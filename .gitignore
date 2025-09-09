@@ -239,3 +239,12 @@ gradle-app.setting
 *.hprof
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,java,kotlin,gradle,node
+# Build artifacts
+/build/
+/backend/build/
+/build/
+**/build/
+/*.jar
+**/*.jar
+*.zip
+**/*.zip
