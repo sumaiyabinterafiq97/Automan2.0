@@ -1,4 +1,0 @@
-Date,Lot Number,Car Model Number,Car Model Year,Car Name,Auction Name,Stock Location,Rixo Company,Client Name,Memo,Price
-2025-04-28,200,ABC123-456789,2015,Toyota Camry,USS,Global Tokyo,Rixo Japan,John Doe,Imported from Excel,$30,000
-2025-04-28,201,DEF456-789012,2016,Honda Civic,CAA,Global Osaka,Rixo Tokyo,Jane Smith,Excel import test,$25,500
-2025-04-28,202,GHI789-012345,2014,Nissan Altima,TAA,Global Hakata,Rixo Osaka,Bob Johnson,Bulk import,$28,750
