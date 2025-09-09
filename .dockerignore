@@ -1,0 +1,37 @@
+# Gradle
+.gradle/
+build/
+!build/distributions/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test files
+TEST files/
+test_*.csv
+sample_*.csv
+*.xlsx
+
+# Docker
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+README.md
+
+# Scripts
+*.sh

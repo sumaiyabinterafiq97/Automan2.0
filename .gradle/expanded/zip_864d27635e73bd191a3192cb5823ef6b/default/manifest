@@ -1,0 +1,10 @@
+builtins_platform=JS
+unique_name=org.jetbrains.compose.ui\:ui-geometry
+compiler_version=1.8.21
+depends=org.jetbrains.compose.runtime\:runtime org.jetbrains.compose.ui\:ui-util org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.kotlinx\:atomicfu kotlin org.jetbrains.kotlin\:kotlinx-atomicfu-runtime
+serializedKlibFingerprint=2ks9gct8updng.3r78lmh6ev7p1
+serializedIrFileFingerprints=SerializedIrFileFingerprint(fileFingerprint\=3p2bjo6pfnmv5.1e7sq1gij5mfm) SerializedIrFileFingerprint(fileFingerprint\=1he3op5u4b0ho.ji610j15riff) SerializedIrFileFingerprint(fileFingerprint\=1metvwo6pnj5n.3eq51gcrozqdy) SerializedIrFileFingerprint(fileFingerprint\=2sodyyquuze8r.12m7iz5lh4xna) SerializedIrFileFingerprint(fileFingerprint\=14526h5uutob1.2ly7mckik2v3b) SerializedIrFileFingerprint(fileFingerprint\=3eanpli3q6338.9vwlzb1g3a4o) SerializedIrFileFingerprint(fileFingerprint\=zw0ctka7el5u.krthqug6hdps)
+jsOutputName=compose-multiplatform-core-ui-geometry
+abi_version=1.7.0
+metadata_version=1.4.1
+ir_version=1.0.0

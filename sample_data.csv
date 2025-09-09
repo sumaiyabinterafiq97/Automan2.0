@@ -1,0 +1,6 @@
+Date,Lot Number,Car Model Number,Car Model Year,Car Name,Auction Name,Stock Location,Rixo Company,Client Name,Country,Price,Rixo Requested,Rixo Confirmed,Notes
+2025-01-15,001,ABC123,2020,Toyota Camry,USS Tokyo,Tokyo Warehouse,Rixo Japan,John Doe,Japan,$25,000,TRUE,TRUE,Sample purchase 1
+2025-01-16,002,DEF456,2021,Honda Civic,USS Osaka,Osaka Warehouse,Rixo Japan,Jane Smith,Japan,$22,000,TRUE,FALSE,Sample purchase 2
+2025-01-17,003,GHI789,2019,Nissan Altima,USS Nagoya,Nagoya Warehouse,Rixo Japan,Bob Johnson,Japan,$20,000,FALSE,TRUE,Sample purchase 3
+2025-01-18,004,JKL012,2022,Mazda CX-5,USS Fukuoka,Fukuoka Warehouse,Rixo Japan,Alice Brown,Japan,$28,000,TRUE,TRUE,Sample purchase 4
+2025-01-19,005,MNO345,2020,Subaru Forester,USS Sapporo,Sapporo Warehouse,Rixo Japan,Charlie Wilson,Japan,$26,000,FALSE,FALSE,Sample purchase 5

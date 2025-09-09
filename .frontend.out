@@ -1,0 +1,50 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/Users/sumaiyabinterafiq/.gradle/wrapper/dists/gradle-8.4-bin/1w5dpkrfk8irigvoxmyhowfim/gradle-8.4/lib/native-platform-0.22-milestone-25.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.4/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+Configuration on demand is an incubating feature.
+> Task :checkKotlinGradlePluginConfigurationErrors
+> Task :jsProcessResources UP-TO-DATE
+> Task :kotlinNodeJsSetup UP-TO-DATE
+> Task :kotlinNpmCachesSetup
+> Task :kotlinRestoreYarnLock UP-TO-DATE
+> Task :kotlinYarnSetup UP-TO-DATE
+> Task :jsPackageJson UP-TO-DATE
+> Task :jsTestPackageJson UP-TO-DATE
+> Task :jsPublicPackageJson UP-TO-DATE
+> Task :jsTestPublicPackageJson UP-TO-DATE
+> Task :packageJsonUmbrella UP-TO-DATE
+> Task :rootPackageJson UP-TO-DATE
+> Task :kotlinNpmInstall UP-TO-DATE
+> Task :kotlinStoreYarnLock UP-TO-DATE
+
+> Task :compileKotlinJs
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:29:13 Variable 'date' is never used
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:101:19 Parameter 'root' is never used
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:471:17 Variable 'date' is never used
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:881:17 Variable 'date' is never used
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:1143:13 Variable 'errMsg' is never used
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:1665:25 Variable 'foundText' is assigned but never accessed
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:1674:29 The value '"${ch} — ${carName}"' assigned to 'var foundText: String defined in com.automan.purchase.showInvoicePage.`<anonymous>`.`<anonymous>`.`<anonymous>`' is never used
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:169<i> [webpack-dev-middleware] wait until bundle finished: /
+<i> [webpack-dev-middleware] wait until bundle finished: /
+src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:1719:54 No cast needed
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:1901:17 Parameter 'blob' is never used
+w: file:///Users/sumaiyabinterafiq/Development/Automan2.0/src/jsMain/kotlin/com/automan/purchase/MinimalPurchaseApp.kt:1915:21 Parameter 'blob' is never used
+
+> Task :jsMainClasses
+> Task :compileDevelopmentExecutableKotlinJs
+> Task :jsDevelopmentExecutableCompileSync
+
+> Task :jsBrowserDevelopmentRun
+<i> [webpack-dev-server] Project is running at:
+<i> [webpack-dev-server] Loopback: http://localhost:8091/
+<i> [webpack-dev-server] On Your Network (IPv4): http://192.168.8.95:8091/
+<i> [webpack-dev-server] On Your Network (IPv6): http://[fe80::1]:8091/
+<i> [webpack-dev-server] Content not from webpack is served from 'kotlin, ../../../processedResources/js/main' directory
+<i> [webpack-dev-middleware] wait until bundle finished: /
+l bundle finished: /
+<i> [webpack-dev-middleware] wait until bundle finished: /

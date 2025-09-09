@@ -1,0 +1,35 @@
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3307/automan_car_purchase?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&connectTimeout=3000&socketTimeout=15000
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 2
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: false
+        jdbc:
+          batch_size: 10
+        order_inserts: true
+        order_updates: true
+        batch_versioned_data: true
+        # Disable second-level cache for faster startup
+        cache:
+          use_second_level_cache: false
+          use_query_cache: false
+
+logging:
+  level:
+    root: WARN
+    com.automan: INFO
+    org.hibernate.SQL: ERROR
+    org.hibernate.type.descriptor.sql.BasicBinder: ERROR
+    org.springframework.boot.autoconfigure: ERROR
+    org.springframework.web: WARN

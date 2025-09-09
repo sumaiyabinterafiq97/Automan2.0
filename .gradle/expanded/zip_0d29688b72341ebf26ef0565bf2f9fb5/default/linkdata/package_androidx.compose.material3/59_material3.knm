@@ -1,0 +1,669 @@
+
+ˆS
+animateBorderStrokeAsState
+androidx
+compose
+runtime
+State
+
+foundation
+BorderStroke
+enabled
+kotlin
+Boolean
+isError
+interactionSource
+interaction
+InteractionSource
+colors
+	material3
+TextFieldColors
+focusedBorderThickness
+ui
+unit
+Dp
+unfocusedBorderThickness
+TextFieldDefaults.kt
+
+Composable
+OutlinedTextFieldDefaults
+Any
+FocusedBorderThickness
+	MinHeight
+MinWidth
+UnfocusedBorderThickness
+shape
+graphics
+Shape
+ContainerBox
+Unit
+ExperimentalMaterial3Api
+DecorationBox
+value
+String
+innerTextField
+	Function0
+
+singleLine
+visualTransformation
+text
+input
+VisualTransformation
+label
+placeholder
+leadingIcon
+trailingIcon
+prefix
+suffix
+supportingText
+contentPadding
+layout
+PaddingValues
+	container
+focusedTextColor
+Color
+unfocusedTextColor
+disabledTextColor
+errorTextColor
+focusedContainerColor
+unfocusedContainerColor
+disabledContainerColor
+errorContainerColor
+cursorColor
+errorCursorColor
+selectionColors
+	selection
+TextSelectionColors
+focusedBorderColor
+unfocusedBorderColor
+disabledBorderColor
+errorBorderColor
+focusedLeadingIconColor
+unfocusedLeadingIconColor
+disabledLeadingIconColor
+errorLeadingIconColor
+focusedTrailingIconColor
+unfocusedTrailingIconColor
+disabledTrailingIconColor
+errorTrailingIconColor
+focusedLabelColor
+unfocusedLabelColor
+disabledLabelColor
+errorLabelColor
+focusedPlaceholderColor
+unfocusedPlaceholderColor
+disabledPlaceholderColor
+errorPlaceholderColor
+focusedSupportingTextColor
+unfocusedSupportingTextColor
+disabledSupportingTextColor
+errorSupportingTextColor
+focusedPrefixColor
+unfocusedPrefixColor
+disabledPrefixColor
+errorPrefixColor
+focusedSuffixColor
+unfocusedSuffixColor
+disabledSuffixColor
+errorSuffixColor
+start
+top
+end
+bottom
+	Immutable
+textSelectionColors
+focusedIndicatorColor
+unfocusedIndicatorColor
+disabledIndicatorColor
+errorIndicatorColor
+containerColor
+equals
+other
+hashCode
+Int
+indicatorColor
+
+labelColor
+leadingIconColor
+placeholderColor
+prefixColor
+suffixColor
+supportingTextColor
+	textColor
+trailingIconColor
+TextFieldDefaults
+
+Deprecated
+message
+éSplit into `TextFieldDefaults.FocusedIndicatorThickness` and `OutlinedTextFieldDefaults.FocusedBorderThickness`. Please update as appropriate.
+replaceWith
+ReplaceWith
+imports
+
+expression
++TextFieldDefaults.FocusedIndicatorThickness
+level
+DeprecationLevel
+WARNING
+FocusedIndicatorThickness
+íSplit into `TextFieldDefaults.UnfocusedIndicatorThickness` and `OutlinedTextFieldDefaults.UnfocusedBorderThickness`. Please update as appropriate.
+-TextFieldDefaults.UnfocusedIndicatorThickness
+UnfocusedIndicatorThickness
+filledShape
+$Renamed to `TextFieldDefaults.shape`
+TextFieldDefaults.shape
+outlinedShape
+,Renamed to `OutlinedTextFieldDefaults.shape`
+3androidx.compose.material.OutlinedTextFieldDefaults
+OutlinedTextFieldDefaults.shape
+FilledContainerBox
++Renamed to `TextFieldDefaults.ContainerBox`
+∫TextFieldDefaults.ContainerBox(
+        enabled = enabled,
+        isError = isError,
+        interactionSource = interactionSource,
+        colors = colors,
+        shape = shape,
+    )
+OutlinedBorderContainerBox
+3Renamed to `OutlinedTextFieldDefaults.ContainerBox`
+∏OutlinedTextFieldDefaults.ContainerBox(
+        enabled = enabled,
+        isError = isError,
+        interactionSource = interactionSource,
+        colors = colors,
+        shape = shape,
+        focusedBorderThickness = focusedBorderThickness,
+        unfocusedBorderThickness = unfocusedBorderThickness,
+    )
+OutlinedTextFieldDecorationBox
+4Renamed to `OutlinedTextFieldDefaults.DecorationBox`
+ÁOutlinedTextFieldDefaults.DecorationBox(
+        value = value,
+        innerTextField = innerTextField,
+        enabled = enabled,
+        singleLine = singleLine,
+        visualTransformation = visualTransformation,
+        interactionSource = interactionSource,
+        isError = isError,
+        label = label,
+        placeholder = placeholder,
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        prefix = prefix,
+        suffix = suffix,
+        supportingText = supportingText,
+        colors = colors,
+        contentPadding = contentPadding,
+        container = container,
+    )
+.Use overload with prefix and suffix parameters
+HIDDEN
+TextFieldDecorationBox
+,Renamed to `TextFieldDefaults.DecorationBox`
+ˆTextFieldDefaults.DecorationBox(
+        value = value,
+        innerTextField = innerTextField,
+        enabled = enabled,
+        singleLine = singleLine,
+        visualTransformation = visualTransformation,
+        interactionSource = interactionSource,
+        isError = isError,
+        label = label,
+        placeholder = placeholder,
+        leadingIcon = leadingIcon,
+        trailingIcon = trailingIcon,
+        prefix = prefix,
+        suffix = suffix,
+        supportingText = supportingText,
+        shape = shape,
+        colors = colors,
+        contentPadding = contentPadding,
+        container = container,
+    )
+contentPaddingWithLabel
+contentPaddingWithoutLabel
+outlinedTextFieldColors
+#Maintained for binary compatibility
+rRenamed to `OutlinedTextFieldDefaults.colors` with additional parameters tocontrol container color based on state.
+ÜOutlinedTextFieldDefaults.colors(
+        focusedTextColor = focusedTextColor,
+        unfocusedTextColor = unfocusedTextColor,
+        disabledTextColor = disabledTextColor,
+        errorTextColor = errorTextColor,
+        focusedContainerColor = containerColor,
+        unfocusedContainerColor = containerColor,
+        disabledContainerColor = containerColor,
+        errorContainerColor = errorContainerColor,
+        cursorColor = cursorColor,
+        errorCursorColor = errorCursorColor,
+        selectionColors = selectionColors,
+        focusedBorderColor = focusedBorderColor,
+        unfocusedBorderColor = unfocusedBorderColor,
+        disabledBorderColor = disabledBorderColor,
+        errorBorderColor = errorBorderColor,
+        focusedLeadingIconColor = focusedLeadingIconColor,
+        unfocusedLeadingIconColor = unfocusedLeadingIconColor,
+        disabledLeadingIconColor = disabledLeadingIconColor,
+        errorLeadingIconColor = errorLeadingIconColor,
+        focusedTrailingIconColor = focusedTrailingIconColor,
+        unfocusedTrailingIconColor = unfocusedTrailingIconColor,
+        disabledTrailingIconColor = disabledTrailingIconColor,
+        errorTrailingIconColor = errorTrailingIconColor,
+        focusedLabelColor = focusedLabelColor,
+        unfocusedLabelColor = unfocusedLabelColor,
+        disabledLabelColor = disabledLabelColor,
+        errorLabelColor = errorLabelColor,
+        focusedPlaceholderColor = focusedPlaceholderColor,
+        unfocusedPlaceholderColor = unfocusedPlaceholderColor,
+        disabledPlaceholderColor = disabledPlaceholderColor,
+        errorPlaceholderColor = errorPlaceholderColor,
+        focusedSupportingTextColor = focusedSupportingTextColor,
+        unfocusedSupportingTextColor = unfocusedSupportingTextColor,
+        disabledSupportingTextColor = disabledSupportingTextColor,
+        errorSupportingTextColor = errorSupportingTextColor,
+        focusedPrefixColor = focusedPrefixColor,
+        unfocusedPrefixColor = unfocusedPrefixColor,
+        disabledPrefixColor = disabledPrefixColor,
+        errorPrefixColor = errorPrefixColor,
+        focusedSuffixColor = focusedSuffixColor,
+        unfocusedSuffixColor = unfocusedSuffixColor,
+        disabledSuffixColor = disabledSuffixColor,
+        errorSuffixColor = errorSuffixColor,
+    )
+outlinedTextFieldPadding
+5Renamed to `OutlinedTextFieldDefaults.contentPadding`
+ÖOutlinedTextFieldDefaults.contentPadding(
+        start = start,
+        top = top,
+        end = end,
+        bottom = bottom,
+    )
+supportingTextPadding
+textFieldColors
+jRenamed to `TextFieldDefaults.colors` with additional parameters to controlcontainer color based on state.
+ñTextFieldDefaults.colors(
+        focusedTextColor = focusedTextColor,
+        unfocusedTextColor = unfocusedTextColor,
+        disabledTextColor = disabledTextColor,
+        errorTextColor = errorTextColor,
+        focusedContainerColor = containerColor,
+        unfocusedContainerColor = containerColor,
+        disabledContainerColor = containerColor,
+        errorContainerColor = errorContainerColor,
+        cursorColor = cursorColor,
+        errorCursorColor = errorCursorColor,
+        selectionColors = selectionColors,
+        focusedIndicatorColor = focusedIndicatorColor,
+        unfocusedIndicatorColor = unfocusedIndicatorColor,
+        disabledIndicatorColor = disabledIndicatorColor,
+        errorIndicatorColor = errorIndicatorColor,
+        focusedLeadingIconColor = focusedLeadingIconColor,
+        unfocusedLeadingIconColor = unfocusedLeadingIconColor,
+        disabledLeadingIconColor = disabledLeadingIconColor,
+        errorLeadingIconColor = errorLeadingIconColor,
+        focusedTrailingIconColor = focusedTrailingIconColor,
+        unfocusedTrailingIconColor = unfocusedTrailingIconColor,
+        disabledTrailingIconColor = disabledTrailingIconColor,
+        errorTrailingIconColor = errorTrailingIconColor,
+        focusedLabelColor = focusedLabelColor,
+        unfocusedLabelColor = unfocusedLabelColor,
+        disabledLabelColor = disabledLabelColor,
+        errorLabelColor = errorLabelColor,
+        focusedPlaceholderColor = focusedPlaceholderColor,
+        unfocusedPlaceholderColor = unfocusedPlaceholderColor,
+        disabledPlaceholderColor = disabledPlaceholderColor,
+        errorPlaceholderColor = errorPlaceholderColor,
+        focusedSupportingTextColor = focusedSupportingTextColor,
+        unfocusedSupportingTextColor = unfocusedSupportingTextColor,
+        disabledSupportingTextColor = disabledSupportingTextColor,
+        errorSupportingTextColor = errorSupportingTextColor,
+        focusedPrefixColor = focusedPrefixColor,
+        unfocusedPrefixColor = unfocusedPrefixColor,
+        disabledPrefixColor = disabledPrefixColor,
+        errorPrefixColor = errorPrefixColor,
+        focusedSuffixColor = focusedSuffixColor,
+        unfocusedSuffixColor = unfocusedSuffixColor,
+        disabledSuffixColor = disabledSuffixColor,
+        errorSuffixColor = errorSuffixColor,
+    )
+textFieldWithLabelPadding
+6Renamed to `TextFieldDefaults.contentPaddingWithLabel`
+ÜTextFieldDefaults.contentPaddingWithLabel(
+        start = start,
+        top = top,
+        end = end,
+        bottom = bottom,
+    )
+textFieldWithoutLabelPadding
+9Renamed to `TextFieldDefaults.contentPaddingWithoutLabel`
+âTextFieldDefaults.contentPaddingWithoutLabel(
+        start = start,
+        top = top,
+        end = end,
+        bottom = bottom,
+    )
+indicatorLine
+Modifier
+focusedIndicatorLineThickness
+unfocusedIndicatorLineThickness¢
+
+ 
+
+ 
+
+ 
+
+	 
+
+ 
+
+
+ 
+
+
+ 
+ 
+
+ 
+ 
+
+  
+" 
+
+# 
+& 
+( 
++
+,
+- 
+6
+7 
+: 
++
+E
+F 
+k 
+u 
+
+ 
+Ä 
+Ñ 
+â 
+∏ `5 2(2
+(2(2(2(2(8H¯ “
+‡
+Ú
+0
+ 0
+0
+0	
+0
+0Ç
+ÿ
+
+"ú« BJF!2(2
+(2(2(2(2(2(8H¯ “
+“
+‡
+Jè$2%(2'(2(2)(2*(	2(2
+(2.(
+2/(
+20(
+21(
+22(
+23(
+24(
+2(25(28(8H“
+“
+‡
+JÈ29(2;(2<(2=(2>(2?(2@(2A(2B(2C(2D(2G(2H(2I(2J(2K(2L(2M(2N(2O(2P(2Q(2R(2S(2T(2U(2V(2W(2X(2Y(2Z(2[(2\(2](2^(2_(2`(2a(2b(2c(2d(2e(2f(8H¯ “
+‡
+J*52g(2h(2i(2j(8¯ ‡
+R
+H¯ ÄR
+H¯ ÄR
+H¯ ÄR
+H¯ ÄR8GHÄäÚL
+0
+0
+0
+0
+0
+0	
+0
+0
+0“
+
+0
+0“
+
+0
+0
+0 Ç
+“
+!¯
+"Ü Bá 9(;(<(=(>(?(@(A(B(C(l(m(n(o(p(K(L(M(N(O(P(Q(R(S(T(U(V(W(X(Y(Z([(\(](^(_(`(a(b(c(d(e(f(¯ J#q2(2
+(2(8H¯ “
+‡
+JB2
+(8H¯ “
+‡
+Jr2s(8Hñ‡
+J	t8H‡
+J#v2(2
+(2(8H¯ “
+‡
+J#w2(2
+(2(8H¯ “
+‡
+J#x2(2
+(2(8H¯ “
+‡
+J#y2(2
+(2(8H¯ “
+‡
+J#z2(2
+(2(8H¯ “
+‡
+J#{2(2
+(2(8H¯ “
+‡
+J#|2(2
+(2(8H¯ “
+‡
+J#}2(2
+(2(8H¯ “
+‡
+J#~2(2
+(2(8H¯ “
+‡
+RBHXÇ¯ ÄR@HXÇ¯ ÄRoHXÇ¯ ÄRUHXÇ¯ ÄRMHXÇ¯ ÄRYHXÇ¯ ÄRaHXÇ¯ ÄReHXÇ¯ ÄR]HXÇ¯ ÄR<HXÇ¯ ÄRQHXÇ¯ ÄRAHXÇ¯ ÄRCHXÇ¯ ÄRpHXÇ¯ ÄRVHXÇ¯ ÄRNHXÇ¯ ÄRZHXÇ¯ ÄRbHXÇ¯ ÄRfHXÇ¯ ÄR^HXÇ¯ ÄR=HXÇ¯ ÄRRHXÇ¯ ÄR>HXÇ¯ ÄRmHXÇ¯ ÄRSHXÇ¯ ÄRKHXÇ¯ ÄRWHXÇ¯ ÄR_HXÇ¯ ÄRcHXÇ¯ ÄR[HXÇ¯ ÄR9HXÇ¯ ÄROHXÇ¯ ÄRD8AHXÄÄäR
+lHXÇÄR?HXÇ¯ ÄRnHXÇ¯ ÄRTHXÇ¯ ÄRLHXÇ¯ ÄRXHXÇ¯ ÄR`HXÇ¯ ÄRdHXÇ¯ ÄR\HXÇ¯ ÄR;HXÇ¯ ÄRPHXÇ¯ ÄÚ&
+0
+0
+0 
+0
+0
+0	
+0
+0"Ç
+“
+!¯
+" « #BJ3!2(2
+(2(2(2(8H“
+“
+‡
+Jó$2%(2'(2(2)(2*(	2(2
+(2.(
+2/(
+20(
+21(
+22(
+23(
+24(
+2(2(25(28(8H“
+“
+‡
+Juñ2(2
+(2(2(2(8H“
+>$
+Å(ó ÉB%Ö
+Ü(òà
+0&8ä“
+“
+‡
+Jèô2(2
+(2(2(2(2(2(8H¯ “
+E$
+Å(ö'É"B%Ö	J(î
+Ü(õà
+0&8ä“
+“
+‡
+Jÿú2%(2'(2(2)(2*(	2(2
+(2.(
+2/(
+20(
+21(
+22(
+23(
+24(
+2(25(28(8H“
+E$
+Å(ù'É"B%Ö	J(î
+Ü(ûà
+0&8ä“
+“
+‡
+Jüú2%(2'(2(2)(2*(	2(2
+(2.(
+2/(
+20(
+21(
+24(
+2(25(28(8H“
+$
+Å(üà
+0&8†“
+“
+‡
+JŸ°2%(2'(2(2)(2*(	2(2
+(2.(
+2/(
+20(
+21(
+22(
+23(
+24(
+2(2(25(28(8H“
+>$
+Å(¢ ÉB%Ö
+Ü(£à
+0&8ä“
+“
+‡
+Jß°2%(2'(2(2)(2*(	2(2
+(2.(
+2/(
+20(
+21(
+24(
+2(2(25(28(8H“
+$
+Å(üà
+0&8†“
+“
+‡
+JÈ29(2;(2<(2=(2>(2?(2@(2A(2B(2C(2D(2m(2n(2o(2p(2K(2L(2M(2N(2O(2P(2Q(2R(2S(2T(2U(2V(2W(2X(2Y(2Z(2[(2\(2](2^(2_(2`(2a(2b(2c(2d(2e(2f(8H¯ “
+‡
+J+§2g(2i(2h(2j(8¯ ‡
+J+•2g(2h(2i(2j(8¯ ‡
+J÷¶2}(2<(2q(2B(2C(2D(2G(2H(2I(2J(2K(2L(2M(2N(2O(2P(2Q(2R(2S(2T(2U(2V(2y(2Y(2[(2\(2](2^(2_(2`(2a(2b(2c(2d(2e(2f(8H¯ “
+$
+Å(ßà
+0&8†“
+“
+‡
+Jß¶29(2;(2<(2=(2q(2A(2B(2C(2D(2G(2H(2I(2J(2K(2L(2M(2N(2O(2P(2Q(2R(2S(2T(2U(2V(2W(2X(2Y(2Z(2[(2\(2](2^(2_(2`(2a(2b(2c(2d(2e(2f(8H¯ “
+E$
+Å(®'É"B%Ö	J(î
+Ü(©à
+0&8ä“
+“
+‡
+Ju™2g(2h(2i(2j(8H¯ “
+E$
+Å(´'É"B%Ö	J(î
+Ü(¨à
+0&8ä‡
+J2≠2g(2h(2i(2j(8H¯ “
+‡
+J÷Æ2}(2<(2q(2B(2C(2D(2m(2n(2o(2p(2K(2L(2M(2N(2O(2P(2Q(2R(2S(2T(2U(2V(2y(2Y(2[(2\(2](2^(2_(2`(2a(2b(2c(2d(2e(2f(8H¯ “
+$
+Å(ßà
+0&8†“
+“
+‡
+J†Æ29(2;(2<(2=(2q(2A(2B(2C(2D(2m(2n(2o(2p(2K(2L(2M(2N(2O(2P(2Q(2R(2S(2T(2U(2V(2W(2X(2Y(2Z(2[(2\(2](2^(2_(2`(2a(2b(2c(2d(2e(2f(8H¯ “
+>$
+Å(Ø ÉB%Ö
+Ü(∞à
+0&8ä“
+“
+‡
+Jn±2g(2i(2h(2j(8H¯ “
+>$
+Å(≤ ÉB%Ö
+Ü(≥à
+0&8ä‡
+Jn¥2g(2h(2i(2j(8H¯ “
+>$
+Å(µ ÉB%Ö
+Ü(∂à
+0&8ä‡
+J>∑2(2
+(2(2(2π(2∫(8@H¯ “
+‡
+RP8HXá¯ “
+>$
+Å(Ç ÉB%Ö
+Ü(áà
+0&8äÄRãH¯ ÄR
+H¯ ÄR
+H¯ ÄRP8HXá¯ “
+>$
+Å(å ÉB%Ö
+Ü(çà
+0&8äÄRéH¯ ÄRSè8GHXá“
+>$
+Å(ê ÉB%Ö
+Ü(ëà
+0&8äÄäRZí8GHXá“
+E$
+Å(ì'É"B%Ö	J(î
+Ü(ïà
+0&8äÄäR8GHÄäÚP
+0
+0
+0
+0
+0
+0	
+0
+0
+0“
+
+0
+0“
+
+0
+0
+0 
+0'Ç
+“
+!¯
+‡
+ Í
+androidx.compose.material3Ú
+#

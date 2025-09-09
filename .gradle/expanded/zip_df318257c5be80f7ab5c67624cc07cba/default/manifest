@@ -1,0 +1,10 @@
+builtins_platform=JS
+unique_name=org.jetbrains.compose.ui\:ui-unit
+compiler_version=1.8.21
+depends=org.jetbrains.compose.ui\:ui-geometry org.jetbrains.compose.runtime\:runtime org.jetbrains.compose.ui\:ui-util org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.kotlinx\:atomicfu kotlin org.jetbrains.kotlin\:kotlinx-atomicfu-runtime
+serializedKlibFingerprint=2epxrq6oppk13.1bmapmw96m266
+serializedIrFileFingerprints=SerializedIrFileFingerprint(fileFingerprint\=37s6083v8gbkx.2wp7n8ymlmxwx) SerializedIrFileFingerprint(fileFingerprint\=39f68zm666p2l.r76kr04ddb29) SerializedIrFileFingerprint(fileFingerprint\=3a2ckv3nahktg.2v0fb3t9nzjap) SerializedIrFileFingerprint(fileFingerprint\=375np54uxxksf.3ghyiqnctjl7x) SerializedIrFileFingerprint(fileFingerprint\=3fby2zwiy9c7h.26e9yptvizeic) SerializedIrFileFingerprint(fileFingerprint\=1izmhxdkifngc.2d7wn1jc7irwt) SerializedIrFileFingerprint(fileFingerprint\=37l4007pex8v6.3mp1qu4dxh4hb) SerializedIrFileFingerprint(fileFingerprint\=3ns0ovyo51i5u.1dlgjb7lqu7jt) SerializedIrFileFingerprint(fileFingerprint\=95t2nnbefm4c.sw266hct0z36) SerializedIrFileFingerprint(fileFingerprint\=rx8gsrvpxeq1.3ves3neivlasc) SerializedIrFileFingerprint(fileFingerprint\=2fdv60p122635.mrwd049uh497) SerializedIrFileFingerprint(fileFingerprint\=2i6l9qo0vo7ws.np097eqgrohh)
+jsOutputName=compose-multiplatform-core-ui-unit
+abi_version=1.7.0
+metadata_version=1.4.1
+ir_version=1.0.0

@@ -1,0 +1,10 @@
+builtins_platform=JS
+unique_name=org.jetbrains.compose.material\:material-ripple
+compiler_version=1.8.21
+depends=org.jetbrains.compose.foundation\:foundation org.jetbrains.compose.animation\:animation org.jetbrains.compose.foundation\:foundation-layout org.jetbrains.compose.animation\:animation-core org.jetbrains.compose.ui\:ui org.jetbrains.compose.ui\:ui-text org.jetbrains.compose.ui\:ui-graphics org.jetbrains.compose.ui\:ui-unit org.jetbrains.compose.ui\:ui-geometry org.jetbrains.compose.runtime\:runtime-saveable org.jetbrains.compose.runtime\:runtime org.jetbrains.compose.ui\:ui-util org.jetbrains.skiko\:skiko org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.kotlinx\:atomicfu kotlin org.jetbrains.kotlin\:kotlinx-atomicfu-runtime
+serializedKlibFingerprint=1ulc8yxqdmprw.2b607ilek15x2
+serializedIrFileFingerprints=SerializedIrFileFingerprint(fileFingerprint\=15npg7fqvb0ug.jwvepl6ad33x) SerializedIrFileFingerprint(fileFingerprint\=3cgt8af1o36q5.2ve8f6qxj0lej) SerializedIrFileFingerprint(fileFingerprint\=1lidetj50dtwa.2rma2bu6t3tla) SerializedIrFileFingerprint(fileFingerprint\=1museawofrech.2ueqntus731m) SerializedIrFileFingerprint(fileFingerprint\=3r8uoh0509nfp.3gy278mrrqsoh)
+jsOutputName=compose-multiplatform-core-material-ripple
+abi_version=1.7.0
+metadata_version=1.4.1
+ir_version=1.0.0

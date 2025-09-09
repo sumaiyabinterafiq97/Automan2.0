@@ -1,0 +1,10 @@
+builtins_platform=JS
+unique_name=org.jetbrains.kotlinx\:atomicfu
+compiler_version=1.8.20
+depends=kotlin
+serializedKlibFingerprint=qcq3ijiso71q.woifr085lfc4
+serializedIrFileFingerprints=SerializedIrFileFingerprint(fileFingerprint\=22shee6bewt9v.3cd1zsl6mndo3) SerializedIrFileFingerprint(fileFingerprint\=1v4dggz15dopy.1gv0zvuuqxivl) SerializedIrFileFingerprint(fileFingerprint\=2wk7mv2lytmkf.k1dbn2kzc4sb) SerializedIrFileFingerprint(fileFingerprint\=3qesgqja832yo.1y3468hub4lzj) SerializedIrFileFingerprint(fileFingerprint\=wutahxvqrz75.hqkveni9plpe) SerializedIrFileFingerprint(fileFingerprint\=1ob0ngn0wvgqu.2ro166xq4bgmd) SerializedIrFileFingerprint(fileFingerprint\=1d0o47mci7wbe.3dpgcg5w2ijc) SerializedIrFileFingerprint(fileFingerprint\=2zkztzd3hs2k4.7oxtvcpr6xof)
+jsOutputName=88b0986a7186d029-atomicfu-js-ir
+abi_version=1.7.0
+metadata_version=1.4.1
+ir_version=1.0.0

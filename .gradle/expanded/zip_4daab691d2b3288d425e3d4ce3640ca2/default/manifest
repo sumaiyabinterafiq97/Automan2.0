@@ -1,0 +1,10 @@
+builtins_platform=JS
+unique_name=org.jetbrains.compose.ui\:ui-util
+compiler_version=1.8.21
+depends=kotlin
+serializedKlibFingerprint=276cnfnw77i4c.1gbngnugs4ps4
+serializedIrFileFingerprints=SerializedIrFileFingerprint(fileFingerprint\=99annjib162h.27b4vr85zm4el) SerializedIrFileFingerprint(fileFingerprint\=lcmgqfeeyzm7.1dy9wyhuvpn7x) SerializedIrFileFingerprint(fileFingerprint\=19uxabn7huhoa.28vf0cqg9mn4n)
+jsOutputName=compose-multiplatform-core-ui-util
+abi_version=1.7.0
+metadata_version=1.4.1
+ir_version=1.0.0

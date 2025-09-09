@@ -1,0 +1,10 @@
+builtins_platform=JS
+unique_name=org.jetbrains.compose.runtime\:runtime-saveable
+compiler_version=1.8.21
+depends=org.jetbrains.compose.runtime\:runtime org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.kotlinx\:atomicfu kotlin org.jetbrains.kotlin\:kotlinx-atomicfu-runtime
+serializedKlibFingerprint=1zvd63fuxwlv2.n2rdaic4eky4
+serializedIrFileFingerprints=SerializedIrFileFingerprint(fileFingerprint\=1vcal2icg7u31.6o7yjysose6r) SerializedIrFileFingerprint(fileFingerprint\=ned0cbly1g7i.3cs3umyrg8696) SerializedIrFileFingerprint(fileFingerprint\=2jldh5yryq644.2ie25nkz95ajb) SerializedIrFileFingerprint(fileFingerprint\=2i6rnk9hm810c.2h2oo4006x5hs) SerializedIrFileFingerprint(fileFingerprint\=jp7hxmnbllfg.1u5229tbx2vxw) SerializedIrFileFingerprint(fileFingerprint\=1bgtghjmeln5r.2q7gqueq6e62k)
+jsOutputName=compose-multiplatform-core-runtime-saveable
+abi_version=1.7.0
+metadata_version=1.4.1
+ir_version=1.0.0

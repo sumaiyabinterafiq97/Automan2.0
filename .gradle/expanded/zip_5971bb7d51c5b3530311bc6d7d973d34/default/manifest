@@ -1,0 +1,10 @@
+builtins_platform=JS
+unique_name=org.jetbrains.compose.animation\:animation
+compiler_version=1.8.21
+depends=org.jetbrains.compose.animation\:animation-core org.jetbrains.compose.foundation\:foundation-layout org.jetbrains.compose.ui\:ui org.jetbrains.compose.ui\:ui-text org.jetbrains.compose.ui\:ui-graphics org.jetbrains.compose.ui\:ui-unit org.jetbrains.compose.ui\:ui-geometry org.jetbrains.compose.runtime\:runtime-saveable org.jetbrains.compose.runtime\:runtime org.jetbrains.compose.ui\:ui-util org.jetbrains.skiko\:skiko org.jetbrains.kotlinx\:kotlinx-coroutines-core org.jetbrains.kotlinx\:atomicfu kotlin org.jetbrains.kotlin\:kotlinx-atomicfu-runtime
+serializedKlibFingerprint=1ikzx3nwe1c76.fd6ncoe1hzf6
+serializedIrFileFingerprints=SerializedIrFileFingerprint(fileFingerprint\=29jsoj8y5wueo.3tdet4bap6sgi) SerializedIrFileFingerprint(fileFingerprint\=jennhfh991rs.2kti3oowzr2x8) SerializedIrFileFingerprint(fileFingerprint\=1o3qp9ovwlunm.1jt29vvo5y9u2) SerializedIrFileFingerprint(fileFingerprint\=7r1h7www7c0l.byiyjlmu7ovr) SerializedIrFileFingerprint(fileFingerprint\=xlp2y7t42tid.p66n5k1sg31m) SerializedIrFileFingerprint(fileFingerprint\=3hnlny98g3kpl.3mp6qsv5l7oax) SerializedIrFileFingerprint(fileFingerprint\=3vqlb4lwnjblf.x5qzgte0qv00) SerializedIrFileFingerprint(fileFingerprint\=3ctfasifkbn7n.10cz1s75xvj3b) SerializedIrFileFingerprint(fileFingerprint\=2sof6p4dcc60k.37dxuxj4572ve) SerializedIrFileFingerprint(fileFingerprint\=1rmem2euaftlz.2rid8swmzpmz6) SerializedIrFileFingerprint(fileFingerprint\=29ykhftm5dicw.3r3co0n58p1eh) SerializedIrFileFingerprint(fileFingerprint\=26xfovxzq8tdz.39ell98hn4ldx) SerializedIrFileFingerprint(fileFingerprint\=2ibl4z2pf6fu8.2668q7j3b8x2c) SerializedIrFileFingerprint(fileFingerprint\=1waeaq930n0qx.18n68j7wain0w) SerializedIrFileFingerprint(fileFingerprint\=uqju6bl8gozd.1ycqow73fek74) SerializedIrFileFingerprint(fileFingerprint\=1ng9lp9pdtydp.1xwle4jsba84g)
+jsOutputName=compose-multiplatform-core-animation
+abi_version=1.7.0
+metadata_version=1.4.1
+ir_version=1.0.0
