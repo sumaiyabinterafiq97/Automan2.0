@@ -53,15 +53,42 @@ private var selectedPurchases = mutableSetOf<Long>()
 fun createApp(root: Element) {
     root.innerHTML = """
         <div style="padding: 20px; font-family: Arial, sans-serif;">
-            <h1>Automan Car Purchase Management</h1>
+            <div style="text-align: center; width: 100%;">
+                <h1 style="margin: 0; display: inline-block;">Automan Car Purchase Management</h1>
+            </div>
             
-            <div style="margin-bottom: 20px;">
-                <button id="newBtn" style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">New+</button>
-                <button id="importBtn" style="padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">Import CSV</button>
-                <button id="rixoBtn" style="padding: 10px 20px; background-color: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;">Generate Rixo PDF</button>
+            <!-- Sidebar -->
+            <div id="sidebar" style="position: fixed; top: 0; left: -250px; width: 250px; height: 100vh; background-color: #2c3e50; transition: left 0.3s ease; z-index: 1000; box-shadow: 2px 0 5px rgba(0,0,0,0.1);">
+                <div style="padding: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+                        <h3 style="color: white; margin: 0;">Menu</h3>
+                        <button id="closeSidebar" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">×</button>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 15px;">
+                        <button id="newBtn" style="padding: 12px 20px; background-color: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">New+</button>
+                        <button id="importBtn" style="padding: 12px 20px; background-color: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Import CSV</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Overlay -->
+            <div id="sidebarOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 999; display: none;"></div>
+            
+            
+            <div style="margin-bottom: 20px; margin-top: 60px;">
+                <button id="rixoBtn" style="padding: 10px 20px; background-color: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; display: none; margin-right: 10px;">Generating Invoice PDF</button>
+                <button id="rixoTransportBtn" style="padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; display: none;">Generate Rixo PDF</button>
             </div>
             <style>
                 .sort-menu { display: none; }
+                /* Ensure hamburger button stays fixed during scroll */
+                #hamburgerBtn { 
+                    position: fixed !important; 
+                    top: 20px !important; 
+                    left: 20px !important; 
+                    z-index: 10000 !important; 
+                    pointer-events: auto !important;
+                }
             </style>
             <div id="sortingBar" style="display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 16px 0;"></div>
             
@@ -91,36 +118,79 @@ fun createApp(root: Element) {
         handleRixoPdfGeneration()
     })
     
-    // Render sorting controls under the buttons
-    renderSortingBar()
+    document.getElementById("rixoTransportBtn")?.addEventListener("click", { _: Event ->
+        handleRixoTransportPdfGeneration()
+    })
     
-    // Load initial data
-    loadPurchases()
+    // Sidebar event listeners (hamburger button will be added only on purchase list page)
+    
+    document.getElementById("closeSidebar")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+    })
+    
+    document.getElementById("sidebarOverlay")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+    })
+    
+    // Load initial data only if we're on the purchase list page
+    val hash = window.location.hash
+    if (hash.isEmpty() || hash == "#" || !hash.startsWith("#/")) {
+        loadPurchases()
+        // Show sorting bar on initial load (purchase list page)
+        val sortingBar = document.getElementById("sortingBar") as HTMLElement?
+        sortingBar?.style?.display = "flex"
+        renderSortingBar()
+    }
 }
 
 fun updateContent(root: Element) {
     val hash = window.location.hash
     val content = document.getElementById("content")!!
+    val sortingBar = document.getElementById("sortingBar") as HTMLElement?
     
     when {
         hash.startsWith("#/add") -> {
+            removeHamburgerMenu() // Remove hamburger menu from add page
             content.innerHTML = createAddFormHTML()
             setupAddFormListeners()
+            // Hide sorting bar on add page
+            sortingBar?.style?.display = "none"
         }
         hash.startsWith("#/edit/") -> {
+            removeHamburgerMenu() // Remove hamburger menu from edit page
             val id = hash.substring(7).toLongOrNull()
             if (id != null) {
                 showEditForm(id)
             } else {
                 showPurchaseList()
             }
+            // Hide sorting bar on edit page
+            sortingBar?.style?.display = "none"
         }
         hash.startsWith("#/invoice") -> {
+            removeHamburgerMenu() // Remove hamburger menu from invoice page
             showInvoicePage()
+            // Hide sorting bar on invoice page
+            sortingBar?.style?.display = "none"
+        }
+        hash.startsWith("#/rixo-transport") -> {
+            removeHamburgerMenu() // Remove hamburger menu from rixo transport page
+            showRixoTransportPage()
+            // Hide sorting bar on rixo transport page
+            sortingBar?.style?.display = "none"
         }
         else -> {
             showPurchaseList()
+            // Show sorting bar on purchase list page
+            sortingBar?.style?.display = "flex"
+            renderSortingBar()
         }
+    }
+}
+
+fun removeHamburgerMenu() {
+    document.getElementById("hamburgerBtn")?.let { button ->
+        button.parentElement?.remove()
     }
 }
 
@@ -128,6 +198,15 @@ fun showPurchaseList() {
     window.location.hash = ""
     val content = document.getElementById("content")!!
     content.innerHTML = """
+        <!-- Hamburger Menu Button (only on purchase list page) -->
+        <div style="position: fixed; top: 20px; left: 20px; z-index: 10000; pointer-events: auto;">
+            <button id="hamburgerBtn" style="background: none; border: none; cursor: pointer; padding: 10px; border-radius: 4px; background-color: #2c3e50; box-shadow: 0 2px 8px rgba(0,0,0,0.3);">
+                <div style="width: 25px; height: 3px; background-color: white; margin: 3px 0; border-radius: 2px;"></div>
+                <div style="width: 25px; height: 3px; background-color: white; margin: 3px 0; border-radius: 2px;"></div>
+                <div style="width: 25px; height: 3px; background-color: white; margin: 3px 0; border-radius: 2px;"></div>
+            </button>
+        </div>
+        
         <div id="purchaseList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px;">
             <h2>Purchase List</h2>
             <div id="purchaseTable" style="margin-top: 20px;">
@@ -137,6 +216,12 @@ fun showPurchaseList() {
             </div>
         </div>
     """
+    
+    // Add hamburger button event listener only on purchase list page
+    document.getElementById("hamburgerBtn")?.addEventListener("click", { _: Event ->
+        openSidebar()
+    })
+    
     loadPurchases()
 }
 
@@ -310,16 +395,22 @@ fun createAddFormHTML(): String {
                         <input type="text" id="auctionNo" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Auction Name</label>
-                        <input type="text" id="auctionName" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <label>Auction Name *</label>
+                        <select id="auctionName" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="handleAuctionNameChange(this.value)">
+                            <option value="">Select Auction House</option>
+                        </select>
                     </div>
                     <div>
                         <label>Stock Location</label>
-                        <input type="text" id="stockLocation" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <select id="stockLocation" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Select Stock Location</option>
+                        </select>
                     </div>
                     <div>
                         <label>Rixo Company</label>
-                        <input type="text" id="rixoCompany" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <select id="rixoCompany" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Select Rixo Company</option>
+                        </select>
                     </div>
                     <div>
                         <label>Client Name</label>
@@ -343,7 +434,9 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Rixo Price</label>
-                        <input type="text" id="rixoPrice" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <select id="rixoPrice" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Select Rixo Price</option>
+                        </select>
                     </div>
                 </div>
 
@@ -454,7 +547,190 @@ fun createAddFormHTML(): String {
     """
 }
 
+// JavaScript functions for Rixo dropdown functionality
+fun setEditFormValuesFromKotlin(purchaseData: dynamic) {
+    val dataToPass = purchaseData
+    js("""
+        try {
+            if (window.setEditFormValues && typeof window.setEditFormValues === 'function') {
+                window.setEditFormValues(dataToPass);
+            } else {
+                console.log('setEditFormValues not available yet, skipping...');
+            }
+        } catch (e) {
+            console.log('Error calling setEditFormValues:', e);
+        }
+    """)
+}
+
+fun setupRixoDropdowns() {
+    js("""
+        // Populate dropdown options
+        function populateDropdownOptions() {
+            if (typeof window.rixoDropdownOptions === 'undefined') {
+                console.log('Rixo dropdown options not loaded yet');
+                return;
+            }
+            
+            // Populate Auction Name dropdown
+            var auctionSelect = document.getElementById('auctionName');
+            var editAuctionSelect = document.getElementById('editAuctionName');
+            if (auctionSelect) {
+                auctionSelect.innerHTML = '<option value="">Select Auction House</option>';
+                window.rixoDropdownOptions.auctionHouses.forEach(function(auction) {
+                    auctionSelect.innerHTML += '<option value="' + auction + '">' + auction + '</option>';
+                });
+            }
+            if (editAuctionSelect) {
+                editAuctionSelect.innerHTML = '<option value="">Select Auction House</option>';
+                window.rixoDropdownOptions.auctionHouses.forEach(function(auction) {
+                    editAuctionSelect.innerHTML += '<option value="' + auction + '">' + auction + '</option>';
+                });
+            }
+            
+            // Populate Stock Location dropdown
+            var stockSelect = document.getElementById('stockLocation');
+            var editStockSelect = document.getElementById('editStockLocation');
+            if (stockSelect) {
+                stockSelect.innerHTML = '<option value="">Select Stock Location</option>';
+                window.rixoDropdownOptions.stockLocations.forEach(function(location) {
+                    stockSelect.innerHTML += '<option value="' + location + '">' + location + '</option>';
+                });
+            }
+            if (editStockSelect) {
+                editStockSelect.innerHTML = '<option value="">Select Stock Location</option>';
+                window.rixoDropdownOptions.stockLocations.forEach(function(location) {
+                    editStockSelect.innerHTML += '<option value="' + location + '">' + location + '</option>';
+                });
+            }
+            
+            // Populate Rixo Company dropdown
+            var rixoSelect = document.getElementById('rixoCompany');
+            var editRixoSelect = document.getElementById('editRixoCompany');
+            if (rixoSelect) {
+                rixoSelect.innerHTML = '<option value="">Select Rixo Company</option>';
+                window.rixoDropdownOptions.rixoCompanies.forEach(function(company) {
+                    rixoSelect.innerHTML += '<option value="' + company + '">' + company + '</option>';
+                });
+            }
+            if (editRixoSelect) {
+                editRixoSelect.innerHTML = '<option value="">Select Rixo Company</option>';
+                window.rixoDropdownOptions.rixoCompanies.forEach(function(company) {
+                    editRixoSelect.innerHTML += '<option value="' + company + '">' + company + '</option>';
+                });
+            }
+            
+            // Populate Rixo Price dropdown
+            var priceSelect = document.getElementById('rixoPrice');
+            var editPriceSelect = document.getElementById('editRixoPrice');
+            if (priceSelect) {
+                priceSelect.innerHTML = '<option value="">Select Rixo Price</option>';
+                window.rixoDropdownOptions.rixoPrices.forEach(function(price) {
+                    priceSelect.innerHTML += '<option value="' + price + '">' + price + '</option>';
+                });
+            }
+            if (editPriceSelect) {
+                editPriceSelect.innerHTML = '<option value="">Select Rixo Price</option>';
+                window.rixoDropdownOptions.rixoPrices.forEach(function(price) {
+                    editPriceSelect.innerHTML += '<option value="' + price + '">' + price + '</option>';
+                });
+            }
+        }
+        
+        // Handle auction name change and auto-fill other fields
+        function handleAuctionNameChange(auctionName) {
+            if (!auctionName || typeof window.rixoPriceMapping === 'undefined') {
+                return;
+            }
+            
+            var mapping = window.rixoPriceMapping[auctionName];
+            if (!mapping) {
+                console.log('No mapping found for auction:', auctionName);
+                return;
+            }
+            
+            // Auto-fill Stock Location
+            var stockSelect = document.getElementById('stockLocation');
+            var editStockSelect = document.getElementById('editStockLocation');
+            if (stockSelect) {
+                stockSelect.value = mapping.stockLocation || '';
+            }
+            if (editStockSelect) {
+                editStockSelect.value = mapping.stockLocation || '';
+            }
+            
+            // Auto-fill Rixo Company
+            var rixoSelect = document.getElementById('rixoCompany');
+            var editRixoSelect = document.getElementById('editRixoCompany');
+            if (rixoSelect) {
+                rixoSelect.value = mapping.rixoCompany || '';
+            }
+            if (editRixoSelect) {
+                editRixoSelect.value = mapping.rixoCompany || '';
+            }
+            
+            // Auto-fill Rixo Price
+            var priceSelect = document.getElementById('rixoPrice');
+            var editPriceSelect = document.getElementById('editRixoPrice');
+            if (priceSelect) {
+                priceSelect.value = mapping.rixoPrice || '';
+            }
+            if (editPriceSelect) {
+                editPriceSelect.value = mapping.rixoPrice || '';
+            }
+            
+            console.log('Auto-filled fields for auction:', auctionName, mapping);
+        }
+        
+        // Make functions globally available
+        window.handleAuctionNameChange = handleAuctionNameChange;
+        window.populateDropdownOptions = populateDropdownOptions;
+        
+        // Set values for Edit form dropdowns
+        function setEditFormValues(purchaseData) {
+            if (!purchaseData) return;
+            
+            // Set Auction Name
+            var editAuctionSelect = document.getElementById('editAuctionName');
+            if (editAuctionSelect && purchaseData.auctionName) {
+                editAuctionSelect.value = purchaseData.auctionName;
+            }
+            
+            // Set Stock Location
+            var editStockSelect = document.getElementById('editStockLocation');
+            if (editStockSelect && purchaseData.stockLocation) {
+                editStockSelect.value = purchaseData.stockLocation;
+            }
+            
+            // Set Rixo Company
+            var editRixoSelect = document.getElementById('editRixoCompany');
+            if (editRixoSelect && purchaseData.rixoCompany) {
+                editRixoSelect.value = purchaseData.rixoCompany;
+            }
+            
+            // Set Rixo Price
+            var editPriceSelect = document.getElementById('editRixoPrice');
+            if (editPriceSelect && purchaseData.rixoPrice) {
+                editPriceSelect.value = purchaseData.rixoPrice;
+            }
+        }
+        
+        // Make function globally available
+        window.setEditFormValues = setEditFormValues;
+        
+        // Initialize dropdowns when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', populateDropdownOptions);
+        } else {
+            populateDropdownOptions();
+        }
+    """)
+}
+
 fun setupAddFormListeners() {
+    // Setup Rixo dropdowns
+    setupRixoDropdowns()
+    
     document.getElementById("cancelBtn")?.addEventListener("click", { _: Event ->
         showPurchaseList()
     })
@@ -512,9 +788,9 @@ fun handleAddPurchase() {
     val distance = (document.getElementById("distance") as HTMLInputElement).value
     val options = (document.getElementById("options") as HTMLInputElement).value
     val auctionNo = (document.getElementById("auctionNo") as HTMLInputElement).value
-    val auctionName = (document.getElementById("auctionName") as HTMLInputElement).value
-    val stockLocation = (document.getElementById("stockLocation") as HTMLInputElement).value
-    val rixoCompany = (document.getElementById("rixoCompany") as HTMLInputElement).value
+    val auctionName = (document.getElementById("auctionName") as HTMLSelectElement).value
+    val stockLocation = (document.getElementById("stockLocation") as HTMLSelectElement).value
+    val rixoCompany = (document.getElementById("rixoCompany") as HTMLSelectElement).value
     val clientName = (document.getElementById("clientName") as HTMLInputElement).value
     val country = (document.getElementById("country") as HTMLInputElement).value
     val price = (document.getElementById("price") as HTMLInputElement).value
@@ -525,7 +801,7 @@ fun handleAddPurchase() {
     val paymentDate = formatWithWeekday((document.getElementById("paymentDate") as HTMLInputElement).value)
     val rixoRequested = (document.getElementById("rixoRequested") as HTMLInputElement).value
     val rixoConfirmed = (document.getElementById("rixoConfirmed") as HTMLInputElement).value
-    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement).value
+    val rixoPrice = (document.getElementById("rixoPrice") as HTMLSelectElement).value
     val shipmentDate = formatWithWeekday((document.getElementById("shipmentDate") as HTMLInputElement).value)
     val blNo = (document.getElementById("blNo") as HTMLInputElement).value
     val vesselNo = (document.getElementById("vesselNo") as HTMLInputElement).value
@@ -710,16 +986,22 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <input type="text" id="editAuctionNo" value="${purchaseData.auctionNo ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Auction Name</label>
-                        <input type="text" id="editAuctionName" value="${purchaseData.auctionName ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <label>Auction Name *</label>
+                        <select id="editAuctionName" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="handleAuctionNameChange(this.value)">
+                            <option value="">Select Auction House</option>
+                        </select>
                     </div>
                     <div>
                         <label>Stock Location</label>
-                        <input type="text" id="editStockLocation" value="${purchaseData.stockLocation ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <select id="editStockLocation" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Select Stock Location</option>
+                        </select>
                     </div>
                     <div>
                         <label>Rixo Company</label>
-                        <input type="text" id="editRixoCompany" value="${purchaseData.rixoCompany ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <select id="editRixoCompany" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Select Rixo Company</option>
+                        </select>
                     </div>
                     <div>
                         <label>Client Name</label>
@@ -743,7 +1025,9 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Rixo Price</label>
-                        <input type="text" id="editRixoPrice" value="${purchaseData.rixoPrice ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <select id="editRixoPrice" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Select Rixo Price</option>
+                        </select>
                     </div>
                 </div>
 
@@ -855,6 +1139,13 @@ fun showEditFormWithData(purchaseData: dynamic) {
     """
     
     setupEditFormListeners()
+    
+    // Setup Rixo dropdowns and set values
+    setupRixoDropdowns()
+    // Set edit form values after a longer delay to ensure dropdowns are fully populated
+    window.setTimeout({
+        setEditFormValuesFromKotlin(purchaseData)
+    }, 500)
 }
 
 fun setupEditFormListeners() {
@@ -922,9 +1213,9 @@ fun handleEditPurchase() {
     val distance = (document.getElementById("editDistance") as HTMLInputElement).value
     val options = (document.getElementById("editOptions") as HTMLInputElement).value
     val auctionNo = (document.getElementById("editAuctionNo") as HTMLInputElement).value
-    val auctionName = (document.getElementById("editAuctionName") as HTMLInputElement).value
-    val stockLocation = (document.getElementById("editStockLocation") as HTMLInputElement).value
-    val rixoCompany = (document.getElementById("editRixoCompany") as HTMLInputElement).value
+    val auctionName = (document.getElementById("editAuctionName") as HTMLSelectElement).value
+    val stockLocation = (document.getElementById("editStockLocation") as HTMLSelectElement).value
+    val rixoCompany = (document.getElementById("editRixoCompany") as HTMLSelectElement).value
     val clientName = (document.getElementById("editClientName") as HTMLInputElement).value
     val country = (document.getElementById("editCountry") as HTMLInputElement).value
     val price = (document.getElementById("editPrice") as HTMLInputElement).value
@@ -935,7 +1226,7 @@ fun handleEditPurchase() {
     val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as HTMLInputElement).value)
     val rixoRequested = (document.getElementById("editRixoRequested") as HTMLInputElement).value
     val rixoConfirmed = (document.getElementById("editRixoConfirmed") as HTMLInputElement).value
-    val rixoPrice = (document.getElementById("editRixoPrice") as HTMLInputElement).value
+    val rixoPrice = (document.getElementById("editRixoPrice") as HTMLSelectElement).value
     val shipmentDate = formatWithWeekday((document.getElementById("editShipmentDate") as HTMLInputElement).value)
     val blNo = (document.getElementById("editBlNo") as HTMLInputElement).value
     val vesselNo = (document.getElementById("editVesselNo") as HTMLInputElement).value
@@ -1157,7 +1448,7 @@ fun displayPurchases(purchases: dynamic) {
     if (js("purchases.length") == 0) {
         table.innerHTML = """
             <div style="text-align: center; color: #666; padding: 40px;">
-                No purchases found. Click 'New+' to add a purchase or 'Import CSV' to import data.
+                No purchases found. Click the menu button (☰) in the top-left corner to add a purchase or import data.
             </div>
         """
         return
@@ -1302,11 +1593,15 @@ fun setupCheckboxListeners() {
 
 fun updateRixoButtonVisibility() {
     val rixoBtn = document.getElementById("rixoBtn")
+    val rixoTransportBtn = document.getElementById("rixoTransportBtn")
     if (selectedPurchases.isNotEmpty()) {
         rixoBtn?.setAttribute("style", "display: inline-block; padding: 10px 20px; background-color: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;")
-        rixoBtn?.textContent = "Generate Rixo PDF (${selectedPurchases.size} selected)"
+        rixoBtn?.textContent = "Generating Invoice PDF (${selectedPurchases.size} selected)"
+        rixoTransportBtn?.setAttribute("style", "display: inline-block; padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer;")
+        rixoTransportBtn?.textContent = "Generate Rixo PDF (${selectedPurchases.size} selected)"
     } else {
         rixoBtn?.setAttribute("style", "display: none;")
+        rixoTransportBtn?.setAttribute("style", "display: none;")
     }
 }
 
@@ -1366,10 +1661,16 @@ fun checkMissingRixoData() {
                 }
                 
                 if (missingDataPurchases.isNotEmpty()) {
-                    showMissingDataModal(missingDataPurchases)
-                } else {
-                    navigateToInvoicePage(selectedIds)
+                    // Persist missing purchases to be filled on the invoice page
+                    try {
+                        val json = JSON.stringify(missingDataPurchases)
+                        window.localStorage.setItem("invoiceMissingPurchases", json)
+                    } catch (e: dynamic) {
+                        console.error("Failed to store missing purchases for invoice page", e)
+                    }
                 }
+                // Always navigate to the invoice page; it will render the missing-data section if present
+                navigateToInvoicePage(selectedIds)
             }
         }
     }
@@ -1508,12 +1809,43 @@ fun generateRixoPdf(selectedIds: List<Long>) {
     navigateToInvoicePage(selectedIds)
 }
 
+fun handleRixoTransportPdfGeneration() {
+    if (selectedPurchases.isEmpty()) {
+        showMessage("Please select at least one purchase", "error")
+        return
+    }
+    
+    // Store selected purchases for the rixo transport page
+    val selectedIds = selectedPurchases.toList()
+    js("window.selectedPurchasesForRixoTransport = selectedIds")
+    
+    // Also store in localStorage for cross-tab access
+    val idsJson = JSON.stringify(selectedIds.toTypedArray())
+    window.localStorage.setItem("rixoTransportSelectedIds", idsJson)
+    console.log("Storing selected IDs for Rixo Transport:", selectedIds)
+    
+    // Navigate to rixo transport page in new tab
+    val url = "${window.location.origin}${window.location.pathname}#/rixo-transport?ids=${selectedIds.joinToString(",")}"
+    window.open(url, "_blank")
+}
+
 // Navigate to invoice page with selected IDs stored globally
 fun navigateToInvoicePage(selectedIds: List<Long>) {
-    val jsArray = js("[]")
-    selectedIds.forEach { id -> jsArray.push(id.toInt()) }
-    js("window.invoiceSelectedIds = jsArray")
-    window.location.hash = "#/invoice"
+    // Store selected IDs in localStorage for cross-tab access
+    val idsJson = JSON.stringify(selectedIds.toTypedArray())
+    window.localStorage.setItem("invoiceSelectedIds", idsJson)
+    console.log("Storing selected IDs in localStorage:", selectedIds)
+    
+    // Open invoice page in a new tab with selected IDs as URL parameter
+    val newTab = window.open("", "_blank")
+    if (newTab != null) {
+        // Set the URL to the invoice page with selected IDs as parameter
+        val idsParam = selectedIds.joinToString(",")
+        newTab.location.href = window.location.origin + window.location.pathname + "#/invoice?ids=" + idsParam
+    } else {
+        // Fallback to same tab if popup is blocked
+        window.location.hash = "#/invoice"
+    }
 }
 
 // Render invoice page content
@@ -1570,6 +1902,7 @@ fun showInvoicePage() {
                         </div>
                         <div id="selectedCarsPreview" style="margin-top:10px;"></div>
                     </div>
+                    <div id="missingRixoSection"></div>
                     <div class="grid-2">
                         <div class="section">
                             <h3>Invoice Details</h3>
@@ -1596,7 +1929,8 @@ fun showInvoicePage() {
                                 </div>
                                 <div class="field">
                                     <label for="sailDate">Sail Date</label>
-                                    <input class="input" type="text" id="sailDate" placeholder="Enter sail date" aria-required="true" data-required="true" />
+                                    <input class="input" type="date" id="sailDate" aria-required="true" data-required="true" />
+                                    <div id="sailDateFormatted" style="margin-top: 4px; font-size: 12px; color: #6b7280; min-height: 16px;"></div>
                                     <div id="sailDateError" class="error-text"></div>
                                 </div>
                                 <div class="grid-2-inner">
@@ -1628,6 +1962,100 @@ fun showInvoicePage() {
         </div>
     """
 
+    // Load selected IDs from localStorage or URL parameters for new tab functionality
+    var loadedIds = false
+    
+    // First try to get IDs from URL parameters
+    val urlParams = window.location.hash.split("?")
+    if (urlParams.size > 1) {
+        val params = urlParams[1]
+        val idsMatch = Regex("ids=([^&]*)").find(params)
+        if (idsMatch != null) {
+            val idsString = idsMatch.groupValues[1]
+            if (idsString.isNotEmpty()) {
+                try {
+                    val idsList = idsString.split(",").map { it.trim().toLong() }
+                    selectedPurchases.clear()
+                    idsList.forEach { id -> selectedPurchases.add(id) }
+                    console.log("Loaded selected purchases from URL parameters:", selectedPurchases.toList())
+                    loadedIds = true
+                } catch (e: Exception) {
+                    console.error("Failed to parse URL parameter IDs:", e)
+                }
+            }
+        }
+    }
+    
+    // If not loaded from URL, try localStorage
+    if (!loadedIds) {
+        val storedIds = window.localStorage.getItem("invoiceSelectedIds")
+        if (storedIds != null) {
+            try {
+                val idsArray = JSON.parse(storedIds) as Array<Double>
+                selectedPurchases.clear()
+                idsArray.forEach { id -> selectedPurchases.add(id.toLong()) }
+                console.log("Loaded selected purchases from localStorage:", selectedPurchases.toList())
+                // Clear the stored IDs after loading
+                window.localStorage.removeItem("invoiceSelectedIds")
+                loadedIds = true
+            } catch (e: Exception) {
+                console.error("Failed to parse stored invoice IDs:", e)
+            }
+        }
+    }
+    
+    if (!loadedIds) {
+        console.log("No selected purchases found")
+        showMessage("No purchases selected for invoice", "warning")
+    }
+
+    // Render missing rixo data section if any stored
+    run {
+        val section = document.getElementById("missingRixoSection") as HTMLElement?
+        val storedMissing = window.localStorage.getItem("invoiceMissingPurchases")
+        if (section != null && storedMissing != null) {
+            try {
+                val purchases = JSON.parse(storedMissing) as Array<dynamic>
+                // expose to window for later collection on submit
+                js("window._missingPurchasesForInvoice = purchases")
+                if (purchases.isNotEmpty()) {
+                    val sb = StringBuilder()
+                    sb.append("<div class=\"section\" style=\"margin-bottom:22px;\">")
+                    sb.append("<h3>Fill Missing Rixo Data</h3>")
+                    for (p in purchases) {
+                        val id = js("p.id")
+                        val lotNumber = js("p.lotNumber")
+                        val chassis = js("p.chassis")
+                        val missingFields = js("p.missingFields") as Array<dynamic>
+                        sb.append("<div style=\"border:1px solid #e5e7eb; padding:12px; border-radius:8px; margin:10px 0; background:#fff;\">")
+                        sb.append("<h4 style=\"margin:0 0 10px 0;\">Purchase: Lot "+lotNumber+" - "+chassis+"</h4>")
+                        for (f in missingFields) {
+                            val field = f as String
+                            val label = when(field) {
+                                "rixoCompany" -> "Rixo Company"
+                                "rixoRequested" -> "Rixo Requested"
+                                "rixoConfirmed" -> "Rixo Confirmed"
+                                "rixoPrice" -> "Rixo Price"
+                                "clientName" -> "Client Name"
+                                "carName" -> "Car Name"
+                                "carModelYear" -> "Car Model Year"
+                                else -> field
+                            }
+                            sb.append("<div class=\"field\"><label>"+label+"</label>")
+                            sb.append("<input class=\"input\" type=\"text\" id=\"missing_"+id+"_"+field+"\" placeholder=\"Enter "+label+"\" /></div>")
+                        }
+                        sb.append("</div>")
+                    }
+                    sb.append("</div>")
+                    section.innerHTML = sb.toString()
+                }
+                window.localStorage.removeItem("invoiceMissingPurchases")
+            } catch (e: dynamic) {
+                console.error("Failed to render missing rixo section", e)
+            }
+        }
+    }
+
     // Wire up events
     document.getElementById("cancelInvoicePageBtn")?.addEventListener("click", { _: Event ->
         showPurchaseList()
@@ -1642,7 +2070,7 @@ fun showInvoicePage() {
             return@addEventListener
         }
         val idsList = selectedPurchases.toList()
-        collectInvoiceDataAndGeneratePdf(idsList)
+        collectMissingFromInvoiceAndGenerate(idsList)
     })
 
     // Add-by-chasis handler and preview renderer
@@ -1695,8 +2123,551 @@ fun showInvoicePage() {
         }
     })
 
+    // Add date formatting for sailDate field
+    document.getElementById("sailDate")?.addEventListener("change", { ev: Event ->
+        val input = ev.target as HTMLInputElement
+        val dateValue = input.value
+        val formattedDiv = document.getElementById("sailDateFormatted") as HTMLElement?
+        if (dateValue.isNotEmpty()) {
+            val formattedDate = formatWithWeekday(dateValue)
+            formattedDiv?.textContent = formattedDate
+        } else {
+            formattedDiv?.textContent = ""
+        }
+    })
+
     // Initial preview render
     renderSelectedCarsPreview()
+}
+
+// Render Rixo Transport page content
+fun showRixoTransportPage() {
+    val content = document.getElementById("content") ?: return
+    
+    // Load selected IDs from localStorage or URL parameters for new tab functionality (same as Invoice page)
+    var loadedIds = false
+    var loadedSelectedIds = mutableListOf<Long>()
+    
+    // First try to get IDs from URL parameters
+    val urlParams = window.location.hash.split("?")
+    if (urlParams.size > 1) {
+        val params = urlParams[1]
+        val idsMatch = Regex("ids=([^&]*)").find(params)
+        if (idsMatch != null) {
+            val idsString = idsMatch.groupValues[1]
+            if (idsString.isNotEmpty()) {
+                try {
+                    val idsList = idsString.split(",").map { it.trim().toLong() }
+                    loadedSelectedIds.addAll(idsList)
+                    console.log("Loaded selected purchases from URL parameters for Rixo Transport:", loadedSelectedIds)
+                    loadedIds = true
+                } catch (e: Exception) {
+                    console.error("Failed to parse URL parameter IDs for Rixo Transport:", e)
+                }
+            }
+        }
+    }
+    
+    // If not loaded from URL, try localStorage
+    if (!loadedIds) {
+        val storedIds = window.localStorage.getItem("rixoTransportSelectedIds")
+        if (storedIds != null) {
+            try {
+                val idsArray = JSON.parse(storedIds) as Array<Double>
+                loadedSelectedIds.addAll(idsArray.map { it.toLong() })
+                console.log("Loaded selected purchases from localStorage for Rixo Transport:", loadedSelectedIds)
+                // Clear the stored IDs after loading
+                window.localStorage.removeItem("rixoTransportSelectedIds")
+                loadedIds = true
+            } catch (e: Exception) {
+                console.error("Failed to parse stored Rixo Transport IDs:", e)
+            }
+        }
+    }
+    
+    if (!loadedIds) {
+        console.log("No selected purchases found for Rixo Transport")
+        showMessage("No purchases selected for Rixo Transport", "warning")
+    }
+    
+    content.innerHTML = """
+        <div class="rixo-transport-shell" style="width:100%; min-height: calc(100vh - 140px); display:flex; align-items:flex-start; justify-content:center; padding: 32px 16px; box-sizing:border-box;">
+            <style>
+                .rixo-transport-card { 
+                    width: 100%; max-width: 1000px; 
+                    border-radius: 16px; 
+                    padding: 28px; 
+                    background: rgba(255,255,255,0.75);
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.10);
+                    border: 1px solid rgba(229,231,235,0.6);
+                    backdrop-filter: blur(8px);
+                }
+                .rixo-transport-title { margin: 0; color: #111827; font-size: 28px; text-align: center; letter-spacing: .2px; }
+                .rixo-transport-sub { color:#6b7280; margin: 10px 0 26px 0; text-align:center; }
+                .section { border: 1px solid rgba(229,231,235,0.9); border-radius: 12px; padding: 18px; background: rgba(249,250,251,0.8); margin-bottom: 20px; }
+                .section h3 { margin:0 0 14px 0; color:#111827; font-size:16px; text-align:left; }
+                .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+                .grid-1 { display:grid; grid-template-columns: 1fr; gap: 16px; }
+                .field label { display:block; margin-bottom: 6px; font-weight: 600; color:#374151; }
+                .input, .textarea { width:100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; background: rgba(255,255,255,0.9); transition: box-shadow .2s, border-color .2s, background .2s; color:#111827; }
+                .input::placeholder, .textarea::placeholder { color:#9ca3af; }
+                .input:hover, .textarea:hover { border-color:#a5b4fc; }
+                .input:focus, .textarea:focus { outline:none; border-color:#6d28d9; box-shadow: 0 0 0 4px rgba(109,40,217,0.15); background:#fff; }
+                .error-text { margin-top:6px; font-size: 12px; color:#b91c1c; min-height: 16px; }
+                .actions { display:flex; gap: 12px; justify-content:center; margin-top:22px; }
+                .btn { padding: 10px 18px; border: none; border-radius: 10px; cursor: pointer; transition: transform .05s ease, box-shadow .2s ease; }
+                .btn:active { transform: translateY(1px); }
+                .btn-primary { background: linear-gradient(135deg, #28a745, #20c997); color:white; box-shadow: 0 6px 16px rgba(40,167,69,0.35); }
+                .btn-primary:hover { box-shadow: 0 8px 20px rgba(40,167,69,0.45); }
+                .btn-secondary { background:#6b7280; color:white; }
+                @media (max-width: 720px) { .grid-2 { grid-template-columns: 1fr; } }
+            </style>
+            <div class="rixo-transport-card">
+                <h2 class="rixo-transport-title">Rixo Information</h2>
+                <p class="rixo-transport-sub">Please fill in the details for land transportation PDF generation:</p>
+                <form id="rixoTransportForm" novalidate>
+                                    <div class="section">
+                                        <h3>Selected Cars (${loadedSelectedIds.size})</h3>
+                                        <div id="selectedCarsPreview" style="margin: 8px 0 6px 0; font-weight:600;">Loading selected cars...</div>
+                                    </div>
+                    
+                    <div id="fillMissingDataSection" class="section" style="display: none;">
+                        <h3>Fill Missing Data</h3>
+                        <div id="missingDataContent"></div>
+                    </div>
+                    
+                    <div class="section">
+                        <h3>Details</h3>
+                        <div class="field">
+                            <label for="transportDate">Date</label>
+                            <input class="input" type="date" id="transportDate" aria-required="true" data-required="true" />
+                            <div id="transportDateFormatted" style="margin-top: 4px; font-size: 12px; color: #6b7280; min-height: 16px;"></div>
+                            <div id="transportDateError" class="error-text"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="actions">
+                        <button type="button" id="cancelRixoTransportBtn" class="btn btn-secondary">Cancel</button>
+                        <button type="submit" id="generateRixoTransportPdfBtn" class="btn btn-primary">Generate PDF</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    """
+    
+    // Store selected purchases globally for this page
+    val jsArray = loadedSelectedIds.toTypedArray()
+    js("window.selectedPurchasesForRixoTransport = jsArray")
+    
+    // Load and display selected cars (same as Invoice page)
+    loadSelectedCarsForRixoTransport(loadedSelectedIds)
+    
+    // Set up event listeners
+    setupRixoTransportPageListeners()
+}
+
+fun loadSelectedCarsForRixoTransport(selectedIds: List<Long>) {
+    console.log("Loading selected cars for Rixo Transport. Selected IDs:", selectedIds)
+    if (selectedIds.isEmpty()) {
+        document.getElementById("selectedCarsPreview")?.innerHTML = "<div style=\"color:#6b7280; font-size: 13px;\">No cars selected.</div>"
+        return
+    }
+    
+    window.fetch("http://localhost:8083/api/purchases").then { response ->
+        console.log("API response status:", response.status)
+        if (response.ok) {
+            response.json().then { allPurchases ->
+                console.log("Received purchases from API:", allPurchases)
+                val purchasesArray = allPurchases as Array<dynamic>
+                val selectedCars = mutableListOf<String>()
+                val missingDataPurchases = mutableListOf<dynamic>()
+                
+                for (purchase in purchasesArray) {
+                    val id = js("purchase.id").toString().toLongOrNull() ?: continue
+                    if (selectedIds.contains(id)) {
+                        val chassis = js("purchase.chassis")?.toString() ?: ""
+                        val carName = js("purchase.carName")?.toString() ?: ""
+                        val lotNumber = js("purchase.lotNumber")?.toString() ?: ""
+                        selectedCars.add("$chassis - $carName (Lot: $lotNumber)")
+                        
+                        // Check for missing data - always add all selected purchases to missing data form
+                        // This ensures Venue ID and Number Cut fields are available for every row
+                        val missingFields = mutableListOf<String>()
+                        
+                        // Check for missing core data fields
+                        if ((js("purchase.carModelYear")?.toString() ?: "").isEmpty()) missingFields.add("carModelYear")
+                        if ((js("purchase.carName")?.toString() ?: "").isEmpty()) missingFields.add("carName")
+                        if ((js("purchase.clientName")?.toString() ?: "").isEmpty()) missingFields.add("clientName")
+                        if ((js("purchase.stockLocation")?.toString() ?: "").isEmpty()) missingFields.add("stockLocation")
+                        
+                        // Always add Venue ID and Number Cut fields for every selected row
+                        missingFields.add("venueId")
+                        missingFields.add("numberCut")
+                        
+                        // Add the purchase to missing data form (even if no core fields are missing)
+                        val missingPurchase = js("Object.assign({}, purchase)")
+                        val missingFieldsArray = missingFields.toTypedArray()
+                        js("missingPurchase.missingFields = missingFieldsArray")
+                        missingDataPurchases.add(missingPurchase)
+                    }
+                }
+                
+                // Display selected cars
+                val previewHtml = if (selectedCars.isNotEmpty()) {
+                    "<div style=\"margin:8px 0 6px 0; font-weight:600;\">Selected Cars (${selectedCars.size})</div>" +
+                    selectedCars.joinToString("<br>") { "<div style=\"color:#6b7280; font-size: 13px; margin: 2px 0;\">$it</div>" }
+                } else {
+                    "<div style=\"color:#6b7280; font-size: 13px;\">No cars found.</div>"
+                }
+                document.getElementById("selectedCarsPreview")?.innerHTML = previewHtml
+                
+                // Always show missing data section since we need Venue ID and Number Cut for every row
+                if (missingDataPurchases.isNotEmpty()) {
+                    renderMissingDataForRixoTransport(missingDataPurchases)
+                    document.getElementById("fillMissingDataSection")?.setAttribute("style", "display: block;")
+                }
+            }
+        } else {
+            document.getElementById("selectedCarsPreview")?.innerHTML = "<div style=\"color:#ef4444; font-size: 13px;\">Failed to load cars.</div>"
+        }
+    }.catch { error ->
+        document.getElementById("selectedCarsPreview")?.innerHTML = "<div style=\"color:#ef4444; font-size: 13px;\">Error loading cars: ${error.message}</div>"
+    }
+}
+
+fun renderMissingDataForRixoTransport(missingPurchases: List<dynamic>) {
+    val content = document.getElementById("missingDataContent") ?: return
+    val sb = StringBuilder()
+    
+    for (purchase in missingPurchases) {
+        val id = js("purchase.id").toString()
+        val chassis = js("purchase.chassis")?.toString() ?: ""
+        val lotNumber = js("purchase.lotNumber")?.toString() ?: ""
+        val missingFields = js("purchase.missingFields") as Array<dynamic>
+        
+        sb.append("<div style=\"margin-bottom: 20px; padding: 15px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb;\">")
+        sb.append("<h4 style=\"margin: 0 0 10px 0; color: #111827;\">Purchase: Lot $lotNumber - $chassis</h4>")
+        
+        for (field in missingFields) {
+            val fieldName = field as String
+            val label = when (fieldName) {
+                "carModelYear" -> "Car Model Year"
+                "carName" -> "Car Name"
+                "clientName" -> "Client Name"
+                "stockLocation" -> "Stock Location"
+                "venueId" -> "Venue ID"
+                "numberCut" -> "Number Cut"
+                else -> fieldName
+            }
+            
+            // Only show fields that are actually missing (not Venue ID and Number Cut which are always shown)
+            val shouldShow = when (fieldName) {
+                "venueId", "numberCut" -> true // Always show these
+                else -> {
+                    // Check if the field is actually missing
+                    val currentValue = when (fieldName) {
+                        "carModelYear" -> js("purchase.carModelYear")?.toString() ?: ""
+                        "carName" -> js("purchase.carName")?.toString() ?: ""
+                        "clientName" -> js("purchase.clientName")?.toString() ?: ""
+                        "stockLocation" -> js("purchase.stockLocation")?.toString() ?: ""
+                        else -> ""
+                    }
+                    currentValue.isEmpty()
+                }
+            }
+            
+            if (shouldShow) {
+                sb.append("<div class=\"field\" style=\"margin-bottom: 10px;\">")
+                sb.append("<label for=\"missing_${id}_${fieldName}\" style=\"display: block; margin-bottom: 4px; font-weight: 500; color: #374151;\">$label</label>")
+                sb.append("<input class=\"input\" type=\"text\" id=\"missing_${id}_${fieldName}\" placeholder=\"Enter $label\" style=\"width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px;\" />")
+                sb.append("</div>")
+            }
+        }
+        
+        sb.append("</div>")
+    }
+    
+    content.innerHTML = sb.toString()
+}
+
+fun setupRixoTransportPageListeners() {
+    // Cancel button
+    document.getElementById("cancelRixoTransportBtn")?.addEventListener("click", { _: Event ->
+        window.close()
+    })
+    
+    // Date formatting for transportDate field
+    document.getElementById("transportDate")?.addEventListener("change", { ev: Event ->
+        val input = ev.target as HTMLInputElement
+        val dateValue = input.value
+        val formattedDiv = document.getElementById("transportDateFormatted") as HTMLElement?
+        if (dateValue.isNotEmpty()) {
+            val formattedDate = formatWithWeekday(dateValue)
+            formattedDiv?.textContent = formattedDate
+        } else {
+            formattedDiv?.textContent = ""
+        }
+    })
+    
+    // Form submission
+    document.getElementById("rixoTransportForm")?.addEventListener("submit", { ev: Event ->
+        ev.preventDefault()
+        val selectedIds = js("window.selectedPurchasesForRixoTransport") as Array<dynamic>?
+        if (selectedIds != null && selectedIds.isNotEmpty()) {
+            val idsList = selectedIds.mapNotNull { js("it").toString().toLongOrNull() }
+            collectRixoTransportDataAndGenerate(idsList)
+        } else {
+            showMessage("No cars selected", "error")
+        }
+    })
+}
+
+fun collectRixoTransportDataAndGenerate(selectedIds: List<Long>) {
+    // Collect missing data updates first
+    val nodeList = document.querySelectorAll("input[id^='missing_']")
+    if (nodeList.length > 0) {
+        val purchaseIds = mutableSetOf<String>()
+        for (i in 0 until nodeList.length) {
+            val el = nodeList.item(i) as? HTMLInputElement ?: continue
+            val parts = el.id.split("_")
+            if (parts.size >= 3) purchaseIds.add(parts[1])
+        }
+
+        val fields = arrayOf(
+            "carModelYear",
+            "carName",
+            "clientName",
+            "stockLocation",
+            "venueId",
+            "numberCut"
+        )
+
+        val updates = mutableListOf<dynamic>()
+        for (pid in purchaseIds) {
+            val upd = js("{}")
+            js("upd.id = pid")
+            for (field in fields) {
+                val inputId = "missing_${'$'}pid_${'$'}field"
+                val input = document.getElementById(inputId) as HTMLInputElement?
+                val value = input?.value?.trim() ?: ""
+                if (value.isNotEmpty()) {
+                    when (field) {
+                        "carModelYear" -> js("upd.carModelYear = value")
+                        "carName" -> js("upd.carName = value")
+                        "clientName" -> js("upd.clientName = value")
+                        "stockLocation" -> js("upd.stockLocation = value")
+                        "venueId" -> js("upd.venueId = value")
+                        "numberCut" -> js("upd.numberCut = value")
+                    }
+                }
+            }
+            updates.add(upd)
+        }
+
+        // Update purchases first, then generate PDF
+        if (updates.isNotEmpty()) {
+            updatePurchasesForRixoTransport(updates, selectedIds)
+            return
+        }
+    }
+    
+    // No missing data to update, proceed directly to PDF generation
+    generateRixoTransportPdf(selectedIds)
+}
+
+fun updatePurchasesForRixoTransport(purchases: List<dynamic>, selectedIds: List<Long>) {
+    val updatePromises = js("[]")
+    for (purchase in purchases) {
+        val id = js("purchase.id").toString()
+        val putChain = window.fetch("http://localhost:8083/api/purchases/$id").then { resp: dynamic ->
+            if (resp.ok) {
+                return@then resp.json().then { current: dynamic ->
+                    val merged = js("Object.assign({}, current)")
+                    if (js("purchase.carModelYear") != undefined) js("merged.carModelYear = purchase.carModelYear")
+                    if (js("purchase.carName") != undefined) js("merged.carName = purchase.carName")
+                    if (js("purchase.clientName") != undefined) js("merged.clientName = purchase.clientName")
+                    if (js("purchase.stockLocation") != undefined) js("merged.stockLocation = purchase.stockLocation")
+                    if (js("purchase.venueId") != undefined) js("merged.venueId = purchase.venueId")
+                    if (js("purchase.numberCut") != undefined) js("merged.numberCut = purchase.numberCut")
+
+                    val init = js("{}")
+                    init.method = "PUT"
+                    val headers = js("{}")
+                    headers["Content-Type"] = "application/json"
+                    init.headers = headers
+                    init.body = JSON.stringify(merged)
+                    return@then window.fetch("http://localhost:8083/api/purchases/$id", init)
+                }
+            } else {
+                val init = js("{}")
+                init.method = "PUT"
+                val headers = js("{}")
+                headers["Content-Type"] = "application/json"
+                init.headers = headers
+                init.body = JSON.stringify(purchase)
+                return@then window.fetch("http://localhost:8083/api/purchases/$id", init)
+            }
+        }
+        js("updatePromises.push(putChain)")
+    }
+    
+    js("Promise.all(updatePromises)").then { _: dynamic ->
+        // Small delay to ensure database commits
+        js("setTimeout")( {
+            generateRixoTransportPdf(selectedIds)
+        }, 400)
+    }.catch { error: dynamic ->
+        console.error("Failed updating purchases before Rixo Transport PDF", error)
+        showMessage("Failed to update missing data", "error")
+    }
+}
+
+fun generateRixoTransportPdf(selectedIds: List<Long>) {
+    showMessage("Generating Rixo Transport PDF...", "info")
+    
+    // Collect form data
+    val transportData = js("{}")
+    transportData.transportDate = (document.getElementById("transportDate") as HTMLInputElement).value
+    
+    // Collect ALL data from missing data form for each purchase
+    val purchaseData = js("[]")
+    for (id in selectedIds) {
+        val purchaseInfo = js("{}")
+        js("purchaseInfo.id = id")
+        
+        // Collect all possible fields from the form
+        val fields = arrayOf("carModelYear", "carName", "clientName", "stockLocation", "venueId", "numberCut")
+        for (field in fields) {
+            val input = document.getElementById("missing_${id}_${field}") as HTMLInputElement?
+            val value = input?.value?.trim() ?: ""
+            if (value.isNotEmpty()) {
+                when (field) {
+                    "carModelYear" -> js("purchaseInfo.carModelYear = value")
+                    "carName" -> js("purchaseInfo.carName = value")
+                    "clientName" -> js("purchaseInfo.clientName = value")
+                    "stockLocation" -> js("purchaseInfo.stockLocation = value")
+                    "venueId" -> js("purchaseInfo.venueId = value")
+                    "numberCut" -> js("purchaseInfo.numberCut = value")
+                }
+            }
+        }
+        js("purchaseData.push(purchaseInfo)")
+    }
+    transportData.purchaseData = purchaseData
+    
+    // Create request body
+    val requestBody = js("{}")
+    val jsArray = js("[]")
+    selectedIds.forEach { id ->
+        jsArray.push(id.toInt())
+    }
+    requestBody.ids = jsArray
+    requestBody.transportData = transportData
+    
+    val requestInit = js("{}")
+    requestInit.method = "POST"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(requestBody)
+    
+    window.fetch("http://localhost:8083/api/purchases/rixo-transport-pdf", requestInit).then { response ->
+        if (response.ok) {
+            response.blob().then { blob ->
+                // Store the blob for later use
+                js("window.generatedRixoTransportPdfBlob = blob")
+                
+                // Show PDF generation success modal
+                showRixoTransportPdfGenerationSuccessModal(blob)
+                
+                showMessage("Rixo Transport PDF generated successfully!", "success")
+            }
+        } else {
+            response.text().then { errorText ->
+                showMessage("Failed to generate PDF: $errorText", "error")
+            }
+        }
+    }.catch { error ->
+        showMessage("Failed to generate PDF: ${error.message}", "error")
+    }
+}
+
+fun showRixoTransportPdfGenerationSuccessModal(blob: dynamic) {
+    val modal = document.createElement("div")
+    modal.id = "rixoTransportPdfSuccessModal"
+    modal.setAttribute("style", "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;")
+    
+    modal.innerHTML = """
+        <div style="background-color: white; padding: 30px; border-radius: 8px; min-width: 400px; max-width: 500px; text-align: center;">
+            <div style="margin-bottom: 20px;">
+                <div style="width: 60px; height: 60px; background-color: #28a745; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
+                    <span style="color: white; font-size: 24px; font-weight: bold;">✓</span>
+                </div>
+                <h2 style="margin: 0; color: #333;">Rixo Transport PDF Generated!</h2>
+                <p style="margin: 10px 0 0; color: #666;">Your land transportation report has been generated. What would you like to do next?</p>
+            </div>
+            
+            <div style="display: flex; gap: 15px; justify-content: center; margin-top: 25px;">
+                <button id="downloadRixoTransportPdfBtn" style="padding: 12px 24px; background-color: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px;">
+                    <span>📥</span>
+                    Download PDF
+                </button>
+                <button id="sendRixoTransportEmailBtn" style="padding: 12px 24px; background-color: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 8px;">
+                    <span>📧</span>
+                    Send in Gmail
+                </button>
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <button id="closeRixoTransportPdfModalBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                    Close
+                </button>
+            </div>
+        </div>
+    """
+    
+    document.body?.appendChild(modal)
+    
+    // Event listeners
+    document.getElementById("downloadRixoTransportPdfBtn")?.addEventListener("click", { _: Event ->
+        downloadRixoTransportPdf(blob)
+        document.body?.removeChild(modal)
+    })
+    
+    document.getElementById("sendRixoTransportEmailBtn")?.addEventListener("click", { _: Event ->
+        sendRixoTransportPdfViaGmail(blob)
+        document.body?.removeChild(modal)
+    })
+    
+    document.getElementById("closeRixoTransportPdfModalBtn")?.addEventListener("click", { _: Event ->
+        document.body?.removeChild(modal)
+    })
+    
+    // Close modal when clicking outside
+    modal.addEventListener("click", { event ->
+        if (event.target == modal) {
+            document.body?.removeChild(modal)
+        }
+    })
+}
+
+fun downloadRixoTransportPdf(blob: dynamic) {
+    val url = js("window.URL.createObjectURL(blob)")
+    val a = document.createElement("a") as HTMLAnchorElement
+    a.setAttribute("href", url)
+    a.setAttribute("download", "rixo-transport-${js("Date.now()")}.pdf")
+    document.body?.appendChild(a)
+    a.click()
+    document.body?.removeChild(a)
+    js("window.URL.revokeObjectURL(url)")
+    
+    showMessage("Rixo Transport PDF downloaded successfully!", "success")
+}
+
+fun sendRixoTransportPdfViaGmail(blob: dynamic) {
+    // Placeholder for Gmail functionality
+    showMessage("Gmail functionality will be implemented later", "info")
+    console.log("Gmail send functionality - blob size:", js("blob.size"))
 }
 
 fun collectInvoiceDataAndGeneratePdf(selectedIds: List<Long>) {
@@ -1711,6 +2682,125 @@ fun collectInvoiceDataAndGeneratePdf(selectedIds: List<Long>) {
     
     // Now generate the PDF with invoice data
     generateRixoPdfWithInvoiceData(selectedIds, invoiceData)
+}
+
+// Collect missing Rixo data inputs rendered on the invoice page, update backend, then generate PDF
+fun collectMissingFromInvoiceAndGenerate(selectedIds: List<Long>) {
+    // Always derive updates directly from the DOM so we pick up any newly filled fields
+    val nodeList = document.querySelectorAll("input[id^='missing_']")
+    if (nodeList.length == 0) {
+        // Nothing to update; proceed to PDF
+        collectInvoiceDataAndGeneratePdf(selectedIds)
+        return
+    }
+
+    // Collect unique purchase ids from input ids of the form missing_<id>_<field>
+    val purchaseIds = mutableSetOf<String>()
+    for (i in 0 until nodeList.length) {
+        val el = nodeList.item(i) as? HTMLInputElement ?: continue
+        val parts = el.id.split("_")
+        if (parts.size >= 3) purchaseIds.add(parts[1])
+    }
+
+    val fields = arrayOf(
+        "rixoCompany",
+        "rixoRequested",
+        "rixoConfirmed",
+        "rixoPrice",
+        "clientName",
+        "carName",
+        "carModelYear"
+    )
+
+    val updates = mutableListOf<dynamic>()
+    for (pid in purchaseIds) {
+        val upd = js("{}")
+        js("upd.id = pid")
+        for (field in fields) {
+            val inputId = "missing_${'$'}pid_${'$'}field"
+            val input = document.getElementById(inputId) as HTMLInputElement?
+            val value = input?.value?.trim() ?: ""
+            if (value.isNotEmpty()) {
+                when (field) {
+                    "rixoCompany" -> js("upd.rixoCompany = value")
+                    "rixoRequested" -> js("upd.rixoRequested = value")
+                    "rixoConfirmed" -> js("upd.rixoConfirmed = value")
+                    "rixoPrice" -> js("upd.rixoPrice = value")
+                    "clientName" -> js("upd.clientName = value")
+                    "carName" -> js("upd.carName = value")
+                    "carModelYear" -> js("upd.carModelYear = value")
+                }
+            }
+        }
+        updates.add(upd)
+    }
+
+    // If no fields were filled, just generate the PDF
+    var anyValue = false
+    for (u in updates) {
+        if (js("u.rixoCompany || u.rixoRequested || u.rixoConfirmed || u.rixoPrice || u.clientName || u.carName || u.carModelYear") != undefined) {
+            anyValue = true
+            break
+        }
+    }
+    if (!anyValue) {
+        collectInvoiceDataAndGeneratePdf(selectedIds)
+        return
+    }
+
+    updatePurchasesAndThenGenerate(updates, selectedIds)
+}
+
+fun updatePurchasesAndThenGenerate(purchases: List<dynamic>, selectedIds: List<Long>) {
+    // For each purchase, GET the current entity first, merge updates, then PUT.
+    val updatePromises = js("[]")
+    for (purchase in purchases) {
+        val id = js("purchase.id").toString()
+        // IMPORTANT: Return the PUT promise so Promise.all waits for DB writes
+        val putChain = window.fetch("http://localhost:8083/api/purchases/$id").then { resp: dynamic ->
+            if (resp.ok) {
+                return@then resp.json().then { current: dynamic ->
+                    // Merge changed fields from 'purchase' into 'current'
+                    val merged = js("Object.assign({}, current)")
+                    if (js("purchase.rixoCompany") != undefined) js("merged.rixoCompany = purchase.rixoCompany")
+                    if (js("purchase.rixoRequested") != undefined) js("merged.rixoRequested = purchase.rixoRequested")
+                    if (js("purchase.rixoConfirmed") != undefined) js("merged.rixoConfirmed = purchase.rixoConfirmed")
+                    if (js("purchase.rixoPrice") != undefined) js("merged.rixoPrice = purchase.rixoPrice")
+                    if (js("purchase.clientName") != undefined) js("merged.clientName = purchase.clientName")
+                    if (js("purchase.carName") != undefined) js("merged.carName = purchase.carName")
+                    if (js("purchase.carModelYear") != undefined) js("merged.carModelYear = purchase.carModelYear")
+
+                    val init = js("{}")
+                    init.method = "PUT"
+                    val headers = js("{}")
+                    headers["Content-Type"] = "application/json"
+                    init.headers = headers
+                    init.body = JSON.stringify(merged)
+                    return@then window.fetch("http://localhost:8083/api/purchases/$id", init)
+                }
+            } else {
+                // Fallback: attempt to PUT provided object as-is
+                val init = js("{}")
+                init.method = "PUT"
+                val headers = js("{}")
+                headers["Content-Type"] = "application/json"
+                init.headers = headers
+                init.body = JSON.stringify(purchase)
+                return@then window.fetch("http://localhost:8083/api/purchases/$id", init)
+            }
+        }
+        js("updatePromises.push(putChain)")
+    }
+    js("Promise.all(updatePromises)").then { _: dynamic ->
+        js("window._missingPurchasesForInvoice = null")
+        // Small delay to ensure the database has committed before we fetch for PDF
+        js("setTimeout")( {
+            collectInvoiceDataAndGeneratePdf(selectedIds)
+        }, 400)
+    }.catch { error: dynamic ->
+        console.error("Failed updating purchases before PDF", error)
+        showMessage("Failed to update missing Rixo data", "error")
+    }
 }
 
 // Simple client-side validation with accessible error messages
@@ -1759,31 +2849,37 @@ fun renderSelectedCarsPreview() {
         container.innerHTML = "<div style=\"color:#6b7280; font-size: 13px;\">No cars selected.</div>"
         return
     }
-    window.fetch("http://localhost:8083/api/purchases").then { response ->
-        if (response.ok) {
-            response.json().then { allPurchases ->
-                val purchasesArray = allPurchases as Array<dynamic>
-                val listItems = StringBuilder()
-                var count = 0
-                for (p in purchasesArray) {
-                    val id = js("p.id").toString().toDouble().toLong()
-                    if (selectedPurchases.contains(id)) {
-                        count += 1
-                        val ch = js("p.chassis")?.toString() ?: ""
-                        val car = js("p.carName")?.toString() ?: ""
-                        listItems.append("<li style=\"padding:6px 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;\">#${id} — ${ch} <span style=\"color:#6b7280;\">${car}</span></li>")
-                    }
-                }
-                container.innerHTML = "<div style=\"margin:8px 0 6px 0; font-weight:600;\">Selected Cars (${count})</div>" +
-                    "<ul style=\"display:grid;grid-template-columns:1fr;gap:8px;list-style:none;padding:0;margin:0;\">" +
-                    listItems.toString() + "</ul>"
+    
+    // Just show the count without making an API call to avoid errors
+    val count = ids.size
+    container.innerHTML = "<div style=\"margin:8px 0 6px 0; font-weight:600;\">Selected Cars (${count})</div>" +
+        "<div style=\"color:#6b7280; font-size: 13px;\">Ready for PDF generation</div>"
+}
+
+fun collectMissingRixoDataFromForm(): dynamic {
+    val missingData = js("[]")
+    
+    // Find all missing data inputs
+    val nodeList = document.querySelectorAll("input[id^='missing_']")
+    for (i in 0 until nodeList.length) {
+        val el = nodeList.item(i) as? HTMLInputElement ?: continue
+        val parts = el.id.split("_")
+        if (parts.size >= 3) {
+            val purchaseId = parts[1]
+            val field = parts[2]
+            val value = el.value.trim()
+            
+            if (value.isNotEmpty()) {
+                val dataItem = js("{}")
+                js("dataItem.purchaseId = purchaseId")
+                js("dataItem.field = field")
+                js("dataItem.value = value")
+                missingData.push(dataItem)
             }
-        } else {
-            container.innerHTML = "<div style=\"color:#b91c1c; font-size: 13px;\">Failed to load selected cars.</div>"
         }
-    }.catch { _ ->
-        container.innerHTML = "<div style=\"color:#b91c1c; font-size: 13px;\">Failed to load selected cars.</div>"
     }
+    
+    return missingData
 }
 
 fun generateRixoPdfWithInvoiceData(selectedIds: List<Long>, invoiceData: dynamic) {
@@ -1791,7 +2887,11 @@ fun generateRixoPdfWithInvoiceData(selectedIds: List<Long>, invoiceData: dynamic
     console.log("Selected IDs for PDF generation:", selectedIds)
     console.log("Invoice data:", invoiceData)
     
-    // Create request body with selected IDs and invoice data
+    // Collect missing Rixo data from the form
+    val missingRixoData = collectMissingRixoDataFromForm()
+    console.log("Missing Rixo data:", missingRixoData)
+    
+    // Create request body with selected IDs, invoice data, and missing Rixo data
     val requestBody = js("{}")
     val jsArray = js("[]")
     selectedIds.forEach { id ->
@@ -1800,6 +2900,7 @@ fun generateRixoPdfWithInvoiceData(selectedIds: List<Long>, invoiceData: dynamic
     }
     requestBody.ids = jsArray
     requestBody.invoiceData = invoiceData
+    requestBody.missingRixoData = missingRixoData
     
     console.log("Request body before stringify:", requestBody)
     console.log("Request body ids:", requestBody.ids)
@@ -1967,4 +3068,20 @@ fun showMessage(message: String, type: String) {
     window.setTimeout({
         messageDiv.remove()
     }, 5000)
+}
+
+fun openSidebar() {
+    val sidebar = document.getElementById("sidebar") as HTMLElement?
+    val overlay = document.getElementById("sidebarOverlay") as HTMLElement?
+    
+    sidebar?.style?.left = "0px"
+    overlay?.style?.display = "block"
+}
+
+fun closeSidebar() {
+    val sidebar = document.getElementById("sidebar") as HTMLElement?
+    val overlay = document.getElementById("sidebarOverlay") as HTMLElement?
+    
+    sidebar?.style?.left = "-250px"
+    overlay?.style?.display = "none"
 }

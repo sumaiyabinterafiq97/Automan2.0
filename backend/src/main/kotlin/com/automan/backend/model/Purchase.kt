@@ -140,6 +140,12 @@ data class Purchase(
     @Column(name = "rixo_price")
     val rixoPrice: String? = null,
     
+    @Column(name = "venue_id")
+    val venueId: String? = null,
+    
+    @Column(name = "number_cut")
+    val numberCut: String? = null,
+    
     @Column(name = "repair_company")
     val repairCompany: String? = null,
     

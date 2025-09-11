@@ -449,8 +449,9 @@ class PurchaseService(
         }
     }
     
-    fun generateRixoPdf(selectedIds: List<Long>, invoiceData: Map<String, String>): ByteArray {
+    fun generateRixoPdf(selectedIds: List<Long>, invoiceData: Map<String, String>, missingRixoData: List<Map<String, String>> = emptyList()): ByteArray {
         println("🚀 Starting Rixo PDF generation for ${selectedIds.size} purchases")
+        println("📝 Missing Rixo data: $missingRixoData")
         
         try {
             // Get selected purchases
@@ -464,11 +465,102 @@ class PurchaseService(
             
             println("📄 Found ${purchases.size} purchases to include in PDF")
             
+            // Apply missing Rixo data to purchases
+            val updatedPurchases = purchases.map { purchase ->
+                // Find missing data for this purchase
+                val purchaseMissingData = missingRixoData.filter { 
+                    it["purchaseId"] == purchase.id.toString() 
+                }
+                
+                // Create a new purchase with updated fields
+                var updatedPurchase = purchase
+                
+                // Apply the missing data to the purchase
+                for (missingItem in purchaseMissingData) {
+                    val field = missingItem["field"]
+                    val value = missingItem["value"]
+                    
+                    updatedPurchase = when (field) {
+                        "rixoCompany" -> updatedPurchase.copy(rixoCompany = value)
+                        "rixoRequested" -> updatedPurchase.copy(rixoRequested = value)
+                        "rixoConfirmed" -> updatedPurchase.copy(rixoConfirmed = value)
+                        "rixoPrice" -> updatedPurchase.copy(rixoPrice = value)
+                        "clientName" -> updatedPurchase.copy(clientName = value)
+                        "carName" -> updatedPurchase.copy(carName = value)
+                        "carModelYear" -> updatedPurchase.copy(carModelYear = value)
+                        else -> updatedPurchase
+                    }
+                }
+                
+                updatedPurchase
+            }
+            
+            println("📝 Applied missing Rixo data to ${updatedPurchases.size} purchases")
+            
             // Generate PDF using the PDF service
-            return pdfService.generateRixoPdf(purchases, invoiceData)
+            return pdfService.generateRixoPdf(updatedPurchases, invoiceData)
             
         } catch (e: Exception) {
             println("❌ Error generating Rixo PDF: ${e.message}")
+            e.printStackTrace()
+            throw e
+        }
+    }
+    
+    fun generateRixoTransportPdf(selectedIds: List<Long>, transportData: Map<String, String>, purchaseData: List<Map<String, Any>> = emptyList()): ByteArray {
+        println("🚀 Starting Rixo Transport PDF generation for ${selectedIds.size} purchases")
+        
+        try {
+            // Get selected purchases
+            val purchases = selectedIds.mapNotNull { id ->
+                purchaseRepository.findById(id).orElse(null)
+            }
+            
+            if (purchases.isEmpty()) {
+                throw IllegalArgumentException("No purchases found for the selected IDs")
+            }
+            
+            println("📄 Found ${purchases.size} purchases to include in Rixo Transport PDF")
+            
+            // Override purchase fields with form data if provided
+            val updatedPurchases = purchases.map { purchase ->
+                val formData = purchaseData.find { formItem ->
+                    val formId = formItem["id"]
+                    when (formId) {
+                        is Number -> formId.toLong() == purchase.id
+                        is Map<*, *> -> {
+                            // Handle Kotlin Long object {low_1=397, high_1=0}
+                            val low = formId["low_1"] as? Number
+                            if (low != null) {
+                                low.toLong() == purchase.id
+                            } else {
+                                false
+                            }
+                        }
+                        else -> false
+                    }
+                }
+                if (formData != null) {
+                    println("📝 Overriding purchase ${purchase.id} with form data: $formData")
+                    // Create a copy with updated fields
+                    purchase.copy(
+                        carModelYear = formData["carModelYear"] as? String ?: purchase.carModelYear,
+                        carName = formData["carName"] as? String ?: purchase.carName,
+                        clientName = formData["clientName"] as? String ?: purchase.clientName,
+                        stockLocation = formData["stockLocation"] as? String ?: purchase.stockLocation,
+                        venueId = formData["venueId"] as? String ?: purchase.venueId,
+                        numberCut = formData["numberCut"] as? String ?: purchase.numberCut
+                    )
+                } else {
+                    purchase
+                }
+            }
+            
+            // Generate PDF using the PDF service
+            return pdfService.generateRixoTransportPdf(updatedPurchases, transportData)
+            
+        } catch (e: Exception) {
+            println("❌ Error generating Rixo Transport PDF: ${e.message}")
             e.printStackTrace()
             throw e
         }
