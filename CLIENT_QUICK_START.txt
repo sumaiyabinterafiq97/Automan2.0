@@ -1,0 +1,37 @@
+Admin Login
+- email: admin@gmail.com
+- password: Admin#12
+
+Windows (PowerShell)
+- Install Docker Desktop and start it.
+- Download and extract Zip file.
+- In the extracted folder, Shift+Right-click → "Open PowerShell here", then run:
+  docker-compose up -d --build
+- Open: http://localhost:9090
+- phpMyAdmin (optional): http://localhost:8082
+  Username: automan_user, Password: automan_password
+
+macOS
+- Install Docker Desktop and start it.
+- Extract the ZIP.
+- Open Terminal in that folder, then run:
+  chmod +x build-docker.sh
+  ./build-docker.sh
+- Open: http://localhost:9090
+- phpMyAdmin (optional): http://localhost:8082
+
+Linux
+- Install Docker Engine + Docker Compose plugin (from your distro docs) and start Docker.
+- Extract the ZIP.
+- In the folder, run:
+  chmod +x build-docker.sh
+  ./build-docker.sh
+- Open: http://localhost:9090
+- phpMyAdmin (optional): http://localhost:8082
+
+Ports and services
+- Frontend: http://localhost:9090
+- Backend API: http://localhost:8083
+- phpMyAdmin: http://localhost:8082
+- MySQL host port: 3307 (container 3306)
+

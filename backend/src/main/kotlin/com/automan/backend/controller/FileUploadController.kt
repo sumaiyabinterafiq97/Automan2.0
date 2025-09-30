@@ -9,7 +9,7 @@ import org.springframework.web.multipart.MultipartFile
 
 @RestController
 @RequestMapping("/upload")
-@CrossOrigin(origins = ["http://localhost:8080", "http://localhost:8084", "http://localhost:8085", "http://localhost:8089", "http://localhost:8090"])
+@CrossOrigin(origins = ["http://localhost:8080", "http://localhost:8081", "http://localhost:8084", "http://localhost:8085", "http://localhost:8089", "http://localhost:8090", "http://localhost:9090"])
 class FileUploadController(private val purchaseService: PurchaseService) {
     
     @PostMapping("/excel")

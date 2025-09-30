@@ -1,7 +1,7 @@
 services:
   mysql:
     image: mysql:8.0
-    container_name: automan_mysql
+    container_name: automan_mysql_dev
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
@@ -11,15 +11,15 @@ services:
     ports:
       - "3307:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - mysql_data_dev:/var/lib/mysql
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
     command: --default-authentication-plugin=mysql_native_password
     networks:
-      - automan_network
+      - automan_dev_network
 
   backend:
     build: ./backend
-    container_name: automan_backend
+    container_name: automan_backend_dev
     restart: always
     ports:
       - "8083:8083"
@@ -31,22 +31,39 @@ services:
       SPRING_DATASOURCE_USERNAME: automan_user
       SPRING_DATASOURCE_PASSWORD: automan_password
     networks:
-      - automan_network
+      - automan_dev_network
 
   frontend:
-    build: .
-    container_name: automan_frontend
+    image: node:18-alpine
+    container_name: automan_frontend_dev
     restart: always
     ports:
       - "9090:8080"
+    working_dir: /app
+    volumes:
+      # Mount source code for hot reloading
+      - ./src:/app/src
+      - ./build.gradle.kts:/app/build.gradle.kts
+      - ./settings.gradle.kts:/app/settings.gradle.kts
+      - ./gradle.properties:/app/gradle.properties
+      - ./gradlew:/app/gradlew
+      - ./gradle:/app/gradle
+    environment:
+      - NODE_ENV=development
+    command: >
+      sh -c "
+        apk add --no-cache openjdk17-jdk curl &&
+        chmod +x gradlew &&
+        ./gradlew jsBrowserDevelopmentWebpack --continuous
+      "
     depends_on:
       - backend
     networks:
-      - automan_network
+      - automan_dev_network
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
-    container_name: automan_phpmyadmin
+    container_name: automan_phpmyadmin_dev
     restart: always
     environment:
       PMA_HOST: mysql
@@ -58,11 +75,11 @@ services:
     depends_on:
       - mysql
     networks:
-      - automan_network
+      - automan_dev_network
 
 volumes:
-  mysql_data:
+  mysql_data_dev:
 
 networks:
-  automan_network:
+  automan_dev_network:
     driver: bridge

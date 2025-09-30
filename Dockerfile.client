@@ -1,0 +1,127 @@
+# Single Docker Image for Client Delivery
+# This Dockerfile creates one image with everything: Frontend + Backend + Database
+
+# Stage 1: Build Frontend
+FROM openjdk:17-jdk-slim AS frontend-builder
+
+WORKDIR /app
+
+# Copy Gradle wrapper and build files
+COPY gradlew .
+COPY gradle gradle
+COPY build.gradle.kts .
+COPY settings.gradle.kts .
+COPY gradle.properties .
+
+# Copy frontend source
+COPY src src
+
+# Make gradlew executable
+RUN chmod +x gradlew
+
+# Build the frontend application
+RUN ./gradlew jsBrowserProductionWebpack
+
+# Stage 2: Build Backend
+FROM openjdk:17-jdk-slim AS backend-builder
+
+WORKDIR /app
+
+# Copy Gradle wrapper and build files
+COPY gradlew .
+COPY gradle gradle
+COPY build.gradle.kts .
+COPY settings.gradle.kts .
+COPY gradle.properties .
+
+# Copy backend source
+COPY backend backend
+
+# Make gradlew executable
+RUN chmod +x gradlew
+
+# Build the backend application
+RUN cd backend && ./gradlew build -x test
+
+# Stage 3: Final Runtime Image
+FROM openjdk:17-jdk-slim
+
+# Install required packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nginx \
+    mariadb-server \
+    curl \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy built frontend from Stage 1
+COPY --from=frontend-builder /app/build/dist/js/productionExecutable /var/www/html
+
+# Copy built backend JAR from Stage 2
+COPY --from=backend-builder /app/backend/build/libs/*.jar /app/backend.jar
+
+# Copy database initialization script
+COPY database/init.sql /docker-entrypoint-initdb.d/init.sql
+
+# Copy nginx configuration
+COPY nginx-client.conf /etc/nginx/sites-available/default
+
+# Copy supervisor configuration
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Create startup script inline
+RUN echo '#!/bin/bash\n\
+echo "🚀 Starting Automan Client Application..."\n\
+\n\
+# Initialize MySQL database if not exists\n\
+if [ ! -d "/var/lib/mysql/automan_car_purchase" ]; then\n\
+    echo "📊 Initializing MySQL database..."\n\
+    \n\
+    # Start MySQL temporarily for initialization\n\
+    mysqld_safe --user=mysql --datadir=/var/lib/mysql &\n\
+    MYSQL_PID=$!\n\
+    \n\
+    # Wait for MySQL to start\n\
+    sleep 10\n\
+    \n\
+    # Create database and user\n\
+    mysql -e "CREATE DATABASE IF NOT EXISTS automan_car_purchase;"\n\
+    mysql -e "CREATE USER IF NOT EXISTS '\''automan_user'\''@'\''localhost'\'' IDENTIFIED BY '\''automan_password'\'';"\n\
+    mysql -e "GRANT ALL PRIVILEGES ON automan_car_purchase.* TO '\''automan_user'\''@'\''localhost'\'';"\n\
+    mysql -e "FLUSH PRIVILEGES;"\n\
+    \n\
+    # Import initial data\n\
+    if [ -f "/docker-entrypoint-initdb.d/init.sql" ]; then\n\
+        echo "📥 Importing initial database schema..."\n\
+        mysql -u automan_user -pautoman_password automan_car_purchase < /docker-entrypoint-initdb.d/init.sql\n\
+    fi\n\
+    \n\
+    # Stop temporary MySQL\n\
+    kill $MYSQL_PID\n\
+    sleep 5\n\
+fi\n\
+\n\
+echo "✅ Database ready!"\n\
+echo "🌐 Starting all services with supervisor..."\n\
+\n\
+# Start supervisor to manage all services\n\
+exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf' > /start-client.sh && chmod +x /start-client.sh
+
+# Create necessary directories
+RUN mkdir -p /var/lib/mysql /var/log/mysql /var/run/mysqld
+
+# Set MariaDB permissions
+RUN chown -R mysql:mysql /var/lib/mysql /var/log/mysql /var/run/mysqld
+
+# Expose port 8080
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8080/ || exit 1
+
+# Start everything with supervisor
+CMD ["/start-client.sh"]

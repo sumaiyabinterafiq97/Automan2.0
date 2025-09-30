@@ -2,15 +2,24 @@ package com.automan.backend.controller
 
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
+import com.automan.backend.model.Event
+import com.automan.backend.model.EventType
 import com.automan.backend.service.PurchaseService
+import com.automan.backend.service.ClientService
+import com.automan.backend.repository.EventRepository
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
+import java.time.LocalDate
 
 @RestController
 @RequestMapping("/purchases")
-@CrossOrigin(origins = ["http://localhost:8080", "http://localhost:8084", "http://localhost:8085", "http://localhost:8089", "http://localhost:8090"])
-class PurchaseController(private val purchaseService: PurchaseService) {
+@CrossOrigin(origins = ["http://localhost:8080", "http://localhost:8084", "http://localhost:8085", "http://localhost:8089", "http://localhost:8090", "http://localhost:9090"])
+class PurchaseController(
+    private val purchaseService: PurchaseService,
+    private val clientService: ClientService,
+    private val eventRepository: EventRepository
+) {
     
     @GetMapping
     fun getAllPurchases(): ResponseEntity<List<Purchase>> {
@@ -47,8 +56,11 @@ class PurchaseController(private val purchaseService: PurchaseService) {
     }
     
     @PutMapping("/{id}")
-    fun updatePurchase(@PathVariable id: Long, @RequestBody purchase: Purchase): ResponseEntity<Purchase> {
-        val updatedPurchase = purchaseService.updatePurchase(id, purchase)
+    fun updatePurchase(@PathVariable id: Long, @RequestBody updateData: Map<String, Any>): ResponseEntity<Purchase> {
+        println("🔍 [Controller] Updating purchase ID: $id")
+        println("🔍 [Controller] Update data received: $updateData")
+        
+        val updatedPurchase = purchaseService.updatePurchasePartial(id, updateData)
         return if (updatedPurchase != null) {
             ResponseEntity.ok(updatedPurchase)
         } else {
@@ -255,9 +267,9 @@ class PurchaseController(private val purchaseService: PurchaseService) {
         return ResponseEntity.ok(purchases)
     }
     
-    @GetMapping("/filter/auction-name")
-    fun filterByAuctionName(@RequestParam auctionName: String): ResponseEntity<List<Purchase>> {
-        val purchases = purchaseService.filterByAuctionName(auctionName)
+    @GetMapping("/filter/auction-house")
+    fun filterByAuctionHouse(@RequestParam auctionHouse: String): ResponseEntity<List<Purchase>> {
+        val purchases = purchaseService.filterByAuctionHouse(auctionHouse)
         return ResponseEntity.ok(purchases)
     }
     
@@ -271,5 +283,66 @@ class PurchaseController(private val purchaseService: PurchaseService) {
     fun filterByDate(@RequestParam date: String): ResponseEntity<List<Purchase>> {
         val purchases = purchaseService.filterByDate(date)
         return ResponseEntity.ok(purchases)
+    }
+    
+    @PostMapping("/transaction")
+    fun createTransaction(@RequestBody transactionData: Map<String, Any>): ResponseEntity<Map<String, Any>> {
+        return try {
+            // Extract clientId directly from the payload
+            val clientId = (transactionData["clientId"] as? Number)?.toLong() 
+                ?: throw IllegalArgumentException("Client ID is required")
+            
+            println("DEBUG: Creating transaction for client $clientId")
+            println("DEBUG: Transaction data: $transactionData")
+            
+            // Verify client exists
+            val client = clientService.getClientById(clientId)
+                ?: throw IllegalArgumentException("Client not found: $clientId")
+            
+            println("DEBUG: Client found: ${client.clientName}")
+            
+            // Calculate running balance based on client's current balance
+            val currentBalance = client.currentBalance
+            val transactionPrice = (transactionData["transactionPrice"] as? Number)?.toDouble() ?: 0.0
+            val paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble() ?: 0.0
+            val newBalance = currentBalance + paymentReceived - transactionPrice
+            
+            println("DEBUG: Current balance: $currentBalance, New balance: $newBalance")
+            
+            // Create Event object
+            val event = Event(
+                clientId = clientId,
+                eventDate = LocalDate.parse(transactionData["eventDate"] as String),
+                eventType = EventType.OTHER,
+                eventDescription = transactionData["eventDescription"] as? String,
+                quantity = (transactionData["quantity"] as? Number)?.toInt(),
+                billNumber = transactionData["billNumber"] as? String,
+                transactionPrice = transactionPrice,
+                paymentReceived = paymentReceived,
+                runningBalance = newBalance
+            )
+            
+            // Save event directly using EventRepository
+            val savedEvent = eventRepository.save(event)
+            println("DEBUG: Event saved with ID: ${savedEvent.id}")
+            
+            // Update client balance
+            clientService.updateClientBalance(clientId, newBalance)
+            println("DEBUG: Client balance updated to: $newBalance")
+            
+            ResponseEntity.ok(mapOf(
+                "success" to true,
+                "transactionId" to (savedEvent.id ?: 0L),
+                "message" to "Transaction created successfully",
+                "runningBalance" to newBalance
+            ))
+        } catch (e: Exception) {
+            println("ERROR: Exception in createTransaction: ${e.message}")
+            e.printStackTrace()
+            ResponseEntity.status(500).body(mapOf(
+                "success" to false,
+                "error" to (e.message ?: "Unknown error")
+            ))
+        }
     }
 }

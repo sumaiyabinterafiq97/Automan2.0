@@ -8,7 +8,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 @Table(
     name = "purchases",
     uniqueConstraints = [
-        UniqueConstraint(columnNames = ["lot_number", "chassis"], name = "uk_lot_chassis")
+        UniqueConstraint(columnNames = ["chassis"], name = "uk_chassis")
     ]
 )
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -34,6 +34,10 @@ data class Purchase(
     
     @Column(name = "car_name")
     val carName: String? = null,
+    
+    @Column(name = "shipment_size")
+    @com.fasterxml.jackson.annotation.JsonAlias("vehicleType")
+    val shipmentSize: String? = null,
     
     @Column(name = "grade")
     val grade: String? = null,
@@ -65,8 +69,9 @@ data class Purchase(
     @Column(name = "auction_no")
     val auctionNo: String? = null,
     
-    @Column(name = "auction_name")
-    val auctionName: String? = null,
+    @Column(name = "auction_house")
+    @com.fasterxml.jackson.annotation.JsonAlias("auctionName")
+    val auctionHouse: String? = null,
     
     @Column(name = "stock_location")
     val stockLocation: String? = null,
@@ -76,6 +81,9 @@ data class Purchase(
     
     @Column(name = "client_name")
     val clientName: String? = null,
+    
+    @Column(name = "client_id")
+    val clientId: Long? = null,
     
     @Column(name = "country")
     val country: String? = null,

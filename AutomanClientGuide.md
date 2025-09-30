@@ -13,7 +13,7 @@ What’s included
 - One command starts: MySQL, Backend API, Frontend, phpMyAdmin
 
 Service URLs (after start)
-- Frontend: http://localhost:8080
+- Frontend: http://localhost:9090
 - Backend API: http://localhost:8083
 - phpMyAdmin: http://localhost:8082
   - Username: automan_user
@@ -27,7 +27,7 @@ macOS
    chmod +x build-docker.sh
 4) Start:
    ./build-docker.sh
-5) Open http://localhost:8080
+5) Open http://localhost:9090
 
 Linux
 1) Open Terminal
@@ -37,21 +37,21 @@ Linux
    chmod +x build-docker.sh
 4) Start:
    ./build-docker.sh
-5) Open http://localhost:8080
+5) Open http://localhost:9090
 
 Windows (PowerShell or Git Bash)
 Option A: PowerShell (no chmod needed)
 1) Open PowerShell in the extracted folder
 2) Run:
    .\build-docker.sh
-3) Open http://localhost:8080
+3) Open http://localhost:9090
 
 Option B: Git Bash (if PowerShell fails to run the script)
 1) Right-click folder → “Git Bash Here”
 2) Run:
    chmod +x build-docker.sh
    ./build-docker.sh
-3) Open http://localhost:8080
+3) Open http://localhost:9090
 
 Manage the system
 - Stop: docker-compose down
@@ -60,16 +60,16 @@ Manage the system
 - Rebuild: docker-compose up -d --build
 
 Troubleshooting
-- “This site can’t be reached” on 8080:
+- “This site can’t be reached” on 9090:
   - Ensure Docker Desktop is running
   - Check containers: docker ps
   - Frontend logs: docker-compose logs -f frontend
-  - Port busy? Edit docker-compose.yml to map “8081:8080”, then:
+  - Port busy? Edit docker-compose.yml to map “9091:8080”, then:
     docker-compose down && docker-compose up -d --build
-    Open http://localhost:8081
+    Open http://localhost:9091
 - Windows firewall prompt: allow Docker/Node for Private networks
 - First run is slow: images and builds may take several minutes
 - phpMyAdmin login: automan_user / automan_password
 
 Done
-Once the script finishes, the app is available at http://localhost:8080.
+Once the script finishes, the app is available at http://localhost:9090.

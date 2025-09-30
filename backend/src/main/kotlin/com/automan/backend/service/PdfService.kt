@@ -227,14 +227,15 @@ class PdfService {
         
         // Date on upper right (4th column)
         val transportDate = transportData["transportDate"] ?: ""
-        val formattedDate = formatDateToJapanese(transportDate)
-        println("🎌 PDF Service: Original date: '$transportDate' -> Formatted: '$formattedDate'")
+        // Header wants full date with year and weekday in Japanese, e.g. 2025年9月30日火曜日
+        val formattedDateWithWeekday = formatDateToJapanese(transportDate, includeYear = true)
+        println("🎌 PDF Service: Original date: '$transportDate' -> Formatted: '$formattedDateWithWeekday'")
         
         val dateCell = Cell()
             .add(Paragraph()
                 .add(Text("日付 ").setBold().setFont(japaneseFont))
                 .add(Text(" ").setFont(japaneseFont)) // Add extra space after 日付
-                .add(Text(formattedDate).setFont(japaneseFont))
+                .add(Text(formattedDateWithWeekday).setFont(japaneseFont))
                 .setFontSize(12f))
             .setPadding(8f)
             .setTextAlignment(TextAlignment.CENTER)
@@ -274,7 +275,9 @@ class PdfService {
         purchases.forEachIndexed { index, purchase ->
             // Date (only show in first row, formatted as "2025年9月11日Thursday")
             if (index == 0) {
-                table.addCell(createCell(formattedDate, japaneseFont))
+                // Table cell wants short date without year, e.g. 9月30日 火曜日
+                val shortDate = formatDateToJapanese(transportDate, includeYear = false)
+                table.addCell(createCell(shortDate, japaneseFont))
             } else {
                 table.addCell(createCell("", japaneseFont)) // Empty for other rows
             }
@@ -418,7 +421,7 @@ class PdfService {
             .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
     }
 
-    private fun formatDateToJapanese(dateString: String): String {
+    private fun formatDateToJapanese(dateString: String, includeYear: Boolean = true): String {
         if (dateString.isBlank()) return ""
         
         try {
@@ -447,19 +450,20 @@ class PdfService {
                 val day = parsedDate.dayOfMonth
                 val dayOfWeek = parsedDate.dayOfWeek.name
                 
-                // Convert day of week to English format (as shown in the image)
-                val dayOfWeekEnglish = when (dayOfWeek) {
-                    "MONDAY" -> "Monday"
-                    "TUESDAY" -> "Tuesday"
-                    "WEDNESDAY" -> "Wednesday"
-                    "THURSDAY" -> "Thursday"
-                    "FRIDAY" -> "Friday"
-                    "SATURDAY" -> "Saturday"
-                    "SUNDAY" -> "Sunday"
+                // Convert day of week to Japanese
+                val dayOfWeekJapanese = when (dayOfWeek) {
+                    "MONDAY" -> "月曜日"
+                    "TUESDAY" -> "火曜日"
+                    "WEDNESDAY" -> "水曜日"
+                    "THURSDAY" -> "木曜日"
+                    "FRIDAY" -> "金曜日"
+                    "SATURDAY" -> "土曜日"
+                    "SUNDAY" -> "日曜日"
                     else -> dayOfWeek
                 }
                 
-                return "${year}年${month}月${day}日${dayOfWeekEnglish}"
+                val core = if (includeYear) "${year}年${month}月${day}日${dayOfWeekJapanese}" else "${month}月${day}日 ${dayOfWeekJapanese}"
+                return core
             }
         } catch (e: Exception) {
             // If parsing fails, return original string
