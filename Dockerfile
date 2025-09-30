@@ -22,26 +22,20 @@ RUN chmod +x gradlew
 RUN ./gradlew jsBrowserProductionWebpack
 
 # Stage 2: Serve with Node.js
-FROM node:18-alpine
+FROM nginx:1.25-alpine
 
-# Install necessary packages
+# Install curl for healthcheck
 RUN apk add --no-cache curl
 
-# Set working directory
-WORKDIR /app
+# Copy built web assets
+COPY --from=builder /app/build/dist/js/productionExecutable /usr/share/nginx/html
 
-# Install serve package globally
-RUN npm install -g serve
+# Copy nginx config with /api proxy to backend
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Copy the built web assets from the builder stage
-COPY --from=builder /app/build/dist/js/productionExecutable /app/web
-
-# Expose port 8080
 EXPOSE 8080
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
-  CMD curl -f http://localhost:8080 || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS http://localhost:8080/ || exit 1
 
-# Serve the built application
-CMD ["serve", "-s", "/app/web", "-l", "8080"]
+CMD ["nginx", "-g", "daemon off;"]

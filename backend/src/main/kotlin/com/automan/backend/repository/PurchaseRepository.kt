@@ -14,7 +14,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
            "LOWER(p.lotNumber) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
            "LOWER(p.chassis) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
            "LOWER(p.carName) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-           "LOWER(p.auctionName) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+        "LOWER(p.auctionHouse) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
            "LOWER(p.stockLocation) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
            "LOWER(p.rixoCompany) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
            "LOWER(p.clientName) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
@@ -26,7 +26,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     fun searchPurchases(@Param("searchTerm") searchTerm: String): List<Purchase>
     
     fun findByCarNameContainingIgnoreCase(carName: String): List<Purchase>
-    fun findByAuctionNameContainingIgnoreCase(auctionName: String): List<Purchase>
+    fun findByAuctionHouseContainingIgnoreCase(auctionHouse: String): List<Purchase>
     fun findByClientNameContainingIgnoreCase(clientName: String): List<Purchase>
     fun findByDateContainingIgnoreCase(date: String): List<Purchase>
     

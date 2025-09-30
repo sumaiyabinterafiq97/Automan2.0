@@ -27,7 +27,7 @@ data class ApiPurchase(
     val distance: String? = null,
     val options: String? = null,
     val auctionNo: String? = null,
-    val auctionName: String? = null,
+    val auctionHouse: String? = null,
     val stockLocation: String? = null,
     val rixoCompany: String? = null,
     val clientName: String? = null,
@@ -70,7 +70,7 @@ data class ImportResponse(
 )
 
 object ApiService {
-    private const val BASE_URL = "http://localhost:8083/api"
+    private const val BASE_URL = "/api"
     private val json = Json { ignoreUnknownKeys = true }
     
     suspend fun fetchPurchases(): List<Purchase> {
@@ -101,7 +101,7 @@ object ApiService {
                 distance = apiPurchase.distance,
                 options = apiPurchase.options,
                 auctionNo = apiPurchase.auctionNo,
-                auctionName = apiPurchase.auctionName,
+                auctionHouse = apiPurchase.auctionHouse,
                 stockLocation = apiPurchase.stockLocation,
                 rixoCompany = apiPurchase.rixoCompany,
                 clientName = apiPurchase.clientName,
@@ -150,7 +150,7 @@ object ApiService {
             distance = purchase.distance,
             options = purchase.options,
             auctionNo = purchase.auctionNo,
-            auctionName = purchase.auctionName,
+            auctionHouse = purchase.auctionHouse,
             stockLocation = purchase.stockLocation,
             rixoCompany = purchase.rixoCompany,
             clientName = purchase.clientName,
@@ -210,7 +210,7 @@ object ApiService {
             distance = created.distance,
             options = created.options,
             auctionNo = created.auctionNo,
-            auctionName = created.auctionName,
+                auctionHouse = created.auctionHouse,
             stockLocation = created.stockLocation,
             rixoCompany = created.rixoCompany,
             clientName = created.clientName,
@@ -269,7 +269,7 @@ object ApiService {
                 distance = apiPurchase.distance,
                 options = apiPurchase.options,
                 auctionNo = apiPurchase.auctionNo,
-                auctionName = apiPurchase.auctionName,
+                auctionHouse = apiPurchase.auctionHouse,
                 stockLocation = apiPurchase.stockLocation,
                 rixoCompany = apiPurchase.rixoCompany,
                 clientName = apiPurchase.clientName,
@@ -328,7 +328,7 @@ object ApiService {
                 distance = apiPurchase.distance,
                 options = apiPurchase.options,
                 auctionNo = apiPurchase.auctionNo,
-                auctionName = apiPurchase.auctionName,
+                auctionHouse = apiPurchase.auctionHouse,
                 stockLocation = apiPurchase.stockLocation,
                 rixoCompany = apiPurchase.rixoCompany,
                 clientName = apiPurchase.clientName,
@@ -378,7 +378,7 @@ object ApiService {
             distance = purchase.distance,
             options = purchase.options,
             auctionNo = purchase.auctionNo,
-            auctionName = purchase.auctionName,
+            auctionHouse = purchase.auctionHouse,
             stockLocation = purchase.stockLocation,
             rixoCompany = purchase.rixoCompany,
             clientName = purchase.clientName,
@@ -438,7 +438,7 @@ object ApiService {
             distance = updated.distance,
             options = updated.options,
             auctionNo = updated.auctionNo,
-            auctionName = updated.auctionName,
+                auctionHouse = updated.auctionHouse,
             stockLocation = updated.stockLocation,
             rixoCompany = updated.rixoCompany,
             clientName = updated.clientName,

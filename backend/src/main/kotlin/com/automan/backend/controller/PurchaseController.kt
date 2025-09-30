@@ -2,15 +2,24 @@ package com.automan.backend.controller
 
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
+import com.automan.backend.model.Event
+import com.automan.backend.model.EventType
 import com.automan.backend.service.PurchaseService
+import com.automan.backend.service.ClientService
+import com.automan.backend.repository.EventRepository
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
+import java.time.LocalDate
 
 @RestController
 @RequestMapping("/purchases")
-@CrossOrigin(origins = ["http://localhost:8080", "http://localhost:8084", "http://localhost:8085", "http://localhost:8089", "http://localhost:8090"])
-class PurchaseController(private val purchaseService: PurchaseService) {
+@CrossOrigin(origins = ["http://localhost:8080", "http://localhost:8084", "http://localhost:8085", "http://localhost:8089", "http://localhost:8090", "http://localhost:9090"])
+class PurchaseController(
+    private val purchaseService: PurchaseService,
+    private val clientService: ClientService,
+    private val eventRepository: EventRepository
+) {
     
     @GetMapping
     fun getAllPurchases(): ResponseEntity<List<Purchase>> {
@@ -47,8 +56,11 @@ class PurchaseController(private val purchaseService: PurchaseService) {
     }
     
     @PutMapping("/{id}")
-    fun updatePurchase(@PathVariable id: Long, @RequestBody purchase: Purchase): ResponseEntity<Purchase> {
-        val updatedPurchase = purchaseService.updatePurchase(id, purchase)
+    fun updatePurchase(@PathVariable id: Long, @RequestBody updateData: Map<String, Any>): ResponseEntity<Purchase> {
+        println("🔍 [Controller] Updating purchase ID: $id")
+        println("🔍 [Controller] Update data received: $updateData")
+        
+        val updatedPurchase = purchaseService.updatePurchasePartial(id, updateData)
         return if (updatedPurchase != null) {
             ResponseEntity.ok(updatedPurchase)
         } else {
@@ -96,9 +108,11 @@ class PurchaseController(private val purchaseService: PurchaseService) {
         try {
             val idsRaw = request["ids"]
             val invoiceDataRaw = request["invoiceData"] as? Map<String, Any>
+            val missingRixoDataRaw = request["missingRixoData"] as? List<Map<String, Any>>
             println("Controller: Raw request body: $request")
             println("Controller: Raw ids: $idsRaw (type: ${idsRaw?.javaClass?.simpleName})")
             println("Controller: Raw invoice data: $invoiceDataRaw")
+            println("Controller: Raw missing Rixo data: $missingRixoDataRaw")
             
             val selectedIds = when (idsRaw) {
                 is List<*> -> {
@@ -134,11 +148,21 @@ class PurchaseController(private val purchaseService: PurchaseService) {
                 value?.toString() ?: ""
             } ?: emptyMap()
             
+            // Process missing Rixo data
+            val missingRixoData = missingRixoDataRaw?.map { item ->
+                mapOf(
+                    "purchaseId" to (item["purchaseId"]?.toString() ?: ""),
+                    "field" to (item["field"]?.toString() ?: ""),
+                    "value" to (item["value"]?.toString() ?: "")
+                )
+            } ?: emptyList()
+            
             println("Controller: Final selectedIds: $selectedIds (size: ${selectedIds.size})")
             println("Controller: Invoice data: $invoiceData")
+            println("Controller: Missing Rixo data: $missingRixoData")
             println("Controller: Generating Rixo PDF for ${selectedIds.size} purchases")
             
-            val pdfBytes = purchaseService.generateRixoPdf(selectedIds, invoiceData)
+            val pdfBytes = purchaseService.generateRixoPdf(selectedIds, invoiceData, missingRixoData)
             
             return ResponseEntity.ok()
                 .header("Content-Type", "application/pdf")
@@ -146,6 +170,70 @@ class PurchaseController(private val purchaseService: PurchaseService) {
                 .body(pdfBytes)
         } catch (e: Exception) {
             println("Controller: Error generating Rixo PDF: ${e.message}")
+            e.printStackTrace()
+            return ResponseEntity.status(500).build()
+        }
+    }
+    
+    @PostMapping("/rixo-transport-pdf")
+    fun generateRixoTransportPdf(@RequestBody request: Map<String, Any>): ResponseEntity<ByteArray> {
+        try {
+            val idsRaw = request["ids"]
+            val transportDataRaw = request["transportData"] as? Map<String, Any>
+            println("Controller: Raw Rixo Transport request body: $request")
+            println("Controller: Raw ids: $idsRaw (type: ${idsRaw?.javaClass?.simpleName})")
+            println("Controller: Raw transport data: $transportDataRaw")
+            
+            val selectedIds = when (idsRaw) {
+                is List<*> -> {
+                    println("Controller: Processing List with ${idsRaw.size} items")
+                    idsRaw.mapNotNull { item ->
+                        println("Controller: Processing item: $item (type: ${item?.javaClass?.simpleName})")
+                        when (item) {
+                            is Number -> {
+                                val longValue = item.toLong()
+                                println("Controller: Converted Number $item to Long $longValue")
+                                longValue
+                            }
+                            is String -> {
+                                val longValue = item.toLongOrNull()
+                                println("Controller: Converted String '$item' to Long $longValue")
+                                longValue
+                            }
+                            else -> {
+                                println("Controller: Unknown item type: ${item?.javaClass?.simpleName}")
+                                null
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    println("Controller: idsRaw is not a List, it's: ${idsRaw?.javaClass?.simpleName}")
+                    emptyList()
+                }
+            }
+            
+            // Process transport data
+            val transportData = transportDataRaw?.mapValues { (_, value) -> 
+                value?.toString() ?: ""
+            } ?: emptyMap()
+            
+            // Extract purchase data from transport data
+            val purchaseData = transportDataRaw?.get("purchaseData") as? List<Map<String, Any>> ?: emptyList()
+            
+            println("Controller: Final selectedIds: $selectedIds (size: ${selectedIds.size})")
+            println("Controller: Transport data: $transportData")
+            println("Controller: Purchase data: $purchaseData")
+            println("Controller: Generating Rixo Transport PDF for ${selectedIds.size} purchases")
+            
+            val pdfBytes = purchaseService.generateRixoTransportPdf(selectedIds, transportData, purchaseData)
+            
+            return ResponseEntity.ok()
+                .header("Content-Type", "application/pdf")
+                .header("Content-Disposition", "attachment; filename=\"rixo-transport.pdf\"")
+                .body(pdfBytes)
+        } catch (e: Exception) {
+            println("Controller: Error generating Rixo Transport PDF: ${e.message}")
             e.printStackTrace()
             return ResponseEntity.status(500).build()
         }
@@ -179,9 +267,9 @@ class PurchaseController(private val purchaseService: PurchaseService) {
         return ResponseEntity.ok(purchases)
     }
     
-    @GetMapping("/filter/auction-name")
-    fun filterByAuctionName(@RequestParam auctionName: String): ResponseEntity<List<Purchase>> {
-        val purchases = purchaseService.filterByAuctionName(auctionName)
+    @GetMapping("/filter/auction-house")
+    fun filterByAuctionHouse(@RequestParam auctionHouse: String): ResponseEntity<List<Purchase>> {
+        val purchases = purchaseService.filterByAuctionHouse(auctionHouse)
         return ResponseEntity.ok(purchases)
     }
     
@@ -195,5 +283,66 @@ class PurchaseController(private val purchaseService: PurchaseService) {
     fun filterByDate(@RequestParam date: String): ResponseEntity<List<Purchase>> {
         val purchases = purchaseService.filterByDate(date)
         return ResponseEntity.ok(purchases)
+    }
+    
+    @PostMapping("/transaction")
+    fun createTransaction(@RequestBody transactionData: Map<String, Any>): ResponseEntity<Map<String, Any>> {
+        return try {
+            // Extract clientId directly from the payload
+            val clientId = (transactionData["clientId"] as? Number)?.toLong() 
+                ?: throw IllegalArgumentException("Client ID is required")
+            
+            println("DEBUG: Creating transaction for client $clientId")
+            println("DEBUG: Transaction data: $transactionData")
+            
+            // Verify client exists
+            val client = clientService.getClientById(clientId)
+                ?: throw IllegalArgumentException("Client not found: $clientId")
+            
+            println("DEBUG: Client found: ${client.clientName}")
+            
+            // Calculate running balance based on client's current balance
+            val currentBalance = client.currentBalance
+            val transactionPrice = (transactionData["transactionPrice"] as? Number)?.toDouble() ?: 0.0
+            val paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble() ?: 0.0
+            val newBalance = currentBalance + paymentReceived - transactionPrice
+            
+            println("DEBUG: Current balance: $currentBalance, New balance: $newBalance")
+            
+            // Create Event object
+            val event = Event(
+                clientId = clientId,
+                eventDate = LocalDate.parse(transactionData["eventDate"] as String),
+                eventType = EventType.OTHER,
+                eventDescription = transactionData["eventDescription"] as? String,
+                quantity = (transactionData["quantity"] as? Number)?.toInt(),
+                billNumber = transactionData["billNumber"] as? String,
+                transactionPrice = transactionPrice,
+                paymentReceived = paymentReceived,
+                runningBalance = newBalance
+            )
+            
+            // Save event directly using EventRepository
+            val savedEvent = eventRepository.save(event)
+            println("DEBUG: Event saved with ID: ${savedEvent.id}")
+            
+            // Update client balance
+            clientService.updateClientBalance(clientId, newBalance)
+            println("DEBUG: Client balance updated to: $newBalance")
+            
+            ResponseEntity.ok(mapOf(
+                "success" to true,
+                "transactionId" to (savedEvent.id ?: 0L),
+                "message" to "Transaction created successfully",
+                "runningBalance" to newBalance
+            ))
+        } catch (e: Exception) {
+            println("ERROR: Exception in createTransaction: ${e.message}")
+            e.printStackTrace()
+            ResponseEntity.status(500).body(mapOf(
+                "success" to false,
+                "error" to (e.message ?: "Unknown error")
+            ))
+        }
     }
 }
