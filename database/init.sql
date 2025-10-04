@@ -159,3 +159,22 @@ CREATE INDEX idx_purchase_client_id ON purchases(client_id);
 UPDATE purchases SET client_id = 1 WHERE client_name = 'Tariq';
 UPDATE purchases SET client_id = 2 WHERE client_name = 'Arshad';
 UPDATE purchases SET client_id = 3 WHERE client_name = 'Jawad';
+
+-- Create users table for authentication
+CREATE TABLE IF NOT EXISTS users (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(120) NOT NULL UNIQUE,
+    name VARCHAR(80) NOT NULL,
+    password_hash VARCHAR(120) NOT NULL,
+    role VARCHAR(16) NOT NULL DEFAULT 'VIEWER',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create index for users table
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_role ON users(role);
+
+-- Insert default admin user for client package
+-- Password: Admin#12 (BCrypt hashed)
+INSERT INTO users (email, name, password_hash, role, created_at) VALUES
+('admin@gmail.com', 'admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVEFDi', 'ADMIN', NOW());

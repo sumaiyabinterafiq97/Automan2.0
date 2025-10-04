@@ -219,14 +219,18 @@ class PdfService {
         // 陸送 on upper left
         titleTable.addCell(createTitleCell("陸送", japaneseFont))
         
-        // KLC in center
-        titleTable.addCell(createTitleCell("KLC", japaneseFont))
+        // Rixo Company in center (dynamic from form)
+        val rixoCompany = transportData["rixoCompany"] ?: "KLC"
+        titleTable.addCell(createTitleCell(rixoCompany, japaneseFont))
         
         // 様 on upper right
         titleTable.addCell(createTitleCell("様", japaneseFont))
         
         // Date on upper right (4th column)
-        val transportDate = transportData["transportDate"] ?: ""
+        println("🎌 PDF Service: transportData keys: ${transportData.keys}")
+        println("🎌 PDF Service: transportData values: ${transportData.values}")
+        println("🎌 PDF Service: buyingDate value: '${transportData["buyingDate"]}'")
+        val transportDate = transportData["buyingDate"] ?: ""
         // Header wants full date with year and weekday in Japanese, e.g. 2025年9月30日火曜日
         val formattedDateWithWeekday = formatDateToJapanese(transportDate, includeYear = true)
         println("🎌 PDF Service: Original date: '$transportDate' -> Formatted: '$formattedDateWithWeekday'")
@@ -424,6 +428,8 @@ class PdfService {
     private fun formatDateToJapanese(dateString: String, includeYear: Boolean = true): String {
         if (dateString.isBlank()) return ""
         
+        println("🎌 PDF Service: formatDateToJapanese input: '$dateString', includeYear: $includeYear")
+        
         try {
             // Try to parse various date formats
             val formatters = listOf(
@@ -437,9 +443,12 @@ class PdfService {
             var parsedDate: java.time.LocalDate? = null
             for (formatter in formatters) {
                 try {
+                    println("🎌 PDF Service: Trying formatter: ${formatter.toString()}")
                     parsedDate = java.time.LocalDate.parse(dateString, formatter)
+                    println("🎌 PDF Service: Successfully parsed with ${formatter.toString()}: $parsedDate")
                     break
                 } catch (e: Exception) {
+                    println("🎌 PDF Service: Failed with ${formatter.toString()}: ${e.message}")
                     // Continue to next formatter
                 }
             }

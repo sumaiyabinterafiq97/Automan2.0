@@ -12,6 +12,28 @@ body {
     color: #333;
 }
 
+/* Rixo table polish */
+.rixo-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.rixo-table thead tr {
+    background: #f8f9fa;
+}
+
+.rixo-table th,
+.rixo-table td {
+    border: 1px solid #dee2e6;
+    padding: 8px 10px;
+}
+
+.rixo-row { transition: background-color 140ms ease-in, box-shadow 140ms ease-in; }
+.rixo-row:nth-child(even) { background: #f6f8ff; }
+.rixo-row:hover { background: #e7f1ff; }
+.rixo-row-selected { background: #efe2ff; box-shadow: inset 0 0 0 2px #6f42c1; }
+.rixo-row-disabled { color: #adb5bd; background: #f8f9fa; }
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
     width: 8px;

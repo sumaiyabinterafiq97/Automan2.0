@@ -16,6 +16,9 @@ COPY src src
 # Make gradlew executable
 RUN chmod +x gradlew
 
+# Install curl for healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 # Build the application
 RUN ./gradlew build -x test
 

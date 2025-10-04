@@ -809,6 +809,10 @@ class PurchaseService(
             }
             
             // Generate PDF using the PDF service
+            println("🔍 PurchaseService: transportData before PDF generation: $transportData")
+            println("🔍 PurchaseService: transportData keys: ${transportData.keys}")
+            println("🔍 PurchaseService: transportData values: ${transportData.values}")
+            println("🔍 PurchaseService: buyingDate value: '${transportData["buyingDate"]}'")
             return pdfService.generateRixoTransportPdf(updatedPurchases, transportData)
             
         } catch (e: Exception) {

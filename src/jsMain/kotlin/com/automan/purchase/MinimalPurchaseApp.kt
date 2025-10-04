@@ -302,6 +302,7 @@ fun createApp(root: Element) {
                     <div style="display: flex; flex-direction: column; gap: 15px;">
                         <button id="newBtn" style="padding: 12px 20px; background-color: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">New+</button>
                         <button id="importBtn" style="padding: 12px 20px; background-color: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Import CSV</button>
+                        <button id="rixoRequestBtn" style="padding: 12px 20px; background-color: #8e44ad; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Rixo Request</button>
                         <button id="userManagementBtn" style="padding: 12px 20px; background-color: #9b59b6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Manage Users</button>
                         <button id="clientAccountsBtn" style="padding: 12px 20px; background-color: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Client Accounts</button>
                         <button id="roleRequestBtn" style="padding: 12px 20px; background-color: #ffc107; color: black; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Request Role</button>
@@ -362,8 +363,8 @@ fun createApp(root: Element) {
         showImportModal()
     })
     
-    document.getElementById("rixoBtn")?.addEventListener("click", { _: Event ->
-        handleRixoPdfGeneration()
+    document.getElementById("rixoRequestBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/rixo-transport"
     })
     
     document.getElementById("rixoTransportBtn")?.addEventListener("click", { _: Event ->
@@ -462,9 +463,7 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/rixo-transport") -> {
-            // Temporarily disable Rixo Information page
-            window.location.hash = "#/purchase"
-            return
+            showRixoRequestGeneratorPage()
         }
         hash.startsWith("#/users/edit/") -> {
             removeHamburgerMenu() // Remove hamburger menu from edit user page
@@ -1096,13 +1095,20 @@ fun applyRoleBasedRestrictions() {
 fun updateSidebarForRole() {
     val newBtn = document.getElementById("newBtn") as HTMLElement?
     val importBtn = document.getElementById("importBtn") as HTMLElement?
+    val rixoRequestBtn = document.getElementById("rixoRequestBtn") as HTMLElement?
     
     if (isViewer()) {
         newBtn?.style?.display = "none"
         importBtn?.style?.display = "none"
+        rixoRequestBtn?.style?.display = "none"
     } else if (isEditor()) {
         newBtn?.style?.display = "block"
         importBtn?.style?.display = "block"
+        rixoRequestBtn?.style?.display = "block"
+    } else if (isAdmin()) {
+        newBtn?.style?.display = "block"
+        importBtn?.style?.display = "block"
+        rixoRequestBtn?.style?.display = "block"
     }
 }
 
@@ -1965,8 +1971,18 @@ fun createAddFormHTML(): String {
                             </label>
                         </div>
                     </div>
+                        </div>
+
+                <!-- SHAKEN Checkbox -->
+                <div style="margin: 20px 0 10px 0;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; cursor: pointer;">
+                        <input type="checkbox" id="shakenCheckbox" style="width: 18px; height: 18px; accent-color: #007bff;">
+                        SHAKEN
+                    </label>
                 </div>
 
+                <!-- Number Cut Information Section (initially hidden) -->
+                <div id="numberCutSection" style="display: none;">
                 <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Number Cut Information</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; align-items: end;">
                     <div>
@@ -2103,6 +2119,7 @@ fun createAddFormHTML(): String {
                     <label>Generated Number Cut String:</label>
                     <input type="text" id="numberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
                 </div>
+                </div> <!-- End of numberCutSection -->
 
                 <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Pricing Information</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
@@ -2508,6 +2525,18 @@ fun setupRixoDropdowns() {
                         rixoConfirmedRadio.checked = true;
                     }
                 }
+                
+                // Set SHAKEN checkbox
+                var editShakenCheckbox = document.getElementById('editShakenCheckbox');
+                var editNumberCutSection = document.getElementById('editNumberCutSection');
+                if (editShakenCheckbox) {
+                    editShakenCheckbox.checked = purchaseData.shaken || false;
+                    if (editShakenCheckbox.checked) {
+                        editNumberCutSection.style.display = 'block';
+                    } else {
+                        editNumberCutSection.style.display = 'none';
+                    }
+                }
             }, 100);
         }
         
@@ -2575,6 +2604,17 @@ fun setupAddFormListeners() {
         val v = (ev.target as HTMLInputElement).value
         val hint = document.getElementById("dateDayHint") as HTMLElement?
         hint?.textContent = isoToWeekdayLabel(v)
+    })
+
+    // Add SHAKEN checkbox listener
+    document.getElementById("shakenCheckbox")?.addEventListener("change", { event: Event ->
+        val target = event.target as HTMLInputElement
+        val numberCutSection = document.getElementById("numberCutSection") as HTMLElement?
+        if (target.checked) {
+            numberCutSection?.style?.setProperty("display", "block")
+        } else {
+            numberCutSection?.style?.setProperty("display", "none")
+        }
     })
 
     // Add number cut listeners
@@ -2685,6 +2725,7 @@ fun handleAddPurchase() {
     val repairCompany = (document.getElementById("repairCompany") as HTMLInputElement).value
     val repairCharges = (document.getElementById("repairCharges") as HTMLInputElement).value
     val notes = (document.getElementById("notes") as HTMLTextAreaElement).value
+    val shaken = (document.getElementById("shakenCheckbox") as HTMLInputElement).checked
     
     val purchaseData = js("{}")
     purchaseData.date = date
@@ -2734,6 +2775,7 @@ fun handleAddPurchase() {
     purchaseData.repairCompany = repairCompany
     purchaseData.repairCharges = repairCharges
     purchaseData.notes = notes
+    purchaseData.shaken = shaken
     purchaseData.numberCut = numberCutString
     
     // Call API to create purchase
@@ -2943,8 +2985,18 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             </label>
                         </div>
                     </div>
+                        </div>
+
+                <!-- SHAKEN Checkbox -->
+                <div style="margin: 20px 0 10px 0;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; cursor: pointer;">
+                        <input type="checkbox" id="editShakenCheckbox" style="width: 18px; height: 18px; accent-color: #007bff;">
+                        SHAKEN
+                    </label>
                 </div>
 
+                <!-- Number Cut Information Section (initially hidden) -->
+                <div id="editNumberCutSection" style="display: none;">
                 <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Number Cut Information</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; align-items: end;">
                     <div>
@@ -3081,6 +3133,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <label>Generated Number Cut String:</label>
                     <input type="text" id="editNumberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
                 </div>
+                </div> <!-- End of editNumberCutSection -->
 
                 <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Pricing Information</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
@@ -3265,6 +3318,17 @@ fun setupEditFormListeners() {
         hint?.textContent = isoToWeekdayLabel(v)
     })
 
+    // Add SHAKEN checkbox listener for edit form
+    document.getElementById("editShakenCheckbox")?.addEventListener("change", { event: Event ->
+        val target = event.target as HTMLInputElement
+        val numberCutSection = document.getElementById("editNumberCutSection") as HTMLElement?
+        if (target.checked) {
+            numberCutSection?.style?.setProperty("display", "block")
+        } else {
+            numberCutSection?.style?.setProperty("display", "none")
+        }
+    })
+
     // Add number cut listeners for edit form
     setupEditNumberCutListeners()
 }
@@ -3316,6 +3380,7 @@ fun handleEditPurchase() {
     val repairCompany = (document.getElementById("editRepairCompany") as HTMLInputElement).value
     val repairCharges = (document.getElementById("editRepairCharges") as HTMLInputElement).value
     val notes = (document.getElementById("editNotes") as HTMLTextAreaElement).value
+    val shaken = (document.getElementById("editShakenCheckbox") as HTMLInputElement).checked
     
     val purchaseData = js("{}")
     purchaseData.date = date
@@ -3365,6 +3430,7 @@ fun handleEditPurchase() {
     purchaseData.repairCompany = repairCompany
     purchaseData.repairCharges = repairCharges
     purchaseData.notes = notes
+    purchaseData.shaken = shaken
     purchaseData.numberCut = numberCutString
     
     console.log("Sending update data: ${JSON.stringify(purchaseData)}")
@@ -3579,7 +3645,7 @@ fun displayPurchases(purchases: dynamic) {
         "notes" to "Notes"
     )
     
-    val sortableFields = setOf("date", "carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany")
+    val sortableFields = setOf("carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany")
     
     val tableHTML = StringBuilder()
     tableHTML.append("""
@@ -3599,7 +3665,25 @@ fun displayPurchases(purchases: dynamic) {
     // Generate header columns based on selected columns
     selectedColumns.forEach { columnKey ->
         val label = columnLabels[columnKey] ?: columnKey
-        if (sortableFields.contains(columnKey)) {
+        if (columnKey == "date") {
+            // Special handling for Date column - show date picker filter
+            tableHTML.append("""
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" class="date-filter-header" data-field="$columnKey">
+                            <span>$label</span>
+                            <span style="font-size: 12px; color: #666;">📅</span>
+                        </div>
+                        <div class="date-filter-menu" data-field="$columnKey" style="position: absolute; top: 42px; left: 0; background: #fff; border: 1px solid #ccc; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); padding: 12px; display: none; z-index: 10; min-width: 280px;">
+                            <div style="margin-bottom: 8px; font-weight: 600; color: #333;">Filter by Date</div>
+                            <input type="date" id="dateFilterInput" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 8px;">
+                            <div style="display: flex; gap: 8px;">
+                                <button id="applyDateFilter" style="padding: 6px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Apply</button>
+                                <button id="clearDateFilter" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Clear</button>
+                        </div>
+                        </div>
+                    </th>
+            """)
+        } else if (sortableFields.contains(columnKey)) {
             tableHTML.append("""
                     <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative;">
                         <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" class="sortable-header" data-field="$columnKey">
@@ -3740,6 +3824,9 @@ fun displayPurchases(purchases: dynamic) {
     
     // Add event listeners for sortable headers
     setupSortableHeaders()
+    
+    // Add event listeners for date filter
+    setupDateFilter()
 }
 
 fun setupSortableHeaders() {
@@ -3803,8 +3890,9 @@ fun setupSortableHeaders() {
     // Hide menus when clicking outside
     document.addEventListener("click", { event ->
         val target = event.target as? HTMLElement ?: return@addEventListener
-        if (target.closest(".sortable-header") == null && target.closest(".sort-menu") == null) {
-            val allMenus = document.querySelectorAll(".sort-menu")
+        if (target.closest(".sortable-header") == null && target.closest(".sort-menu") == null && 
+            target.closest(".date-filter-header") == null && target.closest(".date-filter-menu") == null) {
+            val allMenus = document.querySelectorAll(".sort-menu, .date-filter-menu")
             for (i in 0 until allMenus.length) {
                 val menu = allMenus.item(i) as? HTMLElement
                 if (menu != null) {
@@ -3813,6 +3901,108 @@ fun setupSortableHeaders() {
             }
         }
     })
+}
+
+fun setupDateFilter() {
+    // Add event listeners for date filter headers
+    val dateFilterHeaders = document.querySelectorAll(".date-filter-header")
+    for (i in 0 until dateFilterHeaders.length) {
+        val header = dateFilterHeaders.item(i) as HTMLElement
+        header.addEventListener("click", { event ->
+            val target = event.currentTarget as? HTMLElement ?: return@addEventListener
+            val field = target.getAttribute("data-field") ?: return@addEventListener
+            
+            // Toggle the date filter menu
+            val menu = document.querySelector(".date-filter-menu[data-field='$field']") as HTMLElement?
+            if (menu != null) {
+                // Hide all other menus
+                val allMenus = document.querySelectorAll(".sort-menu, .date-filter-menu")
+                for (j in 0 until allMenus.length) {
+                    val menuItem = allMenus.item(j) as? HTMLElement
+                    if (menuItem != null && menuItem != menu) {
+                        menuItem.style.display = "none"
+                    }
+                }
+                
+                // Toggle current menu
+                if (menu.style.display == "none" || menu.style.display.isEmpty()) {
+                    menu.style.display = "block"
+                } else {
+                    menu.style.display = "none"
+                }
+            }
+        })
+    }
+    
+    // Add event listeners for date filter buttons
+    document.getElementById("applyDateFilter")?.addEventListener("click", { _: Event ->
+        val dateInput = document.getElementById("dateFilterInput") as HTMLInputElement?
+        val selectedDate = dateInput?.value
+        if (selectedDate != null && selectedDate.isNotEmpty()) {
+            applyDateFilter(selectedDate)
+        }
+    })
+    
+    document.getElementById("clearDateFilter")?.addEventListener("click", { _: Event ->
+        clearDateFilter()
+    })
+}
+
+fun applyDateFilter(selectedDate: String) {
+    // Convert the selected date to the format used in the database
+    val formattedDate = formatWithWeekday(selectedDate)
+    console.log("Filtering by date:", formattedDate)
+    
+    // Fetch all purchases and filter by date
+    window.fetch("/api/purchases").then { response ->
+        if (response.ok) {
+            response.json().then { purchases ->
+                val filteredPurchases = js("[]")
+                val purchasesArray = purchases as Array<dynamic>
+                
+                for (i in 0 until purchasesArray.size) {
+                    val purchase = purchasesArray[i]
+                    if (purchase.date == formattedDate) {
+                        js("filteredPurchases.push(purchase)")
+                    }
+                }
+                
+                // Display filtered purchases
+                displayPurchases(filteredPurchases)
+                
+                // Hide the date filter menu
+                val allMenus = document.querySelectorAll(".date-filter-menu")
+                for (j in 0 until allMenus.length) {
+                    val menuItem = allMenus.item(j) as? HTMLElement
+                    menuItem?.style?.setProperty("display", "none")
+                }
+                
+                showMessage("Showing purchases for $formattedDate", "success")
+            }
+        } else {
+            showMessage("Failed to load purchases for filtering", "error")
+        }
+    }.catch { error ->
+        console.error("Error filtering purchases by date:", error)
+        showMessage("Error filtering purchases by date", "error")
+    }
+}
+
+fun clearDateFilter() {
+    // Clear the date input
+    val dateInput = document.getElementById("dateFilterInput") as HTMLInputElement?
+    dateInput?.value = ""
+    
+    // Hide the date filter menu
+    val allMenus = document.querySelectorAll(".date-filter-menu")
+    for (j in 0 until allMenus.length) {
+        val menuItem = allMenus.item(j) as? HTMLElement
+        menuItem?.style?.setProperty("display", "none")
+    }
+    
+    // Reload all purchases
+    loadPurchases()
+    showMessage("Date filter cleared", "success")
 }
 
 fun setupCheckboxListeners() {
@@ -4601,6 +4791,1140 @@ fun showRixoTransportPage() {
     
     // Set up event listeners
     setupRixoTransportPageListeners()
+}
+
+// New Rixo Request Generator Page (matches the image layout)
+fun showRixoRequestGeneratorPage() {
+    val content = document.getElementById("content") ?: return
+    
+    content.innerHTML = """
+        <div style="width: 100%; min-height: calc(100vh - 140px); padding: 20px; box-sizing: border-box;">
+            <div style="display: flex; gap: 20px; height: 100%;">
+                <!-- Left Panel: Rixo Request Generator Form -->
+                <div style="flex: 1; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e5e7eb;">
+                    <h2 style="margin: 0 0 24px 0; color: #111827; font-size: 24px; font-weight: 600;">Rixo Request Generator</h2>
+                    
+                    <form id="rixoRequestForm">
+                        <!-- Buying Date -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Buying Date</label>
+                            <input type="date" id="buyingDate" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        </div>
+                        
+                        <!-- Rixo Company -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Rixo Company</label>
+                            <select id="rixoCompany" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background: white;">
+                                <option value="">Select Rixo Company</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Head Message -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Head Message</label>
+                            <textarea id="headMessage" rows="3" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical;">いつもお世話になっております。
+下記の車両の陸送手配をお願いいたします。</textarea>
+                        </div>
+                        
+                        <!-- Footer Message -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Footer Message</label>
+                            <textarea id="footerMessage" rows="3" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical;">※港や船での盗難が多発の為、スペアキーやリモコンキーが車内に
+ありましたら弊社まで郵送していただけると助かります。</textarea>
+                        </div>
+                        
+                        <!-- Extra Message -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Extra Message</label>
+                            <textarea id="extraMessage" rows="2" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical;"></textarea>
+                        </div>
+                        
+                        <!-- Contact Details -->
+                        <div style="margin-bottom: 24px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Contact Details</label>
+                            <textarea id="contactDetails" rows="3" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical;">担当：芽紋 080-3918-1478
+FAX: 047-711-0409
+有限会社メモン</textarea>
+                        </div>
+                        
+                        <!-- Print Button -->
+                        <button type="button" id="printRixoRequest" style="width: 100%; padding: 14px; background: linear-gradient(135deg, #8e44ad, #9b59b6); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+                            Print
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Right Panel: Rows Preview -->
+                <div style="flex: 1; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e5e7eb;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2 style="margin: 0; color: #111827; font-size: 24px; font-weight: 600;">Rows Preview</h2>
+                        <button id="backToPurchaseList" style="padding: 8px 16px; background: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">Back to Purchase List</button>
+                    </div>
+                    
+                    <div id="selectedCount" style="margin-bottom: 16px; color: #6b7280; font-size: 14px;">Selected: 0 of 0</div>
+                    
+                    <div id="rixoRowsPreview" style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
+                        <div style="text-align: center; padding: 40px; color: #9ca3af;">
+                            Please select a buying date and Rixo company to view available rows.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <style>
+            /* Custom checkbox styling for Rixo rows */
+            .rixo-checkwrap {
+                display: inline-flex;
+                align-items: center;
+                cursor: pointer;
+                position: relative;
+            }
+            
+            .rixo-check {
+                appearance: none !important;
+                -webkit-appearance: none !important;
+                -moz-appearance: none !important;
+                width: 20px;
+                height: 20px;
+                border-radius: 50%;
+                border: 2px solid #007bff;
+                background: #fff;
+                cursor: pointer;
+                position: relative;
+                flex-shrink: 0;
+                margin: 0;
+            }
+            
+            .rixo-check:checked {
+                background: #007bff;
+                border-color: #007bff;
+            }
+            
+            .rixo-check:checked::after {
+                content: '✓';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            
+            .rixo-table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            
+            .rixo-table th,
+            .rixo-table td {
+                padding: 12px;
+                text-align: left;
+                border-bottom: 1px solid #e5e7eb;
+            }
+            
+            .rixo-table th {
+                background: #f9fafb;
+                font-weight: 600;
+                color: #374151;
+            }
+            
+            .rixo-table tr:hover {
+                background: #f9fafb;
+            }
+            
+            .rixo-edit-btn {
+                width: 28px;
+                height: 28px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                background-color: #4CC9FF;
+                border: none;
+                border-radius: 50%;
+                cursor: pointer;
+                box-shadow: 0 2px 6px rgba(76,201,255,0.30);
+            }
+            
+            .rixo-edit-btn:hover {
+                background-color: #3bb5e6;
+            }
+        </style>
+    """
+    
+    // Set up event listeners
+    setupRixoRequestGeneratorListeners()
+    
+    // Set default date to today
+    val today = js("new Date().toISOString().split('T')[0]") as String
+    document.getElementById("buyingDate")?.setAttribute("value", today)
+}
+
+// Set up event listeners for the Rixo Request Generator page
+fun setupRixoRequestGeneratorListeners() {
+    // Back to Purchase List button
+    document.getElementById("backToPurchaseList")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/purchase"
+    })
+    
+    // Buying Date change - load Rixo companies and rows
+    document.getElementById("buyingDate")?.addEventListener("change", { _: Event ->
+        loadRixoCompaniesForDate()
+        loadRowsForDateAndCompany()
+    })
+    
+    // Rixo Company change - load rows
+    document.getElementById("rixoCompany")?.addEventListener("change", { _: Event ->
+        loadRowsForDateAndCompany()
+    })
+    
+    // Print button
+    document.getElementById("printRixoRequest")?.addEventListener("click", { _: Event ->
+        generateRixoRequestPdf()
+    })
+}
+
+// Load Rixo companies for the selected date
+fun loadRixoCompaniesForDate() {
+    val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
+    if (buyingDate.isEmpty()) return
+    
+    // Convert ISO date to database format (e.g., "2025-04-24" -> "April24, 2025(Thursday)")
+    val formattedDate = formatWithWeekday(buyingDate)
+    console.log("Looking for purchases with date:", formattedDate)
+    
+    window.fetch("/api/purchases").then { response ->
+        if (response.ok) {
+            response.json().then { allPurchases ->
+                val purchasesArray = allPurchases as Array<dynamic>
+                val rixoCompanies = mutableSetOf<String>()
+                
+                for (purchase in purchasesArray) {
+                    val date = js("purchase.date")?.toString() ?: ""
+                    val rixoRequested = js("purchase.rixoRequested")?.toString() ?: "FALSE"
+                    val rixoCompany = js("purchase.rixoCompany")?.toString() ?: ""
+                    
+                    // Only include purchases from the selected date where rixoRequested is FALSE
+                    if (date == formattedDate && rixoRequested == "FALSE" && rixoCompany.isNotEmpty()) {
+                        rixoCompanies.add(rixoCompany)
+                        console.log("Found matching purchase with rixoCompany:", rixoCompany)
+                    }
+                }
+                
+                console.log("Found rixoCompanies:", rixoCompanies)
+                
+                // Update dropdown
+                val select = document.getElementById("rixoCompany") as HTMLSelectElement
+                select.innerHTML = "<option value=\"\">Select Rixo Company</option>"
+                
+                rixoCompanies.sorted().forEach { company ->
+                    val option = document.createElement("option")
+                    option.setAttribute("value", company)
+                    option.textContent = company
+                    select.appendChild(option)
+                }
+            }
+        }
+    }
+}
+
+// Load rows for the selected date and company
+fun loadRowsForDateAndCompany() {
+    val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
+    val rixoCompany = (document.getElementById("rixoCompany") as HTMLSelectElement).value
+    
+    if (buyingDate.isEmpty() || rixoCompany.isEmpty()) {
+        document.getElementById("rixoRowsPreview")?.innerHTML = """
+            <div style="text-align: center; padding: 40px; color: #9ca3af;">
+                Please select a buying date and Rixo company to view available rows.
+            </div>
+        """
+        document.getElementById("selectedCount")?.textContent = "Selected: 0 of 0"
+        return
+    }
+    
+    // Convert ISO date to database format
+    val formattedDate = formatWithWeekday(buyingDate)
+    
+    window.fetch("/api/purchases").then { response ->
+        if (response.ok) {
+            response.json().then { allPurchases ->
+                val purchasesArray = allPurchases as Array<dynamic>
+                val matchingPurchases = mutableListOf<dynamic>()
+                
+                for (purchase in purchasesArray) {
+                    val date = js("purchase.date")?.toString() ?: ""
+                    val rixoRequested = js("purchase.rixoRequested")?.toString() ?: "FALSE"
+                    val company = js("purchase.rixoCompany")?.toString() ?: ""
+                    
+                    // Only include purchases from the selected date and company where rixoRequested is FALSE
+                    if (date == formattedDate && company == rixoCompany && rixoRequested == "FALSE") {
+                        matchingPurchases.add(purchase)
+                    }
+                }
+                
+                renderRixoRowsPreview(matchingPurchases)
+            }
+        }
+    }
+}
+
+// Render the rows preview table
+fun renderRixoRowsPreview(purchases: List<dynamic>) {
+    val preview = document.getElementById("rixoRowsPreview") ?: return
+    val selectedCount = document.getElementById("selectedCount") ?: return
+    
+    if (purchases.isEmpty()) {
+        preview.innerHTML = """
+            <div style="text-align: center; padding: 40px; color: #9ca3af;">
+                No rows found for the selected date and Rixo company.
+            </div>
+        """
+        selectedCount.textContent = "Selected: 0 of 0"
+        return
+    }
+    
+    val tableHTML = StringBuilder()
+    tableHTML.append("""
+        <table class="rixo-table">
+            <thead>
+                <tr>
+                    <th style="width: 60px;">
+                        <label class="rixo-checkwrap">
+                            <input type="checkbox" id="selectAllRixo" class="rixo-check">
+                            <span style="margin-left: 8px; font-weight: 600;">Select All</span>
+                        </label>
+                    </th>
+                    <th style="width: 50px;"></th>
+                    <th>Lot</th>
+                    <th>Chassis</th>
+                    <th>Year</th>
+                    <th>Car</th>
+                    <th>Client</th>
+                    <th>Stock</th>
+                    <th>Venue ID</th>
+                    <th>Number Cut</th>
+                </tr>
+            </thead>
+            <tbody>
+    """)
+    
+    purchases.forEach { purchase ->
+        val id = js("purchase.id").toString()
+        val lotNumber = js("purchase.lotNumber")?.toString() ?: ""
+        val chassis = js("purchase.chassis")?.toString() ?: ""
+        val year = js("purchase.carModelYear")?.toString() ?: ""
+        val carName = js("purchase.carName")?.toString() ?: ""
+        val clientName = js("purchase.clientName")?.toString() ?: ""
+        val stockLocation = js("purchase.stockLocation")?.toString() ?: ""
+        val venueId = js("purchase.venueId")?.toString() ?: ""
+        val numberCut = js("purchase.numberCut")?.toString() ?: ""
+        
+        tableHTML.append("""
+            <tr>
+                <td>
+                    <label class="rixo-checkwrap">
+                        <input type="checkbox" class="rixo-check rixo-row-check" data-id="$id" checked>
+                    </label>
+                </td>
+                <td>
+                    <button class="rixo-edit-btn" data-id="$id" title="Edit">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                            <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                        </svg>
+                    </button>
+                </td>
+                <td>$lotNumber</td>
+                <td>$chassis</td>
+                <td>$year</td>
+                <td>$carName</td>
+                <td>$clientName</td>
+                <td>$stockLocation</td>
+                <td>$venueId</td>
+                <td>$numberCut</td>
+            </tr>
+        """)
+    }
+    
+    tableHTML.append("""
+            </tbody>
+        </table>
+    """)
+    
+    preview.innerHTML = tableHTML.toString()
+    selectedCount.textContent = "Selected: ${purchases.size} of ${purchases.size}"
+    
+    // Set up checkbox listeners
+    setupRixoCheckboxListeners()
+}
+
+// Set up checkbox event listeners for the Rixo rows
+fun setupRixoCheckboxListeners() {
+    // Select All checkbox
+    val selectAllCheckbox = document.getElementById("selectAllRixo") as HTMLInputElement?
+    val rowCheckboxes = document.querySelectorAll(".rixo-row-check")
+    
+    selectAllCheckbox?.addEventListener("change", { _: Event ->
+        val isChecked = selectAllCheckbox.checked
+        for (i in 0 until rowCheckboxes.length) {
+            val checkbox = rowCheckboxes.item(i) as HTMLInputElement
+            checkbox.checked = isChecked
+        }
+        updateRixoSelectedCount()
+    })
+    
+    // Individual row checkboxes
+    for (i in 0 until rowCheckboxes.length) {
+        val checkbox = rowCheckboxes.item(i) as HTMLInputElement
+        checkbox.addEventListener("change", { _: Event ->
+            updateRixoSelectedCount()
+            updateSelectAllRixoCheckbox()
+        })
+    }
+    
+    // Edit button listeners
+    val editButtons = document.querySelectorAll(".rixo-edit-btn")
+    for (i in 0 until editButtons.length) {
+        val button = editButtons.item(i) as HTMLElement
+        button.addEventListener("click", { event ->
+            val btn = event.currentTarget as HTMLElement
+            val id = btn.getAttribute("data-id")?.toLongOrNull()
+            if (id != null) {
+                showRixoEditModal(id)
+            }
+        })
+    }
+}
+
+// Update the selected count display
+fun updateRixoSelectedCount() {
+    val rowCheckboxes = document.querySelectorAll(".rixo-row-check")
+    var checkedCount = 0
+    for (i in 0 until rowCheckboxes.length) {
+        val checkbox = rowCheckboxes.item(i) as HTMLInputElement
+        if (checkbox.checked) checkedCount++
+    }
+    val totalCount = rowCheckboxes.length
+    
+    document.getElementById("selectedCount")?.textContent = "Selected: $checkedCount of $totalCount"
+}
+
+// Update the Select All checkbox state
+fun updateSelectAllRixoCheckbox() {
+    val selectAllCheckbox = document.getElementById("selectAllRixo") as HTMLInputElement?
+    val rowCheckboxes = document.querySelectorAll(".rixo-row-check")
+    
+    if (selectAllCheckbox != null && rowCheckboxes.length > 0) {
+        var checkedCount = 0
+        for (i in 0 until rowCheckboxes.length) {
+            val checkbox = rowCheckboxes.item(i) as HTMLInputElement
+            if (checkbox.checked) checkedCount++
+        }
+        selectAllCheckbox.checked = checkedCount == rowCheckboxes.length
+        selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < rowCheckboxes.length
+    }
+}
+
+// Show edit modal for a Rixo row
+fun showRixoEditModal(purchaseId: Long) {
+    // Fetch the purchase data first
+    window.fetch("/api/purchases/$purchaseId")
+        .then { response -> response.json() }
+        .then { purchaseData ->
+            createRixoEditModal(purchaseData)
+        }
+        .catch { error ->
+            console.error("Error fetching purchase data:", error)
+            showMessage("Error loading purchase data", "error")
+        }
+}
+
+fun createRixoEditModal(purchaseData: dynamic) {
+    val modalHTML = """
+        <div id="rixoEditModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
+            <div style="background: white; border-radius: 12px; padding: 24px; max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                    <h2 style="margin: 0; color: #111827; font-size: 24px; font-weight: 600;">Edit Purchase</h2>
+                    <button id="closeRixoModal" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280;">&times;</button>
+                </div>
+                
+                <form id="rixoEditForm">
+                    <input type="hidden" id="rixoEditId" value="${purchaseData.id}">
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Lot Number</label>
+                            <input type="text" id="rixoEditLotNumber" value="${purchaseData.lotNumber ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Chassis</label>
+                            <input type="text" id="rixoEditChassis" value="${purchaseData.chassis ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Car Model Year</label>
+                            <input type="text" id="rixoEditCarModelYear" value="${purchaseData.carModelYear ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Car Name</label>
+                            <input type="text" id="rixoEditCarName" value="${purchaseData.carName ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Client Name</label>
+                            <input type="text" id="rixoEditClientName" value="${purchaseData.clientName ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Stock Location</label>
+                            <input type="text" id="rixoEditStockLocation" value="${purchaseData.stockLocation ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Venue ID</label>
+                            <input type="text" id="rixoEditVenueId" value="${purchaseData.venueId ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Number Cut</label>
+                            <input type="text" id="rixoEditNumberCut" value="${purchaseData.numberCut ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        </div>
+                    </div>
+                    
+                    <!-- SHAKEN Checkbox -->
+                    <div style="margin: 20px 0 10px 0;">
+                        <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; cursor: pointer;">
+                            <input type="checkbox" id="rixoEditShakenCheckbox" style="width: 18px; height: 18px; accent-color: #007bff;">
+                            SHAKEN
+                        </label>
+                    </div>
+
+                    <!-- Number Cut Information Section (initially hidden) -->
+                    <div id="rixoEditNumberCutSection" style="display: none;">
+                        <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Number Cut Information</h3>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; align-items: end;">
+                            <div>
+                                <label>Place Name (Japanese)</label>
+                                <select id="rixoEditNumberCutPlace" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                    <option value="">Select Place</option>
+                                    <option value="札幌">札幌 (Sapporo)</option>
+                                    <option value="函館">函館 (Hakodate)</option>
+                                    <option value="旭川">旭川 (Asahikawa)</option>
+                                    <option value="室蘭">室蘭 (Muroran)</option>
+                                    <option value="釧路">釧路 (Kushiro)</option>
+                                    <option value="帯広">帯広 (Obihiro)</option>
+                                    <option value="十勝">十勝 (Tokachi)</option>
+                                    <option value="北見">北見 (Kitami)</option>
+                                    <option value="知床">知床 (Shiretoko)</option>
+                                    <option value="苫小牧">苫小牧 (Tomakomai)</option>
+                                    <option value="青森">青森 (Aomori)</option>
+                                    <option value="弘前">弘前 (Hirosaki)</option>
+                                    <option value="岩手">岩手 (Iwate)</option>
+                                    <option value="盛岡">盛岡 (Morioka)</option>
+                                    <option value="平泉">平泉 (Hiraizumi)</option>
+                                    <option value="宮城">宮城 (Miyagi)</option>
+                                    <option value="仙台">仙台 (Sendai)</option>
+                                    <option value="八戸">八戸 (Hachinohe)</option>
+                                    <option value="秋田">秋田 (Akita)</option>
+                                    <option value="山形">山形 (Yamagata)</option>
+                                    <option value="福島">福島 (Fukushima)</option>
+                                    <option value="茨城">茨城 (Ibaraki)</option>
+                                    <option value="栃木">栃木 (Tochigi)</option>
+                                    <option value="群馬">群馬 (Gunma)</option>
+                                    <option value="埼玉">埼玉 (Saitama)</option>
+                                    <option value="千葉">千葉 (Chiba)</option>
+                                    <option value="東京">東京 (Tokyo)</option>
+                                    <option value="神奈川">神奈川 (Kanagawa)</option>
+                                    <option value="新潟">新潟 (Niigata)</option>
+                                    <option value="富山">富山 (Toyama)</option>
+                                    <option value="石川">石川 (Ishikawa)</option>
+                                    <option value="福井">福井 (Fukui)</option>
+                                    <option value="山梨">山梨 (Yamanashi)</option>
+                                    <option value="長野">長野 (Nagano)</option>
+                                    <option value="岐阜">岐阜 (Gifu)</option>
+                                    <option value="静岡">静岡 (Shizuoka)</option>
+                                    <option value="愛知">愛知 (Aichi)</option>
+                                    <option value="三重">三重 (Mie)</option>
+                                    <option value="滋賀">滋賀 (Shiga)</option>
+                                    <option value="京都">京都 (Kyoto)</option>
+                                    <option value="大阪">大阪 (Osaka)</option>
+                                    <option value="兵庫">兵庫 (Hyogo)</option>
+                                    <option value="奈良">奈良 (Nara)</option>
+                                    <option value="和歌山">和歌山 (Wakayama)</option>
+                                    <option value="鳥取">鳥取 (Tottori)</option>
+                                    <option value="島根">島根 (Shimane)</option>
+                                    <option value="岡山">岡山 (Okayama)</option>
+                                    <option value="広島">広島 (Hiroshima)</option>
+                                    <option value="山口">山口 (Yamaguchi)</option>
+                                    <option value="徳島">徳島 (Tokushima)</option>
+                                    <option value="香川">香川 (Kagawa)</option>
+                                    <option value="愛媛">愛媛 (Ehime)</option>
+                                    <option value="高知">高知 (Kochi)</option>
+                                    <option value="福岡">福岡 (Fukuoka)</option>
+                                    <option value="佐賀">佐賀 (Saga)</option>
+                                    <option value="長崎">長崎 (Nagasaki)</option>
+                                    <option value="熊本">熊本 (Kumamoto)</option>
+                                    <option value="大分">大分 (Oita)</option>
+                                    <option value="宮崎">宮崎 (Miyazaki)</option>
+                                    <option value="鹿児島">鹿児島 (Kagoshima)</option>
+                                    <option value="沖縄">沖縄 (Okinawa)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Number (English)</label>
+                                <input type="number" id="rixoEditNumberCutNumber1" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            </div>
+                            <div>
+                                <label>Hiragana Character</label>
+                                <select id="rixoEditNumberCutHiragana" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                    <option value="">Select Character</option>
+                                    <option value="あ">あ (a)</option>
+                                    <option value="い">い (i)</option>
+                                    <option value="う">う (u)</option>
+                                    <option value="え">え (e)</option>
+                                    <option value="お">お (o)</option>
+                                    <option value="か">か (ka)</option>
+                                    <option value="き">き (ki)</option>
+                                    <option value="く">く (ku)</option>
+                                    <option value="け">け (ke)</option>
+                                    <option value="こ">こ (ko)</option>
+                                    <option value="さ">さ (sa)</option>
+                                    <option value="し">し (shi)</option>
+                                    <option value="す">す (su)</option>
+                                    <option value="せ">せ (se)</option>
+                                    <option value="そ">そ (so)</option>
+                                    <option value="た">た (ta)</option>
+                                    <option value="ち">ち (chi)</option>
+                                    <option value="つ">つ (tsu)</option>
+                                    <option value="て">て (te)</option>
+                                    <option value="と">と (to)</option>
+                                    <option value="な">な (na)</option>
+                                    <option value="に">に (ni)</option>
+                                    <option value="ぬ">ぬ (nu)</option>
+                                    <option value="ね">ね (ne)</option>
+                                    <option value="の">の (no)</option>
+                                    <option value="は">は (ha)</option>
+                                    <option value="ひ">ひ (hi)</option>
+                                    <option value="ふ">ふ (fu)</option>
+                                    <option value="へ">へ (he)</option>
+                                    <option value="ほ">ほ (ho)</option>
+                                    <option value="ま">ま (ma)</option>
+                                    <option value="み">み (mi)</option>
+                                    <option value="む">む (mu)</option>
+                                    <option value="め">め (me)</option>
+                                    <option value="も">も (mo)</option>
+                                    <option value="や">や (ya)</option>
+                                    <option value="ゆ">ゆ (yu)</option>
+                                    <option value="よ">よ (yo)</option>
+                                    <option value="ら">ら (ra)</option>
+                                    <option value="り">り (ri)</option>
+                                    <option value="る">る (ru)</option>
+                                    <option value="れ">れ (re)</option>
+                                    <option value="ろ">ろ (ro)</option>
+                                    <option value="わ">わ (wa)</option>
+                                    <option value="ゐ">ゐ (wi)</option>
+                                    <option value="ゑ">ゑ (we)</option>
+                                    <option value="を">を (wo)</option>
+                                    <option value="ん">ん (n)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label>Number (English)</label>
+                                <input type="number" id="rixoEditNumberCutNumber2" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 20px;">
+                            <label>Generated Number Cut String:</label>
+                            <input type="text" id="rixoEditNumberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
+                        <button type="button" id="rixoEditCancel" style="padding: 12px 24px; background: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">Cancel</button>
+                        <button type="submit" id="rixoEditSave" style="padding: 12px 24px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    """
+    
+    // Remove any existing modal
+    document.getElementById("rixoEditModal")?.remove()
+    
+    // Add the modal to the page
+    document.body?.insertAdjacentHTML("beforeend", modalHTML)
+    
+    // Set up the modal functionality
+    setupRixoEditModalListeners(purchaseData)
+}
+
+fun setupRixoEditModalListeners(purchaseData: dynamic) {
+    // Close modal functionality
+    document.getElementById("closeRixoModal")?.addEventListener("click", { _: Event ->
+        document.getElementById("rixoEditModal")?.remove()
+    })
+    
+    document.getElementById("rixoEditCancel")?.addEventListener("click", { _: Event ->
+        document.getElementById("rixoEditModal")?.remove()
+    })
+    
+    // Close modal when clicking outside
+    document.getElementById("rixoEditModal")?.addEventListener("click", { event: Event ->
+        val target = event.target as HTMLElement?
+        if (target?.id == "rixoEditModal") {
+            document.getElementById("rixoEditModal")?.remove()
+        }
+    })
+    
+    // SHAKEN checkbox functionality
+    document.getElementById("rixoEditShakenCheckbox")?.addEventListener("change", { event: Event ->
+        val target = event.target as HTMLInputElement
+        val numberCutSection = document.getElementById("rixoEditNumberCutSection") as HTMLElement?
+        if (target.checked) {
+            numberCutSection?.style?.setProperty("display", "block")
+        } else {
+            numberCutSection?.style?.setProperty("display", "none")
+        }
+    })
+    
+    // Set initial SHAKEN checkbox state
+    val shakenCheckbox = document.getElementById("rixoEditShakenCheckbox") as HTMLInputElement?
+    val numberCutSection = document.getElementById("rixoEditNumberCutSection") as HTMLElement?
+    if (shakenCheckbox != null) {
+        shakenCheckbox.checked = purchaseData.shaken || false
+        if (shakenCheckbox.checked) {
+            numberCutSection?.style?.setProperty("display", "block")
+        } else {
+            numberCutSection?.style?.setProperty("display", "none")
+        }
+    }
+    
+    // Number cut generation listeners
+    setupRixoModalNumberCutListeners()
+    
+    // Form submission
+    document.getElementById("rixoEditForm")?.addEventListener("submit", { event: Event ->
+        event.preventDefault()
+        handleRixoEditSubmit()
+    })
+}
+
+fun setupRixoModalNumberCutListeners() {
+    // Add listeners for number cut generation (similar to the main form)
+    val placeSelect = document.getElementById("rixoEditNumberCutPlace") as HTMLSelectElement?
+    val number1Input = document.getElementById("rixoEditNumberCutNumber1") as HTMLInputElement?
+    val hiraganaSelect = document.getElementById("rixoEditNumberCutHiragana") as HTMLSelectElement?
+    val number2Input = document.getElementById("rixoEditNumberCutNumber2") as HTMLInputElement?
+    val resultInput = document.getElementById("rixoEditNumberCutString") as HTMLInputElement?
+    
+    fun updateNumberCutString() {
+        val place = placeSelect?.value ?: ""
+        val number1 = number1Input?.value ?: ""
+        val hiragana = hiraganaSelect?.value ?: ""
+        val number2 = number2Input?.value ?: ""
+        
+        if (place.isNotEmpty() && number1.isNotEmpty() && hiragana.isNotEmpty() && number2.isNotEmpty()) {
+            val result = "$place$number1$hiragana$number2"
+            resultInput?.value = result
+        } else {
+            resultInput?.value = ""
+        }
+    }
+    
+    placeSelect?.addEventListener("change", { _: Event -> updateNumberCutString() })
+    number1Input?.addEventListener("input", { _: Event -> updateNumberCutString() })
+    hiraganaSelect?.addEventListener("change", { _: Event -> updateNumberCutString() })
+    number2Input?.addEventListener("input", { _: Event -> updateNumberCutString() })
+}
+
+fun handleRixoEditSubmit() {
+    val id = (document.getElementById("rixoEditId") as HTMLInputElement).value.toLong()
+    val lotNumber = (document.getElementById("rixoEditLotNumber") as HTMLInputElement).value
+    val chassis = (document.getElementById("rixoEditChassis") as HTMLInputElement).value
+    val carModelYear = (document.getElementById("rixoEditCarModelYear") as HTMLInputElement).value
+    val carName = (document.getElementById("rixoEditCarName") as HTMLInputElement).value
+    val clientName = (document.getElementById("rixoEditClientName") as HTMLInputElement).value
+    val stockLocation = (document.getElementById("rixoEditStockLocation") as HTMLInputElement).value
+    val venueId = (document.getElementById("rixoEditVenueId") as HTMLInputElement).value
+    val numberCut = (document.getElementById("rixoEditNumberCut") as HTMLInputElement).value
+    val shaken = (document.getElementById("rixoEditShakenCheckbox") as HTMLInputElement).checked
+    val numberCutString = (document.getElementById("rixoEditNumberCutString") as HTMLInputElement).value
+    
+    val updateData = js("{}")
+    updateData.lotNumber = lotNumber
+    updateData.chassis = chassis
+    updateData.carModelYear = carModelYear
+    updateData.carName = carName
+    updateData.clientName = clientName
+    updateData.stockLocation = stockLocation
+    updateData.venueId = venueId
+    updateData.numberCut = if (numberCutString.isNotEmpty()) numberCutString else numberCut
+    updateData.shaken = shaken
+    
+    // Update the purchase
+    val requestInit = js("{}")
+    requestInit.method = "PUT"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(updateData)
+    
+    window.fetch("/api/purchases/$id", requestInit)
+        .then { response ->
+            if (response.ok) {
+                showMessage("Purchase updated successfully", "success")
+                document.getElementById("rixoEditModal")?.remove()
+                // Refresh the rows preview
+                val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
+                val rixoCompany = (document.getElementById("rixoCompany") as HTMLSelectElement).value
+                if (buyingDate.isNotEmpty() && rixoCompany.isNotEmpty()) {
+                    loadRowsForDateAndCompany()
+                }
+            } else {
+                showMessage("Error updating purchase", "error")
+            }
+        }
+        .catch { error ->
+            console.error("Error updating purchase:", error)
+            showMessage("Error updating purchase", "error")
+        }
+}
+
+// Generate Rixo Request PDF
+fun generateRixoRequestPdf() {
+    val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
+    val rixoCompany = (document.getElementById("rixoCompany") as HTMLSelectElement).value
+    val headMessage = (document.getElementById("headMessage") as HTMLTextAreaElement).value
+    val footerMessage = (document.getElementById("footerMessage") as HTMLTextAreaElement).value
+    val extraMessage = (document.getElementById("extraMessage") as HTMLTextAreaElement).value
+    val contactDetails = (document.getElementById("contactDetails") as HTMLTextAreaElement).value
+    
+    if (buyingDate.isEmpty() || rixoCompany.isEmpty()) {
+        showMessage("Please select a buying date and Rixo company", "error")
+        return
+    }
+    
+    // Get selected purchase IDs
+    val selectedIds = mutableListOf<Long>()
+    val rowCheckboxes = document.querySelectorAll(".rixo-row-check")
+    for (i in 0 until rowCheckboxes.length) {
+        val checkbox = rowCheckboxes.item(i) as HTMLInputElement
+        if (checkbox.checked) {
+            val id = checkbox.getAttribute("data-id")?.toLongOrNull()
+            if (id != null) {
+                selectedIds.add(id)
+            }
+        }
+    }
+    
+    if (selectedIds.isEmpty()) {
+        showMessage("Please select at least one row to generate the PDF", "error")
+        return
+    }
+    
+    // Fetch selected purchase data
+    window.fetch("/api/purchases").then { response ->
+        if (response.ok) {
+            response.json().then { allPurchases ->
+                val purchasesArray = allPurchases as Array<dynamic>
+                val selectedPurchases = mutableListOf<dynamic>()
+                
+                for (purchase in purchasesArray) {
+                    val id = js("purchase.id").toString().toLongOrNull() ?: continue
+                    if (selectedIds.contains(id)) {
+                        selectedPurchases.add(purchase)
+                    }
+                }
+                
+                // Generate PDF with selected data and update status after printing
+                generateRixoRequestPdfDocument(selectedPurchases, buyingDate, rixoCompany, headMessage, footerMessage, extraMessage, contactDetails, selectedIds)
+            }
+        }
+    }
+}
+
+// Generate the actual PDF document
+fun generateRixoRequestPdfDocument(purchases: List<dynamic>, buyingDate: String, rixoCompany: String, headMessage: String, footerMessage: String, extraMessage: String, contactDetails: String, selectedIds: List<Long>) {
+    console.log("🔧 [DEBUG] generateRixoRequestPdfDocument called with selectedIds:", selectedIds)
+    // Convert buying date to Japanese format
+    val formattedDate = formatWithWeekday(buyingDate)
+    val currentDate = js("new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })") as String
+    
+    // Split messages into lines for proper formatting
+    val headMessageLines = headMessage.split("\n")
+    val footerMessageLines = footerMessage.split("\n")
+    
+    // Create HTML content for PDF
+    val htmlContent = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>
+                body { 
+                    font-family: 'Hiragino Sans', 'Yu Gothic', sans-serif; 
+                    margin: 20px; 
+                    font-size: 12px;
+                    line-height: 1.4;
+                }
+                .header { 
+                    display: flex; 
+                    justify-content: space-between; 
+                    align-items: flex-start;
+                    margin-bottom: 20px;
+                }
+                .title-section {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+                .main-title {
+                    font-size: 24px;
+                    font-weight: bold;
+                    margin: 0;
+                }
+                .company-name {
+                    font-size: 18px;
+                    margin: 0;
+                }
+                .date-info {
+                    text-align: right;
+                    font-size: 12px;
+                }
+                .head-message {
+                    margin: 20px 0;
+                    font-size: 14px;
+                    line-height: 1.6;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin: 20px 0;
+                    font-size: 11px;
+                }
+                th, td {
+                    border: 1px solid #000;
+                    padding: 8px 4px;
+                    text-align: left;
+                    vertical-align: top;
+                }
+                th {
+                    background-color: #f0f0f0;
+                    font-weight: bold;
+                    text-align: center;
+                }
+                .footer-message {
+                    margin: 20px 0;
+                    font-size: 12px;
+                    line-height: 1.5;
+                }
+                .extra-message {
+                    margin: 10px 0;
+                    font-size: 12px;
+                    line-height: 1.5;
+                }
+                .contact-details {
+                    text-align: right;
+                    margin-top: 30px;
+                    font-size: 12px;
+                    line-height: 1.4;
+                }
+                .total-count {
+                    text-align: right;
+                    margin: 10px 0;
+                    font-weight: bold;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <div class="title-section">
+                    <h1 class="main-title">陸送</h1>
+                    <h2 class="company-name">${rixoCompany} 様</h2>
+                </div>
+                <div class="date-info">
+                    日付 ${currentDate}
+                </div>
+            </div>
+            
+            <div class="head-message">
+                ${headMessageLines.joinToString("<br>")}
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>日付</th>
+                        <th>出品番号</th>
+                        <th>型式・車体番号</th>
+                        <th>年式</th>
+                        <th>車名</th>
+                        <th>取引先名</th>
+                        <th>搬入先名</th>
+                        <th>会場ID</th>
+                        <th>ナンバーカット</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${generateTableRows(purchases, formattedDate)}
+                </tbody>
+            </table>
+            
+            <div class="total-count">
+                合計${purchases.size}台
+            </div>
+            
+            <div class="footer-message">
+                ${footerMessageLines.joinToString("<br>")}
+            </div>
+            
+            ${if (extraMessage.isNotEmpty()) "<div class=\"extra-message\">${extraMessage}</div>" else ""}
+            
+            <div class="contact-details">
+                ${contactDetails.replace("\n", "<br>")}
+            </div>
+        </body>
+        </html>
+    """
+    
+    // Create a new window for printing
+    val printWindow = window.open("", "_blank")
+    printWindow?.document?.write(htmlContent)
+    printWindow?.document?.close()
+    
+    // Flag to ensure update only happens once
+    var updateCalled = false
+    
+    fun updateStatusOnce() {
+        if (!updateCalled) {
+            updateCalled = true
+            console.log("🔧 [DEBUG] updateStatusOnce called with IDs:", selectedIds)
+            console.log("🔧 [DEBUG] selectedIds size:", selectedIds.size)
+            updateRixoRequestedStatus(selectedIds)
+        } else {
+            console.log("🔧 [DEBUG] updateStatusOnce already called, skipping")
+        }
+    }
+    
+    // Wait for content to load, then print
+    printWindow?.onload = {
+        printWindow?.print()
+        
+        // Use setTimeout to ensure the print dialog has time to appear
+        window.setTimeout({
+            printWindow?.close()
+            updateStatusOnce()
+        }, 1000) // 1 second delay
+    }
+    
+    // Fallback: if onload doesn't fire, update after a delay anyway
+    window.setTimeout({
+        updateStatusOnce()
+    }, 3000) // 3 second fallback
+    
+    showMessage("PDF generated successfully for ${purchases.size} vehicles", "success")
+}
+
+// Generate table rows for the PDF
+fun generateTableRows(purchases: List<dynamic>, formattedDate: String): String {
+    val rows = StringBuilder()
+    
+    for (purchase in purchases) {
+        val lotNumber = js("purchase.lotNumber")?.toString() ?: ""
+        val chassis = js("purchase.chassis")?.toString() ?: ""
+        val carModelYear = js("purchase.carModelYear")?.toString() ?: ""
+        val carName = js("purchase.carName")?.toString() ?: ""
+        val clientName = js("purchase.clientName")?.toString() ?: ""
+        val stockLocation = js("purchase.stockLocation")?.toString() ?: ""
+        val venueId = js("purchase.venueId")?.toString() ?: ""
+        val numberCut = js("purchase.numberCut")?.toString() ?: ""
+        
+        rows.append("""
+            <tr>
+                <td>${formattedDate}</td>
+                <td>${lotNumber}</td>
+                <td>${chassis}</td>
+                <td>${carModelYear}</td>
+                <td>${carName}</td>
+                <td>${clientName}</td>
+                <td>${stockLocation}</td>
+                <td>${venueId}</td>
+                <td>${numberCut}</td>
+            </tr>
+        """)
+    }
+    
+    return rows.toString()
+}
+
+// Update rixoRequested status to TRUE for selected purchases
+fun updateRixoRequestedStatus(selectedIds: List<Long>) {
+    console.log("🔧 [DEBUG] updateRixoRequestedStatus called with IDs:", selectedIds)
+    
+    if (selectedIds.isEmpty()) {
+        console.log("❌ [DEBUG] No IDs to update")
+        return
+    }
+    
+    // Update each purchase individually
+    var completedUpdates = 0
+    var failedUpdates = 0
+    
+    selectedIds.forEach { id ->
+        val updateData = js("""
+            {
+                "rixoRequested": "TRUE"
+            }
+        """)
+        
+        console.log("🔧 [DEBUG] Making PUT request to /api/purchases/$id with data:", updateData)
+        
+        window.fetch("/api/purchases/$id", js("""
+            {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(updateData)
+            }
+        """)).then { response ->
+            console.log("🔧 [DEBUG] Response for ID $id: status=${response.status}, ok=${response.ok}")
+            if (response.ok) {
+                completedUpdates++
+                console.log("Successfully updated rixoRequested for purchase ID: $id")
+            } else {
+                failedUpdates++
+                console.error("Failed to update rixoRequested for purchase ID: $id, status: ${response.status}")
+            }
+            
+            // Check if all updates are complete
+            if (completedUpdates + failedUpdates == selectedIds.size) {
+                if (failedUpdates == 0) {
+                    showMessage("Successfully updated ${completedUpdates} purchases to rixoRequested = TRUE", "success")
+                } else {
+                    showMessage("Updated ${completedUpdates} purchases successfully, ${failedUpdates} failed", "warning")
+                }
+            }
+        }.catch { error ->
+            failedUpdates++
+            console.error("Error updating rixoRequested for purchase ID: $id:", error)
+            
+            // Check if all updates are complete
+            if (completedUpdates + failedUpdates == selectedIds.size) {
+                if (failedUpdates == 0) {
+                    showMessage("Successfully updated ${completedUpdates} purchases to rixoRequested = TRUE", "success")
+                } else {
+                    showMessage("Updated ${completedUpdates} purchases successfully, ${failedUpdates} failed", "warning")
+                }
+            }
+        }
+    }
 }
 
 fun loadSelectedCarsForRixoTransport(selectedIds: List<Long>) {
