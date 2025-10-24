@@ -41,3 +41,5 @@ logging:
     org.hibernate.type.descriptor.sql.BasicBinder: TRACE
     org.springframework.boot.autoconfigure: WARN
     org.springframework.orm.jpa: DEBUG
+    org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping: DEBUG
+    org.springframework.context.annotation.ComponentScan: DEBUG

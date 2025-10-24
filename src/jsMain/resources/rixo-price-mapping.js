@@ -2369,10 +2369,22 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             setFieldValue('rixoCompany', 'rixoCompany', rixoCompanies[0]);
             setFieldValue('rixoCompany', 'editRixoCompany', rixoCompanies[0]);
         }
+        
+        // Auto-select shipment size: use first available option, or default to "CAR" if none available
         if (shipmentSizes.length > 0) {
             setFieldValue('typeOfVehicle', 'typeOfVehicle', shipmentSizes[0]);
             setFieldValue('typeOfVehicle', 'editTypeOfVehicle', shipmentSizes[0]);
+        } else {
+            // No shipment size mapping found, default to "CAR"
+            console.log('No shipment size mapping found, defaulting to "CAR"');
+            // First, add "CAR" to the dropdown options
+            updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
+            updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
+            // Then set the value
+            setFieldValue('typeOfVehicle', 'typeOfVehicle', 'CAR');
+            setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
         }
+        
         if (rixoPrices.length > 0) {
             setFieldValue('rixoPrice', 'rixoPrice', rixoPrices[0]);
             setFieldValue('rixoPrice', 'editRixoPrice', rixoPrices[0]);
@@ -2402,6 +2414,15 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             if (availableTypes.length === 1) {
                 setFieldValue('typeOfVehicle', 'typeOfVehicle', availableTypes[0]);
                 setFieldValue('typeOfVehicle', 'editTypeOfVehicle', availableTypes[0]);
+            } else if (availableTypes.length === 0) {
+                // No shipment size mapping found for this company, default to "CAR"
+                console.log('No shipment size mapping found for company, defaulting to "CAR"');
+                // First, add "CAR" to the dropdown options
+                updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
+                updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
+                // Then set the value
+                setFieldValue('typeOfVehicle', 'typeOfVehicle', 'CAR');
+                setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
             }
             if (availablePrices.length === 1) {
                 setFieldValue('rixoPrice', 'rixoPrice', availablePrices[0]);
@@ -2437,6 +2458,15 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
                 setFieldValue('rixoPrice', 'rixoPrice', availablePrices[0]);
                 setFieldValue('rixoPrice', 'editRixoPrice', availablePrices[0]);
             }
+        } else {
+            // No mappings found for this typeOfVehicle, default to "CAR" for shipment size
+            console.log('No mappings found for typeOfVehicle, defaulting to "CAR"');
+            // First, add "CAR" to the dropdown options
+            updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
+            updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
+            // Then set the value
+            setFieldValue('typeOfVehicle', 'typeOfVehicle', 'CAR');
+            setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
         }
     }
     

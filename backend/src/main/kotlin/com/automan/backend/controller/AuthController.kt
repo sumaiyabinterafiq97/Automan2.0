@@ -14,7 +14,6 @@ import jakarta.servlet.http.HttpServletRequest
 
 @RestController
 @RequestMapping("/auth")
-@CrossOrigin(origins = ["*"], allowCredentials = "false")
 class AuthController(
     private val authService: AuthService
 ) {
@@ -33,13 +32,21 @@ class AuthController(
     @PostMapping("/signup")
     fun signup(@RequestBody body: SignupDto): ResponseEntity<Map<String, Any>> {
         return try {
-            // After system initialization, only allow VIEWER signup
             val userCount = authService.getUserCount()
-            if (userCount > 0 && body.role.uppercase() != "VIEWER") {
-                return ResponseEntity.badRequest().body(mapOf(
-                    "success" to false,
-                    "message" to "Only VIEWER role signup is allowed. Use role request system for higher roles."
-                ))
+            
+            // If this is the first user, automatically make them ADMIN
+            val userRole = if (userCount == 0L) {
+                UserRole.ADMIN
+            } else {
+                // Allow users to select their role during signup
+                try {
+                    UserRole.valueOf(body.role.uppercase())
+                } catch (e: IllegalArgumentException) {
+                    return ResponseEntity.badRequest().body(mapOf(
+                        "success" to false,
+                        "message" to "Invalid role. Please select a valid role."
+                    ))
+                }
             }
             
             val result = authService.signup(
@@ -47,7 +54,7 @@ class AuthController(
                     email = body.email,
                     name = body.name,
                     password = body.password,
-                    role = UserRole.valueOf(body.role.uppercase()),
+                    role = userRole,
                     createdByRole = null // For now, no authentication middleware - will be VIEWER level
                 )
             )

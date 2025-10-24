@@ -78,7 +78,6 @@ The system uses a single `purchases` table with the following structure:
 CREATE TABLE purchases (
     id INT AUTO_INCREMENT PRIMARY KEY,
     date VARCHAR(50) NOT NULL,
-    lot_number VARCHAR(50) NOT NULL,
     car_model_number VARCHAR(100) NOT NULL,
     car_model_year VARCHAR(10) NOT NULL,
     car_name VARCHAR(100) NOT NULL,

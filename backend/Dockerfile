@@ -22,8 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf 
 # Build the application
 RUN ./gradlew build -x test
 
-# Copy the built JAR file
-COPY build/libs/*.jar app.jar
+# Copy the built JAR file from the container's build directory
+RUN ls -la build/libs/ && cp build/libs/automan-backend-1.0-SNAPSHOT.jar app.jar
 
 # Expose port 8083
 EXPOSE 8083

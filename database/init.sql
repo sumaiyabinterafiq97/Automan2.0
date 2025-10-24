@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS purchases (
     rixo_price VARCHAR(50),
     repair_company VARCHAR(100),
     repair_charges VARCHAR(50),
+    profit DECIMAL(15,2) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_lot_chassis (lot_number, chassis),
@@ -51,10 +52,10 @@ CREATE TABLE IF NOT EXISTS purchases (
 );
 
 -- Insert sample data
-INSERT INTO purchases (date, lot_number, chassis, car_model_year, brand, car_name, auction_no, stock_location, rixo_company, client_name, country, price, rixo_requested, rixo_confirmed, notes) VALUES
-('24 Apr, 2025', '100', 'KDH201-5012551', '2013', 'Toyota', 'Hiace', 'USS', 'Global Hakata', 'Rixo Japan', 'Tariq', 'South Africa', '$25,500', 'TRUE', 'TRUE', ''),
-('24 Apr, 2025', '101', 'NZE141-9145340', '2010', 'Toyota', 'Corolla', 'CAA', 'Global Hakata', 'Rixo Tokyo', 'Arshad', 'Pakistan', '$12,750', 'TRUE', 'TRUE', ''),
-('24 Apr, 2025', '102', 'ZRR75-0084692', '2011', 'Toyota', 'Noah', 'TAA', 'Global Hakata', 'Rixo Osaka', 'Jawad', 'Pakistan', '$15,800', 'TRUE', 'TRUE', '');
+INSERT INTO purchases (date, lot_number, chassis, car_model_year, brand, car_name, auction_no, stock_location, rixo_company, client_name, country, price, auction_fee, rixo_price, shipment_charges, freight, inspection_fee, repair_charges, misc_charges, rixo_requested, rixo_confirmed, notes) VALUES
+('24 Apr, 2025', '100', 'KDH201-5012551', '2013', 'Toyota', 'Hiace', 'USS', 'Global Hakata', 'Rixo Japan', 'Tariq', 'South Africa', '25,500', '898', '89890', '9909', '789', '768', '899', '778', 'TRUE', 'TRUE', ''),
+('24 Apr, 2025', '101', 'NZE141-9145340', '2010', 'Toyota', 'Corolla', 'CAA', 'Global Hakata', 'Rixo Tokyo', 'Arshad', 'Pakistan', '12,750', '500', '45000', '5000', '400', '300', '200', '150', 'TRUE', 'TRUE', ''),
+('24 Apr, 2025', '102', 'ZRR75-0084692', '2011', 'Toyota', 'Noah', 'TAA', 'Global Hakata', 'Rixo Osaka', 'Jawad', 'Pakistan', '15,800', '600', '55000', '6000', '500', '400', '300', '200', 'TRUE', 'TRUE', '');
 
 -- Create the clients table
 CREATE TABLE IF NOT EXISTS clients (
@@ -178,3 +179,67 @@ CREATE INDEX idx_users_role ON users(role);
 -- Password: Admin#12 (BCrypt hashed)
 INSERT INTO users (email, name, password_hash, role, created_at) VALUES
 ('admin@gmail.com', 'admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iAt6Z5EHsM8lE9lBOsl7iKTVEFDi', 'ADMIN', NOW());
+
+-- ===========================================
+-- BOOKING SYSTEM TABLES
+-- ===========================================
+
+-- Create bookings table for car booking management
+CREATE TABLE IF NOT EXISTS bookings (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    booking_number VARCHAR(50) UNIQUE NOT NULL,
+    vessel_no VARCHAR(100),
+    vessel_name VARCHAR(200),
+    consignee_country VARCHAR(100),
+    pol_port VARCHAR(100),
+    booking_date DATE,
+    status ENUM('DRAFT', 'CONFIRMED', 'SHIPPED') DEFAULT 'DRAFT',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Create vessels lookup table
+CREATE TABLE IF NOT EXISTS vessels (
+    vessel_no VARCHAR(100) PRIMARY KEY,
+    vessel_name VARCHAR(200) NOT NULL,
+    company VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create booking_calculations table for cost calculations
+CREATE TABLE IF NOT EXISTS booking_calculations (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    booking_id BIGINT NOT NULL,
+    calculation_type ENUM('FREIGHT', 'CAF', 'FOB', 'PAKISTAN') NOT NULL,
+    container_price DECIMAL(15,2) DEFAULT 0,
+    shipping_charge DECIMAL(15,2) DEFAULT 0,
+    wc_charge DECIMAL(15,2) DEFAULT 0,
+    inspection_fee DECIMAL(15,2) DEFAULT 0,
+    fob_price DECIMAL(15,2) DEFAULT 0,
+    freight_price DECIMAL(15,2) DEFAULT 0,
+    insurance DECIMAL(15,2) DEFAULT 0,
+    total_price DECIMAL(15,2) DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE
+);
+
+-- Add booking_id column to purchases table
+ALTER TABLE purchases ADD COLUMN booking_id BIGINT;
+ALTER TABLE purchases ADD CONSTRAINT fk_purchase_booking_id FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE SET NULL;
+
+-- Create indexes for performance
+CREATE INDEX idx_booking_number ON bookings(booking_number);
+CREATE INDEX idx_booking_status ON bookings(status);
+CREATE INDEX idx_booking_vessel_no ON bookings(vessel_no);
+CREATE INDEX idx_purchase_booking_id ON purchases(booking_id);
+CREATE INDEX idx_booking_calculation_booking_id ON booking_calculations(booking_id);
+CREATE INDEX idx_booking_calculation_type ON booking_calculations(calculation_type);
+
+-- Insert sample vessel data
+INSERT INTO vessels (vessel_no, vessel_name, company) VALUES
+('MSC123', 'MSC BASIL', 'MSC'),
+('MSC456', 'MSC MANHATTAN V', 'MSC'),
+('CAP789', 'CAPTAIN THANASIS I', 'CAPTAIN'),
+('MAE012', 'MAERSK VIRGINIA', 'MAERSK'),
+('VIR345', 'VIRGO V', 'VIRGO'),
+('NAV678', 'NAVIOS TEMPO V', 'NAVIOS');

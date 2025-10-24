@@ -3,7 +3,6 @@ package com.automan.purchase
 data class Purchase(
     val id: Long? = null,
     val date: String? = null,
-    val lotNumber: String,
     val chassis: String,
     val carModelYear: String? = null,
     val brand: String? = null,
@@ -27,6 +26,7 @@ data class Purchase(
     val auctionFee: String? = null,
     val recycleFee: String? = null,
     val roadTax: String? = null,
+    val taxTotal: String? = null,
     val totalPrice: String? = null,
     val paymentDate: String? = null,
     val rixoRequested: String? = null,

@@ -11,6 +11,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
 import java.time.LocalDate
+import java.math.BigDecimal
 
 @RestController
 @RequestMapping("/purchases")
@@ -33,13 +34,160 @@ class PurchaseController(
         return ResponseEntity.ok(purchases)
     }
     
+    @GetMapping("/countries")
+    fun getCountries(): ResponseEntity<List<String>> {
+        val countries = purchaseService.getUniqueCountries()
+        return ResponseEntity.ok(countries)
+    }
+    
+    @GetMapping("/stock-locations")
+    fun getStockLocations(): ResponseEntity<List<String>> {
+        val stockLocations = purchaseService.getUniqueStockLocations()
+        return ResponseEntity.ok(stockLocations)
+    }
+    
+    @GetMapping("/filtered-chassis")
+    fun getFilteredChassis(
+        @RequestParam country: String,
+        @RequestParam polPort: String
+    ): ResponseEntity<List<String>> {
+        val chassis = purchaseService.getFilteredChassis(country, polPort)
+        return ResponseEntity.ok(chassis)
+    }
+    
+    @PutMapping("/save-costs")
+    fun saveCarCostDetails(@RequestBody costData: Map<String, Any>): ResponseEntity<Map<String, String>> {
+        return try {
+            val chassis = costData["chassis"] as String
+            val carPrice = (costData["carPrice"] as? Number)?.toDouble() ?: 0.0
+            val auctionFee = (costData["auctionFee"] as? Number)?.toDouble() ?: 0.0
+            val rixoPrice = (costData["rixoPrice"] as? Number)?.toDouble() ?: 0.0
+            val shippingCharge = (costData["shippingCharge"] as? Number)?.toDouble() ?: 0.0
+            val freight = (costData["freight"] as? Number)?.toDouble() ?: 0.0
+            val inspectionFee = (costData["inspectionFee"] as? Number)?.toDouble() ?: 0.0
+            val repairFee = (costData["repairFee"] as? Number)?.toDouble() ?: 0.0
+            val mscCharges = (costData["mscCharges"] as? Number)?.toDouble() ?: 0.0
+            val profit = (costData["profit"] as? Number)?.toDouble() ?: 0.0
+            val packagePrice = (costData["packagePrice"] as? Number)?.toDouble() ?: 0.0
+            val isPackageMode = costData["isPackageMode"] as? Boolean ?: false
+            
+            println("🔍 DEBUG: Received package data - packagePrice: $packagePrice, isPackageMode: $isPackageMode")
+            println("🔍 DEBUG: Full costData: $costData")
+            
+            purchaseService.saveCarCostDetails(
+                chassis, carPrice, auctionFee, rixoPrice, shippingCharge, 
+                freight, inspectionFee, repairFee, mscCharges, profit, packagePrice, isPackageMode
+            )
+            
+            ResponseEntity.ok(mapOf("message" to "Car cost details saved successfully", "chassis" to chassis))
+        } catch (e: Exception) {
+            ResponseEntity.status(500).body(mapOf("error" to "Failed to save car cost details: ${e.message}"))
+        }
+    }
+
+    @PostMapping("/save-total-cnf")
+    fun saveTotalCnfPriceEndpoint(@RequestBody costData: Map<String, Any>): ResponseEntity<Map<String, String>> {
+        return try {
+            val chassis = costData["chassis"] as String
+            val totalCnfPrice = (costData["totalCnfPrice"] as? Number)?.toDouble() ?: 0.0
+            
+            println("🔍 DEBUG: Saving total C&F price - chassis: $chassis, totalCnfPrice: $totalCnfPrice")
+            
+            purchaseService.saveTotalCnfPrice(chassis, totalCnfPrice)
+            
+            ResponseEntity.ok(mapOf("message" to "Total C&F price saved successfully", "chassis" to chassis, "totalCnfPrice" to totalCnfPrice.toString()))
+        } catch (e: Exception) {
+            ResponseEntity.status(500).body(mapOf("error" to "Failed to save total C&F price: ${e.message}"))
+        }
+    }
+
+
+    @PutMapping("/save-fob-costs")
+    fun saveFobCarCostDetails(@RequestBody costData: Map<String, Any>): ResponseEntity<Map<String, String>> {
+        return try {
+            val chassis = costData["chassis"] as String
+            val carPrice = (costData["carPrice"] as? Number)?.toDouble() ?: 0.0
+            val auctionFee = (costData["auctionFee"] as? Number)?.toDouble() ?: 0.0
+            val rixoPrice = (costData["rixoPrice"] as? Number)?.toDouble() ?: 0.0
+            val shippingCharge = (costData["shippingCharge"] as? Number)?.toDouble() ?: 0.0
+            val inspectionFee = (costData["inspectionFee"] as? Number)?.toDouble() ?: 0.0
+            val repairFee = (costData["repairFee"] as? Number)?.toDouble() ?: 0.0
+            val mscCharges = (costData["mscCharges"] as? Number)?.toDouble() ?: 0.0
+            val profit = (costData["profit"] as? Number)?.toDouble() ?: 0.0
+            
+            purchaseService.saveFobCarCostDetails(
+                chassis, carPrice, auctionFee, rixoPrice, shippingCharge, 
+                inspectionFee, repairFee, mscCharges, profit
+            )
+            
+            ResponseEntity.ok(mapOf("message" to "FOB cost details saved successfully", "chassis" to chassis))
+        } catch (e: Exception) {
+            ResponseEntity.status(500).body(mapOf("error" to "Failed to save FOB cost details: ${e.message}"))
+        }
+    }
+    
     @GetMapping("/sort")
     fun sortPurchases(@RequestParam field: String, @RequestParam order: String): ResponseEntity<List<Purchase>> {
         val purchases = purchaseService.sortPurchases(field, order)
         return ResponseEntity.ok(purchases)
     }
     
-    @GetMapping("/{id}")
+    @GetMapping("/costs-by-chassis/{chassis}")
+    fun getCarCostDetails(@PathVariable chassis: String): ResponseEntity<Map<String, Any>> {
+        return try {
+            println("DEBUG: Looking for chassis: $chassis")
+            val purchase = purchaseService.getPurchaseByChassis(chassis)
+            println("DEBUG: Purchase result: $purchase")
+            if (purchase != null) {
+                println("DEBUG: Purchase found - chassis: ${purchase.chassis}, price: ${purchase.price}, shipmentCharges: ${purchase.shipmentCharges}, miscCharges: ${purchase.miscCharges}, repairCharges: ${purchase.repairCharges}")
+                val costDetails = mapOf(
+                    "chassis" to (purchase.chassis ?: ""),
+                    "carPrice" to (purchase.price?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
+                    "auctionFee" to (purchase.auctionFee?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
+                    "rixoPrice" to (purchase.rixoPrice?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
+                    "shippingCharge" to (purchase.shipmentCharges?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
+                    "freight" to (purchase.freight?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
+                    "inspectionFee" to (purchase.inspectionFee?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
+                    "repairFee" to (purchase.repairCharges?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
+                    "mscCharges" to (purchase.miscCharges?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
+                    "profit" to (purchase.profit ?: BigDecimal.ZERO)
+                )
+                ResponseEntity.ok(costDetails)
+            } else {
+                ResponseEntity.notFound().build()
+            }
+        } catch (e: Exception) {
+            println("ERROR: Exception in getCarCostDetails: ${e.message}")
+            e.printStackTrace()
+            ResponseEntity.status(500).body(mapOf(
+                "error" to (e.message ?: "Unknown error")
+            ))
+        }
+    }
+    
+    @GetMapping("/test-costs")
+    fun testCostsEndpoint(): ResponseEntity<Map<String, Any>> {
+        return ResponseEntity.ok(mapOf(
+            "message" to "Costs endpoint is working",
+            "timestamp" to System.currentTimeMillis()
+        ))
+    }
+    
+    @GetMapping("/simple-test")
+    fun simpleTest(): ResponseEntity<String> {
+        return ResponseEntity.ok("Simple test endpoint working")
+    }
+    
+    @GetMapping("/costs-test")
+    fun costsTest(): ResponseEntity<Map<String, Any>> {
+        return ResponseEntity.ok(mapOf(
+            "message" to "Costs test endpoint working",
+            "timestamp" to System.currentTimeMillis(),
+            "test" to "success"
+        ))
+    }
+    
+    @GetMapping("/purchase/{id}")
     fun getPurchaseById(@PathVariable id: Long): ResponseEntity<Purchase> {
         val purchase = purchaseService.getPurchaseById(id)
         return if (purchase != null) {
@@ -54,6 +202,7 @@ class PurchaseController(
         val createdPurchase = purchaseService.createPurchase(purchase)
         return ResponseEntity.ok(createdPurchase)
     }
+    
     
     @PutMapping("/{id}")
     fun updatePurchase(@PathVariable id: Long, @RequestBody updateData: Map<String, Any>): ResponseEntity<Purchase> {
@@ -344,5 +493,296 @@ class PurchaseController(
                 "error" to (e.message ?: "Unknown error")
             ))
         }
+    }
+    
+    @PostMapping("/shipping-schedule/generate-pdf")
+    fun generateShippingSchedulePdf(@RequestBody request: com.automan.backend.dto.ShippingSchedulePdfRequest): ResponseEntity<ByteArray> {
+        try {
+            println("📋 Generating PDF for booking: ${request.bookingNo}")
+            
+            // Get PDF data from service
+            val pdfData = purchaseService.getShippingSchedulePdfData(request)
+            
+            // Generate PDF
+            val pdfBytes = generatePdfDocument(pdfData)
+            
+            // Set response headers
+            val headers = org.springframework.http.HttpHeaders()
+            headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
+            headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"shipping_schedule_${request.bookingNo}.pdf\"")
+            headers.contentLength = pdfBytes.size.toLong()
+            
+            println("✅ PDF generated successfully for booking: ${request.bookingNo}")
+            return ResponseEntity.ok()
+                .headers(headers)
+                .body(pdfBytes)
+                
+        } catch (e: Exception) {
+            println("❌ Error generating PDF: ${e.message}")
+            e.printStackTrace()
+            return ResponseEntity.internalServerError().build()
+        }
+    }
+    
+    @PostMapping("/fob-shipping-schedule/generate-pdf")
+    fun generateFobShippingSchedulePdf(@RequestBody request: com.automan.backend.dto.ShippingSchedulePdfRequest): ResponseEntity<ByteArray> {
+        try {
+            println("📋 Generating FOB PDF for booking: ${request.bookingNo}")
+            
+            // Get PDF data from service (same as regular shipping schedule)
+            val pdfData = purchaseService.getShippingSchedulePdfData(request)
+            
+            // Generate FOB PDF (same format but with FOB price column)
+            val pdfBytes = generateFobPdfDocument(pdfData)
+            
+            // Set response headers
+            val headers = org.springframework.http.HttpHeaders()
+            headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
+            headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"fob_shipping_schedule_${request.bookingNo}.pdf\"")
+            headers.contentLength = pdfBytes.size.toLong()
+            
+            println("✅ FOB PDF generated successfully for booking: ${request.bookingNo}")
+            return ResponseEntity.ok()
+                .headers(headers)
+                .body(pdfBytes)
+                
+        } catch (e: Exception) {
+            println("❌ Error generating FOB PDF: ${e.message}")
+            e.printStackTrace()
+            return ResponseEntity.internalServerError().build()
+        }
+    }
+    
+    private fun generatePdfDocument(pdfData: com.automan.backend.dto.ShippingSchedulePdfData): ByteArray {
+        println("🔥🔥🔥 GENERATING PDF WITH TABLE FORMAT - UPDATED CODE - ${System.currentTimeMillis()} 🔥🔥🔥")
+        val outputStream = java.io.ByteArrayOutputStream()
+        val pdfWriter = com.itextpdf.kernel.pdf.PdfWriter(outputStream)
+        val pdfDocument = com.itextpdf.kernel.pdf.PdfDocument(pdfWriter)
+        val document = com.itextpdf.layout.Document(pdfDocument)
+        
+        // Set page margins
+        document.setMargins(50f, 50f, 50f, 50f)
+        
+        // Title
+        val title = com.itextpdf.layout.element.Paragraph("SHIPPING SCHEDULE (BOOKING CHASIS NO. LIST)")
+            .setFontSize(16f)
+            .setBold()
+            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+            .setMarginBottom(20f)
+        document.add(title)
+        
+        // Company name
+        val companyName = com.itextpdf.layout.element.Paragraph(pdfData.companyName)
+            .setFontSize(14f)
+            .setBold()
+            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+            .setMarginBottom(30f)
+        document.add(companyName)
+        
+        // Booking details section - using table format with row-spanning SHIPPING DATE cell
+        val bookingTable = com.itextpdf.layout.element.Table(com.itextpdf.layout.properties.UnitValue.createPercentArray(floatArrayOf(1f, 2f, 1f, 1f)))
+            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(100f))
+            .setMarginBottom(20f)
+            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+        
+        // Row 1: BOOKING NO, BOOKING NO VALUE, SHIPPING DATE (spans 2 rows), SHIPPING DATE VALUE (spans 2 rows)
+        bookingTable.addCell(createCellWithBorder("BOOKING NO:", true))
+        bookingTable.addCell(createCellWithBorder(pdfData.bookingNo, false))
+        val shippingDateLabelCell = createCellWithBorder("SHIPPING DATE:", true)
+        shippingDateLabelCell.setProperty(com.itextpdf.layout.properties.Property.ROWSPAN, 2)
+        bookingTable.addCell(shippingDateLabelCell)
+        val shippingDateValueCell = createCellWithBorder(pdfData.shippingDate, false)
+        shippingDateValueCell.setProperty(com.itextpdf.layout.properties.Property.ROWSPAN, 2)
+        bookingTable.addCell(shippingDateValueCell)
+        
+        // Row 2: VESSEL NAME, VESSEL NAME VALUE (SHIPPING DATE cells continue from row 1)
+        bookingTable.addCell(createCellWithBorder("VESSEL NAME:", true))
+        bookingTable.addCell(createCellWithBorder(pdfData.vesselName, false))
+        
+        // Row 3: POL, POL VALUE, POD, POD VALUE
+        bookingTable.addCell(createCellWithBorder("POL:", true))
+        bookingTable.addCell(createCellWithBorder(pdfData.pol, false))
+        bookingTable.addCell(createCellWithBorder("POD:", true))
+        bookingTable.addCell(createCellWithBorder(pdfData.pod, false))
+        
+        document.add(bookingTable)
+        
+        // Car list table
+        val carTable = com.itextpdf.layout.element.Table(com.itextpdf.layout.properties.UnitValue.createPercentArray(floatArrayOf(0.5f, 2f, 2.5f, 1f, 2f)))
+            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(100f))
+            .setMarginBottom(20f)
+        
+        // Table headers
+        carTable.addHeaderCell(createHeaderCell("No."))
+        carTable.addHeaderCell(createHeaderCell("NAME"))
+        carTable.addHeaderCell(createHeaderCell("CHASIS NUMBER"))
+        carTable.addHeaderCell(createHeaderCell("YEAR"))
+        carTable.addHeaderCell(createHeaderCell("C&F PRICE"))
+        
+        // Add car data rows
+        pdfData.carList.forEach { car ->
+            carTable.addCell(createCell(car.no.toString(), false))
+            carTable.addCell(createCell(car.name, false))
+            carTable.addCell(createCell(car.chassisNumber, false))
+            carTable.addCell(createCell(car.year, false))
+            carTable.addCell(createCell(car.cnfPrice, false))
+        }
+        
+        document.add(carTable)
+        
+        // Consignee section - horizontal table with label on top, value underneath
+        val consigneeTable = com.itextpdf.layout.element.Table(com.itextpdf.layout.properties.UnitValue.createPercentArray(floatArrayOf(1f)))
+            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(50f))
+            .setMarginTop(30f)
+            .setMarginBottom(20f)
+            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+        
+        // Add consignee label row (first row) - center aligned
+        consigneeTable.addCell(createCellWithBorderCentered("CONSIGNEE:", true))
+        
+        // Add consignee value row (second row) - center aligned
+        consigneeTable.addCell(createCellWithBorderCentered(pdfData.consigneeDetails.name, false))
+        
+        document.add(consigneeTable)
+        
+        document.close()
+        return outputStream.toByteArray()
+    }
+    
+    private fun generateFobPdfDocument(pdfData: com.automan.backend.dto.ShippingSchedulePdfData): ByteArray {
+        println("🔥🔥🔥 GENERATING FOB PDF WITH TABLE FORMAT - UPDATED CODE - ${System.currentTimeMillis()} 🔥🔥🔥")
+        val outputStream = java.io.ByteArrayOutputStream()
+        val pdfWriter = com.itextpdf.kernel.pdf.PdfWriter(outputStream)
+        val pdfDocument = com.itextpdf.kernel.pdf.PdfDocument(pdfWriter)
+        val document = com.itextpdf.layout.Document(pdfDocument)
+        
+        // Title
+        val title = com.itextpdf.layout.element.Paragraph("SHIPPING SCHEDULE (BOOKING CHASIS NO. LIST)")
+            .setBold()
+            .setFontSize(18f)
+            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+            .setMarginBottom(20f)
+        document.add(title)
+        
+        // Company name
+        val companyName = com.itextpdf.layout.element.Paragraph("MEMON CO., LTD")
+            .setFontSize(14f)
+            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+            .setMarginBottom(30f)
+        document.add(companyName)
+        
+        // Booking Details Table (same format as regular PDF)
+        val bookingTable = com.itextpdf.layout.element.Table(floatArrayOf(1f, 2f, 1f, 1f))
+            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(100f))
+            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+        
+        // Row 1
+        bookingTable.addCell(createCellWithBorder("BOOKING NO:", true))
+        bookingTable.addCell(createCellWithBorder(pdfData.bookingNo, false))
+        val shippingDateLabelCell = createCellWithBorder("SHIPPING DATE:", true)
+        shippingDateLabelCell.setProperty(com.itextpdf.layout.properties.Property.ROWSPAN, 2)
+        bookingTable.addCell(shippingDateLabelCell)
+        val shippingDateValueCell = createCellWithBorder(pdfData.shippingDate, false)
+        shippingDateValueCell.setProperty(com.itextpdf.layout.properties.Property.ROWSPAN, 2)
+        bookingTable.addCell(shippingDateValueCell)
+        
+        // Row 2
+        bookingTable.addCell(createCellWithBorder("VESSEL NAME:", true))
+        bookingTable.addCell(createCellWithBorder(pdfData.vesselName, false))
+        
+        // Row 3
+        bookingTable.addCell(createCellWithBorder("POL:", true))
+        bookingTable.addCell(createCellWithBorder(pdfData.pol, false))
+        bookingTable.addCell(createCellWithBorder("POD:", true))
+        bookingTable.addCell(createCellWithBorder(pdfData.pod, false))
+        
+        document.add(bookingTable)
+        
+        // Add some space
+        document.add(com.itextpdf.layout.element.Paragraph().setMarginBottom(20f))
+        
+        // Car List Table (FOB version - with FOB PRICE column instead of C&F PRICE)
+        val carListTable = com.itextpdf.layout.element.Table(floatArrayOf(1f, 2f, 3f, 1f, 2f))
+            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(100f))
+            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+        
+        // Header row with gray background
+        carListTable.addCell(createHeaderCell("No."))
+        carListTable.addCell(createHeaderCell("NAME"))
+        carListTable.addCell(createHeaderCell("CHASIS NUMBER"))
+        carListTable.addCell(createHeaderCell("YEAR"))
+        carListTable.addCell(createHeaderCell("FOB PRICE")) // Changed from "C&F PRICE" to "FOB PRICE"
+        
+        // Data rows
+        pdfData.carList.forEachIndexed { index, car ->
+            carListTable.addCell(createCellWithBorder((index + 1).toString(), false))
+            carListTable.addCell(createCellWithBorder(car.name, false))
+            carListTable.addCell(createCellWithBorder(car.chassisNumber, false))
+            carListTable.addCell(createCellWithBorder(car.year, false))
+            // Remove any existing ¥ symbol and add single ¥ with right alignment
+            val priceWithoutSymbol = car.cnfPrice.toString().replace("¥", "").trim()
+            val priceCell = createCellWithBorder("¥$priceWithoutSymbol", false)
+            priceCell.setTextAlignment(com.itextpdf.layout.properties.TextAlignment.RIGHT)
+            carListTable.addCell(priceCell) // Single ¥ symbol for FOB price with right alignment
+        }
+        
+        document.add(carListTable)
+        
+        // Add some space
+        document.add(com.itextpdf.layout.element.Paragraph().setMarginBottom(20f))
+        
+        // Consignee Table (moved after Car List Table)
+        val consigneeTable = com.itextpdf.layout.element.Table(floatArrayOf(1f))
+            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(50f))
+            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+        
+        consigneeTable.addCell(createCellWithBorderCentered("CONSIGNEE:", true))
+        consigneeTable.addCell(createCellWithBorderCentered(pdfData.consigneeDetails.name, false))
+        
+        document.add(consigneeTable)
+        
+        document.close()
+        return outputStream.toByteArray()
+    }
+    
+    private fun createCell(text: String, isBold: Boolean): com.itextpdf.layout.element.Cell {
+        val paragraph = if (isBold) {
+            com.itextpdf.layout.element.Paragraph(text).setBold().setFontSize(10f)
+        } else {
+            com.itextpdf.layout.element.Paragraph(text).setFontSize(10f)
+        }
+        return com.itextpdf.layout.element.Cell().add(paragraph)
+    }
+    
+    private fun createCellWithBorder(text: String, isBold: Boolean): com.itextpdf.layout.element.Cell {
+        val paragraph = if (isBold) {
+            com.itextpdf.layout.element.Paragraph(text).setBold().setFontSize(10f)
+        } else {
+            com.itextpdf.layout.element.Paragraph(text).setFontSize(10f)
+        }
+        return com.itextpdf.layout.element.Cell()
+            .add(paragraph)
+            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+            .setPadding(8f)
+            .setMargin(0f)
+    }
+    
+    private fun createCellWithBorderCentered(text: String, isBold: Boolean): com.itextpdf.layout.element.Cell {
+        val paragraph = if (isBold) {
+            com.itextpdf.layout.element.Paragraph(text).setBold().setFontSize(10f).setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+        } else {
+            com.itextpdf.layout.element.Paragraph(text).setFontSize(10f).setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+        }
+        return com.itextpdf.layout.element.Cell()
+            .add(paragraph)
+            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+            .setPadding(8f)
+            .setMargin(0f)
+    }
+    
+    private fun createHeaderCell(text: String): com.itextpdf.layout.element.Cell {
+        return com.itextpdf.layout.element.Cell()
+            .add(com.itextpdf.layout.element.Paragraph(text).setBold().setFontSize(10f))
+            .setBackgroundColor(com.itextpdf.kernel.colors.ColorConstants.LIGHT_GRAY)
     }
 }

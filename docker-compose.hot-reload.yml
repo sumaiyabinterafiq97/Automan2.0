@@ -1,0 +1,86 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: automan_mysql_hot
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: automan_car_purchase
+      MYSQL_USER: automan_user
+      MYSQL_PASSWORD: automan_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data_hot:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: --default-authentication-plugin=mysql_native_password
+    networks:
+      - automan_hot_network
+
+  backend:
+    build: ./backend
+    container_name: automan_backend_hot
+    restart: always
+    ports:
+      - "8083:8083"
+    depends_on:
+      - mysql
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: automan_user
+      SPRING_DATASOURCE_PASSWORD: automan_password
+    networks:
+      - automan_hot_network
+
+  frontend:
+    image: node:18-alpine
+    container_name: automan_frontend_hot
+    restart: always
+    ports:
+      - "8080:8080"
+    working_dir: /app
+    volumes:
+      # Mount source code for hot reloading
+      - ./src:/app/src
+      - ./build.gradle.kts:/app/build.gradle.kts
+      - ./settings.gradle.kts:/app/settings.gradle.kts
+      - ./gradle.properties:/app/gradle.properties
+      - ./gradlew:/app/gradlew
+      - ./gradle:/app/gradle
+      - ./Dark Blue Minimalist Car Rental Deals Instagram Post.png:/app/src/jsMain/resources/Dark Blue Minimalist Car Rental Deals Instagram Post.png
+    environment:
+      - NODE_ENV=development
+    command: >
+      sh -c "
+        apk add --no-cache openjdk17-jdk curl &&
+        chmod +x gradlew &&
+        ./gradlew jsBrowserDevelopmentWebpack --continuous --info
+      "
+    depends_on:
+      - backend
+    networks:
+      - automan_hot_network
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: automan_phpmyadmin_hot
+    restart: always
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: automan_user
+      PMA_PASSWORD: automan_password
+    ports:
+      - "8082:80"
+    depends_on:
+      - mysql
+    networks:
+      - automan_hot_network
+
+volumes:
+  mysql_data_hot:
+
+networks:
+  automan_hot_network:
+    driver: bridge

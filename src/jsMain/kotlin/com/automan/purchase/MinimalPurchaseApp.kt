@@ -6,6 +6,151 @@ import org.w3c.dom.*
 import org.w3c.files.File
 import org.w3c.dom.events.Event
 
+// Global mutable list to store cars that have been confirmed (saved) on the C&F page
+val cnfConfirmedCars: MutableList<dynamic> = mutableListOf()
+
+// Global variable to store cars passed to C&F page from Car Booking
+var cnfPageSelectedCars: List<dynamic> = emptyList()
+
+// Global mutable list to store cars that have been confirmed (saved) on the FOB page
+val fobConfirmedCars: MutableList<dynamic> = mutableListOf()
+
+// Global variable to store cars passed to FOB page from Car Booking
+var fobPageSelectedCars: List<dynamic> = emptyList()
+
+// Global variable to store the currently selected country from the Car Booking page
+var currentSelectedCountry: String = "PAKISTAN" // Default to Pakistan
+
+// Global variable to store the country selected on the Car Booking page for C&F/FOB/Package context
+var cnfPageSelectedCountry: String = "PAKISTAN" // Default value
+
+// Global variables to store booking details for PDF generation
+var globalBookingDetails: dynamic = js("{}")
+var globalSelectedCarsForPdf: List<dynamic> = emptyList()
+var globalFreightValues: MutableMap<String, Double> = mutableMapOf()
+
+// Store booking details for PDF generation
+fun storeBookingDetailsForPdf() {
+    console.log("📋 Storing booking details for PDF generation...")
+    
+    val bookingDetails = js("{}")
+    
+    // Get form values and use fallbacks for empty strings
+    val bookingNoValue = (document.getElementById("bookingNo") as? HTMLInputElement)?.value ?: ""
+    val vesselNameValue = (document.getElementById("vesselSelect") as? HTMLSelectElement)?.selectedOptions?.item(0)?.textContent ?: ""
+    val polValue = (document.getElementById("polPort") as? HTMLSelectElement)?.selectedOptions?.item(0)?.textContent ?: ""
+    val podValue = (document.getElementById("podPort") as? HTMLInputElement)?.value ?: ""
+    val shippingDateValue = (document.getElementById("etdDate") as? HTMLInputElement)?.value ?: ""
+    val consigneeNameValue = (document.getElementById("consigneeName") as? HTMLInputElement)?.value ?: ""
+    
+    // Use fallback values for empty strings
+    bookingDetails.bookingNo = if (bookingNoValue.isNotEmpty()) bookingNoValue else "EBKG14265885"
+    bookingDetails.vesselName = if (vesselNameValue.isNotEmpty() && vesselNameValue != "Select Vessel") vesselNameValue else "MSC RICCARDA II"
+    bookingDetails.pol = if (polValue.isNotEmpty()) polValue else "HAKATA"
+    bookingDetails.pod = if (podValue.isNotEmpty()) podValue else "KARACHI"
+    bookingDetails.shippingDate = if (shippingDateValue.isNotEmpty()) shippingDateValue else "2025-09-27"
+    bookingDetails.consigneeName = if (consigneeNameValue.isNotEmpty()) consigneeNameValue else "OVERSEAS TRANSIT AGENCY (PVT) LTD."
+    bookingDetails.consigneeAddress = "1201-1203, 12TH FLOOR, Q.M.HOUSE, PLOT NO. 11/2RY9, ELLANDER ROAD, OFF.I.I CHUNDRIGAR ROAD (OPP. SHAHEEN COMPLEX), KARACHI"
+    
+    globalBookingDetails = bookingDetails
+    globalSelectedCarsForPdf = getSelectedCarsFromTable()
+    
+    console.log("✅ Booking details stored:", bookingDetails)
+    console.log("✅ Selected cars stored:", globalSelectedCarsForPdf.size)
+    console.log("🔍 DEBUG: globalBookingDetails after assignment:", globalBookingDetails)
+}
+
+// Global variable to store PDF blob
+var globalPdfBlob: dynamic = null
+
+// Show PDF download modal
+fun showPdfDownloadModal(pdfBlob: dynamic) {
+    console.log("📄 Showing PDF download modal...")
+    console.log("🔍 DEBUG: pdfBlob received:", pdfBlob)
+    
+    // Store the blob globally so it can be accessed by the event listener
+    globalPdfBlob = pdfBlob
+    console.log("🔍 DEBUG: globalPdfBlob set to:", globalPdfBlob)
+    console.log("🔍 DEBUG: Using direct parameter passing approach")
+    console.log("🚀🚀🚀 PDF MODAL FIX - CACHE BUST - 1736383000 🚀🚀🚀")
+    console.log("🔍 DEBUG: globalBookingDetails value before modal JS setup:", globalBookingDetails)
+    console.log("🔍 DEBUG: globalBookingDetails.bookingNo:", globalBookingDetails.bookingNo)
+    
+    // Extract booking number to avoid scope issues
+    val bookingNumber = globalBookingDetails.bookingNo ?: "unknown"
+    console.log("🔍 DEBUG: Extracted booking number:", bookingNumber)
+    
+    val modalHTML = """
+        <div id="pdfDownloadModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; display: flex; justify-content: center; align-items: center;">
+            <div style="background: white; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); max-width: 500px; text-align: center;">
+                <div style="margin-bottom: 30px;">
+                    <div style="width: 80px; height: 80px; background-color: #dcfce7; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 20px;">
+                        <span style="font-size: 40px;">📄</span>
+                    </div>
+                    <h3 style="margin: 0 0 15px 0; color: #374151; font-size: 24px; font-weight: 600;">PDF Generated Successfully!</h3>
+                    <p style="margin: 0; color: #6b7280; font-size: 16px; line-height: 1.5;">Your Shipping Schedule PDF is ready for download.</p>
+                </div>
+                <div style="display: flex; gap: 15px; justify-content: center;">
+                    <button id="downloadPdfBtn" style="padding: 12px 24px; background-color: #059669; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 500; display: flex; align-items: center; gap: 8px;">
+                        <span>📥</span>
+                        <span>Download PDF</span>
+                    </button>
+                    <button id="closePdfModal" style="padding: 12px 24px; background-color: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 500;">Close</button>
+                </div>
+            </div>
+        </div>
+    """
+    
+    document.body?.insertAdjacentHTML("beforeend", modalHTML)
+    
+    // Attach event listeners with a small delay to ensure DOM is ready
+    js("""
+        setTimeout(function() {
+            console.log('🔍 DEBUG: Setting up modal event listeners...');
+            
+            var downloadBtn = document.getElementById('downloadPdfBtn');
+            console.log('🔍 DEBUG: downloadPdfBtn element found:', downloadBtn);
+            if (downloadBtn) {
+                downloadBtn.addEventListener('click', function() {
+                    console.log('📥 Downloading PDF...');
+                    try {
+                        // Create download link directly with the blob
+                        var url = URL.createObjectURL(arguments[0]);
+                        var link = document.createElement('a');
+                        link.setAttribute('href', url);
+                        link.setAttribute('download', 'shipping_schedule_' + (arguments[1] || 'unknown') + '.pdf');
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+                        console.log('✅ PDF download initiated');
+                    } catch (e) {
+                        console.error('❌ Error downloading PDF:', e);
+                        alert('Error downloading PDF: ' + e.message);
+                    }
+                }.bind(null, pdfBlob, bookingNumber));
+            }
+            var closeBtn = document.getElementById('closePdfModal');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', function() {
+                    var modal = document.getElementById('pdfDownloadModal');
+                    if (modal) modal.remove();
+                });
+            }
+            var modal = document.getElementById('pdfDownloadModal');
+            if (modal) {
+                modal.addEventListener('click', function(event) {
+                    if (event.target === modal) {
+                        modal.remove();
+                    }
+                });
+            }
+        }, 100);
+    """)
+    
+    console.log("✅ PDF download modal displayed")
+}
+
 fun showClientDetailsPage(clientId: Long) {
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -37,7 +182,10 @@ fun showClientDetailsPage(clientId: Long) {
 }
 
 fun main() {
-    console.log("Main function called - VERSION 2.0")
+    console.log("🚀🚀🚀 FOB PDF FUNCTIONALITY IMPLEMENTED - CACHE BUST - 1736382000 🚀🚀🚀")
+    console.log("🔥🔥🔥 FOB PDF - CONFIRM BUTTON GENERATES PDF - CACHE BUSTED! 🔥🔥🔥")
+    console.log("💥💥💥 FOB PDF - 1736382000 - NEW CODE LOADED! 💥💥💥")
+    console.log("🎯🎯🎯 FOB PDF CACHE BUST - 1736382000 - NEW FILENAME LOADED! 🎯🎯🎯")
     val root = document.getElementById("root")!!
     console.log("Root element found: $root")
     
@@ -48,6 +196,20 @@ fun main() {
     window.asDynamic().editClientFromList = ::editClientFromList
     window.asDynamic().addClientTransaction = ::addClientTransaction
     window.asDynamic().closeEditClientModal = ::closeEditClientModal
+    
+    // Expose state persistence functions to global scope
+    window.asDynamic().saveCarBookingState = ::saveCarBookingState
+    window.asDynamic().restoreCarBookingState = ::restoreCarBookingState
+    window.asDynamic().restoreSelectedRows = ::restoreSelectedRows
+    window.asDynamic().displayPurchasesAsCars = ::displayPurchasesAsCars
+    
+    // Expose freight calculation functions to global scope
+    window.asDynamic().removeCarFromContainer = { containerId: String, chassis: String ->
+        // Get the current selected cars from the global variable
+        val selectedCars = if (cnfConfirmedCars.isNotEmpty()) cnfConfirmedCars else fobConfirmedCars
+        removeCarFromContainer(containerId, chassis, selectedCars)
+    }
+    
     
     // Expose client selection handlers used by Add/Edit forms
     window.asDynamic().handleClientSelection = { value: Any? ->
@@ -303,6 +465,7 @@ fun createApp(root: Element) {
                         <button id="newBtn" style="padding: 12px 20px; background-color: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">New+</button>
                         <button id="importBtn" style="padding: 12px 20px; background-color: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Import CSV</button>
                         <button id="rixoRequestBtn" style="padding: 12px 20px; background-color: #8e44ad; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Rixo Request</button>
+                        <button id="carBookingBtn" style="padding: 12px 20px; background-color: #17a2b8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Car Booking</button>
                         <button id="userManagementBtn" style="padding: 12px 20px; background-color: #9b59b6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Manage Users</button>
                         <button id="clientAccountsBtn" style="padding: 12px 20px; background-color: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Client Accounts</button>
                         <button id="roleRequestBtn" style="padding: 12px 20px; background-color: #ffc107; color: black; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Request Role</button>
@@ -365,6 +528,10 @@ fun createApp(root: Element) {
     
     document.getElementById("rixoRequestBtn")?.addEventListener("click", { _: Event ->
         window.location.hash = "#/rixo-transport"
+    })
+    
+    document.getElementById("carBookingBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/booking"
     })
     
     document.getElementById("rixoTransportBtn")?.addEventListener("click", { _: Event ->
@@ -464,6 +631,9 @@ fun updateContent(root: Element) {
         }
         hash.startsWith("#/rixo-transport") -> {
             showRixoRequestGeneratorPage()
+        }
+        hash.startsWith("#/booking") -> {
+            showCarBookingPage()
         }
         hash.startsWith("#/users/edit/") -> {
             removeHamburgerMenu() // Remove hamburger menu from edit user page
@@ -566,9 +736,20 @@ fun showAuthPage() {
                             <div class="input-container">
                                 <input id="su_pass" type="password" placeholder="Enter your password" class="form-input"/>
                                 <span class="input-icon">🔒</span>
-                    </div> 
+                            </div> 
                         </div>
                         
+                        <div class="form-group">
+                            <label class="form-label">Role</label>
+                            <div class="input-container">
+                                <select id="su_role" class="form-input">
+                                    <option value="VIEWER">Viewer</option>
+                                    <option value="EDITOR">Editor</option>
+                                    <option value="ADMIN">Admin</option>
+                                </select>
+                                <span class="input-icon">👤</span>
+                            </div> 
+                        </div>
                         
                         <div class="form-options">
                             <label class="checkbox-container">
@@ -763,6 +944,25 @@ fun showAuthPage() {
                 color: rgba(255, 255, 255, 0.7);
             }
             
+            /* Select dropdown styling */
+            select.form-input {
+                appearance: none;
+                -webkit-appearance: none;
+                -moz-appearance: none;
+                background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6,9 12,15 18,9'%3e%3c/polyline%3e%3c/svg%3e");
+                background-repeat: no-repeat;
+                background-position: right 12px center;
+                background-size: 16px;
+                padding-right: 40px;
+                cursor: pointer;
+            }
+            
+            select.form-input option {
+                background: #1a1a1a;
+                color: white;
+                padding: 8px;
+            }
+            
             
             .form-options {
                 display: flex;
@@ -953,11 +1153,12 @@ private fun setupAuthHandlers() {
         val email = (document.getElementById("su_email") as HTMLInputElement).value
         val name = (document.getElementById("su_name") as HTMLInputElement).value
         val pass = (document.getElementById("su_pass") as HTMLInputElement).value
-        if (email.isBlank() || name.isBlank() || pass.isBlank()) {
+        val role = (document.getElementById("su_role") as HTMLSelectElement).value
+        if (email.isBlank() || name.isBlank() || pass.isBlank() || role.isBlank()) {
             js("alert('Please fill in all fields')")
             return
         }
-        val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:email,name:name,password:pass,role:signupRole})})")
+        val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:email,name:name,password:pass,role:role})})")
         window.fetch("/api/auth/signup", body)
             .then { it.json() }
             .then { resp ->
@@ -1814,22 +2015,20 @@ fun createAddFormHTML(): String {
                 <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Basic Information</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                     <div>
-                        <label>Date</label>
+                        <label>Purchase Date</label>
                         <div style="position:relative;">
                             <input type="date" id="date" style="width:100%; padding: 8px 110px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="dateDayHint" style="position:absolute; right:12px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
                     <div>
-                        <label>Lot Number *</label>
-                        <input type="text" id="lotNumber" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label>Chassis *</label>
                         <input type="text" id="chassis" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Car Model Year</label>
+                        <label>Production Date</label>
                         <input type="text" id="carModelYear" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
@@ -1882,16 +2081,16 @@ fun createAddFormHTML(): String {
                     </div>
                 </div>
                 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Auction Information</h3>
+                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Supplier Information</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                     <div>
                         <label>Auction No</label>
                         <input type="text" id="auctionNo" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Auction house *</label>
+                        <label>Supplier Name *</label>
                         <select id="auctionName" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="handleAuctionNameChange(this.value)">
-                            <option value="">Select Auction house</option>
+                            <option value="">Select Supplier Name</option>
                         </select>
                     </div>
                     <div>
@@ -1934,7 +2133,7 @@ fun createAddFormHTML(): String {
                         <input type="text" id="clientName" placeholder="Enter client name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Country</label>
+                        <label>Target Country</label>
                         <input type="text" id="country" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
@@ -2140,6 +2339,13 @@ fun createAddFormHTML(): String {
                         <input type="text" id="roadTax" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
+                        <label>Tax Total</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="taxTotal" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="Calculated tax amount">
+                            <button type="button" id="calculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">10% Tax</button>
+                        </div>
+                    </div>
+                    <div>
                         <label>Total Price</label>
                         <input type="text" id="totalPrice" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
@@ -2262,13 +2468,13 @@ fun setupRixoDropdowns() {
             var auctionSelect = document.getElementById('auctionName');
             var editAuctionSelect = document.getElementById('editAuctionName');
             if (auctionSelect) {
-                auctionSelect.innerHTML = '<option value="">Select Auction house</option>';
+                auctionSelect.innerHTML = '<option value="">Select Supplier Name</option>';
                 auctionNames.forEach(function(auction) {
                     auctionSelect.innerHTML += '<option value="' + auction + '">' + auction + '</option>';
                 });
             }
             if (editAuctionSelect) {
-                editAuctionSelect.innerHTML = '<option value="">Select Auction house</option>';
+                editAuctionSelect.innerHTML = '<option value="">Select Supplier Name</option>';
                 auctionNames.forEach(function(auction) {
                     editAuctionSelect.innerHTML += '<option value="' + auction + '">' + auction + '</option>';
                 });
@@ -2312,9 +2518,15 @@ fun setupRixoDropdowns() {
         }
         
         function updateDropdownOptions(auctionName, typeOfVehicle, stockLocation, rixoCompany) {
-            // This function is now handled by the mapping file's autoSelectRelatedFields
-            // No need to duplicate the filtering logic here
-            console.log('updateDropdownOptions called but handled by mapping file:', auctionName, typeOfVehicle, stockLocation, rixoCompany);
+            console.log('🔄 NEW updateDropdownOptions called - CACHE BUST 1736384000:', auctionName, typeOfVehicle, stockLocation, rixoCompany);
+            
+            // Call the mapping file's autoSelectRelatedFields function
+            if (window.autoSelectRelatedFields) {
+                console.log('🔄 Calling autoSelectRelatedFields - CACHE BUST 1736384000');
+                window.autoSelectRelatedFields(auctionName, 'auctionHouse', auctionName);
+            } else {
+                console.log('❌ autoSelectRelatedFields not available - CACHE BUST 1736384000');
+            }
         }
         
         function updateDropdown(elementId, editElementId, options) {
@@ -2478,8 +2690,111 @@ fun setupRixoDropdowns() {
         window.selectRixoPrice = selectRixoPrice;
         window.selectEditRixoPrice = selectEditRixoPrice;
         
+        // Handle car picture upload
+        function handleCarPictureUpload(input) {
+            var files = input.files;
+            if (files.length === 0) return;
+            
+            console.log('📷 Uploading', files.length, 'car pictures');
+            
+            // Show progress bar
+            var progressDiv = document.getElementById('uploadProgress');
+            var progressBar = document.getElementById('progressBar');
+            var progressText = document.getElementById('progressText');
+            var previewDiv = document.getElementById('carPicturePreview');
+            
+            progressDiv.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressText.textContent = 'Preparing upload...';
+            
+            var uploadedCount = 0;
+            var totalFiles = files.length;
+            
+            // Process each file
+            for (var i = 0; i < files.length; i++) {
+                var file = files[i];
+                var index = i;
+                
+                // Validate file type
+                if (!file.type.startsWith('image/')) {
+                    console.warn('Skipping non-image file:', file.name);
+                    continue;
+                }
+                
+                // Validate file size (max 5MB)
+                if (file.size > 5 * 1024 * 1024) {
+                    alert('File ' + file.name + ' is too large. Maximum size is 5MB.');
+                    continue;
+                }
+                
+                // Create preview
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    var previewItem = document.createElement('div');
+                    previewItem.style.cssText = 'position: relative; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: white;';
+                    
+                    // Generate unique ID for this picture
+                    var pictureId = 'pic_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                    previewItem.setAttribute('data-picture-id', pictureId);
+                    previewItem.setAttribute('data-picture-data', e.target.result);
+                    
+                    var img = document.createElement('img');
+                    img.src = e.target.result;
+                    img.style.cssText = 'width: 100%; height: 150px; object-fit: cover;';
+                    
+                    var overlay = document.createElement('div');
+                    overlay.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; opacity: 0; transition: opacity 0.3s;';
+                    overlay.textContent = 'Uploading...';
+                    
+                    var deleteBtn = document.createElement('button');
+                    deleteBtn.innerHTML = '❌';
+                    deleteBtn.style.cssText = 'position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px;';
+                    deleteBtn.onclick = function() {
+                        previewItem.remove();
+                    };
+                    
+                    previewItem.appendChild(img);
+                    previewItem.appendChild(overlay);
+                    previewItem.appendChild(deleteBtn);
+                    
+                    // Show overlay on hover
+                    previewItem.onmouseenter = function() {
+                        overlay.style.opacity = '1';
+                    };
+                    previewItem.onmouseleave = function() {
+                        overlay.style.opacity = '0';
+                    };
+                    
+                    previewDiv.appendChild(previewItem);
+                    
+                    // Simulate upload progress
+                    setTimeout(function() {
+                        overlay.textContent = 'Uploaded ✓';
+                        overlay.style.background = 'rgba(0,128,0,0.7)';
+                        uploadedCount++;
+                        
+                        var progress = (uploadedCount / totalFiles) * 100;
+                        progressBar.style.width = progress + '%';
+                        progressText.textContent = 'Uploaded ' + uploadedCount + '/' + totalFiles + ' pictures';
+                        
+                        if (uploadedCount === totalFiles) {
+                            setTimeout(function() {
+                                progressDiv.style.display = 'none';
+                                progressText.textContent = 'All pictures uploaded successfully!';
+                            }, 1000);
+                        }
+                    }, 1000 + (index * 500)); // Stagger uploads
+                };
+                
+                reader.readAsDataURL(file);
+            }
+        }
+        
+        window.handleCarPictureUpload = handleCarPictureUpload;
+        
         // Set values for Edit form dropdowns
         function setEditFormValues(purchaseData) {
+            console.log('🔄 NEW setEditFormValues called - CACHE BUST 1736384000');
             if (!purchaseData) return;
             
             // Set Auction house first
@@ -2496,18 +2811,29 @@ fun setupRixoDropdowns() {
                 var editStockSelect = document.getElementById('editStockLocation');
                 if (editStockSelect && purchaseData.stockLocation) {
                     editStockSelect.value = purchaseData.stockLocation;
+                    console.log('Set edit stock location:', purchaseData.stockLocation);
                 }
                 
                 // Set Rixo Company
                 var editRixoSelect = document.getElementById('editRixoCompany');
                 if (editRixoSelect && purchaseData.rixoCompany) {
                     editRixoSelect.value = purchaseData.rixoCompany;
+                    console.log('Set edit rixo company:', purchaseData.rixoCompany);
                 }
                 
                 // Set Rixo Price
                 var editPriceInput = document.getElementById('editRixoPrice');
                 if (editPriceInput && purchaseData.rixoPrice) {
                     editPriceInput.value = purchaseData.rixoPrice;
+                    console.log('Set edit rixo price:', purchaseData.rixoPrice);
+                }
+                
+                // Set Shipment Size (Type of Vehicle)
+                var editShipmentSelect = document.getElementById('editTypeOfVehicle');
+                if (editShipmentSelect && (purchaseData.shipmentSize || purchaseData.vehicleType)) {
+                    var shipmentValue = purchaseData.shipmentSize || purchaseData.vehicleType;
+                    editShipmentSelect.value = shipmentValue;
+                    console.log('Set edit shipment size:', shipmentValue);
                 }
                 
                 // Set Rixo Requested radio button
@@ -2585,6 +2911,11 @@ fun setupAddFormListeners() {
     document.getElementById("addForm")?.addEventListener("submit", { event: Event ->
         event.preventDefault()
         handleAddPurchase()
+    })
+    
+    // Tax calculation button
+    document.getElementById("calculateTaxBtn")?.addEventListener("click", { _: Event ->
+        calculateTax("price", "auctionFee", "roadTax", "taxTotal")
     })
 
     // Hook day hints for date inputs
@@ -2677,10 +3008,48 @@ fun setupEditNumberCutListeners() {
     document.getElementById("editNumberCutHiragana")?.addEventListener("change", { _: Event -> generateEditNumberCutString() })
     document.getElementById("editNumberCutNumber2")?.addEventListener("input", { _: Event -> generateEditNumberCutString() })
 }
+
+fun calculateTax(priceFieldId: String, auctionFeeFieldId: String, roadTaxFieldId: String, taxTotalFieldId: String) {
+    try {
+        // Get values from form fields
+        val priceValue = (document.getElementById(priceFieldId) as HTMLInputElement).value.trim()
+        val auctionFeeValue = (document.getElementById(auctionFeeFieldId) as HTMLInputElement).value.trim()
+        val roadTaxValue = (document.getElementById(roadTaxFieldId) as HTMLInputElement).value.trim()
+        
+        // Helper function to extract numeric value from string (remove currency symbols, commas, etc.)
+        fun extractNumericValue(value: String): Double {
+            if (value.isBlank()) return 0.0
+            // Remove currency symbols, commas, spaces and extract only numbers and decimal point
+            val cleaned = value.replace(Regex("[^0-9.-]"), "")
+            return cleaned.toDoubleOrNull() ?: 0.0
+        }
+        
+        // Extract numeric values
+        val price = extractNumericValue(priceValue)
+        val auctionFee = extractNumericValue(auctionFeeValue)
+        val roadTax = extractNumericValue(roadTaxValue)
+        
+        // Calculate 10% tax on the sum of Price + Auction Fee + Road Tax
+        val totalBase = price + auctionFee + roadTax
+        val taxAmount = totalBase * 0.10
+        
+        // Format the result with currency symbol
+        val formattedTax = "¥${taxAmount.toInt()}"
+        
+        // Set the calculated value in the tax total field
+        (document.getElementById(taxTotalFieldId) as HTMLInputElement).value = formattedTax
+        
+        console.log("Tax calculation: Price=$price, Auction Fee=$auctionFee, Road Tax=$roadTax, Total Base=$totalBase, 10% Tax=$formattedTax")
+        
+    } catch (e: Exception) {
+        console.error("Error calculating tax:", e)
+        showMessage("Error calculating tax. Please check your input values.", "error")
+    }
+}
+
 fun handleAddPurchase() {
     val dateIso = (document.getElementById("date") as HTMLInputElement).value
     val date = formatWithWeekday(dateIso)
-    val lotNumber = (document.getElementById("lotNumber") as HTMLInputElement).value
     val chassis = (document.getElementById("chassis") as HTMLInputElement).value
     val carModelYear = (document.getElementById("carModelYear") as HTMLInputElement).value
     val brand = (document.getElementById("brand") as HTMLInputElement).value
@@ -2706,6 +3075,7 @@ fun handleAddPurchase() {
     val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement).value
     val recycleFee = (document.getElementById("recycleFee") as HTMLInputElement).value
     val roadTax = (document.getElementById("roadTax") as HTMLInputElement).value
+    val taxTotal = (document.getElementById("taxTotal") as HTMLInputElement).value
     val totalPrice = (document.getElementById("totalPrice") as HTMLInputElement).value
     val paymentDate = formatWithWeekday((document.getElementById("paymentDate") as HTMLInputElement).value)
     val rixoRequested = (document.querySelector("input[name=\"rixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
@@ -2729,7 +3099,6 @@ fun handleAddPurchase() {
     
     val purchaseData = js("{}")
     purchaseData.date = date
-    purchaseData.lotNumber = lotNumber
     purchaseData.chassis = chassis
     purchaseData.carModelYear = carModelYear
     purchaseData.brand = brand
@@ -2757,6 +3126,7 @@ fun handleAddPurchase() {
     purchaseData.auctionFee = auctionFee
     purchaseData.recycleFee = recycleFee
     purchaseData.roadTax = roadTax
+    purchaseData.taxTotal = taxTotal
     purchaseData.totalPrice = totalPrice
     purchaseData.paymentDate = paymentDate
     purchaseData.rixoRequested = rixoRequested
@@ -2802,7 +3172,7 @@ fun handleAddPurchase() {
 
 fun showEditForm(id: Long) {
     // First fetch the purchase data
-    window.fetch("/api/purchases/$id").then { response ->
+    window.fetch("/api/purchases/purchase/$id").then { response ->
         if (response.ok) {
             response.json().then { purchaseData ->
                 showEditFormWithData(purchaseData)
@@ -2827,22 +3197,20 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Basic Information</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                     <div>
-                        <label>Date</label>
+                        <label>Purchase Date</label>
                         <div style="position:relative;">
                             <input type="date" id="editDate" value="${toIsoFromLabel(purchaseData.date)}" style="width:100%; padding: 8px 110px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.date ?: ""}">
                             <span id="editDateDayHint" style="position:absolute; right:12px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
                     <div>
-                        <label>Lot Number *</label>
-                        <input type="text" id="editLotNumber" value="${purchaseData.lotNumber}" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label>Chassis *</label>
                         <input type="text" id="editChassis" value="${purchaseData.chassis}" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Car Model Year</label>
+                        <label>Production Date</label>
                         <input type="text" id="editCarModelYear" value="${purchaseData.carModelYear ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
@@ -2895,16 +3263,16 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                 </div>
                 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Auction Information</h3>
+                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Supplier Information</h3>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                     <div>
                         <label>Auction No</label>
                         <input type="text" id="editAuctionNo" value="${purchaseData.auctionNo ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Auction house *</label>
+                        <label>Supplier Name *</label>
                         <select id="editAuctionName" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="handleAuctionNameChange(this.value)">
-                            <option value="">Select Auction house</option>
+                            <option value="">Select Supplier Name</option>
                         </select>
                     </div>
                     <div>
@@ -2948,7 +3316,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <input type="text" id="editClientName" value="${purchaseData.clientName ?: ""}" placeholder="Enter client name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Country</label>
+                        <label>Target Country</label>
                         <input type="text" id="editCountry" value="${purchaseData.country ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
@@ -3154,6 +3522,13 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <input type="text" id="editRoadTax" value="${purchaseData.roadTax ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
+                        <label>Tax Total</label>
+                        <div style="display: flex; gap: 8px;">
+                            <input type="text" id="editTaxTotal" value="${purchaseData.taxTotal ?: ""}" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="Calculated tax amount">
+                            <button type="button" id="editCalculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">10% Tax</button>
+                        </div>
+                    </div>
+                    <div>
                         <label>Total Price</label>
                         <input type="text" id="editTotalPrice" value="${purchaseData.totalPrice ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
@@ -3232,6 +3607,39 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <label>Notes</label>
                     <textarea id="editNotes" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-height: 80px;">${purchaseData.notes ?: ""}</textarea>
                 </div>
+                
+                <!-- Car Pictures Section -->
+                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Car Pictures</h3>
+                <div style="margin-bottom: 20px; padding: 20px; border: 2px dashed #ddd; border-radius: 8px; background-color: #f9f9f9;">
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <label for="carPictures" style="display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background-color 0.3s;">
+                            📷 Upload Car Pictures
+                        </label>
+                        <input type="file" id="carPictures" multiple accept="image/*" style="display: none;" onchange="handleCarPictureUpload(this)">
+                    </div>
+                    
+                    <!-- Picture Preview Area -->
+                    <div id="carPicturePreview" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 20px;">
+                        <!-- Pictures will be displayed here -->
+                    </div>
+                    
+                    <!-- Upload Progress -->
+                    <div id="uploadProgress" style="display: none; margin-top: 15px;">
+                        <div style="background-color: #e9ecef; border-radius: 4px; height: 20px; overflow: hidden;">
+                            <div id="progressBar" style="background-color: #007bff; height: 100%; width: 0%; transition: width 0.3s;"></div>
+                        </div>
+                        <div id="progressText" style="text-align: center; margin-top: 5px; font-size: 14px; color: #666;"></div>
+                    </div>
+                    
+                    <!-- Existing Pictures (if any) -->
+                    <div id="existingPictures" style="margin-top: 20px;">
+                        <h4 style="color: #555; margin-bottom: 10px;">Existing Pictures:</h4>
+                        <div id="existingPicturesList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
+                            <!-- Existing pictures will be displayed here -->
+                        </div>
+                    </div>
+                </div>
+                
                 <div style="display: flex; gap: 10px;">
                     <button type="submit" style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Update</button>
                     <button type="button" id="deleteBtn" style="padding: 10px 20px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">Delete</button>
@@ -3248,6 +3656,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
     // Set edit form values after a longer delay to ensure dropdowns are fully populated
     window.setTimeout({
         setEditFormValuesFromKotlin(purchaseData)
+        // Load existing car pictures
+        loadExistingCarPictures(purchaseData)
     }, 500)
 }
 
@@ -3280,6 +3690,11 @@ fun setupEditFormListeners() {
     document.getElementById("editForm")?.addEventListener("submit", { event: Event ->
         event.preventDefault()
         handleEditPurchase()
+    })
+    
+    // Tax calculation button for edit form
+    document.getElementById("editCalculateTaxBtn")?.addEventListener("click", { _: Event ->
+        calculateTax("editPrice", "editAuctionFee", "editRoadTax", "editTaxTotal")
     })
 
     document.getElementById("deleteBtn")?.addEventListener("click", { _: Event ->
@@ -3335,7 +3750,6 @@ fun setupEditFormListeners() {
 fun handleEditPurchase() {
     val id = (document.getElementById("editId") as HTMLInputElement).value.toLong()
     val date = formatWithWeekday((document.getElementById("editDate") as HTMLInputElement).value)
-    val lotNumber = (document.getElementById("editLotNumber") as HTMLInputElement).value
     val chassis = (document.getElementById("editChassis") as HTMLInputElement).value
     val carModelYear = (document.getElementById("editCarModelYear") as HTMLInputElement).value
     val brand = (document.getElementById("editBrand") as HTMLInputElement).value
@@ -3361,6 +3775,7 @@ fun handleEditPurchase() {
     val auctionFee = (document.getElementById("editAuctionFee") as HTMLInputElement).value
     val recycleFee = (document.getElementById("editRecycleFee") as HTMLInputElement).value
     val roadTax = (document.getElementById("editRoadTax") as HTMLInputElement).value
+    val taxTotal = (document.getElementById("editTaxTotal") as HTMLInputElement).value
     val totalPrice = (document.getElementById("editTotalPrice") as HTMLInputElement).value
     val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as HTMLInputElement).value)
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
@@ -3384,7 +3799,6 @@ fun handleEditPurchase() {
     
     val purchaseData = js("{}")
     purchaseData.date = date
-    purchaseData.lotNumber = lotNumber
     purchaseData.chassis = chassis
     purchaseData.carModelYear = carModelYear
     purchaseData.brand = brand
@@ -3412,6 +3826,7 @@ fun handleEditPurchase() {
     purchaseData.auctionFee = auctionFee
     purchaseData.recycleFee = recycleFee
     purchaseData.roadTax = roadTax
+    purchaseData.taxTotal = taxTotal
     purchaseData.totalPrice = totalPrice
     purchaseData.paymentDate = paymentDate
     purchaseData.rixoRequested = rixoRequested
@@ -3433,8 +3848,16 @@ fun handleEditPurchase() {
     purchaseData.shaken = shaken
     purchaseData.numberCut = numberCutString
     
+    // Collect car pictures data
+    val carPictures = collectCarPictures()
+    purchaseData.carPictures = carPictures
+    
     console.log("Sending update data: ${JSON.stringify(purchaseData)}")
+    console.log("📷 Car pictures data:", carPictures)
     console.log("Request URL: /api/purchases/$id")
+    console.log("🔍 DEBUG: venueId = $venueId")
+    console.log("🔍 DEBUG: vehicleType = $vehicleType")
+    console.log("🔍 DEBUG: shipmentSize = ${purchaseData.shipmentSize}")
     
     // Call API to update purchase
     val requestInit = js("{}")
@@ -3462,6 +3885,92 @@ fun handleEditPurchase() {
         showMessage("Failed to update purchase: ${error.message}", "error")
     }
 }
+
+// Collect car pictures data for saving
+fun collectCarPictures(): dynamic {
+    val pictures = js("[]")
+    
+    // Get all uploaded pictures from the preview area
+    val previewDiv = document.getElementById("carPicturePreview")
+    if (previewDiv != null) {
+        val pictureElements = previewDiv.querySelectorAll("div[data-picture-id]")
+        for (i in 0 until pictureElements.length) {
+            val element = pictureElements.item(i) as HTMLElement
+            val pictureId = element.getAttribute("data-picture-id")
+            val pictureData = element.getAttribute("data-picture-data")
+            
+            if (pictureId != null && pictureData != null) {
+                val pictureObj = js("{}")
+                pictureObj.id = pictureId
+                pictureObj.data = pictureData
+                pictures.push(pictureObj)
+            }
+        }
+    }
+    
+    console.log("📷 Collected ${pictures.length} car pictures")
+    return pictures
+}
+
+// Load existing car pictures when editing
+fun loadExistingCarPictures(purchaseData: dynamic) {
+    console.log("📷 Loading existing car pictures for purchase:", purchaseData.id)
+    
+    // Check if purchase has car pictures data
+    val carPicturesJson = purchaseData.carPictures
+    if (carPicturesJson != null && carPicturesJson.toString().isNotEmpty()) {
+        try {
+            // Parse JSON string to array
+            val carPictures = js("JSON.parse(carPicturesJson)")
+            console.log("📷 Parsed car pictures:", carPictures)
+            
+            if (js("Array.isArray(carPictures)") && js("carPictures.length > 0")) {
+                console.log("📷 Found ${js("carPictures.length")} existing pictures")
+                
+                val existingPicturesList = document.getElementById("existingPicturesList")
+                if (existingPicturesList != null) {
+                    // Clear any existing content
+                    existingPicturesList.innerHTML = ""
+                    
+                    // Display each existing picture
+                    for (i in 0 until js("carPictures.length").unsafeCast<Int>()) {
+                        val picture = js("carPictures[i]")
+                        val pictureId = js("picture.id").toString()
+                        val pictureData = js("picture.data").toString()
+                        
+                        // Create picture element
+                        val pictureElement = document.createElement("div")
+                        pictureElement.setAttribute("style", "position: relative; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: white;")
+                        pictureElement.setAttribute("data-picture-id", pictureId)
+                        pictureElement.setAttribute("data-picture-data", pictureData)
+                        
+                        // Create image
+                        val img = document.createElement("img")
+                        img.setAttribute("src", pictureData)
+                        img.setAttribute("style", "width: 100%; height: 150px; object-fit: cover;")
+                        
+                        // Create delete button
+                        val deleteBtn = document.createElement("button")
+                        deleteBtn.innerHTML = "❌"
+                        deleteBtn.setAttribute("style", "position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px;")
+                        deleteBtn.setAttribute("onclick", "this.parentElement.remove();")
+                        
+                        pictureElement.appendChild(img)
+                        pictureElement.appendChild(deleteBtn)
+                        existingPicturesList.appendChild(pictureElement)
+                    }
+                }
+            } else {
+                console.log("📷 No pictures in parsed array")
+            }
+        } catch (e: Exception) {
+            console.log("📷 Error parsing car pictures JSON:", e.message)
+        }
+    } else {
+        console.log("📷 No existing pictures found")
+    }
+}
+
 fun showImportModal() {
     // Create modal overlay
     val modal = document.createElement("div")
@@ -3586,6 +4095,238 @@ fun loadPurchases() {
         showMessage("Failed to load purchases: ${'$'}errMsg", "error")
     }
 }
+// Global pagination variables
+var currentPage = 1
+var itemsPerPage = 20
+var allPurchases: Array<dynamic> = emptyArray()
+
+// Global Car Booking state persistence variables
+var carBookingFormState: dynamic = js("{}")
+var carBookingSelectedRows: Array<String> = emptyArray()
+var carBookingTableData: Array<dynamic> = emptyArray()
+var carBookingDisplayedCars: Array<dynamic> = emptyArray()
+
+fun saveCarBookingState() {
+    console.log("💾 Saving Car Booking state...")
+    
+    // Check if we're on Car Booking page (has carSelectionTableBody)
+    val carSelectionTableBodyEl = document.getElementById("carSelectionTableBody")
+    val isOnCarBookingPage = carSelectionTableBodyEl != null
+    
+    console.log("🔍 Current page context - isOnCarBookingPage: $isOnCarBookingPage")
+    
+    // Only save form state if we're on the Car Booking page
+    if (isOnCarBookingPage) {
+        console.log("🔍 On Car Booking page - saving form state...")
+        
+        // Debug: Check if form elements exist and their current values
+        val consigneeCountryEl = document.getElementById("consigneeCountry") as? HTMLSelectElement
+        val consigneeNameEl = document.getElementById("consigneeName") as? HTMLInputElement
+        val etdDateEl = document.getElementById("etdDate") as? HTMLInputElement
+        val polPortEl = document.getElementById("polPort") as? HTMLSelectElement
+        val podPortEl = document.getElementById("podPort") as? HTMLInputElement
+        val bookingNoEl = document.getElementById("bookingNo") as? HTMLInputElement
+        val vesselSelectEl = document.getElementById("vesselSelect") as? HTMLSelectElement
+        val chassisSelectEl = document.getElementById("chassisSelect") as? HTMLSelectElement
+        
+        console.log("🔍 Form elements found:")
+        console.log("  - consigneeCountry: ${consigneeCountryEl?.value ?: "null"}")
+        console.log("  - consigneeName: ${consigneeNameEl?.value ?: "null"}")
+        console.log("  - etdDate: ${etdDateEl?.value ?: "null"}")
+        console.log("  - polPort: ${polPortEl?.value ?: "null"}")
+        console.log("  - podPort: ${podPortEl?.value ?: "null"}")
+        console.log("  - bookingNo: ${bookingNoEl?.value ?: "null"}")
+        console.log("  - vesselSelect: ${vesselSelectEl?.value ?: "null"}")
+        console.log("  - chassisSelect: ${chassisSelectEl?.value ?: "null"}")
+        
+        // Save form field values
+        carBookingFormState = js("{}")
+        carBookingFormState.consigneeCountry = consigneeCountryEl?.value ?: ""
+        carBookingFormState.consigneeName = consigneeNameEl?.value ?: ""
+        carBookingFormState.etdDate = etdDateEl?.value ?: ""
+        carBookingFormState.polPort = polPortEl?.value ?: ""
+        carBookingFormState.podPort = podPortEl?.value ?: ""
+        carBookingFormState.bookingNo = bookingNoEl?.value ?: ""
+        carBookingFormState.vesselSelect = vesselSelectEl?.value ?: ""
+        carBookingFormState.chassisSelect = chassisSelectEl?.value ?: ""
+        
+        console.log("🔍 Form state being saved:", carBookingFormState)
+    } else {
+        console.log("🔍 Not on Car Booking page - preserving existing form state")
+        console.log("🔍 Existing form state:", carBookingFormState)
+    }
+    
+    // Save selected rows - handle different page contexts
+    carBookingSelectedRows = emptyArray()
+    
+    // Check if we're on Car Booking page (has carSelectionTableBody)
+    val carSelectionTableBodyEl2 = document.getElementById("carSelectionTableBody")
+    if (carSelectionTableBodyEl2 != null) {
+        // We're on Car Booking page - get selected rows from checkboxes
+        val checkboxes = document.querySelectorAll("#carSelectionTableBody input[type='checkbox']:checked")
+        console.log("🔍 Found ${checkboxes.length} checked checkboxes on Car Booking page")
+        for (i in 0 until checkboxes.length) {
+            val checkbox = checkboxes.item(i) as HTMLInputElement
+            val chassis = checkbox.getAttribute("data-chassis")
+            console.log("🔍 Checkbox $i: chassis = $chassis, checked = ${checkbox.checked}")
+            if (chassis != null) {
+                carBookingSelectedRows += chassis
+            }
+        }
+    } else {
+        // We're on C&F or Package page - use stored selected cars
+        console.log("🔍 Not on Car Booking page - using stored selected cars")
+        carBookingSelectedRows = cnfPageSelectedCars.map { it.chassis }.toTypedArray()
+        console.log("🔍 Using ${carBookingSelectedRows.size} stored selected cars:", carBookingSelectedRows.contentToString())
+    }
+    
+    // Save table data - both displayed cars and selected cars
+    carBookingTableData = getSelectedCarsFromTable().toTypedArray()
+    
+    console.log("✅ Car Booking state saved:", carBookingFormState)
+    console.log("✅ Selected rows saved:", carBookingSelectedRows.size)
+    console.log("✅ Table data saved:", carBookingTableData.size)
+    console.log("✅ Displayed cars saved:", carBookingDisplayedCars.size)
+}
+
+// Save booking selection state (C&F or FOB)
+fun saveBookingSelectionState(selection: String) {
+    console.log("💾 Saving booking selection state: $selection")
+    window.localStorage.setItem("bookingSelection", selection)
+}
+
+// Restore booking selection state
+fun restoreBookingSelectionState() {
+    console.log("🔄 Restoring booking selection state...")
+    val savedSelection = window.localStorage.getItem("bookingSelection")
+    console.log("🔍 Saved selection:", savedSelection)
+    
+    if (savedSelection != null) {
+        val cnfCheckbox = document.getElementById("cnfCheckbox") as HTMLInputElement?
+        val fobCheckbox = document.getElementById("fobCheckbox") as HTMLInputElement?
+        
+        when (savedSelection) {
+            "cnf" -> {
+                cnfCheckbox?.checked = true
+                fobCheckbox?.checked = false
+                console.log("✅ C&F checkbox restored as checked")
+            }
+            "fob" -> {
+                fobCheckbox?.checked = true
+                cnfCheckbox?.checked = false
+                console.log("✅ FOB checkbox restored as checked")
+            }
+        }
+    }
+}
+
+fun restoreCarBookingState() {
+    console.log("🔄 Restoring Car Booking state...")
+    console.log("🔍 Form state to restore:", carBookingFormState)
+    
+    // Debug: Check if form elements exist before restoring
+    val consigneeCountryEl = document.getElementById("consigneeCountry") as? HTMLSelectElement
+    val consigneeNameEl = document.getElementById("consigneeName") as? HTMLInputElement
+    val etdDateEl = document.getElementById("etdDate") as? HTMLInputElement
+    val polPortEl = document.getElementById("polPort") as? HTMLSelectElement
+    val podPortEl = document.getElementById("podPort") as? HTMLInputElement
+    val bookingNoEl = document.getElementById("bookingNo") as? HTMLInputElement
+    val vesselSelectEl = document.getElementById("vesselSelect") as? HTMLSelectElement
+    val chassisSelectEl = document.getElementById("chassisSelect") as? HTMLSelectElement
+    
+    console.log("🔍 Form elements found for restoration:")
+    console.log("  - consigneeCountry: ${consigneeCountryEl != null}")
+    console.log("  - consigneeName: ${consigneeNameEl != null}")
+    console.log("  - etdDate: ${etdDateEl != null}")
+    console.log("  - polPort: ${polPortEl != null}")
+    console.log("  - podPort: ${podPortEl != null}")
+    console.log("  - bookingNo: ${bookingNoEl != null}")
+    console.log("  - vesselSelect: ${vesselSelectEl != null}")
+    console.log("  - chassisSelect: ${chassisSelectEl != null}")
+    
+    // Restore form field values
+    consigneeCountryEl?.value = carBookingFormState.consigneeCountry ?: ""
+    consigneeNameEl?.value = carBookingFormState.consigneeName ?: ""
+    etdDateEl?.value = carBookingFormState.etdDate ?: ""
+    polPortEl?.value = carBookingFormState.polPort ?: ""
+    podPortEl?.value = carBookingFormState.podPort ?: ""
+    bookingNoEl?.value = carBookingFormState.bookingNo ?: ""
+    vesselSelectEl?.value = carBookingFormState.vesselSelect ?: ""
+    chassisSelectEl?.value = carBookingFormState.chassisSelect ?: ""
+    
+    console.log("🔍 Form fields restored - Country: ${carBookingFormState.consigneeCountry}, POL: ${carBookingFormState.polPort}")
+    console.log("🔍 After restoration - Country: ${consigneeCountryEl?.value}, POL: ${polPortEl?.value}")
+    
+    // Restore chassis dropdown first
+    console.log("🔄 Restoring chassis dropdown...")
+    loadFilteredChassis()
+    
+    // Restore displayed cars first, then selected rows
+    if (carBookingDisplayedCars.isNotEmpty()) {
+        console.log("🔄 Restoring displayed cars:", carBookingDisplayedCars.size)
+        displayPurchasesAsCars(carBookingDisplayedCars)
+        
+        // Restore selected rows after a longer delay to ensure table is fully rendered
+        js("setTimeout(function() { window.restoreSelectedRows(); }, 500)")
+            } else {
+        console.log("⚠️ No displayed cars to restore")
+    }
+    
+    console.log("✅ Car Booking state restored")
+}
+
+fun restoreSelectedRows() {
+    console.log("🔄 Restoring selected rows...")
+    console.log("🔍 carBookingSelectedRows contains:", carBookingSelectedRows.contentToString())
+    
+    // Check if table body exists and has rows
+    val tableBody = document.getElementById("carSelectionTableBody")
+    if (tableBody == null) {
+        console.log("❌ Table body not found, retrying in 200ms...")
+        js("setTimeout(function() { window.restoreSelectedRows(); }, 200)")
+        return
+    }
+    
+    // Clear all checkboxes first
+    val allCheckboxes = document.querySelectorAll("#carSelectionTableBody input[type='checkbox']")
+    console.log("🔍 Found ${allCheckboxes.length} total checkboxes to clear")
+    
+    if (allCheckboxes.length == 0) {
+        console.log("❌ No checkboxes found in table, retrying in 200ms...")
+        js("setTimeout(function() { window.restoreSelectedRows(); }, 200)")
+        return
+    }
+    
+    for (i in 0 until allCheckboxes.length) {
+        val checkbox = allCheckboxes.item(i) as HTMLInputElement
+        checkbox.checked = false
+    }
+    
+    // Check the previously selected rows
+    var restoredCount = 0
+    for (chassis in carBookingSelectedRows) {
+        console.log("🔍 Looking for checkbox with chassis: $chassis")
+        val checkbox = document.querySelector("#carSelectionTableBody input[data-chassis='$chassis']") as? HTMLInputElement
+        if (checkbox != null) {
+            checkbox.checked = true
+            restoredCount++
+            console.log("✅ Restored checkbox for chassis: $chassis")
+        } else {
+            console.log("❌ Checkbox not found for chassis: $chassis")
+            // Debug: List all available checkboxes
+            val allChassisCheckboxes = document.querySelectorAll("#carSelectionTableBody input[data-chassis]")
+            console.log("🔍 Available checkboxes in table:")
+            for (j in 0 until allChassisCheckboxes.length) {
+                val cb = allChassisCheckboxes.item(j) as HTMLInputElement
+                val cbChassis = cb.getAttribute("data-chassis")
+                console.log("  - Checkbox $j: chassis = $cbChassis")
+            }
+        }
+    }
+    
+    console.log("✅ Selected rows restored: $restoredCount out of ${carBookingSelectedRows.size}")
+}
+
 fun displayPurchases(purchases: dynamic) {
     val table = document.getElementById("purchaseTable")!!
     
@@ -3598,18 +4339,36 @@ fun displayPurchases(purchases: dynamic) {
         return
     }
     
+    // Store all purchases globally for pagination
+    allPurchases = purchases as Array<dynamic>
+    currentPage = 1 // Reset to first page when new data is loaded
+    
+    displayPurchasesWithPagination()
+}
+
+fun displayPurchasesWithPagination() {
+    val table = document.getElementById("purchaseTable")!!
+    
+    if (allPurchases.isEmpty()) {
+        table.innerHTML = """
+            <div style="text-align: center; color: #666; padding: 40px;">
+                No purchases found. Click the menu button (☰) in the top-left corner to add a purchase or import data.
+            </div>
+        """
+        return
+    }
+    
     val selectedColumns = getSelectedColumns()
     val columnLabels = mapOf(
-        "date" to "Date",
-        "lotNumber" to "Lot Number", 
+        "date" to "Purchase Date",
         "chassis" to "Chassis",
         "carName" to "Car Name",
-        "auctionHouse" to "Auction House",
+        "auctionHouse" to "Supplier Name",
         "stockLocation" to "Stock Location",
         "clientName" to "Client Name",
         "rixoCompany" to "Rixo Company",
         "price" to "Price",
-        "carModelYear" to "Car Model Year",
+        "carModelYear" to "Production Date",
         "brand" to "Brand",
         "grade" to "Grade",
         "rank" to "Rank",
@@ -3621,7 +4380,7 @@ fun displayPurchases(purchases: dynamic) {
         "distance" to "Distance",
         "options" to "Options",
         "auctionNo" to "Auction No",
-        "country" to "Country",
+        "country" to "Target Country",
         "auctionFee" to "Auction Fee",
         "recycleFee" to "Recycle Fee",
         "roadTax" to "Road Tax",
@@ -3642,6 +4401,13 @@ fun displayPurchases(purchases: dynamic) {
         "commission" to "Commission",
         "repairCompany" to "Repair Company",
         "repairCharges" to "Repair Charges",
+        "venueId" to "Venue ID",
+        "shipmentSize" to "Shipment Size",
+        "numberCut" to "Number Cut",
+        "taxTotal" to "Tax Total",
+        "profit" to "Profit",
+        "packagePrice" to "Package Price",
+        "bookingId" to "Booking ID",
         "notes" to "Notes"
     )
     
@@ -3709,9 +4475,17 @@ fun displayPurchases(purchases: dynamic) {
             <tbody>
     """)
     
-    val purchasesArray = purchases as Array<dynamic>
-    for (i in 0 until purchasesArray.size) {
-        val purchase = purchasesArray[i]
+    // Calculate pagination
+    val totalItems = allPurchases.size
+    val totalPages = kotlin.math.ceil(totalItems.toDouble() / itemsPerPage).toInt()
+    val startIndex = (currentPage - 1) * itemsPerPage
+    val endIndex = kotlin.math.min(startIndex + itemsPerPage, totalItems)
+    
+    // Get current page data
+    val currentPageData = allPurchases.sliceArray(startIndex until endIndex)
+    
+    for (i in 0 until currentPageData.size) {
+        val purchase = currentPageData[i]
         tableHTML.append("""
             <tr style="border-bottom: 1px solid #f0f0f0;">
                 <td style="padding: 12px; text-align: center;">
@@ -3739,7 +4513,6 @@ fun displayPurchases(purchases: dynamic) {
         selectedColumns.forEach { columnKey ->
             val value = when (columnKey) {
                 "date" -> formatWithWeekday(purchase.date ?: "")
-                "lotNumber" -> purchase.lotNumber ?: ""
                 "chassis" -> purchase.chassis ?: ""
                 "carName" -> purchase.carName ?: ""
                 "auctionHouse" -> purchase.auctionHouse ?: ""
@@ -3780,6 +4553,21 @@ fun displayPurchases(purchases: dynamic) {
                 "commission" -> purchase.commission ?: ""
                 "repairCompany" -> purchase.repairCompany ?: ""
                 "repairCharges" -> purchase.repairCharges ?: ""
+                "venueId" -> {
+                    val venueIdValue = purchase.venueId ?: ""
+                    console.log("🔍 DEBUG: venueId for ${purchase.chassis} = '$venueIdValue'")
+                    venueIdValue
+                }
+                "shipmentSize" -> {
+                    val shipmentSizeValue = purchase.shipmentSize ?: ""
+                    console.log("🔍 DEBUG: shipmentSize for ${purchase.chassis} = '$shipmentSizeValue'")
+                    shipmentSizeValue
+                }
+                "numberCut" -> purchase.numberCut ?: ""
+                "taxTotal" -> purchase.taxTotal ?: ""
+                "profit" -> purchase.profit ?: ""
+                "packagePrice" -> purchase.packagePrice ?: ""
+                "bookingId" -> purchase.bookingId ?: ""
                 "notes" -> purchase.notes ?: ""
                 else -> ""
             }
@@ -3794,6 +4582,9 @@ fun displayPurchases(purchases: dynamic) {
         </table>
     """)
     
+    // Add pagination controls
+    tableHTML.append(generatePaginationHTML(totalPages, totalItems))
+    
     table.innerHTML = tableHTML.toString()
     
     // Add event listeners for edit and delete buttons
@@ -3806,6 +4597,9 @@ fun displayPurchases(purchases: dynamic) {
             window.location.hash = "#/edit/$id"
         })
     }
+    
+    // Add pagination event listeners
+    addPaginationEventListeners(totalPages)
     
     val deleteButtons = document.querySelectorAll(".delete-btn")
     for (i in 0 until deleteButtons.length) {
@@ -3827,6 +4621,73 @@ fun displayPurchases(purchases: dynamic) {
     
     // Add event listeners for date filter
     setupDateFilter()
+}
+
+fun generatePaginationHTML(totalPages: Int, totalItems: Int): String {
+    if (totalPages <= 1) return ""
+    
+    val startItem = (currentPage - 1) * itemsPerPage + 1
+    val endItem = kotlin.math.min(currentPage * itemsPerPage, totalItems)
+    
+    return """
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
+            <div style="color: #6c757d; font-size: 14px;">
+                Showing $startItem to $endItem of $totalItems entries
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <label style="font-size: 14px; color: #495057;">Rows per page:</label>
+                    <select id="itemsPerPageSelect" style="padding: 4px 8px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px;">
+                        <option value="10" ${if (itemsPerPage == 10) "selected" else ""}>10</option>
+                        <option value="20" ${if (itemsPerPage == 20) "selected" else ""}>20</option>
+                        <option value="50" ${if (itemsPerPage == 50) "selected" else ""}>50</option>
+                        <option value="100" ${if (itemsPerPage == 100) "selected" else ""}>100</option>
+                    </select>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px;">
+                    <button id="prevPage" ${if (currentPage <= 1) "disabled" else ""} 
+                            style="padding: 6px 12px; border: 1px solid #ced4da; background: ${if (currentPage <= 1) "#e9ecef" else "white"}; 
+                                   color: ${if (currentPage <= 1) "#6c757d" else "#495057"}; border-radius: 4px; cursor: ${if (currentPage <= 1) "not-allowed" else "pointer"}; font-size: 14px;">
+                        Previous
+                    </button>
+                    <span style="padding: 6px 12px; font-size: 14px; color: #495057;">
+                        Page $currentPage of $totalPages
+                    </span>
+                    <button id="nextPage" ${if (currentPage >= totalPages) "disabled" else ""} 
+                            style="padding: 6px 12px; border: 1px solid #ced4da; background: ${if (currentPage >= totalPages) "#e9ecef" else "white"}; 
+                                   color: ${if (currentPage >= totalPages) "#6c757d" else "#495057"}; border-radius: 4px; cursor: ${if (currentPage >= totalPages) "not-allowed" else "pointer"}; font-size: 14px;">
+                        Next
+                    </button>
+                </div>
+            </div>
+        </div>
+    """
+}
+
+fun addPaginationEventListeners(totalPages: Int) {
+    // Items per page change
+    document.getElementById("itemsPerPageSelect")?.addEventListener("change", { event ->
+        val select = event.target as HTMLSelectElement
+        itemsPerPage = select.value.toInt()
+        currentPage = 1 // Reset to first page
+        displayPurchasesWithPagination()
+    })
+    
+    // Previous page button
+    document.getElementById("prevPage")?.addEventListener("click", { _ ->
+        if (currentPage > 1) {
+            currentPage--
+            displayPurchasesWithPagination()
+        }
+    })
+    
+    // Next page button
+    document.getElementById("nextPage")?.addEventListener("click", { _ ->
+        if (currentPage < totalPages) {
+            currentPage++
+            displayPurchasesWithPagination()
+        }
+    })
 }
 
 fun setupSortableHeaders() {
@@ -4221,13 +5082,12 @@ fun showMissingDataModal(purchases: List<dynamic>) {
     
     for (purchase in purchases) {
         val id = js("purchase.id")
-        val lotNumber = js("purchase.lotNumber")
         val chasis = js("purchase.chassis")
         val missingFields = js("purchase.missingFields") as List<String>
         
         modalContent.append("""
             <div style="border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 4px;">
-                <h4>Purchase: Lot ${lotNumber} - ${chasis}</h4>
+                <h4>Purchase: ${chasis}</h4>
         """)
         
         for (field in missingFields) {
@@ -4552,11 +5412,10 @@ fun showInvoicePage() {
                     sb.append("<h3>Fill Missing Rixo Data</h3>")
                     for (p in purchases) {
                         val id = js("p.id")
-                        val lotNumber = js("p.lotNumber")
                         val chassis = js("p.chassis")
                         val missingFields = js("p.missingFields") as Array<dynamic>
                         sb.append("<div style=\"border:1px solid #e5e7eb; padding:12px; border-radius:8px; margin:10px 0; background:#fff;\">")
-                        sb.append("<h4 style=\"margin:0 0 10px 0;\">Purchase: Lot "+lotNumber+" - "+chassis+"</h4>")
+                        sb.append("<h4 style=\"margin:0 0 10px 0;\">Purchase: "+chassis+"</h4>")
                         for (f in missingFields) {
                             val field = f as String
                             val label = when(field) {
@@ -5097,11 +5956,10 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
                         </label>
                     </th>
                     <th style="width: 50px;"></th>
-                    <th>Lot</th>
                     <th>Chassis</th>
                     <th>Year</th>
                     <th>Car</th>
-                    <th>Client</th>
+                    <th>Supplier Name</th>
                     <th>Stock</th>
                     <th>Venue ID</th>
                     <th>Number Cut</th>
@@ -5112,11 +5970,10 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
     
     purchases.forEach { purchase ->
         val id = js("purchase.id").toString()
-        val lotNumber = js("purchase.lotNumber")?.toString() ?: ""
         val chassis = js("purchase.chassis")?.toString() ?: ""
         val year = js("purchase.carModelYear")?.toString() ?: ""
         val carName = js("purchase.carName")?.toString() ?: ""
-        val clientName = js("purchase.clientName")?.toString() ?: ""
+        val auctionHouse = js("purchase.auctionHouse")?.toString() ?: ""
         val stockLocation = js("purchase.stockLocation")?.toString() ?: ""
         val venueId = js("purchase.venueId")?.toString() ?: ""
         val numberCut = js("purchase.numberCut")?.toString() ?: ""
@@ -5136,11 +5993,10 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
                         </svg>
                     </button>
                 </td>
-                <td>$lotNumber</td>
                 <td>$chassis</td>
                 <td>$year</td>
                 <td>$carName</td>
-                <td>$clientName</td>
+                <td>$auctionHouse</td>
                 <td>$stockLocation</td>
                 <td>$venueId</td>
                 <td>$numberCut</td>
@@ -5230,7 +6086,7 @@ fun updateSelectAllRixoCheckbox() {
 // Show edit modal for a Rixo row
 fun showRixoEditModal(purchaseId: Long) {
     // Fetch the purchase data first
-    window.fetch("/api/purchases/$purchaseId")
+    window.fetch("/api/purchases/purchase/$purchaseId")
         .then { response -> response.json() }
         .then { purchaseData ->
             createRixoEditModal(purchaseData)
@@ -5255,8 +6111,6 @@ fun createRixoEditModal(purchaseData: dynamic) {
                     
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                         <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Lot Number</label>
-                            <input type="text" id="rixoEditLotNumber" value="${purchaseData.lotNumber ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
                         </div>
                         <div>
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Chassis</label>
@@ -5277,8 +6131,8 @@ fun createRixoEditModal(purchaseData: dynamic) {
                     
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                         <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Client Name</label>
-                            <input type="text" id="rixoEditClientName" value="${purchaseData.clientName ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Supplier Name</label>
+                            <input type="text" id="rixoEditAuctionHouse" value="${purchaseData.auctionHouse ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
                         </div>
                         <div>
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Stock Location</label>
@@ -5545,11 +6399,10 @@ fun setupRixoModalNumberCutListeners() {
 
 fun handleRixoEditSubmit() {
     val id = (document.getElementById("rixoEditId") as HTMLInputElement).value.toLong()
-    val lotNumber = (document.getElementById("rixoEditLotNumber") as HTMLInputElement).value
     val chassis = (document.getElementById("rixoEditChassis") as HTMLInputElement).value
     val carModelYear = (document.getElementById("rixoEditCarModelYear") as HTMLInputElement).value
     val carName = (document.getElementById("rixoEditCarName") as HTMLInputElement).value
-    val clientName = (document.getElementById("rixoEditClientName") as HTMLInputElement).value
+    val auctionHouse = (document.getElementById("rixoEditAuctionHouse") as HTMLInputElement).value
     val stockLocation = (document.getElementById("rixoEditStockLocation") as HTMLInputElement).value
     val venueId = (document.getElementById("rixoEditVenueId") as HTMLInputElement).value
     val numberCut = (document.getElementById("rixoEditNumberCut") as HTMLInputElement).value
@@ -5557,11 +6410,10 @@ fun handleRixoEditSubmit() {
     val numberCutString = (document.getElementById("rixoEditNumberCutString") as HTMLInputElement).value
     
     val updateData = js("{}")
-    updateData.lotNumber = lotNumber
     updateData.chassis = chassis
     updateData.carModelYear = carModelYear
     updateData.carName = carName
-    updateData.clientName = clientName
+    updateData.auctionHouse = auctionHouse
     updateData.stockLocation = stockLocation
     updateData.venueId = venueId
     updateData.numberCut = if (numberCutString.isNotEmpty()) numberCutString else numberCut
@@ -5642,10 +6494,68 @@ fun generateRixoRequestPdf() {
                     }
                 }
                 
-                // Generate PDF with selected data and update status after printing
-                generateRixoRequestPdfDocument(selectedPurchases, buyingDate, rixoCompany, headMessage, footerMessage, extraMessage, contactDetails, selectedIds)
+                // Generate PDF using backend API
+                generateRixoRequestPdfViaBackend(selectedPurchases, buyingDate, rixoCompany, headMessage, footerMessage, extraMessage, contactDetails, selectedIds)
             }
         }
+    }
+}
+
+// Generate PDF using backend API
+fun generateRixoRequestPdfViaBackend(purchases: List<dynamic>, buyingDate: String, rixoCompany: String, headMessage: String, footerMessage: String, extraMessage: String, contactDetails: String, selectedIds: List<Long>) {
+    console.log("🔧 [DEBUG] generateRixoRequestPdfViaBackend called with selectedIds:", selectedIds)
+    
+    // Prepare transport data
+    val transportData = js("{}")
+    transportData.rixoCompany = rixoCompany
+    transportData.buyingDate = buyingDate
+    transportData.headMessage = headMessage
+    transportData.footerMessage = footerMessage
+    transportData.extraMessage = extraMessage
+    transportData.contactDetails = contactDetails
+    
+    // Prepare request body
+    val requestBody = js("{}")
+    val jsArray = js("[]")
+    selectedIds.forEach { id ->
+        jsArray.push(id.toInt())
+    }
+    requestBody.ids = jsArray
+    requestBody.transportData = transportData
+    
+    val requestInit = js("{}")
+    requestInit.method = "POST"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(requestBody)
+    
+    console.log("🔧 [DEBUG] Calling backend API with requestBody:", requestBody)
+    
+    // Call backend API
+    window.fetch("/api/purchases/rixo-transport-pdf", requestInit).then { response ->
+        if (response.ok) {
+            response.blob().then { blob ->
+                // Create download link
+                val url = js("URL.createObjectURL(blob)")
+                val a = document.createElement("a") as HTMLAnchorElement
+                a.href = url
+                a.setAttribute("download", "rixo-transport-${js("Date.now()")}.pdf")
+                document.body?.appendChild(a)
+                a.click()
+                document.body?.removeChild(a)
+                js("URL.revokeObjectURL(url)")
+                
+                // Update rixoRequested status
+                updateRixoRequestedStatus(selectedIds)
+            }
+        } else {
+            console.error("❌ PDF generation failed:", response.status, response.statusText)
+            showMessage("PDF generation failed: ${response.status} ${response.statusText}", "error")
+        }
+    }.catch { error ->
+        console.error("❌ PDF generation error:", error)
+        showMessage("PDF generation error: $error", "error")
     }
 }
 
@@ -5836,7 +6746,6 @@ fun generateTableRows(purchases: List<dynamic>, formattedDate: String): String {
     val rows = StringBuilder()
     
     for (purchase in purchases) {
-        val lotNumber = js("purchase.lotNumber")?.toString() ?: ""
         val chassis = js("purchase.chassis")?.toString() ?: ""
         val carModelYear = js("purchase.carModelYear")?.toString() ?: ""
         val carName = js("purchase.carName")?.toString() ?: ""
@@ -5848,7 +6757,6 @@ fun generateTableRows(purchases: List<dynamic>, formattedDate: String): String {
         rows.append("""
             <tr>
                 <td>${formattedDate}</td>
-                <td>${lotNumber}</td>
                 <td>${chassis}</td>
                 <td>${carModelYear}</td>
                 <td>${carName}</td>
@@ -5948,8 +6856,7 @@ fun loadSelectedCarsForRixoTransport(selectedIds: List<Long>) {
                     if (selectedIds.contains(id)) {
                         val chassis = js("purchase.chassis")?.toString() ?: ""
                         val carName = js("purchase.carName")?.toString() ?: ""
-                        val lotNumber = js("purchase.lotNumber")?.toString() ?: ""
-                        selectedCars.add("$chassis - $carName (Lot: $lotNumber)")
+                        selectedCars.add("$chassis - $carName")
                         
                         // Determine which fields are actually missing
                         val missingFields = mutableListOf<String>()
@@ -6006,11 +6913,10 @@ fun renderMissingDataForRixoTransport(missingPurchases: List<dynamic>) {
     for (purchase in missingPurchases) {
         val id = js("purchase.id").toString()
         val chassis = js("purchase.chassis")?.toString() ?: ""
-        val lotNumber = js("purchase.lotNumber")?.toString() ?: ""
         val missingFields = js("purchase.missingFields") as Array<dynamic>
         
         sb.append("<div style=\"margin-bottom: 20px; padding: 15px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb;\">")
-        sb.append("<h4 style=\"margin: 0 0 10px 0; color: #111827;\">Purchase: Lot $lotNumber - $chassis</h4>")
+        sb.append("<h4 style=\"margin: 0 0 10px 0; color: #111827;\">Purchase: $chassis</h4>")
         
         for (field in missingFields) {
             val fieldName = field as String
@@ -8959,16 +9865,15 @@ private fun populateColumnCheckboxes(selectedColumns: Set<String>) {
     if (container == null) return
     
     val allColumns = mapOf(
-        "date" to "Date",
-        "lotNumber" to "Lot Number", 
+        "date" to "Purchase Date",
         "chassis" to "Chassis",
         "carName" to "Car Name",
-        "auctionHouse" to "Auction House",
+        "auctionHouse" to "Supplier Name",
         "stockLocation" to "Stock Location",
         "clientName" to "Client Name",
         "rixoCompany" to "Rixo Company",
         "price" to "Price",
-        "carModelYear" to "Car Model Year",
+        "carModelYear" to "Production Date",
         "brand" to "Brand",
         "grade" to "Grade",
         "rank" to "Rank",
@@ -8980,7 +9885,7 @@ private fun populateColumnCheckboxes(selectedColumns: Set<String>) {
         "distance" to "Distance",
         "options" to "Options",
         "auctionNo" to "Auction No",
-        "country" to "Country",
+        "country" to "Target Country",
         "auctionFee" to "Auction Fee",
         "recycleFee" to "Recycle Fee",
         "roadTax" to "Road Tax",
@@ -9001,6 +9906,13 @@ private fun populateColumnCheckboxes(selectedColumns: Set<String>) {
         "commission" to "Commission",
         "repairCompany" to "Repair Company",
         "repairCharges" to "Repair Charges",
+        "venueId" to "Venue ID",
+        "shipmentSize" to "Shipment Size",
+        "numberCut" to "Number Cut",
+        "taxTotal" to "Tax Total",
+        "profit" to "Profit",
+        "packagePrice" to "Package Price",
+        "bookingId" to "Booking ID",
         "notes" to "Notes"
     )
     
@@ -9056,7 +9968,7 @@ private fun getSelectedColumns(): Set<String> {
 }
 
 private fun getDefaultColumns(): Set<String> {
-    return setOf("date", "lotNumber", "chassis", "carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany", "price")
+    return setOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany", "price")
 }
 
 private fun saveSelectedColumns(columns: Set<String>) {
@@ -9102,5 +10014,2898 @@ private fun exposeColumnFilterFunctions() {
         window.asDynamic().updateColumnSelection = { updateColumnSelection() }
     } catch (e: dynamic) {
         console.log("Error exposing column filter functions:", e)
+        }
+}
+
+// Car Booking Page - Main booking interface
+fun showCarBookingPage() {
+    try {
+        console.log("=== showCarBookingPage() function called ===")
+        val content = document.getElementById("content") ?: return
+    
+    content.innerHTML = """
+        <div style="width: 100%; min-height: calc(100vh - 140px); padding: 20px; box-sizing: border-box;">
+            <!-- Header -->
+            <div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e5e7eb;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <h1 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">AUTOMAN | CREATE SHIPPING SCHEDULE</h1>
+                      <div style="display: flex; align-items: center; gap: 16px;">
+                          <button id="purchaseListBtn" style="padding: 8px 16px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">📋 Purchase List</button>
+                      </div>
+                </div>
+            </div>
+            
+            <!-- Main Content Container -->
+            <div style="background: white; border-radius: 12px; padding: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e5e7eb;">
+                <div style="display: flex; gap: 30px; min-height: 600px;">
+                    
+                    <!-- Left Section: BOOKING DETAILS -->
+                    <div style="flex: 1; padding-right: 20px; border-right: 2px solid #e5e7eb;">
+                        <h2 style="margin: 0 0 24px 0; color: #111827; font-size: 20px; font-weight: 700; text-transform: uppercase;">BOOKING DETAILS</h2>
+                        
+                        <!-- CONSIGNEE -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">CONSIGNEE:</label>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <span style="color: #6b7280; font-size: 16px;">👤</span>
+                                <select id="consigneeCountry" style="flex: 1; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                    <option value="">Select Country</option>
+                                </select>
+                                <span style="color: #6b7280; font-size: 16px; cursor: pointer;">✏️</span>
+                            </div>
+                            <input type="text" id="consigneeName" placeholder="(CONSIGNEE NAME)" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                        </div>
+                        
+                        <!-- ETD -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">ETD:</label>
+                            <input type="date" id="etdDate" placeholder="ESTIMATED SHIPPING DATE" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; color: #000000;">
+                        </div>
+                        
+                        <!-- POL -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">POL:</label>
+                            <select id="polPort" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; color: #000000;">
+                                <option value="">Select Port of Loading</option>
+                            </select>
+                        </div>
+                        
+                        <!-- POD -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">POD:</label>
+                            <input type="text" id="podPort" placeholder="PORT OF DISCHARGE" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; color: #000000;">
+                        </div>
+                        
+                        <!-- BOOKING NO -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">BOOKING NO:</label>
+                            <input type="text" id="bookingNo" placeholder="" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                        </div>
+                        
+                        <!-- VESSEL -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">VESSEL:</label>
+                            <select id="vesselSelect" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                <option value="">Select Vessel</option>
+                            </select>
+                        </div>
+                        
+                        <!-- SEARCH CHASSIS -->
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">SEARCH CHASSIS:</label>
+                            <select id="chassisSearch" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                <option value="">Select Chassis (Filtered by Country & POL)</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Selection Options -->
+                        <div style="margin-top: 30px;">
+                            <div style="display: flex; gap: 20px; margin-bottom: 15px;">
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 600; color: #111827;">
+                                    <input type="checkbox" id="cnfCheckbox" style="width: 18px; height: 18px; accent-color: #3b82f6;">
+                                    C&F
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 600; color: #111827;">
+                                    <input type="checkbox" id="fobCheckbox" style="width: 18px; height: 18px; accent-color: #3b82f6;">
+                                    FOB
+                                </label>
+                            </div>
+                            <button id="calculateBtn" style="width: 100%; padding: 12px 20px; background: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">Calculate</button>
+                        </div>
+                        
+                        <!-- Additional Action Buttons -->
+                        <div style="display: flex; gap: 12px; margin-top: 15px; justify-content: space-between;">
+                            <a href="#" id="cancelBtn" style="text-decoration: underline; color: #111827; font-size: 14px; font-weight: 600; padding: 8px 0;">CANCEL</a>
+                            <button id="emailBtn" style="padding: 8px 16px; background: white; color: #111827; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+                                    <polyline points="22,6 12,13 2,6"></polyline>
+                                </svg>
+                                EMAIL
+                            </button>
+                            <button id="exportExcelBtn" style="padding: 8px 16px; background: white; color: #111827; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14,2 14,8 20,8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    <polyline points="10,9 9,9 8,9"></polyline>
+                                </svg>
+                                EXPORT EXCEL
+                            </button>
+                            <button id="downloadPdfBtn" style="padding: 8px 16px; background: white; color: #111827; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14,2 14,8 20,8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    <text x="12" y="15" text-anchor="middle" font-size="6" fill="currentColor">PDF</text>
+                                </svg>
+                                DOWNLOAD PDF
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Right Section: LIST -->
+                    <div style="flex: 1; padding-left: 20px;">
+                        <h2 style="margin: 0 0 24px 0; color: #111827; font-size: 20px; font-weight: 700; text-transform: uppercase;">LIST</h2>
+                        
+                        <!-- Car Selection Table -->
+                        <div style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 20px;">
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead style="background-color: #f9fafb;">
+                                    <tr>
+                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">
+                                            <input type="checkbox" id="selectAllCars" style="margin-right: 8px;">SELECT
+                                        </th>
+                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">NO.</th>
+                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">CHASSIS</th>
+                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">NAME</th>
+                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">YEAR</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="carSelectionTableBody">
+                                    <!-- Cars will be loaded here -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- SHOW FULL PREVIEW Button -->
+                        <div style="text-align: center;">
+                            <button id="showFullPreviewBtn" style="padding: 16px 32px; background-color: #111827; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600;">SHOW FULL PREVIEW</button>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+    """
+    
+    // Set current date as default for ETD
+    val today = js("new Date().toISOString().split('T')[0]") as String
+    document.getElementById("etdDate")?.setAttribute("value", today)
+    
+    // Setup event listeners
+    setupCarBookingPageListeners()
+    
+    console.log("=== About to load vessels ===")
+    // Load vessels
+    loadVessels()
+    
+    // Load countries from database
+    loadCountries()
+    
+    // Load stock locations (POL) from database
+    loadStockLocations()
+    
+    // Restore Car Booking state if it exists
+    js("setTimeout(function() { window.restoreCarBookingState(); }, 500)")
+    
+    // Don't load cars automatically - wait for user search
+    console.log("Car Booking page loaded - waiting for user to search by chassis number")
+    
+    // Immediate fallback - load vessels directly since API is not working
+    console.log("Loading vessels with immediate fallback...")
+    console.log("About to call loadVesselsFallback()")
+    
+    // Force load vessels immediately - bypass API entirely
+    // Removed problematic setTimeout call
+    
+    // Also try calling directly without timeout
+    console.log("Calling fallback functions directly...")
+    try {
+        loadVesselsFallback()
+        console.log("loadVesselsFallback() called directly - SUCCESS")
+    } catch (e: dynamic) {
+        console.error("Error calling loadVesselsFallback() directly:", e)
+    }
+    
+    // Cars will be loaded when user searches by chassis number
+    
+    console.log("loadVesselsFallback() scheduled")
+    
+    // Safety fallback - ensure vessels are loaded even if API fails
+    // Removed problematic setTimeout call
+    } catch (e: dynamic) {
+        console.error("Error in showCarBookingPage():", e)
+    }
+}
+
+// Setup event listeners for Car Booking page
+fun setupCarBookingPageListeners() {
+    // Restore booking selection state (C&F or FOB)
+    restoreBookingSelectionState()
+    
+    // Purchase List button
+    document.getElementById("purchaseListBtn")?.addEventListener("click", { _: Event ->
+        console.log("📋 Purchase List button clicked - navigating to existing purchase list")
+        showPurchaseList()
+    })
+    
+    // Country dropdown change - trigger filtered chassis loading
+    document.getElementById("consigneeCountry")?.addEventListener("change", { event: Event ->
+        val selectedCountry = (event.target as HTMLSelectElement).value
+        console.log("🌍 Country selected:", selectedCountry)
+        currentSelectedCountry = selectedCountry // Update the global variable
+        console.log("Country changed, loading filtered chassis...")
+        loadFilteredChassis()
+    })
+    
+    // POL dropdown change - trigger filtered chassis loading
+    document.getElementById("polPort")?.addEventListener("change", { _: Event ->
+        console.log("POL changed, loading filtered chassis...")
+        loadFilteredChassis()
+    })
+    
+    // Chassis dropdown change - search for cars with selected chassis
+    document.getElementById("chassisSearch")?.addEventListener("change", { _: Event ->
+        val chassisSelect = document.getElementById("chassisSearch") as HTMLSelectElement?
+        val selectedChassis = chassisSelect?.value ?: ""
+        if (selectedChassis.isNotEmpty()) {
+            console.log("Chassis selected:", selectedChassis)
+            searchCarsByChassis(selectedChassis)
+        } else {
+            clearCarTable()
+        }
+    })
+    
+    // Select all cars
+    document.getElementById("selectAllCars")?.addEventListener("change", { _: Event ->
+        val isChecked = (document.getElementById("selectAllCars") as HTMLInputElement).checked
+        val checkboxes = document.querySelectorAll("#carSelectionTableBody input[type='checkbox']")
+        for (i in 0 until checkboxes.length) {
+            val checkbox = checkboxes.item(i) as HTMLInputElement
+            checkbox.checked = isChecked
+        }
+        // Update chassis dropdown when select all changes
+        updateChassisDropdown()
+    })
+    
+    // Individual car selection checkboxes - update chassis dropdown
+    val carTableBody = document.getElementById("carSelectionTableBody")
+    carTableBody?.addEventListener("change", { event: Event ->
+        val target = event.target as? HTMLElement
+        if (target?.getAttribute("type") == "checkbox" && target.classList.contains("car-checkbox")) {
+            updateChassisDropdown()
+        }
+    })
+    
+    // Calculate freight button (placeholder for future freight calculation page)
+    document.getElementById("calculateFreightBtn")?.addEventListener("click", { _: Event ->
+        showCalculateFreightPage()
+    })
+    
+    // Show full preview
+    document.getElementById("showFullPreviewBtn")?.addEventListener("click", { _: Event ->
+        showFullPreview()
+    })
+    
+    // C&F and FOB checkboxes - mutual exclusivity
+    document.getElementById("cnfCheckbox")?.addEventListener("change", { event: Event ->
+        val target = event.target as HTMLInputElement
+        if (target.checked) {
+            // Uncheck FOB if C&F is checked
+            val fobCheckbox = document.getElementById("fobCheckbox") as HTMLInputElement?
+            fobCheckbox?.checked = false
+            // Save state
+            saveBookingSelectionState("cnf")
+            console.log("✅ C&F selected, FOB unchecked")
+        }
+    })
+    
+    document.getElementById("fobCheckbox")?.addEventListener("change", { event: Event ->
+        val target = event.target as HTMLInputElement
+        if (target.checked) {
+            // Uncheck C&F if FOB is checked
+            val cnfCheckbox = document.getElementById("cnfCheckbox") as HTMLInputElement?
+            cnfCheckbox?.checked = false
+            // Save state
+            saveBookingSelectionState("fob")
+            console.log("✅ FOB selected, C&F unchecked")
+        }
+    })
+    
+    // Calculate button - navigate based on selection
+    document.getElementById("calculateBtn")?.addEventListener("click", { _: Event ->
+        val cnfChecked = (document.getElementById("cnfCheckbox") as HTMLInputElement?)?.checked ?: false
+        val fobChecked = (document.getElementById("fobCheckbox") as HTMLInputElement?)?.checked ?: false
+        
+        if (!cnfChecked && !fobChecked) {
+            showMessage("Please select either C&F or FOB before calculating", "error")
+            return@addEventListener
+        }
+        
+        if (cnfChecked && fobChecked) {
+            showMessage("Please select only one option (C&F or FOB)", "error")
+            return@addEventListener
+        }
+        
+        // Save Car Booking state before navigating
+        saveCarBookingState()
+        
+        // Store booking details for PDF generation
+        storeBookingDetailsForPdf()
+        
+        // Get the selected cars and first selected car's chassis
+        val selectedCars = getSelectedCarsFromTable()
+        val selectedChassis = if (selectedCars.isNotEmpty()) selectedCars[0].chassis else null
+        
+        if (cnfChecked) {
+            console.log("🚗 Navigating to C&F page with ${selectedCars.size} selected cars")
+            showCnfCalculationPage(selectedChassis, selectedCars, currentSelectedCountry)
+        } else if (fobChecked) {
+            console.log("🚗 Navigating to FOB page with ${selectedCars.size} selected cars")
+            showFobCalculationPage(selectedChassis, selectedCars)
+        }
+    })
+    
+    // CANCEL button - navigate back to purchase list
+    document.getElementById("cancelBtn")?.addEventListener("click", { event: Event ->
+        event.preventDefault()
+        console.log("❌ CANCEL button clicked - navigating back to purchase list")
+        showPurchaseList()
+    })
+    
+    // EMAIL button - placeholder for email functionality
+    document.getElementById("emailBtn")?.addEventListener("click", { _: Event ->
+        console.log("📧 EMAIL button clicked - functionality to be implemented")
+        showMessage("Email functionality will be implemented later", "info")
+    })
+    
+    // EXPORT EXCEL button - placeholder for Excel export functionality
+    document.getElementById("exportExcelBtn")?.addEventListener("click", { _: Event ->
+        console.log("📊 EXPORT EXCEL button clicked - functionality to be implemented")
+        showMessage("Excel export functionality will be implemented later", "info")
+    })
+    
+    // DOWNLOAD PDF button - generate shipping schedule PDF
+    document.getElementById("downloadPdfBtn")?.addEventListener("click", { _: Event ->
+        console.log("📄 DOWNLOAD PDF button clicked - generating shipping schedule PDF")
+        generateShippingSchedulePdf()
+    })
+}
+
+// Generate shipping schedule PDF from BOOKING DETAILS page
+fun generateShippingSchedulePdf() {
+    console.log("✅ Generating shipping schedule PDF from BOOKING DETAILS page...")
+    
+    // Store booking details for PDF generation
+    storeBookingDetailsForPdf()
+    
+    // Prepare PDF request data
+    val pdfRequest = js("{}")
+    pdfRequest.bookingNo = globalBookingDetails.bookingNo
+    pdfRequest.vesselName = globalBookingDetails.vesselName
+    pdfRequest.pol = globalBookingDetails.pol
+    pdfRequest.pod = globalBookingDetails.pod
+    pdfRequest.shippingDate = globalBookingDetails.shippingDate
+    pdfRequest.consigneeName = globalBookingDetails.consigneeName
+    pdfRequest.consigneeAddress = globalBookingDetails.consigneeAddress
+    pdfRequest.chassisNumbers = globalSelectedCarsForPdf.map { it.chassis }
+    
+    console.log("📋 PDF Request data:", pdfRequest)
+    console.log("🚀🚀🚀 USING CORRECT ENDPOINT: /api/purchases/shipping-schedule/generate-pdf 🚀🚀🚀")
+    
+    // Call PDF generation API
+    js("fetch('/api/purchases/shipping-schedule/generate-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pdfRequest) })")
+        .then { response: dynamic ->
+            if (!response.ok) {
+                throw Exception("HTTP error! status: ${response.status}")
+            }
+            response.blob()
+        }
+        .then { pdfBlob: dynamic ->
+            console.log("✅ PDF generated successfully")
+            console.log("📥 Downloading PDF directly...")
+            
+            // Create download link directly
+            val url = js("URL.createObjectURL(pdfBlob)")
+            val link = js("document.createElement('a')")
+            link.setAttribute("href", url)
+            link.setAttribute("download", "shipping_schedule_${globalBookingDetails.bookingNo ?: "unknown"}.pdf")
+            js("document.body.appendChild(link)")
+            js("link.click()")
+            js("document.body.removeChild(link)")
+            js("setTimeout(function() { URL.revokeObjectURL(url); }, 1000)")
+            console.log("✅ PDF download initiated")
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error generating PDF:", error)
+            js("alert('Error generating PDF: ' + error.message)")
+        }
+}
+
+// Load vessels from API (with fallback to hardcoded data)
+fun loadVessels() {
+    console.log("Loading vessels...")
+    
+    js("fetch('/api/api/vessels')")
+        .then { response: dynamic ->
+            console.log("Vessels API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                throw js("new Error('Failed to load vessels - Status: ' + response.status)")
+            }
+        }
+        .then { vessels: dynamic ->
+            console.log("Vessels loaded from API:", vessels)
+            val vesselSelect = document.getElementById("vesselSelect") as HTMLSelectElement?
+            if (vesselSelect != null) {
+                vesselSelect.innerHTML = "<option value=\"\">Select Vessel</option>"
+                
+                vessels.forEach { vessel: dynamic ->
+                    val option = document.createElement("option") as HTMLOptionElement
+                    option.value = vessel.vesselNo
+                    option.textContent = "${vessel.vesselName} (${vessel.vesselNo})"
+                    vesselSelect.appendChild(option)
+                }
+                console.log("Vessels populated from API successfully")
+            } else {
+                console.error("Vessel select element not found!")
+            }
+        }
+        .catch { error: dynamic ->
+            console.error("Error loading vessels from API, using fallback data:", error)
+            // Fallback to hardcoded vessel data
+            loadVesselsFallback()
+        }
+}
+
+// Fallback vessel data when API is not available
+fun loadVesselsFallback() {
+    console.log("Loading fallback vessel data...")
+    console.log("Searching for vesselSelect element...")
+    
+    val vesselSelect = document.getElementById("vesselSelect") as HTMLSelectElement?
+    console.log("Vessel select element found:", vesselSelect)
+    
+    if (vesselSelect == null) {
+        console.error("Vessel select element not found in fallback!")
+        return
+    }
+    
+    console.log("Clearing vessel select and adding default option...")
+    vesselSelect.innerHTML = "<option value=\"\">Select Vessel</option>"
+    
+    // Vessel data from your database - exact match with vessels table
+    val fallbackVessels = listOf(
+        mapOf("vesselNo" to "CAP789", "vesselName" to "CAPTAIN THANASIS I", "company" to "CAPTAIN"),
+        mapOf("vesselNo" to "MAE012", "vesselName" to "MAERSK VIRGINIA", "company" to "MAERSK"),
+        mapOf("vesselNo" to "MSC123", "vesselName" to "MSC BASIL", "company" to "MSC"),
+        mapOf("vesselNo" to "MSC456", "vesselName" to "MSC MANHATTAN V", "company" to "MSC"),
+        mapOf("vesselNo" to "NAV678", "vesselName" to "NAVIOS TEMPO V", "company" to "NAVIOS"),
+        mapOf("vesselNo" to "VIR345", "vesselName" to "VIRGO V", "company" to "VIRGO"),
+        mapOf("vesselNo" to "VSL001", "vesselName" to "Ever Given", "company" to "Evergreen Marine"),
+        mapOf("vesselNo" to "VSL002", "vesselName" to "MSC Oscar", "company" to "MSC"),
+        mapOf("vesselNo" to "VSL003", "vesselName" to "CMA CGM Marco Polo", "company" to "CMA CGM")
+    )
+    
+    console.log("Adding", fallbackVessels.size, "vessels to dropdown...")
+    
+    fallbackVessels.forEach { vessel ->
+        val option = document.createElement("option") as HTMLOptionElement
+        option.value = vessel["vesselNo"] as String
+        option.textContent = "${vessel["vesselName"]} (${vessel["vesselNo"]})"
+        vesselSelect.appendChild(option)
+        console.log("Added vessel:", option.textContent)
+    }
+    
+    console.log("Fallback vessels loaded successfully:", fallbackVessels.size, "vessels")
+    console.log("Final vessel select options count:", vesselSelect.options.length)
+}
+
+// Load countries from purchases table
+fun loadCountries() {
+    console.log("Loading countries from purchases table...")
+    
+    js("fetch('/api/purchases/countries')")
+        .then { response: dynamic ->
+            console.log("Countries API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                console.log("Countries API failed, using fallback")
+                js("Promise.resolve([])")
+            }
+        }
+        .then { countries: dynamic ->
+            console.log("Countries data received:", countries)
+            val countrySelect = document.getElementById("consigneeCountry") as HTMLSelectElement?
+            if (countrySelect != null) {
+                // Clear existing options except the first one
+                countrySelect.innerHTML = "<option value=\"\">Select Country</option>"
+                
+                // Add countries from API
+                val countriesArray = countries as Array<dynamic>
+                countriesArray.forEach { country ->
+                    val option = document.createElement("option")
+                    option.setAttribute("value", country as String)
+                    option.textContent = country as String
+                    countrySelect.appendChild(option)
+                }
+                console.log("Countries loaded from API:", countriesArray.size)
+            }
+        }
+        .catch { error: dynamic ->
+            console.error("Error loading countries:", error)
+            loadCountriesFallback()
+        }
+}
+
+// Load countries fallback data
+fun loadCountriesFallback() {
+    console.log("Loading fallback country data...")
+    
+    val countrySelect = document.getElementById("consigneeCountry") as HTMLSelectElement?
+    if (countrySelect == null) {
+        console.error("Country select element not found in fallback!")
+        return
+    }
+    
+    console.log("Clearing country select and adding default option...")
+    countrySelect.innerHTML = "<option value=\"\">Select Country</option>"
+    
+    // Country data from your CSV file - unique countries
+    val fallbackCountries = listOf(
+        "PAKISTAN",
+        "SOUTH AFRICA", 
+        "KENYA",
+        "TANZANIA",
+        "UGANDA",
+        "GHANA",
+        "NIGERIA",
+        "JAPAN",
+        "DURBAN",
+        "MAPUTO",
+        "DUBAI"
+    )
+    
+    console.log("Adding", fallbackCountries.size, "countries to dropdown...")
+    
+    fallbackCountries.forEach { country ->
+        val option = document.createElement("option")
+        option.setAttribute("value", country)
+        option.textContent = country
+        countrySelect.appendChild(option)
+        console.log("Added country:", country)
+    }
+    
+    console.log("Fallback countries loaded successfully:", fallbackCountries.size, "countries")
+    console.log("Final country select options count:", countrySelect.options.length)
+}
+
+// Load stock locations (POL) from purchases table
+fun loadStockLocations() {
+    console.log("Loading stock locations from purchases table...")
+    
+    js("fetch('/api/purchases/stock-locations')")
+        .then { response: dynamic ->
+            console.log("Stock locations API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                console.log("Stock locations API failed, using fallback")
+                js("Promise.resolve([])")
+            }
+        }
+        .then { stockLocations: dynamic ->
+            console.log("Stock locations data received:", stockLocations)
+            val polSelect = document.getElementById("polPort") as HTMLSelectElement?
+            if (polSelect != null) {
+                // Clear existing options except the first one
+                polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
+                
+                // Add stock locations from API
+                val stockLocationsArray = stockLocations as Array<dynamic>
+                stockLocationsArray.forEach { location ->
+                    val option = document.createElement("option")
+                    option.setAttribute("value", location as String)
+                    option.textContent = location as String
+                    polSelect.appendChild(option)
+                }
+                console.log("Stock locations loaded from API:", stockLocationsArray.size)
+            }
+        }
+        .catch { error: dynamic ->
+            console.error("Error loading stock locations:", error)
+            loadStockLocationsFallback()
+        }
+}
+
+// Load stock locations fallback data
+fun loadStockLocationsFallback() {
+    console.log("Loading fallback stock location data...")
+    
+    val polSelect = document.getElementById("polPort") as HTMLSelectElement?
+    if (polSelect == null) {
+        console.error("POL select element not found in fallback!")
+        return
+    }
+    
+    console.log("Clearing POL select and adding default option...")
+    polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
+    
+    // Stock location data from your CSV file - unique locations
+    val fallbackStockLocations = listOf(
+        "GLOBAL KAWASAKI",
+        "GLOBAL HAKATA", 
+        "GLOBAL NAGOYA",
+        "KLC",
+        "BARAKI",
+        "-"
+    )
+    
+    console.log("Adding", fallbackStockLocations.size, "stock locations to dropdown...")
+    
+    fallbackStockLocations.forEach { location ->
+        val option = document.createElement("option")
+        option.setAttribute("value", location)
+        option.textContent = location
+        polSelect.appendChild(option)
+        console.log("Added stock location:", location)
+    }
+    
+    console.log("Fallback stock locations loaded successfully:", fallbackStockLocations.size, "locations")
+    console.log("Final POL select options count:", polSelect.options.length)
+}
+
+// Load filtered chassis based on selected country and POL
+fun loadFilteredChassis() {
+    val countrySelect = document.getElementById("consigneeCountry") as HTMLSelectElement?
+    val polSelect = document.getElementById("polPort") as HTMLSelectElement?
+    val chassisSelect = document.getElementById("chassisSearch") as HTMLSelectElement?
+    
+    if (countrySelect == null || polSelect == null || chassisSelect == null) {
+        console.error("Required select elements not found!")
+        return
+    }
+    
+    val selectedCountry = countrySelect.value
+    val selectedPol = polSelect.value
+    
+    if (selectedCountry.isEmpty() || selectedPol.isEmpty()) {
+        console.log("Country or POL not selected, clearing chassis dropdown")
+        chassisSelect.innerHTML = "<option value=\"\">Select Chassis (Filtered by Country & POL)</option>"
+        return
+    }
+    
+    console.log("Loading filtered chassis for country:", selectedCountry, "and POL:", selectedPol)
+    
+    js("fetch('/api/purchases/filtered-chassis?country=' + encodeURIComponent(selectedCountry) + '&polPort=' + encodeURIComponent(selectedPol))")
+        .then { response: dynamic ->
+            console.log("Filtered chassis API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                console.log("Filtered chassis API failed, using fallback")
+                js("Promise.resolve([])")
+            }
+        }
+        .then { chassis: dynamic ->
+            console.log("Filtered chassis data received:", chassis)
+            
+            // Clear existing options except the first one
+            chassisSelect.innerHTML = "<option value=\"\">Select Chassis (Filtered by Country & POL)</option>"
+            
+            // Add chassis from API
+            val chassisArray = chassis as Array<dynamic>
+            chassisArray.forEach { chassisNumber ->
+                val option = document.createElement("option")
+                option.setAttribute("value", chassisNumber as String)
+                option.textContent = chassisNumber as String
+                chassisSelect.appendChild(option)
+            }
+            console.log("Filtered chassis loaded from API:", chassisArray.size)
+        }
+        .catch { error: dynamic ->
+            console.error("Error loading filtered chassis:", error)
+            loadFilteredChassisFallback()
+        }
+}
+
+// Load filtered chassis fallback data
+fun loadFilteredChassisFallback() {
+    console.log("Loading fallback filtered chassis data...")
+    
+    val chassisSelect = document.getElementById("chassisSearch") as HTMLSelectElement?
+    if (chassisSelect == null) {
+        console.error("Chassis select element not found in fallback!")
+        return
+    }
+    
+    console.log("Clearing chassis select and adding default option...")
+    chassisSelect.innerHTML = "<option value=\"\">Select Chassis (Filtered by Country & POL)</option>"
+    
+    // Sample chassis data - in real implementation, this would be filtered by country and POL
+    val fallbackChassis = listOf(
+        "VY12-265058",
+        "ANH20-8170371",
+        "AVU65-0007399",
+        "LA350S-0306292",
+        "LA350S-0305865",
+        "SLP2T-105089"
+    )
+    
+    console.log("Adding", fallbackChassis.size, "chassis to dropdown...")
+    
+    fallbackChassis.forEach { chassis ->
+        val option = document.createElement("option")
+        option.setAttribute("value", chassis)
+        option.textContent = chassis
+        chassisSelect.appendChild(option)
+        console.log("Added chassis:", chassis)
+    }
+    
+    console.log("Fallback filtered chassis loaded successfully:", fallbackChassis.size, "chassis")
+    console.log("Final chassis select options count:", chassisSelect.options.length)
+}
+
+// Search cars by specific chassis number
+fun searchCarsByChassis(chassis: String) {
+    console.log("Searching cars by chassis:", chassis)
+    
+    js("fetch('/api/purchases/search?query=' + encodeURIComponent(chassis))")
+        .then { response: dynamic ->
+            console.log("Search API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                console.log("Search API failed, using fallback")
+                js("Promise.resolve([])")
+            }
+        }
+        .then { purchases: dynamic ->
+            console.log("Search results received:", purchases)
+            displayPurchasesAsCarsAPPEND(purchases)
+        }
+        .catch { error: dynamic ->
+            console.error("Error searching cars:", error)
+            searchCarsFallback(chassis)
+        }
+}
+
+// Load unshipped cars from API (with fallback to hardcoded data)
+// Old functions removed - now using search-based approach
+
+// Display cars in the table
+fun displayCars(cars: dynamic) {
+    val tbody = document.getElementById("carSelectionTableBody")
+    tbody?.innerHTML = ""
+    
+    cars.forEachIndexed { index: Int, car: dynamic ->
+        val row = document.createElement("tr")
+        row.innerHTML = """
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
+                <input type="checkbox" value="${car.id}" style="margin-right: 8px;">
+            </td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${index + 1}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${car.chassis}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${car.carName ?: "N/A"}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${car.carModelYear ?: "N/A"}</td>
+        """
+        tbody?.appendChild(row)
+    }
+}
+
+// Search cars by chassis from purchases table
+fun searchCars() {
+    console.log("=== searchCars() function called ===")
+    val chassisSearch = (document.getElementById("chassisSearch") as HTMLInputElement).value.trim()
+    console.log("Search term:", chassisSearch)
+    
+    if (chassisSearch.isBlank()) {
+        clearCarTable()
+        clearAccumulatedCars() // Clear accumulated cars when search is cleared
+        console.log("Search cleared - table emptied")
+        return
+    }
+    
+    console.log("Searching purchases table for chassis:", chassisSearch)
+    
+    // Search the purchases table by chassis number
+    js("fetch('/api/purchases/search?query=' + encodeURIComponent(chassisSearch))")
+        .then { response: dynamic ->
+            console.log("Purchases search API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                throw js("new Error('Failed to search purchases - Status: ' + response.status)")
+            }
+        }
+        .then { purchases: dynamic ->
+            console.log("Found purchases from API:", purchases)
+                displayPurchasesAsCarsAPPEND(purchases)
+        }
+        .catch { error: dynamic ->
+            console.error("Error searching purchases from API, using fallback search:", error)
+            // Fallback: search in sample data
+            searchCarsFallback(chassisSearch)
+        }
+}
+
+// Clear the car table
+fun clearCarTable() {
+    val tbody = document.getElementById("carSelectionTableBody")
+    tbody?.innerHTML = ""
+    console.log("Car table cleared")
+}
+
+// Clear accumulated displayed cars (call when starting new search)
+fun clearAccumulatedCars() {
+    carBookingDisplayedCars = emptyArray()
+    console.log("🧹 Cleared accumulated displayed cars")
+}
+
+// Wrapper function for state restoration
+fun displayPurchasesAsCars(purchases: dynamic) {
+    displayPurchasesAsCarsAPPEND(purchases)
+}
+
+// Display purchases as cars in the table - APPEND VERSION
+fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
+    console.log("🔥🔥🔥 NEW APPEND FUNCTION CALLED - CACHE BUSTED! 🔥🔥🔥")
+    console.log("💰💰💰 CURRENCY FORMATTING ACTIVE - CACHE BUSTED! 💰💰💰")
+    console.log("Displaying purchases as cars:", purchases)
+    
+    // Save displayed cars data for state persistence - ACCUMULATE instead of overwrite
+    val displayedCarsArray = js("Array.isArray(purchases) ? purchases : [purchases]") as Array<dynamic>
+    
+    // Add new cars to existing displayed cars (avoid duplicates)
+    val newCars = mutableListOf<dynamic>()
+    for (newCar in displayedCarsArray) {
+        val chassis = newCar.chassis
+        val alreadyExists = carBookingDisplayedCars.any { it.chassis == chassis }
+        if (!alreadyExists) {
+            newCars.add(newCar)
+        }
+    }
+    carBookingDisplayedCars = carBookingDisplayedCars + newCars.toTypedArray()
+    
+    console.log("💾 Accumulated displayed cars for state persistence:", carBookingDisplayedCars.size)
+    
+    // Debug: Check if table body exists
+    val tbody = document.getElementById("carSelectionTableBody")
+    console.log("Table body element found:", tbody)
+    console.log("Table body element type:", tbody?.tagName)
+    
+    if (tbody == null) {
+        console.error("Car table body not found!")
+        console.log("Available elements with 'car' in ID:")
+        val allElements = document.querySelectorAll("[id*='car']")
+        for (i in 0 until allElements.length) {
+            val element = allElements.item(i) as HTMLElement
+            console.log("Found element:", element.id, element.tagName)
+        }
+        return
+    }
+    
+    // Don't clear the table - append new cars instead
+    // tbody.innerHTML = ""  // REMOVED: This was clearing the table
+    console.log("✅ TABLE NOT CLEARED - APPENDING MODE ACTIVE")
+    
+    val purchasesArray = js("Array.isArray(purchases) ? purchases : [purchases]") as Array<dynamic>
+    console.log("🚀 NEW APPEND LOGIC: Processing", purchasesArray.size, "purchases to ADD to existing table")
+    
+    // Get current row count to continue numbering
+    val currentRowCount = tbody.children.length
+    console.log("Current table has", currentRowCount, "rows, adding", purchasesArray.size, "more")
+    
+    for (index in purchasesArray.indices) {
+        val purchase = purchasesArray[index]
+        
+        // Check if this car is already in the table (avoid duplicates)
+        val chassisNumber = purchase.chassis ?: "N/A"
+        val existingRows = tbody.querySelectorAll("tr")
+        var carAlreadyExists = false
+        
+        for (i in 0 until existingRows.length) {
+            val row = existingRows.item(i) as HTMLElement
+            val chassisCell = row.querySelector("td:nth-child(3)") // 3rd column is chassis (after checkbox column)
+            if (chassisCell?.textContent?.trim() == chassisNumber) {
+                carAlreadyExists = true
+                console.log("Car with chassis", chassisNumber, "already exists in table, skipping")
+                break
+            }
+        }
+        
+        if (!carAlreadyExists) {
+            val row = document.createElement("tr")
+            val rowNumber = currentRowCount + index + 1
+            row.innerHTML = """
+                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
+                    <input type="checkbox" class="car-checkbox" data-purchase-id="${purchase.id}" data-chassis="${chassisNumber}">
+                </td>
+                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${rowNumber}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${chassisNumber}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${purchase.carName ?: "N/A"}</td>
+                <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${purchase.carModelYear ?: "N/A"}</td>
+            """
+            tbody.appendChild(row)
+            console.log("Added car", chassisNumber, "as row", rowNumber)
+        }
+    }
+    
+    console.log("Displayed", purchasesArray.size, "purchases in car table")
+}
+
+// Fallback search function for when API fails
+fun searchCarsFallback(searchTerm: String) {
+    console.log("Using fallback search for term:", searchTerm)
+    
+    // Sample purchase data for testing
+    val samplePurchases = listOf(
+        mapOf("id" to 1, "chassis" to "KDH201-5012551", "carName" to "Toyota Camry", "carModelYear" to "2020"),
+        mapOf("id" to 2, "chassis" to "KDH201-5012552", "carName" to "Honda Accord", "carModelYear" to "2021"),
+        mapOf("id" to 3, "chassis" to "KDH201-5012553", "carName" to "Nissan Altima", "carModelYear" to "2019"),
+        mapOf("id" to 4, "chassis" to "KDH201-5012554", "carName" to "BMW 3 Series", "carModelYear" to "2022"),
+        mapOf("id" to 5, "chassis" to "KDH201-5012555", "carName" to "Mercedes C-Class", "carModelYear" to "2021"),
+        mapOf("id" to 6, "chassis" to "KDH201-5012556", "carName" to "Audi A4", "carModelYear" to "2020"),
+        mapOf("id" to 7, "chassis" to "KDH201-5012557", "carName" to "Lexus ES", "carModelYear" to "2022"),
+        mapOf("id" to 8, "chassis" to "KDH201-5012558", "carName" to "Hyundai Sonata", "carModelYear" to "2021"),
+        mapOf("id" to 9, "chassis" to "KDH201-5012559", "carName" to "Kia Optima", "carModelYear" to "2020"),
+        mapOf("id" to 10, "chassis" to "KDH201-5012560", "carName" to "Mazda 6", "carModelYear" to "2022")
+    )
+    
+    // Filter by search term
+    val filteredPurchases = samplePurchases.filter { purchase ->
+        val chassis = purchase["chassis"] as? String ?: ""
+        chassis.contains(searchTerm, ignoreCase = true)
+    }
+    
+    console.log("Fallback search found", filteredPurchases.size, "matching purchases")
+    displayPurchasesAsCarsAPPEND(filteredPurchases.toTypedArray())
+}
+
+// Calculate Freight
+fun calculateFreight() {
+    val containerPrice = (document.getElementById("containerPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val wcCharge = (document.getElementById("wcCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val fobPrice = (document.getElementById("fobPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val freightPrice = (document.getElementById("freightPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val insurance = (document.getElementById("insurance") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    
+    val total = containerPrice + shippingCharge + wcCharge + inspectionFee + fobPrice + freightPrice + insurance
+    
+    document.getElementById("freightTotal")?.textContent = "Total: $${total.toString().let { it.substringBefore('.') + '.' + it.substringAfter('.').padEnd(2, '0').take(2) }}"
+    (document.getElementById("freightResult") as HTMLElement?)?.style?.display = "block"
+}
+
+// Calculate CAF
+fun calculateCAF() {
+    val containerPrice = (document.getElementById("containerPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val wcCharge = (document.getElementById("wcCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val fobPrice = (document.getElementById("fobPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val freightPrice = (document.getElementById("freightPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val insurance = (document.getElementById("insurance") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    
+    val baseTotal = containerPrice + shippingCharge + wcCharge + inspectionFee + fobPrice + freightPrice + insurance
+    val total = baseTotal * 1.15 // 15% markup for CAF
+    
+    document.getElementById("cafTotal")?.textContent = "Total: $${total.toString().let { it.substringBefore('.') + '.' + it.substringAfter('.').padEnd(2, '0').take(2) }}"
+    (document.getElementById("cafResult") as HTMLElement?)?.style?.display = "block"
+}
+
+// Calculate FOB
+fun calculateFOB() {
+    val containerPrice = (document.getElementById("containerPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val wcCharge = (document.getElementById("wcCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val fobPrice = (document.getElementById("fobPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val freightPrice = (document.getElementById("freightPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val insurance = (document.getElementById("insurance") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    
+    val total = containerPrice + shippingCharge + wcCharge + inspectionFee + fobPrice + freightPrice + insurance
+    
+    document.getElementById("fobTotal")?.textContent = "Total: $${total.toString().let { it.substringBefore('.') + '.' + it.substringAfter('.').padEnd(2, '0').take(2) }}"
+    (document.getElementById("fobResult") as HTMLElement?)?.style?.display = "block"
+}
+
+// Calculate Pakistan
+fun calculatePakistan() {
+    val containerPrice = (document.getElementById("containerPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val wcCharge = (document.getElementById("wcCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val fobPrice = (document.getElementById("fobPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val freightPrice = (document.getElementById("freightPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val insurance = (document.getElementById("insurance") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    
+    val baseTotal = containerPrice + shippingCharge + wcCharge + inspectionFee + fobPrice + freightPrice + insurance
+    val total = baseTotal * 1.25 // 25% markup for Pakistan
+    
+    document.getElementById("pakistanTotal")?.textContent = "Total: $${total.toString().let { it.substringBefore('.') + '.' + it.substringAfter('.').padEnd(2, '0').take(2) }}"
+    (document.getElementById("pakistanResult") as HTMLElement?)?.style?.display = "block"
+}
+
+// Show full preview
+fun showFullPreview() {
+    js("alert('Full preview functionality will be implemented in the next phase!')")
+}
+
+// Show Calculate Freight page
+fun showCalculateFreightPage() {
+    try {
+        console.log("🚢 Opening Calculate Freight page...")
+        
+        // First try to get cars from C&F confirmed cars list
+        val selectedCars = if (cnfConfirmedCars.isNotEmpty()) {
+            console.log("📋 Using confirmed cars from C&F page:", cnfConfirmedCars.size)
+            cnfConfirmedCars
+        } else if (fobConfirmedCars.isNotEmpty()) {
+            // Second: use cars from FOB confirmed cars list
+            console.log("📋 Using confirmed cars from FOB page:", fobConfirmedCars.size)
+            fobConfirmedCars
+        } else if (cnfPageSelectedCars.isNotEmpty()) {
+            // Third: use cars that were passed to C&F page from Car Booking
+            console.log("📋 Using cars from C&F page selection:", cnfPageSelectedCars.size)
+            cnfPageSelectedCars
+        } else if (fobPageSelectedCars.isNotEmpty()) {
+            // Fourth: use cars that were passed to FOB page from Car Booking
+            console.log("📋 Using cars from FOB page selection:", fobPageSelectedCars.size)
+            fobPageSelectedCars
+        } else {
+            // Fallback: try to get selected cars from the car selection table
+            console.log("📋 No confirmed cars found, trying to get from car selection table...")
+            getSelectedCarsFromTable()
+        }
+        
+        console.log("📋 Selected cars found:", selectedCars.size)
+        console.log("📋 Selected cars details:", selectedCars)
+        
+        if (selectedCars.isEmpty()) {
+            js("alert('Please select cars first before calculating freight!')")
+            return
+        }
+        
+        // Create the freight calculation page HTML
+        val freightPageHTML = createFreightCalculationHTML(selectedCars)
+        
+        // Replace the main content with freight calculation page
+        val mainContent = document.getElementById("content")
+        if (mainContent != null) {
+            mainContent.innerHTML = freightPageHTML
+            setupFreightCalculationListeners(selectedCars)
+            
+            // Generate container sections with the selected cars
+            generateContainerSections(selectedCars)
+            
+            console.log("✅ Freight calculation page loaded successfully")
+        } else {
+            console.error("❌ Main content element not found")
+        }
+        
+    } catch (e: dynamic) {
+        console.error("❌ Error opening freight calculation page:", e)
+        js("alert('Error opening freight calculation page: ' + e.message)")
+    }
+}
+
+// Get selected cars from the car selection table
+fun getSelectedCarsFromTable(): List<dynamic> {
+    val selectedCars = mutableListOf<dynamic>()
+    val tableBody = document.getElementById("carSelectionTableBody")
+    
+    console.log("🔍 Looking for car selection table...")
+    console.log("🔍 Table body element:", tableBody)
+    
+    if (tableBody != null) {
+        val rows = tableBody.querySelectorAll("tr")
+        console.log("🔍 Found ${rows.length} rows in table")
+        
+        for (i in 0 until rows.length) {
+            val row = rows[i] as HTMLTableRowElement
+            val checkbox = row.querySelector("input[type='checkbox']") as HTMLInputElement?
+            
+            console.log("🔍 Row $i: checkbox found = ${checkbox != null}, checked = ${checkbox?.checked}")
+            
+            if (checkbox != null && checkbox.checked) {
+                val chassisCell = row.cells[2] // Chassis is in the third column (index 2)
+                val nameCell = row.cells[3]    // Name is in the fourth column (index 3)
+                val yearCell = row.cells[4]    // Year is in the fifth column (index 4)
+                
+                console.log("🔍 Selected car: chassis=${chassisCell?.textContent}, name=${nameCell?.textContent}, year=${yearCell?.textContent}")
+                
+                if (chassisCell != null && nameCell != null && yearCell != null) {
+                    val carObject = js("{}")
+                    carObject.chassis = chassisCell.textContent
+                    carObject.name = nameCell.textContent
+                    carObject.year = yearCell.textContent
+                    carObject.price = 0 // Will be populated from API
+                    selectedCars.add(carObject)
+                }
+            }
+        }
+    } else {
+        console.error("❌ Car selection table body not found!")
+    }
+    
+    console.log("🔍 Total selected cars: ${selectedCars.size}")
+    return selectedCars
+}
+
+// Create freight calculation HTML page
+fun createFreightCalculationHTML(selectedCars: List<dynamic>): String {
+    return """
+        <div style="padding: 20px; background-color: #f9fafb; min-height: 100vh;">
+            <!-- Back Button -->
+            <div style="margin-bottom: 20px;">
+                <button id="backToCnfBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">← Back to C&F</button>
+            </div>
+            
+            <!-- Freight Calculation Container -->
+            <div style="background-color: white; border: 2px solid #8b5cf6; border-radius: 12px; padding: 30px; max-width: 1000px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+                
+                <!-- Header -->
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: #1f2937; font-size: 24px; font-weight: bold; margin: 0;">CALCULATE FREIGHT:</h1>
+                </div>
+                
+                <!-- Overall Container Price Calculation Section -->
+                <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 15px;">
+                        <label style="font-weight: 600; color: #374151;">CONTAINER PRICE :</label>
+                        <input type="number" id="containerPrice" value="3000" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 120px;">
+                        <span style="font-size: 18px; font-weight: bold;">×</span>
+                        <label style="font-weight: 600; color: #374151;">YEN RATE :</label>
+                        <input type="number" id="yenRate" value="150" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 120px;">
+                        <span style="font-size: 18px; font-weight: bold;">=</span>
+                        <label style="font-weight: 600; color: #374151;">TOTAL PER CONTAINER PRICE :</label>
+                        <input type="text" id="totalPerContainerPrice" value="¥450,000" readonly style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 150px; background-color: #f3f4f6; font-weight: bold;">
+                    </div>
+                    
+                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                        <label style="font-weight: 600; color: #374151;">NO. OF CONTAINERS:</label>
+                        <input type="number" id="numberOfContainers" value="2" min="1" max="10" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 100px;">
+                    </div>
+                    
+                </div>
+                
+                <!-- Container Sections -->
+                <div id="containerSections">
+                    <!-- Container sections will be generated dynamically -->
+                </div>
+                
+                <!-- Confirm Button -->
+                <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+                    <button id="confirmFreightBtn" style="padding: 16px 32px; background-color: #374151; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600;">CONFIRM</button>
+                </div>
+            </div>
+        </div>
+    """
+}
+
+// Setup event listeners for freight calculation page
+fun setupFreightCalculationListeners(currentSelectedCars: List<dynamic>) {
+    console.log("🔧 Setting up freight calculation listeners...")
+    
+    // Back to C&F button
+    document.getElementById("backToCnfBtn")?.addEventListener("click", { _: Event ->
+        // Pass the selected cars back to C&F page
+        val selectedCars = cnfPageSelectedCars
+        val selectedChassis = if (selectedCars.isNotEmpty()) selectedCars[0].chassis else null
+        console.log("🔄 Returning to C&F page with ${selectedCars.size} selected cars")
+        showCnfCalculationPage(selectedChassis, selectedCars, cnfPageSelectedCountry)
+    })
+    
+    // Container price and yen rate calculation
+    val containerPriceInput = document.getElementById("containerPrice") as HTMLInputElement?
+    val yenRateInput = document.getElementById("yenRate") as HTMLInputElement?
+    val totalPerContainerPriceInput = document.getElementById("totalPerContainerPrice") as HTMLInputElement?
+    
+    fun calculateTotalPerContainer() {
+        val containerPrice = containerPriceInput?.value?.toDoubleOrNull() ?: 0.0
+        val yenRate = yenRateInput?.value?.toDoubleOrNull() ?: 0.0
+        val total = containerPrice * yenRate
+        totalPerContainerPriceInput?.value = "¥${total.toInt().toString().replace(Regex("(\\d)(?=(\\d{3})+(?!\\d))"), "$1,")}"
+        // Regenerate sections with current selected cars
+        generateContainerSections(currentSelectedCars)
+    }
+    
+    containerPriceInput?.addEventListener("input", { _: Event -> calculateTotalPerContainer() })
+    yenRateInput?.addEventListener("input", { _: Event -> calculateTotalPerContainer() })
+    
+    // Number of containers change - regenerate sections with current selected cars
+    document.getElementById("numberOfContainers")?.addEventListener("change", { _: Event ->
+        // Use the provided currentSelectedCars
+        generateContainerSections(currentSelectedCars)
+    })
+    
+    // Confirm freight button
+    document.getElementById("confirmFreightBtn")?.addEventListener("click", { _: Event ->
+        confirmFreightCalculation()
+    })
+    
+    // Container sections are generated from showCalculateFreightPage with selected cars
+}
+
+// Generate container sections dynamically
+fun generateContainerSections(allSelectedCars: List<dynamic>) {
+    val numberOfContainers = (document.getElementById("numberOfContainers") as HTMLInputElement?)?.value?.toIntOrNull() ?: 2
+    val totalPerContainerPrice = (document.getElementById("totalPerContainerPrice") as HTMLInputElement?)?.value ?: "¥450,000"
+    val containerSections = document.getElementById("containerSections")
+    
+    if (containerSections == null) return
+    
+    // Use the provided allSelectedCars
+    val availableCars = allSelectedCars.toMutableList()
+    
+    console.log("🚢 generateContainerSections called with ${allSelectedCars.size} selected cars")
+    console.log("🚢 Selected cars:", allSelectedCars)
+    
+    var containerHTML = ""
+    
+    for (i in 1..numberOfContainers) {
+        val containerId = "container$i"
+        val isFirstContainer = i == 1
+        
+        containerHTML += """
+            <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 20px;">
+                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                    <label style="font-weight: 600; color: #374151;">CONTAINER NO.$i:</label>
+                    <input type="text" id="${containerId}Price" value="$totalPerContainerPrice" readonly style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 150px; background-color: #f3f4f6; font-weight: bold;">
+                </div>
+                
+                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
+                    <label style="font-weight: 600; color: #374151;">SELECT CARS IN CONTAINER .$i :</label>
+                    <select id="${containerId}CarSelect" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 200px;">
+                        <option value="">SELECT</option>
+        """
+        
+        // Add available cars to dropdown (for first container, show all cars)
+        if (isFirstContainer) {
+            for (car in availableCars) {
+                val carInfo = "${car.chassis} - ${car.name} (${car.year})"
+                containerHTML += """<option value="${car.chassis}">$carInfo</option>"""
+            }
+        } else {
+            // For subsequent containers, they will be populated dynamically by cascading logic
+            // Initially empty except for SELECT option
+        }
+        
+        containerHTML += """
+                    </select>
+                </div>
+                
+                <div id="${containerId}CarList" style="margin-left: 20px;">
+                    <!-- Selected cars for this container will be displayed here -->
+                </div>
+                
+            </div>
+        """
+    }
+    
+    containerSections.innerHTML = containerHTML
+    
+    // Setup car selection listeners for each container with cascading logic
+    for (i in 1..numberOfContainers) {
+        val containerId = "container$i"
+        val carSelect = document.getElementById("${containerId}CarSelect") as HTMLSelectElement?
+        carSelect?.addEventListener("change", { _: Event ->
+            handleContainerCarSelection(containerId, i, availableCars, allSelectedCars)
+        })
+    }
+}
+
+// Handle container car selection with cascading dropdown logic
+fun handleContainerCarSelection(containerId: String, containerNumber: Int, availableCars: List<dynamic>, allSelectedCars: List<dynamic>) {
+    val carSelect = document.getElementById("${containerId}CarSelect") as HTMLSelectElement?
+    val selectedChassis = carSelect?.value ?: ""
+    
+    if (selectedChassis.isEmpty()) return
+    
+    console.log("🚗 Car selected in container $containerNumber: $selectedChassis")
+    
+    // Add the car to the container first
+    addCarToContainer(containerId, selectedChassis, allSelectedCars, containerNumber, availableCars)
+}
+
+// Update subsequent container dropdowns to exclude selected cars
+fun updateSubsequentContainerDropdowns(currentContainerNumber: Int, selectedChassis: String, availableCars: List<dynamic>) {
+    console.log("🔄 Updating dropdowns for containers after $currentContainerNumber")
+    
+    // Get all currently selected cars from all containers
+    val allSelectedCarsInContainers = getAllSelectedCarsFromContainers()
+    
+    // Update each subsequent container dropdown
+    for (i in (currentContainerNumber + 1)..10) { // Assuming max 10 containers
+        val containerId = "container$i"
+        val carSelect = document.getElementById("${containerId}CarSelect") as HTMLSelectElement?
+        
+        if (carSelect != null) {
+            // Clear current options except the first "SELECT" option
+            carSelect.innerHTML = "<option value=\"\">SELECT</option>"
+            
+            // Add only cars that haven't been selected in any container
+            for (car in availableCars) {
+                val carChassis = car.chassis as? String ?: ""
+                if (carChassis.isNotEmpty() && !allSelectedCarsInContainers.contains(carChassis)) {
+                    val option = document.createElement("option") as HTMLOptionElement
+                    option.value = carChassis
+                    option.textContent = "${carChassis} - ${car.name} (${car.year})"
+                    carSelect.appendChild(option)
+                }
+            }
+            
+            console.log("✅ Updated container $i dropdown with ${carSelect.options.length - 1} available cars")
+        }
+    }
+}
+
+// Get all currently selected cars from all containers
+fun getAllSelectedCarsFromContainers(): List<String> {
+    val selectedCars = mutableListOf<String>()
+    
+    for (i in 1..10) { // Assuming max 10 containers
+        val containerId = "container$i"
+        val carList = document.getElementById("${containerId}CarList")
+        
+        if (carList != null) {
+            val carItems = carList.querySelectorAll("[data-chassis]")
+            for (j in 0 until carItems.length) {
+                val carItem = carItems.item(j) as HTMLElement
+                val chassis = carItem.getAttribute("data-chassis")
+                if (chassis != null && chassis.isNotEmpty()) {
+                    selectedCars.add(chassis)
+                }
+            }
+        }
+    }
+    
+    console.log("📋 All selected cars in containers: $selectedCars")
+    return selectedCars
+}
+
+// Add car to container
+fun addCarToContainer(containerId: String, chassis: String, allSelectedCars: List<dynamic>, containerNumber: Int? = null, availableCars: List<dynamic>? = null) {
+    if (chassis.isEmpty()) return
+    
+    val car = allSelectedCars.find { it.chassis == chassis }
+    if (car == null) {
+        console.error("❌ Car with chassis $chassis not found in selected cars list.")
+        return
+    }
+    
+    val carList = document.getElementById("${containerId}CarList")
+    if (carList == null) return
+    
+    // Check if car is already in this container
+    val existingCar = carList.querySelector("[data-chassis='$chassis']")
+    if (existingCar != null) return
+    
+    console.log("🚢 Adding car $chassis to container $containerId")
+    
+    // Fetch C&F price for this chassis
+    js("fetch('/api/purchases/costs-by-chassis/' + encodeURIComponent(chassis))")
+        .then { response: dynamic ->
+            if (response.ok) {
+                response.json()
+            } else {
+                console.error("Failed to fetch C&F price for chassis:", chassis)
+                js("Promise.resolve({})")
+            }
+        }
+        .then { costData: dynamic ->
+            console.log("🚢 C&F data for $chassis:", costData)
+            
+            // Calculate total C&F price
+            val carPrice = (costData.carPrice as? Number)?.toDouble() ?: 0.0
+            val auctionFee = (costData.auctionFee as? Number)?.toDouble() ?: 0.0
+            val rixoPrice = (costData.rixoPrice as? Number)?.toDouble() ?: 0.0
+            val shippingCharge = (costData.shippingCharge as? Number)?.toDouble() ?: 0.0
+            val freight = (costData.freight as? Number)?.toDouble() ?: 0.0
+            val inspectionFee = (costData.inspectionFee as? Number)?.toDouble() ?: 0.0
+            val repairFee = (costData.repairFee as? Number)?.toDouble() ?: 0.0
+            val mscCharges = (costData.mscCharges as? Number)?.toDouble() ?: 0.0
+            val profit = (costData.profit as? Number)?.toDouble() ?: 0.0
+            
+            val totalCnfPrice = carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+            
+            // Add car to container list with C&F price
+            val carItem = document.createElement("div")
+            carItem.setAttribute("data-chassis", chassis)
+            carItem.setAttribute("data-cnf-price", totalCnfPrice.toString())
+            (carItem as HTMLElement).style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 8px; background-color: #f8fafc; border-radius: 4px;"
+            
+            val carNumber = carList.children.length + 1
+            carItem.innerHTML = """
+                <span style="font-weight: 600;">$carNumber.</span>
+                <span style="flex: 1;">${car.chassis} - ${car.name} (${car.year}) :</span>
+                <input type="text" value="" placeholder="Enter Freight" style="width: 100px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; text-align: right;">
+                <button type="button" onclick="removeCarFromContainer('$containerId', '$chassis')" style="padding: 4px 8px; background-color: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Remove</button>
+            """
+            
+            carList.appendChild(carItem)
+            
+            // Remove car from dropdown
+            val carSelect = document.getElementById("${containerId}CarSelect") as HTMLSelectElement?
+            val optionToRemove = carSelect?.querySelector("option[value='$chassis']")
+            optionToRemove?.remove()
+            
+            // Recalculate freight allocation
+            calculateContainerFreightAllocation(containerId, allSelectedCars)
+            
+            console.log("✅ Car $chassis added to container $containerId with C&F price ¥${totalCnfPrice.toInt()}")
+            
+            // Update subsequent container dropdowns to exclude this car (cascading logic)
+            if (containerNumber != null && availableCars != null) {
+                updateSubsequentContainerDropdowns(containerNumber, chassis, availableCars)
+            }
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error fetching C&F price for $chassis:", error)
+            
+            // Fallback: add car without C&F price
+            val carItem = document.createElement("div")
+            carItem.setAttribute("data-chassis", chassis)
+            (carItem as HTMLElement).style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 8px; background-color: #f8fafc; border-radius: 4px;"
+            
+            val carNumber = carList.children.length + 1
+            carItem.innerHTML = """
+                <span style="font-weight: 600;">$carNumber.</span>
+                <span style="flex: 1;">${car.chassis} - ${car.name} (${car.year}) :</span>
+                <span style="font-weight: 600; color: #dc2626;">C&F: N/A</span>
+                <input type="text" value="¥" style="width: 100px; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; text-align: right;" readonly>
+                <button type="button" onclick="removeCarFromContainer('$containerId', '$chassis')" style="padding: 4px 8px; background-color: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Remove</button>
+            """
+            
+            carList.appendChild(carItem)
+            
+            // Remove car from dropdown
+            val carSelect = document.getElementById("${containerId}CarSelect") as HTMLSelectElement?
+            val optionToRemove = carSelect?.querySelector("option[value='$chassis']")
+            optionToRemove?.remove()
+            
+            // Recalculate freight allocation
+            calculateContainerFreightAllocation(containerId, allSelectedCars)
+            
+            // Update subsequent container dropdowns to exclude this car (cascading logic)
+            if (containerNumber != null && availableCars != null) {
+                updateSubsequentContainerDropdowns(containerNumber, chassis, availableCars)
+            }
+        }
+    
+    // Calculate freight allocation for this container
+    calculateContainerFreightAllocation(containerId, allSelectedCars)
+}
+
+// Remove car from container
+fun removeCarFromContainer(containerId: String, chassis: String, allSelectedCars: List<dynamic>) {
+    console.log("🗑️ Removing car $chassis from container $containerId")
+    
+    val carList = document.getElementById("${containerId}CarList")
+    val carItem = carList?.querySelector("[data-chassis='$chassis']")
+    carItem?.remove()
+    
+    // Get the container number from containerId (e.g., "container1" -> 1)
+    val containerNumber = containerId.replace("container", "").toIntOrNull() ?: 1
+    
+    // Update all subsequent container dropdowns to include this car back
+    updateSubsequentContainerDropdownsAfterRemoval(containerNumber, chassis, allSelectedCars)
+    
+    // Recalculate freight allocation
+    calculateContainerFreightAllocation(containerId, allSelectedCars)
+    
+    console.log("✅ Car $chassis removed from container $containerId")
+}
+
+// Update subsequent container dropdowns after a car is removed
+fun updateSubsequentContainerDropdownsAfterRemoval(removedFromContainerNumber: Int, removedChassis: String, allSelectedCars: List<dynamic>) {
+    console.log("🔄 Updating dropdowns after removing $removedChassis from container $removedFromContainerNumber")
+    
+    // Get all currently selected cars from all containers
+    val allSelectedCarsInContainers = getAllSelectedCarsFromContainers()
+    
+    // Update each subsequent container dropdown (including the one the car was removed from)
+    for (i in removedFromContainerNumber..10) { // Assuming max 10 containers
+        val containerId = "container$i"
+        val carSelect = document.getElementById("${containerId}CarSelect") as HTMLSelectElement?
+        
+        if (carSelect != null) {
+            // Clear current options except the first "SELECT" option
+            carSelect.innerHTML = "<option value=\"\">SELECT</option>"
+            
+            // Add only cars that haven't been selected in any container
+            for (car in allSelectedCars) {
+                val carChassis = car.chassis as? String ?: ""
+                if (carChassis.isNotEmpty() && !allSelectedCarsInContainers.contains(carChassis)) {
+                    val option = document.createElement("option") as HTMLOptionElement
+                    option.value = carChassis
+                    option.textContent = "${carChassis} - ${car.name} (${car.year})"
+                    carSelect.appendChild(option)
+                }
+            }
+            
+            console.log("✅ Updated container $i dropdown with ${carSelect.options.length - 1} available cars")
+        }
+    }
+}
+
+// Calculate freight allocation for a container
+fun calculateContainerFreightAllocation(containerId: String, allSelectedCars: List<dynamic>) {
+    val carList = document.getElementById("${containerId}CarList")
+    if (carList == null) return
+    
+    val totalPrice = (document.getElementById("${containerId}Price") as HTMLInputElement?)?.value ?: "¥450,000"
+    val totalAmount = totalPrice.replace("¥", "").replace(",", "").toDoubleOrNull() ?: 450000.0
+    
+    val carItems = carList.querySelectorAll("[data-chassis]")
+    val carCount = carItems.length
+    
+    if (carCount == 0) return
+    
+    // Calculate total C&F price for all cars in this container
+    var totalCnfPrice = 0.0
+    val cnfPrices = mutableListOf<Double>()
+    
+    for (i in 0 until carItems.length) {
+        val carItem = carItems[i] as HTMLElement
+        val chassis = carItem.getAttribute("data-chassis")
+        val car = allSelectedCars.find { it.chassis == chassis }
+        val cnfPrice = if (car != null && car.price != null) {
+            car.price as Double
+        } else {
+            carItem.getAttribute("data-cnf-price")?.toDoubleOrNull() ?: 0.0
+        }
+        cnfPrices.add(cnfPrice)
+        totalCnfPrice += cnfPrice
+    }
+    
+    // Distribute freight based on C&F price ratios
+    for (i in 0 until carItems.length) {
+        val carItem = carItems[i] as HTMLElement
+        val cnfPrice = cnfPrices[i]
+        
+        // Calculate allocation based on C&F price ratio
+        val allocationRatio = if (totalCnfPrice > 0) cnfPrice / totalCnfPrice else 1.0 / carCount
+        val allocatedAmount = totalAmount * allocationRatio
+        
+        // Update the freight allocation input
+        val freightInput = carItem.querySelector("input[type='text']") as HTMLInputElement?
+        freightInput?.value = "¥${allocatedAmount.toInt()}"
+        
+        console.log("🚢 Car ${carItem.getAttribute("data-chassis")}: C&F ¥${cnfPrice.toInt()}, Freight ¥${allocatedAmount.toInt()}")
+    }
+}
+
+// Confirm freight calculation
+fun confirmFreightCalculation() {
+    console.log("✅ Confirming freight calculation and collecting freight values...")
+    
+    // Collect freight values from all containers
+    val freightValues = mutableMapOf<String, Double>()
+    
+    // Get all container sections
+    val containerSections = document.getElementById("containerSections")
+    console.log("🔍 DEBUG: containerSections found:", containerSections)
+    if (containerSections != null) {
+        val containers = containerSections.querySelectorAll("[id^='container'][id$='CarList']")
+        console.log("🔍 DEBUG: Found ${containers.length} containers")
+        for (i in 0 until containers.length) {
+            val container = containers.item(i) as HTMLElement
+            val containerId = container.id
+            console.log("🔍 DEBUG: Processing container $i, containerId: $containerId")
+            val carList = document.getElementById(containerId)
+            console.log("🔍 DEBUG: carList for $containerId:", carList)
+            if (carList != null) {
+                val carItems = carList.querySelectorAll("[data-chassis]")
+                console.log("🔍 DEBUG: Found ${carItems.length} car items in container $containerId")
+                for (j in 0 until carItems.length) {
+                    val carItem = carItems.item(j) as HTMLElement
+                    val chassis = carItem.getAttribute("data-chassis")
+                    console.log("🔍 DEBUG: Processing car item $j, chassis: $chassis")
+                    console.log("🔍 DEBUG: Car item HTML:", carItem.innerHTML)
+                    
+                    val freightInput = carItem.querySelector("input[type='text']") as HTMLInputElement?
+                    console.log("🔍 DEBUG: Freight input found:", freightInput)
+                    console.log("🔍 DEBUG: Freight input value:", freightInput?.value)
+                    
+                    if (chassis != null && freightInput != null) {
+                        val freightValue = freightInput.value.replace("¥", "").replace(",", "").toDoubleOrNull() ?: 0.0
+                        freightValues[chassis] = freightValue
+                        console.log("🚢 Collected freight for $chassis: ¥${freightValue.toInt()}")
+                    } else {
+                        console.log("❌ DEBUG: Missing chassis or freight input for car item $j")
+                    }
+                }
+            }
+        }
+    }
+    
+    // Store freight values globally for C&F page
+    globalFreightValues.clear()
+    globalFreightValues.putAll(freightValues)
+    console.log("📋 Stored freight values:", freightValues)
+    console.log("🔍 DEBUG: globalFreightValues after assignment:", globalFreightValues)
+    console.log("🔍 DEBUG: globalFreightValues size:", globalFreightValues.size)
+    console.log("🔍 DEBUG: globalFreightValues keys:", globalFreightValues.keys)
+    
+    // Navigate back to C&F Calculation page with freight values
+    console.log("🔄 Returning to C&F Calculation page with freight values...")
+    showCnfCalculationPage(null, cnfPageSelectedCars, currentSelectedCountry)
+}
+
+// Show C&F Calculation Page
+fun showCnfCalculationPage(selectedChassis: String? = null, selectedCars: List<dynamic>? = null, selectedCountry: String = "PAKISTAN") {
+    console.log("💰 Opening C&F Calculation page...")
+    
+    // Store the selected cars globally so Calculate Freight can access them
+    cnfPageSelectedCars = selectedCars ?: emptyList()
+    cnfPageSelectedCountry = selectedCountry // Store the selected country
+    console.log("📋 Stored ${cnfPageSelectedCars.size} selected cars for C&F page")
+    console.log("🌍 Stored selected country:", selectedCountry)
+    
+    val cnfPageHTML = createCnfCalculationHTML()
+    
+    // Replace the main content with C&F calculation page
+    val mainContent = document.getElementById("content")
+    if (mainContent != null) {
+        mainContent.innerHTML = cnfPageHTML
+        setupCnfCalculationListeners(selectedChassis, selectedCars)
+        
+        console.log("✅ C&F Calculation page loaded successfully")
+    } else {
+        console.error("❌ Main content element not found")
+    }
+}
+
+// Show modal for "all cars details checked"
+fun showAllCarsDetailsCheckedModal() {
+    val modalHTML = """
+        <div id="allCarsDetailsModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 1000; display: flex; justify-content: center; align-items: center;">
+            <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); max-width: 400px; text-align: center;">
+                <div style="margin-bottom: 20px;">
+                    <div style="width: 60px; height: 60px; background-color: #fef3c7; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px;">
+                        <span style="font-size: 30px;">⚠️</span>
+                    </div>
+                    <h3 style="margin: 0 0 10px 0; color: #374151; font-size: 20px; font-weight: 600;">All Cars Details Checked</h3>
+                    <p style="margin: 0; color: #6b7280; font-size: 14px; line-height: 1.5;">Please check the details of all selected cars before proceeding.</p>
+                </div>
+                <button id="closeAllCarsDetailsModal" style="padding: 10px 24px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">OK</button>
+            </div>
+        </div>
+    """
+    
+    // Add modal to body
+    document.body?.insertAdjacentHTML("beforeend", modalHTML)
+    
+    // Add close event listener
+    document.getElementById("closeAllCarsDetailsModal")?.addEventListener("click", { _: Event ->
+        document.getElementById("allCarsDetailsModal")?.remove()
+    })
+    
+    // Close modal when clicking outside
+    document.getElementById("allCarsDetailsModal")?.addEventListener("click", { event: Event ->
+        if (event.target == document.getElementById("allCarsDetailsModal")) {
+            document.getElementById("allCarsDetailsModal")?.remove()
+        }
+    })
+}
+
+
+
+
+
+// Show FOB Calculation Page
+fun showFobCalculationPage(selectedChassis: String? = null, selectedCars: List<dynamic>? = null) {
+    console.log("🚢 Opening FOB Calculation page...")
+    
+    // Store the selected cars globally so Calculate Freight can access them
+    fobPageSelectedCars = selectedCars ?: emptyList()
+    console.log("📋 Stored ${fobPageSelectedCars.size} selected cars for FOB page")
+    
+    val fobPageHTML = createFobCalculationHTML()
+    
+    // Replace the main content with FOB calculation page
+    val mainContent = document.getElementById("content")
+    if (mainContent != null) {
+        mainContent.innerHTML = fobPageHTML
+        setupFobCalculationListeners(selectedChassis, selectedCars)
+        
+        console.log("✅ FOB Calculation page loaded successfully - FREIGHT FIELD REMOVED - CACHE BUST 1736383002")
+    } else {
+        console.error("❌ Main content element not found")
+    }
+}
+
+// Create C&F Calculation HTML page
+fun createCnfCalculationHTML(): String {
+    return """
+        <div style="padding: 20px; background-color: #f9fafb; min-height: 100vh;">
+            <!-- Back Button -->
+            <div style="margin-bottom: 20px;">
+                <button id="backToBookingBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">← Back to Car Booking</button>
+            </div>
+            
+            <!-- C&F Calculation Container -->
+            <div style="background-color: white; border: 2px solid #8b5cf6; border-radius: 12px; padding: 30px; max-width: 800px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+                
+                <!-- Header -->
+                <div style="text-align: center; margin-bottom: 30px;">
+                    <h1 style="color: #1f2937; font-size: 24px; font-weight: bold; margin: 0;">C&F CALCULATION</h1>
+                </div>
+                
+                <!-- Car Selection -->
+                <div style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 16px;">SELECT CAR CHASSIS :</label>
+                    <select id="chassisSelect" style="width: 100%; padding: 12px; border: 2px solid #d1d5db; border-radius: 6px; font-size: 14px; background-color: white;">
+                        <option value="">Select a car chassis...</option>
+                    </select>
+                </div>
+                
+                <!-- Cost Fields -->
+                <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <!-- Left Column -->
+                        <div>
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">CAR PRICE (¥):</label>
+                                <div style="display: flex; align-items: center;">
+                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                                    <input type="text" id="carPrice" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                </div>
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">RIXO PRICE (¥):</label>
+                                <div style="display: flex; align-items: center;">
+                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                                    <input type="text" id="rixoPrice" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                </div>
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">FREIGHT (¥):</label>
+                                <div style="display: flex; align-items: center;">
+                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                                    <input type="text" id="freight" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                </div>
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">REPAIR FEE (¥):</label>
+                                <div style="display: flex; align-items: center;">
+                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                                    <input type="text" id="repairFee" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                </div>
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">PROFIT (¥):</label>
+                                <div style="display: flex; align-items: center;">
+                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                                    <input type="text" id="profit" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Right Column -->
+                        <div>
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">AUCTION FEE (¥):</label>
+                                <div style="display: flex; align-items: center;">
+                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                                    <input type="text" id="auctionFee" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                </div>
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">SHIPPING CHARGE (¥):</label>
+                                <div style="display: flex; align-items: center;">
+                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                                    <input type="text" id="shippingCharge" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                </div>
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">INSPECTION FEE (¥):</label>
+                                <div style="display: flex; align-items: center;">
+                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                                    <input type="text" id="inspectionFee" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                </div>
+                            </div>
+                            
+                            <div style="margin-bottom: 15px;">
+                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">MSC. CHARGES (¥):</label>
+                                <div style="display: flex; align-items: center;">
+                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                                    <input type="text" id="mscCharges" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Package Option -->
+                    <div style="margin-top: 20px; padding: 15px; background-color: #f3f4f6; border-radius: 8px; border: 1px solid #d1d5db;">
+                        <label style="display: flex; align-items: center; cursor: pointer; font-weight: 500; color: #374151;">
+                            <input type="checkbox" id="packageCheckbox" style="margin-right: 10px; transform: scale(1.2);">
+                            <span style="font-size: 16px;">PACKAGE</span>
+                        </label>
+                    </div>
+                    
+                    <!-- Package Price Field (Hidden by default) -->
+                    <div id="packagePriceSection" style="display: none; margin-top: 20px; padding: 15px; background-color: #fef3c7; border-radius: 8px; border: 1px solid #f59e0b;">
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 16px;">PACKAGE PRICE (¥):</label>
+                        <div style="display: flex; align-items: center;">
+                            <span style="margin-right: 5px; font-weight: bold;">¥</span>
+                            <input type="text" id="packagePrice" value="0" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                        </div>
+                    </div>
+                    
+                    <!-- Total Calculations -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px; padding-top: 20px; border-top: 2px solid #e5e7eb;">
+                        <!-- Total C&F Price -->
+                        <div style="text-align: center;">
+                            <label style="display: block; margin-bottom: 10px; font-weight: 600; color: #374151; font-size: 16px;">TOTAL C&F PRICE (¥):</label>
+                            <div id="totalCnfPrice" style="font-size: 20px; font-weight: bold; color: #059669; background-color: #f0fdf4; padding: 15px; border-radius: 8px; border: 2px solid #22c55e;">0</div>
+                        </div>
+                        
+                        <!-- Total Cost (Hidden by default) -->
+                        <div id="totalCostSection" style="text-align: center; display: none;">
+                            <label style="display: block; margin-bottom: 10px; font-weight: 600; color: #374151; font-size: 16px;">TOTAL COST (¥):</label>
+                            <div id="totalCost" style="font-size: 20px; font-weight: bold; color: #dc2626; background-color: #fef2f2; padding: 15px; border-radius: 8px; border: 2px solid #fca5a5;">0</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div style="text-align: center; margin-top: 20px;">
+                        <button id="saveCarCostsBtn" style="padding: 12px 32px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; margin-right: 15px;">SAVE</button>
+                        <button id="confirmCarCostsBtn" style="padding: 12px 32px; background-color: #059669; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; margin-right: 15px;">CONFIRM</button>
+                        <button id="calculateFreightBtn" style="padding: 12px 32px; background-color: #8b5cf6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">CALCULATE FREIGHT</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    """
+}
+
+// Create FOB Calculation HTML page
+fun createFobCalculationHTML(): String {
+    return """
+        <div style="padding: 20px; background-color: #f9fafb; min-height: 100vh;">
+            <!-- Back Button -->
+            <div style="margin-bottom: 20px;">
+                <button id="backToBookingBtnFob" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">← Back to Car Booking</button>
+            </div>
+            
+            <!-- Main Container -->
+            <div style="background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%); border: 2px solid #3b82f6; border-radius: 12px; padding: 30px; box-shadow: 0 10px 25px rgba(0,0,0,0.1);">
+                <h3 style="margin: 0 0 25px 0; color: #374151; font-size: 20px; font-weight: 600; text-align: center;">FOB CALCULATION</h3>
+                
+                <!-- Chassis Selection -->
+                <div style="margin-bottom: 25px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">SELECT CAR CHASSIS :</label>
+                    <select id="chassisSelectFob" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background-color: white;">
+                        <option value="">Select a car chassis...</option>
+                    </select>
+                </div>
+                
+                <!-- Cost Fields Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
+                    <!-- Left Column -->
+                    <div style="display: flex; flex-direction: column; gap: 15px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">CAR PRICE (¥):</label>
+                            <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden;">
+                                <span style="padding: 10px; background-color: #f3f4f6; color: #6b7280; font-weight: 600;">¥</span>
+                                <input type="text" id="carPriceFob" placeholder="0" style="flex: 1; padding: 10px; border: none; font-size: 14px; outline: none;">
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">RIXO PRICE (¥):</label>
+                            <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden;">
+                                <span style="padding: 10px; background-color: #f3f4f6; color: #6b7280; font-weight: 600;">¥</span>
+                                <input type="text" id="rixoPriceFob" placeholder="0" style="flex: 1; padding: 10px; border: none; font-size: 14px; outline: none;">
+                            </div>
+                        </div>
+                        
+                        
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">REPAIR FEE (¥):</label>
+                            <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden;">
+                                <span style="padding: 10px; background-color: #f3f4f6; color: #6b7280; font-weight: 600;">¥</span>
+                                <input type="text" id="repairFeeFob" placeholder="0" style="flex: 1; padding: 10px; border: none; font-size: 14px; outline: none;">
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">PROFIT (¥):</label>
+                            <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden;">
+                                <span style="padding: 10px; background-color: #f3f4f6; color: #6b7280; font-weight: 600;">¥</span>
+                                <input type="text" id="profitFob" placeholder="0" style="flex: 1; padding: 10px; border: none; font-size: 14px; outline: none;">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Right Column -->
+                    <div style="display: flex; flex-direction: column; gap: 15px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">AUCTION FEE (¥):</label>
+                            <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden;">
+                                <span style="padding: 10px; background-color: #f3f4f6; color: #6b7280; font-weight: 600;">¥</span>
+                                <input type="text" id="auctionFeeFob" placeholder="0" style="flex: 1; padding: 10px; border: none; font-size: 14px; outline: none;">
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">SHIPPING CHARGE (¥):</label>
+                            <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden;">
+                                <span style="padding: 10px; background-color: #f3f4f6; color: #6b7280; font-weight: 600;">¥</span>
+                                <input type="text" id="shippingChargeFob" placeholder="0" style="flex: 1; padding: 10px; border: none; font-size: 14px; outline: none;">
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">INSPECTION FEE (¥):</label>
+                            <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden;">
+                                <span style="padding: 10px; background-color: #f3f4f6; color: #6b7280; font-weight: 600;">¥</span>
+                                <input type="text" id="inspectionFeeFob" placeholder="0" style="flex: 1; padding: 10px; border: none; font-size: 14px; outline: none;">
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">MSC. CHARGES (¥):</label>
+                            <div style="display: flex; align-items: center; border: 1px solid #d1d5db; border-radius: 6px; overflow: hidden;">
+                                <span style="padding: 10px; background-color: #f3f4f6; color: #6b7280; font-weight: 600;">¥</span>
+                                <input type="text" id="mscChargesFob" placeholder="0" style="flex: 1; padding: 10px; border: none; font-size: 14px; outline: none;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Total FOB Price -->
+                <div style="text-align: center; margin-top: 20px; padding-top: 20px; border-top: 2px solid #e5e7eb;">
+                    <label style="display: block; margin-bottom: 10px; font-weight: 600; color: #374151; font-size: 18px;">TOTAL FOB PRICE (¥):</label>
+                    <div id="totalFobPrice" style="font-size: 24px; font-weight: bold; color: #3b82f6; background-color: #eff6ff; padding: 15px; border-radius: 8px; border: 2px solid #3b82f6;">0</div>
+                </div>
+                
+                <!-- Action Buttons -->
+                <div style="text-align: center; margin-top: 20px;">
+                    <button id="saveCarCostsBtnFob" style="padding: 12px 32px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; margin-right: 15px;">SAVE</button>
+                    <button id="confirmCarCostsBtnFob" style="padding: 12px 32px; background-color: #059669; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">CONFIRM</button>
+                </div>
+            </div>
+        </div>
+    """
+}
+
+// Setup event listeners for C&F calculation page
+fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: List<dynamic>? = null) {
+    console.log("🔧 Setting up C&F calculation listeners...")
+    
+    // Back to booking button
+    document.getElementById("backToBookingBtn")?.addEventListener("click", { _: Event ->
+        // Save state before navigating back to Car Booking page
+        saveCarBookingState()
+        showCarBookingPage()
+    })
+    
+    // Load chassis dropdown with available cars
+    loadChassisDropdownForCnf(selectedCars)
+    
+    // If a specific chassis is selected, set it in the dropdown
+    if (!selectedChassis.isNullOrEmpty()) {
+        val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
+        chassisSelect?.value = selectedChassis
+        loadCarCostDetails()
+    }
+    
+    // Chassis selection dropdown - load car cost details
+    document.getElementById("chassisSelect")?.addEventListener("change", { _: Event ->
+        loadCarCostDetails()
+    })
+    
+    // Save button - save calculated Total C&F Price
+    document.getElementById("saveCarCostsBtn")?.addEventListener("click", { _: Event ->
+        saveTotalCnfPrice()
+    })
+    
+    // Confirm button - save data and then navigate
+    document.getElementById("confirmCarCostsBtn")?.addEventListener("click", { _: Event ->
+        console.log("🔘 CONFIRM button clicked!")
+        // First, save the calculated C&F cost details to database, THEN navigate
+        console.log("💾 Saving C&F cost details before navigation...")
+        saveCarCostDetailsAndNavigate()
+    })
+    
+    // Calculate freight button - navigate to freight calculation page
+    document.getElementById("calculateFreightBtn")?.addEventListener("click", { _: Event ->
+        console.log("🚢 Navigating from C&F page to Calculate Freight page...")
+        showCalculateFreightPage()
+    })
+    
+    // Add input validation to all cost fields
+    addCostFieldValidation()
+    
+    // Add event listeners for all cost input fields to calculate total in real-time
+    val costFieldIds = listOf("carPrice", "auctionFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
+    costFieldIds.forEach { fieldId ->
+        document.getElementById(fieldId)?.addEventListener("input", { _: Event ->
+            calculateCnfTotal()
+        })
+        document.getElementById(fieldId)?.addEventListener("change", { _: Event ->
+            calculateCnfTotal()
+        })
+    }
+    
+    // Package checkbox event listener
+    document.getElementById("packageCheckbox")?.addEventListener("change", { _: Event ->
+        togglePackageFields()
+    })
+    
+    // Package price input event listener
+    document.getElementById("packagePrice")?.addEventListener("input", { _: Event ->
+        calculateCnfTotal()
+    })
+    
+    console.log("✅ C&F calculation listeners setup complete")
+}
+
+// Setup event listeners for FOB calculation page
+fun setupFobCalculationListeners(selectedChassis: String? = null, selectedCars: List<dynamic>? = null) {
+    console.log("🔧 Setting up FOB calculation listeners...")
+    
+    // Back to booking button
+    document.getElementById("backToBookingBtnFob")?.addEventListener("click", { _: Event ->
+        // Save state before navigating back to Car Booking page
+        saveCarBookingState()
+        showCarBookingPage()
+    })
+    
+    // Load chassis dropdown with available cars
+    loadChassisDropdownForFob(selectedCars)
+    
+    // If a specific chassis is selected, set it in the dropdown
+    if (!selectedChassis.isNullOrEmpty()) {
+        val chassisSelect = document.getElementById("chassisSelectFob") as HTMLSelectElement?
+        chassisSelect?.value = selectedChassis
+        loadCarCostDetailsFob()
+    }
+    
+    // Chassis selection dropdown - load car cost details
+    document.getElementById("chassisSelectFob")?.addEventListener("change", { _: Event ->
+        loadCarCostDetailsFob()
+    })
+    
+    // Save button - save calculated Total FOB Price
+    document.getElementById("saveCarCostsBtnFob")?.addEventListener("click", { _: Event ->
+        console.log("🔘 SAVE button clicked - NEW FUNCTIONALITY - CACHE BUST 1736383003")
+        saveTotalFobPrice()
+    })
+    
+    // Confirm button - navigate to C&F page
+    document.getElementById("confirmCarCostsBtnFob")?.addEventListener("click", { _: Event ->
+        console.log("🔘 CONFIRM button clicked - NEW FUNCTIONALITY - CACHE BUST 1736383003")
+        navigateToCnfPage()
+    })
+    
+    // Add input validation to all cost fields
+    addCostFieldValidationFob()
+    
+    console.log("✅ FOB calculation listeners setup complete - FREIGHT FIELD REMOVED - CACHE BUST 1736383002")
+}
+
+// Load chassis dropdown for C&F page
+fun loadChassisDropdownForCnf(selectedCars: List<dynamic>? = null) {
+    console.log("🔄 Loading chassis dropdown for C&F page...")
+    
+    // Use provided selectedCars or stored cnfPageSelectedCars (fallback)
+    val cars = selectedCars ?: cnfPageSelectedCars
+    val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
+    
+    if (chassisSelect != null) {
+        // Clear existing options except the first one
+        chassisSelect.innerHTML = "<option value=\"\">Select a car chassis...</option>"
+        
+        // Add selected cars to dropdown
+        cars.forEach { car ->
+            val option = document.createElement("option") as HTMLOptionElement
+            option.value = car.chassis
+            option.textContent = "${car.chassis} - ${car.name} (${car.year})"
+            chassisSelect.appendChild(option)
+        }
+        
+        console.log("✅ Added ${cars.size} cars to C&F chassis dropdown")
+    } else {
+        console.error("❌ Chassis select element not found!")
+    }
+}
+
+// Calculate and update C&F total display
+// Toggle package fields visibility
+fun togglePackageFields() {
+    val packageCheckbox = document.getElementById("packageCheckbox") as HTMLInputElement?
+    val packagePriceSection = document.getElementById("packagePriceSection")
+    val totalCostSection = document.getElementById("totalCostSection")
+    
+    if (packageCheckbox?.checked == true) {
+        // Show package fields
+        packagePriceSection?.setAttribute("style", "display: block; margin-top: 20px; padding: 15px; background-color: #fef3c7; border-radius: 8px; border: 1px solid #f59e0b;")
+        totalCostSection?.setAttribute("style", "text-align: center; display: block;")
+        console.log("📦 Package fields shown")
+    } else {
+        // Hide package fields
+        packagePriceSection?.setAttribute("style", "display: none;")
+        totalCostSection?.setAttribute("style", "text-align: center; display: none;")
+        console.log("📦 Package fields hidden")
+    }
+    
+    // Recalculate totals
+    calculateCnfTotal()
+}
+
+fun calculateCnfTotal() {
+    // Get current cost values from the form
+    val carPrice = (document.getElementById("carPrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val freight = (document.getElementById("freight") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val repairFee = (document.getElementById("repairFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val mscCharges = (document.getElementById("mscCharges") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val profit = (document.getElementById("profit") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    
+    // Check if package checkbox is checked
+    val packageCheckbox = document.getElementById("packageCheckbox") as HTMLInputElement?
+    val isPackageChecked = packageCheckbox?.checked == true
+    
+    if (isPackageChecked) {
+        // Package mode: Total C&F = Car Price + Package Price
+        val packagePrice = (document.getElementById("packagePrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+        val totalCnfPrice = carPrice + packagePrice
+        
+        // Total Cost = sum of all fees
+        val totalCost = auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+        
+        // Update displays
+        document.getElementById("totalCnfPrice")?.textContent = "¥${totalCnfPrice.toInt()}"
+        document.getElementById("totalCost")?.textContent = "¥${totalCost.toInt()}"
+        
+        console.log("📦 Package mode - Total C&F: $totalCnfPrice, Total Cost: $totalCost")
+    } else {
+        // Normal mode: Total C&F = Car Price + All Fees (current behavior)
+        val totalCnfPrice = carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+        
+        // Update display
+        document.getElementById("totalCnfPrice")?.textContent = "¥${totalCnfPrice.toInt()}"
+        
+        console.log("💰 Normal mode - Total C&F: $totalCnfPrice")
+    }
+}
+
+// Confirm car cost details - save to database and add to confirmed cars list
+fun confirmCarCostDetails() {
+    console.log("✅ Confirming car cost details...")
+    
+    val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
+    if (chassisSelect == null || chassisSelect.value.isEmpty()) {
+        window.alert("Please select a car chassis first!")
+        return
+    }
+    
+    val selectedChassis = chassisSelect.value
+    console.log("🔍 Confirming costs for chassis: $selectedChassis")
+    
+    // Get current cost values from the form
+    val carPrice = (document.getElementById("carPrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val freight = (document.getElementById("freight") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val repairFee = (document.getElementById("repairFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val mscCharges = (document.getElementById("mscCharges") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val profit = (document.getElementById("profit") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    
+    // Calculate total C&F price
+    val totalCnfPrice = carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+    
+    // Update the display
+    document.getElementById("totalCnfPrice")?.textContent = "¥${totalCnfPrice.toInt()}"
+    
+    console.log("💰 Total C&F Price calculated: $totalCnfPrice")
+    
+    // Create cost data object
+    val costData = js("{}")
+    costData.chassis = selectedChassis
+    costData.carPrice = carPrice
+    costData.auctionFee = auctionFee
+    costData.rixoPrice = rixoPrice
+    costData.shippingCharge = shippingCharge
+    costData.freight = freight
+    costData.inspectionFee = inspectionFee
+    costData.repairFee = repairFee
+    costData.mscCharges = mscCharges
+    costData.profit = profit
+    costData.totalCnfPrice = totalCnfPrice
+    
+    // Save to database using existing saveCarCostDetails function
+    saveCarCostDetails()
+    
+    // Add to confirmed cars list
+    val confirmedCar = js("{}")
+    confirmedCar.chassis = selectedChassis
+    
+    // Parse car name and year from dropdown text
+    val optionText = chassisSelect.options[chassisSelect.selectedIndex]?.textContent ?: ""
+    val nameAndYear = optionText.split(" - ")
+    if (nameAndYear.size >= 2) {
+        val nameAndYearPart = nameAndYear[1].split(" (")
+        confirmedCar.name = nameAndYearPart[0]
+        if (nameAndYearPart.size >= 2) {
+            confirmedCar.year = nameAndYearPart[1].replace(")", "")
+        } else {
+            confirmedCar.year = "Unknown"
+        }
+    } else {
+        confirmedCar.name = "Unknown"
+        confirmedCar.year = "Unknown"
+    }
+    
+    confirmedCar.totalCnfPrice = totalCnfPrice
+    
+    // Check if car already exists in confirmed list and update it
+    val existingIndex = cnfConfirmedCars.indexOfFirst { it.chassis == selectedChassis }
+    if (existingIndex >= 0) {
+        cnfConfirmedCars[existingIndex] = confirmedCar
+        console.log("🔄 Updated existing confirmed car: $selectedChassis")
+    } else {
+        cnfConfirmedCars.add(confirmedCar)
+        console.log("➕ Added new confirmed car: $selectedChassis")
+    }
+    
+    window.alert("✅ Car costs confirmed and saved!\nChassis: $selectedChassis\nTotal C&F Price: ¥${totalCnfPrice.toInt()}")
+}
+
+// ==================== FOB HELPER FUNCTIONS ====================
+
+// Load chassis dropdown for FOB page
+fun loadChassisDropdownForFob(selectedCars: List<dynamic>? = null) {
+    console.log("🔄 Loading chassis dropdown for FOB page...")
+    
+    // Use provided selectedCars or stored fobPageSelectedCars (fallback)
+    val cars = selectedCars ?: fobPageSelectedCars
+    
+    val chassisSelect = document.getElementById("chassisSelectFob") as HTMLSelectElement?
+    if (chassisSelect == null) {
+        console.error("❌ Chassis select element for FOB not found!")
+        return
+    }
+    
+    chassisSelect.innerHTML = "<option value=\"\">Select a car chassis...</option>" // Clear existing options
+    
+    if (cars.isNotEmpty()) {
+        cars.forEach { car ->
+            val chassis = car.chassis as? String
+            val name = car.name as? String
+            val year = car.year as? String
+            if (chassis != null) {
+                val option = document.createElement("option") as HTMLOptionElement
+                option.setAttribute("value", chassis)
+                option.textContent = "$chassis - $name ($year)"
+                chassisSelect.appendChild(option)
+            }
+        }
+        console.log("✅ FOB chassis dropdown populated with ${cars.size} selected cars.")
+    } else {
+        console.warn("⚠️ No cars passed to FOB page to populate dropdown.")
+    }
+}
+
+// Load car cost details for FOB page
+fun loadCarCostDetailsFob() {
+    val chassisSelect = document.getElementById("chassisSelectFob") as HTMLSelectElement?
+    if (chassisSelect == null || chassisSelect.value.isEmpty()) {
+        clearCostFieldsFob()
+        return
+    }
+    
+    val selectedChassis = chassisSelect.value
+    console.log("🔍 Loading FOB cost details for chassis:", selectedChassis)
+    
+    js("fetch('/api/purchases/costs-by-chassis/' + encodeURIComponent(selectedChassis))")
+        .then { response: dynamic ->
+            if (!response.ok) {
+                throw Exception("HTTP error! status: ${response.status}")
+            }
+            response.json()
+        }
+        .then { costData: dynamic ->
+            console.log("✅ FOB Cost details fetched:", costData)
+            populateCostFieldsFob(costData)
+            calculateTotalFobPrice()
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error fetching FOB cost details:", error)
+            js("alert('Error fetching FOB cost details: ' + error.message)")
+            clearCostFieldsFob()
+        }
+}
+
+// Populate cost fields for FOB page
+fun populateCostFieldsFob(purchase: dynamic) {
+    console.log("Filling FOB cost fields with data:", purchase)
+    
+    // Helper function to safely convert value to string
+    fun getValueAsString(value: dynamic): String {
+        return when (value) {
+            is String -> value.replace(",", "")
+            is Number -> value.toString()
+            else -> "0"
+        }
+    }
+    
+    (document.getElementById("carPriceFob") as? HTMLInputElement)?.value = getValueAsString(purchase.carPrice)
+    (document.getElementById("auctionFeeFob") as? HTMLInputElement)?.value = getValueAsString(purchase.auctionFee)
+    (document.getElementById("rixoPriceFob") as? HTMLInputElement)?.value = getValueAsString(purchase.rixoPrice)
+    (document.getElementById("shippingChargeFob") as? HTMLInputElement)?.value = getValueAsString(purchase.shippingCharge)
+    (document.getElementById("inspectionFeeFob") as? HTMLInputElement)?.value = getValueAsString(purchase.inspectionFee)
+    (document.getElementById("repairFeeFob") as? HTMLInputElement)?.value = getValueAsString(purchase.repairFee)
+    (document.getElementById("mscChargesFob") as? HTMLInputElement)?.value = getValueAsString(purchase.mscCharges)
+    (document.getElementById("profitFob") as? HTMLInputElement)?.value = getValueAsString(purchase.profit)
+    
+    console.log("✅ FOB fields populated successfully")
+    calculateTotalFobPrice()
+}
+
+// Clear cost fields for FOB page
+fun clearCostFieldsFob() {
+    console.log("🧹 Clearing FOB cost fields...")
+    (document.getElementById("carPriceFob") as? HTMLInputElement)?.value = "0"
+    (document.getElementById("auctionFeeFob") as? HTMLInputElement)?.value = "0"
+    (document.getElementById("rixoPriceFob") as? HTMLInputElement)?.value = "0"
+    (document.getElementById("shippingChargeFob") as? HTMLInputElement)?.value = "0"
+    (document.getElementById("inspectionFeeFob") as? HTMLInputElement)?.value = "0"
+    (document.getElementById("repairFeeFob") as? HTMLInputElement)?.value = "0"
+    (document.getElementById("mscChargesFob") as? HTMLInputElement)?.value = "0"
+    (document.getElementById("profitFob") as? HTMLInputElement)?.value = "0"
+    (document.getElementById("totalFobPrice") as? HTMLElement)?.textContent = "¥0"
+}
+
+// Calculate total FOB price
+fun calculateTotalFobPrice() {
+    val carPrice = parseCurrency((document.getElementById("carPriceFob") as? HTMLInputElement)?.value ?: "0")
+    val auctionFee = parseCurrency((document.getElementById("auctionFeeFob") as? HTMLInputElement)?.value ?: "0")
+    val rixoPrice = parseCurrency((document.getElementById("rixoPriceFob") as? HTMLInputElement)?.value ?: "0")
+    val shippingCharge = parseCurrency((document.getElementById("shippingChargeFob") as? HTMLInputElement)?.value ?: "0")
+    val inspectionFee = parseCurrency((document.getElementById("inspectionFeeFob") as? HTMLInputElement)?.value ?: "0")
+    val repairFee = parseCurrency((document.getElementById("repairFeeFob") as? HTMLInputElement)?.value ?: "0")
+    val mscCharges = parseCurrency((document.getElementById("mscChargesFob") as? HTMLInputElement)?.value ?: "0")
+    val profit = parseCurrency((document.getElementById("profitFob") as? HTMLInputElement)?.value ?: "0")
+    
+    val total = carPrice + auctionFee + rixoPrice + shippingCharge + inspectionFee + repairFee + mscCharges + profit
+    (document.getElementById("totalFobPrice") as? HTMLElement)?.textContent = "¥${total.toInt()}"
+}
+
+// Save FOB cost details - FUNCTIONALITY REMOVED
+fun saveFobCostDetails() {
+    console.log("🔘 saveFobCostDetails called - functionality removed - CACHE BUST 1736383001")
+    // Functionality removed - no longer saves to database
+}
+
+// Save calculated Total FOB Price for individual car
+fun saveTotalFobPrice() {
+    console.log("🔘 saveTotalFobPrice called - NEW FUNCTIONALITY - CACHE BUST 1736383003")
+    
+    val chassisSelect = document.getElementById("chassisSelectFob") as HTMLSelectElement
+    val selectedChassis = chassisSelect.value
+
+    if (selectedChassis.isEmpty()) {
+        js("alert('Please select a car chassis first')")
+        return
+    }
+
+    console.log("💾 Saving Total FOB Price for chassis:", selectedChassis)
+
+    // Get current Total FOB Price from the display
+    val totalFobPriceElement = document.getElementById("totalFobPrice")
+    val totalFobPriceText = totalFobPriceElement?.textContent ?: "¥0"
+
+    // Extract numeric value from "¥26900" format
+    val totalFobPrice = totalFobPriceText.replace("¥", "").replace(",", "").toDoubleOrNull() ?: 0.0
+
+    console.log("📊 Total FOB Price to save:", totalFobPrice)
+
+    // Create cost data object
+    val costData = js("{}")
+    costData.chassis = selectedChassis
+    costData.totalCnfPrice = totalFobPrice  // Save FOB price to total_cnf_price column
+
+    console.log("📊 Cost data to save:", costData)
+
+    // Call backend API to save FOB price to total_cnf_price column
+    js("fetch('/api/purchases/save-total-cnf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(costData) })")
+        .then { response: dynamic ->
+            console.log("Save Total FOB API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                throw js("Error('Failed to save total FOB price')")
+            }
+        }
+        .then { result: dynamic ->
+            console.log("✅ Total FOB price saved successfully:", result)
+            js("alert('Total FOB Price saved successfully for chassis: ' + selectedChassis)")
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error saving total FOB price:", error)
+            js("alert('Error saving total FOB price: ' + error.message)")
+        }
+}
+
+// Navigate to C&F page from FOB page
+fun navigateToCnfPage() {
+    console.log("🔘 navigateToCnfPage called - Navigating to BOOKING DETAILS page")
+    
+    // Navigate back to BOOKING DETAILS page
+    showCarBookingPage()
+    console.log("✅ Navigated to BOOKING DETAILS page")
+}
+
+// Confirm FOB cost details - FUNCTIONALITY REMOVED
+fun confirmFobCostDetails() {
+    console.log("🔘 confirmFobCostDetails called - functionality removed - CACHE BUST 1736383001")
+    // Functionality removed - no longer saves to database or navigates
+}
+
+// Confirm FOB PDF generation - FUNCTIONALITY REMOVED
+fun confirmFobPdfGeneration() {
+    console.log("🔘 confirmFobPdfGeneration called - functionality removed - CACHE BUST 1736383001")
+    // Functionality removed - no longer generates PDF
+}
+
+// Add cost field validation for FOB page
+fun addCostFieldValidationFob() {
+    val costFields = listOf(
+        "carPriceFob", "auctionFeeFob", "rixoPriceFob", "shippingChargeFob",
+        "inspectionFeeFob", "repairFeeFob", "mscChargesFob", "profitFob"
+    )
+    
+    costFields.forEach { fieldId ->
+        val field = document.getElementById(fieldId) as? HTMLInputElement
+        if (field != null) {
+            field.addEventListener("input", { _: Event ->
+                calculateTotalFobPrice()
+            })
+        }
+    }
+}
+
+// Update chassis dropdown with selected cars
+fun updateChassisDropdown() {
+    console.log("🔄 Updating chassis dropdown...")
+    val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement
+    val selectedChassis = mutableListOf<String>()
+    
+    // Get all checked cars from the table
+    val checkboxes = document.querySelectorAll("#carSelectionTableBody input[type='checkbox']:checked")
+    for (i in 0 until checkboxes.length) {
+        val checkbox = checkboxes.item(i) as HTMLInputElement
+        val row = checkbox.closest("tr") as HTMLElement
+        val chassisCell = row.querySelector("td:nth-child(3)") // 3rd column is chassis
+        val chassisNumber = chassisCell?.textContent?.trim()
+        if (!chassisNumber.isNullOrEmpty()) {
+            selectedChassis.add(chassisNumber)
+        }
+    }
+    
+    // Clear and repopulate dropdown
+    chassisSelect.innerHTML = ""
+    chassisSelect.add(js("new Option('Select a car chassis...', '')"))
+    
+    for (chassis in selectedChassis) {
+        val option = js("new Option(chassis, chassis)")
+        chassisSelect.add(option)
+    }
+    
+    console.log("✅ Chassis dropdown updated with", selectedChassis.size, "selected cars")
+}
+
+// Currency formatting functions
+fun formatCurrency(amount: Double): String {
+    return amount.toInt().toString().replace(Regex("(\\d)(?=(\\d{3})+(?!\\d))"), "$1,")
+}
+
+fun parseCurrency(currencyString: String): Double {
+    // Remove commas and any currency symbols, then parse as double
+    val cleanString = currencyString.replace(",", "").replace("¥", "").replace("Â¥", "").trim()
+    return cleanString.toDoubleOrNull() ?: 0.0
+}
+
+// Input validation and formatting
+fun validateAndFormatCurrencyInput(field: HTMLInputElement) {
+    val currentValue = field.value
+    val numericValue = currentValue.toDoubleOrNull() ?: 0.0
+    
+    // Validate: only allow positive numbers
+    if (numericValue < 0) {
+        field.value = "0"
+    } else {
+        field.value = numericValue.toInt().toString()
+    }
+    
+    // Recalculate total after any change
+    calculateTotalCnfPrice()
+}
+
+// Add input validation to all cost fields
+fun addCostFieldValidation() {
+    val costFields = listOf("carPrice", "auctionFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
+    
+    for (fieldId in costFields) {
+        val field = document.getElementById(fieldId) as HTMLInputElement
+        if (field != null) {
+            // Add event listeners for real-time validation
+            field.addEventListener("blur", { _: Event ->
+                validateAndFormatCurrencyInput(field)
+            })
+            
+            field.addEventListener("input", { _: Event ->
+                // Allow typing but validate on blur
+                val currentValue = field.value
+                // Only allow numbers (no currency symbols or commas)
+                if (!currentValue.matches(Regex("^[\\d]*$"))) {
+                    field.value = currentValue.replace(Regex("[^\\d]"), "")
+                }
+            })
+        }
+    }
+}
+
+// Load car cost details when chassis is selected
+fun loadCarCostDetails() {
+    val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement
+    val selectedChassis = chassisSelect.value
+    
+    if (selectedChassis.isEmpty()) {
+        clearCostFields()
+        return
+    }
+    
+    console.log("📋 Loading cost details for chassis:", selectedChassis)
+    
+    // Try API call first, fallback to sample data if it fails
+    js("fetch('/api/purchases/costs-by-chassis/' + encodeURIComponent(selectedChassis))")
+        .then { response: dynamic ->
+            if (response.ok) {
+                response.json()
+            } else {
+                throw js("new Error('Failed to load cost details - Status: ' + response.status)")
+            }
+        }
+        .then { costData: dynamic ->
+            console.log("✅ Cost data loaded from API:", costData)
+            if (costData && costData.chassis) {
+                console.log("✅ Cost details extracted:", costData)
+                populateCostFields(costData)
+            } else {
+                throw js("new Error('No cost data found for chassis: ' + selectedChassis)")
+            }
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error loading cost details from API, using fallback:", error)
+            loadCarCostDetailsFallback(selectedChassis)
+        }
+}
+
+// Populate cost fields from API data
+fun populateCostFields(costData: dynamic) {
+    console.log("🔄 Populating cost fields with API data")
+    
+    // Get current selected chassis to check for freight value
+    val selectedChassis = (document.getElementById("chassisSelect") as HTMLSelectElement?)?.value ?: ""
+    console.log("🔍 DEBUG: selectedChassis:", selectedChassis)
+    console.log("🔍 DEBUG: globalFreightValues:", globalFreightValues)
+    console.log("🔍 DEBUG: globalFreightValues size:", globalFreightValues.size)
+    console.log("🔍 DEBUG: globalFreightValues contains key $selectedChassis:", globalFreightValues.containsKey(selectedChassis))
+    
+    console.log("🔍 DEBUG: Value from globalFreightValues[selectedChassis]:", globalFreightValues[selectedChassis])
+    val freightValue = if (selectedChassis.isNotEmpty() && globalFreightValues.containsKey(selectedChassis)) {
+        globalFreightValues[selectedChassis] ?: 0.0
+    } else {
+        0.0 // Freight always starts at 0, not from database
+    }
+    
+    console.log("🚢 Using freight value for $selectedChassis: ¥${freightValue.toInt()}")
+    
+    val fieldMappings = mapOf(
+        "carPrice" to costData.carPrice,
+        "auctionFee" to costData.auctionFee,
+        "rixoPrice" to costData.rixoPrice,
+        "shippingCharge" to costData.shippingCharge,
+        "freight" to freightValue, // Use freight value from Calculate Freight page
+        "inspectionFee" to costData.inspectionFee,
+        "repairFee" to costData.repairFee,
+        "mscCharges" to costData.mscCharges,
+        "profit" to costData.profit
+    )
+    
+    // Populate cost fields with plain numbers (¥ symbol is displayed in HTML)
+    for ((fieldId, value) in fieldMappings) {
+        val field = document.getElementById(fieldId) as HTMLInputElement
+        val numericValue = value?.toString()?.toDoubleOrNull() ?: 0.0
+        val plainValue = numericValue.toInt().toString()
+        console.log("🔍 Field:", fieldId, "Raw value:", value, "Numeric:", numericValue, "Plain value:", plainValue)
+        field.value = plainValue
+    }
+    
+    // Calculate total using the new function that handles package checkbox
+    calculateCnfTotal()
+    
+    console.log("✅ Cost fields populated from API data with currency formatting")
+}
+
+// Fallback function to load car cost details (will be replaced with API call)
+fun loadCarCostDetailsFallback(chassis: String) {
+    console.log("🔄 Loading fallback cost details for:", chassis)
+    
+    // Sample cost data - will be replaced with API call
+    val costData = mapOf(
+        "carPrice" to 300000.0,
+        "auctionFee" to 14500.0, 
+        "rixoPrice" to 12000.0,
+        "shippingCharge" to 20000.0,
+        "freight" to 0.0, // Freight always starts at 0, not from database
+        "inspectionFee" to 0.0,
+        "repairFee" to 0.0,
+        "mscCharges" to 0.0,
+        "profit" to 20000.0
+    )
+    
+    // Populate cost fields with currency formatting
+    for ((fieldId, value) in costData) {
+        val field = document.getElementById(fieldId) as HTMLInputElement
+        field.value = formatCurrency(value)
+    }
+    
+    // Calculate total using the new function that handles package checkbox
+    calculateCnfTotal()
+    
+    console.log("✅ Cost details loaded for chassis:", chassis)
+}
+
+// Clear all cost fields
+fun clearCostFields() {
+    val costFields = listOf("carPrice", "auctionFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
+    for (fieldId in costFields) {
+        val field = document.getElementById(fieldId) as HTMLInputElement
+        field.value = "0"
+    }
+    calculateCnfTotal()
+}
+
+// Calculate total C&F price
+fun calculateTotalCnfPrice() {
+    val costFields = listOf("carPrice", "auctionFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
+    var total = 0.0
+    
+    for (fieldId in costFields) {
+        val field = document.getElementById(fieldId) as HTMLInputElement
+        val value = field.value.toDoubleOrNull() ?: 0.0
+        total += value
+    }
+    
+    val totalElement = document.getElementById("totalCnfPrice")
+    totalElement?.textContent = "¥${total.toInt()}"
+    
+    console.log("💰 Total C&F Price calculated:", total)
+}
+
+// Save car cost details
+fun saveCarCostDetails() {
+    val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement
+    val selectedChassis = chassisSelect.value
+    
+    if (selectedChassis.isEmpty()) {
+        js("alert('Please select a car chassis first')")
+        return
+    }
+    
+    console.log("💾 Saving cost details for chassis:", selectedChassis)
+    
+    // Get all cost values from the form
+    val carPrice = (document.getElementById("carPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val freight = (document.getElementById("freight") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val repairFee = (document.getElementById("repairFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val mscCharges = (document.getElementById("mscCharges") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val profit = (document.getElementById("profit") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    
+    // Check if package checkbox is checked and get package price
+    val packageCheckbox = document.getElementById("packageCheckbox") as HTMLInputElement?
+    val isPackageChecked = packageCheckbox?.checked == true
+    val packagePrice = if (isPackageChecked) {
+        (document.getElementById("packagePrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    } else {
+        0.0
+    }
+    
+    // Create cost data object
+    val costData = js("{}")
+    costData.chassis = selectedChassis
+    costData.carPrice = carPrice
+    costData.auctionFee = auctionFee
+    costData.rixoPrice = rixoPrice
+    costData.shippingCharge = shippingCharge
+    costData.freight = freight
+    costData.inspectionFee = inspectionFee
+    costData.repairFee = repairFee
+    costData.mscCharges = mscCharges
+    costData.profit = profit
+    costData.packagePrice = packagePrice
+    costData.isPackageMode = isPackageChecked
+    
+    console.log("📊 Cost data to save:", costData)
+    console.log("🔍 DEBUG: Package price:", packagePrice)
+    console.log("🔍 DEBUG: Is package mode:", isPackageChecked)
+    
+    // Call backend API to save cost details
+    js("fetch('/api/purchases/save-costs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(costData) })")
+        .then { response: dynamic ->
+            console.log("Save API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                throw js("Error('Failed to save cost details')")
+            }
+        }
+        .then { result: dynamic ->
+            console.log("✅ Cost details saved successfully:", result)
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error saving cost details:", error)
+            js("alert('Error saving cost details: ' + error.message)")
+        }
+}
+
+// Save car cost details and then navigate to booking details page
+fun saveCarCostDetailsAndNavigate() {
+    val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement
+    val selectedChassis = chassisSelect.value
+    
+    if (selectedChassis.isEmpty()) {
+        js("alert('Please select a car chassis first')")
+        return
+    }
+    
+    console.log("💾 Saving cost details for chassis:", selectedChassis)
+    
+    // Get all cost values from the form
+    val carPrice = (document.getElementById("carPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val freight = (document.getElementById("freight") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val repairFee = (document.getElementById("repairFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val mscCharges = (document.getElementById("mscCharges") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val profit = (document.getElementById("profit") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    
+    // Check if package checkbox is checked and get package price
+    val packageCheckbox = document.getElementById("packageCheckbox") as HTMLInputElement?
+    val isPackageChecked = packageCheckbox?.checked == true
+    val packagePrice = if (isPackageChecked) {
+        (document.getElementById("packagePrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    } else {
+        0.0
+    }
+    
+    // Create cost data object
+    val costData = js("{}")
+    costData.chassis = selectedChassis
+    costData.carPrice = carPrice
+    costData.auctionFee = auctionFee
+    costData.rixoPrice = rixoPrice
+    costData.shippingCharge = shippingCharge
+    costData.freight = freight
+    costData.inspectionFee = inspectionFee
+    costData.repairFee = repairFee
+    costData.mscCharges = mscCharges
+    costData.profit = profit
+    costData.packagePrice = packagePrice
+    costData.isPackageMode = isPackageChecked
+    
+    console.log("📊 Cost data to save:", costData)
+    console.log("🔍 DEBUG: Package price:", packagePrice)
+    console.log("🔍 DEBUG: Is package mode:", isPackageChecked)
+    
+    // Call backend API to save cost details, THEN navigate
+    js("fetch('/api/purchases/save-costs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(costData) })")
+        .then { response: dynamic ->
+            console.log("Save API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                throw js("Error('Failed to save cost details')")
+            }
+        }
+        .then { result: dynamic ->
+            console.log("✅ Cost details saved successfully:", result)
+            // NOW navigate to booking details page after save completes
+            console.log("📋 Returning to populated BOOKING DETAILS page")
+            showCarBookingPage()
+            console.log("✅ Navigation completed")
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error saving cost details:", error)
+            js("alert('Error saving cost details: ' + error.message)")
+        }
+}
+
+// Save calculated Total C&F Price for individual car
+fun saveTotalCnfPrice() {
+    val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement
+    val selectedChassis = chassisSelect.value
+    
+    if (selectedChassis.isEmpty()) {
+        js("alert('Please select a car chassis first')")
+        return
+    }
+    
+    console.log("💾 Saving Total C&F Price for chassis:", selectedChassis)
+    
+    // Get current Total C&F Price from the display
+    val totalCnfPriceElement = document.getElementById("totalCnfPrice")
+    val totalCnfPriceText = totalCnfPriceElement?.textContent ?: "¥0"
+    
+    // Extract numeric value from "¥476900" format
+    val totalCnfPrice = totalCnfPriceText.replace("¥", "").replace(",", "").toDoubleOrNull() ?: 0.0
+    
+    console.log("📊 Total C&F Price to save:", totalCnfPrice)
+    
+    // Create cost data object
+    val costData = js("{}")
+    costData.chassis = selectedChassis
+    costData.totalCnfPrice = totalCnfPrice
+    
+    console.log("📊 Cost data to save:", costData)
+    
+    // Call backend API to save total C&F price
+    js("fetch('/api/purchases/save-total-cnf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(costData) })")
+        .then { response: dynamic ->
+            console.log("Save Total C&F API response status:", response.status)
+            if (response.ok) {
+                response.json()
+            } else {
+                throw js("Error('Failed to save total C&F price')")
+            }
+        }
+        .then { result: dynamic ->
+            console.log("✅ Total C&F price saved successfully:", result)
+            js("alert('Total C&F Price saved successfully for chassis: ' + selectedChassis)")
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error saving total C&F price:", error)
+            js("alert('Error saving total C&F price: ' + error.message)")
         }
 }

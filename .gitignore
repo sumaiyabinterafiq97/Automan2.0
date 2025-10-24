@@ -270,3 +270,9 @@ client-delivery-package 2/
 client-delivery-package-amd64-fixed 2/
 # OS files
 .DS_Store
+# Large files and archives
+Video/
+automan-single-image-fixed/automan-complete-fresh.tar
+*.mov
+*.tar
+*.zip

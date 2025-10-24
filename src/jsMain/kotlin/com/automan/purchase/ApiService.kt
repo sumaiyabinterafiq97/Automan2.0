@@ -12,7 +12,6 @@ import org.w3c.files.File
 data class ApiPurchase(
     val id: Long? = null,
     val date: String? = null,
-    val lotNumber: String,
     val chassis: String,
     val carModelYear: String? = null,
     val brand: String? = null,
@@ -36,6 +35,7 @@ data class ApiPurchase(
     val auctionFee: String? = null,
     val recycleFee: String? = null,
     val roadTax: String? = null,
+    val taxTotal: String? = null,
     val totalPrice: String? = null,
     val paymentDate: String? = null,
     val rixoRequested: String? = null,
@@ -86,7 +86,6 @@ object ApiService {
             Purchase(
                 id = apiPurchase.id,
                 date = apiPurchase.date,
-                lotNumber = apiPurchase.lotNumber,
                 chassis = apiPurchase.chassis,
                 carModelYear = apiPurchase.carModelYear,
                 brand = apiPurchase.brand,
@@ -110,6 +109,7 @@ object ApiService {
                 auctionFee = apiPurchase.auctionFee,
                 recycleFee = apiPurchase.recycleFee,
                 roadTax = apiPurchase.roadTax,
+                taxTotal = apiPurchase.taxTotal,
                 totalPrice = apiPurchase.totalPrice,
                 paymentDate = apiPurchase.paymentDate,
                 rixoRequested = apiPurchase.rixoRequested,
@@ -135,7 +135,6 @@ object ApiService {
     suspend fun createPurchase(purchase: Purchase): Purchase {
         val apiPurchase = ApiPurchase(
             date = purchase.date,
-            lotNumber = purchase.lotNumber,
             chassis = purchase.chassis,
             carModelYear = purchase.carModelYear,
             brand = purchase.brand,
@@ -159,6 +158,7 @@ object ApiService {
             auctionFee = purchase.auctionFee,
             recycleFee = purchase.recycleFee,
             roadTax = purchase.roadTax,
+            taxTotal = purchase.taxTotal,
             totalPrice = purchase.totalPrice,
             paymentDate = purchase.paymentDate,
             rixoRequested = purchase.rixoRequested,
@@ -195,7 +195,6 @@ object ApiService {
         return Purchase(
             id = created.id,
             date = created.date,
-            lotNumber = created.lotNumber,
             chassis = created.chassis,
             carModelYear = created.carModelYear,
             brand = created.brand,
@@ -254,7 +253,6 @@ object ApiService {
             Purchase(
                 id = apiPurchase.id,
                 date = apiPurchase.date,
-                lotNumber = apiPurchase.lotNumber,
                 chassis = apiPurchase.chassis,
                 carModelYear = apiPurchase.carModelYear,
                 brand = apiPurchase.brand,
@@ -278,6 +276,7 @@ object ApiService {
                 auctionFee = apiPurchase.auctionFee,
                 recycleFee = apiPurchase.recycleFee,
                 roadTax = apiPurchase.roadTax,
+                taxTotal = apiPurchase.taxTotal,
                 totalPrice = apiPurchase.totalPrice,
                 paymentDate = apiPurchase.paymentDate,
                 rixoRequested = apiPurchase.rixoRequested,
@@ -313,7 +312,6 @@ object ApiService {
             Purchase(
                 id = apiPurchase.id,
                 date = apiPurchase.date,
-                lotNumber = apiPurchase.lotNumber,
                 chassis = apiPurchase.chassis,
                 carModelYear = apiPurchase.carModelYear,
                 brand = apiPurchase.brand,
@@ -337,6 +335,7 @@ object ApiService {
                 auctionFee = apiPurchase.auctionFee,
                 recycleFee = apiPurchase.recycleFee,
                 roadTax = apiPurchase.roadTax,
+                taxTotal = apiPurchase.taxTotal,
                 totalPrice = apiPurchase.totalPrice,
                 paymentDate = apiPurchase.paymentDate,
                 rixoRequested = apiPurchase.rixoRequested,
@@ -363,7 +362,6 @@ object ApiService {
         val apiPurchase = ApiPurchase(
             id = purchase.id,
             date = purchase.date,
-            lotNumber = purchase.lotNumber,
             chassis = purchase.chassis,
             carModelYear = purchase.carModelYear,
             brand = purchase.brand,
@@ -387,6 +385,7 @@ object ApiService {
             auctionFee = purchase.auctionFee,
             recycleFee = purchase.recycleFee,
             roadTax = purchase.roadTax,
+            taxTotal = purchase.taxTotal,
             totalPrice = purchase.totalPrice,
             paymentDate = purchase.paymentDate,
             rixoRequested = purchase.rixoRequested,
@@ -423,7 +422,6 @@ object ApiService {
         return Purchase(
             id = updated.id,
             date = updated.date,
-            lotNumber = updated.lotNumber,
             chassis = updated.chassis,
             carModelYear = updated.carModelYear,
             brand = updated.brand,

@@ -13,7 +13,6 @@ The importer auto-maps headers case-insensitively and accepts common variants.
 
 Required headers:
 - DATE
-- LOT NO. (also accepts: LOT NO, LOT)
 - CHASSIS (also accepts: CHASIS)
 
 Optional headers (any order, any subset):
@@ -40,7 +39,6 @@ Notes:
 - Every row after the header is treated as data unless it matches a repeated header.
 - Required field values per row:
   - CHASSIS: non-empty and not "-". Rows with empty/"-" chassis are skipped.
-  - LOT NO.: should be present (string)
   - DATE: Japanese dates like "6月2日月曜日" are accepted and converted to English.
 - Trailing empty rows or lines with only commas are ignored.
 
@@ -48,7 +46,7 @@ Notes:
 
 Valid header example:
 ```
-DATE,LOT NO.,CHASSIS,YEAR,CAR NAME,AUCTION HOUSE,STOCK LOCATION,CLIENT NAME,PRICE,RIXO CONFIRMED,NOTES
+DATE,CHASSIS,YEAR,CAR NAME,AUCTION HOUSE,STOCK LOCATION,CLIENT NAME,PRICE,RIXO CONFIRMED,NOTES
 ```
 
 Valid row example:

@@ -144,11 +144,10 @@ class PdfService {
             // No. column
             table.addCell(createCell(rowNumber.toString()))
 
-            // DESCRIPTION column - format: CHASSIS NO. [chassis] \n [lotNumber, carName, carModelYear, clientName, rixoCompany, rixoRequested, rixoConfirmed]
+            // DESCRIPTION column - format: CHASSIS NO. [chassis] \n [carName, carModelYear, clientName, rixoCompany, rixoRequested, rixoConfirmed]
             val description = buildString {
                 append("CHASSIS NO. ${purchase.chassis ?: ""}\n")
                 val details = listOfNotNull(
-                    purchase.lotNumber,
                     purchase.carName,
                     purchase.carModelYear,
                     purchase.clientName,
@@ -263,7 +262,8 @@ class PdfService {
         document.add(request)
 
         // Create table for vehicle data with Japanese headers
-        val table = Table(UnitValue.createPercentArray(floatArrayOf(15f, 12f, 20f, 12f, 15f, 15f, 10f, 10f, 15f)))
+
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(8f, 8f, 15f, 8f, 10f, 10f, 11f, 15f, 15f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginBottom(20f)
 
@@ -286,8 +286,8 @@ class PdfService {
                 table.addCell(createCell("", japaneseFont)) // Empty for other rows
             }
             
-            // Lot Number
-            table.addCell(createCell(purchase.lotNumber ?: "", japaneseFont))
+            // Lot Number (using auctionNo)
+            table.addCell(createCell(purchase.auctionNo ?: "", japaneseFont))
             
             // Chassis
             table.addCell(createCell(purchase.chassis ?: "", japaneseFont))
@@ -298,8 +298,10 @@ class PdfService {
             // Car Name
             table.addCell(createCell(purchase.carName ?: "", japaneseFont))
             
-            // Client Name
-            table.addCell(createCell(purchase.clientName ?: "", japaneseFont))
+            // Auction House (取引先名 - Supplier Name)
+            val auctionHouseValue = purchase.auctionHouse ?: ""
+            println("🎌 PDF Service: Auction House value: '$auctionHouseValue' for purchase ID: ${purchase.id}")
+            table.addCell(createCell(auctionHouseValue, japaneseFont))
             
             // Stock Location (from purchase data or default to KLC)
             table.addCell(createCell(purchase.stockLocation ?: "KLC", japaneseFont))

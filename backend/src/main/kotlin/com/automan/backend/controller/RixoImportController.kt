@@ -7,7 +7,6 @@ import org.springframework.web.multipart.MultipartFile
 
 @RestController
 @RequestMapping("/api/rixo")
-@CrossOrigin(origins = ["*"])
 class RixoImportController(
     private val rixoImportService: RixoImportService
 ) {

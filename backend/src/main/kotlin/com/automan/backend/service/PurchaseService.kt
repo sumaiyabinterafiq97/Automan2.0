@@ -23,15 +23,11 @@ class PurchaseService(
     
     @Transactional
     fun createPurchase(purchase: Purchase): Purchase {
-        // Check for duplicate before creating
-        val existingPurchases = purchaseRepository.findAllByLotNumberAndChassis(
-            purchase.lotNumber,
-            purchase.chassis
-        )
+        // Check for duplicate before creating (chassis only)
+        val existingPurchase = purchaseRepository.findByChassis(purchase.chassis)
         
-        if (existingPurchases.isNotEmpty()) {
-            val existingPurchase = existingPurchases.first()
-            throw IllegalArgumentException("⚠️ Duplicate found: A purchase with Lot ${purchase.lotNumber} and Chassis ${purchase.chassis} (${existingPurchase.carName}) already exists.")
+        if (existingPurchase != null) {
+            throw IllegalArgumentException("⚠️ Duplicate found: A purchase with Chassis ${purchase.chassis} (${existingPurchase.carName}) already exists.")
         }
         
         return purchaseRepository.save(purchase)
@@ -47,15 +43,12 @@ class PurchaseService(
             println("🔍 [Service] Found existing purchase: $existingPurchase")
             
             // For partial updates, we need to merge the new data with existing data
-            // Only check for duplicates if lotNumber and chassis are being updated
-            if (purchase.lotNumber != null && purchase.chassis != null) {
-                val duplicateCheck = purchaseRepository.findAllByLotNumberAndChassis(
-                    purchase.lotNumber,
-                    purchase.chassis
-                ).find { it.id != id }
+            // Only check for duplicates if chassis is being updated
+            if (purchase.chassis != null) {
+                val duplicateCheck = purchaseRepository.findByChassis(purchase.chassis)
                 
-                if (duplicateCheck != null) {
-                    throw IllegalArgumentException("⚠️ Duplicate found: A purchase with Lot ${purchase.lotNumber} and Chassis ${purchase.chassis} (${duplicateCheck.carName}) already exists.")
+                if (duplicateCheck != null && duplicateCheck.id != id) {
+                    throw IllegalArgumentException("⚠️ Duplicate found: A purchase with Chassis ${purchase.chassis} (${duplicateCheck.carName}) already exists.")
                 }
             }
             
@@ -63,7 +56,6 @@ class PurchaseService(
             val updatedPurchase = existingPurchase.copy(
                 id = id,
                 date = purchase.date ?: existingPurchase.date,
-                lotNumber = purchase.lotNumber ?: existingPurchase.lotNumber,
                 chassis = purchase.chassis ?: existingPurchase.chassis,
                 carModelYear = purchase.carModelYear ?: existingPurchase.carModelYear,
                 brand = purchase.brand ?: existingPurchase.brand,
@@ -134,7 +126,6 @@ class PurchaseService(
             val updatedPurchase = existingPurchase.copy(
                 id = id,
                 date = updateData["date"] as? String ?: existingPurchase.date,
-                lotNumber = updateData["lotNumber"] as? String ?: existingPurchase.lotNumber,
                 chassis = updateData["chassis"] as? String ?: existingPurchase.chassis,
                 carModelYear = updateData["carModelYear"] as? String ?: existingPurchase.carModelYear,
                 brand = updateData["brand"] as? String ?: existingPurchase.brand,
@@ -182,10 +173,25 @@ class PurchaseService(
                 inspectionFee = updateData["inspectionFee"] as? String ?: existingPurchase.inspectionFee,
                 commission = updateData["commission"] as? String ?: existingPurchase.commission,
                 rixoPrice = updateData["rixoPrice"] as? String ?: existingPurchase.rixoPrice,
-                venueId = updateData["venueId"] as? String ?: existingPurchase.venueId,
+                venueId = run {
+                    val receivedVenueId = updateData["venueId"] as? String
+                    println("🔍 DEBUG: venueId received = $receivedVenueId, existing = ${existingPurchase.venueId}")
+                    receivedVenueId ?: existingPurchase.venueId
+                },
                 numberCut = updateData["numberCut"] as? String ?: existingPurchase.numberCut,
                 repairCompany = updateData["repairCompany"] as? String ?: existingPurchase.repairCompany,
                 repairCharges = updateData["repairCharges"] as? String ?: existingPurchase.repairCharges,
+                carPictures = run {
+                    val carPicturesData = updateData["carPictures"]
+                    if (carPicturesData != null) {
+                        // Convert car pictures array to JSON string
+                        val jsonString = com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(carPicturesData)
+                        println("📷 [Service] Saving car pictures data: $jsonString")
+                        jsonString
+                    } else {
+                        existingPurchase.carPictures
+                    }
+                },
                 updatedAt = java.time.LocalDateTime.now()
             )
             
@@ -346,12 +352,10 @@ class PurchaseService(
                         // Try to save the purchase directly - let the database handle unique constraint violations
                         val savedPurchase = purchaseRepository.save(purchase)
                         savedPurchases.add(savedPurchase)
-                        println("✅ Saved: ${purchase.carName} (Lot: ${purchase.lotNumber})")
+                        println("✅ Saved: ${purchase.carName} (Chassis: ${purchase.chassis})")
                     } catch (e: Exception) {
                         // Check if it's a unique constraint violation (duplicate)
                         if (e.message?.contains("Duplicate entry") == true || 
-                            e.message?.contains("uk_lot_chasis") == true ||
-                            e.message?.contains("uk_lot_chassis") == true ||
                             e.message?.contains("uk_chassis") == true ||
                             e.message?.contains("UNIQUE constraint failed") == true) {
                             val duplicateMessage = "⚠️ Duplicate found: Chassis ${purchase.chassis} (${purchase.carName})"
@@ -359,7 +363,7 @@ class PurchaseService(
                             duplicateDetails.add(duplicateMessage)
                             duplicateCount++
                         } else {
-                            val errorMessage = "❌ Error saving purchase ${purchase.carName} (Lot: ${purchase.lotNumber}): ${e.message}"
+                            val errorMessage = "❌ Error saving purchase ${purchase.carName} (Chassis: ${purchase.chassis}): ${e.message}"
                             println(errorMessage)
                             errorDetails.add(errorMessage)
                             errorCount++
@@ -432,14 +436,13 @@ class PurchaseService(
             // Look for common header patterns with more variations
             val hasChassis = headers.contains("CHASSIS") || headers.contains("CHASIS")
             val hasDate = headers.contains("DATE")
-            val hasLot = headers.contains("LOT NO.") || headers.contains("LOT NO") || headers.contains("LOT")
             val hasCarName = headers.contains("CAR NAME") || headers.contains("CARNAME")
             val hasAuction = headers.contains("AUCTION HOUSE") || headers.contains("AUCTION NAME") || headers.contains("AUCTION")
             
             // Check if this looks like a header row
-            if (hasChassis || (hasDate && hasLot) || (hasCarName && hasAuction)) {
+            if (hasChassis || hasDate || (hasCarName && hasAuction)) {
                 println("📋 Found header row at line ${index + 1}: $headers")
-                println("🔍 Header analysis: Chassis=$hasChassis, Date=$hasDate, Lot=$hasLot, CarName=$hasCarName, Auction=$hasAuction")
+                println("🔍 Header analysis: Chassis=$hasChassis, Date=$hasDate, CarName=$hasCarName, Auction=$hasAuction")
                 return index
             }
         }
@@ -514,7 +517,6 @@ class PurchaseService(
         return Purchase(
             id = null,
             date = getColumnValue(values, columnMapping, "DATE")?.let { convertJapaneseDateToEnglish(it) }?.take(255) ?: "",
-            lotNumber = getColumnValue(values, columnMapping, "LOT NO.", "LOT NO", "LOT")?.take(255) ?: "",
             chassis = chassis.take(255),
             carModelYear = getColumnValue(values, columnMapping, "YEAR")?.take(50) ?: "",
             brand = getColumnValue(values, columnMapping, "BRAND")?.take(20) ?: "",
@@ -859,7 +861,6 @@ class PurchaseService(
             content.appendLine("PURCHASE ${index + 1}")
             content.appendLine("-".repeat(40))
             content.appendLine("Date: ${purchase.date}")
-            content.appendLine("Lot Number: ${purchase.lotNumber}")
             content.appendLine("Chassis: ${purchase.chassis}")
             content.appendLine("Car Name: ${purchase.carName}")
             content.appendLine("Car Model Year: ${purchase.carModelYear}")
@@ -872,6 +873,198 @@ class PurchaseService(
         }
         
         return content.toString()
+    }
+    
+    fun getPurchaseByChassis(chassis: String): Purchase? {
+        return purchaseRepository.findByChassis(chassis)
+    }
+    
+    fun getUniqueCountries(): List<String> {
+        return purchaseRepository.findDistinctCountries()
+    }
+    
+    fun getUniqueStockLocations(): List<String> {
+        return purchaseRepository.findDistinctStockLocations()
+    }
+    
+    fun getFilteredChassis(country: String, polPort: String): List<String> {
+        return purchaseRepository.findFilteredChassis(country, polPort)
+    }
+    
+    fun saveCarCostDetails(
+        chassis: String,
+        carPrice: Double,
+        auctionFee: Double,
+        rixoPrice: Double,
+        shippingCharge: Double,
+        freight: Double,
+        inspectionFee: Double,
+        repairFee: Double,
+        mscCharges: Double,
+        profit: Double,
+        packagePrice: Double = 0.0,
+        isPackageMode: Boolean = false
+    ) {
+        val existingPurchase = purchaseRepository.findByChassis(chassis)
+        if (existingPurchase != null) {
+            // Create a new Purchase object with updated cost details
+            val updatedPurchase = existingPurchase.copy(
+                price = carPrice.toString(),
+                auctionFee = auctionFee.toString(),
+                rixoPrice = rixoPrice.toString(),
+                shipmentCharges = shippingCharge.toString(),
+                freight = freight.toString(),
+                inspectionFee = inspectionFee.toString(),
+                repairCharges = repairFee.toString(),
+                miscCharges = mscCharges.toString(),
+                profit = java.math.BigDecimal(profit),
+                packagePrice = packagePrice.toString(),
+                isPackageMode = isPackageMode,
+                updatedAt = java.time.LocalDateTime.now()
+            )
+            
+            purchaseRepository.save(updatedPurchase)
+            println("✅ Updated cost details for chassis: $chassis")
+        } else {
+            throw RuntimeException("Purchase not found for chassis: $chassis")
+        }
+    }
+
+    fun saveTotalCnfPrice(
+        chassis: String,
+        totalCnfPrice: Double
+    ) {
+        val existingPurchase = purchaseRepository.findByChassis(chassis)
+        if (existingPurchase != null) {
+            // Create a new Purchase object with updated total C&F price
+            val updatedPurchase = existingPurchase.copy(
+                totalCnfPrice = java.math.BigDecimal(totalCnfPrice),
+                updatedAt = java.time.LocalDateTime.now()
+            )
+            
+            purchaseRepository.save(updatedPurchase)
+            println("✅ Updated total C&F price for chassis: $chassis = $totalCnfPrice")
+        } else {
+            throw RuntimeException("Purchase not found for chassis: $chassis")
+        }
+    }
+
+
+    fun saveFobCarCostDetails(
+        chassis: String,
+        carPrice: Double,
+        auctionFee: Double,
+        rixoPrice: Double,
+        shippingCharge: Double,
+        inspectionFee: Double,
+        repairFee: Double,
+        mscCharges: Double,
+        profit: Double
+    ) {
+        val existingPurchase = purchaseRepository.findByChassis(chassis)
+        if (existingPurchase != null) {
+            // Create a new Purchase object with updated FOB cost details
+            val updatedPurchase = existingPurchase.copy(
+                price = carPrice.toString(),
+                auctionFee = auctionFee.toString(),
+                rixoPrice = rixoPrice.toString(),
+                shipmentCharges = shippingCharge.toString(),
+                inspectionFee = inspectionFee.toString(),
+                repairCharges = repairFee.toString(),
+                miscCharges = mscCharges.toString(),
+                profit = java.math.BigDecimal(profit),
+                updatedAt = java.time.LocalDateTime.now()
+            )
+            
+            purchaseRepository.save(updatedPurchase)
+            println("✅ Updated FOB cost details for chassis: $chassis")
+        } else {
+            throw RuntimeException("Purchase not found for chassis: $chassis")
+        }
+    }
+    
+    // Get shipping schedule PDF data
+    fun getShippingSchedulePdfData(request: com.automan.backend.dto.ShippingSchedulePdfRequest): com.automan.backend.dto.ShippingSchedulePdfData {
+        println("📋 Generating shipping schedule PDF data for booking: ${request.bookingNo}")
+        
+        // Format shipping date as "DD.MON.YYYY"
+        val formattedDate = try {
+            val date = java.time.LocalDate.parse(request.shippingDate)
+            val day = date.dayOfMonth.toString().padStart(2, '0')
+            val month = date.month.name.substring(0, 3).uppercase()
+            val year = date.year.toString()
+            "$day.$month.$year"
+        } catch (e: Exception) {
+            request.shippingDate // Fallback to original format
+        }
+        
+        // Create consignee details
+        val consigneeDetails = com.automan.backend.dto.ConsigneeDetailsDto(
+            name = request.consigneeName,
+            address = request.consigneeAddress
+        )
+        
+        // Fetch car details for each chassis
+        val carList = request.chassisNumbers.mapIndexed { index, chassis ->
+            val purchase = purchaseRepository.findByChassis(chassis)
+            if (purchase != null) {
+                // Use saved totalCnfPrice if available, otherwise calculate it
+                val totalCnfPrice = if (purchase.totalCnfPrice != null) {
+                    // Use saved total C&F price
+                    purchase.totalCnfPrice!!
+                } else {
+                    // Fallback: Calculate final C&F price based on package mode
+                    val carPrice = try { java.math.BigDecimal(purchase.price ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+                    val packagePrice = try { java.math.BigDecimal(purchase.packagePrice ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+                    val isPackageMode = purchase.isPackageMode ?: false
+                    
+                    if (isPackageMode) {
+                        // Package mode: C&F = Car Price + Package Price
+                        carPrice.add(packagePrice)
+                    } else {
+                        // Normal mode: C&F = Car Price + All Fees
+                        val auctionFee = try { java.math.BigDecimal(purchase.auctionFee ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+                        val rixoPrice = try { java.math.BigDecimal(purchase.rixoPrice ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+                        val shipmentCharges = try { java.math.BigDecimal(purchase.shipmentCharges ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+                        val freight = try { java.math.BigDecimal(purchase.freight ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+                        val inspectionFee = try { java.math.BigDecimal(purchase.inspectionFee ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+                        val repairCharges = try { java.math.BigDecimal(purchase.repairCharges ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+                        val miscCharges = try { java.math.BigDecimal(purchase.miscCharges ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+                        val profit = purchase.profit ?: java.math.BigDecimal.ZERO
+                        
+                        carPrice.add(auctionFee).add(rixoPrice).add(shipmentCharges)
+                            .add(freight).add(inspectionFee).add(repairCharges).add(miscCharges).add(profit)
+                    }
+                }
+                
+                com.automan.backend.dto.CarPdfDto(
+                    no = index + 1,
+                    name = purchase.carName ?: "Unknown",
+                    chassisNumber = purchase.chassis,
+                    year = purchase.carModelYear ?: "Unknown",
+                    cnfPrice = "¥${totalCnfPrice.toInt()}"
+                )
+            } else {
+                com.automan.backend.dto.CarPdfDto(
+                    no = index + 1,
+                    name = "Unknown",
+                    chassisNumber = chassis,
+                    year = "Unknown",
+                    cnfPrice = "¥0"
+                )
+            }
+        }
+        
+        return com.automan.backend.dto.ShippingSchedulePdfData(
+            companyName = "MEMON CO., LTD",
+            bookingNo = request.bookingNo,
+            vesselName = request.vesselName,
+            pol = request.pol,
+            pod = request.pod,
+            shippingDate = formattedDate,
+            consigneeDetails = consigneeDetails,
+            carList = carList
+        )
     }
     
 }

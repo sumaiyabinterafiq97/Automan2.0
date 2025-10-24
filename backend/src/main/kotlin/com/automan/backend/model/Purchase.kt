@@ -20,8 +20,6 @@ data class Purchase(
     @Column(name = "date")
     val date: String? = null,
     
-    @Column(name = "lot_number", nullable = false)
-    val lotNumber: String,
     
     @Column(name = "chassis", nullable = false)
     val chassis: String,
@@ -100,6 +98,9 @@ data class Purchase(
     @Column(name = "road_tax")
     val roadTax: String? = null,
     
+    @Column(name = "tax_total")
+    val taxTotal: String? = null,
+    
     @Column(name = "total_price")
     val totalPrice: String? = null,
     
@@ -159,6 +160,25 @@ data class Purchase(
     
     @Column(name = "repair_charges")
     val repairCharges: String? = null,
+    
+    
+    @Column(name = "profit")
+    val profit: java.math.BigDecimal? = null,
+    
+    @Column(name = "package_price")
+    val packagePrice: String? = null,
+    
+    @Column(name = "is_package_mode")
+    val isPackageMode: Boolean? = null,
+    
+    @Column(name = "total_cnf_price")
+    val totalCnfPrice: java.math.BigDecimal? = null,
+    
+    @Column(name = "booking_id")
+    val bookingId: Long? = null,
+    
+    @Column(name = "car_pictures", columnDefinition = "TEXT")
+    val carPictures: String? = null,
     
     @Column(name = "created_at")
     val createdAt: LocalDateTime = LocalDateTime.now(),
