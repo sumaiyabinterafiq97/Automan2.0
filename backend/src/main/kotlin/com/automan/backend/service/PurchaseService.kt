@@ -23,14 +23,26 @@ class PurchaseService(
     
     @Transactional
     fun createPurchase(purchase: Purchase): Purchase {
-        // Check for duplicate before creating (chassis only)
+        // Check for duplicate before creating (chassis must be unique)
         val existingPurchase = purchaseRepository.findByChassis(purchase.chassis)
         
         if (existingPurchase != null) {
             throw IllegalArgumentException("⚠️ Duplicate found: A purchase with Chassis ${purchase.chassis} (${existingPurchase.carName}) already exists.")
         }
         
-        return purchaseRepository.save(purchase)
+        // Ensure shaken has a value (default to false if null)
+        // Explicitly convert to boolean to ensure proper database storage
+        val shakenValue = when {
+            purchase.shaken == true -> true
+            purchase.shaken == false -> false
+            else -> false
+        }
+        val purchaseToSave = purchase.copy(shaken = shakenValue)
+        
+        println("🔍 [Service] Creating purchase - received shaken=${purchase.shaken} (type: ${purchase.shaken?.javaClass?.simpleName}), saving shaken=${purchaseToSave.shaken}")
+        val savedPurchase = purchaseRepository.save(purchaseToSave)
+        println("🔍 [Service] Saved purchase - shaken=${savedPurchase.shaken} (database value: ${if (savedPurchase.shaken == true) 1 else 0})")
+        return savedPurchase
     }
     
     @Transactional
@@ -42,9 +54,8 @@ class PurchaseService(
         if (existingPurchase != null) {
             println("🔍 [Service] Found existing purchase: $existingPurchase")
             
-            // For partial updates, we need to merge the new data with existing data
-            // Only check for duplicates if chassis is being updated
-            if (purchase.chassis != null) {
+            // Check for duplicates if chassis is being updated (chassis must be unique)
+            if (purchase.chassis != null && purchase.chassis != existingPurchase.chassis) {
                 val duplicateCheck = purchaseRepository.findByChassis(purchase.chassis)
                 
                 if (duplicateCheck != null && duplicateCheck.id != id) {
@@ -70,11 +81,16 @@ class PurchaseService(
                 door = purchase.door ?: existingPurchase.door,
                 distance = purchase.distance ?: existingPurchase.distance,
                 options = purchase.options ?: existingPurchase.options,
+                cc = purchase.cc ?: existingPurchase.cc,
+                shift = purchase.shift ?: existingPurchase.shift,
+                steeringWheel = purchase.steeringWheel ?: existingPurchase.steeringWheel,
+                wd = purchase.wd ?: existingPurchase.wd,
                 auctionNo = purchase.auctionNo ?: existingPurchase.auctionNo,
                 auctionHouse = purchase.auctionHouse ?: existingPurchase.auctionHouse,
                 stockLocation = purchase.stockLocation ?: existingPurchase.stockLocation,
                 rixoCompany = purchase.rixoCompany ?: existingPurchase.rixoCompany,
                 clientName = purchase.clientName ?: existingPurchase.clientName,
+                consignee = purchase.consignee ?: existingPurchase.consignee,
                 country = purchase.country ?: existingPurchase.country,
                 price = purchase.price ?: existingPurchase.price,
                 auctionFee = purchase.auctionFee ?: existingPurchase.auctionFee,
@@ -98,6 +114,20 @@ class PurchaseService(
                 rixoPrice = purchase.rixoPrice ?: existingPurchase.rixoPrice,
                 venueId = purchase.venueId ?: existingPurchase.venueId,
                 numberCut = purchase.numberCut ?: existingPurchase.numberCut,
+                shaken = when {
+                    purchase.shaken == true -> {
+                        println("🔍 [Service] updatePurchase - Setting shaken to true")
+                        true
+                    }
+                    purchase.shaken == false -> {
+                        println("🔍 [Service] updatePurchase - Setting shaken to false")
+                        false
+                    }
+                    else -> {
+                        println("🔍 [Service] updatePurchase - Keeping existing shaken: ${existingPurchase.shaken}")
+                        existingPurchase.shaken
+                    }
+                },
                 repairCompany = purchase.repairCompany ?: existingPurchase.repairCompany,
                 repairCharges = purchase.repairCharges ?: existingPurchase.repairCharges,
                 updatedAt = java.time.LocalDateTime.now()
@@ -145,6 +175,25 @@ class PurchaseService(
                 door = updateData["door"] as? String ?: existingPurchase.door,
                 distance = updateData["distance"] as? String ?: existingPurchase.distance,
                 options = updateData["options"] as? String ?: existingPurchase.options,
+                cc = run {
+                    val ccValue = updateData["cc"]
+                    when {
+                        ccValue is Int -> ccValue
+                        ccValue is Number -> ccValue.toInt()
+                        ccValue is String -> ccValue.toIntOrNull()
+                        ccValue == null -> existingPurchase.cc
+                        else -> {
+                            try {
+                                ccValue.toString().toIntOrNull()
+                            } catch (e: Exception) {
+                                existingPurchase.cc
+                            }
+                        }
+                    }
+                },
+                shift = updateData["shift"] as? String ?: existingPurchase.shift,
+                steeringWheel = updateData["steeringWheel"] as? String ?: existingPurchase.steeringWheel,
+                wd = updateData["wd"] as? String ?: existingPurchase.wd,
                 auctionNo = updateData["auctionNo"] as? String ?: existingPurchase.auctionNo,
                 auctionHouse = (updateData["auctionHouse"] as? String)
                     ?: (updateData["auctionName"] as? String)
@@ -152,6 +201,21 @@ class PurchaseService(
                 stockLocation = updateData["stockLocation"] as? String ?: existingPurchase.stockLocation,
                 rixoCompany = updateData["rixoCompany"] as? String ?: existingPurchase.rixoCompany,
                 clientName = updateData["clientName"] as? String ?: existingPurchase.clientName,
+                consignee = run {
+                    val consigneeValue = updateData["consignee"] as? String
+                    if (consigneeValue != null) {
+                        val trimmed = consigneeValue.trim()
+                        if (trimmed.isNotEmpty()) {
+                            println("🔍 [Service] Updating consignee to: '$trimmed'")
+                            trimmed
+                        } else {
+                            println("🔍 [Service] Consignee value blank, keeping existing: '${existingPurchase.consignee}'")
+                            existingPurchase.consignee
+                        }
+                    } else {
+                        existingPurchase.consignee
+                    }
+                },
                 country = updateData["country"] as? String ?: existingPurchase.country,
                 price = updateData["price"] as? String ?: existingPurchase.price,
                 auctionFee = updateData["auctionFee"] as? String ?: existingPurchase.auctionFee,
@@ -179,6 +243,39 @@ class PurchaseService(
                     receivedVenueId ?: existingPurchase.venueId
                 },
                 numberCut = updateData["numberCut"] as? String ?: existingPurchase.numberCut,
+                shaken = run {
+                    val shakenValue = updateData["shaken"]
+                    println("🔍 [Service] Processing shaken field - received: $shakenValue (type: ${shakenValue?.javaClass?.simpleName})")
+                    val result = when {
+                        shakenValue is Boolean -> {
+                            println("🔍 [Service] Shaken is Boolean: $shakenValue")
+                            shakenValue
+                        }
+                        shakenValue is String -> {
+                            val boolValue = shakenValue.toBoolean()
+                            println("🔍 [Service] Shaken is String '$shakenValue', converted to Boolean: $boolValue")
+                            boolValue
+                        }
+                        shakenValue == true -> {
+                            println("🔍 [Service] Shaken is true (boxed)")
+                            true
+                        }
+                        shakenValue == false -> {
+                            println("🔍 [Service] Shaken is false (boxed)")
+                            false
+                        }
+                        shakenValue == null -> {
+                            println("🔍 [Service] Shaken is null, keeping existing: ${existingPurchase.shaken}")
+                            existingPurchase.shaken
+                        }
+                        else -> {
+                            println("🔍 [Service] Shaken unknown type: ${shakenValue?.javaClass?.name}, keeping existing: ${existingPurchase.shaken}")
+                            existingPurchase.shaken
+                        }
+                    }
+                    println("🔍 [Service] Final shaken value to save: $result")
+                    result
+                },
                 repairCompany = updateData["repairCompany"] as? String ?: existingPurchase.repairCompany,
                 repairCharges = updateData["repairCharges"] as? String ?: existingPurchase.repairCharges,
                 carPictures = run {
@@ -192,12 +289,100 @@ class PurchaseService(
                         existingPurchase.carPictures
                     }
                 },
+                bookingId = run {
+                    val bookingIdValue = updateData["bookingId"]
+                    println("🔍 [Service] Processing bookingId - updateData['bookingId'] = $bookingIdValue (type: ${bookingIdValue?.javaClass?.simpleName ?: "null"})")
+                    println("🔍 [Service] bookingId value class: ${bookingIdValue?.javaClass?.name}")
+                    println("🔍 [Service] bookingId value toString: ${bookingIdValue?.toString()}")
+                    println("🔍 [Service] bookingId key exists in updateData: ${updateData.containsKey("bookingId")}")
+                    when {
+                        // If key exists and value is null, clear the bookingId (user wants to delete it)
+                        updateData.containsKey("bookingId") && bookingIdValue == null -> {
+                            println("🔍 [Service] bookingId is explicitly null (key exists), clearing value")
+                            null
+                        }
+                        // If key doesn't exist, keep existing value (field not provided)
+                        !updateData.containsKey("bookingId") -> {
+                            println("🔍 [Service] bookingId key not in updateData, keeping existing: ${existingPurchase.bookingId}")
+                            existingPurchase.bookingId
+                        }
+                        bookingIdValue == null -> {
+                            println("🔍 [Service] bookingId is null, keeping existing: ${existingPurchase.bookingId}")
+                            existingPurchase.bookingId
+                        }
+                        bookingIdValue is Int -> {
+                            val result = bookingIdValue.toLong()
+                            println("🔍 [Service] bookingId is Int, converted to Long: $result")
+                            result
+                        }
+                        bookingIdValue is Long -> {
+                            println("🔍 [Service] bookingId is Long: $bookingIdValue")
+                            bookingIdValue
+                        }
+                        bookingIdValue is Number -> {
+                            val result = bookingIdValue.toLong()
+                            println("🔍 [Service] bookingId is Number (${bookingIdValue.javaClass.name}), converted to Long: $result")
+                            result
+                        }
+                        bookingIdValue is String -> {
+                            val result = bookingIdValue.toLongOrNull()
+                            println("🔍 [Service] bookingId is String, converted to Long: $result")
+                            result
+                        }
+                        else -> {
+                            println("⚠️ [Service] bookingId is unknown type: ${bookingIdValue.javaClass.name}, attempting conversion...")
+                            try {
+                                val result = bookingIdValue.toString().toLongOrNull()
+                                println("🔍 [Service] Converted unknown type to Long: $result")
+                                result
+                            } catch (e: Exception) {
+                                println("❌ [Service] Failed to convert bookingId, keeping existing: ${existingPurchase.bookingId}")
+                                existingPurchase.bookingId
+                            }
+                        }
+                    }
+                },
+                vessel = run {
+                    val vesselValue = updateData["vessel"]
+                    println("🔍 [Service] Processing vessel - updateData['vessel'] = $vesselValue (type: ${vesselValue?.javaClass?.simpleName})")
+                    when {
+                        vesselValue is String -> {
+                            println("🔍 [Service] vessel is String, setting to: '$vesselValue'")
+                            vesselValue
+                        }
+                        vesselValue == null -> {
+                            println("🔍 [Service] vessel is null, keeping existing: '${existingPurchase.vessel}'")
+                            existingPurchase.vessel
+                        }
+                        else -> {
+                            println("🔍 [Service] vessel is unknown type, converting to string: '$vesselValue'")
+                            vesselValue.toString()
+                        }
+                    }
+                },
+                shipped = run {
+                    val shippedValue = updateData["shipped"]
+                    when {
+                        shippedValue is Boolean -> shippedValue
+                        shippedValue is String -> shippedValue.toBoolean()
+                        shippedValue is Number -> shippedValue.toInt() != 0
+                        else -> existingPurchase.shipped
+                    }
+                },
                 updatedAt = java.time.LocalDateTime.now()
             )
             
-            println("🔍 [Service] Saving updated purchase: $updatedPurchase")
+            println("🔍 [Service] Saving updated purchase:")
+            println("   - shipmentDate: ${updatedPurchase.shipmentDate}")
+            println("   - bookingId: ${updatedPurchase.bookingId}")
+            println("   - vessel: ${updatedPurchase.vessel}")
             val savedPurchase = purchaseRepository.save(updatedPurchase)
-            println("✅ [Service] Successfully saved purchase: $savedPurchase")
+            println("✅ [Service] Successfully saved purchase:")
+            println("   - shipmentDate: ${savedPurchase.shipmentDate}")
+            println("   - bookingId: ${savedPurchase.bookingId}")
+            println("   - vessel: ${savedPurchase.vessel}")
+            println("   - shaken: ${savedPurchase.shaken} (type: ${savedPurchase.shaken?.javaClass?.simpleName})")
+            println("   - shaken database value: ${if (savedPurchase.shaken == true) 1 else 0}")
             return savedPurchase
         } else {
             println("❌ [Service] Purchase with ID $id not found")
@@ -213,6 +398,30 @@ class PurchaseService(
         } else {
             false
         }
+    }
+    
+    @Transactional
+    fun markPurchasesAsShipped(purchaseIds: List<Long>): List<Purchase> {
+        println("🚢 [Service] Marking ${purchaseIds.size} purchases as shipped: $purchaseIds")
+        val updatedPurchases = mutableListOf<Purchase>()
+        
+        for (id in purchaseIds) {
+            val existingPurchase = purchaseRepository.findById(id).orElse(null)
+            if (existingPurchase != null) {
+                val updatedPurchase = existingPurchase.copy(
+                    shipped = true,
+                    updatedAt = java.time.LocalDateTime.now()
+                )
+                val savedPurchase = purchaseRepository.save(updatedPurchase)
+                updatedPurchases.add(savedPurchase)
+                println("✅ [Service] Marked purchase $id as shipped")
+            } else {
+                println("⚠️ [Service] Purchase $id not found, skipping")
+            }
+        }
+        
+        println("✅ [Service] Successfully marked ${updatedPurchases.size} purchases as shipped")
+        return updatedPurchases
     }
     
     fun searchPurchases(searchTerm: String): List<Purchase> {
@@ -998,10 +1207,81 @@ class PurchaseService(
             request.shippingDate // Fallback to original format
         }
         
-        // Create consignee details
+        // Split consignee name and address if they're combined
+        // The frontend may send both name and address in consigneeName (separated by newline)
+        // For PDF: Show name (bold) on first line, address (not bold) on second line
+        println("📋 Original consigneeName: '${request.consigneeName}'")
+        println("📋 Original consigneeAddress: '${request.consigneeAddress}'")
+        
+        // Extract consignee name and address properly
+        // The frontend sends: consigneeName (may contain both name+address) and consigneeAddress (may be empty or duplicate)
+        // We need: name = only company name, address = only address
+        
+        var extractedName = ""
+        var extractedAddress = ""
+        
+        // First, try splitting by newline (if frontend sent them separated)
+        val consigneeNameParts = request.consigneeName?.split("\n", limit = 2) ?: emptyList()
+        val nameFromSplit = consigneeNameParts.getOrNull(0)?.trim() ?: ""
+        val addressFromSplit = consigneeNameParts.getOrNull(1)?.trim() ?: ""
+        
+        if (nameFromSplit.isNotEmpty() && addressFromSplit.isNotEmpty()) {
+            // Frontend sent them separated by newline - use them directly
+            extractedName = nameFromSplit
+            extractedAddress = addressFromSplit
+        } else {
+            // Frontend sent them combined - need to split
+            val fullConsigneeName = request.consigneeName?.trim() ?: ""
+            
+            // Split at "LTD." or "LTD " - company name ends here
+            val ltdPatterns = listOf("LTD.", "LTD ", "LTD\n")
+            var foundSplit = false
+            
+            for (pattern in ltdPatterns) {
+                if (fullConsigneeName.contains(pattern, ignoreCase = true)) {
+                    val index = fullConsigneeName.indexOf(pattern, ignoreCase = true)
+                    if (index >= 0) {
+                        extractedName = fullConsigneeName.substring(0, index + pattern.length).trim()
+                        extractedAddress = fullConsigneeName.substring(index + pattern.length).trim()
+                        foundSplit = true
+                        break
+                    }
+                }
+            }
+            
+            // If still not split, check if consigneeAddress field has the address
+            if (!foundSplit || extractedAddress.isEmpty()) {
+                val addressFromField = request.consigneeAddress?.trim() ?: ""
+                if (addressFromField.isNotEmpty()) {
+                    // Use address from separate field
+                    extractedAddress = addressFromField
+                    // Name should be everything before the address in consigneeName
+                    if (fullConsigneeName.contains(addressFromField)) {
+                        val addressIndex = fullConsigneeName.indexOf(addressFromField)
+                        if (addressIndex > 0) {
+                            extractedName = fullConsigneeName.substring(0, addressIndex).trim()
+                        } else {
+                            extractedName = fullConsigneeName
+                        }
+                    } else {
+                        extractedName = fullConsigneeName
+                    }
+                } else {
+                    // No address found - use full consigneeName as name
+                    extractedName = fullConsigneeName
+                    extractedAddress = ""
+                }
+            }
+        }
+        
+        println("📋 Extracted consignee name: '${extractedName}'")
+        println("📋 Extracted consignee address: '${extractedAddress}'")
+        println("📋 Name length: ${extractedName.length}, Address length: ${extractedAddress.length}")
+        
+        // Create consignee details - name (bold) and address (not bold)
         val consigneeDetails = com.automan.backend.dto.ConsigneeDetailsDto(
-            name = request.consigneeName,
-            address = request.consigneeAddress
+            name = extractedName,
+            address = extractedAddress
         )
         
         // Fetch car details for each chassis

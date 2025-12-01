@@ -19,7 +19,8 @@ import java.math.BigDecimal
 class PurchaseController(
     private val purchaseService: PurchaseService,
     private val clientService: ClientService,
-    private val eventRepository: EventRepository
+    private val eventRepository: EventRepository,
+    private val pdfService: com.automan.backend.service.PdfService
 ) {
     
     @GetMapping
@@ -140,27 +141,44 @@ class PurchaseController(
             println("DEBUG: Purchase result: $purchase")
             if (purchase != null) {
                 println("DEBUG: Purchase found - chassis: ${purchase.chassis}, price: ${purchase.price}, shipmentCharges: ${purchase.shipmentCharges}, miscCharges: ${purchase.miscCharges}, repairCharges: ${purchase.repairCharges}")
-                val costDetails = mapOf(
+                
+                // Helper function to safely parse price strings to BigDecimal
+                fun parsePrice(priceStr: String?): BigDecimal {
+                    if (priceStr == null || priceStr.isBlank()) return BigDecimal.ZERO
+                    return try {
+                        val cleaned = priceStr.replace(",", "").replace("¥", "").replace("Â¥", "").trim()
+                        if (cleaned.isEmpty()) BigDecimal.ZERO else BigDecimal(cleaned)
+                    } catch (e: Exception) {
+                        println("WARNING: Failed to parse price '$priceStr': ${e.message}")
+                        BigDecimal.ZERO
+                    }
+                }
+                
+                val costDetails: Map<String, Any> = mapOf(
+                    "id" to (purchase.id ?: 0L), // Include purchase ID for chassis uniqueness checking
                     "chassis" to (purchase.chassis ?: ""),
-                    "carPrice" to (purchase.price?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
-                    "auctionFee" to (purchase.auctionFee?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
-                    "rixoPrice" to (purchase.rixoPrice?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
-                    "shippingCharge" to (purchase.shipmentCharges?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
-                    "freight" to (purchase.freight?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
-                    "inspectionFee" to (purchase.inspectionFee?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
-                    "repairFee" to (purchase.repairCharges?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
-                    "mscCharges" to (purchase.miscCharges?.let { BigDecimal(it.replace(",", "").replace("¥", "")) } ?: BigDecimal.ZERO),
+                    "carPrice" to parsePrice(purchase.price),
+                    "auctionFee" to parsePrice(purchase.auctionFee),
+                    "rixoPrice" to parsePrice(purchase.rixoPrice),
+                    "shippingCharge" to parsePrice(purchase.shipmentCharges),
+                    "freight" to parsePrice(purchase.freight),
+                    "inspectionFee" to parsePrice(purchase.inspectionFee),
+                    "repairFee" to parsePrice(purchase.repairCharges),
+                    "mscCharges" to parsePrice(purchase.miscCharges),
                     "profit" to (purchase.profit ?: BigDecimal.ZERO)
                 )
+                println("DEBUG: Cost details prepared: $costDetails")
                 ResponseEntity.ok(costDetails)
             } else {
+                println("DEBUG: Purchase not found for chassis: $chassis")
                 ResponseEntity.notFound().build()
             }
         } catch (e: Exception) {
             println("ERROR: Exception in getCarCostDetails: ${e.message}")
             e.printStackTrace()
             ResponseEntity.status(500).body(mapOf(
-                "error" to (e.message ?: "Unknown error")
+                "error" to (e.message ?: "Unknown error"),
+                "stackTrace" to e.stackTraceToString()
             ))
         }
     }
@@ -190,6 +208,7 @@ class PurchaseController(
     @GetMapping("/purchase/{id}")
     fun getPurchaseById(@PathVariable id: Long): ResponseEntity<Purchase> {
         val purchase = purchaseService.getPurchaseById(id)
+        println("🔍 [Controller] getPurchaseById - ID: $id, shaken: ${purchase?.shaken} (type: ${purchase?.shaken?.javaClass?.simpleName})")
         return if (purchase != null) {
             ResponseEntity.ok(purchase)
         } else {
@@ -199,7 +218,9 @@ class PurchaseController(
     
     @PostMapping
     fun createPurchase(@RequestBody purchase: Purchase): ResponseEntity<Purchase> {
+        println("🔍 [Controller] Creating purchase - received shaken=${purchase.shaken} (type: ${purchase.shaken?.javaClass?.simpleName})")
         val createdPurchase = purchaseService.createPurchase(purchase)
+        println("🔍 [Controller] Created purchase - saved shaken=${createdPurchase.shaken}")
         return ResponseEntity.ok(createdPurchase)
     }
     
@@ -208,11 +229,21 @@ class PurchaseController(
     fun updatePurchase(@PathVariable id: Long, @RequestBody updateData: Map<String, Any>): ResponseEntity<Purchase> {
         println("🔍 [Controller] Updating purchase ID: $id")
         println("🔍 [Controller] Update data received: $updateData")
+        println("🔍 [Controller] Update data keys: ${updateData.keys}")
+        println("🔍 [Controller] Shaken value in updateData: ${updateData["shaken"]} (type: ${updateData["shaken"]?.javaClass?.simpleName})")
+        println("🔍 [Controller] shipmentDate: ${updateData["shipmentDate"]} (type: ${updateData["shipmentDate"]?.javaClass?.simpleName})")
+        println("🔍 [Controller] bookingId: ${updateData["bookingId"]} (type: ${updateData["bookingId"]?.javaClass?.simpleName})")
+        println("🔍 [Controller] vessel: ${updateData["vessel"]} (type: ${updateData["vessel"]?.javaClass?.simpleName})")
         
         val updatedPurchase = purchaseService.updatePurchasePartial(id, updateData)
         return if (updatedPurchase != null) {
+            println("✅ [Controller] Purchase updated successfully:")
+            println("   - shipmentDate: ${updatedPurchase.shipmentDate}")
+            println("   - bookingId: ${updatedPurchase.bookingId}")
+            println("   - vessel: ${updatedPurchase.vessel}")
             ResponseEntity.ok(updatedPurchase)
         } else {
+            println("❌ [Controller] Purchase not found or update failed")
             ResponseEntity.notFound().build()
         }
     }
@@ -224,6 +255,57 @@ class PurchaseController(
             ResponseEntity.ok().build()
         } else {
             ResponseEntity.notFound().build()
+        }
+    }
+    
+    @PostMapping("/ship")
+    fun shipPurchases(@RequestBody request: Map<String, Any>): ResponseEntity<Map<String, Any>> {
+        println("🚢 [Controller] Ship purchases request received: $request")
+        val purchaseIds = (request["purchaseIds"] as? List<*>)?.mapNotNull { 
+            when (it) {
+                is Number -> it.toLong()
+                is String -> it.toLongOrNull()
+                else -> null
+            }
+        } ?: emptyList()
+        
+        if (purchaseIds.isEmpty()) {
+            println("❌ [Controller] No purchase IDs provided")
+            return ResponseEntity.badRequest().body(mapOf("error" to "No purchase IDs provided"))
+        }
+        
+        println("🚢 [Controller] Marking ${purchaseIds.size} purchases as shipped: $purchaseIds")
+        val updatedPurchases = purchaseService.markPurchasesAsShipped(purchaseIds)
+        
+        return ResponseEntity.ok(mapOf(
+            "success" to true,
+            "message" to "Successfully marked ${updatedPurchases.size} purchase(s) as shipped",
+            "updatedCount" to updatedPurchases.size,
+            "purchaseIds" to purchaseIds
+        ))
+    }
+    
+    @PostMapping("/invoice/generate-pdf")
+    fun generateInvoicePdf(@RequestBody request: com.automan.backend.dto.InvoicePdfRequest): ResponseEntity<ByteArray> {
+        try {
+            println("📄 [Controller] Generating invoice PDF for invoice number: ${request.invoiceNumber}")
+            
+            val pdfBytes = pdfService.generateInvoicePdf(request)
+            
+            val headers = org.springframework.http.HttpHeaders()
+            headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
+            headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"invoice_${request.invoiceNumber}.pdf\"")
+            headers.contentLength = pdfBytes.size.toLong()
+            
+            println("✅ [Controller] Invoice PDF generated successfully")
+            return ResponseEntity.ok()
+                .headers(headers)
+                .body(pdfBytes)
+                
+        } catch (e: Exception) {
+            println("❌ [Controller] Error generating invoice PDF: ${e.message}")
+            e.printStackTrace()
+            return ResponseEntity.internalServerError().build()
         }
     }
     
@@ -553,6 +635,64 @@ class PurchaseController(
         }
     }
     
+    /**
+     * Parse consignee address into separate components: P.O.BOX, location, TEL, E-MAIL
+     * Example: "P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM"
+     * Returns: ["P.O.BOX=86338-80100", "MOMBASA-KENYA", "TEL:+254724666786", "E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM"]
+     */
+    private fun parseConsigneeAddress(address: String): List<String> {
+        val components = mutableListOf<String>()
+        val trimmedAddress = address.trim()
+        
+        if (trimmedAddress.isEmpty()) {
+            return components
+        }
+        
+        // Split by comma, but preserve parts that contain "=" (like P.O.BOX=...)
+        val parts = trimmedAddress.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        
+        var poBox: String? = null
+        var location: String? = null
+        var tel: String? = null
+        var email: String? = null
+        
+        parts.forEach { part ->
+            when {
+                part.contains("P.O.BOX", ignoreCase = true) || part.contains("P.O. BOX", ignoreCase = true) -> {
+                    poBox = part
+                }
+                part.contains("TEL:", ignoreCase = true) -> {
+                    tel = part
+                }
+                part.contains("E-MAIL:", ignoreCase = true) || part.contains("EMAIL:", ignoreCase = true) || part.contains("@") -> {
+                    email = part
+                }
+                else -> {
+                    // This is likely the location (city, country)
+                    if (location == null) {
+                        location = part
+                    } else {
+                        // If there's already a location, append it (for multi-part locations)
+                        location = "$location, $part"
+                    }
+                }
+            }
+        }
+        
+        // Add components in order: P.O.BOX, location, TEL, E-MAIL
+        if (poBox != null) components.add(poBox!!)
+        if (location != null) components.add(location!!)
+        if (tel != null) components.add(tel!!)
+        if (email != null) components.add(email!!)
+        
+        // If no structured parsing worked, return the original address as a single component
+        if (components.isEmpty()) {
+            components.add(trimmedAddress)
+        }
+        
+        return components
+    }
+    
     private fun generatePdfDocument(pdfData: com.automan.backend.dto.ShippingSchedulePdfData): ByteArray {
         println("🔥🔥🔥 GENERATING PDF WITH TABLE FORMAT - UPDATED CODE - ${System.currentTimeMillis()} 🔥🔥🔥")
         val outputStream = java.io.ByteArrayOutputStream()
@@ -630,9 +770,9 @@ class PurchaseController(
         
         document.add(carTable)
         
-        // Consignee section - horizontal table with label on top, value underneath
+        // Consignee section - horizontal table with label on top, name (bold) and address underneath
         val consigneeTable = com.itextpdf.layout.element.Table(com.itextpdf.layout.properties.UnitValue.createPercentArray(floatArrayOf(1f)))
-            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(50f))
+            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(70f)) // Wider table to prevent wrapping
             .setMarginTop(30f)
             .setMarginBottom(20f)
             .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
@@ -640,8 +780,68 @@ class PurchaseController(
         // Add consignee label row (first row) - center aligned
         consigneeTable.addCell(createCellWithBorderCentered("CONSIGNEE:", true))
         
-        // Add consignee value row (second row) - center aligned
-        consigneeTable.addCell(createCellWithBorderCentered(pdfData.consigneeDetails.name, false))
+        // Add consignee name row (second row) - bold, center aligned
+        val consigneeName = pdfData.consigneeDetails.name ?: ""
+        println("🔍 PDF Generation - Consignee Name: '$consigneeName'")
+        println("🔍 PDF Generation - Consignee Name length: ${consigneeName.length}")
+        println("🔍 PDF Generation - Consignee Name contains newline: ${consigneeName.contains("\n")}")
+        
+        val consigneeNameText = com.itextpdf.layout.element.Text(consigneeName)
+            .setBold()
+            .setFontSize(11f)
+        val consigneeNameParagraph = com.itextpdf.layout.element.Paragraph()
+            .add(consigneeNameText)
+            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+        val consigneeNameCell = com.itextpdf.layout.element.Cell()
+            .add(consigneeNameParagraph)
+            .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+            .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+            .setBorderTop(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+            .setBorderBottom(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove bottom border to eliminate horizontal line
+            .setPadding(8f)
+            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+        consigneeTable.addCell(consigneeNameCell)
+        
+        // Add consignee address rows - split into separate lines for P.O.BOX, location, TEL, E-MAIL
+        val consigneeAddress = pdfData.consigneeDetails.address ?: ""
+        println("🔍 PDF Generation - Consignee Address: '$consigneeAddress'")
+        println("🔍 PDF Generation - Consignee Address length: ${consigneeAddress.length}")
+        println("🔍 PDF Generation - Consignee Address is empty: ${consigneeAddress.isEmpty()}")
+        
+        if (consigneeAddress.isNotEmpty()) {
+            // Parse address into components: P.O.BOX, location, TEL, E-MAIL
+            val addressComponents = parseConsigneeAddress(consigneeAddress)
+            println("📋 Parsed address components: $addressComponents")
+            
+            // Add each component as a separate row
+            addressComponents.forEach { component ->
+                if (component.isNotEmpty()) {
+                    val componentText = com.itextpdf.layout.element.Text(component)
+                        .setFontSize(10f)
+                    val componentParagraph = com.itextpdf.layout.element.Paragraph()
+                        .add(componentText)
+                        .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                    val componentCell = com.itextpdf.layout.element.Cell()
+                        .add(componentParagraph)
+                        .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                        .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                        .setBorderTop(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove top border between rows
+                        .setBorderBottom(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove bottom border between rows
+                        .setPadding(4f)
+                        .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                    consigneeTable.addCell(componentCell)
+                }
+            }
+            
+            // Add bottom border to the last address row
+            if (addressComponents.isNotEmpty()) {
+                val lastCellIndex = consigneeTable.numberOfRows - 1
+                val lastCell = consigneeTable.getCell(lastCellIndex, 0)
+                lastCell.setBorderBottom(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+            }
+        } else {
+            println("⚠️ PDF Generation - Consignee address is empty, not adding address row")
+        }
         
         document.add(consigneeTable)
         
@@ -733,11 +933,63 @@ class PurchaseController(
         
         // Consignee Table (moved after Car List Table)
         val consigneeTable = com.itextpdf.layout.element.Table(floatArrayOf(1f))
-            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(50f))
+            .setWidth(com.itextpdf.layout.properties.UnitValue.createPercentValue(70f)) // Wider table to prevent wrapping
             .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
         
         consigneeTable.addCell(createCellWithBorderCentered("CONSIGNEE:", true))
-        consigneeTable.addCell(createCellWithBorderCentered(pdfData.consigneeDetails.name, false))
+        
+        // Add consignee name row - bold, center aligned
+        val consigneeName = pdfData.consigneeDetails.name ?: ""
+        val consigneeNameText = com.itextpdf.layout.element.Text(consigneeName)
+            .setBold()
+            .setFontSize(11f)
+        val consigneeNameParagraph = com.itextpdf.layout.element.Paragraph()
+            .add(consigneeNameText)
+            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+        val consigneeNameCell = com.itextpdf.layout.element.Cell()
+            .add(consigneeNameParagraph)
+            .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+            .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+            .setBorderTop(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+            .setBorderBottom(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove bottom border to eliminate horizontal line
+            .setPadding(8f)
+            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+        consigneeTable.addCell(consigneeNameCell)
+        
+        // Add consignee address rows - split into separate lines for P.O.BOX, location, TEL, E-MAIL
+        val consigneeAddress = pdfData.consigneeDetails.address ?: ""
+        if (consigneeAddress.isNotEmpty()) {
+            // Parse address into components: P.O.BOX, location, TEL, E-MAIL
+            val addressComponents = parseConsigneeAddress(consigneeAddress)
+            println("📋 FOB PDF - Parsed address components: $addressComponents")
+            
+            // Add each component as a separate row
+            addressComponents.forEach { component ->
+                if (component.isNotEmpty()) {
+                    val componentText = com.itextpdf.layout.element.Text(component)
+                        .setFontSize(10f)
+                    val componentParagraph = com.itextpdf.layout.element.Paragraph()
+                        .add(componentText)
+                        .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                    val componentCell = com.itextpdf.layout.element.Cell()
+                        .add(componentParagraph)
+                        .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                        .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                        .setBorderTop(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove top border between rows
+                        .setBorderBottom(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove bottom border between rows
+                        .setPadding(4f)
+                        .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                    consigneeTable.addCell(componentCell)
+                }
+            }
+            
+            // Add bottom border to the last address row
+            if (addressComponents.isNotEmpty()) {
+                val lastCellIndex = consigneeTable.numberOfRows - 1
+                val lastCell = consigneeTable.getCell(lastCellIndex, 0)
+                lastCell.setBorderBottom(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+            }
+        }
         
         document.add(consigneeTable)
         

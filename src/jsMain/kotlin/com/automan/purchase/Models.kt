@@ -44,5 +44,7 @@ data class Purchase(
     val commission: String? = null,
     val rixoPrice: String? = null,
     val repairCompany: String? = null,
-    val repairCharges: String? = null
+    val repairCharges: String? = null,
+    val shaken: Boolean? = null,
+    val numberCut: String? = null
 )

@@ -38,9 +38,9 @@ class AuthService(
     }
     
     private fun validateRoleCreation(creatorRole: UserRole?, requestedRole: UserRole) {
-        // Allow ADMIN creation during initial setup (when creatorRole is null and no users exist)
-        if (creatorRole == null && getUserCount() == 0L && requestedRole == UserRole.ADMIN) {
-            return // Allow first ADMIN creation
+        // Allow role selection during signup (when creatorRole is null)
+        if (creatorRole == null) {
+            return // Allow any role during signup
         }
         
         val allowedRoles = when (creatorRole) {

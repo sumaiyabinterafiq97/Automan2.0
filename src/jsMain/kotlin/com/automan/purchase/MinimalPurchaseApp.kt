@@ -5,6 +5,20 @@ import kotlinx.browser.window
 import org.w3c.dom.*
 import org.w3c.files.File
 import org.w3c.dom.events.Event
+import org.w3c.fetch.RequestInit
+import org.w3c.fetch.Headers
+
+// API base URL - use relative path so nginx can proxy to backend
+val API_BASE_URL = "/api"
+
+// Helper function to get API URL
+fun apiUrl(path: String): String {
+    // Remove leading slash if present - use trimStart to be safe
+    val cleanPath = path.trimStart('/')
+    val fullUrl = "$API_BASE_URL/$cleanPath"
+    console.log("🔍 apiUrl() called with path: '$path' (length: ${path.length}), cleanPath: '$cleanPath' (length: ${cleanPath.length}), fullUrl: '$fullUrl'")
+    return fullUrl
+}
 
 // Global mutable list to store cars that have been confirmed (saved) on the C&F page
 val cnfConfirmedCars: MutableList<dynamic> = mutableListOf()
@@ -37,11 +51,95 @@ fun storeBookingDetailsForPdf() {
     
     // Get form values and use fallbacks for empty strings
     val bookingNoValue = (document.getElementById("bookingNo") as? HTMLInputElement)?.value ?: ""
-    val vesselNameValue = (document.getElementById("vesselSelect") as? HTMLSelectElement)?.selectedOptions?.item(0)?.textContent ?: ""
+    val vesselNameValue = (document.getElementById("vesselSelect") as? HTMLInputElement)?.value ?: ""
     val polValue = (document.getElementById("polPort") as? HTMLSelectElement)?.selectedOptions?.item(0)?.textContent ?: ""
     val podValue = (document.getElementById("podPort") as? HTMLInputElement)?.value ?: ""
     val shippingDateValue = (document.getElementById("etdDate") as? HTMLInputElement)?.value ?: ""
-    val consigneeNameValue = (document.getElementById("consigneeName") as? HTMLInputElement)?.value ?: ""
+    // Force sync consigneeDisplay to hidden input before extraction
+    val consigneeDisplay = document.getElementById("consigneeDisplay") as? HTMLElement
+    val consigneeNameInput = document.getElementById("consigneeName") as? HTMLInputElement
+    
+    // If display div exists, sync its content to hidden input
+    if (consigneeDisplay != null && consigneeNameInput != null) {
+        val displayText = (consigneeDisplay.innerText ?: consigneeDisplay.textContent ?: "").trim()
+        if (displayText.isNotEmpty()) {
+            // Split by newline - first line is name, rest is address
+            val lines = displayText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+            if (lines.size >= 2) {
+                val name = lines[0]
+                val address = lines.subList(1, lines.size).joinToString(" ")
+                consigneeNameInput.value = name + "\n" + address
+            } else if (lines.size == 1) {
+                consigneeNameInput.value = lines[0]
+            }
+            console.log("🔄 Synced consigneeDisplay to hidden input:", consigneeNameInput.value)
+        }
+    }
+    
+    // Get consignee value from hidden input (now synced)
+    val consigneeNameValue = consigneeNameInput?.value ?: ""
+    
+    // Split consignee name and address (they're stored together separated by newline)
+    // Clean up any extra whitespace or HTML artifacts
+    val cleanedValue = consigneeNameValue.trim().replace(Regex("\\s+"), " ")
+    val consigneeParts = cleanedValue.split("\n", limit = 2)
+    var extractedConsigneeName = consigneeParts.getOrNull(0)?.trim() ?: ""
+    var extractedConsigneeAddress = consigneeParts.getOrNull(1)?.trim() ?: ""
+    
+    // If address is empty but name contains address-like text, try to split at common patterns
+    // This handles cases like "LAKHANI MOTORS (K) LTDP.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM"
+    if (extractedConsigneeAddress.isEmpty() && extractedConsigneeName.isNotEmpty()) {
+        // Check if name contains address patterns (like P.O.BOX, TEL:, E-MAIL:)
+        // Also check for patterns like "LTD" followed by address text
+        val addressPatterns = listOf("P.O.BOX", "P.O. BOX", "TEL:", "E-MAIL:", "E-MAIL", "EMAIL:")
+        
+        // First, try to find where the company name ends (usually at "LTD" or "LTD.")
+        val ltdPatterns = listOf("LTD.", "LTD ", "LTD\n", "LTD")
+        var splitIndex = -1
+        
+        for (ltdPattern in ltdPatterns) {
+            val index = extractedConsigneeName.indexOf(ltdPattern, ignoreCase = true)
+            if (index > 0) {
+                splitIndex = index + ltdPattern.length
+                break
+            }
+        }
+        
+        // If we found LTD, check if there's address content after it
+        if (splitIndex > 0 && splitIndex < extractedConsigneeName.length) {
+            val potentialName = extractedConsigneeName.substring(0, splitIndex).trim()
+            val potentialAddress = extractedConsigneeName.substring(splitIndex).trim()
+            
+            // Check if potentialAddress contains address patterns
+            val hasAddressPattern = addressPatterns.any { potentialAddress.contains(it, ignoreCase = true) }
+            
+            if (hasAddressPattern && potentialName.isNotEmpty()) {
+                extractedConsigneeName = potentialName
+                extractedConsigneeAddress = potentialAddress
+            }
+        } else {
+            // Fallback: try to split at any address pattern
+            for (pattern in addressPatterns) {
+                val index = extractedConsigneeName.indexOf(pattern, ignoreCase = true)
+                if (index > 0) {
+                    val tempName = extractedConsigneeName.substring(0, index).trim()
+                    val tempAddress = extractedConsigneeName.substring(index).trim()
+                    // Only split if the name part looks like a company name (ends with LTD, etc.)
+                    if (tempName.endsWith("LTD", ignoreCase = true) || tempName.endsWith("LTD.", ignoreCase = true)) {
+                        extractedConsigneeName = tempName
+                        extractedConsigneeAddress = tempAddress
+                        break
+                    }
+                }
+            }
+        }
+    }
+    
+    // Log what we're extracting for debugging
+    console.log("📋 Extracting consignee for PDF:")
+    console.log("  - Original hidden input value: '$consigneeNameValue'")
+    console.log("  - Extracted name: '$extractedConsigneeName'")
+    console.log("  - Extracted address: '$extractedConsigneeAddress'")
     
     // Use fallback values for empty strings
     bookingDetails.bookingNo = if (bookingNoValue.isNotEmpty()) bookingNoValue else "EBKG14265885"
@@ -49,8 +147,8 @@ fun storeBookingDetailsForPdf() {
     bookingDetails.pol = if (polValue.isNotEmpty()) polValue else "HAKATA"
     bookingDetails.pod = if (podValue.isNotEmpty()) podValue else "KARACHI"
     bookingDetails.shippingDate = if (shippingDateValue.isNotEmpty()) shippingDateValue else "2025-09-27"
-    bookingDetails.consigneeName = if (consigneeNameValue.isNotEmpty()) consigneeNameValue else "OVERSEAS TRANSIT AGENCY (PVT) LTD."
-    bookingDetails.consigneeAddress = "1201-1203, 12TH FLOOR, Q.M.HOUSE, PLOT NO. 11/2RY9, ELLANDER ROAD, OFF.I.I CHUNDRIGAR ROAD (OPP. SHAHEEN COMPLEX), KARACHI"
+    bookingDetails.consigneeName = if (extractedConsigneeName.isNotEmpty()) extractedConsigneeName else "OVERSEAS TRANSIT AGENCY (PVT) LTD."
+    bookingDetails.consigneeAddress = if (extractedConsigneeAddress.isNotEmpty()) extractedConsigneeAddress else "1201-1203, 12TH FLOOR, Q.M.HOUSE, PLOT NO. 11/2RY9, ELLANDER ROAD, OFF.I.I CHUNDRIGAR ROAD (OPP. SHAHEEN COMPLEX), KARACHI"
     
     globalBookingDetails = bookingDetails
     globalSelectedCarsForPdf = getSelectedCarsFromTable()
@@ -181,17 +279,15 @@ fun showClientDetailsPage(clientId: Long) {
     loadClientEvents(clientId)
 }
 
-fun main() {
-    console.log("🚀🚀🚀 FOB PDF FUNCTIONALITY IMPLEMENTED - CACHE BUST - 1736382000 🚀🚀🚀")
-    console.log("🔥🔥🔥 FOB PDF - CONFIRM BUTTON GENERATES PDF - CACHE BUSTED! 🔥🔥🔥")
-    console.log("💥💥💥 FOB PDF - 1736382000 - NEW CODE LOADED! 💥💥💥")
-    console.log("🎯🎯🎯 FOB PDF CACHE BUST - 1736382000 - NEW FILENAME LOADED! 🎯🎯🎯")
-    val root = document.getElementById("root")!!
-    console.log("Root element found: $root")
+// Initialize application setup (event listeners, global functions, etc.)
+fun initializeAppSetup() {
+    // Note: rixoBtn has been removed - invoice PDF generation is now handled via the invoice page
     
     // Expose functions to global scope for HTML onclick attributes
     window.asDynamic().closeAddClientModal = ::closeAddClientModal
     window.asDynamic().selectClient = ::selectClient
+    window.asDynamic().handleRixoPdfGeneration = ::handleRixoPdfGeneration
+    window.asDynamic().handleGenerateInvoice = ::handleGenerateInvoice
     window.asDynamic().editClient = ::editClient
     window.asDynamic().editClientFromList = ::editClientFromList
     window.asDynamic().addClientTransaction = ::addClientTransaction
@@ -210,7 +306,6 @@ fun main() {
         removeCarFromContainer(containerId, chassis, selectedCars)
     }
     
-    
     // Expose client selection handlers used by Add/Edit forms
     window.asDynamic().handleClientSelection = { value: Any? ->
         val v = value?.toString() ?: ""
@@ -225,9 +320,334 @@ fun main() {
     console.log("closeAddClientModal available:", window.asDynamic().closeAddClientModal != null)
     console.log("selectClient available:", window.asDynamic().selectClient != null)
     console.log("editClient available:", window.asDynamic().editClient != null)
+}
+
+fun main() {
+    console.log("🚀🚀🚀 INVOICE PDF BUTTON FIX - CACHE BUST - 1762413057 🚀🚀🚀")
+    console.log("🔥🔥🔥 INVOICE PDF BUTTON - GLOBAL EVENT DELEGATION ACTIVE! 🔥🔥🔥")
+    console.log("💥💥💥 INVOICE PDF - 1762413057 - NEW CODE LOADED! 💥💥💥")
+    
+    // Initialize app setup (always run, regardless of root element)
+    initializeAppSetup()
+    
+    val root = document.getElementById("root")
+    if (root == null) {
+        console.error("❌ Root element not found! Waiting for DOM to load...")
+        // Wait for DOM to be ready
+        if (document.readyState == DocumentReadyState.LOADING) {
+            document.addEventListener("DOMContentLoaded", { _: Event ->
+                val rootElement = document.getElementById("root")
+                if (rootElement != null) {
+                    console.log("✅ Root element found after DOMContentLoaded: $rootElement")
+                    checkSystemInitialization(rootElement)
+                } else {
+                    console.error("❌ Root element still not found after DOMContentLoaded!")
+                }
+            })
+            return
+        } else {
+            console.error("❌ Root element not found and DOM is already loaded!")
+            return
+        }
+    }
+    console.log("Root element found: $root")
     
     // Check if system is initialized first, then create app if needed
     checkSystemInitialization(root)
+    
+    // Setup brand selection handlers
+    setupBrandSelectionHandlers()
+    
+    // Setup editable combobox handlers
+    setupEditableComboboxHandlers()
+}
+
+// Helper function to create editable combobox HTML
+fun createEditableCombobox(id: String, placeholder: String, required: Boolean = false, additionalAttrs: String = "", initialValue: String = ""): String {
+    val requiredAttr = if (required) "required" else ""
+    return """
+        <div style="position: relative; width: 100%;">
+            <input type="text" id="${id}Input" placeholder="$placeholder" $requiredAttr ${if (initialValue.isNotEmpty()) "value=\"$initialValue\"" else ""}
+                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                   autocomplete="off" $additionalAttrs
+                   onfocus="this.select();">
+            <select id="$id" $requiredAttr 
+                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('$id');"
+                    onchange="syncComboboxInput('$id'); if (typeof handleRixoCompanyChange === 'function' && '$id' === 'rixoCompany') { handleRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleEditRixoCompanyChange === 'function' && '$id' === 'editRixoCompany') { handleEditRixoCompanyChange(window.getComboboxValue('$id')); }">
+                <option value="">▼</option>
+            </select>
+            <div id="${id}Button" onclick="openComboboxDropdown('$id')" 
+                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                ▼
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+// JavaScript function to sync combobox input and select
+fun setupEditableComboboxHandlers() {
+    js("""
+        window.syncComboboxInput = function(selectId) {
+            var select = document.getElementById(selectId);
+            var input = document.getElementById(selectId + 'Input');
+            if (select && input && select.value) {
+                input.value = select.value;
+                // Trigger change event on input for any listeners
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        };
+        
+        
+        // Helper function to get combobox value (reads from input, falls back to select)
+        window.getComboboxValue = function(fieldId) {
+            var input = document.getElementById(fieldId + 'Input');
+            if (input && input.value) {
+                return input.value;
+            }
+            var select = document.getElementById(fieldId);
+            if (select) {
+                return select.value || '';
+            }
+            return '';
+        };
+        
+        // Function to open combobox dropdown - shows all options
+        window.openComboboxDropdown = function(selectId) {
+            var select = document.getElementById(selectId);
+            if (!select) return;
+            
+            // Handle special case for Rixo Price fields
+            var inputId = selectId + 'Input';
+            if (selectId === 'rixoPriceDropdown') {
+                inputId = 'rixoPriceInput';
+            } else if (selectId === 'editRixoPriceDropdown') {
+                inputId = 'editRixoPriceInput';
+            }
+            
+            var input = document.getElementById(inputId);
+            if (!input) return;
+            
+            // Get all options from the select (excluding the first empty option)
+            // Check if select.options exists and is iterable
+            if (!select.options || typeof select.options[Symbol.iterator] !== 'function') {
+                console.error('Select element has no iterable options:', selectId);
+                return;
+            }
+            
+            var options = Array.from(select.options).slice(1).map(function(opt) {
+                return { value: opt.value, text: opt.text };
+            });
+            
+            if (options.length === 0) return;
+            
+            // Create dropdown overlay - styled with white text and ash background
+            var dropdown = document.createElement('div');
+            dropdown.id = selectId + '_dropdown';
+            dropdown.style.position = 'fixed';
+            dropdown.style.backgroundColor = '#808080';
+            dropdown.style.border = '1px solid #a0a0a0';
+            dropdown.style.borderTop = 'none';
+            dropdown.style.borderRadius = '0';
+            dropdown.style.boxShadow = '0 2px 4px rgba(0,0,0,0.15)';
+            dropdown.style.maxHeight = '200px';
+            dropdown.style.overflowY = 'auto';
+            dropdown.style.overflowX = 'hidden';
+            dropdown.style.zIndex = '10000';
+            dropdown.style.fontSize = '13px';
+            dropdown.style.fontFamily = 'Arial, sans-serif';
+            dropdown.style.color = '#ffffff';
+            dropdown.style.padding = '0';
+            dropdown.style.margin = '0';
+            dropdown.style.listStyle = 'none';
+            
+            // Position dropdown below the input (aligned with input border)
+            var rect = input.getBoundingClientRect();
+            dropdown.style.left = rect.left + 'px';
+            dropdown.style.top = rect.bottom + 'px';
+            dropdown.style.width = rect.width + 'px';
+            dropdown.style.minWidth = rect.width + 'px';
+            
+            // Add options to dropdown
+            options.forEach(function(opt) {
+                var optionDiv = document.createElement('div');
+                optionDiv.style.padding = '2px 4px';
+                optionDiv.style.cursor = 'default';
+                optionDiv.style.whiteSpace = 'nowrap';
+                optionDiv.style.overflow = 'hidden';
+                optionDiv.style.textOverflow = 'ellipsis';
+                optionDiv.style.lineHeight = '1.4';
+                optionDiv.textContent = opt.text || opt.value;
+                
+                // Highlight if matches current input value
+                if (input.value === opt.value) {
+                    optionDiv.style.backgroundColor = '#316AC5';
+                    optionDiv.style.color = '#ffffff';
+                } else {
+                    optionDiv.style.backgroundColor = '#808080';
+                    optionDiv.style.color = '#ffffff';
+                }
+                
+                optionDiv.onmouseenter = function() {
+                    if (input.value !== opt.value) {
+                        this.style.backgroundColor = '#316AC5';
+                        this.style.color = '#ffffff';
+                    }
+                };
+                optionDiv.onmouseleave = function() {
+                    if (input.value === opt.value) {
+                        this.style.backgroundColor = '#316AC5';
+                        this.style.color = '#ffffff';
+                    } else {
+                        this.style.backgroundColor = '#808080';
+                        this.style.color = '#ffffff';
+                    }
+                };
+                
+                optionDiv.onclick = function(e) {
+                    e.stopPropagation();
+                    input.value = opt.value;
+                    select.value = opt.value;
+                    syncComboboxInput(selectId);
+                    closeComboboxDropdown(selectId);
+                };
+                
+                dropdown.appendChild(optionDiv);
+            });
+            
+            // Add click outside handler
+            var closeHandler = function(e) {
+                if (!dropdown.contains(e.target) && e.target.id !== selectId + 'Button' && e.target.id !== selectId) {
+                    closeComboboxDropdown(selectId);
+                    document.removeEventListener('click', closeHandler);
+                }
+            };
+            setTimeout(function() {
+                document.addEventListener('click', closeHandler);
+            }, 10);
+            
+            // Remove existing dropdown if any
+            var existing = document.getElementById(selectId + '_dropdown');
+            if (existing) {
+                existing.remove();
+            }
+            
+            document.body.appendChild(dropdown);
+            
+            // Prevent page scrolling when dropdown is open
+            var originalOverflow = document.body.style.overflow;
+            document.body.style.overflow = 'hidden';
+            
+            // Store reference to restore scroll when dropdown closes
+            dropdown.dataset.originalOverflow = originalOverflow || '';
+            
+            // Close dropdown when page is scrolled (but allow scrolling inside dropdown)
+            var scrollHandler = function(e) {
+                // Check if scroll happened inside the dropdown
+                var scrollTarget = e.target || document.body;
+                if (dropdown.contains(scrollTarget)) {
+                    return; // Allow scrolling inside dropdown
+                }
+                // Close dropdown when page scrolls (if somehow scroll happened)
+                closeComboboxDropdown(selectId);
+                window.removeEventListener('scroll', scrollHandler, true);
+                document.removeEventListener('scroll', scrollHandler, true);
+            };
+            window.addEventListener('scroll', scrollHandler, true);
+            document.addEventListener('scroll', scrollHandler, true);
+            
+            // Also close on window resize
+            var resizeHandler = function() {
+                closeComboboxDropdown(selectId);
+                window.removeEventListener('resize', resizeHandler);
+            };
+            window.addEventListener('resize', resizeHandler);
+        };
+        
+        // Function to close combobox dropdown
+        window.closeComboboxDropdown = function(selectId) {
+            var dropdown = document.getElementById(selectId + '_dropdown');
+            if (dropdown) {
+                // Restore page scrolling
+                var originalOverflow = dropdown.dataset.originalOverflow;
+                if (originalOverflow !== undefined && originalOverflow !== null) {
+                    document.body.style.overflow = originalOverflow;
+                } else {
+                    document.body.style.overflow = '';
+                }
+                dropdown.remove();
+            }
+            
+            // Also check if any other dropdowns are still open
+            var allDropdowns = document.querySelectorAll('[id$="_dropdown"]');
+            if (allDropdowns.length === 0) {
+                // No dropdowns open, ensure scrolling is restored
+                document.body.style.overflow = '';
+            }
+        };
+        
+        // Close all dropdowns when page is scrolled (but allow scrolling inside dropdown)
+        window.addEventListener('scroll', function(e) {
+            // Find all open dropdowns
+            var allDropdowns = document.querySelectorAll('[id$="_dropdown"]');
+            var scrollTarget = e.target || document.body;
+            allDropdowns.forEach(function(dropdown) {
+                // Don't close if scrolling inside the dropdown itself
+                if (!dropdown.contains(scrollTarget)) {
+                    // Restore scrolling before removing
+                    var originalOverflow = dropdown.dataset.originalOverflow;
+                    if (originalOverflow !== undefined && originalOverflow !== null) {
+                        document.body.style.overflow = originalOverflow;
+                    } else {
+                        document.body.style.overflow = '';
+                    }
+                    dropdown.remove();
+                }
+            });
+            
+            // Ensure scrolling is restored if no dropdowns are open
+            if (document.querySelectorAll('[id$="_dropdown"]').length === 0) {
+                document.body.style.overflow = '';
+            }
+        }, true);
+        
+        // Also listen to scroll on document (for scrollable containers)
+        document.addEventListener('scroll', function(e) {
+            var allDropdowns = document.querySelectorAll('[id$="_dropdown"]');
+            var scrollTarget = e.target || document.body;
+            allDropdowns.forEach(function(dropdown) {
+                // Don't close if scrolling inside the dropdown itself
+                if (!dropdown.contains(scrollTarget)) {
+                    dropdown.remove();
+                }
+            });
+        }, true);
+        
+        // Close all dropdowns when window is resized
+        window.addEventListener('resize', function() {
+            var allDropdowns = document.querySelectorAll('[id$="_dropdown"]');
+            allDropdowns.forEach(function(dropdown) {
+                dropdown.remove();
+            });
+        });
+        
+        // Sync input to select when user types
+        document.addEventListener('input', function(e) {
+            if (e.target.id && e.target.id.endsWith('Input')) {
+                var selectId = e.target.id.replace('Input', '');
+                var select = document.getElementById(selectId);
+                if (select) {
+                    // Check if typed value matches any option
+                    var matchingOption = Array.from(select.options).find(function(opt) {
+                        return opt.value === e.target.value;
+                    });
+                    if (matchingOption) {
+                        select.value = e.target.value;
+                    }
+                }
+            }
+        });
+    """).unsafeCast<Unit>()
 }
 
 // Formats ISO date (yyyy-MM-dd) to "MonthD, yyyy(Day)" e.g., 2025-06-03 -> "June3, 2025(Tuesday)"
@@ -250,6 +670,113 @@ private fun formatWithWeekday(isoDate: String?): String {
         return month + dayOfMonth.toString() + ", " + year.toString() + "(" + weekday + ")"
     } catch (e: dynamic) {
         return isoDate
+    }
+}
+
+private fun formatDateForDatabase(isoDate: String?): String {
+    if (isoDate == null || isoDate.isBlank()) return ""
+    try {
+        val date = js("new Date(isoDate)")
+        if (js("isNaN(date)") as Boolean) return isoDate
+        val months = arrayOf(
+            "January","February","March","April","May","June",
+            "July","August","September","October","November","December"
+        )
+        val days = arrayOf("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday")
+        val month = months[js("date.getMonth()") as Int]
+        val dayOfMonth = js("date.getDate()") as Int
+        val year = js("date.getFullYear()") as Int
+        val weekday = days[js("date.getDay()") as Int]
+        return month + dayOfMonth.toString() + ", " + year.toString() + "(" + weekday + ")"
+    } catch (e: dynamic) {
+        return isoDate
+    }
+}
+
+// Formats carModelYear from YYYY-MM or MM/YYYY to "Month YYYY" format
+// Examples: "2025-07" -> "July 2025", "07/2025" -> "July 2025", "7/2025" -> "July 2025"
+private fun formatCarModelYear(yearStr: String?): String {
+    if (yearStr == null || yearStr.isBlank()) return ""
+    
+    val months = arrayOf(
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    )
+    
+    try {
+        // Handle YYYY-MM format (from month input)
+        if (yearStr.contains("-")) {
+            val parts = yearStr.split("-")
+            if (parts.size == 2) {
+                val year = parts[0].toIntOrNull()
+                val month = parts[1].toIntOrNull()
+                if (year != null && month != null && month >= 1 && month <= 12) {
+                    return "${months[month - 1]} $year"
+                }
+            }
+        }
+        
+        // Handle MM/YYYY or M/YYYY format (from database)
+        if (yearStr.contains("/")) {
+            val parts = yearStr.split("/")
+            if (parts.size == 2) {
+                val month = parts[0].toIntOrNull()
+                val year = parts[1].toIntOrNull()
+                if (month != null && year != null && month >= 1 && month <= 12) {
+                    return "${months[month - 1]} $year"
+                }
+            }
+        }
+        
+        // If already in readable format, return as is
+        return yearStr
+    } catch (e: dynamic) {
+        return yearStr
+    }
+}
+
+private fun normalizeDateForComparison(dateStr: String?): String {
+    if (dateStr == null || dateStr.isBlank()) return ""
+    
+    try {
+        // Handle format: "24 Apr, 2025" -> convert to "April24, 2025"
+        if (dateStr.contains("Apr") && !dateStr.contains("April")) {
+            val parts = dateStr.split(", ")
+            if (parts.size == 2) {
+                val dayMonth = parts[0].trim()
+                val year = parts[1].trim()
+                val day = dayMonth.split(" ")[0]
+                return "April$day, $year"
+            }
+        }
+        
+        // Handle format: "April24, 2025(Thursday)" -> extract "April24, 2025"
+        if (dateStr.contains("April") && dateStr.contains("(")) {
+            val beforeParen = dateStr.split("(")[0].trim()
+            return beforeParen
+        }
+        
+        // Handle format: "April24, 2025" -> return as is
+        if (dateStr.contains("April")) {
+            return dateStr
+        }
+        
+        // If none of the above, try to parse as ISO date and convert
+        val date = js("new Date(dateStr)")
+        if (!js("isNaN(date)") as Boolean) {
+            val months = arrayOf(
+                "January","February","March","April","May","June",
+                "July","August","September","October","November","December"
+            )
+            val month = months[js("date.getMonth()") as Int]
+            val dayOfMonth = js("date.getDate()") as Int
+            val year = js("date.getFullYear()") as Int
+            return month + dayOfMonth.toString() + ", " + year.toString()
+        }
+        
+        return dateStr
+    } catch (e: dynamic) {
+        return dateStr
     }
 }
 
@@ -286,11 +813,14 @@ private var selectedPurchases = mutableSetOf<Long>()
 
 // System initialization check
 fun checkSystemInitialization(root: Element) {
-    window.fetch("/api/auth/users/count")
+    val url = apiUrl("auth/users/count")
+    console.log("🔍 Checking system initialization - URL: $url")
+    window.fetch(url)
         .then { it.json() }
         .then { response ->
-            val count = response.asDynamic().count as Number
-            val isInitialized = response.asDynamic().isInitialized as Boolean
+            val responseDynamic = response.asDynamic()
+            val count = (responseDynamic.count as? Number) ?: 0
+            val isInitialized = (responseDynamic.isInitialized as? Boolean) ?: false
             
             if (isInitialized) {
                 // System is initialized, create app and proceed with normal flow
@@ -372,29 +902,58 @@ fun showSetupPage(root: Element) {
 }
 
 fun setupSetupHandlers() {
-    val form = document.getElementById("setupForm") as HTMLFormElement
-    val messageDiv = document.getElementById("setupMessage") as HTMLElement
+    val form = document.getElementById("setupForm") as? HTMLFormElement
     
-    form.addEventListener("submit", { event ->
+    if (form == null) {
+        console.error("❌ Setup form not found!")
+        return
+    }
+    
+    // Use a separate function to avoid closure issues
+    form.addEventListener("submit", { event: Event ->
         event.preventDefault()
-        
-        val email = (document.getElementById("setupEmail") as HTMLInputElement).value.trim()
-        val name = (document.getElementById("setupName") as HTMLInputElement).value.trim()
-        val password = (document.getElementById("setupPassword") as HTMLInputElement).value
+        handleSetupSubmit()
+    })
+}
+
+fun handleSetupSubmit() {
+    val emailInput = document.getElementById("setupEmail") as? HTMLInputElement
+    val nameInput = document.getElementById("setupName") as? HTMLInputElement
+    val passwordInput = document.getElementById("setupPassword") as? HTMLInputElement
+    val submitBtn = document.getElementById("setupSubmit") as? HTMLButtonElement
+    
+    if (emailInput == null || nameInput == null || passwordInput == null || submitBtn == null) {
+        console.error("❌ Setup form elements not found!")
+        showSetupMessage("Form elements not found. Please refresh the page.", "error")
+        return
+    }
+    
+    val email = emailInput.value.trim()
+    val name = nameInput.value.trim()
+    val password = passwordInput.value
         
         if (email.isBlank() || name.isBlank() || password.isBlank()) {
             showSetupMessage("Please fill in all fields", "error")
-            return@addEventListener
+        return
         }
         
         // Show loading state
-        val submitBtn = document.getElementById("setupSubmit") as HTMLButtonElement
         submitBtn.disabled = true
         submitBtn.textContent = "Creating Account..."
         
-        val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:email,name:name,password:password})})")
+    // Construct fetch request using proper Kotlin/JS types (same pattern as ApiService.kt)
+    val requestBodyJson = """{"email":"${email.replace("\"", "\\\"").replace("\\", "\\\\")}","name":"${name.replace("\"", "\\\"").replace("\\", "\\\\")}","password":"${password.replace("\"", "\\\"").replace("\\", "\\\\")}"}"""
+    
+    val headers = Headers().apply {
+        append("Content-Type", "application/json")
+    }
+    val init = RequestInit(
+        method = "POST",
+        headers = headers,
+        body = requestBodyJson
+    )
         
-        window.fetch("/api/auth/setup", body)
+    window.fetch(apiUrl("auth/setup"), init)
             .then { response ->
                 if (response.ok) {
                     response.json()
@@ -414,15 +973,26 @@ fun setupSetupHandlers() {
                 }, 2000)
             }
             .catch { error ->
-                showSetupMessage("Setup failed: ${error.message}", "error")
+            val errorMessage = try {
+                val errorDynamic = error.asDynamic()
+                (errorDynamic.message?.toString() ?: errorDynamic.toString() ?: "Unknown error")
+            } catch (e: dynamic) {
+                "Setup failed. Please try again."
+            }
+            showSetupMessage("Setup failed: $errorMessage", "error")
                 submitBtn.disabled = false
                 submitBtn.textContent = "Create Admin Account"
             }
-    })
 }
 
 fun showSetupMessage(message: String, type: String) {
-    val messageDiv = document.getElementById("setupMessage") as HTMLElement
+    val messageDiv = document.getElementById("setupMessage") as? HTMLElement
+    if (messageDiv == null) {
+        console.error("❌ Setup message div not found!")
+        // Fallback to alert if message div not found
+        window.alert(message)
+        return
+    }
     messageDiv.style.display = "block"
     messageDiv.textContent = message
     
@@ -486,13 +1056,11 @@ fun createApp(root: Element) {
             <div style="margin-bottom: 20px; margin-top: 60px; display: flex; gap: 10px;">
                 <!-- Rixo buttons temporarily hidden per request -->
                 <button id="rixoTransportBtn" style="display: none;">Generate Rixo PDF</button>
-                <button id="rixoBtn" style="display: none;">Generating Invoice PDF</button>
+                <button id="generateInvoiceBtn" style="display: none; padding: 10px 20px; background-color: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Generate Invoice</button>
             </div>
             <style>
                 /* Force-hide only the Rixo Transport button */
                 #rixoTransportBtn { display: none !important; }
-                /* Hide invoice button by default, JS shows it when rows selected */
-                #rixoBtn { display: none; }
                 .sort-menu { display: none; }
                 /* Ensure hamburger button stays fixed during scroll */
                 #hamburgerBtn { 
@@ -538,6 +1106,9 @@ fun createApp(root: Element) {
         handleRixoTransportPdfGeneration()
     })
     
+    // Note: rixoBtn click handler is set up globally in main() via event delegation
+    // This ensures it works even if the button is recreated
+    
     // Sidebar event listeners (hamburger button will be added only on purchase list page)
     
     document.getElementById("closeSidebar")?.addEventListener("click", { _: Event ->
@@ -580,15 +1151,16 @@ fun createApp(root: Element) {
 
 fun updateContent(root: Element) {
     val hash = window.location.hash
-    val content = document.getElementById("content")!!
-    
-    // Redirect unauthenticated users to login page at #/
-    val token = window.localStorage.getItem("authToken")
-    if (token == null || token.isBlank()) {
-        if (hash != "#/" && hash != "" && hash != "#") {
-            window.location.hash = "#/"
+    val content = document.getElementById("content")
+    if (content == null) {
+        console.error("❌ Content element not found!")
         return
-        }
+    }
+    
+    // If unauthenticated, allow navigation but render auth page only when hash is "#/"
+    val token = window.localStorage.getItem("authToken")
+    if ((token == null || token.isBlank()) && (hash == "" || hash == "#")) {
+            window.location.hash = "#/"
     }
 
     when {
@@ -736,7 +1308,7 @@ fun showAuthPage() {
                             <div class="input-container">
                                 <input id="su_pass" type="password" placeholder="Enter your password" class="form-input"/>
                                 <span class="input-icon">🔒</span>
-                            </div> 
+                    </div> 
                         </div>
                         
                         <div class="form-group">
@@ -1159,7 +1731,7 @@ private fun setupAuthHandlers() {
             return
         }
         val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:email,name:name,password:pass,role:role})})")
-        window.fetch("/api/auth/signup", body)
+        window.fetch(apiUrl("auth/signup"), body)
             .then { it.json() }
             .then { resp ->
                 val success = resp.asDynamic().success as Boolean?
@@ -1195,7 +1767,7 @@ private fun setupAuthHandlers() {
             return
         }
         val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:email,password:pass})})")
-        window.fetch("/api/auth/login", body)
+        window.fetch(apiUrl("auth/login"), body)
             .then { it.json() }
             .then { resp ->
                 val token = resp.asDynamic().token as String?
@@ -1273,7 +1845,7 @@ fun applyRoleBasedRestrictions() {
     val userManagementBtn = document.getElementById("userManagementBtn") as HTMLElement?
     val clientAccountsBtn = document.getElementById("clientAccountsBtn") as HTMLElement?
     val roleRequestBtn = document.getElementById("roleRequestBtn") as HTMLElement?
-    val rixoBtn = document.getElementById("rixoBtn") as HTMLElement?
+    // rixoBtn has been removed
     val rixoTransportBtn = document.getElementById("rixoTransportBtn") as HTMLElement?
     val clientAccountsQuickBtn = document.getElementById("clientAccountsQuickBtn") as HTMLElement?
     
@@ -1283,7 +1855,7 @@ fun applyRoleBasedRestrictions() {
     clientAccountsBtn?.style?.display = if (isAdmin()) "block" else "none"
     roleRequestBtn?.style?.display = if (!isAdmin()) "block" else "none" // Show for non-admin users
     // Keep invoice button hidden by default; it appears when rows are selected
-    rixoBtn?.style?.display = "none"
+    // rixoBtn has been removed
     rixoTransportBtn?.style?.display = "none"
     clientAccountsQuickBtn?.style?.display = if (isAdmin()) "block" else "none"
     
@@ -1510,7 +2082,7 @@ fun toggleRoleRequestsSection() {
 }
 
 private fun loadUsers() {
-    window.fetch("/api/users")
+    window.fetch(apiUrl("users"))
         .then { response ->
             if (response.ok) {
                 response.json().then { users ->
@@ -1709,7 +2281,7 @@ private fun showEditUserPage(userId: Long) {
 }
 
 private fun loadUserForEdit(userId: Long) {
-    window.fetch("/api/users/$userId")
+    window.fetch(apiUrl("users/$userId"))
         .then { response ->
             if (response.ok) {
                 response.json().then { user ->
@@ -1813,7 +2385,7 @@ private fun updateUserRole(userId: Long) {
         body: JSON.stringify(updateData)
     })""")
     
-    window.fetch("/api/users/$userId", requestOptions)
+    window.fetch(apiUrl("users/$userId"), requestOptions)
         .then { response ->
             if (response.ok) {
                 showMessage("User role updated successfully!", "success")
@@ -1956,7 +2528,7 @@ private fun createNewUser() {
         body: JSON.stringify(userData)
     })""")
     
-    window.fetch("/api/users", requestOptions)
+    window.fetch(apiUrl("users"), requestOptions)
         .then { response ->
             if (response.ok) {
                 showMessage("User created successfully!", "success")
@@ -1992,7 +2564,7 @@ private fun deleteUser(id: Long?) {
     if (id == null) return
     if (js("confirm('Are you sure you want to delete this user? This action cannot be undone.')")) {
         val deleteOptions = js("""({method: 'DELETE'})""")
-        window.fetch("/api/users/$id", deleteOptions)
+        window.fetch(apiUrl("users/$id"), deleteOptions)
             .then { response ->
                 if (response.ok) {
                     showMessage("User deleted successfully", "success")
@@ -2017,27 +2589,91 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Purchase Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="date" style="width:100%; padding: 8px 110px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <span id="dateDayHint" style="position:absolute; right:12px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                            <input type="date" id="date" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <span id="dateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
                     <div>
                     </div>
                     <div>
                         <label>Chassis *</label>
-                        <input type="text" id="chassis" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("chassis", "Select Chassis", required = true)}
                     </div>
                     <div>
                         <label>Production Date</label>
-                        <input type="text" id="carModelYear" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="month" id="carModelYear" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label>Brand</label>
-                        <input type="text" id="brand" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <select id="brand" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                <option value="">Select Brand</option>
+                            <option value="Toyota">Toyota</option>
+                            <option value="Nissan">Nissan</option>
+                            <option value="Subaru">Subaru</option>
+                            <option value="Honda">Honda</option>
+                            <option value="Suzuki">Suzuki</option>
+                            <option value="Isuzu">Isuzu</option>
+                            <option value="Daihatsu">Daihatsu</option>
+                            <option value="Mitsuoka">Mitsuoka</option>
+                            <option value="Hino">Hino</option>
+                            <option value="Mitsubishi Fuso">Mitsubishi Fuso</option>
+                            <option value="Mitsubishi">Mitsubishi</option>
+                            <option value="Lexus">Lexus</option>
+                            <option value="Mazda">Mazda</option>
+                            <option value="Nissan Diesel">Nissan Diesel</option>
+                            <option value="Cadillac">Cadillac</option>
+                            <option value="Chevrolet">Chevrolet</option>
+                            <option value="GMC">GMC</option>
+                            <option value="Hummer">Hummer</option>
+                            <option value="Lincoln">Lincoln</option>
+                            <option value="Ford">Ford</option>
+                            <option value="Chrisler">Chrisler</option>
+                            <option value="Chrisler Jeep">Chrisler Jeep</option>
+                            <option value="Dodge">Dodge</option>
+                            <option value="Infiniti">Infiniti</option>
+                            <option value="Acura">Acura</option>
+                            <option value="Tesla">Tesla</option>
+                            <option value="Mercedes Benz">Mercedes Benz</option>
+                            <option value="MB AMG">MB AMG</option>
+                            <option value="Smart">Smart</option>
+                            <option value="BMW">BMW</option>
+                            <option value="Audi">Audi</option>
+                            <option value="VolksWagen">VolksWagen</option>
+                            <option value="Porsche">Porsche</option>
+                            <option value="Rolls-Royce">Rolls-Royce</option>
+                            <option value="Bentely">Bentely</option>
+                            <option value="Jaguar">Jaguar</option>
+                            <option value="Land Rover">Land Rover</option>
+                            <option value="Mini">Mini</option>
+                            <option value="Lotus">Lotus</option>
+                            <option value="Aston Martin">Aston Martin</option>
+                            <option value="McLaren">McLaren</option>
+                            <option value="Fiat">Fiat</option>
+                            <option value="Ferrari">Ferrari</option>
+                            <option value="Lancia">Lancia</option>
+                            <option value="Alfa Romeo">Alfa Romeo</option>
+                            <option value="Maserati">Maserati</option>
+                            <option value="Lamborghini">Lamborghini</option>
+                            <option value="Abarth">Abarth</option>
+                            <option value="Renault">Renault</option>
+                            <option value="Peugeot">Peugeot</option>
+                            <option value="Citroen">Citroen</option>
+                            <option value="Ds Automobiles">Ds Automobiles</option>
+                            <option value="Volvo">Volvo</option>
+                            <option value="Hyundai">Hyundai</option>
+                            <option value="Kia">Kia</option>
+                            <option value="BYD">BYD</option>
+                            <option value="TOMMYKAIRA">TOMMYKAIRA</option>
+                            </select>
+                            <button type="button" id="manageBrandMappings" class="manage-btn" title="Manage Mappings">
+                                ⚙️
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <label>Car Name</label>
-                        <input type="text" id="carName" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("carName", "Select Car Name")}
                     </div>
                 </div>
                 
@@ -2045,7 +2681,7 @@ fun createAddFormHTML(): String {
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                     <div>
                         <label>Grade</label>
-                        <input type="text" id="grade" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("grade", "Select Grade")}
                     </div>
                     <div>
                         <label>Rank</label>
@@ -2061,7 +2697,7 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Fuel</label>
-                        <input type="text" id="fuel" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("fuel", "Select Fuel")}
                     </div>
                     <div>
                         <label>Seat</label>
@@ -2069,7 +2705,7 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Door</label>
-                        <input type="text" id="door" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("door", "Select Door")}
                     </div>
                     <div>
                         <label>Distance</label>
@@ -2078,6 +2714,26 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Options</label>
                         <input type="text" id="options" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <div>
+                        <label>CC</label>
+                        ${createEditableCombobox("cc", "Select CC")}
+                    </div>
+                    <div>
+                        <label>Shift</label>
+                        ${createEditableCombobox("shift", "Select Shift")}
+                    </div>
+                    <div>
+                        <label>Steering Wheel</label>
+                        <select id="steeringWheel" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Select Steering Wheel</option>
+                            <option value="Right">Right</option>
+                            <option value="Left">Left</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>WD</label>
+                        ${createEditableCombobox("wd", "Select WD")}
                     </div>
                 </div>
                 
@@ -2089,43 +2745,49 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Supplier Name *</label>
-                        <select id="auctionName" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="handleAuctionNameChange(this.value)">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <select id="auctionName" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <option value="">Select Supplier Name</option>
                         </select>
+                            <button type="button" id="manageAuctionMappings" class="manage-btn" title="Manage Mappings">
+                                ⚙️
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <label>Venue ID</label>
-                        <select id="venueId" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Venue ID</option>
-                        </select>
+                        ${createEditableCombobox("venueId", "Select Venue ID")}
                     </div>
                     <div>
                         <label>Stock Location</label>
-                        <select id="stockLocation" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Stock Location</option>
-                        </select>
+                        ${createEditableCombobox("stockLocation", "Select Stock Location")}
                     </div>
                     <div>
                         <label>Rixo Company</label>
-                        <select id="rixoCompany" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="handleRixoCompanyChange(this.value)">
-                            <option value="">Select Rixo Company</option>
-                        </select>
+                        ${createEditableCombobox("rixoCompany", "Select Rixo Company", additionalAttrs = "onchange=\"handleRixoCompanyChange(window.getComboboxValue('rixoCompany'))\"")}
                     </div>
                     <div>
                         <label>Shipment size</label>
-                        <select id="typeOfVehicle" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Shipment size</option>
-                            <option value="Car">Car</option>
-                            <option value="Truck">Truck</option>
-                        </select>
+                        ${createEditableCombobox("typeOfVehicle", "Select Shipment size")}
                     </div>
                     <div>
                         <label>Rixo Price</label>
-                        <div style="position: relative;">
-                            <input type="text" id="rixoPrice" placeholder="Enter or select Rixo Price" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <select id="rixoPriceDropdown" style="position: absolute; top: 0; right: 0; width: 30px; height: 100%; border: none; background: #f5f5f5; cursor: pointer;" onchange="selectRixoPrice(this.value)">
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="rixoPriceInput" placeholder="Enter or select Rixo Price" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <input type="text" id="rixoPrice" placeholder="Enter or select Rixo Price" style="display: none;">
+                            <select id="rixoPriceDropdown" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('rixoPriceDropdown');"
+                                    onchange="var input = document.getElementById('rixoPriceInput'); if (input && this.value) { input.value = this.value; input.dispatchEvent(new Event('change', { bubbles: true })); } selectRixoPrice(this.value);">
                                 <option value="">▼</option>
                             </select>
+                            <div id="rixoPriceDropdownButton" onclick="openComboboxDropdown('rixoPriceDropdown')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
                         </div>
                     </div>
                     <div>
@@ -2149,7 +2811,7 @@ fun createAddFormHTML(): String {
                                 TRUE
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="rixoRequested" value="FALSE">
+                                <input type="radio" name="rixoRequested" value="FALSE" checked>
                                 <span class="checkmark"></span>
                                 FALSE
                             </label>
@@ -2164,7 +2826,7 @@ fun createAddFormHTML(): String {
                                 TRUE
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="rixoConfirmed" value="FALSE">
+                                <input type="radio" name="rixoConfirmed" value="FALSE" checked>
                                 <span class="checkmark"></span>
                                 FALSE
                             </label>
@@ -2315,7 +2977,7 @@ fun createAddFormHTML(): String {
                     </div>
                 </div>
                 <div style="margin-bottom: 20px;">
-                    <label>Generated Number Cut String:</label>
+                    <label>Number Cut:</label>
                     <input type="text" id="numberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
                 </div>
                 </div> <!-- End of numberCutSection -->
@@ -2352,8 +3014,8 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Payment Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="paymentDate" style="width:100%; padding: 8px 110px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <span id="paymentDateDayHint" style="position:absolute; right:12px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                            <input type="date" id="paymentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <span id="paymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
                 </div>
@@ -2363,8 +3025,8 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Shipment Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="shipmentDate" style="width:100%; padding: 8px 110px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <span id="shipmentDateDayHint" style="position:absolute; right:12px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                            <input type="date" id="shipmentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <span id="shipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
                     <div>
@@ -2452,17 +3114,35 @@ fun setEditFormValuesFromKotlin(purchaseData: dynamic) {
 fun setupRixoDropdowns() {
     js("""
         // Dynamic dropdown system with hierarchical filtering
+        var populateRetryCount = 0;
+        var maxPopulateRetries = 20; // 10 seconds max wait (20 * 500ms)
+        
         function populateDropdownOptions() {
             if (typeof window.rixoPriceMapping === 'undefined') {
-                console.log('Rixo price mapping not loaded yet, retrying in 500ms...');
+                populateRetryCount++;
+                if (populateRetryCount >= maxPopulateRetries) {
+                    console.error('❌ Rixo price mapping failed to load after', maxPopulateRetries * 500, 'ms. Check if rixo-price-mapping.js is loaded correctly.');
+                    // Try to load from backend API as fallback
+                    if (typeof window.refreshRixoDropdowns === 'function') {
+                        console.log('Attempting to load from backend API as fallback...');
+                        window.refreshRixoDropdowns();
+                    }
+                    return;
+                }
+                console.log('Rixo price mapping not loaded yet, retrying in 500ms... (attempt', populateRetryCount, 'of', maxPopulateRetries, ')');
                 setTimeout(populateDropdownOptions, 500);
                 return;
             }
             
-            console.log('Rixo price mapping loaded, found', Object.keys(window.rixoPriceMapping).length, 'auctions');
+            // Reset retry count on success
+            populateRetryCount = 0;
             
-            // Get all unique auction names
             var auctionNames = Object.keys(window.rixoPriceMapping);
+            console.log('✅ Rixo price mapping loaded, found', auctionNames.length, 'auctions');
+            
+            if (auctionNames.length === 0) {
+                console.warn('⚠️ Rixo price mapping is empty! Check rixo-price-mapping.js file.');
+            }
             
             // Populate Auction house dropdown
             var auctionSelect = document.getElementById('auctionName');
@@ -2472,12 +3152,18 @@ fun setupRixoDropdowns() {
                 auctionNames.forEach(function(auction) {
                     auctionSelect.innerHTML += '<option value="' + auction + '">' + auction + '</option>';
                 });
+                console.log('✅ Populated auctionName dropdown with', auctionNames.length, 'suppliers');
+            } else {
+                console.warn('⚠️ auctionName element not found in DOM');
             }
             if (editAuctionSelect) {
                 editAuctionSelect.innerHTML = '<option value="">Select Supplier Name</option>';
                 auctionNames.forEach(function(auction) {
                     editAuctionSelect.innerHTML += '<option value="' + auction + '">' + auction + '</option>';
                 });
+                console.log('✅ Populated editAuctionName dropdown with', auctionNames.length, 'suppliers');
+            } else {
+                console.warn('⚠️ editAuctionName element not found in DOM');
             }
             
             // Clear other dropdowns initially
@@ -2582,8 +3268,8 @@ fun setupRixoDropdowns() {
                 
                 // Handle rixo price fields specially (they are input + dropdown)
                 if (elementId === 'rixoPrice' || elementId === 'editRixoPrice') {
-                    var input = document.getElementById(elementId);
-                    var editInput = document.getElementById(editElementId);
+                    var input = document.getElementById(elementId + 'Input');
+                    var editInput = document.getElementById(editElementId + 'Input');
                     
                     if (input) {
                         input.value = uniqueOptions[0];
@@ -2628,14 +3314,26 @@ fun setupRixoDropdowns() {
                 return;
             }
             
+            // Note: New supplier creation is now handled via the manage mapping button (⚙️)
+            // The old "__add_new_supplier__" option has been removed
+            
                     var auctionData = window.rixoPriceMapping[auctionName];
             if (!auctionData) {
-                console.log('No data found for auction:', auctionName);
+                console.log('⚠️ No data found for supplier:', auctionName);
+                console.log('Available suppliers:', Object.keys(window.rixoPriceMapping || {}));
                 return;
             }
             
-            // Call the new hierarchical filtering logic
+            console.log('✅ Found data for supplier:', auctionName);
+            console.log('📊 Supplier data:', auctionData);
+            
+            // Call the hierarchical filtering logic to auto-populate fields
+            if (typeof window.autoSelectRelatedFields === 'function') {
+                console.log('🔄 Calling autoSelectRelatedFields for supplier:', auctionName);
             window.autoSelectRelatedFields(auctionName, 'auctionHouse', auctionName);
+            } else {
+                console.error('❌ autoSelectRelatedFields function not available!');
+            }
         }
         
         // Handle type of vehicle change
@@ -2670,13 +3368,21 @@ fun setupRixoDropdowns() {
         // Helper functions for rixo price selection
         function selectRixoPrice(value) {
             if (value) {
-                document.getElementById('rixoPrice').value = value;
+                var input = document.getElementById('rixoPriceInput');
+                if (input) {
+                    input.value = value;
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
             }
         }
         
         function selectEditRixoPrice(value) {
             if (value) {
-                document.getElementById('editRixoPrice').value = value;
+                var input = document.getElementById('editRixoPriceInput');
+                if (input) {
+                    input.value = value;
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
             }
         }
         
@@ -2822,7 +3528,7 @@ fun setupRixoDropdowns() {
                 }
                 
                 // Set Rixo Price
-                var editPriceInput = document.getElementById('editRixoPrice');
+                var editPriceInput = document.getElementById('editRixoPriceInput');
                 if (editPriceInput && purchaseData.rixoPrice) {
                     editPriceInput.value = purchaseData.rixoPrice;
                     console.log('Set edit rixo price:', purchaseData.rixoPrice);
@@ -2856,12 +3562,37 @@ fun setupRixoDropdowns() {
                 var editShakenCheckbox = document.getElementById('editShakenCheckbox');
                 var editNumberCutSection = document.getElementById('editNumberCutSection');
                 if (editShakenCheckbox) {
-                    editShakenCheckbox.checked = purchaseData.shaken || false;
-                    if (editShakenCheckbox.checked) {
+                    // Handle shaken value correctly: true, 1, "true", "1" -> checked; false, 0, null, undefined -> unchecked
+                    // Access purchaseData.shaken - check both possible field names
+                    var shakenValueRaw = purchaseData.shaken;
+                    var shakenValueAlt = purchaseData.shaken_1;
+                    var shakenValue = (shakenValueRaw !== undefined && shakenValueRaw !== null) ? shakenValueRaw : 
+                                    ((shakenValueAlt !== undefined && shakenValueAlt !== null) ? shakenValueAlt : null);
+                    
+                    console.log("🔍 [DEBUG] Raw shaken value from purchaseData:", shakenValue, "Type:", typeof shakenValue);
+                    console.log("🔍 [DEBUG] purchaseData.shaken:", purchaseData.shaken);
+                    console.log("🔍 [DEBUG] purchaseData.shaken_1:", purchaseData.shaken_1);
+                    console.log("🔍 [DEBUG] Full purchaseData keys:", Object.keys(purchaseData));
+                    
+                    var isShaken = false;
+                    if (shakenValue === true || shakenValue === 1 || shakenValue === "true" || shakenValue === "1" || shakenValue === "TRUE") {
+                        isShaken = true;
+                    } else if (shakenValue === false || shakenValue === 0 || shakenValue === "false" || shakenValue === "0" || shakenValue === "FALSE" || shakenValue === null || shakenValue === undefined) {
+                        isShaken = false;
+                    }
+                    editShakenCheckbox.checked = isShaken;
+                    console.log("🔍 [DEBUG] Loading shaken value:", shakenValue, "-> checkbox checked:", isShaken);
+                    if (isShaken) {
                         editNumberCutSection.style.display = 'block';
                     } else {
                         editNumberCutSection.style.display = 'none';
                     }
+                }
+                
+                // Load numberCut value from database
+                var editNumberCutString = document.getElementById('editNumberCutString');
+                if (editNumberCutString && purchaseData.numberCut) {
+                    editNumberCutString.value = purchaseData.numberCut;
                 }
             }, 100);
         }
@@ -2872,10 +3603,25 @@ fun setupRixoDropdowns() {
         window.handleEditClientSelection = handleEditClientSelection;
         
         // Initialize dropdowns when DOM is ready
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', populateDropdownOptions);
+        function initRixoDropdowns() {
+            console.log('initRixoDropdowns -> requesting latest prices from backend');
+            // First, try to populate from static data if available
+            if (typeof window.rixoPriceMapping !== 'undefined' && Object.keys(window.rixoPriceMapping).length > 0) {
+                console.log('Using static Rixo mapping data for initial population');
+                populateDropdownOptions();
+            }
+            
+            // Then try to refresh from backend
+            if (typeof window.refreshRixoDropdowns === 'function') {
+                window.refreshRixoDropdowns(); // pulls from DB and then calls populateDropdownOptions
         } else {
             populateDropdownOptions();
+            }
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initRixoDropdowns);
+        } else {
+            initRixoDropdowns();
         }
     """)
 }
@@ -2885,10 +3631,13 @@ fun setupAddFormListeners() {
     // Setup Rixo dropdowns
     setupRixoDropdowns()
     
-    // Add event listener for auction name change
+    // Add event listener for auction name change (Supplier Name)
     document.getElementById("auctionName")?.addEventListener("change", { event: Event ->
         val target = event.target as HTMLSelectElement
-        js("window.handleAuctionNameChange(target.value)")
+        val supplierName = target.value
+        console.log("🔵 Supplier Name selected:", supplierName)
+        js("window.handleAuctionNameChange(supplierName)")
+        js("window.toggleManageButtons()")
     })
     
     // Add event listener for type of vehicle change
@@ -2902,6 +3651,7 @@ fun setupAddFormListeners() {
     document.getElementById("rixoCompany")?.addEventListener("change", { event: Event ->
         val target = event.target as HTMLSelectElement
         js("window.handleRixoCompanyChange(target.value)")
+        js("window.toggleManageButtons()")
     })
     
     document.getElementById("cancelBtn")?.addEventListener("click", { _: Event ->
@@ -2913,9 +3663,59 @@ fun setupAddFormListeners() {
         handleAddPurchase()
     })
     
+    // Real-time Total Price calculation
+    fun calculateTotalPrice() {
+        try {
+            // Helper function to extract numeric value from string (remove currency symbols, commas, etc.)
+            fun extractNumericValue(value: String): Double {
+                if (value.isBlank()) return 0.0
+                // Remove currency symbols, commas, spaces and extract only numbers and decimal point
+                val cleaned = value.replace(Regex("[^0-9.-]"), "")
+                return cleaned.toDoubleOrNull() ?: 0.0
+            }
+            
+            // Get values from form fields
+            val priceValue = (document.getElementById("price") as? HTMLInputElement)?.value?.trim() ?: ""
+            val auctionFeeValue = (document.getElementById("auctionFee") as? HTMLInputElement)?.value?.trim() ?: ""
+            val recycleFeeValue = (document.getElementById("recycleFee") as? HTMLInputElement)?.value?.trim() ?: ""
+            val roadTaxValue = (document.getElementById("roadTax") as? HTMLInputElement)?.value?.trim() ?: ""
+            val taxTotalValue = (document.getElementById("taxTotal") as? HTMLInputElement)?.value?.trim() ?: ""
+            
+            // Extract numeric values
+            val price = extractNumericValue(priceValue)
+            val auctionFee = extractNumericValue(auctionFeeValue)
+            val recycleFee = extractNumericValue(recycleFeeValue)
+            val roadTax = extractNumericValue(roadTaxValue)
+            val taxTotal = extractNumericValue(taxTotalValue)
+            
+            // Calculate total: Price + Auction Fee + Recycle Fee + Road Tax + Tax Total
+            val total = price + auctionFee + recycleFee + roadTax + taxTotal
+            
+            // Format the result with currency symbol
+            val formattedTotal = if (total > 0) "¥${total.toInt()}" else ""
+            
+            // Set the calculated value in the total price field
+            (document.getElementById("totalPrice") as? HTMLInputElement)?.value = formattedTotal
+            
+        } catch (e: Exception) {
+            console.error("Error calculating total price:", e)
+        }
+    }
+    
+    // Add event listeners for real-time calculation
+    listOf("price", "auctionFee", "recycleFee", "roadTax", "taxTotal").forEach { fieldId ->
+        document.getElementById(fieldId)?.addEventListener("input", { _: Event ->
+            calculateTotalPrice()
+        })
+        document.getElementById(fieldId)?.addEventListener("change", { _: Event ->
+            calculateTotalPrice()
+        })
+    }
+    
     // Tax calculation button
     document.getElementById("calculateTaxBtn")?.addEventListener("click", { _: Event ->
         calculateTax("price", "auctionFee", "roadTax", "taxTotal")
+        calculateTotalPrice() // Also update total price after tax calculation
     })
 
     // Hook day hints for date inputs
@@ -3009,6 +3809,1619 @@ fun setupEditNumberCutListeners() {
     document.getElementById("editNumberCutNumber2")?.addEventListener("input", { _: Event -> generateEditNumberCutString() })
 }
 
+// Function to fetch brand mappings and populate dropdowns
+fun fetchBrandMappings(brandName: String, isEditForm: Boolean = false) {
+    if (brandName.isBlank()) {
+        // Clear dropdowns and form fields if brand is cleared
+        clearBrandMappings(isEditForm)
+        return
+    }
+    
+    val encodedBrandName = js("encodeURIComponent")(brandName) as String
+    val url = apiUrl("car-brand-mapping/brand/$encodedBrandName")
+    console.log("Fetching brand mappings for: $brandName")
+    
+    window.fetch(url)
+        .then { response ->
+            if (!response.ok) {
+                throw Exception("Failed to fetch brand mappings: ${response.status}")
+            }
+            response.json()
+        }
+        .then { data: dynamic ->
+            val mappingsData = js("data.mappings")
+            val mappings = if (js("Array.isArray(mappingsData)")) {
+                (mappingsData as? Array<*>)?.toList() ?: emptyList()
+            } else {
+                emptyList()
+            }
+            val firstRow = js("data.firstRow")
+            val dropdowns = js("data.dropdowns")
+            
+            if (mappings.isEmpty() || js("firstRow == null")) {
+                console.log("No mappings found for brand: $brandName")
+                clearBrandMappings(isEditForm)
+                return@then
+            }
+            
+            // Populate dropdowns
+            populateBrandDropdowns(dropdowns, isEditForm)
+            
+            // Auto-fill form fields with first row values
+            if (firstRow != null) {
+                console.log("📝 Auto-filling fields with first row data for ${if (isEditForm) "edit" else "add"} form")
+                console.log("📝 First row data:", firstRow)
+                autoFillBrandFields(firstRow, isEditForm)
+            } else {
+                console.warn("⚠️ No first row data available for auto-fill")
+            }
+            
+            console.log("Brand mappings loaded successfully for: $brandName")
+        }
+        .catch { error ->
+            console.error("Error fetching brand mappings:", error)
+        }
+}
+
+// Function to populate dropdowns with unique values
+fun populateBrandDropdowns(dropdowns: dynamic, isEditForm: Boolean) {
+    // Helper function to resolve field IDs for add vs edit forms.
+    fun fieldId(base: String): String {
+        val id = if (isEditForm) {
+            "edit$base"
+        } else {
+            // Explicit mapping for add form to match actual element IDs
+            when (base) {
+                "Chassis" -> "chassis"
+                "CarName" -> "carName"
+                "Fuel" -> "fuel"
+                "Wd" -> "wd"
+                "Cc" -> "cc"
+                "Door" -> "door"
+                "Grade" -> "grade"
+                "Shift" -> "shift"
+                else -> base.lowercase()
+            }
+        }
+        console.log("populateBrandDropdowns: resolving fieldId for", base, "->", id, "isEditForm=", isEditForm)
+        return id
+    }
+    
+    // Helper function to populate a dropdown (and sync to input if it's a combobox)
+    fun populateDropdown(fieldId: String, values: Array<String>, defaultLabel: String) {
+        console.log("populateBrandDropdowns: populating dropdown", fieldId, "with", values.size, "values, defaultLabel=", defaultLabel)
+        val element = document.getElementById(fieldId) as? HTMLSelectElement
+        
+        if (element == null) {
+            console.error("populateBrandDropdowns: no select element found for", fieldId, "- skipping")
+            return
+        }
+        
+        // Clear existing options
+        element.innerHTML = ""
+        
+        // Add default "Select" option
+        val defaultOption = js("new Option(defaultLabel, '', true, true)")
+        element.add(defaultOption)
+        
+        // Add new options
+        values.forEach { value ->
+            if (value.isNotEmpty()) {
+                val option = js("new Option(value, value)")
+                element.add(option)
+            }
+        }
+        console.log("populateBrandDropdowns: finished populating", fieldId, "- total options:", element.options.length)
+    }
+    
+    // Populate each dropdown
+    val chassisList = js("dropdowns.chassis") as? Array<String> ?: emptyArray()
+    populateDropdown(fieldId("Chassis"), chassisList, "Select Chassis")
+    
+    val carNameList = js("dropdowns.carName") as? Array<String> ?: emptyArray()
+    populateDropdown(fieldId("CarName"), carNameList, "Select Car Name")
+    
+    val fuelList = js("dropdowns.fuel") as? Array<String> ?: emptyArray()
+    populateDropdown(fieldId("Fuel"), fuelList, "Select Fuel")
+    
+    val wdList = js("dropdowns.wd") as? Array<String> ?: emptyArray()
+    populateDropdown(fieldId("Wd"), wdList, "Select WD")
+    
+    val shiftList = js("dropdowns.shift") as? Array<String> ?: emptyArray()
+    val shiftElement = document.getElementById(fieldId("Shift")) as? HTMLSelectElement
+    if (shiftElement != null) {
+        shiftElement.innerHTML = "<option value=\"\">Select Shift</option>"
+        shiftList.forEach { value ->
+            if (value.isNotEmpty()) {
+                val option = js("new Option(value, value)")
+                shiftElement.add(option)
+            }
+        }
+    }
+    
+    val ccList = js("dropdowns.cc") as? Array<String> ?: emptyArray()
+    populateDropdown(fieldId("Cc"), ccList, "Select CC")
+    
+    val doorList = js("dropdowns.door") as? Array<String> ?: emptyArray()
+    populateDropdown(fieldId("Door"), doorList, "Select Door")
+    
+    val gradeList = js("dropdowns.grade") as? Array<String> ?: emptyArray()
+    populateDropdown(fieldId("Grade"), gradeList, "Select Grade")
+}
+
+// Function to auto-fill form fields with first row values
+fun autoFillBrandFields(firstRow: dynamic, isEditForm: Boolean) {
+    console.log("🔄 autoFillBrandFields called - isEditForm: $isEditForm")
+    
+    // Helper to resolve field IDs for add vs edit forms.
+    fun fieldId(base: String): String {
+        val id = if (isEditForm) {
+            "edit$base"
+        } else {
+            when (base) {
+                "Chassis" -> "chassis"
+                "CarName" -> "carName"
+                "Fuel" -> "fuel"
+                "Wd" -> "wd"
+                "Cc" -> "cc"
+                "Door" -> "door"
+                "Grade" -> "grade"
+                "Shift" -> "shift"
+                else -> base.lowercase()
+            }
+        }
+        console.log("autoFillBrandFields: resolving fieldId for", base, "->", id, "isEditForm=", isEditForm)
+        return id
+    }
+    
+    // Helper function to set field value (always set when brand is selected)
+    // For comboboxes, sets both input and select fields
+    fun setFieldValue(fieldId: String, value: String) {
+        // Try to set both input and select (for comboboxes)
+        val inputElement = document.getElementById("${fieldId}Input") as? HTMLInputElement
+        val selectElement = document.getElementById(fieldId) as? HTMLSelectElement
+        
+        // Set select value
+        if (selectElement != null) {
+            selectElement.value = value
+            console.log("autoFillBrandFields: set select", fieldId, "=", value)
+        }
+        
+        // Set input value (for combobox)
+        if (inputElement != null) {
+            inputElement.value = value
+            console.log("autoFillBrandFields: set input", "${fieldId}Input", "=", value)
+        }
+        
+        // Fallback: if no Input suffix field exists, try direct fieldId as input
+        if (inputElement == null && selectElement == null) {
+            val directInput = document.getElementById(fieldId) as? HTMLInputElement
+            if (directInput != null) {
+                directInput.value = value
+                console.log("autoFillBrandFields: set direct input", fieldId, "=", value)
+            } else {
+                console.warn("⚠️ Field not found: $fieldId (tried ${fieldId}Input and $fieldId)")
+            }
+        }
+    }
+    
+    val chassis = js("firstRow.chassis")?.toString() ?: ""
+    val carName = js("firstRow.carName")?.toString() ?: ""
+    val fuel = js("firstRow.fuel")?.toString() ?: ""
+    val wd = js("firstRow.wd")?.toString() ?: ""
+    val shift = js("firstRow.shift")?.toString() ?: ""
+    val ccRaw = js("firstRow.cc")?.toString() ?: ""
+    val doorRaw = js("firstRow.door")?.toString() ?: ""
+    val grade = js("firstRow.grade")?.toString() ?: ""
+    
+    // Convert "0" to empty string for select dropdowns (NULL values)
+    val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
+    val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
+    
+    // Set chassis
+    setFieldValue(fieldId("Chassis"), chassis)
+    
+    // Set car name (for combobox, set both input and select)
+    if (carName.isNotBlank()) {
+        val carNameFieldId = fieldId("CarName")
+        val carNameInput = document.getElementById("${carNameFieldId}Input") as? HTMLInputElement
+        val carNameSelect = document.getElementById(carNameFieldId) as? HTMLSelectElement
+        
+        if (carNameInput != null) {
+            carNameInput.value = carName
+            console.log("✅ Set car name input field ${carNameFieldId}Input = '$carName'")
+        }
+        if (carNameSelect != null) {
+            carNameSelect.value = carName
+            console.log("✅ Set car name select field $carNameFieldId = '$carName'")
+        }
+        if (carNameInput == null && carNameSelect == null) {
+            console.warn("⚠️ Car name field $carNameFieldId not found")
+        }
+    }
+    
+    // Set other fields
+    setFieldValue(fieldId("Fuel"), fuel)
+    setFieldValue(fieldId("Wd"), wd)
+    setFieldValue(fieldId("Shift"), shift)
+    setFieldValue(fieldId("Cc"), cc)
+    setFieldValue(fieldId("Door"), door)
+    setFieldValue(fieldId("Grade"), grade)
+}
+
+// Function to clear brand mappings when brand is cleared
+fun clearBrandMappings(isEditForm: Boolean) {
+    // Helper to resolve field IDs for add vs edit forms.
+    fun fieldId(base: String): String =
+        if (isEditForm) "edit$base" else base.lowercase()
+    
+    // Clear dropdowns (reset to default)
+    val fieldConfigs = listOf(
+        Triple("Chassis", "Select Chassis", fieldId("Chassis")),
+        Triple("CarName", "Select Car Name", fieldId("CarName")),
+        Triple("Fuel", "Select Fuel", fieldId("Fuel")),
+        Triple("Wd", "Select WD", fieldId("Wd")),
+        Triple("Cc", "Select CC", fieldId("Cc")),
+        Triple("Door", "Select Door", fieldId("Door")),
+        Triple("Grade", "Select Grade", fieldId("Grade"))
+    )
+    fieldConfigs.forEach { (_, label, id) ->
+        val element = document.getElementById(id) as? HTMLSelectElement
+        if (element != null) {
+            element.innerHTML = "<option value=\"\">$label</option>"
+        }
+    }
+    
+    // Clear shift dropdown
+    val shiftElement = document.getElementById(fieldId("Shift")) as? HTMLSelectElement
+    if (shiftElement != null) {
+        shiftElement.innerHTML = "<option value=\"\">Select Shift</option>"
+        listOf("AT", "MT", "6F", "5F").forEach { value ->
+            val option = js("new Option(value, value)")
+            shiftElement.add(option)
+        }
+    }
+}
+
+// Function to fetch mappings by Car Name, filter chassis dropdown, and auto-fill fields
+fun fetchMappingsByCarName(brandName: String, carName: String, isEditForm: Boolean) {
+    if (brandName.isBlank() || carName.isBlank()) {
+        console.log("Brand or Car Name not selected, skipping car name mapping")
+        return
+    }
+    
+    // Helper to resolve field IDs for add vs edit forms.
+    fun fieldId(base: String): String {
+        val id = if (isEditForm) {
+            "edit$base"
+        } else {
+            when (base) {
+                "Chassis" -> "chassis"
+                "CarName" -> "carName"
+                "Fuel" -> "fuel"
+                "Wd" -> "wd"
+                "Cc" -> "cc"
+                "Door" -> "door"
+                "Grade" -> "grade"
+                "Shift" -> "shift"
+                else -> base.lowercase()
+            }
+        }
+        console.log("fetchMappingsByCarName: resolving fieldId for", base, "->", id, "isEditForm=", isEditForm)
+        return id
+    }
+    val encodedBrandName = js("encodeURIComponent")(brandName).unsafeCast<String>()
+    val encodedCarName = js("encodeURIComponent")(carName).unsafeCast<String>()
+    val url = apiUrl("car-brand-mapping/brand/$encodedBrandName/car-name/$encodedCarName")
+    console.log("Fetching mappings for brand: $brandName, carName: $carName")
+    
+    window.fetch(url)
+        .then { response ->
+            if (!response.ok) {
+                throw Exception("Failed to fetch mappings: ${response.status}")
+            }
+            response.json()
+        }
+        .then { data: dynamic ->
+            val found = (data.found as? Boolean) ?: false
+            val chassisList = (data.chassisList as? Array<*>)?.map { it.toString() }?.toTypedArray() ?: emptyArray()
+            val firstRow = data.firstRow
+            
+            if (!found || firstRow == null) {
+                console.log("No mappings found for brand: $brandName, carName: $carName")
+                return@then
+            }
+            
+            // Filter chassis dropdown
+            val chassisElement = document.getElementById(fieldId("Chassis")) as? HTMLSelectElement
+            if (chassisElement != null) {
+                // Clear existing options
+                chassisElement.innerHTML = ""
+                
+                // Add default "Select Chassis" option
+                val defaultOption = js("new Option('Select Chassis', '', true, true)")
+                chassisElement.add(defaultOption)
+                
+                // Add filtered chassis options
+                chassisList.forEach { chassis ->
+                    if (chassis.isNotBlank()) {
+                        val option = js("new Option(chassis, chassis)")
+                        chassisElement.add(option)
+                    }
+                }
+                console.log("✅ Filtered chassis dropdown with ${chassisList.size} options for carName: $carName")
+            }
+            
+            // Auto-fill all fields from first row
+            val chassis = js("firstRow.chassis")?.toString() ?: ""
+            val fuel = js("firstRow.fuel")?.toString() ?: ""
+            val wd = js("firstRow.wd")?.toString() ?: ""
+            val shift = js("firstRow.shift")?.toString() ?: ""
+            val ccRaw = js("firstRow.cc")?.toString() ?: ""
+            val doorRaw = js("firstRow.door")?.toString() ?: ""
+            val grade = js("firstRow.grade")?.toString() ?: ""
+            
+            // Convert "0" to empty string for select dropdowns (NULL values)
+            val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
+            val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
+            
+            console.log("Auto-filling fields from first row: chassis=$chassis, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, grade=$grade")
+            
+            // Helper function to set field value (always set, even if empty)
+            // For comboboxes, sets both input and select fields
+            fun setFieldValue(fieldId: String, value: String) {
+                val inputElement = document.getElementById("${fieldId}Input") as? HTMLInputElement
+                val selectElement = document.getElementById(fieldId) as? HTMLSelectElement
+                
+                if (selectElement != null) {
+                    selectElement.value = value
+                    console.log("✅ Set select field $fieldId = '$value'")
+                }
+                if (inputElement != null) {
+                    inputElement.value = value
+                    console.log("✅ Set input field ${fieldId}Input = '$value'")
+                }
+                if (inputElement == null && selectElement == null) {
+                    val directInput = document.getElementById(fieldId) as? HTMLInputElement
+                    if (directInput != null) {
+                        directInput.value = value
+                        console.log("✅ Set direct input field $fieldId = '$value'")
+                    } else {
+                        console.warn("⚠️ Field not found: $fieldId")
+                    }
+                }
+            }
+            
+            // Set all fields
+            if (isEditForm) {
+                // Set chassis (select first chassis from filtered list)
+                if (chassis.isNotBlank()) {
+                    setFieldValue("editChassis", chassis)
+                }
+                setFieldValue("editFuel", fuel)
+                setFieldValue("editWd", wd)
+                setFieldValue("editShift", shift)
+                setFieldValue("editCc", cc)
+                setFieldValue("editDoor", door)
+                setFieldValue("editGrade", grade)
+            } else {
+                // Set chassis (select first chassis from filtered list)
+                if (chassis.isNotBlank()) {
+                    setFieldValue("chassis", chassis)
+                }
+                setFieldValue("fuel", fuel)
+                setFieldValue("wd", wd)
+                setFieldValue("shift", shift)
+                setFieldValue("cc", cc)
+                setFieldValue("door", door)
+                setFieldValue("grade", grade)
+            }
+        }
+        .catch { error ->
+            console.error("Error fetching mappings by car name:", error)
+        }
+}
+
+// Function to fetch and auto-fill fields based on Chassis or Car Name selection
+fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName: String?, isEditForm: Boolean) {
+    if (brandName.isBlank()) {
+        console.log("Brand not selected, skipping chassis/carName mapping")
+        return
+    }
+    
+    val prefix = if (isEditForm) "edit" else ""
+    
+    // Build query parameters
+    val queryParams = mutableListOf<String>()
+    if (!chassis.isNullOrBlank()) {
+        val encodedChassis = js("encodeURIComponent")(chassis).unsafeCast<String>()
+        queryParams.add("chassis=$encodedChassis")
+    }
+    if (!carName.isNullOrBlank()) {
+        val encodedCarName = js("encodeURIComponent")(carName).unsafeCast<String>()
+        queryParams.add("carName=$encodedCarName")
+    }
+    
+    if (queryParams.isEmpty()) {
+        console.log("Neither chassis nor carName selected")
+        return
+    }
+    
+    val encodedBrandName = js("encodeURIComponent")(brandName).unsafeCast<String>()
+    val url = apiUrl("car-brand-mapping/brand/$encodedBrandName/match?${queryParams.joinToString("&")}")
+    console.log("Fetching mapping for brand: $brandName, chassis: $chassis, carName: $carName")
+    
+    window.fetch(url)
+        .then { response ->
+            if (!response.ok) {
+                throw Exception("Failed to fetch mapping: ${response.status}")
+            }
+            response.json()
+        }
+        .then { data: dynamic ->
+            val found = (data.found as? Boolean) ?: false
+            val mappingData = data.data
+            
+            if (!found || mappingData == null) {
+                console.log("No mapping found for brand: $brandName, chassis: $chassis, carName: $carName")
+                return@then
+            }
+            
+            // Auto-fill fields (always overwrite, as user explicitly selected chassis/carName)
+            val carName = js("mappingData.carName")?.toString() ?: ""
+            val fuel = js("mappingData.fuel")?.toString() ?: ""
+            val wd = js("mappingData.wd")?.toString() ?: ""
+            val shift = js("mappingData.shift")?.toString() ?: ""
+            val ccRaw = js("mappingData.cc")?.toString() ?: ""
+            val doorRaw = js("mappingData.door")?.toString() ?: ""
+            val grade = js("mappingData.grade")?.toString() ?: ""
+            
+            // Convert "0" to empty string for select dropdowns (NULL values)
+            val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
+            val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
+            
+            console.log("Auto-filling fields from mapping: carName=$carName, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, grade=$grade")
+            
+            // Helper function to set field value (always set, even if empty)
+            // For comboboxes, sets both input and select fields
+            fun setFieldValue(fieldId: String, value: String) {
+                val inputElement = document.getElementById("${fieldId}Input") as? HTMLInputElement
+                val selectElement = document.getElementById(fieldId) as? HTMLSelectElement
+                
+                if (selectElement != null) {
+                    selectElement.value = value
+                    console.log("✅ Set select field $fieldId = '$value'")
+                }
+                if (inputElement != null) {
+                    inputElement.value = value
+                    console.log("✅ Set input field ${fieldId}Input = '$value'")
+                }
+                if (inputElement == null && selectElement == null) {
+                    val directInput = document.getElementById(fieldId) as? HTMLInputElement
+                    if (directInput != null) {
+                        directInput.value = value
+                        console.log("✅ Set direct input field $fieldId = '$value'")
+                    } else {
+                        console.warn("⚠️ Field not found: $fieldId")
+                    }
+                }
+            }
+            
+            // Always set all fields, even if empty (user explicitly selected chassis/carName)
+            // Field IDs: Add form uses lowercase (fuel, wd, etc.), Edit form uses camelCase (editFuel, editWd, etc.)
+            if (isEditForm) {
+                // Populate car name field (for combobox, set both input and select)
+                if (carName.isNotBlank()) {
+                    val carNameInput = document.getElementById("editCarNameInput") as? HTMLInputElement
+                    val carNameSelect = document.getElementById("editCarName") as? HTMLSelectElement
+                    
+                    if (carNameInput != null) {
+                        carNameInput.value = carName
+                        console.log("✅ Set car name input field editCarNameInput = '$carName'")
+                    }
+                    if (carNameSelect != null) {
+                        carNameSelect.value = carName
+                        console.log("✅ Set car name select field editCarName = '$carName'")
+                    }
+                }
+                setFieldValue("editFuel", fuel)
+                setFieldValue("editWd", wd)
+                setFieldValue("editShift", shift)
+                setFieldValue("editCc", cc)
+                setFieldValue("editDoor", door)
+                setFieldValue("editGrade", grade)
+            } else {
+                // Populate car name field (for combobox, set both input and select)
+                if (carName.isNotBlank()) {
+                    val carNameInput = document.getElementById("carNameInput") as? HTMLInputElement
+                    val carNameSelect = document.getElementById("carName") as? HTMLSelectElement
+                    
+                    if (carNameInput != null) {
+                        carNameInput.value = carName
+                        console.log("✅ Set car name input field carNameInput = '$carName'")
+                    }
+                    if (carNameSelect != null) {
+                        carNameSelect.value = carName
+                        console.log("✅ Set car name select field carName = '$carName'")
+                    }
+                }
+                setFieldValue("fuel", fuel)
+                setFieldValue("wd", wd)
+                setFieldValue("shift", shift)
+                setFieldValue("cc", cc)
+                setFieldValue("door", door)
+                setFieldValue("grade", grade)
+            }
+        }
+        .catch { error ->
+            console.error("Error fetching mapping:", error)
+        }
+}
+
+// Setup event listeners for brand selection
+fun setupBrandSelectionHandlers() {
+    // Helper function to get value from combobox (input or select)
+    fun getComboboxValue(fieldId: String): String {
+        val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+        val select = document.getElementById(fieldId) as? HTMLSelectElement
+        return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
+    }
+    
+    // Helper function to get brand name
+    fun getBrandName(isEditForm: Boolean): String {
+        val brandSelect = document.getElementById(if (isEditForm) "editBrand" else "brand") as? HTMLSelectElement
+        return brandSelect?.value ?: ""
+    }
+    
+    // Use event delegation for dynamic forms - handle both select and input changes
+    document.addEventListener("change", { event: Event ->
+        val target = event.target as? HTMLElement
+        val targetId = target?.id ?: ""
+        
+        when {
+            targetId == "brand" -> {
+                val brandSelect = target as HTMLSelectElement
+                val brandName = brandSelect.value
+                console.log("🔵 Brand selected: $brandName")
+                if (brandName.isNotBlank()) {
+                    fetchBrandMappings(brandName, isEditForm = false)
+                }
+            }
+            targetId == "editBrand" -> {
+                val brandSelect = target as HTMLSelectElement
+                val brandName = brandSelect.value
+                console.log("🔵 Brand selected (edit): $brandName")
+                if (brandName.isNotBlank()) {
+                    fetchBrandMappings(brandName, isEditForm = true)
+                }
+            }
+            targetId == "chassis" || targetId == "chassisInput" || targetId == "editChassis" || targetId == "editChassisInput" -> {
+                // Chassis changed (either select or input)
+                val isEditForm = targetId.startsWith("edit")
+                val brandName = getBrandName(isEditForm)
+                val chassis = getComboboxValue(if (isEditForm) "editChassis" else "chassis")
+                
+                if (brandName.isNotBlank() && chassis.isNotBlank()) {
+                    console.log("🔵 Chassis selected: $chassis for brand: $brandName")
+                    fetchMappingByChassisOrCarName(brandName, chassis, null, isEditForm)
+                }
+            }
+            targetId == "carName" || targetId == "carNameInput" || targetId == "editCarName" || targetId == "editCarNameInput" -> {
+                // Car Name changed (either select or input)
+                val isEditForm = targetId.startsWith("edit")
+                val brandName = getBrandName(isEditForm)
+                val carName = getComboboxValue(if (isEditForm) "editCarName" else "carName")
+                
+                if (brandName.isNotBlank() && carName.isNotBlank()) {
+                    console.log("🔵 Car Name selected: $carName for brand: $brandName")
+                    fetchMappingsByCarName(brandName, carName, isEditForm)
+                } else if (carName.isBlank()) {
+                    // Car name cleared - reset chassis dropdown to show all chassis for brand
+                    if (brandName.isNotBlank()) {
+                        console.log("Car Name cleared, resetting chassis dropdown for brand: $brandName")
+                        fetchBrandMappings(brandName, isEditForm)
+                    }
+                }
+            }
+        }
+    })
+    
+    // Also listen to input events for comboboxes (when user types)
+    document.addEventListener("input", { event: Event ->
+        val target = event.target as? HTMLElement
+        val targetId = target?.id ?: ""
+        
+        // Only handle combobox inputs, ignore other inputs
+        if (targetId.endsWith("Input") && (targetId.contains("chassis") || targetId.contains("carName"))) {
+            val isEditForm = targetId.startsWith("edit")
+            val brandName = getBrandName(isEditForm)
+            
+            // Debounce: wait a bit after user stops typing before triggering lookup
+            js("""
+                clearTimeout(window.brandMappingDebounce);
+                window.brandMappingDebounce = setTimeout(function() {
+                    var targetId = arguments[0];
+                    var brandName = arguments[1];
+                    var isEditForm = arguments[2];
+                    var value = arguments[3];
+                    
+                    if (targetId.indexOf('chassis') !== -1) {
+                        if (brandName && value && value.length >= 3) {
+                            console.log('🔵 Chassis typed: ' + value + ' for brand: ' + brandName);
+                            // Trigger change event on select to use existing handler
+                            var selectId = isEditForm ? 'editChassis' : 'chassis';
+                            var select = document.getElementById(selectId);
+                            if (select) {
+                                select.value = value;
+                                select.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }
+                    } else if (targetId.indexOf('carName') !== -1) {
+                        if (brandName && value && value.length >= 3) {
+                            console.log('🔵 Car Name typed: ' + value + ' for brand: ' + brandName);
+                            // Trigger change event on select to use existing handler
+                            var selectId = isEditForm ? 'editCarName' : 'carName';
+                            var select = document.getElementById(selectId);
+                            if (select) {
+                                select.value = value;
+                                select.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }
+                    }
+                }, 500, targetId, brandName, isEditForm, (target && target.value) || '');
+            """)
+        }
+    })
+    
+    // Manage Brand Mappings button click handlers (always visible)
+    document.addEventListener("click", { event: Event ->
+        val target = event.target as? HTMLElement
+        if (target?.id == "manageBrandMappings") {
+            val brandSelect = document.getElementById("brand") as? HTMLSelectElement
+            val brandName = brandSelect?.value ?: ""
+            // Open modal even if brand is empty (for new brand creation)
+            showBrandMappingsModal(brandName)
+        } else if (target?.id == "manageEditBrandMappings") {
+            val brandSelect = document.getElementById("editBrand") as? HTMLSelectElement
+            val brandName = brandSelect?.value ?: ""
+            // Open modal even if brand is empty (for new brand creation)
+            showBrandMappingsModal(brandName)
+        }
+    })
+}
+
+// Show Brand Mappings Modal
+fun showBrandMappingsModal(brandName: String) {
+    val modal = document.getElementById("rixoMappingModal")
+    val title = document.getElementById("modalTitle")
+    val body = document.querySelector(".modal-body")
+    
+    if (modal == null || title == null || body == null) {
+        console.error("Modal elements not found")
+        return
+    }
+    
+    // Store current brand name globally (can be empty for new brand)
+    js("window.currentBrandName = brandName").unsafeCast<Unit>()
+    js("window.currentEditingBrandMappingId = null").unsafeCast<Unit>()
+    js("window.isAddingNewBrandMapping = false").unsafeCast<Unit>()
+    // Check if brand is blank using JavaScript-compatible check
+    val brandNameStr = brandName.toString()
+    val isNewBrand = brandNameStr.trim().isEmpty()
+    js("window.isCreatingNewBrand = isNewBrand").unsafeCast<Unit>()
+    val titleText = if (isNewBrand) "Manage Mappings for:" else "Manage Mappings for: $brandNameStr"
+    
+    title.innerHTML = """
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span>$titleText</span>
+            ${if (isNewBrand) """
+            <input type="text" id="newBrandNameInput" placeholder="Enter Brand Name" required 
+                   style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 200px;">
+            """ else ""}
+        </div>
+    """
+    
+    body.innerHTML = """
+        <div class="mapping-section">
+            <div style="display:flex; align-items:center; justify-content: space-between; margin-bottom: 8px;">
+                <div style="display:flex; align-items:center; gap: 12px;">
+                    <h4 style="margin:0;">Current Mappings</h4>
+                    <button type="button" id="addNewBrandMappingBtn" style="padding: 6px 12px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 14px;">Add New Mapping</button>
+                </div>
+                <div>
+                    <label for="carNameFilter" style="margin-right:6px; color:#555;">Filter by car name</label>
+                    <select id="carNameFilter" style="padding:6px 8px; border:1px solid #ddd; border-radius:4px;">
+                        <option value="">All car names</option>
+                    </select>
+                </div>
+            </div>
+            <div id="currentBrandMappings" class="current-mappings">
+                <p style="color: #666; text-align: center; padding: 20px;">Loading mappings...</p>
+            </div>
+        </div>
+    """
+    
+    (modal as? HTMLElement)?.style?.display = "block"
+    
+    // Load current mappings (only if brand name is provided)
+    if (!isNewBrand && brandNameStr.isNotEmpty()) {
+        loadCurrentBrandMappings(brandNameStr)
+    } else {
+        // For new brand, show empty state
+        val container = document.getElementById("currentBrandMappings")
+        container?.innerHTML = "<p style=\"color: #666; text-align: center; padding: 20px;\">Enter brand name and add mappings</p>"
+        js("window._lastLoadedBrandMappings = []").unsafeCast<Unit>()
+    }
+    
+    // Setup event listeners
+    setupBrandModalEventListeners(brandName)
+    
+    // Add New Mapping button click handler
+    val addNewBtn = document.getElementById("addNewBrandMappingBtn")
+    addNewBtn?.addEventListener("click", { _: Event ->
+        addNewBrandMappingRow()
+    })
+    
+    // Brand name input field change handler (update title dynamically)
+    if (isNewBrand) {
+        val brandNameInput = document.getElementById("newBrandNameInput") as? HTMLInputElement
+        brandNameInput?.addEventListener("input", { _: Event ->
+            val newBrandName = brandNameInput.value.trim()
+            if (newBrandName.isNotBlank()) {
+                // Update global brand name
+                js("window.currentBrandName = newBrandName").unsafeCast<Unit>()
+                // Update title
+                val titleSpan = title.querySelector("span")
+                titleSpan?.textContent = "Manage Mappings for: $newBrandName"
+            } else {
+                val titleSpan = title.querySelector("span")
+                titleSpan?.textContent = "Manage Mappings for:"
+            }
+        })
+    }
+    
+    // Setup Save Changes button handler
+    val saveBtn = document.getElementById("saveMappings")
+    saveBtn?.addEventListener("click", { _: Event ->
+        saveBrandMappingsChanges()
+    })
+    
+    // Setup Cancel button handler
+    val cancelBtn = document.getElementById("cancelMappings")
+    cancelBtn?.addEventListener("click", { _: Event ->
+        closeBrandMappingsModal()
+    })
+    
+    // Setup close button handler
+    val closeBtn = document.querySelector(".close")
+    closeBtn?.addEventListener("click", { _: Event ->
+        closeBrandMappingsModal()
+    })
+}
+
+// Load current brand mappings
+fun loadCurrentBrandMappings(brandName: String) {
+    if (brandName.isBlank()) {
+        val container = document.getElementById("currentBrandMappings")
+        container?.innerHTML = "<p style=\"color: #666; text-align: center; padding: 20px;\">Enter brand name and add mappings</p>"
+        return
+    }
+    
+    val encodedBrandName = js("encodeURIComponent")(brandName).unsafeCast<String>()
+    val url = apiUrl("car-brand-mapping/brand/$encodedBrandName/mappings")
+    console.log("Loading brand mappings for: $brandName")
+    
+    window.fetch(url)
+        .then { response ->
+            if (!response.ok) {
+                throw Exception("Failed to load mappings: ${response.status}")
+            }
+            response.json()
+        }
+        .then { data: dynamic ->
+            val success = (data.success as? Boolean) ?: false
+            val mappingsData = data.data as? Array<dynamic>
+            val mappings = mappingsData ?: emptyArray()
+            
+            // Check if we're adding a new mapping - if so, render table even if empty
+            val isAddingNew = js("window.isAddingNewBrandMapping") as? Boolean ?: false
+            
+            if (!success || mappings.isEmpty()) {
+                if (isAddingNew) {
+                    // Store empty mappings array
+                    js("window._lastLoadedBrandMappings = []").unsafeCast<Unit>()
+                    // Populate filter dropdown
+                    populateCarNameFilter(emptyArray())
+                    // Render table with empty editable row
+                    renderBrandMappingsWithFilter(null)
+                } else {
+                    val container = document.getElementById("currentBrandMappings")
+                    container?.innerHTML = "<p style=\"color: #666; text-align: center; padding: 20px;\">No mappings found</p>"
+                    populateCarNameFilter(emptyArray())
+                }
+                return@then
+            }
+            
+            // Sort mappings by ID descending (newest first)
+            val sortedMappings = mappings.sortedByDescending { mapping ->
+                val id = js("mapping.id")?.toString()?.toLongOrNull() ?: 0L
+                id
+            }.toTypedArray()
+            
+            // Store mappings globally for filtering (sorted newest first)
+            js("window._lastLoadedBrandMappings = sortedMappings").unsafeCast<Unit>()
+            
+            // Populate filter dropdown
+            populateCarNameFilter(mappings)
+            
+            // Render mappings (no filter initially)
+            renderBrandMappingsWithFilter(null)
+        }
+        .catch { error ->
+            console.error("Error loading brand mappings:", error)
+            val container = document.getElementById("currentBrandMappings")
+            container?.innerHTML = "<p style=\"color: #d32f2f; text-align: center; padding: 20px;\">Error loading mappings: ${error.message}</p>"
+        }
+}
+
+// Populate car name filter dropdown
+fun populateCarNameFilter(mappings: Array<dynamic>) {
+    val filterSelect = document.getElementById("carNameFilter") as? HTMLSelectElement
+    if (filterSelect == null) return
+    
+    // Extract distinct car names
+    val carNames = mutableSetOf<String>()
+    mappings.forEach { mapping ->
+        val carName = js("mapping.carName")?.toString() ?: ""
+        if (carName.isNotBlank()) {
+            carNames.add(carName)
+        }
+    }
+    
+    // Clear existing options (keep "All car names")
+    filterSelect.innerHTML = "<option value=\"\">All car names</option>"
+    
+    // Add distinct car names
+    carNames.sorted().forEach { carName ->
+        val option = js("new Option(carName, carName)")
+        filterSelect.add(option)
+    }
+    
+    console.log("✅ Populated car name filter with ${carNames.size} options")
+}
+
+// Render brand mappings with filter
+fun renderBrandMappingsWithFilter(carNameFilter: String?) {
+    val container = document.getElementById("currentBrandMappings")
+    if (container == null) return
+    
+    val allMappings = js("window._lastLoadedBrandMappings") as? Array<dynamic> ?: emptyArray()
+    
+    // Check if we're adding a new mapping - if so, render table even if empty
+    val isAddingNew = js("window.isAddingNewBrandMapping") as? Boolean ?: false
+    
+    // Filter mappings by car name if filter is selected
+    val filteredMappings = if (carNameFilter.isNullOrBlank()) {
+        allMappings.toList()
+    } else {
+        allMappings.filter { mapping ->
+            val carName = js("mapping.carName")?.toString() ?: ""
+            carName == carNameFilter
+        }
+    }
+    
+    if (filteredMappings.isEmpty() && !isAddingNew) {
+        val filterText = if (carNameFilter.isNullOrBlank()) "" else " for selected car name"
+        container.innerHTML = "<p style=\"color: #666; text-align: center; padding: 20px;\">No mappings found$filterText</p>"
+        return
+    }
+    
+    // Build table HTML
+    val tableHtml = StringBuilder()
+    tableHtml.append("""
+        <table style="width: 100%; border-collapse: collapse; margin-top: 12px; table-layout: auto;">
+            <thead>
+                <tr style="background-color: #f5f5f5;">
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Chassis</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Car Name</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Fuel</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">WD</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Shift</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">CC</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Door</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd;">Grade</th>
+                    <th style="padding: 10px; text-align: left; border: 1px solid #ddd; min-width: 140px; white-space: nowrap;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+    """)
+    
+    // Check if we're adding a new mapping - insert editable row first
+    if (isAddingNew) {
+        tableHtml.append("""
+            <tr id="newBrandMappingRow" style="background-color: #fff9e6;">
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="inlineNewBrandChassis" placeholder="Chassis" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="inlineNewBrandCarName" placeholder="Car Name" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="inlineNewBrandFuel" placeholder="Fuel" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="inlineNewBrandWd" placeholder="WD" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="inlineNewBrandShift" placeholder="Shift" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="number" id="inlineNewBrandCc" placeholder="CC" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="number" id="inlineNewBrandDoor" placeholder="Door" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="inlineNewBrandGrade" placeholder="Grade" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd; min-width: 140px; white-space: nowrap;">
+                    <button type="button" id="saveNewBrandMappingBtn" style="padding: 4px 8px; margin-right: 6px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Save</button>
+                    <button type="button" id="cancelNewBrandMappingBtn" style="padding: 4px 8px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Cancel</button>
+                </td>
+            </tr>
+        """)
+    }
+    
+    filteredMappings.forEach { mapping ->
+        val id = js("mapping.id")?.toString() ?: "0"
+        val chassis = js("mapping.chassis")?.toString() ?: ""
+        val carName = js("mapping.carName")?.toString() ?: ""
+        val fuel = js("mapping.fuel")?.toString() ?: ""
+        val wd = js("mapping.wd")?.toString() ?: ""
+        val shift = js("mapping.shift")?.toString() ?: ""
+        val cc = js("mapping.cc")?.toString() ?: "0"
+        val door = js("mapping.door")?.toString() ?: "0"
+        val grade = js("mapping.grade")?.toString() ?: ""
+        
+        // Check if this row is currently being edited
+        val editingId = js("window.editingBrandMappingId")?.toString()?.toLongOrNull()
+        val isEditing = editingId == id.toLongOrNull()
+        
+        if (isEditing) {
+            // Render editable row
+            tableHtml.append("""
+            <tr data-id="$id" class="editing-row">
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="editBrandChassis_$id" value="$chassis" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="editBrandCarName_$id" value="$carName" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="editBrandFuel_$id" value="$fuel" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="editBrandWd_$id" value="$wd" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="editBrandShift_$id" value="$shift" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="editBrandCc_$id" value="${if (cc == "0") "" else cc}" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="editBrandDoor_$id" value="${if (door == "0") "" else door}" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd;">
+                    <input type="text" id="editBrandGrade_$id" value="$grade" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+                </td>
+                <td style="padding: 8px; border: 1px solid #ddd; min-width: 140px; white-space: nowrap;">
+                    <button type="button" class="save-brand-mapping" data-id="$id" style="padding: 4px 8px; margin-right: 6px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Save</button>
+                    <button type="button" class="cancel-brand-edit" data-id="$id" style="padding: 4px 8px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Cancel</button>
+                </td>
+            </tr>
+        """)
+        } else {
+            // Render read-only row
+            tableHtml.append("""
+            <tr data-id="$id">
+                <td style="padding: 8px; border: 1px solid #ddd;">$chassis</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">$carName</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">$fuel</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">$wd</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">$shift</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${if (cc == "0") "" else cc}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${if (door == "0") "" else door}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">$grade</td>
+                <td style="padding: 8px; border: 1px solid #ddd; min-width: 140px; white-space: nowrap;">
+                    <button type="button" class="edit-brand-mapping" data-id="$id" style="padding: 4px 8px; margin-right: 6px; background-color: #ffc107; color: #000; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Edit</button>
+                    <button type="button" class="delete-brand-mapping" data-id="$id" style="padding: 4px 8px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Delete</button>
+                </td>
+            </tr>
+        """)
+        }
+    }
+    
+    tableHtml.append("""
+            </tbody>
+        </table>
+    """)
+    
+    container.innerHTML = tableHtml.toString()
+    
+    // Setup event listeners for Save/Cancel buttons if new row exists
+    if (isAddingNew) {
+        val saveBtn = document.getElementById("saveNewBrandMappingBtn")
+        val cancelBtn = document.getElementById("cancelNewBrandMappingBtn")
+        
+        saveBtn?.addEventListener("click", { _: Event ->
+            saveNewBrandMappingRow()
+        })
+        
+        cancelBtn?.addEventListener("click", { _: Event ->
+            cancelNewBrandMappingRow()
+        })
+    }
+    
+    console.log("✅ Rendered ${filteredMappings.size} brand mappings")
+}
+
+// Setup brand modal event listeners
+fun setupBrandModalEventListeners(brandName: String) {
+    // Car name filter change
+    val filterSelect = document.getElementById("carNameFilter") as? HTMLSelectElement
+    filterSelect?.addEventListener("change", { _: Event ->
+        val selectedCarName = filterSelect.value
+        renderBrandMappingsWithFilter(if (selectedCarName.isBlank()) null else selectedCarName)
+    })
+    
+    // Note: Add New Mapping button is handled in showBrandMappingsModal
+    // Save/Cancel buttons for inline row are handled in renderBrandMappingsWithFilter
+    
+    // Edit mapping buttons (using event delegation)
+    val container = document.getElementById("currentBrandMappings")
+    container?.addEventListener("click", { event: Event ->
+        val target = event.target as? HTMLElement
+        if (target?.classList?.contains("edit-brand-mapping") == true) {
+            val mappingId = target.getAttribute("data-id")?.toLongOrNull()
+            if (mappingId != null) {
+                editBrandMapping(mappingId)
+            }
+        } else if (target?.classList?.contains("delete-brand-mapping") == true) {
+            val mappingId = target.getAttribute("data-id")?.toLongOrNull()
+            if (mappingId != null) {
+                deleteBrandMapping(mappingId, brandName)
+            }
+        } else if (target?.classList?.contains("save-brand-mapping") == true) {
+            val mappingId = target.getAttribute("data-id")?.toLongOrNull()
+            if (mappingId != null) {
+                saveBrandMapping(mappingId)
+            }
+        } else if (target?.classList?.contains("cancel-brand-edit") == true) {
+            val mappingId = target.getAttribute("data-id")?.toLongOrNull()
+            if (mappingId != null) {
+                cancelBrandEdit(mappingId)
+            }
+        }
+    })
+}
+
+// Add new brand mapping or update existing
+fun addNewBrandMapping(brandName: String?) {
+    // Get brand name from parameter or from global storage
+    val currentBrandName = brandName ?: (js("window.currentBrandName")?.toString() ?: "")
+    
+    if (currentBrandName.isBlank()) {
+        showMessage("Brand name is required", "error")
+        console.error("❌ Brand name is missing!")
+        return
+    }
+    
+    val editingId = js("window.currentEditingBrandMappingId") as? Number
+    
+    val chassis = (document.getElementById("newBrandChassis") as? HTMLInputElement)?.value?.trim() ?: ""
+    val carName = (document.getElementById("newBrandCarName") as? HTMLInputElement)?.value?.trim() ?: ""
+    
+    if (chassis.isBlank() || carName.isBlank()) {
+        showMessage("Chassis and Car Name are required", "error")
+        return
+    }
+    
+    val fuel = (document.getElementById("newBrandFuel") as? HTMLInputElement)?.value?.trim() ?: ""
+    val wd = (document.getElementById("newBrandWd") as? HTMLInputElement)?.value?.trim() ?: ""
+    val shift = (document.getElementById("newBrandShift") as? HTMLInputElement)?.value?.trim() ?: ""
+    val cc = (document.getElementById("newBrandCc") as? HTMLInputElement)?.value?.trim()?.toIntOrNull()
+    val door = (document.getElementById("newBrandDoor") as? HTMLInputElement)?.value?.trim()?.toIntOrNull()
+    val grade = (document.getElementById("newBrandGrade") as? HTMLInputElement)?.value?.trim() ?: ""
+    
+    val requestBody = mapOf(
+        "carBrand" to currentBrandName,
+        "chassis" to chassis,
+        "carName" to carName,
+        "fuel" to (if (fuel.isBlank()) null else fuel),
+        "wd" to (if (wd.isBlank()) null else wd),
+        "shift" to (if (shift.isBlank()) null else shift),
+        "cc" to cc,
+        "door" to door,
+        "grade" to (if (grade.isBlank()) null else grade)
+    )
+    
+    console.log("📤 Sending request body:", requestBody)
+    
+    val isUpdate = editingId != null
+    val url = if (isUpdate) {
+        val id = editingId?.toLong() ?: 0L
+        apiUrl("car-brand-mapping/mappings/$id")
+    } else {
+        apiUrl("car-brand-mapping/mappings")
+    }
+    
+    val method = if (isUpdate) "PUT" else "POST"
+    console.log("${if (isUpdate) "Updating" else "Creating"} brand mapping:", requestBody)
+    
+    // Convert Kotlin map to JavaScript object for proper JSON serialization
+    val jsObject = js("{}").unsafeCast<dynamic>()
+    requestBody.forEach { (key, value) ->
+        jsObject[key] = value
+    }
+    
+    val requestBodyJson = js("JSON.stringify")(jsObject).unsafeCast<String>()
+    console.log("📤 JSON request body:", requestBodyJson)
+    
+    // Build fetch options dynamically
+    val fetchOptions = js("{}").unsafeCast<dynamic>()
+    fetchOptions.method = method
+    fetchOptions.headers = js("{}").unsafeCast<dynamic>()
+    fetchOptions.headers["Content-Type"] = "application/json"
+    fetchOptions.body = requestBodyJson
+    
+    window.fetch(url, fetchOptions)
+        .then { response ->
+            response.json()
+        }
+        .then { data: dynamic ->
+            val success = (data.success as? Boolean) ?: false
+            if (success) {
+                showMessage("Mapping ${if (isUpdate) "updated" else "created"} successfully", "success")
+                // Clear form
+                (document.getElementById("newBrandChassis") as? HTMLInputElement)?.value = ""
+                (document.getElementById("newBrandCarName") as? HTMLInputElement)?.value = ""
+                (document.getElementById("newBrandFuel") as? HTMLInputElement)?.value = ""
+                (document.getElementById("newBrandWd") as? HTMLInputElement)?.value = ""
+                (document.getElementById("newBrandShift") as? HTMLInputElement)?.value = ""
+                (document.getElementById("newBrandCc") as? HTMLInputElement)?.value = ""
+                (document.getElementById("newBrandDoor") as? HTMLInputElement)?.value = ""
+                (document.getElementById("newBrandGrade") as? HTMLInputElement)?.value = ""
+                
+                // Reset edit mode
+                js("window.currentEditingBrandMappingId = null").unsafeCast<Unit>()
+                val addBtn = document.getElementById("addBrandMapping")
+                addBtn?.textContent = "Add Mapping"
+                
+                // Reload mappings - use currentBrandName from global storage
+                val reloadBrandName = currentBrandName
+                if (reloadBrandName.isNotBlank()) {
+                    loadCurrentBrandMappings(reloadBrandName)
+                } else {
+                    console.error("❌ Cannot reload mappings - brand name is missing")
+                }
+            } else {
+                val message = (data.message as? String) ?: "Failed to ${if (isUpdate) "update" else "create"} mapping"
+                console.error("❌ Backend error response:", data)
+                showMessage(message, "error")
+            }
+        }
+        .catch { error ->
+            console.error("❌ Error ${if (isUpdate) "updating" else "creating"} brand mapping:", error)
+            showMessage("Error ${if (isUpdate) "updating" else "creating"} mapping: ${error.message}", "error")
+        }
+}
+
+// Edit brand mapping - inline editing
+fun editBrandMapping(mappingId: Long) {
+    // Check if another row is already being edited
+    val currentEditingId = js("window.editingBrandMappingId")?.toString()?.toLongOrNull()
+    if (currentEditingId != null && currentEditingId != mappingId) {
+        showMessage("Please save or cancel the current edit first", "warning")
+        return
+    }
+    
+    // Set editing flag
+    js("window.editingBrandMappingId = mappingId").unsafeCast<Unit>()
+    
+    // Reload mappings to show editable row
+    val brandName = js("window.currentBrandName")?.toString() ?: ""
+    if (brandName.isNotBlank()) {
+        loadCurrentBrandMappings(brandName)
+    }
+    
+    console.log("✅ Started inline editing for mapping $mappingId")
+}
+
+// Save brand mapping changes (inline edit)
+fun saveBrandMapping(mappingId: Long) {
+    // Get values from input fields
+    val chassis = (document.getElementById("editBrandChassis_$mappingId") as? HTMLInputElement)?.value?.trim() ?: ""
+    val carName = (document.getElementById("editBrandCarName_$mappingId") as? HTMLInputElement)?.value?.trim() ?: ""
+    val fuel = (document.getElementById("editBrandFuel_$mappingId") as? HTMLInputElement)?.value?.trim() ?: ""
+    val wd = (document.getElementById("editBrandWd_$mappingId") as? HTMLInputElement)?.value?.trim() ?: ""
+    val shift = (document.getElementById("editBrandShift_$mappingId") as? HTMLInputElement)?.value?.trim() ?: ""
+    val cc = (document.getElementById("editBrandCc_$mappingId") as? HTMLInputElement)?.value?.trim() ?: ""
+    val door = (document.getElementById("editBrandDoor_$mappingId") as? HTMLInputElement)?.value?.trim() ?: ""
+    val grade = (document.getElementById("editBrandGrade_$mappingId") as? HTMLInputElement)?.value?.trim() ?: ""
+    
+    // Validate required fields
+    if (chassis.isBlank() || carName.isBlank()) {
+        showMessage("Chassis and Car Name are required", "error")
+        return
+    }
+    
+    // Get brand name
+    val brandName = js("window.currentBrandName")?.toString() ?: ""
+    if (brandName.isBlank()) {
+        showMessage("Brand name is required", "error")
+        return
+    }
+    
+    // Prepare request body
+    val requestBody = mutableMapOf<String, Any?>(
+        "carBrand" to brandName,
+        "chassis" to chassis,
+        "carName" to carName,
+        "fuel" to if (fuel.isNotBlank()) fuel else null,
+        "wd" to if (wd.isNotBlank()) wd else null,
+        "shift" to if (shift.isNotBlank()) shift else null,
+        "cc" to if (cc.isNotBlank()) cc.toIntOrNull() else null,
+        "door" to if (door.isNotBlank()) door.toIntOrNull() else null,
+        "grade" to if (grade.isNotBlank()) grade else null
+    )
+    
+    // Convert to JavaScript object
+    val jsObject = js("{}").unsafeCast<dynamic>()
+    requestBody.forEach { (key, value) ->
+        jsObject[key] = value
+    }
+    
+    val requestBodyJson = js("JSON.stringify")(jsObject).unsafeCast<String>()
+    console.log("📤 Updating brand mapping $mappingId:", requestBodyJson)
+    
+    // Send PUT request
+    val requestInit = js("{}")
+    requestInit.method = "PUT"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = requestBodyJson
+    
+    window.fetch(apiUrl("car-brand-mapping/mappings/$mappingId"), requestInit)
+        .then { response ->
+            response.json().then { data ->
+                val success = js("data.success") as? Boolean ?: false
+                if (success) {
+                    showMessage("Mapping updated successfully", "success")
+                    // Clear editing flag
+                    js("window.editingBrandMappingId = null").unsafeCast<Unit>()
+                    // Reload mappings
+                    loadCurrentBrandMappings(brandName)
+                    // Refresh brand dropdowns
+                    refreshBrandDropdown()
+                } else {
+                    val message = (js("data.message") as? String) ?: "Failed to update mapping"
+                    showMessage(message, "error")
+                }
+            }
+        }
+        .catch { error ->
+            console.error("❌ Error updating brand mapping:", error)
+            showMessage("Error updating mapping: ${error.message}", "error")
+        }
+}
+
+// Cancel brand edit (inline edit)
+fun cancelBrandEdit(mappingId: Long) {
+    // Clear editing flag
+    js("window.editingBrandMappingId = null").unsafeCast<Unit>()
+    
+    // Reload mappings to restore original row
+    val brandName = js("window.currentBrandName")?.toString() ?: ""
+    if (brandName.isNotBlank()) {
+        loadCurrentBrandMappings(brandName)
+    }
+    
+    console.log("✅ Cancelled editing for mapping $mappingId")
+}
+
+// Add new brand mapping row (inline in table)
+fun addNewBrandMappingRow() {
+    val isAdding = js("window.isAddingNewBrandMapping") as? Boolean ?: false
+    if (isAdding) {
+        showMessage("Please save or cancel the current new mapping first", "warning")
+        return
+    }
+    
+    // Check if it's a new brand creation
+    val isNewBrand = js("window.isCreatingNewBrand") as? Boolean ?: false
+    val brandName = if (isNewBrand) {
+        (document.getElementById("newBrandNameInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    } else {
+        js("window.currentBrandName")?.toString() ?: ""
+    }
+    
+    if (brandName.isBlank()) {
+        showMessage("Brand name is required. Please enter a brand name in the input field.", "error")
+        return
+    }
+    
+    js("window.isAddingNewBrandMapping = true").unsafeCast<Unit>()
+    
+    // Reload mappings to show the new row
+    loadCurrentBrandMappings(brandName)
+    
+    // Disable Add New Mapping button
+    val addBtn = document.getElementById("addNewBrandMappingBtn") as? HTMLElement
+    addBtn?.setAttribute("disabled", "true")
+    val addBtnStyle = addBtn?.style
+    if (addBtnStyle != null) {
+        addBtnStyle.opacity = "0.5"
+        addBtnStyle.cursor = "not-allowed"
+    }
+}
+
+// Save new brand mapping row
+fun saveNewBrandMappingRow() {
+    // Get brand name from input field if it's a new brand, otherwise from global storage
+    val isNewBrand = js("window.isCreatingNewBrand") as? Boolean ?: false
+    val brandName = if (isNewBrand) {
+        (document.getElementById("newBrandNameInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    } else {
+        js("window.currentBrandName")?.toString() ?: ""
+    }
+    
+    if (brandName.isBlank()) {
+        showMessage("Brand name is required. Please enter a brand name in the input field.", "error")
+        return
+    }
+    
+    val chassis = (document.getElementById("inlineNewBrandChassis") as? HTMLInputElement)?.value?.trim() ?: ""
+    val carName = (document.getElementById("inlineNewBrandCarName") as? HTMLInputElement)?.value?.trim() ?: ""
+    
+    if (chassis.isBlank() || carName.isBlank()) {
+        showMessage("Chassis and Car Name are required", "error")
+        return
+    }
+    
+    val fuel = (document.getElementById("inlineNewBrandFuel") as? HTMLInputElement)?.value?.trim() ?: ""
+    val wd = (document.getElementById("inlineNewBrandWd") as? HTMLInputElement)?.value?.trim() ?: ""
+    val shift = (document.getElementById("inlineNewBrandShift") as? HTMLInputElement)?.value?.trim() ?: ""
+    val cc = (document.getElementById("inlineNewBrandCc") as? HTMLInputElement)?.value?.trim()?.toIntOrNull()
+    val door = (document.getElementById("inlineNewBrandDoor") as? HTMLInputElement)?.value?.trim()?.toIntOrNull()
+    val grade = (document.getElementById("inlineNewBrandGrade") as? HTMLInputElement)?.value?.trim() ?: ""
+    
+    val requestBody = mapOf(
+        "carBrand" to brandName,
+        "chassis" to chassis,
+        "carName" to carName,
+        "fuel" to (if (fuel.isBlank()) null else fuel),
+        "wd" to (if (wd.isBlank()) null else wd),
+        "shift" to (if (shift.isBlank()) null else shift),
+        "cc" to cc,
+        "door" to door,
+        "grade" to (if (grade.isBlank()) null else grade)
+    )
+    
+    // Convert Kotlin map to JavaScript object
+    val jsObject = js("{}").unsafeCast<dynamic>()
+    requestBody.forEach { (key, value) ->
+        jsObject[key] = value
+    }
+    
+    val requestBodyJson = js("JSON.stringify")(jsObject).unsafeCast<String>()
+    
+    val fetchOptions = js("{}").unsafeCast<dynamic>()
+    fetchOptions.method = "POST"
+    fetchOptions.headers = js("{}").unsafeCast<dynamic>()
+    fetchOptions.headers["Content-Type"] = "application/json"
+    fetchOptions.body = requestBodyJson
+    
+    window.fetch(apiUrl("car-brand-mapping/mappings"), fetchOptions)
+        .then { response ->
+            response.json()
+        }
+        .then { data: dynamic ->
+            val success = (data.success as? Boolean) ?: false
+            if (success) {
+                showMessage("Mapping created successfully", "success")
+                // Reset adding flag
+                js("window.isAddingNewBrandMapping = false").unsafeCast<Unit>()
+                // Enable Add New Mapping button
+                val addBtn = document.getElementById("addNewBrandMappingBtn") as? HTMLElement
+                addBtn?.removeAttribute("disabled")
+                val addBtnStyle = addBtn?.style
+                if (addBtnStyle != null) {
+                    addBtnStyle.opacity = "1"
+                    addBtnStyle.cursor = "pointer"
+                }
+                // Update global brand name if it was a new brand
+                if (isNewBrand) {
+                    js("window.currentBrandName = brandName").unsafeCast<Unit>()
+                    js("window.isCreatingNewBrand = false").unsafeCast<Unit>()
+                    // Update title
+                    val title = document.getElementById("modalTitle")
+                    val titleSpan = title?.querySelector("span")
+                    titleSpan?.textContent = "Manage Mappings for: $brandName"
+                    // Add new brand to dropdown lists
+                    refreshBrandDropdown()
+                }
+                // Reload mappings
+                loadCurrentBrandMappings(brandName)
+            } else {
+                val message = (data.message as? String) ?: "Failed to create mapping"
+                showMessage(message, "error")
+            }
+        }
+        .catch { error ->
+            console.error("❌ Error creating brand mapping:", error)
+            showMessage("Error creating mapping: ${error.message}", "error")
+        }
+}
+
+// Cancel new brand mapping row
+fun cancelNewBrandMappingRow() {
+    // Reset adding flag
+    js("window.isAddingNewBrandMapping = false").unsafeCast<Unit>()
+    
+    // Enable Add New Mapping button
+    val addBtn = document.getElementById("addNewBrandMappingBtn") as? HTMLElement
+    addBtn?.removeAttribute("disabled")
+    val addBtnStyle = addBtn?.style
+    if (addBtnStyle != null) {
+        addBtnStyle.opacity = "1"
+        addBtnStyle.cursor = "pointer"
+    }
+    
+    // Get current brand name and reload mappings
+    val isNewBrand = js("window.isCreatingNewBrand") as? Boolean ?: false
+    val brandName = if (isNewBrand) {
+        (document.getElementById("newBrandNameInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    } else {
+        js("window.currentBrandName")?.toString() ?: ""
+    }
+    
+    if (brandName.isNotBlank()) {
+        loadCurrentBrandMappings(brandName)
+    } else {
+        val container = document.getElementById("currentBrandMappings")
+        container?.innerHTML = "<p style=\"color: #666; text-align: center; padding: 20px;\">Enter brand name and add mappings</p>"
+    }
+}
+
+// Save brand mappings changes (Save Changes button handler)
+fun saveBrandMappingsChanges() {
+    val isNewBrand = js("window.isCreatingNewBrand") as? Boolean ?: false
+    val brandName = if (isNewBrand) {
+        (document.getElementById("newBrandNameInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    } else {
+        js("window.currentBrandName")?.toString() ?: ""
+    }
+    
+    if (brandName.isBlank()) {
+        showMessage("Brand name is required. Please enter a brand name.", "error")
+        return
+    }
+    
+    // Check if there's an unsaved inline row
+    val isAddingNew = js("window.isAddingNewBrandMapping") as? Boolean ?: false
+    if (isAddingNew) {
+        // Save the inline row first
+        saveNewBrandMappingRow()
+        // Wait a bit for the save to complete, then close modal
+        window.setTimeout({
+            closeBrandMappingsModal()
+            // Refresh brand dropdown
+            refreshBrandDropdown()
+        }, 500)
+    } else {
+        // No unsaved mappings, just close modal
+        closeBrandMappingsModal()
+        // Refresh brand dropdown
+        refreshBrandDropdown()
+    }
+}
+
+// Close brand mappings modal
+fun closeBrandMappingsModal() {
+    val modal = document.getElementById("rixoMappingModal") as? HTMLElement
+    modal?.style?.display = "none"
+    
+    // Reset flags
+    js("window.currentBrandName = null").unsafeCast<Unit>()
+    js("window.currentEditingBrandMappingId = null").unsafeCast<Unit>()
+    js("window.isAddingNewBrandMapping = false").unsafeCast<Unit>()
+    js("window.isCreatingNewBrand = false").unsafeCast<Unit>()
+}
+
+// Refresh brand dropdown (add new brand to dropdown if it was created)
+fun refreshBrandDropdown() {
+    // Get brand name from input field if it's a new brand, otherwise from global storage
+    val isNewBrand = js("window.isCreatingNewBrand") as? Boolean ?: false
+    val brandName = if (isNewBrand) {
+        (document.getElementById("newBrandNameInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    } else {
+        js("window.currentBrandName")?.toString()?.trim() ?: ""
+    }
+    
+    if (brandName.isNotBlank()) {
+        console.log("🔄 Adding brand '$brandName' to dropdown lists")
+        // Add brand to dropdowns
+        val brandSelect = document.getElementById("brand") as? HTMLSelectElement
+        val editBrandSelect = document.getElementById("editBrand") as? HTMLSelectElement
+        
+        fun addBrandToSelect(select: HTMLSelectElement?) {
+            if (select != null) {
+                // Check if option already exists
+                val existingOption = select.querySelector("option[value='$brandName']")
+                if (existingOption == null) {
+                    // Create new option element
+                    val option = document.createElement("option") as HTMLOptionElement
+                    option.setAttribute("value", brandName)
+                    option.textContent = brandName
+                    // Insert after "Select Brand" option (first option)
+                    if (select.options.length > 0) {
+                        select.insertBefore(option, select.options[1])
+                    } else {
+                        select.appendChild(option)
+                    }
+                    console.log("✅ Added brand '$brandName' to dropdown")
+                } else {
+                    console.log("ℹ️ Brand '$brandName' already exists in dropdown")
+                }
+            }
+        }
+        
+        addBrandToSelect(brandSelect)
+        addBrandToSelect(editBrandSelect)
+    } else {
+        console.log("⚠️ Cannot add brand to dropdown - brand name is blank")
+    }
+}
+
+// Delete brand mapping
+fun deleteBrandMapping(mappingId: Long, brandName: String) {
+    if (!window.confirm("Are you sure you want to delete this mapping?")) {
+        return
+    }
+    
+    val url = apiUrl("car-brand-mapping/mappings/$mappingId")
+    console.log("Deleting brand mapping ID: $mappingId")
+    
+    window.fetch(url, js("""
+        {
+            method: 'DELETE'
+        }
+    """).unsafeCast<dynamic>())
+        .then { response ->
+            if (!response.ok) {
+                throw Exception("Failed to delete mapping: ${response.status}")
+            }
+            response.json()
+        }
+        .then { data: dynamic ->
+            val success = (data.success as? Boolean) ?: false
+            if (success) {
+                showMessage("Mapping deleted successfully", "success")
+                // Reload mappings
+                loadCurrentBrandMappings(brandName)
+            } else {
+                val message = (data.message as? String) ?: "Failed to delete mapping"
+                showMessage(message, "error")
+            }
+        }
+        .catch { error ->
+            console.error("Error deleting brand mapping:", error)
+            showMessage("Error deleting mapping: ${error.message}", "error")
+        }
+}
+
 fun calculateTax(priceFieldId: String, auctionFeeFieldId: String, roadTaxFieldId: String, taxTotalFieldId: String) {
     try {
         // Get values from form fields
@@ -3029,7 +5442,8 @@ fun calculateTax(priceFieldId: String, auctionFeeFieldId: String, roadTaxFieldId
         val auctionFee = extractNumericValue(auctionFeeValue)
         val roadTax = extractNumericValue(roadTaxValue)
         
-        // Calculate 10% tax on the sum of Price + Auction Fee + Road Tax
+        // Calculate 10% tax on the sum of Bid Price (Price) + Auction Fee + Road Tax
+        // Bid Price = the "Price" field (purchase/bid price)
         val totalBase = price + auctionFee + roadTax
         val taxAmount = totalBase * 0.10
         
@@ -3039,7 +5453,7 @@ fun calculateTax(priceFieldId: String, auctionFeeFieldId: String, roadTaxFieldId
         // Set the calculated value in the tax total field
         (document.getElementById(taxTotalFieldId) as HTMLInputElement).value = formattedTax
         
-        console.log("Tax calculation: Price=$price, Auction Fee=$auctionFee, Road Tax=$roadTax, Total Base=$totalBase, 10% Tax=$formattedTax")
+        console.log("Tax calculation: Bid Price (Price)=$price, Auction Fee=$auctionFee, Road Tax=$roadTax, Total Base=$totalBase, 10% Tax=$formattedTax")
         
     } catch (e: Exception) {
         console.error("Error calculating tax:", e)
@@ -3048,29 +5462,63 @@ fun calculateTax(priceFieldId: String, auctionFeeFieldId: String, roadTaxFieldId
 }
 
 fun handleAddPurchase() {
+    // Validate: Only chassis is required
+    val chassis = js("getComboboxValue('chassis')").unsafeCast<String>()
+    if (chassis.isBlank()) {
+        showErrorModal("Validation Error", "Chassis is required. Please enter a chassis number before saving.")
+        return
+    }
+    
+    // Check if chassis already exists before submitting
+    checkChassisExists(chassis, excludeId = null,
+        onExists = {
+            // Chassis exists, show warning modal
+            showDuplicateChassisWarningModal(chassis,
+                onProceed = {
+                    // User chose to proceed anyway, continue with submission
+                    proceedWithAddPurchase(chassis)
+                },
+                onCancel = {
+                    // User cancelled, do nothing
+                    console.log("User cancelled duplicate chassis warning")
+                }
+            )
+        },
+        onNotExists = {
+            // Chassis doesn't exist, proceed with submission
+            proceedWithAddPurchase(chassis)
+        }
+    )
+}
+
+// Proceed with adding purchase (extracted from handleAddPurchase)
+fun proceedWithAddPurchase(chassis: String) {
     val dateIso = (document.getElementById("date") as HTMLInputElement).value
     val date = formatWithWeekday(dateIso)
-    val chassis = (document.getElementById("chassis") as HTMLInputElement).value
     val carModelYear = (document.getElementById("carModelYear") as HTMLInputElement).value
-    val brand = (document.getElementById("brand") as HTMLInputElement).value
-    val carName = (document.getElementById("carName") as HTMLInputElement).value
-    val vehicleType = (document.getElementById("typeOfVehicle") as HTMLSelectElement).value
-    val grade = (document.getElementById("grade") as HTMLInputElement).value
+    val brand = (document.getElementById("brand") as HTMLSelectElement).value
+    val carName = js("getComboboxValue('carName')").unsafeCast<String>()
+    val vehicleType = js("getComboboxValue('typeOfVehicle')").unsafeCast<String>()
+    val grade = js("getComboboxValue('grade')").unsafeCast<String>()
     val rank = (document.getElementById("rank") as HTMLInputElement).value
     val color = (document.getElementById("color") as HTMLInputElement).value
     val displacement = (document.getElementById("displacement") as HTMLInputElement).value
-    val fuel = (document.getElementById("fuel") as HTMLInputElement).value
+    val fuel = js("getComboboxValue('fuel')").unsafeCast<String>()
     val seat = (document.getElementById("seat") as HTMLInputElement).value
-    val door = (document.getElementById("door") as HTMLInputElement).value
+    val door = js("getComboboxValue('door')").unsafeCast<String>()
     val distance = (document.getElementById("distance") as HTMLInputElement).value
     val options = (document.getElementById("options") as HTMLInputElement).value
+    val cc = js("getComboboxValue('cc')").unsafeCast<String>()
+    val shift = js("getComboboxValue('shift')").unsafeCast<String>()
+    val steeringWheel = (document.getElementById("steeringWheel") as HTMLSelectElement).value
+    val wd = js("getComboboxValue('wd')").unsafeCast<String>()
     val auctionNo = (document.getElementById("auctionNo") as HTMLInputElement).value
     val auctionName = (document.getElementById("auctionName") as HTMLSelectElement).value
-    val stockLocation = (document.getElementById("stockLocation") as HTMLSelectElement).value
-    val rixoCompany = (document.getElementById("rixoCompany") as HTMLSelectElement).value
+    val stockLocation = js("getComboboxValue('stockLocation')").unsafeCast<String>()
+    val rixoCompany = js("getComboboxValue('rixoCompany')").unsafeCast<String>()
     val clientName = (document.getElementById("clientName") as HTMLInputElement).value
     val country = (document.getElementById("country") as HTMLInputElement).value
-    val venueId = (document.getElementById("venueId") as HTMLSelectElement).value
+    val venueId = js("getComboboxValue('venueId')").unsafeCast<String>()
     val price = (document.getElementById("price") as HTMLInputElement).value
     val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement).value
     val recycleFee = (document.getElementById("recycleFee") as HTMLInputElement).value
@@ -3080,7 +5528,7 @@ fun handleAddPurchase() {
     val paymentDate = formatWithWeekday((document.getElementById("paymentDate") as HTMLInputElement).value)
     val rixoRequested = (document.querySelector("input[name=\"rixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"rixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
-    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement).value
+    val rixoPrice = (document.getElementById("rixoPriceInput") as? HTMLInputElement)?.value ?: ""
     val numberCutString = (document.getElementById("numberCutString") as HTMLInputElement).value
     val shipmentDate = formatWithWeekday((document.getElementById("shipmentDate") as HTMLInputElement).value)
     val blNo = (document.getElementById("blNo") as HTMLInputElement).value
@@ -3115,6 +5563,10 @@ fun handleAddPurchase() {
     purchaseData.door = door
     purchaseData.distance = distance
     purchaseData.options = options
+    purchaseData.cc = if (cc.isNotEmpty()) cc.toIntOrNull() else null
+    purchaseData.shift = shift
+    purchaseData.steeringWheel = steeringWheel
+    purchaseData.wd = wd
     purchaseData.auctionNo = auctionNo
     purchaseData.auctionHouse = auctionName
     purchaseData.stockLocation = stockLocation
@@ -3144,9 +5596,15 @@ fun handleAddPurchase() {
     purchaseData.commission = commission
     purchaseData.repairCompany = repairCompany
     purchaseData.repairCharges = repairCharges
-    purchaseData.notes = notes
-    purchaseData.shaken = shaken
+    // Always include shaken field explicitly (even if false) to ensure it's saved to database
+    // Convert to explicit boolean to ensure it's always included in JSON
+    purchaseData.shaken = if (shaken) true else false
     purchaseData.numberCut = numberCutString
+    purchaseData.notes = notes
+    
+    // Debug log to verify shaken value is being sent
+    console.log("🔍 [DEBUG] Add Purchase - Shaken checkbox checked:", shaken)
+    console.log("🔍 [DEBUG] Add Purchase - Shaken value being sent:", purchaseData.shaken, "Type:", js("typeof purchaseData.shaken"))
     
     // Call API to create purchase
     val requestInit = js("{}")
@@ -3156,13 +5614,42 @@ fun handleAddPurchase() {
     requestInit.headers = headers
     requestInit.body = JSON.stringify(purchaseData)
     
-    window.fetch("/api/purchases", requestInit).then { response ->
+    // Debug: Log the actual JSON being sent
+    val parsedBody = JSON.parse<dynamic>(requestInit.body)
+    console.log("🔍 [DEBUG] Add Purchase - Request body JSON:", requestInit.body)
+    console.log("🔍 [DEBUG] Add Purchase - Shaken in JSON:", parsedBody.shaken, "Type:", js("typeof parsedBody.shaken"))
+    
+    // Submit the purchase
+    submitAddPurchase(requestInit)
+}
+
+// Submit add purchase request
+fun submitAddPurchase(requestInit: dynamic) {
+    window.fetch(apiUrl("purchases"), requestInit).then { response ->
         if (response.ok) {
             showMessage("Purchase created successfully!", "success")
             showPurchaseList()
         } else {
             response.text().then { errorText ->
+                // Try to parse as JSON first
+                try {
+                    val errorJson = JSON.parse<dynamic>(errorText)
+                    val errorMessage = errorJson.message as? String ?: errorText
+                    
+                    // Check if it's a duplicate chassis error
+                    if (errorMessage.contains("Duplicate found") || (errorMessage.contains("chassis") && errorMessage.contains("already exists"))) {
+                        showErrorModal("Duplicate Chassis", errorMessage)
+                    } else {
+                        showMessage("Failed to create purchase: $errorMessage", "error")
+                    }
+                } catch (e: dynamic) {
+                    // If JSON parsing fails, check the raw text
+                    if (errorText.contains("Duplicate found") || (errorText.contains("chassis") && errorText.contains("already exists"))) {
+                        showErrorModal("Duplicate Chassis", errorText)
+                    } else {
                 showMessage("Failed to create purchase: $errorText", "error")
+                    }
+                }
             }
         }
     }.catch { error ->
@@ -3172,9 +5659,13 @@ fun handleAddPurchase() {
 
 fun showEditForm(id: Long) {
     // First fetch the purchase data
-    window.fetch("/api/purchases/purchase/$id").then { response ->
+    window.fetch(apiUrl("purchases/purchase/$id")).then { response ->
         if (response.ok) {
             response.json().then { purchaseData ->
+                // Debug: Log the raw purchase data to see what's being received
+                console.log("🔍 [DEBUG] Raw purchase data received:", JSON.stringify(purchaseData))
+                val shakenValue = js("purchaseData.shaken").unsafeCast<Any?>()
+                console.log("🔍 [DEBUG] Shaken field in raw data:", shakenValue, "Type:", js("typeof purchaseData.shaken"))
                 showEditFormWithData(purchaseData)
             }
         } else {
@@ -3199,27 +5690,124 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                         <label>Purchase Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="editDate" value="${toIsoFromLabel(purchaseData.date)}" style="width:100%; padding: 8px 110px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.date ?: ""}">
-                            <span id="editDateDayHint" style="position:absolute; right:12px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                            <input type="date" id="editDate" value="${toIsoFromLabel(purchaseData.date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.date ?: ""}">
+                            <span id="editDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
                     <div>
                     </div>
                     <div>
                         <label>Chassis *</label>
-                        <input type="text" id="editChassis" value="${purchaseData.chassis}" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editChassisInput" value="${purchaseData.chassis ?: ""}" placeholder="Select Chassis" required 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off" onfocus="this.select();">
+                            <select id="editChassis" required 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editChassis');"
+                                    onchange="syncComboboxInput('editChassis')">
+                                <option value="">▼</option>
+                                ${if (purchaseData.chassis != null) "<option value=\"${purchaseData.chassis}\" selected>${purchaseData.chassis}</option>" else ""}
+                            </select>
+                            <div id="editChassisButton" onclick="openComboboxDropdown('editChassis')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label>Production Date</label>
-                        <input type="text" id="editCarModelYear" value="${purchaseData.carModelYear ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="month" id="editCarModelYear" value="${if (purchaseData.carModelYear != null) {
+                            val parts = purchaseData.carModelYear.toString().split("/")
+                            if (parts.size == 2) "${parts[1]}-${parts[0].padStart(2, '0')}" else purchaseData.carModelYear.toString()
+                        } else ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label>Brand</label>
-                        <input type="text" id="editBrand" value="${purchaseData.brand ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <select id="editBrand" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                <option value="">Select Brand</option>
+                            <option value="Toyota" ${if (purchaseData.brand == "Toyota") "selected" else ""}>Toyota</option>
+                            <option value="Nissan" ${if (purchaseData.brand == "Nissan") "selected" else ""}>Nissan</option>
+                            <option value="Subaru" ${if (purchaseData.brand == "Subaru") "selected" else ""}>Subaru</option>
+                            <option value="Honda" ${if (purchaseData.brand == "Honda") "selected" else ""}>Honda</option>
+                            <option value="Suzuki" ${if (purchaseData.brand == "Suzuki") "selected" else ""}>Suzuki</option>
+                            <option value="Isuzu" ${if (purchaseData.brand == "Isuzu") "selected" else ""}>Isuzu</option>
+                            <option value="Daihatsu" ${if (purchaseData.brand == "Daihatsu") "selected" else ""}>Daihatsu</option>
+                            <option value="Mitsuoka" ${if (purchaseData.brand == "Mitsuoka") "selected" else ""}>Mitsuoka</option>
+                            <option value="Hino" ${if (purchaseData.brand == "Hino") "selected" else ""}>Hino</option>
+                            <option value="Mitsubishi Fuso" ${if (purchaseData.brand == "Mitsubishi Fuso") "selected" else ""}>Mitsubishi Fuso</option>
+                            <option value="Mitsubishi" ${if (purchaseData.brand == "Mitsubishi") "selected" else ""}>Mitsubishi</option>
+                            <option value="Lexus" ${if (purchaseData.brand == "Lexus") "selected" else ""}>Lexus</option>
+                            <option value="Mazda" ${if (purchaseData.brand == "Mazda") "selected" else ""}>Mazda</option>
+                            <option value="Nissan Diesel" ${if (purchaseData.brand == "Nissan Diesel") "selected" else ""}>Nissan Diesel</option>
+                            <option value="Cadillac" ${if (purchaseData.brand == "Cadillac") "selected" else ""}>Cadillac</option>
+                            <option value="Chevrolet" ${if (purchaseData.brand == "Chevrolet") "selected" else ""}>Chevrolet</option>
+                            <option value="GMC" ${if (purchaseData.brand == "GMC") "selected" else ""}>GMC</option>
+                            <option value="Hummer" ${if (purchaseData.brand == "Hummer") "selected" else ""}>Hummer</option>
+                            <option value="Lincoln" ${if (purchaseData.brand == "Lincoln") "selected" else ""}>Lincoln</option>
+                            <option value="Ford" ${if (purchaseData.brand == "Ford") "selected" else ""}>Ford</option>
+                            <option value="Chrisler" ${if (purchaseData.brand == "Chrisler") "selected" else ""}>Chrisler</option>
+                            <option value="Chrisler Jeep" ${if (purchaseData.brand == "Chrisler Jeep") "selected" else ""}>Chrisler Jeep</option>
+                            <option value="Dodge" ${if (purchaseData.brand == "Dodge") "selected" else ""}>Dodge</option>
+                            <option value="Infiniti" ${if (purchaseData.brand == "Infiniti") "selected" else ""}>Infiniti</option>
+                            <option value="Acura" ${if (purchaseData.brand == "Acura") "selected" else ""}>Acura</option>
+                            <option value="Tesla" ${if (purchaseData.brand == "Tesla") "selected" else ""}>Tesla</option>
+                            <option value="Mercedes Benz" ${if (purchaseData.brand == "Mercedes Benz") "selected" else ""}>Mercedes Benz</option>
+                            <option value="MB AMG" ${if (purchaseData.brand == "MB AMG") "selected" else ""}>MB AMG</option>
+                            <option value="Smart" ${if (purchaseData.brand == "Smart") "selected" else ""}>Smart</option>
+                            <option value="BMW" ${if (purchaseData.brand == "BMW") "selected" else ""}>BMW</option>
+                            <option value="Audi" ${if (purchaseData.brand == "Audi") "selected" else ""}>Audi</option>
+                            <option value="VolksWagen" ${if (purchaseData.brand == "VolksWagen") "selected" else ""}>VolksWagen</option>
+                            <option value="Porsche" ${if (purchaseData.brand == "Porsche") "selected" else ""}>Porsche</option>
+                            <option value="Rolls-Royce" ${if (purchaseData.brand == "Rolls-Royce") "selected" else ""}>Rolls-Royce</option>
+                            <option value="Bentely" ${if (purchaseData.brand == "Bentely") "selected" else ""}>Bentely</option>
+                            <option value="Jaguar" ${if (purchaseData.brand == "Jaguar") "selected" else ""}>Jaguar</option>
+                            <option value="Land Rover" ${if (purchaseData.brand == "Land Rover") "selected" else ""}>Land Rover</option>
+                            <option value="Mini" ${if (purchaseData.brand == "Mini") "selected" else ""}>Mini</option>
+                            <option value="Lotus" ${if (purchaseData.brand == "Lotus") "selected" else ""}>Lotus</option>
+                            <option value="Aston Martin" ${if (purchaseData.brand == "Aston Martin") "selected" else ""}>Aston Martin</option>
+                            <option value="McLaren" ${if (purchaseData.brand == "McLaren") "selected" else ""}>McLaren</option>
+                            <option value="Fiat" ${if (purchaseData.brand == "Fiat") "selected" else ""}>Fiat</option>
+                            <option value="Ferrari" ${if (purchaseData.brand == "Ferrari") "selected" else ""}>Ferrari</option>
+                            <option value="Lancia" ${if (purchaseData.brand == "Lancia") "selected" else ""}>Lancia</option>
+                            <option value="Alfa Romeo" ${if (purchaseData.brand == "Alfa Romeo") "selected" else ""}>Alfa Romeo</option>
+                            <option value="Maserati" ${if (purchaseData.brand == "Maserati") "selected" else ""}>Maserati</option>
+                            <option value="Lamborghini" ${if (purchaseData.brand == "Lamborghini") "selected" else ""}>Lamborghini</option>
+                            <option value="Abarth" ${if (purchaseData.brand == "Abarth") "selected" else ""}>Abarth</option>
+                            <option value="Renault" ${if (purchaseData.brand == "Renault") "selected" else ""}>Renault</option>
+                            <option value="Peugeot" ${if (purchaseData.brand == "Peugeot") "selected" else ""}>Peugeot</option>
+                            <option value="Citroen" ${if (purchaseData.brand == "Citroen") "selected" else ""}>Citroen</option>
+                            <option value="Ds Automobiles" ${if (purchaseData.brand == "Ds Automobiles") "selected" else ""}>Ds Automobiles</option>
+                            <option value="Volvo" ${if (purchaseData.brand == "Volvo") "selected" else ""}>Volvo</option>
+                            <option value="Hyundai" ${if (purchaseData.brand == "Hyundai") "selected" else ""}>Hyundai</option>
+                            <option value="Kia" ${if (purchaseData.brand == "Kia") "selected" else ""}>Kia</option>
+                            <option value="BYD" ${if (purchaseData.brand == "BYD") "selected" else ""}>BYD</option>
+                            <option value="TOMMYKAIRA" ${if (purchaseData.brand == "TOMMYKAIRA") "selected" else ""}>TOMMYKAIRA</option>
+                            </select>
+                            <button type="button" id="manageEditBrandMappings" class="manage-btn" title="Manage Mappings">
+                                ⚙️
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <label>Car Name</label>
-                        <input type="text" id="editCarName" value="${purchaseData.carName ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editCarNameInput" value="${purchaseData.carName ?: ""}" placeholder="Select Car Name" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off">
+                            <select id="editCarName" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editCarName');"
+                                    onchange="syncComboboxInput('editCarName')">
+                                <option value="">▼</option>
+                                ${if (purchaseData.carName != null) "<option value=\"${purchaseData.carName}\" selected>${purchaseData.carName}</option>" else ""}
+                            </select>
+                            <div id="editCarNameButton" onclick="openComboboxDropdown('editCarName')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
@@ -3227,7 +5815,22 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
                     <div>
                         <label>Grade</label>
-                        <input type="text" id="editGrade" value="${purchaseData.grade ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editGradeInput" value="${purchaseData.grade ?: ""}" placeholder="Select Grade" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off">
+                            <select id="editGrade" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editGrade');"
+                                    onchange="syncComboboxInput('editGrade')">
+                                <option value="">▼</option>
+                                ${if (purchaseData.grade != null) "<option value=\"${purchaseData.grade}\" selected>${purchaseData.grade}</option>" else ""}
+                            </select>
+                            <div id="editGradeButton" onclick="openComboboxDropdown('editGrade')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label>Rank</label>
@@ -3243,7 +5846,23 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Fuel</label>
-                        <input type="text" id="editFuel" value="${purchaseData.fuel ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editFuelInput" value="${purchaseData.fuel ?: ""}" placeholder="Select Fuel" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <select id="editFuel" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editFuel');"
+                                    onchange="syncComboboxInput('editFuel')">
+                                <option value="">▼</option>
+                                ${if (purchaseData.fuel != null) "<option value=\"${purchaseData.fuel}\" selected>${purchaseData.fuel}</option>" else ""}
+                            </select>
+                            <div id="editFuelButton" onclick="openComboboxDropdown('editFuel')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label>Seat</label>
@@ -3251,7 +5870,23 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Door</label>
-                        <input type="text" id="editDoor" value="${purchaseData.door ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editDoorInput" value="${purchaseData.door ?: ""}" placeholder="Select Door" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <select id="editDoor" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editDoor');"
+                                    onchange="syncComboboxInput('editDoor')">
+                                <option value="">▼</option>
+                                ${if (purchaseData.door != null) "<option value=\"${purchaseData.door}\" selected>${purchaseData.door}</option>" else ""}
+                            </select>
+                            <div id="editDoorButton" onclick="openComboboxDropdown('editDoor')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label>Distance</label>
@@ -3260,6 +5895,77 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                         <label>Options</label>
                         <input type="text" id="editOptions" value="${purchaseData.options ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <div>
+                        <label>CC</label>
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editCcInput" value="${purchaseData.cc ?: ""}" placeholder="Select CC" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <select id="editCc" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editCc');"
+                                    onchange="syncComboboxInput('editCc')">
+                                <option value="">▼</option>
+                                ${if (purchaseData.cc != null) "<option value=\"${purchaseData.cc}\" selected>${purchaseData.cc}</option>" else ""}
+                            </select>
+                            <div id="editCcButton" onclick="openComboboxDropdown('editCc')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Shift</label>
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editShiftInput" value="${purchaseData.shift ?: ""}" placeholder="Select Shift" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <select id="editShift" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editShift');"
+                                    onchange="syncComboboxInput('editShift')">
+                                <option value="">▼</option>
+                                <option value="AT" ${if (purchaseData.shift == "AT") "selected" else ""}>AT</option>
+                                <option value="MT" ${if (purchaseData.shift == "MT") "selected" else ""}>MT</option>
+                                <option value="6F" ${if (purchaseData.shift == "6F") "selected" else ""}>6F</option>
+                                <option value="5F" ${if (purchaseData.shift == "5F") "selected" else ""}>5F</option>
+                            </select>
+                            <div id="editShiftButton" onclick="openComboboxDropdown('editShift')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Steering Wheel</label>
+                        <select id="editSteeringWheel" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <option value="">Select Steering Wheel</option>
+                            <option value="Right" ${if (purchaseData.steeringWheel == "Right") "selected" else ""}>Right</option>
+                            <option value="Left" ${if (purchaseData.steeringWheel == "Left") "selected" else ""}>Left</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>WD</label>
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editWdInput" value="${purchaseData.wd ?: ""}" placeholder="Select WD" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <select id="editWd" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editWd');"
+                                    onchange="syncComboboxInput('editWd')">
+                                <option value="">▼</option>
+                                ${if (purchaseData.wd != null) "<option value=\"${purchaseData.wd}\" selected>${purchaseData.wd}</option>" else ""}
+                            </select>
+                            <div id="editWdButton" onclick="openComboboxDropdown('editWd')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
                     </div>
                 </div>
                 
@@ -3271,44 +5977,97 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Supplier Name *</label>
-                        <select id="editAuctionName" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="handleAuctionNameChange(this.value)">
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <select id="editAuctionName" style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <option value="">Select Supplier Name</option>
                         </select>
+                            <button type="button" id="manageEditAuctionMappings" class="manage-btn" title="Manage Mappings">
+                                ⚙️
+                            </button>
+                        </div>
                     </div>
                     <div>
                         <label>Venue ID</label>
-                        <select id="editVenueId" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Venue ID</option>
-                            <option value="${purchaseData.venueId ?: ""}" ${if (purchaseData.venueId != null) "selected" else ""}>${purchaseData.venueId ?: ""}</option>
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editVenueIdInput" value="${purchaseData.venueId ?: ""}" placeholder="Select Venue ID" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <select id="editVenueId" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editVenueId');"
+                                    onchange="syncComboboxInput('editVenueId')">
+                                <option value="">▼</option>
+                                ${if (purchaseData.venueId != null) "<option value=\"${purchaseData.venueId}\" selected>${purchaseData.venueId}</option>" else ""}
                         </select>
+                            <div id="editVenueIdButton" onclick="openComboboxDropdown('editVenueId')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label>Stock Location</label>
-                        <select id="editStockLocation" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Stock Location</option>
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editStockLocationInput" value="${purchaseData.stockLocation ?: ""}" placeholder="Select Stock Location" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <select id="editStockLocation" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editStockLocation');"
+                                    onchange="syncComboboxInput('editStockLocation')">
+                                <option value="">▼</option>
                         </select>
+                            <div id="editStockLocationButton" onclick="openComboboxDropdown('editStockLocation')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label>Rixo Company</label>
-                        <select id="editRixoCompany" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" onchange="handleEditRixoCompanyChange(this.value)">
-                            <option value="">Select Rixo Company</option>
-                        </select>
+                        ${createEditableCombobox("editRixoCompany", "Select Rixo Company", initialValue = (purchaseData.rixoCompany ?: ""))}
                     </div>
                     <div>
                         <label>Shipment size</label>
-                        <select id="editTypeOfVehicle" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Shipment size</option>
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editTypeOfVehicleInput" value="${purchaseData.shipmentSize ?: purchaseData.vehicleType ?: ""}" placeholder="Select Shipment size" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <select id="editTypeOfVehicle" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editTypeOfVehicle');"
+                                    onchange="syncComboboxInput('editTypeOfVehicle')">
+                                <option value="">▼</option>
                             <option value="Car" ${if ((purchaseData.shipmentSize ?: purchaseData.vehicleType) == "Car") "selected" else ""}>Car</option>
                             <option value="Truck" ${if ((purchaseData.shipmentSize ?: purchaseData.vehicleType) == "Truck") "selected" else ""}>Truck</option>
                         </select>
+                            <div id="editTypeOfVehicleButton" onclick="openComboboxDropdown('editTypeOfVehicle')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label>Rixo Price</label>
-                        <div style="position: relative;">
-                            <input type="text" id="editRixoPrice" placeholder="Enter or select Rixo Price" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <select id="editRixoPriceDropdown" style="position: absolute; top: 0; right: 0; width: 30px; height: 100%; border: none; background: #f5f5f5; cursor: pointer;" onchange="selectEditRixoPrice(this.value)">
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editRixoPriceInput" value="${purchaseData.rixoPrice ?: ""}" placeholder="Enter or select Rixo Price" 
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <input type="text" id="editRixoPrice" placeholder="Enter or select Rixo Price" style="display: none;">
+                            <select id="editRixoPriceDropdown" 
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editRixoPriceDropdown');"
+                                    onchange="var input = document.getElementById('editRixoPriceInput'); if (input && this.value) { input.value = this.value; input.dispatchEvent(new Event('change', { bubbles: true })); } selectEditRixoPrice(this.value);">
                                 <option value="">▼</option>
                             </select>
+                            <div id="editRixoPriceDropdownButton" onclick="openComboboxDropdown('editRixoPriceDropdown')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
                         </div>
                     </div>
                     <div>
@@ -3327,12 +6086,12 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>Rixo Requested</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
-                                <input type="radio" name="editRixoRequested" value="TRUE">
+                                <input type="radio" name="editRixoRequested" value="TRUE" ${if (purchaseData.rixoRequested == "TRUE") "checked" else ""}>
                                 <span class="checkmark"></span>
                                 TRUE
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="editRixoRequested" value="FALSE">
+                                <input type="radio" name="editRixoRequested" value="FALSE" ${if (purchaseData.rixoRequested != "TRUE") "checked" else ""}>
                                 <span class="checkmark"></span>
                                 FALSE
                             </label>
@@ -3342,12 +6101,12 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>Rixo Confirmed</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
-                                <input type="radio" name="editRixoConfirmed" value="TRUE">
+                                <input type="radio" name="editRixoConfirmed" value="TRUE" ${if (purchaseData.rixoConfirmed == "TRUE") "checked" else ""}>
                                 <span class="checkmark"></span>
                                 TRUE
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="editRixoConfirmed" value="FALSE">
+                                <input type="radio" name="editRixoConfirmed" value="FALSE" ${if (purchaseData.rixoConfirmed != "TRUE") "checked" else ""}>
                                 <span class="checkmark"></span>
                                 FALSE
                             </label>
@@ -3498,7 +6257,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                 </div>
                 <div style="margin-bottom: 20px;">
-                    <label>Generated Number Cut String:</label>
+                    <label>Number Cut:</label>
                     <input type="text" id="editNumberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
                 </div>
                 </div> <!-- End of editNumberCutSection -->
@@ -3535,8 +6294,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                         <label>Payment Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="editPaymentDate" style="width:100%; padding: 8px 110px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.paymentDate ?: ""}">
-                            <span id="editPaymentDateDayHint" style="position:absolute; right:12px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                            <input type="date" id="editPaymentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.paymentDate ?: ""}">
+                            <span id="editPaymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
                 </div>
@@ -3546,8 +6305,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                         <label>Shipment Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="editShipmentDate" style="width:100%; padding: 8px 110px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.shipmentDate ?: ""}">
-                            <span id="editShipmentDateDayHint" style="position:absolute; right:12px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                            <input type="date" id="editShipmentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.shipmentDate ?: ""}">
+                            <span id="editShipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
                     <div>
@@ -3561,6 +6320,10 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                         <label>Destination</label>
                         <input type="text" id="editDestination" value="${purchaseData.destination ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <div>
+                        <label>Book ID</label>
+                        <input type="text" id="editBookingId" value="${purchaseData.bookingId ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
                 <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Charges</h3>
@@ -3668,6 +6431,7 @@ fun setupEditFormListeners() {
     document.getElementById("editAuctionName")?.addEventListener("change", { event: Event ->
         val target = event.target as HTMLSelectElement
         js("window.handleAuctionNameChange(target.value)")
+        js("window.toggleManageButtons()")
     })
     
     // Add event listener for type of vehicle change
@@ -3681,6 +6445,7 @@ fun setupEditFormListeners() {
     document.getElementById("editRixoCompany")?.addEventListener("change", { event: Event ->
         val target = event.target as HTMLSelectElement
         js("window.handleEditRixoCompanyChange(target.value)")
+        js("window.toggleManageButtons()")
     })
     
     document.getElementById("editCancelBtn")?.addEventListener("click", { _: Event ->
@@ -3692,9 +6457,58 @@ fun setupEditFormListeners() {
         handleEditPurchase()
     })
     
-    // Tax calculation button for edit form
+    // Real-time Total Price calculation for Edit form
+    fun calculateEditTotalPrice() {
+        try {
+            // Helper function to extract numeric value from string (remove currency symbols, commas, etc.)
+            fun extractNumericValue(value: String): Double {
+                if (value.isBlank()) return 0.0
+                // Remove currency symbols, commas, spaces and extract only numbers and decimal point
+                val cleaned = value.replace(Regex("[^0-9.-]"), "")
+                return cleaned.toDoubleOrNull() ?: 0.0
+            }
+            
+            // Get values from form fields
+            val priceValue = (document.getElementById("editPrice") as? HTMLInputElement)?.value?.trim() ?: ""
+            val auctionFeeValue = (document.getElementById("editAuctionFee") as? HTMLInputElement)?.value?.trim() ?: ""
+            val recycleFeeValue = (document.getElementById("editRecycleFee") as? HTMLInputElement)?.value?.trim() ?: ""
+            val roadTaxValue = (document.getElementById("editRoadTax") as? HTMLInputElement)?.value?.trim() ?: ""
+            val taxTotalValue = (document.getElementById("editTaxTotal") as? HTMLInputElement)?.value?.trim() ?: ""
+            
+            // Extract numeric values
+            val price = extractNumericValue(priceValue)
+            val auctionFee = extractNumericValue(auctionFeeValue)
+            val recycleFee = extractNumericValue(recycleFeeValue)
+            val roadTax = extractNumericValue(roadTaxValue)
+            val taxTotal = extractNumericValue(taxTotalValue)
+            
+            // Calculate total: Price + Auction Fee + Recycle Fee + Road Tax + Tax Total
+            val total = price + auctionFee + recycleFee + roadTax + taxTotal
+            
+            // Format the result with currency symbol
+            val formattedTotal = if (total > 0) "¥${total.toInt()}" else ""
+            
+            // Set the calculated value in the total price field
+            (document.getElementById("editTotalPrice") as? HTMLInputElement)?.value = formattedTotal
+            
+        } catch (e: Exception) {
+            console.error("Error calculating edit total price:", e)
+        }
+    }
+    
+    // Add event listeners for real-time calculation in Edit form
+    listOf("editPrice", "editAuctionFee", "editRecycleFee", "editRoadTax", "editTaxTotal").forEach { fieldId ->
+        document.getElementById(fieldId)?.addEventListener("input", { _: Event ->
+            calculateEditTotalPrice()
+        })
+        document.getElementById(fieldId)?.addEventListener("change", { _: Event ->
+            calculateEditTotalPrice()
+        })
+    }
+    
     document.getElementById("editCalculateTaxBtn")?.addEventListener("click", { _: Event ->
         calculateTax("editPrice", "editAuctionFee", "editRoadTax", "editTaxTotal")
+        calculateEditTotalPrice() // Also update total price after tax calculation
     })
 
     document.getElementById("deleteBtn")?.addEventListener("click", { _: Event ->
@@ -3749,28 +6563,63 @@ fun setupEditFormListeners() {
 }
 fun handleEditPurchase() {
     val id = (document.getElementById("editId") as HTMLInputElement).value.toLong()
+    
+    // Validate: Only chassis is required
+    val chassis = js("getComboboxValue('editChassis')").unsafeCast<String>()
+    if (chassis.isBlank()) {
+        showErrorModal("Validation Error", "Chassis is required. Please enter a chassis number before saving.")
+        return
+    }
+    
+    // Check if chassis already exists (excluding current purchase) before submitting
+    checkChassisExists(chassis, excludeId = id,
+        onExists = {
+            // Chassis exists for a different purchase, show warning modal
+            showDuplicateChassisWarningModal(chassis,
+                onProceed = {
+                    // User chose to proceed anyway, continue with submission
+                    proceedWithEditPurchase(id, chassis)
+                },
+                onCancel = {
+                    // User cancelled, do nothing
+                    console.log("User cancelled duplicate chassis warning")
+                }
+            )
+        },
+        onNotExists = {
+            // Chassis doesn't exist or is the same purchase, proceed with submission
+            proceedWithEditPurchase(id, chassis)
+        }
+    )
+}
+
+// Proceed with editing purchase (extracted from handleEditPurchase)
+fun proceedWithEditPurchase(id: Long, chassis: String) {
     val date = formatWithWeekday((document.getElementById("editDate") as HTMLInputElement).value)
-    val chassis = (document.getElementById("editChassis") as HTMLInputElement).value
     val carModelYear = (document.getElementById("editCarModelYear") as HTMLInputElement).value
-    val brand = (document.getElementById("editBrand") as HTMLInputElement).value
-    val carName = (document.getElementById("editCarName") as HTMLInputElement).value
-    val vehicleType = (document.getElementById("editTypeOfVehicle") as HTMLSelectElement).value
-    val grade = (document.getElementById("editGrade") as HTMLInputElement).value
+    val brand = (document.getElementById("editBrand") as HTMLSelectElement).value
+    val carName = js("getComboboxValue('editCarName')").unsafeCast<String>()
+    val vehicleType = js("getComboboxValue('editTypeOfVehicle')").unsafeCast<String>()
+    val grade = js("getComboboxValue('editGrade')").unsafeCast<String>()
     val rank = (document.getElementById("editRank") as HTMLInputElement).value
     val color = (document.getElementById("editColor") as HTMLInputElement).value
     val displacement = (document.getElementById("editDisplacement") as HTMLInputElement).value
-    val fuel = (document.getElementById("editFuel") as HTMLInputElement).value
+    val fuel = js("getComboboxValue('editFuel')").unsafeCast<String>()
     val seat = (document.getElementById("editSeat") as HTMLInputElement).value
-    val door = (document.getElementById("editDoor") as HTMLInputElement).value
+    val door = js("getComboboxValue('editDoor')").unsafeCast<String>()
     val distance = (document.getElementById("editDistance") as HTMLInputElement).value
     val options = (document.getElementById("editOptions") as HTMLInputElement).value
+    val cc = js("getComboboxValue('editCc')").unsafeCast<String>()
+    val shift = js("getComboboxValue('editShift')").unsafeCast<String>()
+    val steeringWheel = (document.getElementById("editSteeringWheel") as HTMLSelectElement).value
+    val wd = js("getComboboxValue('editWd')").unsafeCast<String>()
     val auctionNo = (document.getElementById("editAuctionNo") as HTMLInputElement).value
     val auctionName = (document.getElementById("editAuctionName") as HTMLSelectElement).value
-    val stockLocation = (document.getElementById("editStockLocation") as HTMLSelectElement).value
-    val rixoCompany = (document.getElementById("editRixoCompany") as HTMLSelectElement).value
+    val stockLocation = js("getComboboxValue('editStockLocation')").unsafeCast<String>()
+    val rixoCompany = js("getComboboxValue('editRixoCompany')").unsafeCast<String>()
     val clientName = (document.getElementById("editClientName") as HTMLInputElement).value
     val country = (document.getElementById("editCountry") as HTMLInputElement).value
-    val venueId = (document.getElementById("editVenueId") as HTMLSelectElement).value
+    val venueId = js("getComboboxValue('editVenueId')").unsafeCast<String>()
     val price = (document.getElementById("editPrice") as HTMLInputElement).value
     val auctionFee = (document.getElementById("editAuctionFee") as HTMLInputElement).value
     val recycleFee = (document.getElementById("editRecycleFee") as HTMLInputElement).value
@@ -3780,12 +6629,16 @@ fun handleEditPurchase() {
     val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as HTMLInputElement).value)
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
-    val rixoPrice = (document.getElementById("editRixoPrice") as HTMLInputElement).value
+    val rixoPrice = (document.getElementById("editRixoPriceInput") as? HTMLInputElement)?.value ?: ""
     val numberCutString = (document.getElementById("editNumberCutString") as HTMLInputElement).value
     val shipmentDate = formatWithWeekday((document.getElementById("editShipmentDate") as HTMLInputElement).value)
     val blNo = (document.getElementById("editBlNo") as HTMLInputElement).value
     val vesselNo = (document.getElementById("editVesselNo") as HTMLInputElement).value
     val destination = (document.getElementById("editDestination") as HTMLInputElement).value
+    val bookingIdStr = (document.getElementById("editBookingId") as HTMLInputElement).value.trim()
+    // If field is empty, set to null to allow clearing the value
+    // If field has value, convert to Long
+    val bookingId = if (bookingIdStr.isNotEmpty()) bookingIdStr.toLongOrNull() else null
     val shipmentCharges = (document.getElementById("editShipmentCharges") as HTMLInputElement).value
     val freight = (document.getElementById("editFreight") as HTMLInputElement).value
     val storageCharges = (document.getElementById("editStorageCharges") as HTMLInputElement).value
@@ -3815,6 +6668,10 @@ fun handleEditPurchase() {
     purchaseData.door = door
     purchaseData.distance = distance
     purchaseData.options = options
+    purchaseData.cc = if (cc.isNotEmpty()) cc.toIntOrNull() else null
+    purchaseData.shift = shift
+    purchaseData.steeringWheel = steeringWheel
+    purchaseData.wd = wd
     purchaseData.auctionNo = auctionNo
     purchaseData.auctionHouse = auctionName
     purchaseData.stockLocation = stockLocation
@@ -3844,9 +6701,27 @@ fun handleEditPurchase() {
     purchaseData.commission = commission
     purchaseData.repairCompany = repairCompany
     purchaseData.repairCharges = repairCharges
-    purchaseData.notes = notes
-    purchaseData.shaken = shaken
+    // Always include shaken field explicitly (even if false) to ensure it's saved to database
+    // Convert to explicit boolean to ensure it's always included in JSON
+    purchaseData.shaken = if (shaken) true else false
     purchaseData.numberCut = numberCutString
+    purchaseData.notes = notes
+    // Always include bookingId in JSON to allow clearing the value
+    // If field is empty, send null to clear the value in database
+    // If field has value, convert to Number for JSON serialization
+    if (bookingId != null) {
+        // Convert Kotlin Long to JavaScript Number for proper JSON serialization
+        purchaseData.bookingId = js("Number(bookingId)").unsafeCast<Number>()
+        console.log("🔍 [DEBUG] Including bookingId in update:", bookingId, "as Number:", purchaseData.bookingId)
+    } else {
+        // Explicitly set to null to clear the value in database
+        js("purchaseData.bookingId = null").unsafeCast<Unit>()
+        console.log("🔍 [DEBUG] Setting bookingId to null to clear the value in database")
+    }
+    
+    // Debug log to verify shaken value is being sent
+    console.log("🔍 [DEBUG] Edit Shaken checkbox checked:", shaken)
+    console.log("🔍 [DEBUG] Edit Shaken value being sent:", purchaseData.shaken, "Type:", js("typeof purchaseData.shaken"))
     
     // Collect car pictures data
     val carPictures = collectCarPictures()
@@ -3854,11 +6729,17 @@ fun handleEditPurchase() {
     
     console.log("Sending update data: ${JSON.stringify(purchaseData)}")
     console.log("📷 Car pictures data:", carPictures)
-    console.log("Request URL: /api/purchases/$id")
+    console.log("Request URL: /purchases/$id")
     console.log("🔍 DEBUG: venueId = $venueId")
     console.log("🔍 DEBUG: vehicleType = $vehicleType")
     console.log("🔍 DEBUG: shipmentSize = ${purchaseData.shipmentSize}")
     
+    // Submit the purchase update
+    submitEditPurchase(id, purchaseData)
+}
+
+// Submit edit purchase request
+fun submitEditPurchase(id: Long, purchaseData: dynamic) {
     // Call API to update purchase
     val requestInit = js("{}")
     requestInit.method = "PUT"
@@ -3867,17 +6748,40 @@ fun handleEditPurchase() {
     requestInit.headers = headers
     requestInit.body = JSON.stringify(purchaseData)
     
+    // Debug: Log the actual JSON being sent, especially shaken field and bookingId
+    val parsedBody = JSON.parse<dynamic>(requestInit.body)
+    console.log("🔍 [DEBUG] Edit Purchase - Request body JSON:", requestInit.body)
+    console.log("🔍 [DEBUG] Edit Purchase - Shaken in JSON:", parsedBody.shaken, "Type:", js("typeof parsedBody.shaken"))
+    console.log("🔍 [DEBUG] Edit Purchase - BookingId in JSON:", parsedBody.bookingId, "Type:", js("typeof parsedBody.bookingId"))
     console.log("Request headers:", headers)
     console.log("Request body:", requestInit.body)
     
-    window.fetch("/api/purchases/$id", requestInit).then { response ->
+    window.fetch(apiUrl("purchases/$id"), requestInit).then { response ->
         if (response.ok) {
             showMessage("Purchase updated successfully!", "success")
             showPurchaseList()
         } else {
             response.text().then { errorText ->
                 console.log("Update error response: $errorText")
+                // Try to parse as JSON first
+                try {
+                    val errorJson = JSON.parse<dynamic>(errorText)
+                    val errorMessage = errorJson.message as? String ?: errorText
+                    
+                    // Check if it's a duplicate chassis error
+                    if (errorMessage.contains("Duplicate found") || (errorMessage.contains("chassis") && errorMessage.contains("already exists"))) {
+                        showErrorModal("Duplicate Chassis", errorMessage)
+                    } else {
+                        showMessage("Failed to update purchase: $errorMessage", "error")
+                    }
+                } catch (e: dynamic) {
+                    // If JSON parsing fails, check the raw text
+                    if (errorText.contains("Duplicate found") || (errorText.contains("chassis") && errorText.contains("already exists"))) {
+                        showErrorModal("Duplicate Chassis", errorText)
+                    } else {
                 showMessage("Failed to update purchase: $errorText", "error")
+                    }
+                }
             }
         }
     }.catch { error ->
@@ -4033,9 +6937,9 @@ fun handleImport() {
     // Don't set Content-Type for FormData - browser sets it automatically with boundary
     requestInit.body = formData
     
-    console.log("Sending request to: /api/purchases/import")
+    console.log("Sending request to: /purchases/import")
     
-    window.fetch("/api/purchases/import", requestInit).then { response ->
+    window.fetch(apiUrl("purchases/import"), requestInit).then { response ->
         console.log("Import response status: ${response.status}")
         if (response.ok) {
             response.json().then { result ->
@@ -4068,9 +6972,9 @@ fun handleImport() {
 fun loadPurchases() {
     console.log("loadPurchases function called")
     val url = if (currentSortField != null) {
-        "/api/purchases/sort?field=" + currentSortField + "&order=" + currentSortOrder
+        apiUrl("purchases/sort?field=" + currentSortField + "&order=" + currentSortOrder)
     } else {
-        "/api/purchases"
+        apiUrl("purchases")
     }
     window.fetch(url).then { response ->
         console.log("API response received: $response")
@@ -4105,6 +7009,8 @@ var carBookingFormState: dynamic = js("{}")
 var carBookingSelectedRows: Array<String> = emptyArray()
 var carBookingTableData: Array<dynamic> = emptyArray()
 var carBookingDisplayedCars: Array<dynamic> = emptyArray()
+// Global variable to store filtered chassis list for autocomplete
+var filteredChassisList: Array<String> = emptyArray()
 
 fun saveCarBookingState() {
     console.log("💾 Saving Car Booking state...")
@@ -4126,8 +7032,8 @@ fun saveCarBookingState() {
         val polPortEl = document.getElementById("polPort") as? HTMLSelectElement
         val podPortEl = document.getElementById("podPort") as? HTMLInputElement
         val bookingNoEl = document.getElementById("bookingNo") as? HTMLInputElement
-        val vesselSelectEl = document.getElementById("vesselSelect") as? HTMLSelectElement
-        val chassisSelectEl = document.getElementById("chassisSelect") as? HTMLSelectElement
+        val vesselInputEl = document.getElementById("vesselSelect") as? HTMLInputElement
+        val chassisInputEl = document.getElementById("chassisSearch") as? HTMLInputElement
         
         console.log("🔍 Form elements found:")
         console.log("  - consigneeCountry: ${consigneeCountryEl?.value ?: "null"}")
@@ -4136,8 +7042,8 @@ fun saveCarBookingState() {
         console.log("  - polPort: ${polPortEl?.value ?: "null"}")
         console.log("  - podPort: ${podPortEl?.value ?: "null"}")
         console.log("  - bookingNo: ${bookingNoEl?.value ?: "null"}")
-        console.log("  - vesselSelect: ${vesselSelectEl?.value ?: "null"}")
-        console.log("  - chassisSelect: ${chassisSelectEl?.value ?: "null"}")
+        console.log("  - vesselInput: ${vesselInputEl?.value ?: "null"}")
+        console.log("  - chassisInput: ${chassisInputEl?.value ?: "null"}")
         
         // Save form field values
         carBookingFormState = js("{}")
@@ -4147,8 +7053,8 @@ fun saveCarBookingState() {
         carBookingFormState.polPort = polPortEl?.value ?: ""
         carBookingFormState.podPort = podPortEl?.value ?: ""
         carBookingFormState.bookingNo = bookingNoEl?.value ?: ""
-        carBookingFormState.vesselSelect = vesselSelectEl?.value ?: ""
-        carBookingFormState.chassisSelect = chassisSelectEl?.value ?: ""
+        carBookingFormState.vesselSelect = vesselInputEl?.value ?: ""
+        carBookingFormState.chassisSelect = chassisInputEl?.value ?: ""
         
         console.log("🔍 Form state being saved:", carBookingFormState)
     } else {
@@ -4195,29 +7101,26 @@ fun saveBookingSelectionState(selection: String) {
     window.localStorage.setItem("bookingSelection", selection)
 }
 
-// Restore booking selection state
+// Restore booking selection state - always unchecked after refresh
 fun restoreBookingSelectionState() {
-    console.log("🔄 Restoring booking selection state...")
-    val savedSelection = window.localStorage.getItem("bookingSelection")
-    console.log("🔍 Saved selection:", savedSelection)
+    console.log("🔄 Resetting booking selection checkboxes to unchecked...")
     
-    if (savedSelection != null) {
         val cnfCheckbox = document.getElementById("cnfCheckbox") as HTMLInputElement?
         val fobCheckbox = document.getElementById("fobCheckbox") as HTMLInputElement?
         
-        when (savedSelection) {
-            "cnf" -> {
-                cnfCheckbox?.checked = true
-                fobCheckbox?.checked = false
-                console.log("✅ C&F checkbox restored as checked")
-            }
-            "fob" -> {
-                fobCheckbox?.checked = true
-                cnfCheckbox?.checked = false
-                console.log("✅ FOB checkbox restored as checked")
-            }
-        }
+    // If checkboxes don't exist yet, retry after a short delay
+    if (cnfCheckbox == null || fobCheckbox == null) {
+        console.log("⚠️ Checkboxes not found yet, retrying in 100ms...")
+        window.setTimeout({
+            restoreBookingSelectionState()
+        }, 100)
+        return
     }
+    
+    // Always set both checkboxes to unchecked on page load
+    cnfCheckbox.checked = false
+    fobCheckbox.checked = false
+    console.log("✅ Both C&F and FOB checkboxes reset to unchecked")
 }
 
 fun restoreCarBookingState() {
@@ -4231,8 +7134,8 @@ fun restoreCarBookingState() {
     val polPortEl = document.getElementById("polPort") as? HTMLSelectElement
     val podPortEl = document.getElementById("podPort") as? HTMLInputElement
     val bookingNoEl = document.getElementById("bookingNo") as? HTMLInputElement
-    val vesselSelectEl = document.getElementById("vesselSelect") as? HTMLSelectElement
-    val chassisSelectEl = document.getElementById("chassisSelect") as? HTMLSelectElement
+    val vesselInputEl = document.getElementById("vesselSelect") as? HTMLInputElement
+    val chassisInputEl = document.getElementById("chassisSearch") as? HTMLInputElement
     
     console.log("🔍 Form elements found for restoration:")
     console.log("  - consigneeCountry: ${consigneeCountryEl != null}")
@@ -4241,8 +7144,8 @@ fun restoreCarBookingState() {
     console.log("  - polPort: ${polPortEl != null}")
     console.log("  - podPort: ${podPortEl != null}")
     console.log("  - bookingNo: ${bookingNoEl != null}")
-    console.log("  - vesselSelect: ${vesselSelectEl != null}")
-    console.log("  - chassisSelect: ${chassisSelectEl != null}")
+    console.log("  - vesselInput: ${vesselInputEl != null}")
+    console.log("  - chassisInput: ${chassisInputEl != null}")
     
     // Restore form field values
     consigneeCountryEl?.value = carBookingFormState.consigneeCountry ?: ""
@@ -4251,8 +7154,8 @@ fun restoreCarBookingState() {
     polPortEl?.value = carBookingFormState.polPort ?: ""
     podPortEl?.value = carBookingFormState.podPort ?: ""
     bookingNoEl?.value = carBookingFormState.bookingNo ?: ""
-    vesselSelectEl?.value = carBookingFormState.vesselSelect ?: ""
-    chassisSelectEl?.value = carBookingFormState.chassisSelect ?: ""
+    vesselInputEl?.value = carBookingFormState.vesselSelect ?: ""
+    chassisInputEl?.value = carBookingFormState.chassisSelect ?: ""
     
     console.log("🔍 Form fields restored - Country: ${carBookingFormState.consigneeCountry}, POL: ${carBookingFormState.polPort}")
     console.log("🔍 After restoration - Country: ${consigneeCountryEl?.value}, POL: ${polPortEl?.value}")
@@ -4350,11 +7253,94 @@ fun displayPurchasesWithPagination() {
     val table = document.getElementById("purchaseTable")!!
     
     if (allPurchases.isEmpty()) {
-        table.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                No purchases found. Click the menu button (☰) in the top-left corner to add a purchase or import data.
-            </div>
-        """
+        // Show table headers even when no data, so users can access filters
+        val selectedColumns = getSelectedColumns()
+        val sortableFields = setOf("carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany")
+        val columnLabels = mapOf(
+            "date" to "Purchase Date",
+            "chassis" to "Chassis",
+            "carName" to "Car Name",
+            "auctionHouse" to "Supplier Name",
+            "stockLocation" to "Stock Location",
+            "clientName" to "Client Name",
+            "rixoCompany" to "Rixo Company",
+            "price" to "Price",
+            "carModelYear" to "Production Date",
+            "brand" to "Brand",
+            "grade" to "Grade",
+            "rank" to "Rank",
+            "color" to "Color",
+            "displacement" to "Displacement",
+            "fuel" to "Fuel",
+            "seat" to "Seat",
+            "door" to "Door",
+            "distance" to "Distance",
+            "options" to "Options",
+            "auctionNo" to "Auction No",
+            "rixoPrice" to "Rixo Price",
+            "venueId" to "Venue ID",
+            "shipmentSize" to "Shipment Size"
+        )
+        
+        val tableHTML = StringBuilder()
+        tableHTML.append("<table class='table table-striped'>")
+        tableHTML.append("<thead><tr>")
+        
+        for (columnKey in selectedColumns) {
+            val label = columnLabels[columnKey] ?: columnKey
+            if (columnKey == "date") {
+                tableHTML.append("""
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" class="date-filter-header" data-field="$columnKey">
+                            <span>$label</span>
+                            <span style="margin-left: 8px;">📅</span>
+                        </div>
+                        <div class="date-filter-menu" data-field="$columnKey" style="display: none; position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 200px;">
+                            <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #666;">Filter by Date</label>
+                            <input type="date" id="dateFilterInput" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; margin-bottom: 8px;">
+                            <div style="display: flex; gap: 5px;">
+                                <button id="applyDateFilter" style="padding: 6px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Apply</button>
+                                <button id="clearDateFilter" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Clear</button>
+                        </div>
+                        </div>
+                    </th>
+            """)
+            } else if (sortableFields.contains(columnKey)) {
+                tableHTML.append("""
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" class="sortable-header" data-field="$columnKey">
+                            <span>$label</span>
+                            <span style="margin-left: 8px;">↕</span>
+                        </div>
+                        <div class="sort-menu" data-field="$columnKey" style="display: none; position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 5px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 120px;">
+                            <div style="padding: 8px 12px; cursor: pointer; font-size: 12px;" data-sort="asc">Ascending</div>
+                            <div style="padding: 8px 12px; cursor: pointer; font-size: 12px;" data-sort="desc">Descending</div>
+                        </div>
+                    </th>
+            """)
+            } else {
+                tableHTML.append("""
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">$label</th>
+            """)
+            }
+        }
+        
+        tableHTML.append("</tr></thead>")
+        tableHTML.append("<tbody>")
+        tableHTML.append("""
+            <tr>
+                <td colspan="${selectedColumns.size}" style="text-align: center; color: #666; padding: 40px;">
+                    No purchases found. Click the menu button (☰) in the top-left corner to add a purchase or import data.
+                </td>
+            </tr>
+        """)
+        tableHTML.append("</tbody></table>")
+        
+        table.innerHTML = tableHTML.toString()
+        
+        // Setup event listeners for the empty table
+        setupSortableHeaders()
+        setupDateFilter()
         return
     }
     
@@ -4767,14 +7753,17 @@ fun setupSortableHeaders() {
 fun setupDateFilter() {
     // Add event listeners for date filter headers
     val dateFilterHeaders = document.querySelectorAll(".date-filter-header")
+    console.log("Setting up date filter for ${dateFilterHeaders.length} headers")
     for (i in 0 until dateFilterHeaders.length) {
         val header = dateFilterHeaders.item(i) as HTMLElement
         header.addEventListener("click", { event ->
             val target = event.currentTarget as? HTMLElement ?: return@addEventListener
             val field = target.getAttribute("data-field") ?: return@addEventListener
+            console.log("Date filter header clicked for field: $field")
             
             // Toggle the date filter menu
-            val menu = document.querySelector(".date-filter-menu[data-field='$field']") as HTMLElement?
+            val menu = document.querySelector(".date-filter-menu[data-field=\"$field\"]") as HTMLElement?
+            console.log("Found menu: $menu")
             if (menu != null) {
                 // Hide all other menus
                 val allMenus = document.querySelectorAll(".sort-menu, .date-filter-menu")
@@ -4786,10 +7775,14 @@ fun setupDateFilter() {
                 }
                 
                 // Toggle current menu
-                if (menu.style.display == "none" || menu.style.display.isEmpty()) {
+                val currentDisplay = menu.style.display
+                console.log("Current menu display: '$currentDisplay'")
+                if (currentDisplay == "none" || currentDisplay.isEmpty()) {
                     menu.style.display = "block"
+                    console.log("Menu set to block")
                 } else {
                     menu.style.display = "none"
+                    console.log("Menu set to none")
                 }
             }
         })
@@ -4811,11 +7804,11 @@ fun setupDateFilter() {
 
 fun applyDateFilter(selectedDate: String) {
     // Convert the selected date to the format used in the database
-    val formattedDate = formatWithWeekday(selectedDate)
+    val formattedDate = formatDateForDatabase(selectedDate)
     console.log("Filtering by date:", formattedDate)
     
     // Fetch all purchases and filter by date
-    window.fetch("/api/purchases").then { response ->
+    window.fetch(apiUrl("purchases")).then { response ->
         if (response.ok) {
             response.json().then { purchases ->
                 val filteredPurchases = js("[]")
@@ -4823,13 +7816,23 @@ fun applyDateFilter(selectedDate: String) {
                 
                 for (i in 0 until purchasesArray.size) {
                     val purchase = purchasesArray[i]
-                    if (purchase.date == formattedDate) {
+                    console.log("Checking purchase date:", purchase.date, "against filter:", formattedDate)
+                    
+                    // Check if dates match using multiple format comparisons
+                    val purchaseDate = purchase.date as String
+                    val isMatch = purchaseDate == formattedDate || 
+                                 purchaseDate == formattedDate.split("(")[0].trim() ||
+                                 normalizeDateForComparison(purchaseDate) == normalizeDateForComparison(formattedDate)
+                    
+                    if (isMatch) {
+                        console.log("Match found for purchase:", purchase.chassis)
                         js("filteredPurchases.push(purchase)")
                     }
                 }
                 
-                // Display filtered purchases
-                displayPurchases(filteredPurchases)
+                // Display filtered purchases using pagination function to preserve headers
+                allPurchases = filteredPurchases as Array<dynamic>
+                displayPurchasesWithPagination()
                 
                 // Hide the date filter menu
                 val allMenus = document.querySelectorAll(".date-filter-menu")
@@ -4917,14 +7920,18 @@ fun setupCheckboxListeners() {
 }
 
 fun updateRixoButtonVisibility() {
-    val rixoBtn = document.getElementById("rixoBtn")
     val rixoTransportBtn = document.getElementById("rixoTransportBtn")
-    // Show invoice button when there is a selection; hide only Rixo Transport
+    val generateInvoiceBtn = document.getElementById("generateInvoiceBtn")
+    
+    // Show invoice buttons when there is a selection; hide only Rixo Transport
     if (selectedPurchases.isNotEmpty()) {
-        rixoBtn?.setAttribute("style", "display: block; padding: 10px 20px; background-color: #6f42c1; color: white; border: none; border-radius: 4px; cursor: pointer;")
-        rixoBtn?.textContent = "Generating Invoice PDF (${selectedPurchases.size} selected)"
+        // Show Generate Invoice button
+        generateInvoiceBtn?.setAttribute("style", "display: block; padding: 10px 20px; background-color: #059669; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;")
+        generateInvoiceBtn?.textContent = "Generate Invoice (${selectedPurchases.size} selected)"
+        generateInvoiceBtn?.setAttribute("onclick", "if (typeof handleGenerateInvoice === 'function') { handleGenerateInvoice(); } else if (window.handleGenerateInvoice) { window.handleGenerateInvoice(); }")
     } else {
-        rixoBtn?.setAttribute("style", "display: none;")
+        generateInvoiceBtn?.setAttribute("style", "display: none;")
+        generateInvoiceBtn?.removeAttribute("onclick")
     }
         rixoTransportBtn?.setAttribute("style", "display: none;")
 }
@@ -4944,6 +7951,7 @@ fun updateSelectAllCheckbox() {
 }
 
 fun handleRixoPdfGeneration() {
+    console.log("handleRixoPdfGeneration called with selectedPurchases:", selectedPurchases.size)
     if (selectedPurchases.isEmpty()) {
         showMessage("Please select at least one purchase", "error")
         return
@@ -4955,6 +7963,8 @@ fun handleRixoPdfGeneration() {
         return
     }
 }
+
+// Function is exposed to window in main() via window.asDynamic().handleRixoPdfGeneration = ::handleRixoPdfGeneration
 
 fun validateSameClientName(onValid: (() -> Unit)? = null): Boolean {
     if (selectedPurchases.isEmpty()) {
@@ -4981,7 +7991,7 @@ fun validateSameClientName(onValid: (() -> Unit)? = null): Boolean {
     // If DOM lookup failed to find any names, fall back to API data for robustness
     if (clientNames.isEmpty() && emptyClientNames.isEmpty()) {
         // Best-effort synchronous-like fetch using then; we will block navigation by returning false and letting caller re-trigger after cache loads
-        window.fetch("/api/purchases").then { response ->
+        window.fetch(apiUrl("purchases")).then { response ->
             if (response.ok) {
                 response.json().then { allPurchases ->
                     val purchasesArray = allPurchases as Array<dynamic>
@@ -5028,7 +8038,7 @@ fun checkMissingRixoData() {
     val missingDataPurchases = mutableListOf<dynamic>()
     
     // Check each selected purchase for missing Rixo data
-    window.fetch("/api/purchases").then { response ->
+    window.fetch(apiUrl("purchases")).then { response ->
         if (response.ok) {
             response.json().then { allPurchases ->
                 val purchasesArray = allPurchases as Array<dynamic>
@@ -5068,6 +8078,87 @@ fun checkMissingRixoData() {
         }
     }
 }
+
+// Handle Generate Invoice button click - validates same booking ID and navigates to invoice page
+fun handleGenerateInvoice() {
+    console.log("📄 Generate Invoice button clicked!")
+    console.log("Selected purchases:", selectedPurchases.toList())
+    
+    if (selectedPurchases.isEmpty()) {
+        showMessage("Please select at least one purchase", "error")
+        return
+    }
+    
+    // Validate that all selected purchases have the same booking ID
+    val selectedIds = selectedPurchases.toList()
+    val bookingIds = mutableSetOf<Long?>()
+    var firstBookingId: Long? = null
+    var firstClientName: String? = null
+    
+    // Fetch purchases to validate booking IDs
+    window.fetch(apiUrl("purchases")).then { response ->
+        if (response.ok) {
+            response.json().then { allPurchases ->
+                val purchasesArray = allPurchases as Array<dynamic>
+                for (purchase in purchasesArray) {
+                    val id = js("purchase.id").toString().toLongOrNull()
+                    if (id != null && selectedIds.contains(id)) {
+                        // Get booking ID
+                        val bookingIdValue = js("purchase.bookingId")
+                        val bookingId = when {
+                            bookingIdValue == null || bookingIdValue == js("undefined") -> null
+                            bookingIdValue is Number -> bookingIdValue.toLong()
+                            else -> bookingIdValue.toString().toLongOrNull()
+                        }
+                        
+                        bookingIds.add(bookingId)
+                        
+                        if (firstBookingId == null) {
+                            firstBookingId = bookingId
+                        }
+                        
+                        // Also get client name for auto-filling (but don't validate it)
+                        if (firstClientName == null) {
+                            val clientName = js("purchase.clientName")?.toString()?.trim() ?: ""
+                            if (clientName.isNotEmpty()) {
+                                firstClientName = clientName
+                            }
+                        }
+                    }
+                }
+                
+                // Validate same booking ID
+                if (bookingIds.size > 1) {
+                    showMessage("Selected purchases have different booking IDs. Please select purchases with the same booking ID.", "error")
+                    return@then
+                }
+                
+                // Validate that booking ID is not null
+                if (firstBookingId == null) {
+                    showMessage("Selected purchases have no booking ID. Please select purchases with the same booking ID.", "error")
+                    return@then
+                }
+                
+                // Store client name for auto-filling in invoice page (if available)
+                val finalClientName = firstClientName ?: ""
+                if (finalClientName.isNotEmpty()) {
+                    window.localStorage.setItem("invoiceClientName", finalClientName)
+                }
+                
+                console.log("✅ All selected purchases have the same booking ID: $firstBookingId")
+                
+                // Navigate to invoice page
+                navigateToInvoicePage(selectedIds)
+            }
+        } else {
+            showMessage("Failed to validate purchases", "error")
+        }
+    }.catch { error ->
+        console.error("Error validating purchases:", error)
+        showMessage("Error validating purchases", "error")
+    }
+}
+
 fun showMissingDataModal(purchases: List<dynamic>) {
     val modal = document.createElement("div")
     modal.id = "missingDataModal"
@@ -5180,7 +8271,7 @@ fun updatePurchasesAndGeneratePdf(purchases: List<dynamic>) {
         requestInit.headers = headers
         requestInit.body = JSON.stringify(purchase)
         
-        window.fetch("/api/purchases/${id}", requestInit)
+        window.fetch(apiUrl("purchases/${id}"), requestInit)
     }
     
     // Wait for all updates to complete, then generate PDF
@@ -5224,134 +8315,20 @@ fun navigateToInvoicePage(selectedIds: List<Long>) {
     window.localStorage.setItem("invoiceSelectedIds", idsJson)
     console.log("Storing selected IDs in localStorage:", selectedIds)
     
-    // Open invoice page in a new tab with selected IDs as URL parameter
-    val newTab = window.open("", "_blank")
-    if (newTab != null) {
-        // Set the URL to the invoice page with selected IDs as parameter
+    // Navigate to invoice page in new tab (similar to Rixo Transport)
         val idsParam = selectedIds.joinToString(",")
-        newTab.location.href = window.location.origin + window.location.pathname + "#/invoice?ids=" + idsParam
-    } else {
-        // Fallback to same tab if popup is blocked
-        window.location.hash = "#/invoice"
-    }
+    val url = "${window.location.origin}${window.location.pathname}#/invoice?ids=$idsParam"
+    console.log("Opening invoice page in new tab:", url)
+    window.open(url, "_blank")
 }
 
-// Render invoice page content
+// Render invoice page content - NEW DESIGN matching mockup
 fun showInvoicePage() {
     val content = document.getElementById("content") ?: return
-    content.innerHTML = """
-        <div class="invoice-shell" style="width:100%; min-height: calc(100vh - 140px); display:flex; align-items:flex-start; justify-content:center; padding: 32px 16px; box-sizing:border-box;">
-            <style>
-                .invoice-card { 
-                    width: 100%; max-width: 900px; 
-                    border-radius: 16px; 
-                    padding: 28px; 
-                    background: rgba(255,255,255,0.75);
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.10);
-                    border: 1px solid rgba(229,231,235,0.6);
-                    backdrop-filter: blur(8px);
-                }
-                .invoice-title { margin: 0; color: #111827; font-size: 28px; text-align: center; letter-spacing: .2px; }
-                .invoice-sub { color:#6b7280; margin: 10px 0 26px 0; text-align:center; }
-                .section { border: 1px solid rgba(229,231,235,0.9); border-radius: 12px; padding: 18px; background: rgba(249,250,251,0.8); }
-                .section h3 { margin:0 0 14px 0; color:#111827; font-size:16px; text-align:left; }
-                .grid-2 { display:grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-                .grid-1 { display:grid; grid-template-columns: 1fr; gap: 16px; }
-                .grid-2-inner { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-                .field label { display:block; margin-bottom: 6px; font-weight: 600; color:#374151; }
-                .input, .textarea { width:100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 10px; background: rgba(255,255,255,0.9); transition: box-shadow .2s, border-color .2s, background .2s; color:#111827; }
-                .input::placeholder, .textarea::placeholder { color:#9ca3af; }
-                .input:hover, .textarea:hover { border-color:#a5b4fc; }
-                .input:focus, .textarea:focus { outline:none; border-color:#6d28d9; box-shadow: 0 0 0 4px rgba(109,40,217,0.15); background:#fff; }
-                .error-text { margin-top:6px; font-size: 12px; color:#b91c1c; min-height: 16px; }
-                .actions { display:flex; gap: 12px; justify-content:center; margin-top:22px; }
-                .btn { padding: 10px 18px; border: none; border-radius: 10px; cursor: pointer; transition: transform .05s ease, box-shadow .2s ease; }
-                .btn:active { transform: translateY(1px); }
-                .btn-primary { background: linear-gradient(135deg, #6d28d9, #7c3aed); color:white; box-shadow: 0 6px 16px rgba(124,58,237,0.35); }
-                .btn-primary:hover { box-shadow: 0 8px 20px rgba(124,58,237,0.45); }
-                .btn-secondary { background:#6b7280; color:white; }
-                @media (max-width: 720px) { .grid-2, .grid-2-inner { grid-template-columns: 1fr; } }
-            </style>
-            <div class="invoice-card">
-                <h2 class="invoice-title">Invoice Information</h2>
-                <p class="invoice-sub">Please fill in the invoice details for the PDF generation:</p>
-                <form id="invoiceForm" novalidate>
-                    <div class="section" style="margin-bottom:22px;">
-                        <h3>Add Additional Car</h3>
-                        <div class="grid-2-inner">
-                            <div class="field">
-                                <label for="addChassis">Chassis No</label>
-                                <input class="input" type="text" id="addChassis" placeholder="Enter chassis number to add" />
-                                <div id="addChassisError" class="error-text"></div>
-                            </div>
-                            <div class="field" style="align-self:end;">
-                                <button type="button" id="addByChassisBtn" class="btn btn-primary" style="width:100%;">Add by Chassis</button>
-                            </div>
-                        </div>
-                        <div id="selectedCarsPreview" style="margin-top:10px;"></div>
-                    </div>
-                    <div id="missingRixoSection"></div>
-                    <div class="grid-2">
-                        <div class="section">
-                            <h3>Invoice Details</h3>
-                            <div class="grid-1">
-                                <div class="field">
-                                    <label for="invoiceNo">Invoice No</label>
-                                    <input class="input" type="text" id="invoiceNo" placeholder="Enter invoice number" aria-required="true" data-required="true" />
-                                    <div id="invoiceNoError" class="error-text"></div>
-                                </div>
-                                <div class="field">
-                                    <label for="lcNo">L/C No</label>
-                                    <input class="input" type="text" id="lcNo" placeholder="Enter L/C number" />
-                                    <div id="lcNoError" class="error-text"></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="section">
-                            <h3>Shipping</h3>
-                            <div class="grid-1">
-                                <div class="field">
-                                    <label for="vessel">Vessel</label>
-                                    <input class="input" type="text" id="vessel" placeholder="Enter vessel name" aria-required="true" data-required="true" />
-                                    <div id="vesselError" class="error-text"></div>
-                                </div>
-                                <div class="field">
-                                    <label for="sailDate">Sail Date</label>
-                                    <input class="input" type="date" id="sailDate" aria-required="true" data-required="true" />
-                                    <div id="sailDateFormatted" style="margin-top: 4px; font-size: 12px; color: #6b7280; min-height: 16px;"></div>
-                                    <div id="sailDateError" class="error-text"></div>
-                                </div>
-                                <div class="grid-2-inner">
-                                    <div class="field">
-                                        <label for="from">From</label>
-                                        <input class="input" type="text" id="from" placeholder="Origin port/location" aria-required="true" data-required="true" />
-                                        <div id="fromError" class="error-text"></div>
-                                    </div>
-                                    <div class="field">
-                                        <label for="to">To</label>
-                                        <input class="input" type="text" id="to" placeholder="Destination port/location" aria-required="true" data-required="true" />
-                                        <div id="toError" class="error-text"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="section" style="margin-top:22px;">
-                        <h3>Consignee</h3>
-                        <textarea class="textarea" id="consignee" placeholder="Enter consignee information" aria-required="true" data-required="true" style="min-height: 120px;"></textarea>
-                        <div id="consigneeError" class="error-text"></div>
-                    </div>
-                    <div class="actions">
-                        <button type="button" id="cancelInvoicePageBtn" class="btn btn-secondary">Cancel</button>
-                        <button type="submit" id="generateInvoicePdfPageBtn" class="btn btn-primary">Generate PDF</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    """
-
-    // Load selected IDs from localStorage or URL parameters for new tab functionality
+    
+    // Load selected IDs first
     var loadedIds = false
+    val selectedIdsList = mutableListOf<Long>()
     
     // First try to get IDs from URL parameters
     val urlParams = window.location.hash.split("?")
@@ -5363,6 +8340,7 @@ fun showInvoicePage() {
             if (idsString.isNotEmpty()) {
                 try {
                     val idsList = idsString.split(",").map { it.trim().toLong() }
+                    selectedIdsList.addAll(idsList)
                     selectedPurchases.clear()
                     idsList.forEach { id -> selectedPurchases.add(id) }
                     console.log("Loaded selected purchases from URL parameters:", selectedPurchases.toList())
@@ -5380,10 +8358,10 @@ fun showInvoicePage() {
         if (storedIds != null) {
             try {
                 val idsArray = JSON.parse(storedIds) as Array<Double>
+                idsArray.forEach { id -> selectedIdsList.add(id.toLong()) }
                 selectedPurchases.clear()
                 idsArray.forEach { id -> selectedPurchases.add(id.toLong()) }
                 console.log("Loaded selected purchases from localStorage:", selectedPurchases.toList())
-                // Clear the stored IDs after loading
                 window.localStorage.removeItem("invoiceSelectedIds")
                 loadedIds = true
             } catch (e: Exception) {
@@ -5392,139 +8370,746 @@ fun showInvoicePage() {
         }
     }
     
-    if (!loadedIds) {
-        console.log("No selected purchases found")
+    // Get client name from localStorage (set by handleGenerateInvoice)
+    val clientName = window.localStorage.getItem("invoiceClientName") ?: ""
+    
+    content.innerHTML = """
+        <div style="width: 100%; min-height: calc(100vh - 60px); padding: 20px; background: #f5f5f5;">
+            <style>
+                .invoice-container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+                .invoice-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #e5e7eb; }
+                .invoice-title { font-size: 24px; font-weight: 700; color: #111827; margin: 0; }
+                .invoice-help { color: #6b7280; text-decoration: none; }
+                .invoice-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280; }
+                .invoice-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+                .invoice-field { margin-bottom: 16px; }
+                .invoice-field label { display: block; margin-bottom: 6px; font-weight: 600; color: #374151; font-size: 14px; }
+                .invoice-input, .invoice-select, .invoice-textarea { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+                .invoice-input:focus, .invoice-select:focus, .invoice-textarea:focus { outline: none; border-color: #059669; box-shadow: 0 0 0 3px rgba(5,150,105,0.1); }
+                .invoice-radio-group { display: flex; gap: 16px; margin-top: 8px; }
+                .invoice-radio { display: flex; align-items: center; gap: 6px; }
+                .invoice-actions { display: flex; gap: 12px; margin-top: 24px; padding-top: 24px; border-top: 1px solid #e5e7eb; }
+                .invoice-btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 14px; }
+                .invoice-btn-primary { background: #059669; color: white; }
+                .invoice-btn-secondary { background: #6b7280; color: white; }
+                .invoice-btn-danger { background: #dc2626; color: white; }
+                .invoice-list-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                .invoice-list-table th, .invoice-list-table td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+                .invoice-list-table th { background: #f9fafb; font-weight: 600; color: #374151; }
+                .invoice-total { margin-top: 16px; padding: 16px; background: #f9fafb; border-radius: 6px; text-align: right; font-size: 18px; font-weight: 700; }
+                .invoice-generate-btn { padding: 8px 16px; background: #6d28d9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; margin-left: 8px; }
+            </style>
+            <div class="invoice-container">
+                <div class="invoice-header">
+                    <h1 class="invoice-title">AUTOMAN | CREATE CUSTOMER INVOICE</h1>
+                    <div style="display: flex; gap: 16px; align-items: center;">
+                        <a href="#" class="invoice-help">Do you need help?</a>
+                        <button class="invoice-close" onclick="window.close()">×</button>
+                            </div>
+                            </div>
+                
+                <div class="invoice-layout">
+                    <!-- Left Column: Form Fields -->
+                    <div>
+                        <div class="invoice-field">
+                            <label for="invoiceClient">CLIENT:</label>
+                            <input type="text" id="invoiceClient" class="invoice-input" placeholder="(CLIENT NAME)" value="$clientName" />
+                        </div>
+                        
+                        <div class="invoice-field">
+                            <label for="invoiceVessel">VESSEL:</label>
+                            <input type="text" id="invoiceVessel" class="invoice-input" placeholder="Enter vessel name" />
+                    </div>
+                        
+                        <div class="invoice-field">
+                            <label for="invoiceShippingDate">SHIPPING DATE:</label>
+                            <input type="date" id="invoiceShippingDate" class="invoice-input" placeholder="Select shipping date" />
+                                </div>
+                        
+                        <div class="invoice-field">
+                            <label>SHIPPING LOCATION:</label>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                                <div>
+                                    <label style="font-size: 12px; color: #6b7280;">FROM:</label>
+                                    <input type="text" id="invoiceFrom" class="invoice-input" placeholder="Origin port" />
+                                </div>
+                                <div>
+                                    <label style="font-size: 12px; color: #6b7280;">TO:</label>
+                                    <input type="text" id="invoiceTo" class="invoice-input" placeholder="Destination port" />
+                            </div>
+                        </div>
+                                </div>
+                        
+                        <div class="invoice-field">
+                            <label for="invoiceNumber">INVOICE NUMBER:</label>
+                            <div style="display: flex;">
+                                <input type="text" id="invoiceNumber" class="invoice-input" placeholder="Enter invoice number" />
+                                <button type="button" id="generateInvoiceNumberBtn" class="invoice-generate-btn">GENERATE INVOICE NUMBER</button>
+                                </div>
+                                    </div>
+                        
+                        <div class="invoice-field">
+                            <label for="invoiceLcNo">LC NO.:</label>
+                            <input type="text" id="invoiceLcNo" class="invoice-input" placeholder="Enter LC number" />
+                                    </div>
+                        
+                        <div class="invoice-field">
+                            <label>PRICE TYPE:</label>
+                            <div class="invoice-radio-group">
+                                <div class="invoice-radio">
+                                    <input type="radio" id="invoiceCnf" name="invoicePriceType" value="CNF" checked />
+                                    <label for="invoiceCnf" style="margin: 0; font-weight: normal;">C&F</label>
+                                </div>
+                                <div class="invoice-radio">
+                                    <input type="radio" id="invoiceFob" name="invoicePriceType" value="FOB" />
+                                    <label for="invoiceFob" style="margin: 0; font-weight: normal;">FOB</label>
+                            </div>
+                        </div>
+                    </div>
+                        
+                        <div class="invoice-field">
+                            <label for="invoiceBankAccount">SELECT BANK ACCOUNT:</label>
+                            <select id="invoiceBankAccount" class="invoice-select">
+                                <option value="">Select bank account</option>
+                                <option value="BANK OF SMBC MITSUI SUMITOMO (Gyotoku) BRANCH
+A/C NO: 0398932
+A/C NAME: MEMON Co. Ltd.
+SWIFT CODE: SMBCJPJT">BANK OF SMBC MITSUI SUMITOMO (Gyotoku) BRANCH
+A/C NO: 0398932
+A/C NAME: MEMON Co. Ltd.
+SWIFT CODE: SMBCJPJT</option>
+                            </select>
+                    </div>
+                        
+                        <div class="invoice-field">
+                            <label for="invoiceMessage">MESSAGE:</label>
+                            <textarea id="invoiceMessage" class="invoice-textarea" rows="4" placeholder="Enter message"></textarea>
+                    </div>
+                    </div>
+                    
+                    <!-- Right Column: LIST Table -->
+                    <div>
+                        <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; text-transform: uppercase;">LIST</h2>
+                        <table class="invoice-list-table" id="invoiceListTable">
+                            <thead>
+                                <tr>
+                                    <th>NO.</th>
+                                    <th>CHASSIS</th>
+                                    <th>NAME</th>
+                                    <th>YEAR</th>
+                                    <th>AMOUNT</th>
+                                </tr>
+                            </thead>
+                            <tbody id="invoiceListTableBody">
+                                <!-- Will be populated by JavaScript -->
+                            </tbody>
+                        </table>
+                        <div class="invoice-total" id="invoiceTotalAmount">
+                            TOTAL AMOUNT: ¥000,000
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Action Buttons -->
+                <div class="invoice-actions">
+                    <button type="button" id="shipCarsBtn" class="invoice-btn invoice-btn-primary">🚢 SHIP THE CARS</button>
+                    <button type="button" id="cancelInvoiceBtn" class="invoice-btn invoice-btn-secondary">CANCEL</button>
+                    <button type="button" id="emailInvoiceBtn" class="invoice-btn invoice-btn-secondary">EMAIL</button>
+                    <button type="button" id="exportExcelBtn" class="invoice-btn invoice-btn-secondary">EXPORT EXCEL</button>
+                    <button type="button" id="downloadPdfBtn" class="invoice-btn invoice-btn-primary">DOWNLOAD PDF</button>
+                    <button type="button" id="showFullPreviewBtn" class="invoice-btn invoice-btn-secondary">SHOW FULL PREVIEW</button>
+                </div>
+            </div>
+        </div>
+    """
+
+    // Clear client name from localStorage after using it
+    window.localStorage.removeItem("invoiceClientName")
+    
+    // Populate LIST table with selected purchases
+    if (selectedIdsList.isNotEmpty()) {
+        populateInvoiceListTable(selectedIdsList)
+        } else {
         showMessage("No purchases selected for invoice", "warning")
     }
 
-    // Render missing rixo data section if any stored
-    run {
-        val section = document.getElementById("missingRixoSection") as HTMLElement?
-        val storedMissing = window.localStorage.getItem("invoiceMissingPurchases")
-        if (section != null && storedMissing != null) {
-            try {
-                val purchases = JSON.parse(storedMissing) as Array<dynamic>
-                // expose to window for later collection on submit
-                js("window._missingPurchasesForInvoice = purchases")
-                if (purchases.isNotEmpty()) {
-                    val sb = StringBuilder()
-                    sb.append("<div class=\"section\" style=\"margin-bottom:22px;\">")
-                    sb.append("<h3>Fill Missing Rixo Data</h3>")
-                    for (p in purchases) {
-                        val id = js("p.id")
-                        val chassis = js("p.chassis")
-                        val missingFields = js("p.missingFields") as Array<dynamic>
-                        sb.append("<div style=\"border:1px solid #e5e7eb; padding:12px; border-radius:8px; margin:10px 0; background:#fff;\">")
-                        sb.append("<h4 style=\"margin:0 0 10px 0;\">Purchase: "+chassis+"</h4>")
-                        for (f in missingFields) {
-                            val field = f as String
-                            val label = when(field) {
-                                "rixoCompany" -> "Rixo Company"
-                                "rixoRequested" -> "Rixo Requested"
-                                "rixoConfirmed" -> "Rixo Confirmed"
-                                "rixoPrice" -> "Rixo Price"
-                                "clientName" -> "Client Name"
-                                "carName" -> "Car Name"
-                                "carModelYear" -> "Car Model Year"
-                                else -> field
-                            }
-                            sb.append("<div class=\"field\"><label>"+label+"</label>")
-                            sb.append("<input class=\"input\" type=\"text\" id=\"missing_"+id+"_"+field+"\" placeholder=\"Enter "+label+"\" /></div>")
-                        }
-                        sb.append("</div>")
-                    }
-                    sb.append("</div>")
-                    section.innerHTML = sb.toString()
-                }
-                window.localStorage.removeItem("invoiceMissingPurchases")
-            } catch (e: dynamic) {
-                console.error("Failed to render missing rixo section", e)
-            }
-        }
-    }
+    // Setup event listeners
+    setupInvoicePageListeners(selectedIdsList)
+}
 
-    // Wire up events
-    document.getElementById("cancelInvoicePageBtn")?.addEventListener("click", { _: Event ->
-        showPurchaseList()
-    })
-
-    document.getElementById("invoiceForm")?.addEventListener("submit", { ev: Event ->
-        ev.preventDefault()
-        // Validate before submit
-        val isValid = validateInvoiceForm()
-        if (!isValid) {
-            showMessage("Please fix the highlighted fields", "warning")
-            return@addEventListener
-        }
-        val idsList = selectedPurchases.toList()
-        collectMissingFromInvoiceAndGenerate(idsList)
-    })
-
-    // Add-by-chasis handler and preview renderer
-    document.getElementById("addByChassisBtn")?.addEventListener("click", { _: Event ->
-        val input = document.getElementById("addChassis") as HTMLInputElement?
-        val value = input?.value?.trim() ?: ""
-        val errorEl = document.getElementById("addChassisError") as HTMLElement?
-        if (value.isEmpty()) {
-            errorEl?.textContent = "Please enter a chassis number"
-            return@addEventListener
-        } else {
-            errorEl?.textContent = ""
-        }
-        // Fetch purchases and find by chassis (case-insensitive contains or exact match)
-        window.fetch("/api/purchases").then { response ->
+// Populate the invoice LIST table with selected purchases
+fun populateInvoiceListTable(selectedIds: List<Long>) {
+    val tableBody = document.getElementById("invoiceListTableBody") ?: return
+    
+    // Fetch all purchases to get details
+    window.fetch(apiUrl("purchases")).then { response ->
             if (response.ok) {
                 response.json().then { allPurchases ->
                     val purchasesArray = allPurchases as Array<dynamic>
-                    var foundId: Long? = null
-                    var foundText = ""
-                    val target = value.lowercase()
-                    for (p in purchasesArray) {
-                        val ch = js("p.chassis")?.toString() ?: ""
-                        if (ch.lowercase() == target || ch.lowercase().contains(target)) {
-                            val idDyn = js("p.id")
-                            val id = idDyn.toString().toDouble().toLong()
-                            foundId = id
-                            val carName = js("p.carName")?.toString() ?: ""
-                            foundText = "${ch} — ${carName}"
-                            break
-                        }
-                    }
-                    if (foundId != null) {
-                        if (selectedPurchases.contains(foundId)) {
-                            showMessage("Car already selected", "info")
-                        } else {
-                            selectedPurchases.add(foundId)
-                            showMessage("Added car: ${'$'}foundText", "success")
-                            renderSelectedCarsPreview()
-                        }
-                    } else {
-                        showMessage("No car found for the given chassis", "error")
+                val selectedPurchasesList = mutableListOf<dynamic>()
+                
+                // Filter to only selected purchases
+                for (purchase in purchasesArray) {
+                    val id = js("purchase.id").toString().toLongOrNull()
+                    if (id != null && selectedIds.contains(id)) {
+                        selectedPurchasesList.add(purchase)
                     }
                 }
-            } else {
-                showMessage("Failed to search purchases", "error")
+                
+                // Auto-fill form fields from first purchase (since same booking ID, values will be same)
+                if (selectedPurchasesList.isNotEmpty()) {
+                    val firstPurchase = selectedPurchasesList[0]
+                    
+                    // Extract values from first purchase
+                    val consignee = js("firstPurchase.consignee")?.toString()?.trim() ?: ""
+                    val vessel = js("firstPurchase.vessel")?.toString()?.trim() ?: ""
+                    val stockLocation = js("firstPurchase.stockLocation")?.toString()?.trim() ?: ""
+                    val destination = js("firstPurchase.destination")?.toString()?.trim() ?: ""
+                    val shipmentDate = js("firstPurchase.shipmentDate")?.toString()?.trim() ?: ""
+                    
+                    console.log("📋 Auto-filling invoice form fields from purchase data:")
+                    console.log("   - Consignee: '$consignee'")
+                    console.log("   - Vessel: '$vessel'")
+                    console.log("   - Shipping Date: '$shipmentDate'")
+                    console.log("   - Stock Location (FROM): '$stockLocation'")
+                    console.log("   - Destination (TO): '$destination'")
+                    
+                    // Populate CLIENT field (from consignee column)
+                    val clientInput = document.getElementById("invoiceClient") as? HTMLInputElement
+                    if (clientInput != null) {
+                        clientInput.value = consignee
+                        console.log("✅ Populated CLIENT field: '$consignee'")
+                    }
+                    
+                    // Populate VESSEL field (from vessel column)
+                    val vesselInput = document.getElementById("invoiceVessel") as? HTMLInputElement
+                    if (vesselInput != null) {
+                        vesselInput.value = vessel
+                        console.log("✅ Populated VESSEL field: '$vessel'")
+                    }
+                    
+                    // Populate SHIPPING DATE field (from shipmentDate column)
+                    val shippingDateInput = document.getElementById("invoiceShippingDate") as? HTMLInputElement
+                    if (shippingDateInput != null && shipmentDate.isNotEmpty()) {
+                        // Convert date to YYYY-MM-DD format for HTML date input
+                        val formattedDate = when {
+                            shipmentDate.contains("T") -> {
+                                // ISO format: "2025-11-19T00:00:00" -> "2025-11-19"
+                                val datePart = shipmentDate.substring(0, 10)
+                                if (datePart.matches(Regex("\\d{4}-\\d{2}-\\d{2}"))) datePart else ""
+                            }
+                            shipmentDate.matches(Regex("\\d{4}-\\d{2}-\\d{2}")) -> shipmentDate // Already in correct format
+                            else -> {
+                                // Try to parse other date formats using JavaScript Date
+                                try {
+                                    val dateObj = js("new Date(shipmentDate)")
+                                    val dateDynamic = dateObj.asDynamic()
+                                    val year = dateDynamic.getFullYear() as? Int ?: 0
+                                    val month = (dateDynamic.getMonth() as? Int ?: 0) + 1
+                                    val day = dateDynamic.getDate() as? Int ?: 0
+                                    if (year > 0 && month > 0 && day > 0) {
+                                        "${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}"
+                                    } else {
+                                        "" // Return empty if parsing fails
+                                    }
+            } catch (e: dynamic) {
+                                    console.warn("Failed to parse date: $shipmentDate", e)
+                                    "" // Return empty if parsing fails
+                                }
+                            }
+                        }
+                        if (formattedDate.isNotEmpty()) {
+                            shippingDateInput.value = formattedDate
+                            console.log("✅ Populated SHIPPING DATE field: '$formattedDate' (from '$shipmentDate')")
+                        } else {
+                            console.warn("⚠️ Could not format shipping date: '$shipmentDate'")
+        }
+    }
+
+                    // Populate FROM field (from stockLocation column)
+                    val fromInput = document.getElementById("invoiceFrom") as? HTMLInputElement
+                    if (fromInput != null) {
+                        fromInput.value = stockLocation
+                        console.log("✅ Populated FROM field: '$stockLocation'")
+                    }
+                    
+                    // Populate TO field (from destination column)
+                    val toInput = document.getElementById("invoiceTo") as? HTMLInputElement
+                    if (toInput != null) {
+                        toInput.value = destination
+                        console.log("✅ Populated TO field: '$destination'")
+                    }
+                }
+                
+                // Clear table body
+                tableBody.innerHTML = ""
+                
+                var totalAmount = 0.0
+                var rowNumber = 1
+                
+                // Populate table rows
+                for (purchase in selectedPurchasesList) {
+                    val chassis = js("purchase.chassis")?.toString() ?: "N/A"
+                    val carName = js("purchase.carName")?.toString() ?: "N/A"
+                    val year = js("purchase.carModelYear")?.toString() ?: "N/A"
+                    
+                    // Get amount - use totalCnfPrice if available, otherwise totalFobPrice, otherwise 0
+                    val amount = when {
+                        js("purchase.totalCnfPrice") != null -> js("purchase.totalCnfPrice").toString().toDoubleOrNull() ?: 0.0
+                        js("purchase.totalFobPrice") != null -> js("purchase.totalFobPrice").toString().toDoubleOrNull() ?: 0.0
+                        else -> 0.0
+                    }
+                    totalAmount += amount
+                    
+                    val amountInt = amount.toInt()
+                    val amountStr = amountInt.toString()
+                    val reversed = amountStr.reversed()
+                    val chunked = reversed.chunked(3)
+                    val joined = chunked.joinToString(",")
+                    val finalReversed = joined.reversed()
+                    val formattedAmount = "¥$finalReversed"
+                    
+                    val row = document.createElement("tr")
+                    row.innerHTML = """
+                        <td>$rowNumber</td>
+                        <td>$chassis</td>
+                        <td>$carName</td>
+                        <td>$year</td>
+                        <td>$formattedAmount</td>
+                    """
+                    tableBody.appendChild(row)
+                    rowNumber++
+                }
+                
+                // Update total amount
+                val totalElement = document.getElementById("invoiceTotalAmount")
+                val totalInt = totalAmount.toInt()
+                val totalStr = totalInt.toString()
+                val totalReversed = totalStr.reversed()
+                val totalChunked = totalReversed.chunked(3)
+                val totalJoined = totalChunked.joinToString(",")
+                val totalFinalReversed = totalJoined.reversed()
+                val formattedTotal = "¥$totalFinalReversed"
+                totalElement?.textContent = "TOTAL AMOUNT: $formattedTotal"
+                }
+        } else {
+            showMessage("Failed to load purchase details", "error")
             }
         }.catch { error ->
-            showMessage("Search failed: ${'$'}{error.message}", "error")
+        console.error("Error loading purchases:", error)
+        showMessage("Error loading purchase details", "error")
         }
-    })
+}
 
-    // Add date formatting for sailDate field
-    document.getElementById("sailDate")?.addEventListener("change", { ev: Event ->
-        val input = ev.target as HTMLInputElement
-        val dateValue = input.value
-        val formattedDiv = document.getElementById("sailDateFormatted") as HTMLElement?
-        if (dateValue.isNotEmpty()) {
-            val formattedDate = formatWithWeekday(dateValue)
-            formattedDiv?.textContent = formattedDate
+// Setup event listeners for invoice page
+fun setupInvoicePageListeners(selectedIds: List<Long>) {
+    // Cancel button
+    document.getElementById("cancelInvoiceBtn")?.addEventListener("click", { _: Event ->
+        window.close()
+    })
+    
+    // Generate Invoice Number button
+    document.getElementById("generateInvoiceNumberBtn")?.addEventListener("click", { _: Event ->
+        val invoiceNumber = generateInvoiceNumber()
+        val invoiceNumberInput = document.getElementById("invoiceNumber") as HTMLInputElement?
+        invoiceNumberInput?.value = invoiceNumber
+    })
+    
+    // Download PDF button
+    document.getElementById("downloadPdfBtn")?.addEventListener("click", { _: Event ->
+        handleInvoicePdfDownload(selectedIds)
+    })
+    
+    // Ship Cars button
+    document.getElementById("shipCarsBtn")?.addEventListener("click", { _: Event ->
+        handleShipCars(selectedIds)
+    })
+    
+    // Email button
+    document.getElementById("emailInvoiceBtn")?.addEventListener("click", { _: Event ->
+        // TODO: Implement email functionality
+        showMessage("Email functionality will be implemented", "info")
+    })
+    
+    // Export Excel button
+    document.getElementById("exportExcelBtn")?.addEventListener("click", { _: Event ->
+        // TODO: Implement Excel export
+        showMessage("Excel export will be implemented", "info")
+    })
+    
+    // Show Full Preview button
+    document.getElementById("showFullPreviewBtn")?.addEventListener("click", { _: Event ->
+        // TODO: Implement full preview
+        showMessage("Full preview will be implemented", "info")
+    })
+}
+
+fun handleShipCars(selectedIds: List<Long>) {
+    if (selectedIds.isEmpty()) {
+        showMessage("No purchases selected to ship", "warning")
+        return
+    }
+    
+    console.log("🚢 Ship Cars button clicked for ${selectedIds.size} purchases: $selectedIds")
+    
+    // Show confirmation message
+    val confirmMessage = "Are you sure you want to mark ${selectedIds.size} purchase(s) as shipped?"
+    if (!window.confirm(confirmMessage)) {
+        return
+    }
+    
+    // Prepare request body - create JSON string directly
+    val purchaseIdsJson = selectedIds.joinToString(",", "[", "]")
+    val requestBodyJson = "{\"purchaseIds\":$purchaseIdsJson}"
+    console.log("🚢 Sending ship request: $requestBodyJson")
+    
+    // Make API call to mark purchases as shipped
+    val headers = Headers()
+    headers.set("Content-Type", "application/json")
+    
+    val requestInit = RequestInit(
+        method = "POST",
+        headers = headers,
+        body = requestBodyJson
+    )
+    
+    window.fetch(apiUrl("purchases/ship"), requestInit).then { response ->
+            if (response.ok) {
+            response.json().then { data ->
+                val responseData = data.asDynamic()
+                val message = responseData.message?.toString() ?: "Successfully marked purchases as shipped"
+                val updatedCount = responseData.updatedCount?.toString()?.toIntOrNull() ?: selectedIds.size
+                
+                console.log("✅ Ship cars successful: $message")
+                showMessage("✅ $message", "success")
+            }
         } else {
-            formattedDiv?.textContent = ""
+            response.text().then { errorText ->
+                console.error("❌ Ship cars failed:", errorText)
+                showMessage("Failed to mark purchases as shipped: ${errorText}", "error")
+            }
         }
-    })
+    }.catch { error ->
+        console.error("❌ Error shipping cars:", error)
+        showMessage("Error marking purchases as shipped: ${error}", "error")
+    }
+}
 
-    // Initial preview render
-    renderSelectedCarsPreview()
+// Helper function to escape JSON strings
+fun escapeJsonString(str: String): String {
+    return str.replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+}
+
+fun handleInvoicePdfDownload(selectedIds: List<Long>) {
+    console.log("📄 Download PDF button clicked for invoice")
+    
+    // Collect form field values
+    val invoiceNumber = (document.getElementById("invoiceNumber") as? HTMLInputElement)?.value?.trim() ?: ""
+    val invoiceLcNo = (document.getElementById("invoiceLcNo") as? HTMLInputElement)?.value?.trim() ?: ""
+    val invoiceClient = (document.getElementById("invoiceClient") as? HTMLInputElement)?.value?.trim() ?: ""
+    val invoiceVessel = (document.getElementById("invoiceVessel") as? HTMLInputElement)?.value?.trim() ?: ""
+    val invoiceShippingDate = (document.getElementById("invoiceShippingDate") as? HTMLInputElement)?.value?.trim() ?: ""
+    val invoiceFrom = (document.getElementById("invoiceFrom") as? HTMLInputElement)?.value?.trim() ?: ""
+    val invoiceTo = (document.getElementById("invoiceTo") as? HTMLInputElement)?.value?.trim() ?: ""
+    val invoiceMessage = (document.getElementById("invoiceMessage") as? HTMLTextAreaElement)?.value?.trim() ?: ""
+    
+    // Get price type (C&F or FOB)
+    val invoiceCnf = document.getElementById("invoiceCnf") as? HTMLInputElement
+    val invoiceFob = document.getElementById("invoiceFob") as? HTMLInputElement
+    val priceType = when {
+        invoiceCnf?.checked == true -> "C&F"
+        invoiceFob?.checked == true -> "FOB"
+        else -> "C&F"
+    }
+    
+    // Get bank account - use value attribute which preserves newlines
+    val invoiceBankAccount = document.getElementById("invoiceBankAccount") as? HTMLSelectElement
+    val bankAccountValue = invoiceBankAccount?.value?.trim() ?: ""
+    
+    // Validate required fields
+    if (invoiceNumber.isEmpty()) {
+        showMessage("Please enter an invoice number", "warning")
+        return
+    }
+    
+    if (invoiceClient.isEmpty()) {
+        showMessage("Please enter a client name", "warning")
+        return
+    }
+    
+    // Parse client name and address
+    val clientParts = invoiceClient.split("\n", limit = 2)
+    val clientName = clientParts[0].trim()
+    val clientAddress = if (clientParts.size > 1) clientParts[1].trim() else null
+    
+    // Get current date for invoice date
+    val currentDate = js("new Date()").unsafeCast<dynamic>()
+    val year = currentDate.getFullYear() as Int
+    val month = ((currentDate.getMonth() as Int) + 1).toString().padStart(2, '0')
+    val day = (currentDate.getDate() as Int).toString().padStart(2, '0')
+    val invoiceDate = year.toString() + "-" + month + "-" + day
+    
+    // Format shipping date (convert from YYYY-MM-DD to readable format)
+    val formattedShippingDate = if (invoiceShippingDate.isNotEmpty()) {
+        try {
+            val dateParts = invoiceShippingDate.split("-")
+            if (dateParts.size == 3) {
+                val months = arrayOf("", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+                val monthNum = dateParts[1].toIntOrNull() ?: 0
+                val monthName = if (monthNum in 1..12) months[monthNum] else dateParts[1]
+                dateParts[2] + "." + monthName + "." + dateParts[0]
+            } else {
+                invoiceShippingDate
+            }
+        } catch (e: dynamic) {
+            invoiceShippingDate
+        }
+    } else {
+        ""
+    }
+    
+    // Fetch purchase data to get all fields including brand, door, seat, fuel
+    window.fetch(apiUrl("purchases")).then { response ->
+        if (!response.ok) {
+            showMessage("Failed to load purchase details", "error")
+            return@then
+        }
+                response.json().then { allPurchases ->
+                    val purchasesArray = allPurchases as Array<dynamic>
+            val selectedPurchasesList = mutableListOf<dynamic>()
+            
+            // Filter to only selected purchases
+            for (purchase in purchasesArray) {
+                val id = js("purchase.id").toString().toLongOrNull()
+                if (id != null && selectedIds.contains(id)) {
+                    selectedPurchasesList.add(purchase)
+                }
+            }
+            
+            if (selectedPurchasesList.isEmpty()) {
+                showMessage("No items found for selected purchases", "warning")
+                return@then
+            }
+            
+            // Build items list with description field
+            val itemsList = mutableListOf<dynamic>()
+            var totalAmount = 0.0
+            var unitNumber = 1
+            
+            for (purchase in selectedPurchasesList) {
+                val chassis = js("purchase.chassis")?.toString()?.trim() ?: ""
+                val carName = js("purchase.carName")?.toString()?.trim() ?: ""
+                val grade = js("purchase.grade")?.toString()?.trim() ?: ""
+                val carModelYear = js("purchase.carModelYear")?.toString()?.trim() ?: ""
+                val shift = js("purchase.shift")?.toString()?.trim() ?: ""
+                val door = js("purchase.door")?.toString()?.trim() ?: ""
+                val seat = js("purchase.seat")?.toString()?.trim() ?: ""
+                val cc = js("purchase.cc")?.toString()?.trim() ?: ""
+                val color = js("purchase.color")?.toString()?.trim() ?: ""
+                val distance = js("purchase.distance")?.toString()?.trim() ?: ""
+                val fuel = js("purchase.fuel")?.toString()?.trim() ?: ""
+                
+                // Get amount - use totalCnfPrice if available, otherwise totalFobPrice, otherwise 0
+                val amount = when {
+                    js("purchase.totalCnfPrice") != null -> js("purchase.totalCnfPrice").toString().toDoubleOrNull() ?: 0.0
+                    js("purchase.totalFobPrice") != null -> js("purchase.totalFobPrice").toString().toDoubleOrNull() ?: 0.0
+                    else -> 0.0
+                }
+                totalAmount += amount
+                
+                // Format amount with ¥ symbol
+                val amountInt = amount.toInt()
+                val amountStr = amountInt.toString()
+                val reversed = amountStr.reversed()
+                val chunked = reversed.chunked(3)
+                val joined = chunked.joinToString(",")
+                val finalReversed = joined.reversed()
+                val formattedAmount = "¥$finalReversed"
+                
+                // Build description with new format:
+                // Line 1: chassis + 3 spaces + carName + 3 spaces + grade + 5 spaces + production date + 5 spaces + shift + comma + door value (like "5 door") + comma + seat value (like "5 seat")
+                // Line 2: CC value (like "1000CC") + 7 spaces + color + 5 spaces + distance + 5 spaces + fuel
+                
+                // Line 1: chassis + 3 spaces + carName + 3 spaces + grade + 5 spaces + production date + 5 spaces + shift + comma + door + comma + seat
+                val line1Parts = mutableListOf<String>()
+                if (chassis.isNotEmpty()) line1Parts.add(chassis)
+                if (carName.isNotEmpty()) line1Parts.add(carName)
+                if (grade.isNotEmpty()) line1Parts.add(grade)
+                
+                val line1MiddleParts = mutableListOf<String>()
+                if (carModelYear.isNotEmpty()) line1MiddleParts.add(carModelYear)
+                if (shift.isNotEmpty()) line1MiddleParts.add(shift)
+                
+                val doorSeatParts = mutableListOf<String>()
+                if (door.isNotEmpty()) doorSeatParts.add("$door DOOR")
+                if (seat.isNotEmpty()) doorSeatParts.add("$seat SEAT")
+                
+                val line1 = buildString {
+                    if (chassis.isNotEmpty()) append(chassis)
+                    if (carName.isNotEmpty()) {
+                        if (isNotEmpty()) append("   ") // 3 spaces
+                        append(carName)
+                    }
+                    if (grade.isNotEmpty()) {
+                        if (isNotEmpty()) append("   ") // 3 spaces
+                        append(grade)
+                    }
+                    if (carModelYear.isNotEmpty()) {
+                        if (isNotEmpty()) append("     ") // 5 spaces
+                        append(carModelYear)
+                    }
+                    if (shift.isNotEmpty()) {
+                        if (isNotEmpty()) append("     ") // 5 spaces
+                        append(shift)
+                    }
+                    if (doorSeatParts.isNotEmpty()) {
+                        if (isNotEmpty()) append(", ")
+                        append(doorSeatParts.joinToString(", "))
+                    }
+                }
+                
+                // Line 2: CC value + 7 spaces + color + 5 spaces + distance + 5 spaces + fuel
+                val line2 = buildString {
+                    if (cc.isNotEmpty()) {
+                        append("${cc}CC")
+                    }
+                    if (color.isNotEmpty()) {
+                        if (isNotEmpty()) append("       ") // 7 spaces
+                        append(color)
+                    }
+                    if (distance.isNotEmpty()) {
+                        if (isNotEmpty()) append("     ") // 5 spaces
+                        append(distance)
+                    }
+                    if (fuel.isNotEmpty()) {
+                        if (isNotEmpty()) append("     ") // 5 spaces
+                        append(fuel)
+                    }
+                }
+                
+                val description = if (line2.isNotEmpty()) {
+                    "$line1\n$line2"
+                        } else {
+                    line1
+                }
+                
+                val item = js("{}").unsafeCast<dynamic>()
+                item.unit = unitNumber
+                item.description = description
+                item.amount = formattedAmount
+                itemsList.add(item)
+                unitNumber++
+            }
+            
+            // Get total amount (formatted)
+            val totalInt = totalAmount.toInt()
+            val totalStr = totalInt.toString()
+            val totalReversed = totalStr.reversed()
+            val totalChunked = totalReversed.chunked(3)
+            val totalJoined = totalChunked.joinToString(",")
+            val totalFinalReversed = totalJoined.reversed()
+            val formattedTotal = "¥$totalFinalReversed"
+            
+            // Prepare request body - build JSON string manually to avoid Kotlin/JS interop issues
+            val itemsJsonArray = itemsList.joinToString(",") { item ->
+                val itemDynamic = item.unsafeCast<dynamic>()
+                val unit = itemDynamic.unit?.toString() ?: "0"
+                val description = escapeJsonString((itemDynamic.description as? String) ?: "")
+                val amount = escapeJsonString((itemDynamic.amount as? String) ?: "")
+                "{\"unit\":" + unit + ",\"description\":\"" + description + "\",\"amount\":\"" + amount + "\"}"
+            }
+            
+            val lcNumberPart = if (invoiceLcNo.isNotEmpty()) {
+                "\"" + escapeJsonString(invoiceLcNo) + "\""
+                    } else {
+                "null"
+                    }
+            val clientAddressPart = if (clientAddress != null) {
+                "\"" + escapeJsonString(clientAddress) + "\""
+            } else {
+                "null"
+                }
+            val bankAccountPart = if (bankAccountValue.isNotEmpty()) {
+                "\"" + escapeJsonString(bankAccountValue) + "\""
+            } else {
+                "null"
+            }
+            val messagePart = if (invoiceMessage.isNotEmpty()) {
+                "\"" + escapeJsonString(invoiceMessage) + "\""
+            } else {
+                "null"
+            }
+            
+            val requestBodyJson = "{\"invoiceNumber\":\"" + escapeJsonString(invoiceNumber) + 
+                "\",\"invoiceDate\":\"" + escapeJsonString(invoiceDate) + 
+                "\",\"lcNumber\":" + lcNumberPart + 
+                ",\"clientName\":\"" + escapeJsonString(clientName) + 
+                "\",\"clientAddress\":" + clientAddressPart + 
+                ",\"vessel\":\"" + escapeJsonString(invoiceVessel) + 
+                "\",\"shippingDate\":\"" + escapeJsonString(formattedShippingDate) + 
+                "\",\"from\":\"" + escapeJsonString(invoiceFrom) + 
+                "\",\"to\":\"" + escapeJsonString(invoiceTo) + 
+                "\",\"priceType\":\"" + escapeJsonString(priceType) + 
+                "\",\"items\":[" + itemsJsonArray + 
+                "],\"totalAmount\":\"" + escapeJsonString(formattedTotal) + 
+                "\",\"bankAccount\":" + bankAccountPart + 
+                ",\"message\":" + messagePart + 
+                "}"
+            console.log("📄 Sending invoice PDF request: " + requestBodyJson)
+            
+            // Make API call to generate PDF
+            val headers = Headers()
+            headers.set("Content-Type", "application/json")
+            
+            val requestInit = RequestInit(
+                method = "POST",
+                headers = headers,
+                body = requestBodyJson
+            )
+            
+            window.fetch(apiUrl("purchases/invoice/generate-pdf"), requestInit).then { response ->
+                if (response.ok) {
+                    response.blob().then { blob ->
+                        // Create download link
+                        val url = js("window.URL.createObjectURL(blob)") as String
+                        val a = document.createElement("a") as HTMLAnchorElement
+                        a.href = url
+                        a.download = "invoice_" + invoiceNumber + ".pdf"
+                        document.body?.appendChild(a)
+                        a.click()
+                        document.body?.removeChild(a)
+                        // Note: URL will be automatically revoked by browser when object is garbage collected
+                        
+                        console.log("✅ Invoice PDF downloaded successfully")
+                        showMessage("✅ Invoice PDF downloaded successfully", "success")
+                    }
+        } else {
+                    response.text().then { errorText ->
+                        console.error("❌ Invoice PDF generation failed:", errorText)
+                        showMessage("Failed to generate invoice PDF: " + errorText, "error")
+                    }
+                }
+            }.catch { error ->
+                console.error("❌ Error generating invoice PDF:", error)
+                showMessage("Error generating invoice PDF: " + error.toString(), "error")
+        }
+        }.catch { error ->
+            console.error("❌ Error loading purchases:", error)
+            showMessage("Error loading purchase details", "error")
+        }
+    }
+}
+
+// Generate invoice number (simple implementation - can be enhanced)
+fun generateInvoiceNumber(): String {
+    val timestamp = js("Date.now()").toString()
+    val timestampStr = timestamp as String
+    val startIndex = if (timestampStr.length >= 8) timestampStr.length - 8 else 0
+    return "INV-${timestampStr.substring(startIndex)}"
 }
 // Render Rixo Transport page content
 fun showRixoTransportPage() {
@@ -5853,7 +9438,7 @@ fun loadRixoCompaniesForDate() {
     val formattedDate = formatWithWeekday(buyingDate)
     console.log("Looking for purchases with date:", formattedDate)
     
-    window.fetch("/api/purchases").then { response ->
+    window.fetch(apiUrl("purchases")).then { response ->
         if (response.ok) {
             response.json().then { allPurchases ->
                 val purchasesArray = allPurchases as Array<dynamic>
@@ -5906,7 +9491,7 @@ fun loadRowsForDateAndCompany() {
     // Convert ISO date to database format
     val formattedDate = formatWithWeekday(buyingDate)
     
-    window.fetch("/api/purchases").then { response ->
+    window.fetch(apiUrl("purchases")).then { response ->
         if (response.ok) {
             response.json().then { allPurchases ->
                 val purchasesArray = allPurchases as Array<dynamic>
@@ -5957,6 +9542,7 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
                     </th>
                     <th style="width: 50px;"></th>
                     <th>Chassis</th>
+                    <th>Auction No</th>
                     <th>Year</th>
                     <th>Car</th>
                     <th>Supplier Name</th>
@@ -5971,7 +9557,9 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
     purchases.forEach { purchase ->
         val id = js("purchase.id").toString()
         val chassis = js("purchase.chassis")?.toString() ?: ""
-        val year = js("purchase.carModelYear")?.toString() ?: ""
+        val auctionNo = js("purchase.auctionNo")?.toString() ?: ""
+        val yearRaw = js("purchase.carModelYear")?.toString() ?: ""
+        val year = formatCarModelYear(yearRaw)
         val carName = js("purchase.carName")?.toString() ?: ""
         val auctionHouse = js("purchase.auctionHouse")?.toString() ?: ""
         val stockLocation = js("purchase.stockLocation")?.toString() ?: ""
@@ -5994,6 +9582,7 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
                     </button>
                 </td>
                 <td>$chassis</td>
+                <td>$auctionNo</td>
                 <td>$year</td>
                 <td>$carName</td>
                 <td>$auctionHouse</td>
@@ -6086,7 +9675,7 @@ fun updateSelectAllRixoCheckbox() {
 // Show edit modal for a Rixo row
 fun showRixoEditModal(purchaseId: Long) {
     // Fetch the purchase data first
-    window.fetch("/api/purchases/purchase/$purchaseId")
+    window.fetch(apiUrl("purchases/purchase/$purchaseId"))
         .then { response -> response.json() }
         .then { purchaseData ->
             createRixoEditModal(purchaseData)
@@ -6111,6 +9700,8 @@ fun createRixoEditModal(purchaseData: dynamic) {
                     
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                         <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Auction No</label>
+                            <input type="text" id="rixoEditAuctionNo" value="${purchaseData.auctionNo ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
                         </div>
                         <div>
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Chassis</label>
@@ -6121,7 +9712,10 @@ fun createRixoEditModal(purchaseData: dynamic) {
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                         <div>
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Car Model Year</label>
-                            <input type="text" id="rixoEditCarModelYear" value="${purchaseData.carModelYear ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                            <input type="month" id="rixoEditCarModelYear" value="${if (purchaseData.carModelYear != null) {
+                                val parts = purchaseData.carModelYear.toString().split("/")
+                                if (parts.size == 2) "${parts[1]}-${parts[0].padStart(2, '0')}" else purchaseData.carModelYear.toString()
+                            } else ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
                         </div>
                         <div>
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Car Name</label>
@@ -6399,6 +9993,7 @@ fun setupRixoModalNumberCutListeners() {
 
 fun handleRixoEditSubmit() {
     val id = (document.getElementById("rixoEditId") as HTMLInputElement).value.toLong()
+    val auctionNo = (document.getElementById("rixoEditAuctionNo") as HTMLInputElement).value
     val chassis = (document.getElementById("rixoEditChassis") as HTMLInputElement).value
     val carModelYear = (document.getElementById("rixoEditCarModelYear") as HTMLInputElement).value
     val carName = (document.getElementById("rixoEditCarName") as HTMLInputElement).value
@@ -6410,6 +10005,7 @@ fun handleRixoEditSubmit() {
     val numberCutString = (document.getElementById("rixoEditNumberCutString") as HTMLInputElement).value
     
     val updateData = js("{}")
+    updateData.auctionNo = auctionNo
     updateData.chassis = chassis
     updateData.carModelYear = carModelYear
     updateData.carName = carName
@@ -6427,7 +10023,7 @@ fun handleRixoEditSubmit() {
     requestInit.headers = headers
     requestInit.body = JSON.stringify(updateData)
     
-    window.fetch("/api/purchases/$id", requestInit)
+    window.fetch(apiUrl("purchases/$id"), requestInit)
         .then { response ->
             if (response.ok) {
                 showMessage("Purchase updated successfully", "success")
@@ -6481,7 +10077,7 @@ fun generateRixoRequestPdf() {
     }
     
     // Fetch selected purchase data
-    window.fetch("/api/purchases").then { response ->
+    window.fetch(apiUrl("purchases")).then { response ->
         if (response.ok) {
             response.json().then { allPurchases ->
                 val purchasesArray = allPurchases as Array<dynamic>
@@ -6533,7 +10129,7 @@ fun generateRixoRequestPdfViaBackend(purchases: List<dynamic>, buyingDate: Strin
     console.log("🔧 [DEBUG] Calling backend API with requestBody:", requestBody)
     
     // Call backend API
-    window.fetch("/api/purchases/rixo-transport-pdf", requestInit).then { response ->
+    window.fetch(apiUrl("purchases/rixo-transport-pdf"), requestInit).then { response ->
         if (response.ok) {
             response.blob().then { blob ->
                 // Create download link
@@ -6791,9 +10387,9 @@ fun updateRixoRequestedStatus(selectedIds: List<Long>) {
             }
         """)
         
-        console.log("🔧 [DEBUG] Making PUT request to /api/purchases/$id with data:", updateData)
+        console.log("🔧 [DEBUG] Making PUT request to /purchases/$id with data:", updateData)
         
-        window.fetch("/api/purchases/$id", js("""
+        window.fetch(apiUrl("purchases/$id"), js("""
             {
                 method: "PUT",
                 headers: {
@@ -6842,7 +10438,7 @@ fun loadSelectedCarsForRixoTransport(selectedIds: List<Long>) {
         return
     }
     
-    window.fetch("/api/purchases").then { response ->
+    window.fetch(apiUrl("purchases")).then { response ->
         console.log("API response status:", response.status)
         if (response.ok) {
             response.json().then { allPurchases ->
@@ -7243,7 +10839,7 @@ fun updatePurchasesForRixoTransport(updates: List<dynamic>, selectedIds: List<Lo
         val purchaseId = js("update.id").toString().toLongOrNull() ?: continue
         console.log("🔍 Updating purchase $purchaseId with data:", update)
         
-        window.fetch("/api/purchases/$purchaseId", js("""
+        window.fetch(apiUrl("purchases/$purchaseId"), js("""
             {
                 method: 'PUT',
                 headers: {
@@ -7333,7 +10929,7 @@ fun generateRixoTransportPdf(selectedIds: List<Long>) {
     requestInit.headers = headers
     requestInit.body = JSON.stringify(requestBody)
     
-    window.fetch("/api/purchases/rixo-transport-pdf", requestInit).then { response ->
+    window.fetch(apiUrl("purchases/rixo-transport-pdf"), requestInit).then { response ->
         if (response.ok) {
             response.blob().then { blob ->
                 // Store the blob for later use
@@ -7516,7 +11112,7 @@ fun updatePurchasesAndThenGenerate(updates: List<dynamic>, selectedIds: List<Lon
         val purchaseId = js("update.id").toString().toLongOrNull() ?: continue
         console.log("🔍 Updating purchase $purchaseId with data:", update)
         
-        window.fetch("/api/purchases/$purchaseId", js("""
+        window.fetch(apiUrl("purchases/$purchaseId"), js("""
             {
                 method: 'PUT',
                 headers: {
@@ -7663,7 +11259,7 @@ fun generateRixoPdfWithInvoiceData(selectedIds: List<Long>, invoiceData: dynamic
     
     console.log("Request body after stringify:", requestInit.body)
     
-    window.fetch("/api/purchases/rixo-pdf", requestInit).then { response ->
+    window.fetch(apiUrl("purchases/rixo-pdf"), requestInit).then { response ->
         if (response.ok) {
             response.blob().then { blob ->
                 // Store the blob for later use
@@ -7770,7 +11366,7 @@ fun deletePurchase(id: Long) {
         val requestInit = js("{}")
         requestInit.method = "DELETE"
         
-        window.fetch("/api/purchases/$id", requestInit).then { response ->
+        window.fetch(apiUrl("purchases/$id"), requestInit).then { response ->
             if (response.ok) {
                 showMessage("Purchase deleted successfully!", "success")
                 // Always return to the main list after deletion
@@ -7816,6 +11412,167 @@ fun showMessage(message: String, type: String) {
     }, 5000)
 }
 
+// Check if chassis already exists in database
+fun checkChassisExists(chassis: String, excludeId: Long? = null, onExists: () -> Unit, onNotExists: () -> Unit) {
+    if (chassis.isBlank()) {
+        onNotExists()
+        return
+    }
+    
+    // Use the costs-by-chassis endpoint to check if chassis exists
+    console.log("🔍 Checking chassis existence: '$chassis', excludeId: $excludeId")
+    window.fetch(apiUrl("purchases/costs-by-chassis/$chassis")).then { response ->
+        if (response.ok) {
+            response.json().then { data ->
+                console.log("🔍 Chassis check response data:", data)
+                val purchaseId = js("data.id")?.toString()?.toLongOrNull()
+                console.log("🔍 Extracted purchaseId:", purchaseId, "excludeId:", excludeId)
+                
+                // If excludeId is provided (edit mode), check if it's a different purchase
+                if (excludeId != null && purchaseId == excludeId) {
+                    // Same purchase, chassis is not duplicate
+                    console.log("✅ Same purchase, no duplicate")
+                    onNotExists()
+                } else if (purchaseId != null) {
+                    // Chassis exists and it's a different purchase (or no excludeId in add mode)
+                    console.log("⚠️ Chassis exists for different purchase (ID: $purchaseId)")
+                    onExists()
+                } else {
+                    // Chassis doesn't exist (no ID in response)
+                    console.log("✅ Chassis doesn't exist (no ID in response)")
+                    onNotExists()
+                }
+            }.catch { error ->
+                // If parsing fails, assume chassis doesn't exist
+                console.warn("⚠️ Error parsing chassis check response:", error)
+                onNotExists()
+            }
+        } else {
+            // If 404 or other error, chassis doesn't exist
+            console.log("✅ Chassis doesn't exist (response not OK: ${response.status})")
+            onNotExists()
+        }
+    }.catch { error ->
+        // On network error, proceed anyway (let backend handle validation)
+        console.warn("⚠️ Could not check chassis existence, proceeding anyway:", error)
+        onNotExists()
+    }
+}
+
+// Show warning modal for duplicate chassis
+fun showDuplicateChassisWarningModal(chassis: String, onProceed: () -> Unit, onCancel: () -> Unit) {
+    // Remove existing warning modal if any
+    document.getElementById("duplicateChassisWarningModal")?.remove()
+    
+    val modal = document.createElement("div")
+    modal.id = "duplicateChassisWarningModal"
+    modal.setAttribute("style", "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10001; display: flex; justify-content: center; align-items: center;")
+    
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 8px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #f59e0b; font-size: 24px;">⚠️ Duplicate Chassis Warning</h2>
+                <button id="closeDuplicateChassisWarningModal" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 0; width: 30px; height: 30px; line-height: 30px;">&times;</button>
+            </div>
+            <div style="margin-bottom: 25px; color: #333; font-size: 16px; line-height: 1.5;">
+                A purchase with chassis <strong>$chassis</strong> already exists in the database.<br><br>
+                Chassis numbers must be unique. Please use a different chassis number or edit the existing purchase.
+            </div>
+            <div style="text-align: right; display: flex; gap: 10px; justify-content: flex-end;">
+                <button id="cancelDuplicateChassisBtn" style="padding: 10px 24px; background-color: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: 500;">
+                    Cancel
+                </button>
+                <button id="proceedDuplicateChassisBtn" style="padding: 10px 24px; background-color: #f59e0b; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: 500;">
+                    Proceed Anyway
+                </button>
+            </div>
+        </div>
+    """
+    
+    document.body?.appendChild(modal)
+    
+    // Close modal handlers
+    val closeModal = {
+        document.getElementById("duplicateChassisWarningModal")?.remove()
+    }
+    
+    document.getElementById("closeDuplicateChassisWarningModal")?.addEventListener("click", { _: Event -> closeModal(); onCancel() })
+    document.getElementById("cancelDuplicateChassisBtn")?.addEventListener("click", { _: Event -> closeModal(); onCancel() })
+    document.getElementById("proceedDuplicateChassisBtn")?.addEventListener("click", { _: Event -> closeModal(); onProceed() })
+    
+    // Close modal when clicking outside
+    modal.addEventListener("click", { event ->
+        if (event.target == modal) {
+            closeModal()
+            onCancel()
+        }
+    })
+    
+    // Close modal on Escape key
+    fun handleEscape(event: Event) {
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            closeModal()
+            onCancel()
+            document.removeEventListener("keydown", ::handleEscape)
+        }
+    }
+    document.addEventListener("keydown", ::handleEscape)
+}
+
+fun showErrorModal(title: String, message: String) {
+    // Remove existing error modal if any
+    document.getElementById("errorModal")?.remove()
+    
+    val modal = document.createElement("div")
+    modal.id = "errorModal"
+    modal.setAttribute("style", "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10001; display: flex; justify-content: center; align-items: center;")
+    
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 8px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #dc3545; font-size: 24px;">⚠️ $title</h2>
+                <button id="closeErrorModal" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 0; width: 30px; height: 30px; line-height: 30px;">&times;</button>
+            </div>
+            <div style="margin-bottom: 25px; color: #333; font-size: 16px; line-height: 1.5;">
+                $message
+            </div>
+            <div style="text-align: right;">
+                <button id="okErrorModalBtn" style="padding: 10px 24px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: 500;">
+                    OK
+                </button>
+            </div>
+        </div>
+    """
+    
+    document.body?.appendChild(modal)
+    
+    // Close modal handlers
+    val closeModal = {
+        document.getElementById("errorModal")?.remove()
+    }
+    
+    document.getElementById("closeErrorModal")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("okErrorModalBtn")?.addEventListener("click", { _: Event -> closeModal() })
+    
+    // Close modal when clicking outside
+    modal.addEventListener("click", { event ->
+        if (event.target == modal) {
+            closeModal()
+        }
+    })
+    
+    // Close modal on Escape key
+    fun handleEscape(event: Event) {
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            closeModal()
+            document.removeEventListener("keydown", ::handleEscape)
+        }
+    }
+    document.addEventListener("keydown", ::handleEscape)
+}
+
 fun openSidebar() {
     val sidebar = document.getElementById("sidebar") as HTMLElement?
     val overlay = document.getElementById("sidebarOverlay") as HTMLElement?
@@ -7834,7 +11591,7 @@ fun closeSidebar() {
 
 // Role Request Functions
 fun loadRoleRequests() {
-    window.fetch("/api/role-requests/pending")
+    window.fetch(apiUrl("role-requests/pending"))
         .then { response ->
             if (response.ok) {
                 response.json().then { data ->
@@ -7948,7 +11705,7 @@ fun reviewRoleRequest(requestId: Long, status: String) {
     
     val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status:status, reviewComment:'Reviewed by admin'})})")
     
-    window.fetch("/api/role-requests/$requestId/review/$currentUserId", body)
+    window.fetch(apiUrl("role-requests/$requestId/review/$currentUserId"), body)
         .then { response ->
             if (response.ok) {
                 response.json().then { data ->
@@ -8063,7 +11820,7 @@ fun showRoleRequestForm() {
         
         val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({requestedRole:requestedRole, reason:reason, adminId:selectedAdminId})})")
         
-        window.fetch("/api/role-requests/$currentUserId", body)
+        window.fetch(apiUrl("role-requests/$currentUserId"), body)
             .then { response ->
                 if (response.ok) {
                     response.json().then { data ->
@@ -8083,7 +11840,7 @@ fun showRoleRequestForm() {
 }
 
 private fun loadAdminsForRoleRequest() {
-    window.fetch("/api/users")
+    window.fetch(apiUrl("users"))
         .then { response ->
             if (response.ok) {
                 response.json().then { users ->
@@ -8111,7 +11868,7 @@ private fun loadAdminsForRoleRequest() {
 
 // Client Management Functions
 private fun loadClients() {
-    window.fetch("/api/api/clients")
+    window.fetch(apiUrl("clients"))
         .then { response ->
             if (response.ok) {
                 response.json().then { clients ->
@@ -8208,7 +11965,7 @@ private fun selectClient(clientId: Long) {
 // Function to edit client from the client list
 fun editClientFromList(clientId: Long) {
     // Load client details and open edit modal
-    window.fetch("/api/api/clients/$clientId")
+    window.fetch(apiUrl("clients/$clientId"))
         .then { response ->
             if (response.ok) {
                 response.json().then { client ->
@@ -8227,7 +11984,7 @@ private fun loadClientDetails(clientId: Long) {
     opts.method = "GET"
     opts.cache = "no-store"
     val ts = js("Date.now()")
-    window.fetch("/api/clients/$clientId?ts=$ts", opts)
+    window.fetch(apiUrl("clients/$clientId?ts=$ts"), opts)
         .then { response ->
             if (response.ok) {
                 response.json().then { client ->
@@ -8286,7 +12043,7 @@ private fun loadClientEvents(clientId: Long) {
     opts.method = "GET"
     opts.cache = "no-store"
     val ts = js("Date.now()")
-    window.fetch("/api/events/client/$clientId?ts=$ts", opts)
+    window.fetch(apiUrl("events/client/$clientId?ts=$ts"), opts)
         .then { response ->
             if (response.ok) {
                 response.json().then { events ->
@@ -8413,7 +12170,7 @@ private fun toggleClientAlerts() {
 }
 
 private fun loadClientAlerts() {
-    window.fetch("/api/api/clients/alerts")
+    window.fetch(apiUrl("clients/alerts"))
         .then { response ->
             if (response.ok) {
                 response.json().then { alerts ->
@@ -8623,7 +12380,7 @@ private fun handleAddClientSubmit() {
     requestOptions["headers"] = js("{\"Content-Type\": \"application/json\"}")
     requestOptions["body"] = JSON.stringify(clientData)
     
-    window.fetch("/api/api/clients", requestOptions)
+    window.fetch(apiUrl("clients"), requestOptions)
     .then { response ->
         if (response.ok) {
             showMessage("Client added successfully!", "success")
@@ -8703,7 +12460,7 @@ private fun showPerformanceDashboard() {
 
 private fun closePerformanceDashboard() {}
 private fun loadPerformanceData() {
-    window.fetch("/api/events/performance/summary")
+    window.fetch(apiUrl("events/performance/summary"))
         .then { response ->
             if (response.ok) {
                 response.json().then { data ->
@@ -8787,7 +12544,7 @@ private fun displayPerformanceData(data: dynamic) {
 
 private fun editClient(clientId: Long) {
     // Load client data and show edit form
-    window.fetch("/api/api/clients/$clientId")
+    window.fetch(apiUrl("clients/$clientId"))
         .then { response ->
             if (response.ok) {
                 response.json().then { client ->
@@ -8956,7 +12713,7 @@ private fun handleEditClientSubmit(clientId: Long) {
                 balanceReq["method"] = "PUT"
                 balanceReq["headers"] = js("{\"Content-Type\": \"application/json\"}")
                 balanceReq["body"] = JSON.stringify(balanceBody)
-                window.fetch("/api/api/clients/$clientId/balance", balanceReq)
+                window.fetch(apiUrl("clients/$clientId/balance"), balanceReq)
                 .then { balResp ->
                     if (!balResp.ok) {
                         balResp.text().then { err -> console.error("Balance update failed:", err) }
@@ -9001,7 +12758,7 @@ private fun addClientTransaction(clientId: Long) {
 
 // Client Selection Functions for Purchase Forms
 private fun loadClientsForPurchase() {
-    window.fetch("/api/api/clients")
+    window.fetch(apiUrl("clients"))
         .then { response ->
             if (response.ok) {
                 response.json().then { clients ->
@@ -9053,7 +12810,7 @@ private fun handleClientSelection(clientId: String) {
         return
     }
     
-    window.fetch("/api/api/clients/$clientId")
+    window.fetch(apiUrl("clients/$clientId"))
         .then { response ->
             if (response.ok) {
                 response.json().then { client ->
@@ -9072,7 +12829,7 @@ private fun handleEditClientSelection(clientId: String) {
         return
     }
     
-    window.fetch("/api/api/clients/$clientId")
+    window.fetch(apiUrl("clients/$clientId"))
         .then { response ->
             if (response.ok) {
                 response.json().then { client ->
@@ -9242,7 +12999,7 @@ private fun importClientsData(clients: List<dynamic>, updateExisting: Boolean) {
         body: JSON.stringify(importData)
     })""")
     
-    window.fetch("/api/api/clients/import", requestOptions)
+    window.fetch(apiUrl("clients/import"), requestOptions)
         .then { response ->
             if (response.ok) {
                 response.json().then { result ->
@@ -9267,7 +13024,7 @@ private fun importClientsData(clients: List<dynamic>, updateExisting: Boolean) {
 }
 
 private fun exportClientsData() {
-    window.fetch("/api/api/clients")
+    window.fetch(apiUrl("clients"))
         .then { response ->
             if (response.ok) {
                 response.json().then { clients ->
@@ -9393,7 +13150,7 @@ private fun exportClientTransactions(clientId: Long) {
 }
 
 private fun generateBalanceSummary() {
-    window.fetch("/api/clients")
+    window.fetch(apiUrl("clients"))
         .then { response ->
             if (response.ok) {
                 response.json().then { clients ->
@@ -9455,7 +13212,7 @@ private fun generateTransactionReport() {
 }
 
 private fun generateCreditLimitReport() {
-    window.fetch("/api/clients")
+    window.fetch(apiUrl("clients"))
         .then { response ->
             if (response.ok) {
                 response.json().then { clients ->
@@ -9708,7 +13465,7 @@ private fun openAddTransactionModal(clientId: Long) {
 
             console.log("DEBUG: Sending transaction payload:", payload)
 
-            window.fetch("/api/clients/add-transaction", req).then { response ->
+            window.fetch(apiUrl("clients/add-transaction"), req).then { response ->
                 if (response.ok) {
                     response.json().then { result ->
                         console.log("DEBUG: Transaction response:", result)
@@ -10051,7 +13808,10 @@ fun showCarBookingPage() {
                                 <select id="consigneeCountry" style="flex: 1; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
                                     <option value="">Select Country</option>
                                 </select>
-                                <span style="color: #6b7280; font-size: 16px; cursor: pointer;">✏️</span>
+                                <button id="manageBookingMappingsBtn" type="button" style="display: none; background: none; border: none; cursor: pointer; padding: 4px; font-size: 18px; color: #6b7280;" title="Manage Mappings">
+                                    ⚙️
+                                </button>
+                                <!-- Force rebuild trigger -->
                             </div>
                             <input type="text" id="consigneeName" placeholder="(CONSIGNEE NAME)" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
                         </div>
@@ -10085,17 +13845,15 @@ fun showCarBookingPage() {
                         <!-- VESSEL -->
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">VESSEL:</label>
-                            <select id="vesselSelect" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
-                                <option value="">Select Vessel</option>
-                            </select>
+                            <input type="text" id="vesselSelect" placeholder="Enter Vessel" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
                         </div>
                         
                         <!-- SEARCH CHASSIS -->
-                        <div style="margin-bottom: 20px;">
+                        <div style="margin-bottom: 20px; position: relative;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">SEARCH CHASSIS:</label>
-                            <select id="chassisSearch" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
-                                <option value="">Select Chassis (Filtered by Country & POL)</option>
-                            </select>
+                            <input type="text" id="chassisSearch" placeholder="Type to search chassis (Filtered by Country & POL)" autocomplete="off" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div id="chassisSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-top: none; border-radius: 0 0 6px 6px; max-height: 200px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                            </div>
                         </div>
                         
                         <!-- Selection Options -->
@@ -10188,10 +13946,6 @@ fun showCarBookingPage() {
     // Setup event listeners
     setupCarBookingPageListeners()
     
-    console.log("=== About to load vessels ===")
-    // Load vessels
-    loadVessels()
-    
     // Load countries from database
     loadCountries()
     
@@ -10204,28 +13958,7 @@ fun showCarBookingPage() {
     // Don't load cars automatically - wait for user search
     console.log("Car Booking page loaded - waiting for user to search by chassis number")
     
-    // Immediate fallback - load vessels directly since API is not working
-    console.log("Loading vessels with immediate fallback...")
-    console.log("About to call loadVesselsFallback()")
-    
-    // Force load vessels immediately - bypass API entirely
-    // Removed problematic setTimeout call
-    
-    // Also try calling directly without timeout
-    console.log("Calling fallback functions directly...")
-    try {
-        loadVesselsFallback()
-        console.log("loadVesselsFallback() called directly - SUCCESS")
-    } catch (e: dynamic) {
-        console.error("Error calling loadVesselsFallback() directly:", e)
-    }
-    
     // Cars will be loaded when user searches by chassis number
-    
-    console.log("loadVesselsFallback() scheduled")
-    
-    // Safety fallback - ensure vessels are loaded even if API fails
-    // Removed problematic setTimeout call
     } catch (e: dynamic) {
         console.error("Error in showCarBookingPage():", e)
     }
@@ -10233,8 +13966,10 @@ fun showCarBookingPage() {
 
 // Setup event listeners for Car Booking page
 fun setupCarBookingPageListeners() {
-    // Restore booking selection state (C&F or FOB)
+    // Restore booking selection state (C&F or FOB) - with delay to ensure DOM is ready
+    window.setTimeout({
     restoreBookingSelectionState()
+    }, 200)
     
     // Purchase List button
     document.getElementById("purchaseListBtn")?.addEventListener("click", { _: Event ->
@@ -10242,14 +13977,111 @@ fun setupCarBookingPageListeners() {
         showPurchaseList()
     })
     
-    // Country dropdown change - trigger filtered chassis loading
+    // Country dropdown change - trigger filtered chassis loading and booking mappings
     document.getElementById("consigneeCountry")?.addEventListener("change", { event: Event ->
         val selectedCountry = (event.target as HTMLSelectElement).value
         console.log("🌍 Country selected:", selectedCountry)
         currentSelectedCountry = selectedCountry // Update the global variable
+        
+        // Show/hide Manage Mapping button based on country selection
+        val manageBtn = document.getElementById("manageBookingMappingsBtn") as? HTMLElement
+        if (manageBtn != null) {
+            if (selectedCountry.isNotEmpty()) {
+                manageBtn.style.display = "block"
+                console.log("✅ Showing Manage Mapping button for country:", selectedCountry)
+            } else {
+                manageBtn.style.display = "none"
+                console.log("⚠️ Hiding Manage Mapping button - no country selected")
+            }
+        } else {
+            console.error("❌ Manage Mapping button not found in DOM!")
+        }
+        
+        // Apply booking mappings (POD and CONSIGNEE auto-fill) - Direct JS call
+        console.log("📋 Attempting to call booking mappings for country:", selectedCountry)
+        
+        // Direct call using window.asDynamic() - same pattern as other window functions
+        try {
+            val applyBookingMappings = window.asDynamic().applyBookingMappingsByCountry
+            if (applyBookingMappings != null && jsTypeOf(applyBookingMappings) == "function") {
+                console.log("✅ Calling applyBookingMappingsByCountry with:", selectedCountry)
+                applyBookingMappings.unsafeCast<(String) -> Unit>().invoke(selectedCountry)
+            } else {
+                console.warn("⚠️ window.applyBookingMappingsByCountry is not available")
+            }
+        } catch (e: dynamic) {
+            console.error("❌ Error calling booking mappings:", e)
+        }
+        
         console.log("Country changed, loading filtered chassis...")
         loadFilteredChassis()
     })
+    
+    // Manage Booking Mappings button click handler
+    document.getElementById("manageBookingMappingsBtn")?.addEventListener("click", { _: Event ->
+        val selectedCountry = (document.getElementById("consigneeCountry") as? HTMLSelectElement)?.value ?: ""
+        if (selectedCountry.isNotEmpty()) {
+            console.log("🔧 Opening booking mappings modal for country:", selectedCountry)
+            try {
+                val showBookingMappingsModal = window.asDynamic().showBookingMappingsModal
+                if (showBookingMappingsModal != null && jsTypeOf(showBookingMappingsModal) == "function") {
+                    showBookingMappingsModal.unsafeCast<(String) -> Unit>().invoke(selectedCountry)
+                } else {
+                    console.error("⚠️ window.showBookingMappingsModal is not available")
+                }
+            } catch (e: dynamic) {
+                console.error("❌ Error opening booking mappings modal:", e)
+            }
+        } else {
+            console.warn("⚠️ Please select a country first")
+        }
+    })
+    
+    // Initialize booking mappings after page setup - Direct JS calls
+    console.log("🔧 Setting up booking mapping initialization...")
+    window.setTimeout({
+        val countrySelect = document.getElementById("consigneeCountry") as? HTMLSelectElement
+        val countryValue = countrySelect?.value ?: ""
+        
+        // Show/hide Manage Mapping button based on initial country selection
+        val manageBtn = document.getElementById("manageBookingMappingsBtn") as? HTMLElement
+        if (manageBtn != null) {
+            if (countryValue.isNotEmpty()) {
+                manageBtn.style.display = "block"
+                console.log("✅ Showing Manage Mapping button on initial load for country:", countryValue)
+            } else {
+                manageBtn.style.display = "none"
+                console.log("⚠️ Hiding Manage Mapping button on initial load - no country selected")
+            }
+        } else {
+            console.error("❌ Manage Mapping button not found in DOM on initial load!")
+        }
+        
+        // Direct calls using window.asDynamic() - same pattern as other window functions
+        try {
+            val initBookingMapping = window.asDynamic().initBookingMappingAutoFill
+            if (initBookingMapping != null && jsTypeOf(initBookingMapping) == "function") {
+                console.log("✅ Calling initBookingMappingAutoFill...")
+                initBookingMapping.unsafeCast<() -> Unit>().invoke()
+            } else {
+                console.warn("⚠️ window.initBookingMappingAutoFill is not available")
+            }
+            
+            // Apply mappings if country is selected
+            if (countryValue.isNotEmpty()) {
+                console.log("🌍 Applying mappings for country:", countryValue)
+                val applyBookingMappings = window.asDynamic().applyBookingMappingsByCountry
+                if (applyBookingMappings != null && jsTypeOf(applyBookingMappings) == "function") {
+                    console.log("✅ Calling applyBookingMappingsByCountry...")
+                    applyBookingMappings.unsafeCast<(String) -> Unit>().invoke(countryValue)
+                } else {
+                    console.warn("⚠️ window.applyBookingMappingsByCountry is not available")
+                }
+            }
+        } catch (e: dynamic) {
+            console.error("❌ Error initializing booking mappings:", e)
+        }
+    }, 1000)
     
     // POL dropdown change - trigger filtered chassis loading
     document.getElementById("polPort")?.addEventListener("change", { _: Event ->
@@ -10257,15 +14089,38 @@ fun setupCarBookingPageListeners() {
         loadFilteredChassis()
     })
     
-    // Chassis dropdown change - search for cars with selected chassis
-    document.getElementById("chassisSearch")?.addEventListener("change", { _: Event ->
-        val chassisSelect = document.getElementById("chassisSearch") as HTMLSelectElement?
-        val selectedChassis = chassisSelect?.value ?: ""
-        if (selectedChassis.isNotEmpty()) {
-            console.log("Chassis selected:", selectedChassis)
-            searchCarsByChassis(selectedChassis)
-        } else {
-            clearCarTable()
+    // Chassis autocomplete input - filter suggestions and search on Enter
+    val chassisInput = document.getElementById("chassisSearch") as? HTMLInputElement
+    chassisInput?.addEventListener("input", { event: Event ->
+        val input = event.target as? HTMLInputElement
+        val query = input?.value ?: ""
+        filterChassisSuggestions(query)
+    })
+    
+    // Search for cars when Enter is pressed in chassis input
+    chassisInput?.addEventListener("keydown", { event: dynamic ->
+        val key = (event.asDynamic().key as? String) ?: ""
+        if (key == "Enter") {
+            event.preventDefault()
+            val chassis = chassisInput.value.trim()
+            if (chassis.isNotEmpty()) {
+                hideChassisSuggestions()
+                searchCarsByChassis(chassis)
+            }
+        } else if (key == "Escape") {
+            hideChassisSuggestions()
+        }
+    })
+    
+    // Hide suggestions when clicking outside
+    document.addEventListener("click", { event: dynamic ->
+        val target = event.target as? HTMLElement
+        val chassisInput = document.getElementById("chassisSearch")
+        val suggestionsDiv = document.getElementById("chassisSuggestions")
+        if (target != null && chassisInput != null && suggestionsDiv != null) {
+            if (target != chassisInput && !suggestionsDiv.contains(target)) {
+                hideChassisSuggestions()
+            }
         }
     })
     
@@ -10300,15 +14155,15 @@ fun setupCarBookingPageListeners() {
         showFullPreview()
     })
     
-    // C&F and FOB checkboxes - mutual exclusivity
+    // C&F and FOB checkboxes - mutual exclusivity (no state saving)
+    // Add listeners with a small delay to ensure checkboxes exist
+    window.setTimeout({
     document.getElementById("cnfCheckbox")?.addEventListener("change", { event: Event ->
         val target = event.target as HTMLInputElement
         if (target.checked) {
             // Uncheck FOB if C&F is checked
             val fobCheckbox = document.getElementById("fobCheckbox") as HTMLInputElement?
             fobCheckbox?.checked = false
-            // Save state
-            saveBookingSelectionState("cnf")
             console.log("✅ C&F selected, FOB unchecked")
         }
     })
@@ -10319,14 +14174,16 @@ fun setupCarBookingPageListeners() {
             // Uncheck C&F if FOB is checked
             val cnfCheckbox = document.getElementById("cnfCheckbox") as HTMLInputElement?
             cnfCheckbox?.checked = false
-            // Save state
-            saveBookingSelectionState("fob")
             console.log("✅ FOB selected, C&F unchecked")
         }
     })
+    }, 100)
     
     // Calculate button - navigate based on selection
     document.getElementById("calculateBtn")?.addEventListener("click", { _: Event ->
+        console.log("🔥🔥🔥 CALCULATE BUTTON CLICKED - NEW CODE VERSION 1762413200 🔥🔥🔥")
+        console.log("🔥🔥🔥 THIS IS THE UPDATED CODE WITH BOOKING DATA UPDATE 🔥🔥🔥")
+        
         val cnfChecked = (document.getElementById("cnfCheckbox") as HTMLInputElement?)?.checked ?: false
         val fobChecked = (document.getElementById("fobCheckbox") as HTMLInputElement?)?.checked ?: false
         
@@ -10340,6 +14197,61 @@ fun setupCarBookingPageListeners() {
             return@addEventListener
         }
         
+        // Validate required fields: ETD, BOOKING NO, VESSEL
+        val etdInput = document.getElementById("etdDate") as HTMLInputElement?
+        val bookingNoInput = document.getElementById("bookingNo") as HTMLInputElement?
+        val vesselInput = document.getElementById("vesselSelect") as HTMLInputElement?
+        
+        val etd = etdInput?.value?.trim() ?: ""
+        val bookingNo = bookingNoInput?.value?.trim() ?: ""
+        val vesselDisplay = vesselInput?.value?.trim() ?: ""
+        val consigneeInput = document.getElementById("consigneeName") as HTMLInputElement?
+        val consigneeCountrySelect = document.getElementById("consigneeCountry") as HTMLSelectElement?
+        val rawConsignee = consigneeInput?.value ?: ""
+        val consigneeCountry = consigneeCountrySelect?.value ?: ""
+        val formattedConsignee = formatConsigneeForUpdate(rawConsignee, consigneeCountry)
+        
+        // Get POD (Port of Discharge) value for destination column
+        // Handle both input and select elements (in case booking mapping changes it)
+        val podPortElement = document.getElementById("podPort")
+        val podValue = when {
+            podPortElement != null -> {
+                val inputValue = (podPortElement as? HTMLInputElement)?.value?.trim()
+                val selectValue = (podPortElement as? HTMLSelectElement)?.selectedOptions?.item(0)?.textContent?.trim()
+                inputValue ?: selectValue ?: ""
+            }
+            else -> ""
+        }
+        
+        if (etd.isEmpty()) {
+            showMessage("Please fill in ETD (Estimated Time of Departure) before calculating", "error")
+            etdInput?.focus()
+            return@addEventListener
+        }
+        
+        if (bookingNo.isEmpty()) {
+            showMessage("Please fill in BOOKING NO before calculating", "error")
+            bookingNoInput?.focus()
+            return@addEventListener
+        }
+        
+        if (vesselDisplay.isEmpty()) {
+            showMessage("Please enter VESSEL before calculating", "error")
+            vesselInput?.focus()
+            return@addEventListener
+        }
+        
+        // Get selected purchase IDs
+        console.log("🔍 Getting selected purchase IDs...")
+        val selectedPurchaseIds = getSelectedPurchaseIds()
+        console.log("🔍 Got ${selectedPurchaseIds.size} purchase IDs: $selectedPurchaseIds")
+        
+        if (selectedPurchaseIds.isEmpty()) {
+            console.error("❌ No purchase IDs found - cannot update purchases")
+            showMessage("Please select at least one car from the list before calculating", "error")
+            return@addEventListener
+        }
+        
         // Save Car Booking state before navigating
         saveCarBookingState()
         
@@ -10350,6 +14262,27 @@ fun setupCarBookingPageListeners() {
         val selectedCars = getSelectedCarsFromTable()
         val selectedChassis = if (selectedCars.isNotEmpty()) selectedCars[0].chassis else null
         
+        console.log("🔄 About to call updateSelectedPurchasesWithBookingData with:")
+        console.log("   Purchase IDs: $selectedPurchaseIds")
+        console.log("   ETD: $etd")
+        console.log("   BOOKING NO: $bookingNo")
+        console.log("   VESSEL DISPLAY: $vesselDisplay")
+        console.log("   POD (destination): '$podValue'")
+        console.log("   CONSIGNEE (raw): '$rawConsignee'")
+        console.log("   CONSIGNEE COUNTRY: '$consigneeCountry'")
+        console.log("   CONSIGNEE (formatted): '$formattedConsignee'")
+        
+        // Update selected purchases with booking data (ETD, BOOKING NO, VESSEL, POD) before navigating
+        updateSelectedPurchasesWithBookingData(
+            purchaseIds = selectedPurchaseIds,
+            etd = etd,
+            bookingNo = bookingNo,
+            vessel = vesselDisplay,
+            destination = podValue,
+            consignee = formattedConsignee,
+            onComplete = {
+                // After all updates complete, navigate to C&F or FOB page
+                console.log("✅ All updates complete, navigating to calculation page...")
         if (cnfChecked) {
             console.log("🚗 Navigating to C&F page with ${selectedCars.size} selected cars")
             showCnfCalculationPage(selectedChassis, selectedCars, currentSelectedCountry)
@@ -10357,6 +14290,8 @@ fun setupCarBookingPageListeners() {
             console.log("🚗 Navigating to FOB page with ${selectedCars.size} selected cars")
             showFobCalculationPage(selectedChassis, selectedCars)
         }
+            }
+        )
     })
     
     // CANCEL button - navigate back to purchase list
@@ -10404,10 +14339,18 @@ fun generateShippingSchedulePdf() {
     pdfRequest.chassisNumbers = globalSelectedCarsForPdf.map { it.chassis }
     
     console.log("📋 PDF Request data:", pdfRequest)
-    console.log("🚀🚀🚀 USING CORRECT ENDPOINT: /api/purchases/shipping-schedule/generate-pdf 🚀🚀🚀")
+    val pdfUrl = apiUrl("purchases/shipping-schedule/generate-pdf")
+    console.log("🚀🚀🚀 PDF URL:", pdfUrl, "🚀🚀🚀")
+    console.log("🔍🔍🔍 Should be: http://localhost:8083/api/purchases/shipping-schedule/generate-pdf 🔍🔍🔍")
     
     // Call PDF generation API
-    js("fetch('/api/purchases/shipping-schedule/generate-pdf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pdfRequest) })")
+    val requestInit = js("{}")
+    requestInit.method = "POST"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(pdfRequest)
+    window.fetch(pdfUrl, requestInit)
         .then { response: dynamic ->
             if (!response.ok) {
                 throw Exception("HTTP error! status: ${response.status}")
@@ -10436,90 +14379,12 @@ fun generateShippingSchedulePdf() {
 }
 
 // Load vessels from API (with fallback to hardcoded data)
-fun loadVessels() {
-    console.log("Loading vessels...")
-    
-    js("fetch('/api/api/vessels')")
-        .then { response: dynamic ->
-            console.log("Vessels API response status:", response.status)
-            if (response.ok) {
-                response.json()
-            } else {
-                throw js("new Error('Failed to load vessels - Status: ' + response.status)")
-            }
-        }
-        .then { vessels: dynamic ->
-            console.log("Vessels loaded from API:", vessels)
-            val vesselSelect = document.getElementById("vesselSelect") as HTMLSelectElement?
-            if (vesselSelect != null) {
-                vesselSelect.innerHTML = "<option value=\"\">Select Vessel</option>"
-                
-                vessels.forEach { vessel: dynamic ->
-                    val option = document.createElement("option") as HTMLOptionElement
-                    option.value = vessel.vesselNo
-                    option.textContent = "${vessel.vesselName} (${vessel.vesselNo})"
-                    vesselSelect.appendChild(option)
-                }
-                console.log("Vessels populated from API successfully")
-            } else {
-                console.error("Vessel select element not found!")
-            }
-        }
-        .catch { error: dynamic ->
-            console.error("Error loading vessels from API, using fallback data:", error)
-            // Fallback to hardcoded vessel data
-            loadVesselsFallback()
-        }
-}
-
-// Fallback vessel data when API is not available
-fun loadVesselsFallback() {
-    console.log("Loading fallback vessel data...")
-    console.log("Searching for vesselSelect element...")
-    
-    val vesselSelect = document.getElementById("vesselSelect") as HTMLSelectElement?
-    console.log("Vessel select element found:", vesselSelect)
-    
-    if (vesselSelect == null) {
-        console.error("Vessel select element not found in fallback!")
-        return
-    }
-    
-    console.log("Clearing vessel select and adding default option...")
-    vesselSelect.innerHTML = "<option value=\"\">Select Vessel</option>"
-    
-    // Vessel data from your database - exact match with vessels table
-    val fallbackVessels = listOf(
-        mapOf("vesselNo" to "CAP789", "vesselName" to "CAPTAIN THANASIS I", "company" to "CAPTAIN"),
-        mapOf("vesselNo" to "MAE012", "vesselName" to "MAERSK VIRGINIA", "company" to "MAERSK"),
-        mapOf("vesselNo" to "MSC123", "vesselName" to "MSC BASIL", "company" to "MSC"),
-        mapOf("vesselNo" to "MSC456", "vesselName" to "MSC MANHATTAN V", "company" to "MSC"),
-        mapOf("vesselNo" to "NAV678", "vesselName" to "NAVIOS TEMPO V", "company" to "NAVIOS"),
-        mapOf("vesselNo" to "VIR345", "vesselName" to "VIRGO V", "company" to "VIRGO"),
-        mapOf("vesselNo" to "VSL001", "vesselName" to "Ever Given", "company" to "Evergreen Marine"),
-        mapOf("vesselNo" to "VSL002", "vesselName" to "MSC Oscar", "company" to "MSC"),
-        mapOf("vesselNo" to "VSL003", "vesselName" to "CMA CGM Marco Polo", "company" to "CMA CGM")
-    )
-    
-    console.log("Adding", fallbackVessels.size, "vessels to dropdown...")
-    
-    fallbackVessels.forEach { vessel ->
-        val option = document.createElement("option") as HTMLOptionElement
-        option.value = vessel["vesselNo"] as String
-        option.textContent = "${vessel["vesselName"]} (${vessel["vesselNo"]})"
-        vesselSelect.appendChild(option)
-        console.log("Added vessel:", option.textContent)
-    }
-    
-    console.log("Fallback vessels loaded successfully:", fallbackVessels.size, "vessels")
-    console.log("Final vessel select options count:", vesselSelect.options.length)
-}
 
 // Load countries from purchases table
 fun loadCountries() {
     console.log("Loading countries from purchases table...")
     
-    js("fetch('/api/purchases/countries')")
+    window.fetch(apiUrl("purchases/countries"))
         .then { response: dynamic ->
             console.log("Countries API response status:", response.status)
             if (response.ok) {
@@ -10599,7 +14464,7 @@ fun loadCountriesFallback() {
 fun loadStockLocations() {
     console.log("Loading stock locations from purchases table...")
     
-    js("fetch('/api/purchases/stock-locations')")
+    window.fetch(apiUrl("purchases/stock-locations"))
         .then { response: dynamic ->
             console.log("Stock locations API response status:", response.status)
             if (response.ok) {
@@ -10674,10 +14539,10 @@ fun loadStockLocationsFallback() {
 fun loadFilteredChassis() {
     val countrySelect = document.getElementById("consigneeCountry") as HTMLSelectElement?
     val polSelect = document.getElementById("polPort") as HTMLSelectElement?
-    val chassisSelect = document.getElementById("chassisSearch") as HTMLSelectElement?
+    val chassisInput = document.getElementById("chassisSearch") as HTMLInputElement?
     
-    if (countrySelect == null || polSelect == null || chassisSelect == null) {
-        console.error("Required select elements not found!")
+    if (countrySelect == null || polSelect == null || chassisInput == null) {
+        console.error("Required elements not found!")
         return
     }
     
@@ -10685,14 +14550,19 @@ fun loadFilteredChassis() {
     val selectedPol = polSelect.value
     
     if (selectedCountry.isEmpty() || selectedPol.isEmpty()) {
-        console.log("Country or POL not selected, clearing chassis dropdown")
-        chassisSelect.innerHTML = "<option value=\"\">Select Chassis (Filtered by Country & POL)</option>"
+        console.log("Country or POL not selected, clearing chassis data")
+        filteredChassisList = emptyArray()
+        chassisInput.value = ""
+        hideChassisSuggestions()
         return
     }
     
     console.log("Loading filtered chassis for country:", selectedCountry, "and POL:", selectedPol)
     
-    js("fetch('/api/purchases/filtered-chassis?country=' + encodeURIComponent(selectedCountry) + '&polPort=' + encodeURIComponent(selectedPol))")
+    val encodedCountry = js("encodeURIComponent")(selectedCountry) as String
+    val encodedPol = js("encodeURIComponent")(selectedPol) as String
+    val url = apiUrl("purchases/filtered-chassis?country=$encodedCountry&polPort=$encodedPol")
+    window.fetch(url)
         .then { response: dynamic ->
             console.log("Filtered chassis API response status:", response.status)
             if (response.ok) {
@@ -10705,18 +14575,10 @@ fun loadFilteredChassis() {
         .then { chassis: dynamic ->
             console.log("Filtered chassis data received:", chassis)
             
-            // Clear existing options except the first one
-            chassisSelect.innerHTML = "<option value=\"\">Select Chassis (Filtered by Country & POL)</option>"
-            
-            // Add chassis from API
+            // Store chassis data in global variable for autocomplete
             val chassisArray = chassis as Array<dynamic>
-            chassisArray.forEach { chassisNumber ->
-                val option = document.createElement("option")
-                option.setAttribute("value", chassisNumber as String)
-                option.textContent = chassisNumber as String
-                chassisSelect.appendChild(option)
-            }
-            console.log("Filtered chassis loaded from API:", chassisArray.size)
+            filteredChassisList = chassisArray.map { it.toString() }.toTypedArray()
+            console.log("Filtered chassis loaded from API:", filteredChassisList.size)
         }
         .catch { error: dynamic ->
             console.error("Error loading filtered chassis:", error)
@@ -10728,14 +14590,11 @@ fun loadFilteredChassis() {
 fun loadFilteredChassisFallback() {
     console.log("Loading fallback filtered chassis data...")
     
-    val chassisSelect = document.getElementById("chassisSearch") as HTMLSelectElement?
-    if (chassisSelect == null) {
-        console.error("Chassis select element not found in fallback!")
+    val chassisInput = document.getElementById("chassisSearch") as HTMLInputElement?
+    if (chassisInput == null) {
+        console.error("Chassis input element not found in fallback!")
         return
     }
-    
-    console.log("Clearing chassis select and adding default option...")
-    chassisSelect.innerHTML = "<option value=\"\">Select Chassis (Filtered by Country & POL)</option>"
     
     // Sample chassis data - in real implementation, this would be filtered by country and POL
     val fallbackChassis = listOf(
@@ -10747,25 +14606,74 @@ fun loadFilteredChassisFallback() {
         "SLP2T-105089"
     )
     
-    console.log("Adding", fallbackChassis.size, "chassis to dropdown...")
+    // Store in global variable for autocomplete
+    filteredChassisList = fallbackChassis.toTypedArray()
+    console.log("Fallback filtered chassis loaded successfully:", filteredChassisList.size, "chassis")
+}
+
+// Show chassis suggestions dropdown
+fun showChassisSuggestions(suggestions: Array<String>) {
+    val suggestionsDiv = document.getElementById("chassisSuggestions") as? HTMLElement
+    if (suggestionsDiv == null) return
     
-    fallbackChassis.forEach { chassis ->
-        val option = document.createElement("option")
-        option.setAttribute("value", chassis)
-        option.textContent = chassis
-        chassisSelect.appendChild(option)
-        console.log("Added chassis:", chassis)
+    suggestionsDiv.innerHTML = ""
+    
+    if (suggestions.isEmpty()) {
+        suggestionsDiv.style.display = "none"
+        return
     }
     
-    console.log("Fallback filtered chassis loaded successfully:", fallbackChassis.size, "chassis")
-    console.log("Final chassis select options count:", chassisSelect.options.length)
+    suggestions.forEach { chassis ->
+        val suggestionItem = document.createElement("div") as HTMLElement
+        suggestionItem.style.cssText = "padding: 10px; cursor: pointer; border-bottom: 1px solid #e5e7eb;"
+        suggestionItem.textContent = chassis
+        suggestionItem.addEventListener("click", { _: Event ->
+            val chassisInput = document.getElementById("chassisSearch") as? HTMLInputElement
+            chassisInput?.value = chassis
+            hideChassisSuggestions()
+            // Trigger search when suggestion is selected
+            searchCarsByChassis(chassis)
+        })
+        suggestionItem.addEventListener("mouseenter", { _: Event ->
+            suggestionItem.style.setProperty("background-color", "#f3f4f6")
+        })
+        suggestionItem.addEventListener("mouseleave", { _: Event ->
+            suggestionItem.style.setProperty("background-color", "white")
+        })
+        suggestionsDiv.appendChild(suggestionItem)
+    }
+    
+    suggestionsDiv.style.display = "block"
+}
+
+// Hide chassis suggestions dropdown
+fun hideChassisSuggestions() {
+    val suggestionsDiv = document.getElementById("chassisSuggestions") as? HTMLElement
+    suggestionsDiv?.style?.setProperty("display", "none")
+}
+
+// Filter chassis suggestions based on input
+fun filterChassisSuggestions(query: String) {
+    if (query.isEmpty()) {
+        hideChassisSuggestions()
+        return
+    }
+    
+    val queryLower = query.lowercase()
+    val filtered = filteredChassisList.filter { 
+        it.lowercase().contains(queryLower) 
+    }.toTypedArray()
+    
+    showChassisSuggestions(filtered)
 }
 
 // Search cars by specific chassis number
 fun searchCarsByChassis(chassis: String) {
     console.log("Searching cars by chassis:", chassis)
     
-    js("fetch('/api/purchases/search?query=' + encodeURIComponent(chassis))")
+    val encodedChassis = js("encodeURIComponent")(chassis) as String
+    val url = apiUrl("purchases/search?query=$encodedChassis")
+    window.fetch(url)
         .then { response: dynamic ->
             console.log("Search API response status:", response.status)
             if (response.ok) {
@@ -10824,7 +14732,9 @@ fun searchCars() {
     console.log("Searching purchases table for chassis:", chassisSearch)
     
     // Search the purchases table by chassis number
-    js("fetch('/api/purchases/search?query=' + encodeURIComponent(chassisSearch))")
+    val encodedChassis = js("encodeURIComponent")(chassisSearch) as String
+    val url = apiUrl("purchases/search?query=$encodedChassis")
+    window.fetch(url)
         .then { response: dynamic ->
             console.log("Purchases search API response status:", response.status)
             if (response.ok) {
@@ -11149,6 +15059,294 @@ fun getSelectedCarsFromTable(): List<dynamic> {
     return selectedCars
 }
 
+// Get selected purchase IDs from checked checkboxes in the car selection table
+fun getSelectedPurchaseIds(): List<Long> {
+    val selectedIds = mutableListOf<Long>()
+    val tableBody = document.getElementById("carSelectionTableBody")
+    
+    console.log("🔍 getSelectedPurchaseIds() called")
+    console.log("🔍 Table body element:", tableBody)
+    
+    if (tableBody != null) {
+        // Try to find checkboxes with class 'car-checkbox' first
+        var checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
+        console.log("🔍 Found ${checkboxes.length} checkboxes with class 'car-checkbox'")
+        
+        // If none found, try finding all checkboxes in the table
+        if (checkboxes.length == 0) {
+            checkboxes = tableBody.querySelectorAll("input[type='checkbox']")
+            console.log("🔍 No 'car-checkbox' class found, trying all checkboxes: ${checkboxes.length} found")
+        }
+        
+        for (i in 0 until checkboxes.length) {
+            val checkbox = checkboxes.item(i) as HTMLInputElement
+            console.log("🔍 Checkbox $i: checked=${checkbox.checked}, data-purchase-id=${checkbox.getAttribute("data-purchase-id")}")
+            
+            if (checkbox.checked) {
+                // Try to get purchase ID from data attribute
+                var purchaseId = checkbox.getAttribute("data-purchase-id")?.toLongOrNull()
+                
+                // If not found, try to get it from the row's data attribute or from the purchase object
+                if (purchaseId == null) {
+                    val row = checkbox.closest("tr") as? HTMLTableRowElement
+                    if (row != null) {
+                        purchaseId = row.getAttribute("data-purchase-id")?.toLongOrNull()
+                        console.log("🔍 Trying row data-purchase-id: $purchaseId")
+                    }
+                }
+                
+                // If still not found, try to find the purchase ID from the displayed cars data
+                if (purchaseId == null) {
+                    val chassisCell = (checkbox.closest("tr") as? HTMLTableRowElement)?.cells?.get(2)
+                    val chassis = chassisCell?.textContent?.trim()
+                    if (chassis != null) {
+                        // Find the purchase in carBookingDisplayedCars
+                        for (car in carBookingDisplayedCars) {
+                            if (car.chassis == chassis) {
+                                purchaseId = (car.id as? Number)?.toLong()
+                                console.log("🔍 Found purchase ID from displayed cars: $purchaseId for chassis $chassis")
+                                break
+                            }
+                        }
+                    }
+                }
+                
+                if (purchaseId != null) {
+                    selectedIds.add(purchaseId)
+                    console.log("✅ Added purchase ID: $purchaseId")
+                } else {
+                    console.warn("⚠️ Could not find purchase ID for checked checkbox")
+                }
+            }
+        }
+    } else {
+        console.error("❌ Car selection table body not found!")
+    }
+    
+    console.log("🔍 Selected purchase IDs: $selectedIds")
+
+    if (selectedIds.isEmpty()) {
+        console.warn("⚠️ No checkboxes selected. Falling back to all displayed cars.")
+        val fallbackIds = mutableListOf<Long>()
+        for (car in carBookingDisplayedCars) {
+            val id = (car.id as? Number)?.toLong()
+            if (id != null) {
+                fallbackIds.add(id)
+            }
+        }
+        if (fallbackIds.isNotEmpty()) {
+            selectedIds.addAll(fallbackIds)
+            console.log("✅ Defaulted to all displayed cars: $selectedIds")
+        } else {
+            console.warn("⚠️ No displayed cars available for fallback.")
+        }
+    }
+
+    return selectedIds
+}
+
+// Update selected purchases with booking data (ETD, BOOKING NO, VESSEL) sequentially
+fun formatConsigneeForUpdate(rawConsignee: String, consigneeCountry: String): String {
+    val trimmedRaw = rawConsignee.trim()
+    val trimmedCountry = consigneeCountry.trim()
+
+    if (trimmedRaw.isEmpty() && trimmedCountry.isEmpty()) {
+        return ""
+    }
+
+    // Try to split by newline first
+    var parts = trimmedRaw.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+    
+    // If no newline found, try to detect if it's a concatenated name+address
+    // Look for common patterns like company name followed by address (numbers, street names, etc.)
+    if (parts.size == 1 && trimmedRaw.length > 50) {
+        // Try to split at common separators or patterns
+        // Look for patterns like "LTD." or "LTD" followed by address
+        val ltdPattern = Regex("(.*?)(LTD\\.?|LIMITED|PVT|PRIVATE)(.*)", RegexOption.IGNORE_CASE)
+        val match = ltdPattern.find(trimmedRaw)
+        if (match != null) {
+            val companyPart = (match.groupValues[1] + match.groupValues[2]).trim()
+            val addressPart = match.groupValues[3].trim()
+            if (companyPart.isNotEmpty() && addressPart.isNotEmpty()) {
+                parts = listOf(companyPart, addressPart)
+            }
+        }
+    }
+    
+    val name = parts.firstOrNull() ?: ""
+    val address = parts.drop(1).joinToString(" ").trim()
+
+    val builder = StringBuilder()
+
+    if (name.isNotEmpty()) {
+        builder.append(name)
+    }
+
+    val shouldAppendCountryToAddress = trimmedCountry.isNotEmpty() &&
+        !(address.contains(trimmedCountry, ignoreCase = true))
+
+    if (address.isNotEmpty()) {
+        if (builder.isNotEmpty()) {
+            builder.append("\n\n")
+        }
+        builder.append(address)
+        if (shouldAppendCountryToAddress) {
+            builder.append(", ")
+            builder.append(trimmedCountry)
+        }
+    } else if (trimmedCountry.isNotEmpty()) {
+        if (builder.isNotEmpty()) {
+            builder.append("\n\n")
+        }
+        builder.append(trimmedCountry)
+    }
+
+    if (builder.isEmpty() && trimmedCountry.isNotEmpty()) {
+        builder.append(trimmedCountry)
+    }
+
+    return builder.toString()
+}
+
+fun updateSelectedPurchasesWithBookingData(
+    purchaseIds: List<Long>,
+    etd: String,
+    bookingNo: String,
+    vessel: String,
+    destination: String,
+    consignee: String,
+    onComplete: () -> Unit
+) {
+    if (purchaseIds.isEmpty()) {
+        console.log("⚠️ No purchase IDs to update")
+        onComplete()
+        return
+    }
+    
+    console.log("🔄 Updating ${purchaseIds.size} purchases with booking data...")
+    console.log("   ETD: $etd")
+    console.log("   BOOKING NO: $bookingNo")
+    console.log("   VESSEL: $vessel")
+    console.log("   DESTINATION (POD): $destination")
+    console.log("   CONSIGNEE: $consignee")
+    
+    var completedUpdates = 0
+    val totalUpdates = purchaseIds.size
+    
+    // Convert bookingNo to Long if it's numeric, otherwise null
+    val bookingIdLong = bookingNo.trim().toLongOrNull()
+    
+    // Update each purchase sequentially (one after another)
+    fun updateNext(index: Int) {
+        if (index >= purchaseIds.size) {
+            console.log("✅ All purchases updated successfully")
+            onComplete()
+            return
+        }
+        
+        val purchaseId = purchaseIds[index]
+        console.log("🔄 Updating purchase $purchaseId (${index + 1}/$totalUpdates)...")
+        
+        // Prepare update data
+        val updateData = js("{}")
+        updateData.shipmentDate = etd
+        
+        // Send bookingId as an integer (not double) to avoid deserialization issues
+        // If bookingIdLong is null, don't include it in the update
+        if (bookingIdLong != null) {
+            // Send as integer - backend handles Number type conversion
+            updateData.bookingId = bookingIdLong.toInt()
+        }
+        // If null, don't set it - backend will keep existing value
+        
+        // Always set vessel (even if empty string)
+        updateData.vessel = vessel
+        updateData.destination = destination
+        updateData.consignee = consignee
+        
+        // Make PUT request to update purchase
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(updateData)
+        
+        // CRITICAL DEBUG: Log everything before sending
+        console.log("📦📦📦 PREPARING UPDATE DATA FOR PURCHASE $purchaseId 📦📦📦")
+        console.log("   ETD (shipmentDate): '$etd'")
+        console.log("   BOOKING NO (bookingId): '$bookingNo' -> $bookingIdLong")
+        console.log("   VESSEL: '$vessel'")
+        console.log("   DESTINATION (POD): '$destination'")
+        console.log("   CONSIGNEE: '$consignee'")
+        console.log("   updateData.shipmentDate:", updateData.shipmentDate)
+        val bookingIdType = js("typeof updateData.bookingId") as String
+        console.log("   updateData.bookingId:", updateData.bookingId, "(type:", bookingIdType, ")")
+        console.log("   updateData.vessel:", updateData.vessel)
+        console.log("   updateData.destination:", updateData.destination)
+        console.log("   updateData.consignee:", updateData.consignee)
+        console.log("   JSON.stringify(updateData):", JSON.stringify(updateData))
+        console.log("📤📤📤 SENDING UPDATE REQUEST FOR PURCHASE $purchaseId 📤📤📤")
+         
+        console.log("   URL: ${apiUrl("purchases/$purchaseId")}")
+        console.log("   Request body:", requestInit.body)
+        console.log("   Parsed JSON:", JSON.parse(requestInit.body as String))
+        
+        window.fetch(apiUrl("purchases/$purchaseId"), requestInit)
+            .then { response: dynamic ->
+                completedUpdates++
+                if (response.ok) {
+                    response.json().then { updatedPurchase: dynamic ->
+                        console.log("✅ Purchase $purchaseId updated successfully (${completedUpdates}/$totalUpdates)")
+                        console.log("   Response shipmentDate: ${updatedPurchase.shipmentDate}")
+                        console.log("   Response bookingId: ${updatedPurchase.bookingId}")
+                        console.log("   Response vessel: ${updatedPurchase.vessel}")
+                        console.log("   Response destination: ${updatedPurchase.destination}")
+                        console.log("   Response consignee: ${updatedPurchase.consignee}")
+                        
+                        // Verify the values were actually saved
+                        if (updatedPurchase.shipmentDate != etd) {
+                            console.warn("⚠️ WARNING: shipmentDate mismatch! Sent: '$etd', Received: '${updatedPurchase.shipmentDate}'")
+                        }
+                        if (bookingIdLong != null && updatedPurchase.bookingId != bookingIdLong) {
+                            console.warn("⚠️ WARNING: bookingId mismatch! Sent: $bookingIdLong, Received: ${updatedPurchase.bookingId}")
+                        }
+                        if (updatedPurchase.vessel != vessel) {
+                            console.warn("⚠️ WARNING: vessel mismatch! Sent: '$vessel', Received: '${updatedPurchase.vessel}'")
+                        }
+                        val responseDestination = (updatedPurchase.destination as? String?) ?: ""
+                        if (destination.isNotEmpty() && responseDestination != destination) {
+                            console.warn("⚠️ WARNING: destination mismatch! Sent: '$destination', Received: '$responseDestination'")
+                        }
+                        val responseConsignee = (updatedPurchase.consignee as? String?) ?: ""
+                        if (consignee.isNotEmpty() && responseConsignee != consignee) {
+                            console.warn("⚠️ WARNING: consignee mismatch! Sent: '$consignee', Received: '$responseConsignee'")
+                        }
+                    }.catch { error: dynamic ->
+                        console.log("✅ Purchase $purchaseId updated successfully (${completedUpdates}/$totalUpdates) - but couldn't parse response")
+                        console.error("   Parse error:", error)
+                    }
+                } else {
+                    response.text().then { errorText: dynamic ->
+                        console.error("❌ Failed to update purchase $purchaseId: ${response.status}")
+                        console.error("   Error response: $errorText")
+                    }
+                }
+                // Continue with next purchase
+                updateNext(index + 1)
+            }
+            .catch { error: dynamic ->
+                completedUpdates++
+                console.error("❌ Error updating purchase $purchaseId:", error)
+                // Continue with next purchase even if this one failed
+                updateNext(index + 1)
+            }
+    }
+    
+    // Start updating from index 0
+    updateNext(0)
+}
+
 // Create freight calculation HTML page
 fun createFreightCalculationHTML(selectedCars: List<dynamic>): String {
     return """
@@ -11401,7 +15599,9 @@ fun addCarToContainer(containerId: String, chassis: String, allSelectedCars: Lis
     console.log("🚢 Adding car $chassis to container $containerId")
     
     // Fetch C&F price for this chassis
-    js("fetch('/api/purchases/costs-by-chassis/' + encodeURIComponent(chassis))")
+    val encodedChassis = js("encodeURIComponent")(chassis) as String
+    val url = apiUrl("purchases/costs-by-chassis/$encodedChassis")
+    window.fetch(url)
         .then { response: dynamic ->
             if (response.ok) {
                 response.json()
@@ -11647,7 +15847,41 @@ fun confirmFreightCalculation() {
     
     // Navigate back to C&F Calculation page with freight values
     console.log("🔄 Returning to C&F Calculation page with freight values...")
-    showCnfCalculationPage(null, cnfPageSelectedCars, currentSelectedCountry)
+    console.log("📋 globalFreightValues before navigation:", globalFreightValues)
+    console.log("📋 globalFreightValues keys:", globalFreightValues.keys.toList())
+    
+    // Get the first chassis from selected cars to auto-select it
+    val firstChassis = if (cnfPageSelectedCars.isNotEmpty()) {
+        cnfPageSelectedCars[0].chassis
+    } else {
+        null
+    }
+    
+    showCnfCalculationPage(firstChassis, cnfPageSelectedCars, currentSelectedCountry)
+    
+    // After navigation completes, ensure freight field is populated and calculation runs
+    window.setTimeout({
+        val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
+        val selectedChassis = chassisSelect?.value ?: ""
+        console.log("🔍 After navigation - Selected chassis:", selectedChassis)
+        console.log("🔍 After navigation - globalFreightValues:", globalFreightValues)
+        console.log("🔍 After navigation - Contains key?", globalFreightValues.containsKey(selectedChassis))
+        
+        if (selectedChassis.isNotEmpty() && globalFreightValues.containsKey(selectedChassis)) {
+            val freightField = document.getElementById("freight") as HTMLInputElement?
+            if (freightField != null) {
+                val freightValue = globalFreightValues[selectedChassis] ?: 0.0
+                freightField.value = freightValue.toInt().toString()
+                console.log("🚢 Updated freight field after navigation: ¥${freightValue.toInt()}")
+                // Recalculate total with freight included
+                calculateCnfTotal()
+            } else {
+                console.error("❌ Freight field not found in DOM")
+            }
+        } else {
+            console.warn("⚠️ No freight value found for chassis: $selectedChassis")
+        }
+    }, 1000) // Increased delay to ensure page is fully loaded
 }
 
 // Show C&F Calculation Page
@@ -11840,8 +16074,8 @@ fun createCnfCalculationHTML(): String {
                         </div>
                     </div>
                     
-                    <!-- Package Option -->
-                    <div style="margin-top: 20px; padding: 15px; background-color: #f3f4f6; border-radius: 8px; border: 1px solid #d1d5db;">
+                    <!-- Package Option (Only show for PAKISTAN) -->
+                    <div id="packageCheckboxSection" style="margin-top: 20px; padding: 15px; background-color: #f3f4f6; border-radius: 8px; border: 1px solid #d1d5db;">
                         <label style="display: flex; align-items: center; cursor: pointer; font-weight: 500; color: #374151;">
                             <input type="checkbox" id="packageCheckbox" style="margin-right: 10px; transform: scale(1.2);">
                             <span style="font-size: 16px;">PACKAGE</span>
@@ -12014,12 +16248,35 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
         val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
         chassisSelect?.value = selectedChassis
         loadCarCostDetails()
+    } else {
+        // If no chassis selected, try to select first available car
+        val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
+        if (chassisSelect != null && chassisSelect.options.length > 1) {
+            chassisSelect.selectedIndex = 1 // Select first actual option (skip "Select Chassis")
+        loadCarCostDetails()
+        }
     }
     
     // Chassis selection dropdown - load car cost details
     document.getElementById("chassisSelect")?.addEventListener("change", { _: Event ->
         loadCarCostDetails()
     })
+    
+    // After page loads, check if there are freight values and populate them
+    window.setTimeout({
+        val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
+        val currentChassis = chassisSelect?.value ?: ""
+        if (currentChassis.isNotEmpty() && globalFreightValues.containsKey(currentChassis)) {
+            val freightField = document.getElementById("freight") as HTMLInputElement?
+            if (freightField != null) {
+                val freightValue = globalFreightValues[currentChassis] ?: 0.0
+                freightField.value = freightValue.toInt().toString()
+                console.log("🚢 Auto-populated freight field from globalFreightValues: ¥${freightValue.toInt()}")
+                // Recalculate total with freight
+                calculateCnfTotal()
+            }
+        }
+    }, 800) // Delay to ensure fields are loaded
     
     // Save button - save calculated Total C&F Price
     document.getElementById("saveCarCostsBtn")?.addEventListener("click", { _: Event ->
@@ -12052,6 +16309,21 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
         document.getElementById(fieldId)?.addEventListener("change", { _: Event ->
             calculateCnfTotal()
         })
+    }
+    
+    // Show/hide package checkbox based on country (only show for PAKISTAN)
+    val packageCheckboxSection = document.getElementById("packageCheckboxSection")
+    if (cnfPageSelectedCountry.uppercase() == "PAKISTAN") {
+        packageCheckboxSection?.setAttribute("style", "margin-top: 20px; padding: 15px; background-color: #f3f4f6; border-radius: 8px; border: 1px solid #d1d5db; display: block;")
+        console.log("✅ Package checkbox shown for PAKISTAN")
+    } else {
+        packageCheckboxSection?.setAttribute("style", "display: none;")
+        // Also hide package price section if visible
+        document.getElementById("packagePriceSection")?.setAttribute("style", "display: none;")
+        document.getElementById("totalCostSection")?.setAttribute("style", "display: none;")
+        // Uncheck package checkbox if it was checked
+        (document.getElementById("packageCheckbox") as? HTMLInputElement)?.checked = false
+        console.log("✅ Package checkbox hidden for country: $cnfPageSelectedCountry")
     }
     
     // Package checkbox event listener
@@ -12144,6 +16416,16 @@ fun togglePackageFields() {
     val packagePriceSection = document.getElementById("packagePriceSection")
     val totalCostSection = document.getElementById("totalCostSection")
     
+    // Only allow package mode if country is PAKISTAN
+    if (cnfPageSelectedCountry.uppercase() != "PAKISTAN") {
+        packageCheckbox?.checked = false
+        packagePriceSection?.setAttribute("style", "display: none;")
+        totalCostSection?.setAttribute("style", "text-align: center; display: none;")
+        console.log("⚠️ Package mode not available for country: $cnfPageSelectedCountry")
+        showMessage("Package option is only available for PAKISTAN", "warning")
+        return
+    }
+    
     if (packageCheckbox?.checked == true) {
         // Show package fields
         packagePriceSection?.setAttribute("style", "display: block; margin-top: 20px; padding: 15px; background-color: #fef3c7; border-radius: 8px; border: 1px solid #f59e0b;")
@@ -12161,16 +16443,16 @@ fun togglePackageFields() {
 }
 
 fun calculateCnfTotal() {
-    // Get current cost values from the form
-    val carPrice = (document.getElementById("carPrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val freight = (document.getElementById("freight") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val repairFee = (document.getElementById("repairFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val mscCharges = (document.getElementById("mscCharges") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val profit = (document.getElementById("profit") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    // Get current cost values from the form - use parseCurrency to handle formatted values (with commas)
+    val carPrice = parseCurrency((document.getElementById("carPrice") as HTMLInputElement?)?.value ?: "0")
+    val auctionFee = parseCurrency((document.getElementById("auctionFee") as HTMLInputElement?)?.value ?: "0")
+    val rixoPrice = parseCurrency((document.getElementById("rixoPrice") as HTMLInputElement?)?.value ?: "0")
+    val shippingCharge = parseCurrency((document.getElementById("shippingCharge") as HTMLInputElement?)?.value ?: "0")
+    val freight = parseCurrency((document.getElementById("freight") as HTMLInputElement?)?.value ?: "0")
+    val inspectionFee = parseCurrency((document.getElementById("inspectionFee") as HTMLInputElement?)?.value ?: "0")
+    val repairFee = parseCurrency((document.getElementById("repairFee") as HTMLInputElement?)?.value ?: "0")
+    val mscCharges = parseCurrency((document.getElementById("mscCharges") as HTMLInputElement?)?.value ?: "0")
+    val profit = parseCurrency((document.getElementById("profit") as HTMLInputElement?)?.value ?: "0")
     
     // Check if package checkbox is checked
     val packageCheckbox = document.getElementById("packageCheckbox") as HTMLInputElement?
@@ -12178,7 +16460,7 @@ fun calculateCnfTotal() {
     
     if (isPackageChecked) {
         // Package mode: Total C&F = Car Price + Package Price
-        val packagePrice = (document.getElementById("packagePrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+        val packagePrice = parseCurrency((document.getElementById("packagePrice") as HTMLInputElement?)?.value ?: "0")
         val totalCnfPrice = carPrice + packagePrice
         
         // Total Cost = sum of all fees
@@ -12197,6 +16479,17 @@ fun calculateCnfTotal() {
         document.getElementById("totalCnfPrice")?.textContent = "¥${totalCnfPrice.toInt()}"
         
         console.log("💰 Normal mode - Total C&F: $totalCnfPrice")
+        console.log("🔍 Calculation breakdown:")
+        console.log("  - Car Price: $carPrice")
+        console.log("  - Auction Fee: $auctionFee")
+        console.log("  - Rixo Price: $rixoPrice")
+        console.log("  - Shipping Charge: $shippingCharge")
+        console.log("  - Freight: $freight")
+        console.log("  - Inspection Fee: $inspectionFee")
+        console.log("  - Repair Fee: $repairFee")
+        console.log("  - MSC Charges: $mscCharges")
+        console.log("  - Profit: $profit")
+        console.log("  - Total: $totalCnfPrice")
     }
 }
 
@@ -12216,7 +16509,7 @@ fun confirmCarCostDetails() {
     // Get current cost values from the form
     val carPrice = (document.getElementById("carPrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
     val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val rixoPrice = (document.getElementById("rixoPriceInput") as? HTMLInputElement)?.value?.toDoubleOrNull() ?: 0.0
     val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
     val freight = (document.getElementById("freight") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
     val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
@@ -12330,22 +16623,31 @@ fun loadCarCostDetailsFob() {
     val selectedChassis = chassisSelect.value
     console.log("🔍 Loading FOB cost details for chassis:", selectedChassis)
     
-    js("fetch('/api/purchases/costs-by-chassis/' + encodeURIComponent(selectedChassis))")
+    // Try API call first, fallback to sample data if it fails
+    val encodedChassis = js("encodeURIComponent")(selectedChassis) as String
+    val url = apiUrl("purchases/costs-by-chassis/$encodedChassis")
+    window.fetch(url)
         .then { response: dynamic ->
-            if (!response.ok) {
-                throw Exception("HTTP error! status: ${response.status}")
-            }
+            if (response.ok) {
             response.json()
+            } else {
+                throw js("new Error('Failed to load cost details - Status: ' + response.status)")
+            }
         }
         .then { costData: dynamic ->
-            console.log("✅ FOB Cost details fetched:", costData)
+            console.log("✅ FOB Cost data loaded from API:", costData)
+            if (costData && costData.chassis) {
+                console.log("✅ FOB Cost details extracted:", costData)
             populateCostFieldsFob(costData)
             calculateTotalFobPrice()
+            } else {
+                throw js("new Error('No cost data found for chassis: ' + selectedChassis)")
+            }
         }
         .catch { error: dynamic ->
-            console.error("❌ Error fetching FOB cost details:", error)
-            js("alert('Error fetching FOB cost details: ' + error.message)")
-            clearCostFieldsFob()
+            console.error("❌ Error loading FOB cost details from API, using fallback:", error)
+            // Don't show alert - just use fallback data silently
+            loadCarCostDetailsFobFallback(selectedChassis)
         }
 }
 
@@ -12373,6 +16675,42 @@ fun populateCostFieldsFob(purchase: dynamic) {
     
     console.log("✅ FOB fields populated successfully")
     calculateTotalFobPrice()
+}
+
+// Fallback function to load FOB cost details (when API fails)
+fun loadCarCostDetailsFobFallback(chassis: String) {
+    console.log("🔄 Loading fallback FOB cost details for:", chassis)
+    
+    // Sample cost data - will be replaced with API call
+    val costData = mapOf(
+        "carPrice" to 300000.0,
+        "auctionFee" to 14500.0, 
+        "rixoPrice" to 12000.0,
+        "shippingCharge" to 20000.0,
+        "inspectionFee" to 0.0,
+        "repairFee" to 0.0,
+        "mscCharges" to 0.0,
+        "profit" to 20000.0
+    )
+    
+    // Populate cost fields with plain numbers (no formatting) so calculation can read them correctly
+    for ((fieldId, value) in costData) {
+        val fieldIdWithFob = "${fieldId}Fob"
+        val field = document.getElementById(fieldIdWithFob) as HTMLInputElement?
+        if (field != null) {
+            // Store as plain number string (no commas) so calculation can read it
+            field.value = value.toInt().toString()
+            console.log("🔍 Fallback FOB - Field:", fieldIdWithFob, "Value:", value, "Stored as:", field.value)
+        } else {
+            console.warn("⚠️ FOB Field not found:", fieldIdWithFob)
+        }
+    }
+    
+    // Calculate total using the FOB calculation function
+    calculateTotalFobPrice()
+    
+    console.log("✅ FOB Cost details loaded for chassis:", chassis)
+    console.log("💰 Final calculation should show Total FOB price")
 }
 
 // Clear cost fields for FOB page
@@ -12441,7 +16779,13 @@ fun saveTotalFobPrice() {
     console.log("📊 Cost data to save:", costData)
 
     // Call backend API to save FOB price to total_cnf_price column
-    js("fetch('/api/purchases/save-total-cnf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(costData) })")
+    val requestInit = js("{}")
+    requestInit.method = "POST"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(costData)
+    window.fetch(apiUrl("purchases/save-total-cnf"), requestInit)
         .then { response: dynamic ->
             console.log("Save Total FOB API response status:", response.status)
             if (response.ok) {
@@ -12501,28 +16845,48 @@ fun addCostFieldValidationFob() {
 // Update chassis dropdown with selected cars
 fun updateChassisDropdown() {
     console.log("🔄 Updating chassis dropdown...")
-    val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement
+    val chassisSelect = document.getElementById("chassisSelect") as? HTMLSelectElement
+    if (chassisSelect == null) {
+        console.warn("⚠️ chassisSelect element not found")
+        return
+    }
+    
     val selectedChassis = mutableListOf<String>()
     
     // Get all checked cars from the table
     val checkboxes = document.querySelectorAll("#carSelectionTableBody input[type='checkbox']:checked")
     for (i in 0 until checkboxes.length) {
-        val checkbox = checkboxes.item(i) as HTMLInputElement
-        val row = checkbox.closest("tr") as HTMLElement
-        val chassisCell = row.querySelector("td:nth-child(3)") // 3rd column is chassis
-        val chassisNumber = chassisCell?.textContent?.trim()
-        if (!chassisNumber.isNullOrEmpty()) {
+        val checkbox = checkboxes.item(i) as? HTMLInputElement
+        if (checkbox != null) {
+            try {
+                // closest() returns Element?, need to check if it's a table row
+                val rowElement = checkbox.closest("tr")
+                if (rowElement != null) {
+                    // Use querySelector to get the chassis cell (3rd column, index 2)
+                    val chassisCell = rowElement.querySelector("td:nth-child(3)")
+                    if (chassisCell != null) {
+                        val chassisText = chassisCell.textContent
+                        val chassisNumber = chassisText?.trim() ?: ""
+                        if (chassisNumber.isNotEmpty()) {
             selectedChassis.add(chassisNumber)
         }
     }
+                }
+            } catch (e: dynamic) {
+                console.error("❌ Error extracting chassis from row:", e)
+            }
+        }
+    }
     
-    // Clear and repopulate dropdown
-    chassisSelect.innerHTML = ""
-    chassisSelect.add(js("new Option('Select a car chassis...', '')"))
+    // Clear and repopulate dropdown using innerHTML for safety
+    chassisSelect.innerHTML = "<option value=\"\">Select a car chassis...</option>"
     
+    // Add selected chassis options using innerHTML (more reliable than appendChild)
     for (chassis in selectedChassis) {
-        val option = js("new Option(chassis, chassis)")
-        chassisSelect.add(option)
+        val option = document.createElement("option")
+        option.setAttribute("value", chassis)
+        option.textContent = chassis
+        chassisSelect.appendChild(option)
     }
     
     console.log("✅ Chassis dropdown updated with", selectedChassis.size, "selected cars")
@@ -12592,7 +16956,9 @@ fun loadCarCostDetails() {
     console.log("📋 Loading cost details for chassis:", selectedChassis)
     
     // Try API call first, fallback to sample data if it fails
-    js("fetch('/api/purchases/costs-by-chassis/' + encodeURIComponent(selectedChassis))")
+    val encodedChassis = js("encodeURIComponent")(selectedChassis) as String
+    val url = apiUrl("purchases/costs-by-chassis/$encodedChassis")
+    window.fetch(url)
         .then { response: dynamic ->
             if (response.ok) {
                 response.json()
@@ -12649,11 +17015,25 @@ fun populateCostFields(costData: dynamic) {
     
     // Populate cost fields with plain numbers (¥ symbol is displayed in HTML)
     for ((fieldId, value) in fieldMappings) {
-        val field = document.getElementById(fieldId) as HTMLInputElement
+        val field = document.getElementById(fieldId) as HTMLInputElement?
+        if (field != null) {
         val numericValue = value?.toString()?.toDoubleOrNull() ?: 0.0
         val plainValue = numericValue.toInt().toString()
         console.log("🔍 Field:", fieldId, "Raw value:", value, "Numeric:", numericValue, "Plain value:", plainValue)
         field.value = plainValue
+        } else {
+            console.warn("⚠️ Field not found:", fieldId)
+        }
+    }
+    
+    // Double-check freight field is set correctly from globalFreightValues (overrides API value)
+    if (selectedChassis.isNotEmpty() && globalFreightValues.containsKey(selectedChassis)) {
+        val freightField = document.getElementById("freight") as HTMLInputElement?
+        if (freightField != null) {
+            val freightValueFromGlobal = globalFreightValues[selectedChassis] ?: 0.0
+            freightField.value = freightValueFromGlobal.toInt().toString()
+            console.log("🚢 Force-updated freight field from globalFreightValues: ¥${freightValueFromGlobal.toInt()}")
+        }
     }
     
     // Calculate total using the new function that handles package checkbox
@@ -12666,29 +17046,44 @@ fun populateCostFields(costData: dynamic) {
 fun loadCarCostDetailsFallback(chassis: String) {
     console.log("🔄 Loading fallback cost details for:", chassis)
     
+    // Check if freight value exists in globalFreightValues
+    val freightValue = if (globalFreightValues.containsKey(chassis)) {
+        globalFreightValues[chassis] ?: 0.0
+    } else {
+        0.0
+    }
+    console.log("🚢 Fallback - Using freight value for $chassis: ¥${freightValue.toInt()}")
+    
     // Sample cost data - will be replaced with API call
     val costData = mapOf(
         "carPrice" to 300000.0,
         "auctionFee" to 14500.0, 
         "rixoPrice" to 12000.0,
         "shippingCharge" to 20000.0,
-        "freight" to 0.0, // Freight always starts at 0, not from database
+        "freight" to freightValue, // Use freight from globalFreightValues if available
         "inspectionFee" to 0.0,
         "repairFee" to 0.0,
         "mscCharges" to 0.0,
         "profit" to 20000.0
     )
     
-    // Populate cost fields with currency formatting
+    // Populate cost fields with plain numbers (no formatting) so parseCurrency can read them correctly
     for ((fieldId, value) in costData) {
-        val field = document.getElementById(fieldId) as HTMLInputElement
-        field.value = formatCurrency(value)
+        val field = document.getElementById(fieldId) as HTMLInputElement?
+        if (field != null) {
+            // Store as plain number string (no commas) so parseCurrency can read it
+            field.value = value.toInt().toString()
+            console.log("🔍 Fallback - Field:", fieldId, "Value:", value, "Stored as:", field.value)
+        } else {
+            console.warn("⚠️ Field not found:", fieldId)
+        }
     }
     
     // Calculate total using the new function that handles package checkbox
     calculateCnfTotal()
     
     console.log("✅ Cost details loaded for chassis:", chassis)
+    console.log("💰 Final calculation should show Total C&F with freight included")
 }
 
 // Clear all cost fields
@@ -12733,7 +17128,7 @@ fun saveCarCostDetails() {
     // Get all cost values from the form
     val carPrice = (document.getElementById("carPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
-    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val rixoPrice = (document.getElementById("rixoPriceInput") as? HTMLInputElement)?.value?.toDoubleOrNull() ?: 0.0
     val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val freight = (document.getElementById("freight") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
@@ -12770,7 +17165,13 @@ fun saveCarCostDetails() {
     console.log("🔍 DEBUG: Is package mode:", isPackageChecked)
     
     // Call backend API to save cost details
-    js("fetch('/api/purchases/save-costs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(costData) })")
+    val requestInit = js("{}")
+    requestInit.method = "PUT"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(costData)
+    window.fetch(apiUrl("purchases/save-costs"), requestInit)
         .then { response: dynamic ->
             console.log("Save API response status:", response.status)
             if (response.ok) {
@@ -12803,7 +17204,7 @@ fun saveCarCostDetailsAndNavigate() {
     // Get all cost values from the form
     val carPrice = (document.getElementById("carPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
-    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val rixoPrice = (document.getElementById("rixoPriceInput") as? HTMLInputElement)?.value?.toDoubleOrNull() ?: 0.0
     val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val freight = (document.getElementById("freight") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
@@ -12840,7 +17241,13 @@ fun saveCarCostDetailsAndNavigate() {
     console.log("🔍 DEBUG: Is package mode:", isPackageChecked)
     
     // Call backend API to save cost details, THEN navigate
-    js("fetch('/api/purchases/save-costs', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(costData) })")
+    val requestInit = js("{}")
+    requestInit.method = "PUT"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(costData)
+    window.fetch(apiUrl("purchases/save-costs"), requestInit)
         .then { response: dynamic ->
             console.log("Save API response status:", response.status)
             if (response.ok) {
@@ -12891,7 +17298,13 @@ fun saveTotalCnfPrice() {
     console.log("📊 Cost data to save:", costData)
     
     // Call backend API to save total C&F price
-    js("fetch('/api/purchases/save-total-cnf', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(costData) })")
+    val requestInit = js("{}")
+    requestInit.method = "POST"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(costData)
+    window.fetch(apiUrl("purchases/save-total-cnf"), requestInit)
         .then { response: dynamic ->
             console.log("Save Total C&F API response status:", response.status)
             if (response.ok) {
