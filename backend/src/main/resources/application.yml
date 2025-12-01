@@ -10,9 +10,16 @@ spring:
       connection-timeout: 20000
       idle-timeout: 300000
       max-lifetime: 1200000
+  flyway:
+    enabled: false
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-on-migrate: false
+    repair-on-migrate: true
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: validate
     show-sql: true
     properties:
       hibernate:
@@ -28,10 +35,11 @@ spring:
       enabled: true
       max-file-size: 10MB
       max-request-size: 10MB
-    context-path: /api
 
 server:
   port: 8083
+  servlet:
+    context-path: /api
 
 logging:
   level:

@@ -1,5 +1,5 @@
 # Use OpenJDK 17 as base image
-FROM openjdk:17-jdk-slim
+FROM eclipse-temurin:17-jdk
 
 # Set working directory
 WORKDIR /app
@@ -34,9 +34,9 @@ ENV SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=fa
 ENV SPRING_DATASOURCE_USERNAME=automan_user
 ENV SPRING_DATASOURCE_PASSWORD=automan_password
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8083/actuator/health || exit 1
+# Health check - hit an existing public endpoint
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8083/api/purchases || exit 1
 
 # Run the application
 CMD ["java", "-jar", "app.jar"]

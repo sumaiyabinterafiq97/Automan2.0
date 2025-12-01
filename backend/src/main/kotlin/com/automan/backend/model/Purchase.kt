@@ -12,6 +12,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
     ]
 )
 @JsonIgnoreProperties(ignoreUnknown = true)
+@com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
 data class Purchase(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -64,6 +65,18 @@ data class Purchase(
     @Column(name = "options")
     val options: String? = null,
     
+    @Column(name = "CC")
+    val cc: Int? = null,
+    
+    @Column(name = "shift")
+    val shift: String? = null,
+    
+    @Column(name = "steering_wheel")
+    val steeringWheel: String? = null,
+    
+    @Column(name = "WD")
+    val wd: String? = null,
+    
     @Column(name = "auction_no")
     val auctionNo: String? = null,
     
@@ -79,6 +92,9 @@ data class Purchase(
     
     @Column(name = "client_name")
     val clientName: String? = null,
+    
+    @Column(name = "consignee", columnDefinition = "TEXT")
+    val consignee: String? = null,
     
     @Column(name = "client_id")
     val clientId: Long? = null,
@@ -125,8 +141,14 @@ data class Purchase(
     @Column(name = "vessel_no")
     val vesselNo: String? = null,
     
+    @Column(name = "vessel")
+    val vessel: String? = null,
+    
     @Column(name = "destination")
     val destination: String? = null,
+    
+    @Column(name = "shipped")
+    val shipped: Boolean? = null,
     
     @Column(name = "shipment_charges")
     val shipmentCharges: String? = null,
@@ -154,6 +176,10 @@ data class Purchase(
     
     @Column(name = "number_cut")
     val numberCut: String? = null,
+    
+    @Column(name = "shaken")
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+    val shaken: Boolean? = null,
     
     @Column(name = "repair_company")
     val repairCompany: String? = null,

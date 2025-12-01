@@ -1,8 +1,10 @@
 package com.automan.backend.service
 
 import com.automan.backend.model.Purchase
+import com.automan.backend.dto.InvoicePdfRequest
 import com.itextpdf.kernel.pdf.PdfDocument
 import com.itextpdf.kernel.pdf.PdfWriter
+import com.itextpdf.kernel.geom.PageSize
 import com.itextpdf.layout.Document
 import com.itextpdf.layout.element.Cell
 import com.itextpdf.layout.element.Paragraph
@@ -61,6 +63,100 @@ class PdfService {
                 }
             }
         }
+    }
+
+    fun generateInvoicePdf(request: InvoicePdfRequest): ByteArray {
+        val outputStream = ByteArrayOutputStream()
+        val pdfWriter = PdfWriter(outputStream)
+        val pdfDocument = PdfDocument(pdfWriter)
+        val document = Document(pdfDocument)
+
+        val japaneseFont = getJapaneseFont()
+        document.setFont(japaneseFont)
+
+        // Header
+        document.add(
+            Paragraph("INVOICE")
+                .setFontSize(18f)
+                .setBold()
+                .setTextAlignment(TextAlignment.CENTER)
+                .setMarginBottom(15f)
+        )
+
+        val headerTable = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginBottom(10f)
+
+        val leftHeader = Cell()
+            .add(Paragraph("Invoice No: ${request.invoiceNumber}").setFontSize(10f))
+            .add(Paragraph("Invoice Date: ${request.invoiceDate}").setFontSize(10f))
+            .add(Paragraph("LC No: ${request.lcNumber ?: "-"}").setFontSize(10f))
+            .add(Paragraph("Client: ${request.clientName}").setFontSize(10f))
+            .add(Paragraph("Client Address: ${request.clientAddress ?: "-"}").setFontSize(10f))
+            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+        headerTable.addCell(leftHeader)
+
+        val rightHeader = Cell()
+            .add(Paragraph("Vessel: ${request.vessel}").setFontSize(10f))
+            .add(Paragraph("Shipping Date: ${request.shippingDate}").setFontSize(10f))
+            .add(Paragraph("From: ${request.from}").setFontSize(10f))
+            .add(Paragraph("To: ${request.to}").setFontSize(10f))
+            .add(Paragraph("Price Type: ${request.priceType}").setFontSize(10f))
+            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+        headerTable.addCell(rightHeader)
+
+        document.add(headerTable)
+
+        // Items table
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(10f, 70f, 20f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginTop(10f)
+
+        listOf("No.", "Description", "Amount").forEach {
+            table.addHeaderCell(
+                Cell().add(Paragraph(it).setBold().setTextAlignment(TextAlignment.CENTER))
+                    .setBackgroundColor(com.itextpdf.kernel.colors.ColorConstants.LIGHT_GRAY)
+                    .setPadding(8f)
+            )
+        }
+
+        request.items.forEach { item ->
+            table.addCell(createCell(item.unit.toString(), japaneseFont))
+            table.addCell(createCell(item.description, japaneseFont))
+            table.addCell(
+                createCell(item.amount, japaneseFont)
+                    .setTextAlignment(TextAlignment.RIGHT)
+            )
+        }
+
+        document.add(table)
+
+        document.add(
+            Paragraph("Total Amount: ${request.totalAmount}")
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setFontSize(12f)
+                .setBold()
+                .setMarginTop(15f)
+        )
+
+        request.bankAccount?.let {
+            document.add(
+                Paragraph("Bank Account: $it")
+                    .setFontSize(10f)
+                    .setMarginTop(10f)
+            )
+        }
+
+        request.message?.let {
+            document.add(
+                Paragraph(it)
+                    .setFontSize(10f)
+                    .setMarginTop(10f)
+            )
+        }
+
+        document.close()
+        return outputStream.toByteArray()
     }
 
     fun generateRixoPdf(purchases: List<Purchase>, invoiceData: Map<String, String>): ByteArray {
@@ -204,6 +300,8 @@ class PdfService {
         val outputStream = ByteArrayOutputStream()
         val pdfWriter = PdfWriter(outputStream)
         val pdfDocument = PdfDocument(pdfWriter)
+        // Set page size to A4 landscape (horizontal)
+        pdfDocument.setDefaultPageSize(PageSize.A4.rotate())
         val document = Document(pdfDocument)
         
         // Get Japanese-compatible font
@@ -262,8 +360,8 @@ class PdfService {
         document.add(request)
 
         // Create table for vehicle data with Japanese headers
-
-        val table = Table(UnitValue.createPercentArray(floatArrayOf(8f, 8f, 15f, 8f, 10f, 10f, 11f, 15f, 15f)))
+        // Column widths: 日付 (12f), 出品番号 (7f), 型式・車体番号 (14f), 年式 (12f), 車名 (9f), 取引先名 (9f), 搬入先名 (10f), 会場ID (14f), ナンバーカット (13f)
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(12f, 7f, 14f, 12f, 9f, 9f, 10f, 14f, 13f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginBottom(20f)
 
@@ -274,6 +372,9 @@ class PdfService {
             println("🎌 PDF Service: Adding header: '$header'")
             table.addCell(createHeaderCell(header, japaneseFont))
         }
+
+        // Determine total rows needed (minimum 5, or actual count if more)
+        val totalRows = maxOf(5, purchases.size)
 
         // Add vehicle data rows
         purchases.forEachIndexed { index, purchase ->
@@ -292,8 +393,9 @@ class PdfService {
             // Chassis
             table.addCell(createCell(purchase.chassis ?: "", japaneseFont))
             
-            // Car Model Year
-            table.addCell(createCell(purchase.carModelYear?.toString() ?: "", japaneseFont))
+            // Car Model Year - format to "Month YYYY" format
+            val formattedYear = formatCarModelYear(purchase.carModelYear?.toString())
+            table.addCell(createCell(formattedYear, japaneseFont))
             
             // Car Name
             table.addCell(createCell(purchase.carName ?: "", japaneseFont))
@@ -312,6 +414,17 @@ class PdfService {
             // Number Cut (from purchase data or empty)
             table.addCell(createCell(purchase.numberCut ?: "", japaneseFont))
         }
+        
+        // Add empty rows if needed to reach minimum of 5 rows
+        if (purchases.size < 5) {
+            val emptyRowsNeeded = 5 - purchases.size
+            repeat(emptyRowsNeeded) {
+                // Add 9 empty cells for each empty row (one for each column)
+                repeat(9) {
+                    table.addCell(createCell("", japaneseFont))
+                }
+            }
+        }
 
         document.add(table)
 
@@ -329,7 +442,7 @@ class PdfService {
             .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
         totalTable.addCell(emptyCell)
         
-        // Total count on the right side (invisible box)
+        // Total count on the right side (invisible box) - use actual purchases count, not total rows
         val totalCell = Cell()
             .add(Paragraph("合計 ${purchases.size} 台")
                 .setFont(japaneseFont)
@@ -481,6 +594,48 @@ class PdfService {
         }
         
         return dateString
+    }
+
+    // Formats carModelYear from YYYY-MM or MM/YYYY to "Month YYYY" format
+    // Examples: "2025-07" -> "July 2025", "07/2025" -> "July 2025", "7/2025" -> "July 2025"
+    private fun formatCarModelYear(yearStr: String?): String {
+        if (yearStr == null || yearStr.isBlank()) return ""
+        
+        val months = arrayOf(
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        )
+        
+        try {
+            // Handle YYYY-MM format (from month input)
+            if (yearStr.contains("-")) {
+                val parts = yearStr.split("-")
+                if (parts.size == 2) {
+                    val year = parts[0].toIntOrNull()
+                    val month = parts[1].toIntOrNull()
+                    if (year != null && month != null && month >= 1 && month <= 12) {
+                        return "${months[month - 1]} $year"
+                    }
+                }
+            }
+            
+            // Handle MM/YYYY or M/YYYY format (from database)
+            if (yearStr.contains("/")) {
+                val parts = yearStr.split("/")
+                if (parts.size == 2) {
+                    val month = parts[0].toIntOrNull()
+                    val year = parts[1].toIntOrNull()
+                    if (month != null && year != null && month >= 1 && month <= 12) {
+                        return "${months[month - 1]} $year"
+                    }
+                }
+            }
+            
+            // If already in readable format, return as is
+            return yearStr
+        } catch (e: Exception) {
+            return yearStr
+        }
     }
 
 }

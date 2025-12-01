@@ -1,0 +1,3 @@
+ALTER TABLE purchases
+    ADD COLUMN consignee TEXT DEFAULT NULL;
+

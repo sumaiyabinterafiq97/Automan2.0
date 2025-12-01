@@ -1,6 +1,6 @@
 # Multi-stage build for Kotlin JS frontend
 # Stage 1: Build with Java/Kotlin
-FROM openjdk:17-jdk-slim AS builder
+FROM eclipse-temurin:17-jdk AS builder
 
 # Set working directory
 WORKDIR /app

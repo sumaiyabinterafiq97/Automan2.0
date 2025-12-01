@@ -2,6 +2,7 @@ package com.automan.backend.model
 
 import jakarta.persistence.*
 import java.time.LocalDateTime
+import com.fasterxml.jackson.annotation.JsonIgnore
 
 @Entity
 @Table(name = "rixo_prices")
@@ -10,11 +11,15 @@ data class RixoPrice(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long = 0,
     
-    @Column(name = "auction_house", nullable = false)
+    @Column(name = "auction_name", nullable = false)
     @com.fasterxml.jackson.annotation.JsonAlias("auctionName")
     val auctionHouse: String,
     
-    @Column(name = "shipment_size")
+    @Column(name = "auction_house", nullable = false, insertable = false, updatable = false)
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    val auctionHouseDb: String = "", // Generated column - automatically set from auction_name
+    
+    @Column(name = "type_of_vehicle")
     @com.fasterxml.jackson.annotation.JsonAlias("typeOfVehicle")
     val shipmentSize: String? = null,
     
@@ -31,10 +36,34 @@ data class RixoPrice(
     val rixoPrice: String? = null,
     
     @Column(name = "created_at")
+    @JsonIgnore
     val createdAt: LocalDateTime = LocalDateTime.now()
 ) {
     @PrePersist
     fun prePersist() {
         // createdAt is set in the constructor with default value
+        // auction_house needs to be set from auctionHouse
+        // Since this is a data class, we'll handle this in the service layer
+    }
+    
+    companion object {
+        fun create(
+            auctionHouse: String,
+            shipmentSize: String? = null,
+            stockLocation: String,
+            rixoCompany: String,
+            rixoPrice: String? = null,
+            venueId: String? = null
+        ): RixoPrice {
+            return RixoPrice(
+                auctionHouse = auctionHouse,
+                // auctionHouseDb is a generated column, automatically set from auction_name
+                shipmentSize = shipmentSize,
+                stockLocation = stockLocation,
+                rixoCompany = rixoCompany,
+                rixoPrice = rixoPrice,
+                venueId = venueId
+            )
+        }
     }
 }

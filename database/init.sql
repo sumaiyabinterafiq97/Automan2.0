@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS purchases (
     rixo_price VARCHAR(50),
     repair_company VARCHAR(100),
     repair_charges VARCHAR(50),
+    shaken BOOLEAN DEFAULT FALSE,
+    number_cut VARCHAR(255),
     profit DECIMAL(15,2) DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

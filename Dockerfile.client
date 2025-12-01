@@ -6,15 +6,15 @@ WORKDIR /app
 
 # Copy frontend source
 COPY src src
-COPY build.gradle.kts settings.gradle.kts gradle.properties ./
+COPY build.gradle.kts settings.gradle.kts gradle.properties copy-kotlin-dependencies.sh ./
 COPY gradlew ./
 COPY gradle gradle
 
 # Make gradlew executable
-RUN chmod +x gradlew
+RUN chmod +x gradlew && chmod +x copy-kotlin-dependencies.sh
 
 # Build frontend
-RUN ./gradlew jsBrowserProductionWebpack
+RUN ./gradlew jsBrowserProductionWebpack && ./copy-kotlin-dependencies.sh
 
 # Backend builder stage
 FROM openjdk:17-jdk-slim AS backend-builder

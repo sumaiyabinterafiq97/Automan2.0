@@ -1,6 +1,15 @@
 // Dynamic Rixo Price Mapping Data
 // Generated from import_rixo_data.sql with hierarchical filtering
 
+// API Base URL - use relative path so nginx can proxy to backend
+const API_BASE_URL = '/api';
+
+// Helper function to get API URL
+function apiUrl(path) {
+    const cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    return `${API_BASE_URL}/${cleanPath}`;
+}
+
 window.rixoPriceMapping = {
     "ARAI BAYSIDE": {
         typeOfVehicle: ['CAR'],
@@ -2307,6 +2316,12 @@ window.findMatchingMapping = function(auctionName, typeOfVehicle, rixoCompany) {
 // Flag to prevent infinite loops during auto-selection
 window.isAutoSelecting = false;
 
+// Manual reset function in case flag gets stuck
+window.resetAutoSelectionFlag = function() {
+    console.log('🔄 Manually resetting auto-selection flag');
+    window.isAutoSelecting = false;
+};
+
 // Helper function to auto-select related fields
 window.autoSelectRelatedFields = function(auctionName, changedField, changedValue) {
     console.log('autoSelectRelatedFields called:', auctionName, changedField, changedValue);
@@ -2314,17 +2329,39 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
     // Prevent infinite loops
     if (window.isAutoSelecting) {
         console.log('Already auto-selecting, skipping to prevent loop');
+        // Reset flag if it's been stuck for too long (safety mechanism)
+        setTimeout(() => {
+            if (window.isAutoSelecting) {
+                console.warn('⚠️ Auto-selection flag stuck, resetting...');
+                window.isAutoSelecting = false;
+            }
+        }, 1000);
         return;
     }
     
+    // Use try-finally to ensure flag is always reset
     window.isAutoSelecting = true;
     
-    if (!auctionName || !window.rixoPriceMapping[auctionName] || !window.rixoPriceMapping[auctionName].mappings) {
-        console.log('No mappings found for auction:', auctionName);
+    try {
+        // Normalize auction name and find case-insensitive match
+        let normalizedAuctionName = auctionName;
+        if (!auctionName || !window.rixoPriceMapping || !window.rixoPriceMapping[auctionName]) {
+            // Try case-insensitive lookup
+            const mappingKeys = Object.keys(window.rixoPriceMapping || {});
+            const match = mappingKeys.find(key => key.toLowerCase() === auctionName.toLowerCase());
+            if (match) {
+                normalizedAuctionName = match;
+                console.log('Found case-insensitive match:', auctionName, '->', normalizedAuctionName);
+            }
+        }
+        
+        if (!normalizedAuctionName || !window.rixoPriceMapping || !window.rixoPriceMapping[normalizedAuctionName] || !window.rixoPriceMapping[normalizedAuctionName].mappings) {
+            console.log('No mappings found for auction:', auctionName, '(normalized:', normalizedAuctionName, ')');
+            console.log('Available auction names:', Object.keys(window.rixoPriceMapping || {}));
         return;
     }
     
-    const mappings = window.rixoPriceMapping[auctionName].mappings;
+        const mappings = window.rixoPriceMapping[normalizedAuctionName].mappings;
     
     if (changedField === 'auctionHouse') {
         // When auction house is selected, auto-select stockLocation and venueId if they're consistent
@@ -2355,24 +2392,25 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
         updateDropdown('rixoPrice', 'editRixoPrice', rixoPrices);
         
         // THEN auto-select values after dropdowns are populated
-        if (stockLocations.length === 1) {
-            setFieldValue('stockLocation', 'stockLocation', stockLocations[0]);
+        // Use setTimeout to ensure dropdowns are fully populated first
+        setTimeout(function() {
+            // Stock Location - always select first value if available
+            if (stockLocations.length > 0) {
             setFieldValue('stockLocation', 'editStockLocation', stockLocations[0]);
         }
-        if (venueIds.length === 1) {
-            setFieldValue('venueId', 'venueId', venueIds[0]);
+            
+            // Venue ID - always select first value if available
+            if (venueIds.length > 0) {
             setFieldValue('venueId', 'editVenueId', venueIds[0]);
         }
         
-        // Auto-select first available option for other fields if available
+            // Rixo Company - always select first value if available
         if (rixoCompanies.length > 0) {
-            setFieldValue('rixoCompany', 'rixoCompany', rixoCompanies[0]);
             setFieldValue('rixoCompany', 'editRixoCompany', rixoCompanies[0]);
         }
         
-        // Auto-select shipment size: use first available option, or default to "CAR" if none available
+            // Shipment Size - use first available option, or default to "CAR" if none available
         if (shipmentSizes.length > 0) {
-            setFieldValue('typeOfVehicle', 'typeOfVehicle', shipmentSizes[0]);
             setFieldValue('typeOfVehicle', 'editTypeOfVehicle', shipmentSizes[0]);
         } else {
             // No shipment size mapping found, default to "CAR"
@@ -2381,14 +2419,25 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
             updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
             // Then set the value
-            setFieldValue('typeOfVehicle', 'typeOfVehicle', 'CAR');
+                setTimeout(function() {
             setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
+                }, 50);
         }
         
+            // Rixo Price - always select first value if available
         if (rixoPrices.length > 0) {
-            setFieldValue('rixoPrice', 'rixoPrice', rixoPrices[0]);
-            setFieldValue('rixoPrice', 'editRixoPrice', rixoPrices[0]);
+                const priceInput = document.getElementById('rixoPrice');
+                if (priceInput) {
+                    priceInput.value = rixoPrices[0];
+                    console.log('✅ Set Rixo Price:', rixoPrices[0]);
+                }
+                const editPriceInput = document.getElementById('editRixoPrice');
+                if (editPriceInput) {
+                    editPriceInput.value = rixoPrices[0];
+                    console.log('✅ Set Edit Rixo Price:', rixoPrices[0]);
         }
+            }
+        }, 100);
         
     } else if (changedField === 'rixoCompany') {
         // When rixoCompany is selected, filter and update other dropdowns
@@ -2410,11 +2459,23 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             updateDropdown('rixoPrice', 'rixoPrice', availablePrices);
             updateDropdown('rixoPrice', 'editRixoPrice', availablePrices);
             
-            // Auto-select if only one option available for both add and edit forms
-            if (availableTypes.length === 1) {
-                setFieldValue('typeOfVehicle', 'typeOfVehicle', availableTypes[0]);
-                setFieldValue('typeOfVehicle', 'editTypeOfVehicle', availableTypes[0]);
-            } else if (availableTypes.length === 0) {
+            // Auto-select shipment size: always select first option if available
+            // Prefer "CAR / BIG CAR" or "CAR" over "TRUCK" if both are available
+            if (availableTypes.length > 0) {
+                // Sort to prefer "CAR / BIG CAR" or "CAR" first
+                const sortedTypes = [...availableTypes].sort((a, b) => {
+                    const aLower = String(a).toLowerCase();
+                    const bLower = String(b).toLowerCase();
+                    // Prefer "CAR / BIG CAR" or anything with "CAR" first
+                    if (aLower.includes('car') && !bLower.includes('car')) return -1;
+                    if (!aLower.includes('car') && bLower.includes('car')) return 1;
+                    return 0;
+                });
+                const selectedType = sortedTypes[0];
+                console.log('Auto-selecting shipment size:', selectedType, 'from options:', availableTypes);
+                setFieldValue('typeOfVehicle', 'typeOfVehicle', selectedType);
+                setFieldValue('typeOfVehicle', 'editTypeOfVehicle', selectedType);
+            } else {
                 // No shipment size mapping found for this company, default to "CAR"
                 console.log('No shipment size mapping found for company, defaulting to "CAR"');
                 // First, add "CAR" to the dropdown options
@@ -2469,9 +2530,11 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
         }
     }
-    
-    // Reset the flag to allow future auto-selections
+    } finally {
+        // Always reset the flag, even if there was an error
     window.isAutoSelecting = false;
+        console.log('✅ Auto-selection completed, flag reset');
+    }
 };
 
 // Helper function to update dropdown options with filtered data
@@ -2527,12 +2590,17 @@ window.updateDropdown = function(elementId, editElementId, options) {
             });
         }
     } else {
-        // Handle regular dropdowns
+        // Handle regular dropdowns (and their input fields for comboboxes)
         var dropdown = document.getElementById(elementId);
         var editDropdown = document.getElementById(editElementId);
+        var inputField = document.getElementById(elementId + 'Input');
+        var editInputField = document.getElementById(editElementId + 'Input');
+        
+        var defaultLabel = elementId.replace(/([A-Z])/g, ' $1').trim();
+        var editDefaultLabel = editElementId.replace(/([A-Z])/g, ' $1').trim();
         
         if (dropdown) {
-            dropdown.innerHTML = '<option value="">Select ' + elementId.replace(/([A-Z])/g, ' $1').trim() + '</option>';
+            dropdown.innerHTML = '<option value="">Select ' + defaultLabel + '</option>';
             var uniqueOptions = window.getUniqueValues(options);
             uniqueOptions.forEach(function(option) {
                 dropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
@@ -2540,11 +2608,19 @@ window.updateDropdown = function(elementId, editElementId, options) {
         }
         
         if (editDropdown) {
-            editDropdown.innerHTML = '<option value="">Select ' + editElementId.replace(/([A-Z])/g, ' $1').trim() + '</option>';
+            editDropdown.innerHTML = '<option value="">Select ' + editDefaultLabel + '</option>';
             var uniqueOptions = window.getUniqueValues(options);
             uniqueOptions.forEach(function(option) {
                 editDropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
             });
+        }
+        
+        // Update input placeholders for comboboxes
+        if (inputField) {
+            inputField.placeholder = 'Select ' + defaultLabel;
+        }
+        if (editInputField) {
+            editInputField.placeholder = 'Select ' + editDefaultLabel;
         }
     }
 };
@@ -2553,24 +2629,70 @@ window.updateDropdown = function(elementId, editElementId, options) {
 window.setFieldValue = function(addFieldId, editFieldId, value) {
     console.log('setFieldValue called:', addFieldId, editFieldId, value);
     
+    if (!value || value.trim() === '') {
+        console.log('⚠️ Empty value provided, skipping');
+        return;
+    }
+    
     const addField = document.getElementById(addFieldId);
     const editField = document.getElementById(editFieldId);
     
+    // Also set input fields for comboboxes
+    const addInputField = document.getElementById(addFieldId + 'Input');
+    const editInputField = document.getElementById(editFieldId + 'Input');
+    
+    // Set add form values
     if (addField) {
+        // For select elements, ensure the option exists before setting value
+        if (addField.tagName === 'SELECT') {
+            // Check if option exists, if not add it
+            const optionExists = Array.from(addField.options).some(opt => opt.value === value);
+            if (!optionExists && value) {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                addField.appendChild(option);
+                console.log('➕ Added missing option to add select:', addFieldId, value);
+            }
+        }
         addField.value = value;
-        // Only trigger change event if we're not auto-selecting to prevent loops
-        if (addField.tagName === 'SELECT' && !window.isAutoSelecting) {
-            addField.dispatchEvent(new Event('change', { bubbles: true }));
+        console.log('✅ Set add select value:', addFieldId, '=', value);
+        
+        // Sync to input if it's a combobox
+        if (addInputField && typeof window.syncComboboxInput === 'function') {
+            window.syncComboboxInput(addFieldId);
         }
-        console.log('Set add field value:', addFieldId, value);
     }
+    if (addInputField) {
+        addInputField.value = value;
+        console.log('✅ Set add input value:', addFieldId + 'Input', '=', value);
+    }
+    
+    // Set edit form values
     if (editField) {
-        editField.value = value;
-        // Only trigger change event if we're not auto-selecting to prevent loops
-        if (editField.tagName === 'SELECT' && !window.isAutoSelecting) {
-            editField.dispatchEvent(new Event('change', { bubbles: true }));
+        // For select elements, ensure the option exists before setting value
+        if (editField.tagName === 'SELECT') {
+            // Check if option exists, if not add it
+            const optionExists = Array.from(editField.options).some(opt => opt.value === value);
+            if (!optionExists && value) {
+                const option = document.createElement('option');
+                option.value = value;
+                option.textContent = value;
+                editField.appendChild(option);
+                console.log('➕ Added missing option to edit select:', editFieldId, value);
+            }
         }
-        console.log('Set edit field value:', editFieldId, value);
+        editField.value = value;
+        console.log('✅ Set edit select value:', editFieldId, '=', value);
+        
+        // Sync to input if it's a combobox
+        if (editInputField && typeof window.syncComboboxInput === 'function') {
+            window.syncComboboxInput(editFieldId);
+        }
+    }
+    if (editInputField) {
+        editInputField.value = value;
+        console.log('✅ Set edit input value:', editFieldId + 'Input', '=', value);
     }
     
     // Special handling for rixo price fields (they are input fields, not selects)
@@ -2659,3 +2781,1202 @@ window.triggerAutoSelection = function(auctionName) {
     
     console.log('=== End Manual Trigger ===');
 };
+
+// ===== RIXO MAPPING MANAGEMENT FUNCTIONS =====
+
+// Global variables for mapping management
+window.currentAuctionName = null;
+window.currentCompanyName = null;
+window.editingMappingId = null;
+
+// Display mapper for shipment size: map 20ft/40ft to CAR/TRUCK
+function displayShipmentSize(rawValue) {
+    if (!rawValue) return 'N/A';
+    const v = String(rawValue).trim().toLowerCase();
+    if (v.includes('20')) return 'CAR';
+    if (v.includes('40')) return 'TRUCK';
+    return rawValue; // Already a semantic value like CAR/TRUCK
+}
+
+// Helper function to escape HTML attributes
+function escapeHtmlAttr(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+// Show manage buttons when dropdowns have values
+window.toggleManageButtons = function() {
+    // Always show the supplier manage button; click handler already guards selection
+    const auctionBtn = document.getElementById('manageAuctionMappings') || document.getElementById('manageEditAuctionMappings');
+    if (auctionBtn) {
+        auctionBtn.style.display = 'flex';
+    }
+};
+
+// Show auction mappings modal
+window.showAuctionMappingsModal = function(auctionName) {
+    console.log('🔧 [DEBUG] showAuctionMappingsModal called with auctionName:', auctionName);
+    window.currentAuctionName = auctionName || '';
+    window.currentCompanyName = null;
+    
+    // Check if it's a new supplier (empty auction name)
+    const isNewSupplier = !auctionName || auctionName.trim() === '';
+    window.isCreatingNewSupplier = isNewSupplier;
+    console.log('🔧 [DEBUG] isNewSupplier:', isNewSupplier);
+    
+    const modal = document.getElementById('rixoMappingModal');
+    if (!modal) {
+        console.error('❌ [ERROR] Modal element not found!');
+        return;
+    }
+    const title = document.getElementById('modalTitle');
+    const body = document.querySelector('.modal-body');
+    
+    const titleText = isNewSupplier ? 'Manage Mappings for:' : `Manage Mappings for: ${auctionName}`;
+    
+    title.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span>${titleText}</span>
+            ${isNewSupplier ? `
+            <input type="text" id="newSupplierNameInput" placeholder="Enter Supplier Name" required 
+                   style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; min-width: 200px;">
+            ` : ''}
+        </div>
+    `;
+    
+    // Show the modal immediately
+    modal.style.display = 'block';
+    console.log('🔧 [DEBUG] Modal displayed');
+    
+    body.innerHTML = `
+        <div class="mapping-section">
+            <div style="display:flex; align-items:center; justify-content: space-between; margin-bottom: 8px;">
+                <div style="display:flex; align-items:center; gap: 12px;">
+                    <h4 style="margin:0;">Current Mappings</h4>
+                    <button type="button" id="addNewRixoMappingBtn" style="padding: 6px 12px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 14px;">Add New Mapping</button>
+                </div>
+                <div>
+                    <label for="companyFilter" style="margin-right:6px; color:#555;">Filter by company</label>
+                    <select id="companyFilter" style="padding:6px 8px; border:1px solid #ddd; border-radius:4px;">
+                        <option value="">All companies</option>
+                    </select>
+                </div>
+            </div>
+            <div id="currentMappings" class="current-mappings">
+                <!-- Will be populated dynamically -->
+            </div>
+        </div>
+    `;
+    
+    // Initialize adding flag
+    window.isAddingNewRixoMapping = false;
+    
+    // Load current mappings (only if supplier name is provided)
+    if (!isNewSupplier && auctionName.trim() !== '') {
+        loadCurrentMappings(auctionName);
+    } else {
+        // For new supplier, show empty state
+        const container = document.getElementById('currentMappings');
+        container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">Enter supplier name and add mappings</p>';
+        window._lastLoadedRixoMappings = [];
+    }
+    
+    // Ensure modal is displayed
+    modal.style.display = 'block';
+    
+    // Add event listeners
+    document.getElementById('addNewRixoMappingBtn').addEventListener('click', () => addNewRixoMappingRow(auctionName || ''));
+    
+    // Supplier name input field change handler (update title dynamically)
+    if (isNewSupplier) {
+        const supplierNameInput = document.getElementById('newSupplierNameInput');
+        if (supplierNameInput) {
+            supplierNameInput.addEventListener('input', function() {
+                const newSupplierName = this.value.trim();
+                if (newSupplierName) {
+                    // Update global supplier name
+                    window.currentAuctionName = newSupplierName;
+                    // Update title
+                    const titleSpan = title.querySelector('span');
+                    if (titleSpan) {
+                        titleSpan.textContent = `Manage Mappings for: ${newSupplierName}`;
+                    }
+                } else {
+                    const titleSpan = title.querySelector('span');
+                    if (titleSpan) {
+                        titleSpan.textContent = 'Manage Mappings for:';
+                    }
+                }
+            });
+        }
+    }
+    
+    // Setup Save Changes button handler
+    const saveBtn = document.getElementById('saveMappings');
+    if (saveBtn) {
+        // Remove existing listeners by cloning
+        const newSaveBtn = saveBtn.cloneNode(true);
+        saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+        newSaveBtn.addEventListener('click', saveRixoMappingsChanges);
+    }
+    
+    // Setup Cancel button handler
+    const cancelBtn = document.getElementById('cancelMappings');
+    if (cancelBtn) {
+        // Remove existing listeners by cloning
+        const newCancelBtn = cancelBtn.cloneNode(true);
+        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+        newCancelBtn.addEventListener('click', closeMappingModal);
+    }
+    
+    // Add event listeners for modal buttons
+    setupModalEventListeners();
+};
+
+// Show company mappings modal
+// Removed company-specific modal; supplier modal now supports filtering by company
+
+// Load current mappings from backend, fallback to static data if empty
+window.loadCurrentMappings = function(auctionName, companyName = null) {
+    // Check if supplier name is empty (new supplier)
+    if (!auctionName || auctionName.trim() === '') {
+        const container = document.getElementById('currentMappings');
+        if (container) {
+            container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">Enter supplier name and add mappings</p>';
+        }
+        window._lastLoadedRixoMappings = [];
+        return;
+    }
+    
+    const url = apiUrl(`rixo/mappings/by-auction/${encodeURIComponent(auctionName)}`);
+    
+    // Helper function to load from static data
+    const loadFromStaticData = (isFallback = false) => {
+        if (window.rixoPriceMapping && window.rixoPriceMapping[auctionName]) {
+            console.log('Loading mappings from static data for:', auctionName);
+            const auctionData = window.rixoPriceMapping[auctionName];
+            const staticMappings = auctionData.mappings || [];
+            
+            // Convert static data format to mapping format
+            const staticDataAsMappings = [];
+            const seen = new Set(); // Track unique combinations
+            
+            staticMappings.forEach(mapping => {
+                const key = `${mapping.stockLocation}_${mapping.rixoCompany}_${mapping.shipmentSize || ''}_${mapping.venueId || ''}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    staticDataAsMappings.push({
+                        id: null, // Static data doesn't have DB IDs
+                        auctionHouse: auctionName,
+                        stockLocation: mapping.stockLocation,
+                        rixoCompany: mapping.rixoCompany,
+                        shipmentSize: mapping.shipmentSize,
+                        rixoPrice: mapping.rixoPrice,
+                        venueId: mapping.venueId,
+                        _isFallback: isFallback // Mark as fallback data
+                    });
+                }
+            });
+            
+            // Filter by company if specified
+            let mappings = staticDataAsMappings;
+            if (companyName) {
+                mappings = staticDataAsMappings.filter(m => m.rixoCompany === companyName);
+            }
+            
+            console.log('Loaded from static data:', mappings.length, 'mappings');
+            // Sort mappings by ID descending (newest first) - for static data, sort by order in array (reversed)
+            const sortedMappings = mappings.slice().reverse(); // Reverse to show newest first
+            
+            // Store and render with filter
+            window._lastLoadedMappings = sortedMappings;
+            window._isFallbackMode = isFallback; // Track if we're in fallback mode
+            populateCompanyFilter(sortedMappings);
+            renderMappingsWithFilter();
+            return true;
+        }
+        return false;
+    };
+    
+    fetch(url)
+        .then(response => {
+            if (!response.ok) {
+                console.warn('API returned error status:', response.status, '- falling back to static data');
+                // Try to load from static data on API error (mark as fallback)
+                if (loadFromStaticData(true)) {
+                    return null; // Successfully loaded from static data
+                }
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (!data) {
+                // Already handled by static data fallback
+                return;
+            }
+            
+            if (data.success) {
+                let mappings = data.data;
+                
+                // Filter by company if specified
+                if (companyName) {
+                    mappings = mappings.filter(m => m.rixoCompany === companyName);
+                }
+                
+                // If database returns empty, check static data as fallback
+                if (mappings.length === 0) {
+                    if (loadFromStaticData(false)) {
+                        return; // Successfully loaded from static data
+                    }
+                }
+                
+                // Sort mappings by ID descending (newest first)
+                const sortedMappings = mappings.sort((a, b) => {
+                    const idA = a.id || 0;
+                    const idB = b.id || 0;
+                    return idB - idA; // Descending order
+                });
+                
+                // Store and render with filter
+                window._lastLoadedMappings = sortedMappings;
+                populateCompanyFilter(sortedMappings);
+                renderMappingsWithFilter();
+            } else {
+                console.warn('API returned success=false, falling back to static data');
+                // Try to load from static data
+                if (!loadFromStaticData(true)) {
+                    console.error('Failed to load mappings:', data.message);
+                    showMessage('Failed to load mappings: ' + data.message, 'error');
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error loading mappings from API, trying static data:', error);
+            // Try to load from static data on any error (mark as fallback)
+            if (!loadFromStaticData(true)) {
+                showMessage('Error loading mappings. Please check your connection.', 'error');
+            }
+        });
+};
+
+// Populate company filter dropdown
+function populateCompanyFilter(mappings) {
+    const filter = document.getElementById('companyFilter');
+    if (!filter) return;
+    const companies = Array.from(new Set(mappings.map(m => m.rixoCompany).filter(Boolean))).sort();
+    filter.innerHTML = '<option value="">All companies</option>' + companies.map(c => `<option value="${escapeHtmlAttr(c)}">${c}</option>`).join('');
+    filter.onchange = renderMappingsWithFilter;
+}
+
+// Render mappings based on selected filter
+function renderMappingsWithFilter() {
+    const filter = document.getElementById('companyFilter');
+    const selected = filter ? filter.value : '';
+    const data = Array.isArray(window._lastLoadedMappings) ? window._lastLoadedMappings : [];
+    const filtered = selected ? data.filter(m => m.rixoCompany === selected) : data;
+    displayCurrentMappings(filtered);
+}
+
+// Display current mappings in the modal
+window.displayCurrentMappings = function(mappings) {
+    const container = document.getElementById('currentMappings');
+    
+    // Check if we're adding a new mapping - if so, render table even if empty
+    const isAddingNew = window.isAddingNewRixoMapping === true;
+    
+    if (mappings.length === 0 && !isAddingNew) {
+        container.innerHTML = '<div style="padding: 20px; text-align: center; color: #6c757d;">No mappings found</div>';
+        return;
+    }
+    
+    // Build table header + rows
+    const headerHtml = `
+        <div class="mapping-item mapping-header">
+            <div class="mapping-field"><strong>Shipment Size</strong></div>
+            <div class="mapping-field"><strong>Stock Location</strong></div>
+            <div class="mapping-field"><strong>Rixo Company</strong></div>
+            <div class="mapping-field"><strong>Price</strong></div>
+            <div class="mapping-field"><strong>Venue ID</strong></div>
+            <div class="mapping-actions"><strong>Actions</strong></div>
+        </div>`;
+    // Show warning if in fallback mode
+    const isFallbackMode = window._isFallbackMode === true;
+    let warningHtml = '';
+    if (isFallbackMode) {
+        warningHtml = `<div style="background: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 4px; color: #856404;">
+            <strong>⚠️ Backend API Unavailable:</strong> Showing mappings from static data. These mappings may already exist in the database. 
+            Editing is disabled until the backend API is available.
+        </div>`;
+    }
+    
+    // Check if we're adding a new mapping - insert editable row first (isAddingNew already declared above)
+    let newRowHtml = '';
+    if (isAddingNew) {
+        newRowHtml = `
+        <div class="mapping-item" id="newRixoMappingRow" style="background-color: #fff9e6;">
+            <div class="mapping-field">
+                <input type="text" id="inlineNewVehicleType" placeholder="Vehicle Type" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+            </div>
+            <div class="mapping-field">
+                <input type="text" id="inlineNewStockLocation" placeholder="Stock Location" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+            </div>
+            <div class="mapping-field">
+                <input type="text" id="inlineNewRixoCompany" placeholder="Rixo Company" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+            </div>
+            <div class="mapping-field">
+                <input type="text" id="inlineNewRixoPrice" placeholder="Price" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+            </div>
+            <div class="mapping-field">
+                <input type="text" id="inlineNewVenueId" placeholder="Venue ID" style="width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">
+            </div>
+            <div class="mapping-actions">
+                <button type="button" id="saveNewRixoMappingBtn" style="padding: 4px 8px; margin-right: 6px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Save</button>
+                <button type="button" id="cancelNewRixoMappingBtn" style="padding: 4px 8px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">Cancel</button>
+            </div>
+        </div>`;
+    }
+    
+    const rowsHtml = mappings.map(mapping => {
+        const isStaticData = mapping.id === null || mapping.id === undefined;
+        let actionButtons;
+        if (isStaticData) {
+            // In fallback mode, don't show "Add to DB" button to prevent duplicates
+            if (isFallbackMode) {
+                actionButtons = `<span style="color: #6c757d; font-style: italic;">Backend unavailable</span>`;
+            } else {
+                // Store data in data attributes to avoid escaping issues
+                const dataAttrs = `data-auction="${escapeHtmlAttr(mapping.auctionHouse)}" data-stock="${escapeHtmlAttr(mapping.stockLocation)}" data-company="${escapeHtmlAttr(mapping.rixoCompany)}" data-size="${escapeHtmlAttr(mapping.shipmentSize || '')}" data-price="${escapeHtmlAttr(mapping.rixoPrice || '')}" data-venue="${escapeHtmlAttr(mapping.venueId || '')}"`;
+                actionButtons = `<button class="edit-mapping-btn add-static-btn" ${dataAttrs} title="Add to Database">Add to DB</button>`;
+            }
+        } else {
+            actionButtons = `<button class="edit-mapping-btn" onclick="editMapping(${mapping.id})">Edit</button>
+               <button class="delete-mapping-btn" onclick="deleteMapping(${mapping.id})">Delete</button>`;
+        }
+        
+        return `
+        <div class="mapping-item" data-id="${mapping.id || 'static'}">
+            <div class="mapping-field">${displayShipmentSize(mapping.shipmentSize)}</div>
+            <div class="mapping-field">${mapping.stockLocation}</div>
+            <div class="mapping-field">${mapping.rixoCompany}</div>
+            <div class="mapping-field">${mapping.rixoPrice || 'N/A'}</div>
+            <div class="mapping-field">${mapping.venueId || 'N/A'}</div>
+            <div class="mapping-actions">
+                ${actionButtons}
+            </div>
+        </div>`;
+    }).join('');
+    container.innerHTML = warningHtml + headerHtml + newRowHtml + rowsHtml;
+    
+    // Setup event listeners for Save/Cancel buttons if new row exists
+    if (isAddingNew) {
+        const saveBtn = document.getElementById('saveNewRixoMappingBtn');
+        const cancelBtn = document.getElementById('cancelNewRixoMappingBtn');
+        
+        if (saveBtn) {
+            // Remove existing listeners by cloning
+            const newSaveBtn = saveBtn.cloneNode(true);
+            saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+            // Prevent duplicate submissions
+            let isSaving = false;
+            newSaveBtn.addEventListener('click', function() {
+                if (isSaving) {
+                    console.log('Already saving, ignoring duplicate click');
+                    return;
+                }
+                isSaving = true;
+                newSaveBtn.disabled = true;
+                saveNewRixoMappingRow(window.currentAuctionName);
+                // Reset flag after a delay
+                setTimeout(() => {
+                    isSaving = false;
+                    if (newSaveBtn) {
+                        newSaveBtn.disabled = false;
+                    }
+                }, 2000);
+            });
+        }
+        
+        if (cancelBtn) {
+            // Remove existing listeners by cloning
+            const newCancelBtn = cancelBtn.cloneNode(true);
+            cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+            newCancelBtn.addEventListener('click', () => cancelNewRixoMappingRow(window.currentAuctionName));
+        }
+    }
+    
+    // Add event listeners for static mapping buttons
+    container.querySelectorAll('.add-static-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            addStaticMappingToDatabase(
+                this.dataset.auction,
+                this.dataset.stock,
+                this.dataset.company,
+                this.dataset.size,
+                this.dataset.price,
+                this.dataset.venue
+            );
+        });
+    });
+};
+
+// Add new mapping
+window.addNewMapping = function(auctionName) {
+    const vehicleType = document.getElementById('newVehicleType').value;
+    const stockLocation = document.getElementById('newStockLocation').value;
+    const rixoCompany = document.getElementById('newRixoCompany').value;
+    const rixoPrice = document.getElementById('newRixoPrice').value;
+    const venueId = document.getElementById('newVenueId').value;
+    
+    // Validate: at least one field must be filled
+    if (!vehicleType && !stockLocation && !rixoCompany && !rixoPrice && !venueId) {
+        showMessage('Please fill in at least one field', 'error');
+        return;
+    }
+    
+    const mappingData = {
+        auctionHouse: auctionName,
+        vehicleType: vehicleType,
+        stockLocation: stockLocation,
+        rixoCompany: rixoCompany,
+        rixoPrice: rixoPrice,
+        venueId: venueId
+    };
+    
+    fetch(apiUrl('rixo/mappings/add'), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(mappingData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showMessage('Mapping added successfully', 'success');
+            clearMappingForm();
+            loadCurrentMappings(auctionName, window.currentCompanyName);
+            refreshRixoDropdowns();
+        } else {
+            showMessage('Failed to add mapping: ' + data.message, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error adding mapping:', error);
+        showMessage('Error adding mapping', 'error');
+    });
+};
+
+// Add new mapping row (inline in table)
+window.addNewRixoMappingRow = function(auctionName) {
+    if (window.isAddingNewRixoMapping === true) {
+        showMessage('Please save or cancel the current new mapping first', 'warning');
+        return;
+    }
+    
+    // Check if it's a new supplier creation
+    const isNewSupplier = window.isCreatingNewSupplier === true;
+    let supplierName = auctionName || '';
+    
+    if (isNewSupplier) {
+        const supplierNameInput = document.getElementById('newSupplierNameInput');
+        supplierName = supplierNameInput ? supplierNameInput.value.trim() : '';
+    }
+    
+    if (!supplierName) {
+        showMessage('Supplier name is required. Please enter a supplier name in the input field.', 'error');
+        return;
+    }
+    
+    window.isAddingNewRixoMapping = true;
+    
+    // Reload mappings to show the new row
+    loadCurrentMappings(supplierName, window.currentCompanyName);
+    
+    // Disable Add New Mapping button
+    const addBtn = document.getElementById('addNewRixoMappingBtn');
+    if (addBtn) {
+        addBtn.disabled = true;
+        addBtn.style.opacity = '0.5';
+        addBtn.style.cursor = 'not-allowed';
+    }
+};
+
+// Save new rixo mapping row
+window.saveNewRixoMappingRow = function(auctionName) {
+    // Prevent duplicate submissions
+    if (window._isSavingRixoMapping === true) {
+        console.log('Already saving mapping, ignoring duplicate call');
+        return;
+    }
+    
+    // Get supplier name from input field if it's a new supplier, otherwise from parameter
+    const isNewSupplier = window.isCreatingNewSupplier === true;
+    let supplierName = auctionName || '';
+    
+    if (isNewSupplier) {
+        const supplierNameInput = document.getElementById('newSupplierNameInput');
+        supplierName = supplierNameInput ? supplierNameInput.value.trim() : '';
+    }
+    
+    if (!supplierName) {
+        showMessage('Supplier name is required. Please enter a supplier name in the input field.', 'error');
+        return;
+    }
+    
+    const vehicleType = document.getElementById('inlineNewVehicleType')?.value?.trim() || '';
+    const stockLocation = document.getElementById('inlineNewStockLocation')?.value?.trim() || '';
+    const rixoCompany = document.getElementById('inlineNewRixoCompany')?.value?.trim() || '';
+    const rixoPrice = document.getElementById('inlineNewRixoPrice')?.value?.trim() || '';
+    const venueId = document.getElementById('inlineNewVenueId')?.value?.trim() || '';
+    
+    // Validate: at least one field must be filled
+    if (!vehicleType && !stockLocation && !rixoCompany && !rixoPrice && !venueId) {
+        showMessage('Please fill in at least one field', 'error');
+        return;
+    }
+    
+    // Set saving flag
+    window._isSavingRixoMapping = true;
+    
+    // Disable save button to prevent duplicate clicks
+    const saveBtn = document.getElementById('saveNewRixoMappingBtn');
+    if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving...';
+    }
+    
+    const mappingData = {
+        auctionHouse: supplierName,
+        vehicleType: vehicleType,
+        stockLocation: stockLocation,
+        rixoCompany: rixoCompany,
+        rixoPrice: rixoPrice || null,
+        venueId: venueId || null
+    };
+    
+    fetch(apiUrl('rixo/mappings/add'), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(mappingData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Reset saving flag
+        window._isSavingRixoMapping = false;
+        
+        if (data.success) {
+            showMessage('Mapping added successfully', 'success');
+            // Update global supplier name if it was a new supplier
+            if (isNewSupplier) {
+                window.currentAuctionName = supplierName;
+                window.isCreatingNewSupplier = false;
+                // Update title
+                const title = document.getElementById('modalTitle');
+                const titleSpan = title ? title.querySelector('span') : null;
+                if (titleSpan) {
+                    titleSpan.textContent = `Manage Mappings for: ${supplierName}`;
+                }
+                // Add new supplier to dropdown lists
+                if (typeof refreshSupplierDropdown === 'function') {
+                    refreshSupplierDropdown();
+                }
+            }
+            // Reset adding flag
+            window.isAddingNewRixoMapping = false;
+            // Enable Add New Mapping button
+            const addBtn = document.getElementById('addNewRixoMappingBtn');
+            if (addBtn) {
+                addBtn.disabled = false;
+                addBtn.style.opacity = '1';
+                addBtn.style.cursor = 'pointer';
+            }
+            // Reload mappings
+            loadCurrentMappings(supplierName, window.currentCompanyName);
+            if (typeof refreshRixoDropdowns === 'function') {
+                refreshRixoDropdowns();
+            }
+        } else {
+            showMessage('Failed to add mapping: ' + data.message, 'error');
+            // Re-enable save button on error
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+            }
+        }
+    })
+    .catch(error => {
+        console.error('Error adding mapping:', error);
+        showMessage('Error adding mapping', 'error');
+        // Reset saving flag on error
+        window._isSavingRixoMapping = false;
+        // Re-enable save button on error
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = 'Save';
+        }
+    });
+};
+
+// Cancel new rixo mapping row
+window.cancelNewRixoMappingRow = function(auctionName) {
+    // Reset adding flag
+    window.isAddingNewRixoMapping = false;
+    
+    // Enable Add New Mapping button
+    const addBtn = document.getElementById('addNewRixoMappingBtn');
+    if (addBtn) {
+        addBtn.disabled = false;
+        addBtn.style.opacity = '1';
+        addBtn.style.cursor = 'pointer';
+    }
+    
+    // Reload mappings
+    loadCurrentMappings(auctionName, window.currentCompanyName);
+};
+
+// Add static mapping to database
+window.addStaticMappingToDatabase = function(auctionHouse, stockLocation, rixoCompany, shipmentSize, rixoPrice, venueId) {
+    const mappingData = {
+        auctionHouse: auctionHouse,
+        stockLocation: stockLocation,
+        rixoCompany: rixoCompany,
+        shipmentSize: shipmentSize || null,
+        rixoPrice: rixoPrice || null,
+        venueId: venueId || null
+    };
+    
+    fetch(apiUrl('rixo/mappings/add'), {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(mappingData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showMessage('Mapping added to database successfully', 'success');
+            // Reload mappings to show the new database entry
+            loadCurrentMappings(auctionHouse, window.currentCompanyName);
+            refreshRixoDropdowns();
+        } else {
+            showMessage('Failed to add mapping: ' + data.message, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error adding static mapping to database:', error);
+        showMessage('Error adding mapping to database', 'error');
+    });
+};
+
+// Edit mapping
+window.editMapping = function(mappingId) {
+    window.editingMappingId = mappingId;
+    
+    // Find the mapping item
+    const mappingItem = document.querySelector(`[data-id="${mappingId}"]`);
+    if (!mappingItem) {
+        console.error('Mapping item not found for ID:', mappingId);
+        return;
+    }
+    
+    // Get the actual mapping data from stored mappings
+    const mappings = Array.isArray(window._lastLoadedMappings) ? window._lastLoadedMappings : [];
+    const mapping = mappings.find(m => m.id == mappingId);
+    
+    if (!mapping) {
+        console.error('Mapping data not found for ID:', mappingId);
+        console.error('Available mappings:', mappings.map(m => ({ id: m.id, auctionHouse: m.auctionHouse })));
+        showMessage('Error: Mapping data not found', 'error');
+        return;
+    }
+    
+    console.log('Found mapping for edit:', mapping);
+    
+    // Get values from mapping data, handling null/undefined/N/A
+    // Use shipmentSize (from API) or typeOfVehicle (from static data)
+    const vehicleType = (mapping.shipmentSize || mapping.typeOfVehicle) ? 
+        (mapping.shipmentSize || mapping.typeOfVehicle) : '';
+    const stockLocation = (mapping.stockLocation || '').trim();
+    const rixoCompany = (mapping.rixoCompany || '').trim();
+    const rixoPrice = (mapping.rixoPrice && mapping.rixoPrice !== 'N/A') ? mapping.rixoPrice : '';
+    const venueId = (mapping.venueId && mapping.venueId !== 'N/A') ? mapping.venueId : '';
+    
+    // Validate that required fields are present
+    if (!rixoCompany) {
+        console.error('Rixo Company is empty in mapping data:', mapping);
+        showMessage('Error: Rixo Company is missing in mapping data', 'error');
+        return;
+    }
+    
+    // Use unique IDs per row to avoid conflicts
+    const uniqueId = `edit_${mappingId}_`;
+    
+    // Replace with input fields
+    mappingItem.innerHTML = `
+        <div class="mapping-field">
+            <input type="text" value="${escapeHtmlAttr(vehicleType)}" class="mapping-input" id="${uniqueId}VehicleType" placeholder="Vehicle Type">
+        </div>
+        <div class="mapping-field">
+            <input type="text" value="${escapeHtmlAttr(stockLocation)}" class="mapping-input" id="${uniqueId}StockLocation" placeholder="Stock Location">
+        </div>
+        <div class="mapping-field">
+            <input type="text" value="${escapeHtmlAttr(rixoCompany)}" class="mapping-input" id="${uniqueId}RixoCompany" placeholder="Rixo Company" required>
+        </div>
+        <div class="mapping-field">
+            <input type="text" value="${escapeHtmlAttr(rixoPrice)}" class="mapping-input" id="${uniqueId}RixoPrice" placeholder="Price">
+        </div>
+        <div class="mapping-field">
+            <input type="text" value="${escapeHtmlAttr(venueId)}" class="mapping-input" id="${uniqueId}VenueId" placeholder="Venue ID">
+        </div>
+        <div class="mapping-actions">
+            <button class="edit-mapping-btn" onclick="saveMapping(${mappingId})">Save</button>
+            <button class="delete-mapping-btn" onclick="cancelEdit(${mappingId})">Cancel</button>
+        </div>
+    `;
+    
+    console.log('Edit mapping initialized:', { mappingId, vehicleType, stockLocation, rixoCompany, rixoPrice, venueId });
+};
+
+// Save mapping changes
+window.saveMapping = function(mappingId) {
+    // Use unique IDs per row
+    const uniqueId = `edit_${mappingId}_`;
+    
+    const vehicleTypeEl = document.getElementById(`${uniqueId}VehicleType`);
+    const stockLocationEl = document.getElementById(`${uniqueId}StockLocation`);
+    const rixoCompanyEl = document.getElementById(`${uniqueId}RixoCompany`);
+    const rixoPriceEl = document.getElementById(`${uniqueId}RixoPrice`);
+    const venueIdEl = document.getElementById(`${uniqueId}VenueId`);
+    
+    if (!vehicleTypeEl || !stockLocationEl || !rixoCompanyEl || !rixoPriceEl || !venueIdEl) {
+        console.error('Edit fields not found for mapping ID:', mappingId);
+        showMessage('Error: Edit fields not found. Please refresh and try again.', 'error');
+        return;
+    }
+    
+    const vehicleType = vehicleTypeEl.value.trim();
+    const stockLocation = stockLocationEl.value.trim();
+    const rixoCompany = rixoCompanyEl.value.trim();
+    const rixoPrice = rixoPriceEl.value.trim();
+    const venueId = venueIdEl.value.trim();
+    
+    // Validate: at least one field must be filled
+    if (!vehicleType && !stockLocation && !rixoCompany && !rixoPrice && !venueId) {
+        showMessage('Please fill in at least one field', 'error');
+        return;
+    }
+    
+    const mappingData = {
+        vehicleType: vehicleType || null,
+        stockLocation: stockLocation,
+        rixoCompany: rixoCompany,
+        rixoPrice: rixoPrice || null,
+        venueId: venueId || null
+    };
+    
+    console.log('Saving mapping:', mappingId, mappingData);
+    
+    fetch(apiUrl(`rixo/mappings/${mappingId}`), {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(mappingData)
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => {
+                throw new Error(err.message || `HTTP ${response.status}`);
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.success) {
+            showMessage('Mapping updated successfully', 'success');
+            // Reload mappings to show updated data
+            loadCurrentMappings(window.currentAuctionName, window.currentCompanyName);
+            refreshRixoDropdowns();
+        } else {
+            showMessage('Failed to update mapping: ' + (data.message || 'Unknown error'), 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error updating mapping:', error);
+        showMessage('Error updating mapping: ' + error.message, 'error');
+    });
+    
+    window.editingMappingId = null;
+};
+
+// Cancel edit
+window.cancelEdit = function(mappingId) {
+    loadCurrentMappings(window.currentAuctionName, window.currentCompanyName);
+    window.editingMappingId = null;
+};
+
+// Delete mapping
+window.deleteMapping = function(mappingId) {
+    if (!confirm('Are you sure you want to delete this mapping?')) {
+        return;
+    }
+    
+    fetch(apiUrl(`rixo/mappings/${mappingId}`), {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showMessage('Mapping deleted successfully', 'success');
+            loadCurrentMappings(window.currentAuctionName, window.currentCompanyName);
+            refreshRixoDropdowns();
+        } else {
+            showMessage('Failed to delete mapping: ' + data.message, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Error deleting mapping:', error);
+        showMessage('Error deleting mapping', 'error');
+    });
+};
+
+// Clear mapping form
+window.clearMappingForm = function() {
+    document.getElementById('newVehicleType').value = '';
+    document.getElementById('newStockLocation').value = '';
+    document.getElementById('newRixoCompany').value = '';
+    document.getElementById('newRixoPrice').value = '';
+    document.getElementById('newVenueId').value = '';
+};
+
+// Setup modal event listeners
+function setupModalEventListeners() {
+    // Save Changes button
+    const saveBtn = document.getElementById('saveMappings');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', function() {
+            // The "Save Changes" button doesn't need to do anything special
+            // since mappings are saved immediately when "Add Mapping" is clicked
+            showMessage('All changes have been saved automatically', 'success');
+            closeMappingModal();
+        });
+    }
+    
+    // Cancel button
+    const cancelBtn = document.getElementById('cancelMappings');
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', closeMappingModal);
+    }
+}
+
+// Save Rixo mappings changes (Save Changes button handler)
+window.saveRixoMappingsChanges = function() {
+    const isNewSupplier = window.isCreatingNewSupplier === true;
+    let supplierName = window.currentAuctionName || '';
+    
+    if (isNewSupplier) {
+        const supplierNameInput = document.getElementById('newSupplierNameInput');
+        supplierName = supplierNameInput ? supplierNameInput.value.trim() : '';
+    }
+    
+    if (!supplierName) {
+        showMessage('Supplier name is required. Please enter a supplier name.', 'error');
+        return;
+    }
+    
+    // Check if there's an unsaved inline row
+    const isAddingNew = window.isAddingNewRixoMapping === true;
+    if (isAddingNew) {
+        // Save the inline row first
+        saveNewRixoMappingRow(supplierName);
+        // Wait a bit for the save to complete, then close modal
+        setTimeout(() => {
+            // Refresh supplier dropdown before closing (in case it's a new supplier)
+            refreshSupplierDropdown();
+            closeMappingModal();
+        }, 500);
+    } else {
+        // Refresh supplier dropdown before closing (in case it's a new supplier)
+        refreshSupplierDropdown();
+        closeMappingModal();
+    }
+};
+
+// Refresh supplier dropdown (add new supplier to dropdown if it was created)
+window.refreshSupplierDropdown = function() {
+    // Get supplier name from input field if it's a new supplier, otherwise from global storage
+    const isNewSupplier = window.isCreatingNewSupplier === true;
+    let supplierName = '';
+    
+    if (isNewSupplier) {
+        const supplierNameInput = document.getElementById('newSupplierNameInput');
+        supplierName = supplierNameInput ? supplierNameInput.value.trim() : '';
+    } else {
+        supplierName = window.currentAuctionName || '';
+    }
+    
+    if (supplierName) {
+        console.log('🔄 Adding supplier \'' + supplierName + '\' to dropdown lists');
+        // Add supplier to dropdowns
+        const auctionNameSelect = document.getElementById('auctionName');
+        const editAuctionNameSelect = document.getElementById('editAuctionName');
+        
+        function addSupplierToSelect(select) {
+            if (select) {
+                // Check if option already exists
+                const existingOption = select.querySelector('option[value="' + supplierName + '"]');
+                if (!existingOption) {
+                    // Create new option element
+                    const option = document.createElement('option');
+                    option.setAttribute('value', supplierName);
+                    option.textContent = supplierName;
+                    // Insert after "Select Supplier Name" option (first option)
+                    if (select.options.length > 0) {
+                        select.insertBefore(option, select.options[1]);
+                    } else {
+                        select.appendChild(option);
+                    }
+                    console.log('✅ Added supplier \'' + supplierName + '\' to dropdown');
+                } else {
+                    console.log('ℹ️ Supplier \'' + supplierName + '\' already exists in dropdown');
+                }
+            }
+        }
+        
+        addSupplierToSelect(auctionNameSelect);
+        addSupplierToSelect(editAuctionNameSelect);
+    } else {
+        console.log('⚠️ Cannot add supplier to dropdown - supplier name is blank');
+    }
+};
+
+// Close modal
+window.closeMappingModal = function() {
+    const modal = document.getElementById('rixoMappingModal');
+    modal.style.display = 'none';
+    window.currentAuctionName = null;
+    window.currentCompanyName = null;
+    window.editingMappingId = null;
+    window.isCreatingNewSupplier = false;
+    
+    // Ensure manage buttons are visible after closing modal
+    if (typeof window.toggleManageButtons === 'function') {
+        window.toggleManageButtons();
+    }
+};
+
+// Refresh Rixo dropdowns after changes
+window.refreshRixoDropdowns = function() {
+    // Reload the mapping data from backend
+    fetch(apiUrl('rixo/prices'))
+        .then(response => {
+            if (!response.ok) {
+                console.error('Failed to fetch Rixo prices:', response.status, response.statusText);
+                // If API fails, use the static mapping data that's already loaded
+                if (typeof window.rixoPriceMapping !== 'undefined' && Object.keys(window.rixoPriceMapping).length > 0) {
+                    console.log('Using existing static Rixo mapping data');
+                    if (typeof window.populateDropdownOptions === 'function') {
+                        window.populateDropdownOptions();
+                    }
+                } else {
+                    console.error('No Rixo mapping data available');
+                }
+                return null;
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data && data.success) {
+                // Rebuild the mapping object
+                rebuildRixoMapping(data.data);
+                // Repopulate dropdowns
+                if (typeof window.populateDropdownOptions === 'function') {
+                    window.populateDropdownOptions();
+                }
+                
+                // Trigger auto-selection for currently selected supplier (if any)
+                // Check both add form and edit form
+                const auctionNameSelect = document.getElementById('auctionName');
+                const editAuctionNameSelect = document.getElementById('editAuctionName');
+                
+                let selectedAuctionName = null;
+                if (auctionNameSelect && auctionNameSelect.value && auctionNameSelect.value !== '__add_new_supplier__') {
+                    selectedAuctionName = auctionNameSelect.value;
+                } else if (editAuctionNameSelect && editAuctionNameSelect.value && editAuctionNameSelect.value !== '__add_new_supplier__') {
+                    selectedAuctionName = editAuctionNameSelect.value;
+                }
+                
+                // If a supplier is selected, trigger auto-selection to populate fields
+                if (selectedAuctionName && window.autoSelectRelatedFields) {
+                    console.log('🔄 Triggering auto-selection for supplier after refresh:', selectedAuctionName);
+                    // Small delay to ensure dropdowns are populated first
+                    setTimeout(() => {
+                        window.autoSelectRelatedFields(selectedAuctionName, 'auctionHouse', selectedAuctionName);
+                    }, 100);
+                }
+                
+                // Trigger auto-selection if needed
+                window.toggleManageButtons();
+            } else if (!data) {
+                // API failed, but we already handled it above
+                return;
+            }
+        })
+        .catch(error => {
+            console.error('Error refreshing dropdowns:', error);
+            // Fallback to static data if available
+            if (typeof window.rixoPriceMapping !== 'undefined' && Object.keys(window.rixoPriceMapping).length > 0) {
+                console.log('Using existing static Rixo mapping data as fallback');
+                if (typeof window.populateDropdownOptions === 'function') {
+                    window.populateDropdownOptions();
+                }
+            }
+        });
+};
+
+// Rebuild Rixo mapping object from backend data
+window.rebuildRixoMapping = function(rixoPrices) {
+    window.rixoPriceMapping = {};
+    
+    rixoPrices.forEach(price => {
+        const auctionName = price.auctionHouse;
+        
+        if (!window.rixoPriceMapping[auctionName]) {
+            window.rixoPriceMapping[auctionName] = {
+                typeOfVehicle: [],
+                stockLocation: [],
+                rixoCompany: [],
+                rixoPrice: [],
+                venueId: [],
+                mappings: []
+            };
+        }
+        
+        const mapping = {
+            typeOfVehicle: price.shipmentSize,
+            stockLocation: price.stockLocation,
+            rixoCompany: price.rixoCompany,
+            rixoPrice: price.rixoPrice,
+            venueId: price.venueId
+        };
+        
+        window.rixoPriceMapping[auctionName].mappings.push(mapping);
+    });
+    
+    // Update arrays
+    Object.keys(window.rixoPriceMapping).forEach(auctionName => {
+        const auction = window.rixoPriceMapping[auctionName];
+        auction.typeOfVehicle = [...new Set(auction.mappings.map(m => m.typeOfVehicle).filter(t => t))];
+        auction.stockLocation = [...new Set(auction.mappings.map(m => m.stockLocation).filter(s => s))];
+        auction.rixoCompany = [...new Set(auction.mappings.map(m => m.rixoCompany).filter(c => c))];
+        auction.rixoPrice = [...new Set(auction.mappings.map(m => m.rixoPrice).filter(p => p))];
+        auction.venueId = [...new Set(auction.mappings.map(m => m.venueId).filter(v => v))];
+    });
+};
+
+// Show message helper function
+window.showMessage = function(message, type = 'info') {
+    // Create or update message element
+    let messageEl = document.getElementById('rixoMessage');
+    if (!messageEl) {
+        messageEl = document.createElement('div');
+        messageEl.id = 'rixoMessage';
+        messageEl.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 4px;
+            color: white;
+            font-weight: 500;
+            z-index: 10000;
+            max-width: 300px;
+            word-wrap: break-word;
+        `;
+        document.body.appendChild(messageEl);
+    }
+    
+    const colors = {
+        success: '#28a745',
+        error: '#dc3545',
+        warning: '#ffc107',
+        info: '#17a2b8'
+    };
+    
+    messageEl.style.backgroundColor = colors[type] || colors.info;
+    messageEl.textContent = message;
+    messageEl.style.display = 'block';
+    
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+        messageEl.style.display = 'none';
+    }, 3000);
+};
+
+// Initialize event listeners when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    // Modal close events
+    const modal = document.getElementById('rixoMappingModal');
+    const closeBtn = document.querySelector('.close');
+    const cancelBtn = document.getElementById('cancelMappings');
+    
+    if (closeBtn) {
+        closeBtn.addEventListener('click', closeMappingModal);
+    }
+    
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', closeMappingModal);
+    }
+    
+    // Close modal when clicking outside
+    if (modal) {
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                closeMappingModal();
+            }
+        });
+    }
+    
+    // Manage button click events (always visible, can open even with empty supplier)
+    document.addEventListener('click', function(e) {
+        if (e.target.id === 'manageAuctionMappings' || e.target.closest('#manageAuctionMappings')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const auctionSelect = document.getElementById('auctionName');
+            const auctionName = auctionSelect ? (auctionSelect.value || '') : '';
+            console.log('🔧 [DEBUG] Manage button clicked - auctionName:', auctionName);
+            // Open modal even if supplier is empty (for new supplier creation)
+            showAuctionMappingsModal(auctionName);
+        }
+        
+        if (e.target.id === 'manageEditAuctionMappings' || e.target.closest('#manageEditAuctionMappings')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const auctionSelect = document.getElementById('editAuctionName');
+            const auctionName = auctionSelect ? (auctionSelect.value || '') : '';
+            console.log('🔧 [DEBUG] Edit manage button clicked - auctionName:', auctionName);
+            // Open modal even if supplier is empty (for new supplier creation)
+            showAuctionMappingsModal(auctionName);
+        }
+        
+        // company-specific manage buttons removed; both gear icons open supplier modal
+    });
+    
+    // Toggle manage buttons on dropdown changes
+    const dropdowns = ['auctionName', 'editAuctionName'];
+    dropdowns.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.addEventListener('change', toggleManageButtons);
+        }
+    });
+});

@@ -100,3 +100,210 @@ select:focus {
         padding: 6px 2px;
     }
 }
+
+/* Generic modal styling shared across mapping dialogs */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    padding: 40px 16px;
+    overflow: auto;
+    background-color: rgba(15, 23, 42, 0.55);
+    backdrop-filter: blur(2px);
+}
+
+.modal .modal-content {
+    background: #ffffff;
+    margin: auto;
+    width: min(960px, 100%);
+    border-radius: 16px;
+    box-shadow: 0 25px 60px rgba(15, 23, 42, 0.35);
+    border: none;
+    max-height: calc(100vh - 80px);
+    overflow-y: auto;
+    animation: fadeIn 0.25s ease-out;
+}
+
+.modal .modal-header,
+.modal .modal-footer {
+    padding: 18px 24px;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.modal .modal-footer {
+    border-top: 1px solid #e5e7eb;
+    border-bottom: none;
+    justify-content: flex-end;
+}
+
+.modal .modal-body {
+    padding: 24px;
+}
+
+.modal .modal-body .mapping-section {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.modal .modal-header h3 {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #111827;
+}
+
+.modal .close {
+    font-size: 24px;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    transition: color 0.2s ease;
+}
+
+.modal .close:hover {
+    color: #111827;
+}
+
+.modal-open {
+    overflow: hidden;
+}
+
+@media (max-width: 640px) {
+    .modal {
+        padding: 20px 8px;
+    }
+    
+    .modal .modal-content {
+        border-radius: 12px;
+        max-height: calc(100vh - 40px);
+    }
+    
+    .modal .modal-body {
+        padding: 18px;
+    }
+}
+
+/* Mapping management UI */
+.mapping-section h4 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.mapping-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.mapping-form input,
+.mapping-form select,
+.mapping-form textarea {
+    padding: 10px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 14px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.mapping-form input:focus,
+.mapping-form select:focus,
+.mapping-form textarea:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.mapping-form button {
+    padding: 12px;
+    border-radius: 8px;
+    border: none;
+    background: #2563eb;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.1s ease;
+}
+
+.mapping-form button:hover {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+}
+
+.current-mappings {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.mapping-item {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) 140px;
+    gap: 0;
+    padding: 14px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fff;
+}
+
+.mapping-item:nth-child(even) {
+    background: #f9fafb;
+}
+
+.mapping-header {
+    background: #f3f4f6;
+    font-weight: 600;
+    color: #374151;
+}
+
+.mapping-field {
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+    color: #1f2937;
+}
+
+.mapping-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.mapping-actions button,
+.mapping-actions .edit-mapping-btn,
+.mapping-actions .delete-mapping-btn {
+    padding: 6px 12px;
+    border-radius: 6px;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.mapping-actions .edit-mapping-btn {
+    background: #f97316;
+    color: #fff;
+}
+
+.mapping-actions .delete-mapping-btn {
+    background: #dc2626;
+    color: #fff;
+}
+
+.mapping-empty {
+    padding: 20px;
+    text-align: center;
+    color: #6b7280;
+}

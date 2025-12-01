@@ -129,6 +129,19 @@ class RixoImportService(
     fun getRixoPricesByAuctionHouse(auctionHouse: String): List<RixoPrice> {
         return rixoPriceRepository.findByAuctionHouse(auctionHouse)
     }
+    
+    // New CRUD methods for inline mapping management
+    fun saveRixoPrice(rixoPrice: RixoPrice): RixoPrice {
+        return rixoPriceRepository.save(rixoPrice)
+    }
+    
+    fun getRixoPriceById(id: Long): RixoPrice? {
+        return rixoPriceRepository.findById(id).orElse(null)
+    }
+    
+    fun deleteRixoPrice(id: Long) {
+        rixoPriceRepository.deleteById(id)
+    }
 }
 
 data class ImportResult(

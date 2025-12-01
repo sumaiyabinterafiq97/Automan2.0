@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: automan_mysql_multiplatform
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: automan_car_purchase
+      MYSQL_USER: automan_user
+      MYSQL_PASSWORD: automan_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data_multiplatform:/var/lib/mysql
+      - ./database:/docker-entrypoint-initdb.d
+    command: --default-authentication-plugin=mysql_native_password
+    networks:
+      - automan_network
+
+  backend:
+    image: automan20-backend:latest
+    container_name: automan_backend_multiplatform
+    restart: always
+    ports:
+      - "8083:8083"
+    depends_on:
+      - mysql
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: automan_user
+      SPRING_DATASOURCE_PASSWORD: automan_password
+    networks:
+      - automan_network
+
+  frontend:
+    image: automan20-frontend:latest
+    container_name: automan_frontend_multiplatform
+    restart: always
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+    networks:
+      - automan_network
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: automan_phpmyadmin_multiplatform
+    restart: always
+    ports:
+      - "8084:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: automan_user
+      PMA_PASSWORD: automan_password
+    depends_on:
+      - mysql
+    networks:
+      - automan_network
+
+volumes:
+  mysql_data_multiplatform:
+
+networks:
+  automan_network:
+    driver: bridge
+
