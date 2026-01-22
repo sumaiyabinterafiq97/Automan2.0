@@ -1,17 +1,24 @@
 const path = require('path');
-// Use absolute path - this file is in webpack.config.d/ which is in project root
-// So __dirname here is the project root
-const contentBase = path.resolve(__dirname, 'build/dist/js/developmentExecutable');
+// When this config is included in the generated webpack.config.js,
+// __dirname points to build/js/packages/automan-car-purchase
+// So we need to go up 4 levels to get to project root: automan-car-purchase -> packages -> js -> build -> project root
+const projectRoot = path.resolve(__dirname, '../../../..');
+const contentBase = path.resolve(projectRoot, 'build/dist/js/developmentExecutable');
 
 config.devServer = {
     ...config.devServer,
     port: 8081,
     host: 'localhost',
-    static: {
-        directory: contentBase,
-        publicPath: '/',
-        watch: true,
-    },
+    static: [
+        {
+            directory: contentBase,
+            publicPath: '/',
+            watch: true,
+        },
+        // Keep Kotlin/JS generated files accessible
+        path.resolve(__dirname, 'build/js/packages/automan-car-purchase/kotlin'),
+        path.resolve(__dirname, 'build/processedResources/js/main')
+    ],
     historyApiFallback: {
         index: 'index.html',
         disableDotRule: true,
@@ -22,7 +29,7 @@ config.devServer = {
     allowedHosts: 'all',
         proxy: {
             '/api': {
-                target: ' http://localhost:8083',
+                target: 'http://localhost:8083',
                 changeOrigin: true,
                 secure: false
             },

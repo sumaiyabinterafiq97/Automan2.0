@@ -22,75 +22,63 @@ CREATE TABLE IF NOT EXISTS booking_mappings (
 -- Country-level defaults (POD and Consignee)
 
 -- Pakistan default
-INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
 VALUES (
     'PAKISTAN',
     'KARACHI',
     'OVERSEAS TRANSIT AGENCY (PVT) LTD.',
-    '1201-1203, 12TH FLOOR, Q.M.HOUSE, PLOT NO. 11/2RY9, ELLANDER ROAD, OFF.I.I CHUNDRIGAR ROAD (OPP. SHAHEEN COMPLEX), KARACHI',
-    'Country default mapping for Pakistan',
-    NOW()
+    '1201-1203, 12TH FLOOR, Q.M.HOUSE, PLOT NO. 11/2RY9, ELLANDER ROAD, OFF.I.I CHUNDRIGAR ROAD (OPP. SHAHEEN COMPLEX), KARACHI'
 );
 
 -- Kenya default
-INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
 VALUES (
     'KENYA',
     'MOMBASA',
     'LAKHANI MOTORS (K) LTD',
-    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM',
-    'Country default mapping for Kenya',
-    NOW()
+    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM'
 );
 
 -- South Africa default
-INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
 VALUES (
     'SOUTH AFRICA',
     'DURBAN',
     'LAKHANI MOTORS (K) LTD',
-    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM',
-    'Country default mapping for South Africa',
-    NOW()
+    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM'
 );
 
 -- Mozambique default
-INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
 VALUES (
     'MOZAMBIQUE',
     'MAPUTO',
     'LAKHANI MOTORS (K) LTD',
-    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM',
-    'Country default mapping for Mozambique',
-    NOW()
+    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM'
 );
 
 -- Uganda default
-INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
 VALUES (
     'UGANDA',
     NULL,
     'LAKHANI MOTORS (K) LTD',
-    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM',
-    'Country default mapping for Uganda',
-    NOW()
+    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM'
 );
 
 -- UAE default
-INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
 VALUES (
     'UAE',
     'JABEL ALI-DUBAI',
     'LAKHANI MOTORS FZE',
-    'SHOWROOM# 108 DUCAMZ RAS AL KHOR, AL AWEER ROAD, DUBAI- UAE, PO BOX: 63280, TEL: 971-4-3339141 FAX:971-4-3338574, EMAIL: lakhanimotors@gmail.com',
-    'Country default mapping for UAE',
-    NOW()
+    'SHOWROOM# 108 DUCAMZ RAS AL KHOR, AL AWEER ROAD, DUBAI- UAE, PO BOX: 63280, TEL: 971-4-3339141 FAX:971-4-3338574, EMAIL: lakhanimotors@gmail.com'
 );
 
 -- Client-specific overrides
 
 -- SHEHROZE MOTORS -> KARACHI-PAKISTAN
-INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
 VALUES (
     'PAKISTAN',
     'SHEHROZE MOTORS',
@@ -98,13 +86,11 @@ VALUES (
     'GLOBAL KAWASAKI',
     'YOKOHAMA',
     'OVERSEAS TRANSIT AGENCY (PVT) LTD.',
-    '1201-1203, 12TH FLOOR, Q.M.HOUSE, PLOT NO. 11/2RY9, ELLANDER ROAD, OFF.I.I CHUNDRIGAR ROAD (OPP. SHAHEEN COMPLEX), KARACHI',
-    'Client-specific override for Shehroze Motors',
-    NOW()
+    '1201-1203, 12TH FLOOR, Q.M.HOUSE, PLOT NO. 11/2RY9, ELLANDER ROAD, OFF.I.I CHUNDRIGAR ROAD (OPP. SHAHEEN COMPLEX), KARACHI'
 );
 
 -- DAAVI AUTO -> MOMBASA-KENYA
-INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
 VALUES (
     'KENYA',
     'DAAVI AUTO',
@@ -112,13 +98,11 @@ VALUES (
     'AQUA LOGISTICS',
     'YOKOHAMA',
     'LAKHANI MOTORS (K) LTD',
-    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM',
-    'Client-specific override for Daavi Auto',
-    NOW()
+    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM'
 );
 
 -- NEW GRAND AUTO (JAWAD) -> UGANDA
-INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
 VALUES (
     'UGANDA',
     'NEW GRAND AUTO (JAWAD)',
@@ -126,13 +110,11 @@ VALUES (
     'GLOBAL NAGOYA',
     'NAGOYA',
     'LAKHANI MOTORS (K) LTD',
-    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM',
-    'Client-specific override for New Grand Auto (Jawad)',
-    NOW()
+    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM'
 );
 
 -- IRSHAD ALI AKHTAR -> MAPUTO-MOZAMBIQUE
-INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
 VALUES (
     'MOZAMBIQUE',
     'IRSHAD ALI AKHTAR',
@@ -140,13 +122,11 @@ VALUES (
     'FLASHRISE',
     'NAGOYA',
     'LAKHANI MOTORS (K) LTD',
-    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM',
-    'Client-specific override for Irshad Ali Akhtar',
-    NOW()
+    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM'
 );
 
 -- AAMIR DEDHI -> JABEL ALI-DUBAI
-INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
 VALUES (
     'UAE',
     'AAMIR DEDHI',
@@ -154,13 +134,11 @@ VALUES (
     'KLC',
     'OSAKA,SENBOKU,KOBE',
     'LAKHANI MOTORS FZE',
-    'SHOWROOM# 108 DUCAMZ RAS AL KHOR, AL AWEER ROAD, DUBAI- UAE, PO BOX: 63280, TEL: 971-4-3339141 FAX:971-4-3338574, EMAIL: lakhanimotors@gmail.com',
-    'Client-specific override for Aamir Dedhi',
-    NOW()
+    'SHOWROOM# 108 DUCAMZ RAS AL KHOR, AL AWEER ROAD, DUBAI- UAE, PO BOX: 63280, TEL: 971-4-3339141 FAX:971-4-3338574, EMAIL: lakhanimotors@gmail.com'
 );
 
 -- AUTOHANDLER -> DURBAN-SOUTH AFRICA
-INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
 VALUES (
     'SOUTH AFRICA',
     'AUTOHANDLER',
@@ -168,13 +146,11 @@ VALUES (
     'GLOBAL HAKATA',
     'HAKATA',
     'LAKHANI MOTORS (K) LTD',
-    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM',
-    'Client-specific override for Autohandler',
-    NOW()
+    'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM'
 );
 
 -- ESSA ADMANI -> UK
-INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
 VALUES (
     'UK',
     'ESSA ADMANI',
@@ -182,13 +158,11 @@ VALUES (
     'BARAKI PARKING',
     NULL,
     NULL,
-    NULL,
-    'Client-specific override for Essa Admani',
-    NOW()
+    NULL
 );
 
 -- IRFAN MEMON HYDERABAD -> NEWZEALAND
-INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
 VALUES (
     'NEWZEALAND',
     'IRFAN MEMON HYDERABAD',
@@ -196,13 +170,11 @@ VALUES (
     'LOCAL',
     NULL,
     NULL,
-    NULL,
-    'Client-specific override for Irfan Memon Hyderabad',
-    NOW()
+    NULL
 );
 
 -- NAVEES AHMAD -> LOCAL-JAPAN
-INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address, notes, created_at)
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
 VALUES (
     'JAPAN',
     'NAVEES AHMAD',
@@ -210,8 +182,6 @@ VALUES (
     NULL,
     NULL,
     NULL,
-    NULL,
-    'Client-specific override for Navees Ahmad',
-    NOW()
+    NULL
 );
 

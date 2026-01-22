@@ -2,14 +2,17 @@ package com.automan.backend.service
 
 import com.automan.backend.model.RixoPrice
 import com.automan.backend.repository.RixoPriceRepository
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
 import java.io.BufferedReader
 import java.io.InputStreamReader
 
 @Service
 class RixoImportService(
-    private val rixoPriceRepository: RixoPriceRepository
+    private val rixoPriceRepository: RixoPriceRepository,
+    private val entityManager: EntityManager
 ) {
     
     fun importRixoPricesFromCsv(csvContent: String): ImportResult {
@@ -132,7 +135,50 @@ class RixoImportService(
     
     // New CRUD methods for inline mapping management
     fun saveRixoPrice(rixoPrice: RixoPrice): RixoPrice {
-        return rixoPriceRepository.save(rixoPrice)
+        // Set auction_house = auction_name (both columns need to be set)
+        // Use native query to set auction_house since it's marked as insertable=false in the model
+        val saved = rixoPriceRepository.save(rixoPrice)
+        // Update auction_house to match auction_name using native query
+        if (saved.id > 0) {
+            rixoPriceRepository.updateAuctionHouse(saved.id, saved.auctionHouse)
+            return rixoPriceRepository.findById(saved.id).orElse(saved)
+        }
+        return saved
+    }
+    
+    @Transactional
+    fun saveRixoPriceWithAuctionHouse(
+        auctionHouse: String,
+        shipmentSize: String?,
+        stockLocation: String,
+        rixoCompany: String,
+        rixoPrice: String?,
+        venueId: String?
+    ): RixoPrice {
+        // Use native INSERT to include auction_house in the INSERT statement
+        // This avoids the "Field 'auction_house' doesn't have a default value" error
+        val query = entityManager.createNativeQuery("""
+            INSERT INTO rixo_prices (auction_name, auction_house, type_of_vehicle, stock_location, rixo_company, venue_id, rixo_price, created_at)
+            VALUES (:auctionName, :auctionHouse, :typeOfVehicle, :stockLocation, :rixoCompany, :venueId, :rixoPrice, CURRENT_TIMESTAMP)
+        """)
+        
+        query.setParameter("auctionName", auctionHouse)
+        query.setParameter("auctionHouse", auctionHouse)
+        query.setParameter("typeOfVehicle", shipmentSize)
+        query.setParameter("stockLocation", stockLocation)
+        query.setParameter("rixoCompany", rixoCompany)
+        query.setParameter("venueId", venueId)
+        query.setParameter("rixoPrice", rixoPrice)
+        
+        query.executeUpdate()
+        
+        // Get the inserted ID using LAST_INSERT_ID()
+        val idResult = entityManager.createNativeQuery("SELECT LAST_INSERT_ID()").singleResult
+        val id = (idResult as? Number)?.toLong() ?: throw IllegalStateException("Failed to get inserted ID")
+        
+        return rixoPriceRepository.findById(id).orElseThrow {
+            IllegalStateException("Failed to retrieve inserted RixoPrice with id: $id")
+        }
     }
     
     fun getRixoPriceById(id: Long): RixoPrice? {

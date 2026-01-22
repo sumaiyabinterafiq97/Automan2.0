@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:mysql://localhost:3307/automan_car_purchase?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&connectTimeout=5000&socketTimeout=30000
+    url: jdbc:mysql://localhost:3306/automan_car_purchase?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true&connectTimeout=5000&socketTimeout=30000
     username: automan_user
     password: automan_password
     driver-class-name: com.mysql.cj.jdbc.Driver

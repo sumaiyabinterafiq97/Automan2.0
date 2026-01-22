@@ -2,13 +2,14 @@ package com.automan.backend.controller
 
 import com.automan.backend.model.BookingMapping
 import com.automan.backend.repository.BookingMappingRepository
+import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
 data class ApiResponse<T>(val success: Boolean, val data: T? = null, val message: String? = null)
 
 @RestController
-@RequestMapping("/booking/mappings")
+@RequestMapping(value = ["/booking/mappings", "/api/booking/mappings"])
 @CrossOrigin(origins = [
     "http://localhost:8080",
     "http://localhost:8081",
@@ -22,14 +23,29 @@ data class ApiResponse<T>(val success: Boolean, val data: T? = null, val message
 class BookingMappingController(
     private val repo: BookingMappingRepository
 ) {
+    @GetMapping
+    fun getAll(): ResponseEntity<ApiResponse<List<BookingMapping>>> {
+        return try {
+            Logger.debug("BookingMappingController.getAll() called")
+            val items = repo.findAll()
+            Logger.debug("Found ${items.size} booking mappings")
+            ResponseEntity.ok(ApiResponse(true, items))
+        } catch (e: Exception) {
+            Logger.error("Error in BookingMappingController.getAll(): ${e.message}")
+            e.printStackTrace()
+            ResponseEntity.status(500).body(ApiResponse(false, null, "Error: ${e.message}"))
+        }
+    }
+    
     @GetMapping("/by-country/{country}")
     fun byCountry(@PathVariable country: String): ResponseEntity<ApiResponse<List<BookingMapping>>> {
         return try {
-            println("BookingMappingController.byCountry called with country: $country")
+            Logger.debug("BookingMappingController.byCountry called with country: $country")
             val items = repo.findByCountryIgnoreCase(country)
-            println("Found ${items.size} mappings for country: $country")
+            Logger.debug("Found ${items.size} mappings for country: $country")
             ResponseEntity.ok(ApiResponse(true, items))
         } catch (e: Exception) {
+            Logger.error("Error in BookingMappingController.byCountry: ${e.message}")
             e.printStackTrace()
             ResponseEntity.status(500).body(ApiResponse(false, null, "Error: ${e.message}"))
         }

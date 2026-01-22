@@ -1,9 +1,6 @@
 package com.automan.backend.controller
 
-import com.automan.backend.model.Booking
-import com.automan.backend.model.BookingStatus
 import com.automan.backend.model.Purchase
-import com.automan.backend.repository.BookingRepository
 import com.automan.backend.repository.PurchaseRepository
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -31,14 +28,10 @@ class CarSearchControllerIntegrationTest {
     @Autowired
     private lateinit var purchaseRepository: PurchaseRepository
 
-    @Autowired
-    private lateinit var bookingRepository: BookingRepository
-
     @BeforeEach
     fun setUp() {
         // Clean up test data
         purchaseRepository.deleteAll()
-        bookingRepository.deleteAll()
     }
 
     @Test

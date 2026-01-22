@@ -5,6 +5,7 @@ import com.automan.backend.model.ClientStatus
 import com.automan.backend.model.Event
 import com.automan.backend.model.EventType
 import com.automan.backend.service.ClientService
+import com.automan.backend.util.Logger
 import com.automan.backend.repository.EventRepository
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -192,14 +193,14 @@ class ClientController(
             val clientId = (transactionData["clientId"] as? Number)?.toLong() 
                 ?: throw IllegalArgumentException("Client ID is required")
             
-            println("DEBUG: Creating transaction for client $clientId")
-            println("DEBUG: Transaction data: $transactionData")
+            Logger.debug("Creating transaction for client $clientId")
+            Logger.debug("Transaction data: $transactionData")
             
             // Verify client exists
             val client = clientService.getClientById(clientId)
                 ?: throw IllegalArgumentException("Client not found: $clientId")
             
-            println("DEBUG: Client found: ${client.clientName}")
+            Logger.debug("Client found: ${client.clientName}")
             
             // Calculate running balance based on client's current balance
             val currentBalance = client.currentBalance
@@ -207,7 +208,7 @@ class ClientController(
             val paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble() ?: 0.0
             val newBalance = currentBalance + paymentReceived - transactionPrice
             
-            println("DEBUG: Current balance: $currentBalance, New balance: $newBalance")
+            Logger.debug("Current balance: $currentBalance, New balance: $newBalance")
             
             // Create Event object
             val event = Event(
@@ -224,11 +225,11 @@ class ClientController(
             
             // Save event directly using EventRepository
             val savedEvent = eventRepository.save(event)
-            println("DEBUG: Event saved with ID: ${savedEvent.id}")
+            Logger.debug("Event saved with ID: ${savedEvent.id}")
             
             // Update client balance
             clientService.updateClientBalance(clientId, newBalance)
-            println("DEBUG: Client balance updated to: $newBalance")
+            Logger.debug("Client balance updated to: $newBalance")
             
             ResponseEntity.ok(mapOf(
                 "success" to true,
@@ -237,8 +238,7 @@ class ClientController(
                 "runningBalance" to newBalance
             ))
         } catch (e: Exception) {
-            println("ERROR: Exception in createTransaction: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Exception in createTransaction: ${e.message}", e)
             ResponseEntity.status(500).body(mapOf(
                 "success" to false,
                 "error" to (e.message ?: "Unknown error")

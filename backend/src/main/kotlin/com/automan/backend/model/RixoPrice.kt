@@ -15,10 +15,6 @@ data class RixoPrice(
     @com.fasterxml.jackson.annotation.JsonAlias("auctionName")
     val auctionHouse: String,
     
-    @Column(name = "auction_house", nullable = false, insertable = false, updatable = false)
-    @com.fasterxml.jackson.annotation.JsonIgnore
-    val auctionHouseDb: String = "", // Generated column - automatically set from auction_name
-    
     @Column(name = "type_of_vehicle")
     @com.fasterxml.jackson.annotation.JsonAlias("typeOfVehicle")
     val shipmentSize: String? = null,

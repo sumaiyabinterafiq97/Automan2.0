@@ -7,6 +7,7 @@ import com.automan.backend.service.SignupRequest
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.http.HttpStatus
+import com.automan.backend.util.Logger
 import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -157,7 +158,10 @@ class AuthController(
     private fun getClientIpAddress(request: HttpServletRequest): String {
         val xForwardedFor = request.getHeader("X-Forwarded-For")
         return when {
-            !xForwardedFor.isNullOrBlank() -> xForwardedFor.split(",")[0].trim()
+            !xForwardedFor.isNullOrBlank() -> {
+                val parts = xForwardedFor.split(",")
+                if (parts.isNotEmpty()) parts[0].trim() else "unknown"
+            }
             else -> request.remoteAddr ?: "unknown"
         }
     }
@@ -188,7 +192,7 @@ class AuthController(
     }
 
     private fun logSecurityEvent(event: String, ip: String, details: String) {
-        println("[SECURITY] $event - IP: $ip - Details: $details - Time: ${LocalDateTime.now()}")
+        Logger.debug("[SECURITY] $event - IP: $ip - Details: $details - Time: ${LocalDateTime.now()}")
     }
 }
 

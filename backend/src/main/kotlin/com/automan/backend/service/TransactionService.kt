@@ -5,6 +5,7 @@ import com.automan.backend.dto.TransactionResponse
 import com.automan.backend.model.Event
 import com.automan.backend.model.EventType
 import com.automan.backend.repository.EventRepository
+import com.automan.backend.util.Logger
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
@@ -17,20 +18,18 @@ class TransactionService(
     
     @Transactional
     fun createTransaction(request: CreateTransactionRequest): TransactionResponse {
-        println("DEBUG: TransactionService.createTransaction called")
-        println("DEBUG: Client ID: ${request.clientId}")
-        println("DEBUG: Event Description: ${request.eventDescription}")
+        Logger.debug("TransactionService.createTransaction called - Client ID: ${request.clientId}")
         
         return try {
             // Fetch client from database
             val client = clientService.getClientById(request.clientId)
                 ?: throw IllegalArgumentException("Client not found: ${request.clientId}")
-            println("DEBUG: Client found: ${client.clientName}")
+            Logger.debug("Client found: ${client.clientName}")
             
             // Calculate running balance
             val currentBalance = client.currentBalance
             val newBalance = currentBalance + (request.paymentReceived ?: 0.0) - (request.transactionPrice ?: 0.0)
-            println("DEBUG: Current balance: $currentBalance, New balance: $newBalance")
+            Logger.debug("Current balance: $currentBalance, New balance: $newBalance")
             
             // Create Event object
             val event = Event(
@@ -47,11 +46,11 @@ class TransactionService(
             
             // Save the event
             val savedEvent = eventRepository.save(event)
-            println("DEBUG: Event saved with ID: ${savedEvent.id}")
+            Logger.debug("Event saved with ID: ${savedEvent.id}")
             
             // Update client balance
             clientService.updateClientBalance(request.clientId, newBalance)
-            println("DEBUG: Client balance updated to: $newBalance")
+            Logger.debug("Client balance updated to: $newBalance")
             
             TransactionResponse(
                 success = true,
@@ -61,8 +60,7 @@ class TransactionService(
             )
             
         } catch (e: Exception) {
-            println("ERROR: Exception in TransactionService.createTransaction: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Exception in TransactionService.createTransaction: ${e.message}", e)
             TransactionResponse(
                 success = false,
                 message = "Failed to create transaction: ${e.message}"

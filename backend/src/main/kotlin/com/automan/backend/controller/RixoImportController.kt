@@ -1,6 +1,7 @@
 package com.automan.backend.controller
 
 import com.automan.backend.service.RixoImportService
+import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
@@ -64,9 +65,9 @@ class RixoImportController(
     @GetMapping("/prices")
     fun getAllRixoPrices(): ResponseEntity<Map<String, Any>> {
         return try {
-            println("DEBUG: getAllRixoPrices endpoint called")
+            Logger.debug("getAllRixoPrices endpoint called")
             val prices = rixoImportService.getAllRixoPrices()
-            println("DEBUG: Found ${prices.size} prices")
+            Logger.debug("Found ${prices.size} prices")
             
             // Convert to map to avoid serialization issues
             val priceData = prices.map { price ->
@@ -87,7 +88,7 @@ class RixoImportController(
                 "count" to prices.size
             ))
         } catch (e: Exception) {
-            println("ERROR in getAllRixoPrices: ${e.message}")
+            Logger.error("ERROR in getAllRixoPrices: ${e.message}")
             e.printStackTrace()
             ResponseEntity.status(500).body(mapOf(
                 "success" to false,
@@ -192,8 +193,11 @@ class RixoImportController(
         return try {
             // Validate required fields
             val auctionHouse = request["auctionHouse"] as? String
-            val stockLocation = request["stockLocation"] as? String
-            val rixoCompany = request["rixoCompany"] as? String
+            val vehicleType = (request["vehicleType"] as? String)?.trim()
+            val stockLocation = (request["stockLocation"] as? String)?.trim()
+            val rixoCompany = (request["rixoCompany"] as? String)?.trim()
+            val rixoPrice = (request["rixoPrice"] as? String)?.trim()
+            val venueId = (request["venueId"] as? String)?.trim()
             
             if (auctionHouse.isNullOrBlank()) {
                 return ResponseEntity.badRequest().body(mapOf(
@@ -202,30 +206,29 @@ class RixoImportController(
                 ))
             }
             
-            if (stockLocation.isNullOrBlank()) {
+            // Validate: at least one of the 5 fields must be filled
+            val hasVehicleType = !vehicleType.isNullOrBlank()
+            val hasStockLocation = !stockLocation.isNullOrBlank()
+            val hasRixoCompany = !rixoCompany.isNullOrBlank()
+            val hasRixoPrice = !rixoPrice.isNullOrBlank()
+            val hasVenueId = !venueId.isNullOrBlank()
+            
+            if (!hasVehicleType && !hasStockLocation && !hasRixoCompany && !hasRixoPrice && !hasVenueId) {
                 return ResponseEntity.badRequest().body(mapOf(
                     "success" to false,
-                    "message" to "stockLocation is required"
+                    "message" to "At least one field (Vehicle Type, Stock Location, Rixo Company, Price, or Venue ID) must be filled"
                 ))
             }
             
-            if (rixoCompany.isNullOrBlank()) {
-                return ResponseEntity.badRequest().body(mapOf(
-                    "success" to false,
-                    "message" to "rixoCompany is required"
-                ))
-            }
-            
-            val rixoPrice = com.automan.backend.model.RixoPrice.create(
+            // Use service method that handles auction_house properly
+            val savedMapping = rixoImportService.saveRixoPriceWithAuctionHouse(
                 auctionHouse = auctionHouse.trim(),
-                shipmentSize = (request["vehicleType"] as? String)?.trim(),
-                stockLocation = stockLocation.trim(),
-                rixoCompany = rixoCompany.trim(),
-                rixoPrice = (request["rixoPrice"] as? String)?.trim(),
-                venueId = (request["venueId"] as? String)?.trim()
+                shipmentSize = vehicleType,
+                stockLocation = stockLocation ?: "",
+                rixoCompany = rixoCompany ?: "",
+                rixoPrice = rixoPrice,
+                venueId = venueId
             )
-            
-            val savedMapping = rixoImportService.saveRixoPrice(rixoPrice)
             
             ResponseEntity.ok(mapOf(
                 "success" to true,
@@ -250,15 +253,42 @@ class RixoImportController(
                 return ResponseEntity.notFound().build()
             }
             
+            // Preserve createdAt when copying - ensure it's never null
+            val createdAtValue = existingMapping.createdAt ?: java.time.LocalDateTime.now()
+            
             val updatedMapping = existingMapping.copy(
+                id = existingMapping.id, // CRITICAL: Explicitly preserve ID
                 shipmentSize = request["vehicleType"] as? String ?: existingMapping.shipmentSize,
                 stockLocation = request["stockLocation"] as? String ?: existingMapping.stockLocation,
                 rixoCompany = request["rixoCompany"] as? String ?: existingMapping.rixoCompany,
                 rixoPrice = request["rixoPrice"] as? String ?: existingMapping.rixoPrice,
-                venueId = request["venueId"] as? String ?: existingMapping.venueId
+                venueId = request["venueId"] as? String ?: existingMapping.venueId,
+                createdAt = createdAtValue // Preserve createdAt (never null)
             )
             
+            Logger.debug("[RIXO UPDATE] Original ID: ${existingMapping.id}, Updated ID: ${updatedMapping.id}")
+            
+            // Verify ID is preserved
+            if (updatedMapping.id != existingMapping.id) {
+                Logger.error("[RIXO UPDATE] ERROR: ID mismatch!")
+                return ResponseEntity.badRequest().body(mapOf(
+                    "success" to false,
+                    "message" to "Internal error: ID mismatch during update"
+                ))
+            }
+            
             val savedMapping = rixoImportService.saveRixoPrice(updatedMapping)
+            
+            // Verify the saved entity has the same ID
+            if (savedMapping.id != existingMapping.id) {
+                Logger.error("[RIXO UPDATE] ERROR: Saved entity has different ID! Original: ${existingMapping.id}, Saved: ${savedMapping.id}")
+                return ResponseEntity.badRequest().body(mapOf(
+                    "success" to false,
+                    "message" to "Error: Update created a new row instead of updating existing one"
+                ))
+            }
+            
+            Logger.debug("[RIXO UPDATE] Successfully updated existing mapping with ID: ${savedMapping.id}")
             
             ResponseEntity.ok(mapOf(
                 "success" to true,
@@ -266,6 +296,7 @@ class RixoImportController(
                 "data" to savedMapping
             ))
         } catch (e: Exception) {
+            e.printStackTrace()
             ResponseEntity.badRequest().body(mapOf(
                 "success" to false,
                 "message" to "Failed to update mapping: ${e.message}"

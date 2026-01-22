@@ -2322,6 +2322,58 @@ window.resetAutoSelectionFlag = function() {
     window.isAutoSelecting = false;
 };
 
+// Helper function to format rixo price for display (adds ¥ symbol and commas)
+window.formatRixoPrice = function(value) {
+    if (!value || value === '' || value === null || value === undefined) {
+        return '';
+    }
+    
+    // Parse the value - remove any existing formatting
+    var numStr = String(value).trim();
+    // Remove ¥, Â¥, commas, spaces
+    numStr = numStr.replace(/[¥Â¥,\s]/g, '').replace(/Â/g, '');
+    
+    // Check if it's a valid number
+    if (numStr === '' || isNaN(numStr)) {
+        return '';
+    }
+    
+    // Convert to number and format with commas
+    var num = parseInt(numStr, 10);
+    if (isNaN(num)) {
+        return '';
+    }
+    
+    // Format with commas: 8000 -> "8,000"
+    var formatted = num.toLocaleString('en-US');
+    
+    // Add ¥ symbol: "8,000" -> "¥8,000"
+    return '¥' + formatted;
+};
+
+// Helper function to parse rixo price for saving (removes ¥ symbol and commas)
+window.parseRixoPrice = function(value) {
+    if (!value || value === '' || value === null || value === undefined) {
+        return '';
+    }
+    
+    // Convert to string and trim
+    var cleaned = String(value).trim();
+    
+    // Remove all non-numeric characters except decimal point (.)
+    // This removes: ¥, Â¥, commas, spaces, letters, and any other symbols
+    cleaned = cleaned.replace(/[^\d.]/g, '');
+    
+    // Remove multiple decimal points (keep only the first one)
+    var parts = cleaned.split('.');
+    if (parts.length > 2) {
+        cleaned = parts[0] + '.' + parts.slice(1).join('');
+    }
+    
+    // Return cleaned numeric string (empty if no numbers found)
+    return cleaned;
+};
+
 // Helper function to auto-select related fields
 window.autoSelectRelatedFields = function(auctionName, changedField, changedValue) {
     console.log('autoSelectRelatedFields called:', auctionName, changedField, changedValue);
@@ -2388,6 +2440,7 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
         updateDropdown('rixoCompany', 'editRixoCompany', rixoCompanies);
         updateDropdown('typeOfVehicle', 'typeOfVehicle', shipmentSizes);
         updateDropdown('typeOfVehicle', 'editTypeOfVehicle', shipmentSizes);
+        updateDropdown('shipmentSize', 'editShipmentSize', shipmentSizes);
         updateDropdown('rixoPrice', 'rixoPrice', rixoPrices);
         updateDropdown('rixoPrice', 'editRixoPrice', rixoPrices);
         
@@ -2412,29 +2465,42 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             // Shipment Size - use first available option, or default to "CAR" if none available
         if (shipmentSizes.length > 0) {
             setFieldValue('typeOfVehicle', 'editTypeOfVehicle', shipmentSizes[0]);
+            setFieldValue('shipmentSize', 'editShipmentSize', shipmentSizes[0]);
         } else {
             // No shipment size mapping found, default to "CAR"
             console.log('No shipment size mapping found, defaulting to "CAR"');
             // First, add "CAR" to the dropdown options
             updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
             updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
+            updateDropdown('shipmentSize', 'editShipmentSize', ['CAR']);
             // Then set the value
                 setTimeout(function() {
             setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
+            setFieldValue('shipmentSize', 'editShipmentSize', 'CAR');
                 }, 50);
         }
         
             // Rixo Price - always select first value if available
         if (rixoPrices.length > 0) {
-                const priceInput = document.getElementById('rixoPrice');
+                // Parse the raw value from database - remove all symbols and words, keep only numbers
+                var rawPrice = window.parseRixoPrice ? window.parseRixoPrice(rixoPrices[0]) : rixoPrices[0];
+                
+                // For number input fields, set the numeric value (not formatted)
+                const priceInput = document.getElementById('rixoPriceInput');
                 if (priceInput) {
-                    priceInput.value = rixoPrices[0];
-                    console.log('✅ Set Rixo Price:', rixoPrices[0]);
+                    priceInput.value = rawPrice;
+                    console.log('✅ Set Rixo Price (numeric):', rawPrice);
+                    // Trigger change event to ensure UI updates
+                    priceInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    priceInput.dispatchEvent(new Event('change', { bubbles: true }));
                 }
-                const editPriceInput = document.getElementById('editRixoPrice');
+                const editPriceInput = document.getElementById('editRixoPriceInput');
                 if (editPriceInput) {
-                    editPriceInput.value = rixoPrices[0];
-                    console.log('✅ Set Edit Rixo Price:', rixoPrices[0]);
+                    editPriceInput.value = rawPrice;
+                    console.log('✅ Set Edit Rixo Price (numeric):', rawPrice);
+                    // Trigger change event to ensure UI updates
+                    editPriceInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    editPriceInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
             }
         }, 100);
@@ -2456,6 +2522,7 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             // Update dropdowns directly for both add and edit forms
             updateDropdown('typeOfVehicle', 'typeOfVehicle', availableTypes);
             updateDropdown('typeOfVehicle', 'editTypeOfVehicle', availableTypes);
+            updateDropdown('shipmentSize', 'editShipmentSize', availableTypes);
             updateDropdown('rixoPrice', 'rixoPrice', availablePrices);
             updateDropdown('rixoPrice', 'editRixoPrice', availablePrices);
             
@@ -2475,15 +2542,18 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
                 console.log('Auto-selecting shipment size:', selectedType, 'from options:', availableTypes);
                 setFieldValue('typeOfVehicle', 'typeOfVehicle', selectedType);
                 setFieldValue('typeOfVehicle', 'editTypeOfVehicle', selectedType);
+                setFieldValue('shipmentSize', 'editShipmentSize', selectedType);
             } else {
                 // No shipment size mapping found for this company, default to "CAR"
                 console.log('No shipment size mapping found for company, defaulting to "CAR"');
                 // First, add "CAR" to the dropdown options
                 updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
                 updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
+                updateDropdown('shipmentSize', 'editShipmentSize', ['CAR']);
                 // Then set the value
                 setFieldValue('typeOfVehicle', 'typeOfVehicle', 'CAR');
                 setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
+                setFieldValue('shipmentSize', 'editShipmentSize', 'CAR');
             }
             if (availablePrices.length === 1) {
                 setFieldValue('rixoPrice', 'rixoPrice', availablePrices[0]);
@@ -2525,9 +2595,11 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             // First, add "CAR" to the dropdown options
             updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
             updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
+            updateDropdown('shipmentSize', 'editShipmentSize', ['CAR']);
             // Then set the value
             setFieldValue('typeOfVehicle', 'typeOfVehicle', 'CAR');
             setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
+            setFieldValue('shipmentSize', 'editShipmentSize', 'CAR');
         }
     }
     } finally {
@@ -2552,6 +2624,8 @@ window.updateDropdownOptions = function(auctionName, typeOfVehicle, stockLocatio
     
     // Update Type of Vehicle dropdown
     updateDropdown('typeOfVehicle', 'editTypeOfVehicle', filteredOptions.typeOfVehicle);
+    // Update Shipment Size dropdown (same as typeOfVehicle)
+    updateDropdown('shipmentSize', 'editShipmentSize', filteredOptions.typeOfVehicle);
     
     // Update Rixo Price dropdown
     updateDropdown('rixoPrice', 'editRixoPrice', filteredOptions.rixoPrice);
@@ -2578,7 +2652,11 @@ window.updateDropdown = function(elementId, editElementId, options) {
             dropdown.innerHTML = '<option value="">▼</option>';
             var uniqueOptions = window.getUniqueValues(options);
             uniqueOptions.forEach(function(option) {
-                dropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
+                // Format price for display in dropdown
+                var displayValue = window.formatRixoPrice ? window.formatRixoPrice(option) : option;
+                // Store raw numeric value
+                var rawValue = window.parseRixoPrice ? window.parseRixoPrice(option) : option;
+                dropdown.innerHTML += '<option value="' + rawValue + '">' + displayValue + '</option>';
             });
         }
         
@@ -2586,7 +2664,11 @@ window.updateDropdown = function(elementId, editElementId, options) {
             editDropdown.innerHTML = '<option value="">▼</option>';
             var uniqueOptions = window.getUniqueValues(options);
             uniqueOptions.forEach(function(option) {
-                editDropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
+                // Format price for display in dropdown
+                var displayValue = window.formatRixoPrice ? window.formatRixoPrice(option) : option;
+                // Store raw numeric value
+                var rawValue = window.parseRixoPrice ? window.parseRixoPrice(option) : option;
+                editDropdown.innerHTML += '<option value="' + rawValue + '">' + displayValue + '</option>';
             });
         }
     } else {
@@ -2697,16 +2779,23 @@ window.setFieldValue = function(addFieldId, editFieldId, value) {
     
     // Special handling for rixo price fields (they are input fields, not selects)
     if (addFieldId === 'rixoPrice' || editFieldId === 'editRixoPrice') {
-        const addInput = document.getElementById('rixoPrice');
-        const editInput = document.getElementById('editRixoPrice');
+        const addInput = document.getElementById('rixoPriceInput');
+        const editInput = document.getElementById('editRixoPriceInput');
+        
+        // Parse the value to remove all symbols and words, keep only numbers
+        var numericValue = window.parseRixoPrice ? window.parseRixoPrice(value) : value;
         
         if (addInput && addFieldId === 'rixoPrice') {
-            addInput.value = value;
-            console.log('Set rixo price input value:', value);
+            addInput.value = numericValue;
+            console.log('Set rixo price input value (numeric):', numericValue);
+            addInput.dispatchEvent(new Event('input', { bubbles: true }));
+            addInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
         if (editInput && editFieldId === 'editRixoPrice') {
-            editInput.value = value;
-            console.log('Set edit rixo price input value:', value);
+            editInput.value = numericValue;
+            console.log('Set edit rixo price input value (numeric):', numericValue);
+            editInput.dispatchEvent(new Event('input', { bubbles: true }));
+            editInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
     }
 };
@@ -3947,36 +4036,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Manage button click events (always visible, can open even with empty supplier)
-    document.addEventListener('click', function(e) {
-        if (e.target.id === 'manageAuctionMappings' || e.target.closest('#manageAuctionMappings')) {
-            e.preventDefault();
-            e.stopPropagation();
-            const auctionSelect = document.getElementById('auctionName');
-            const auctionName = auctionSelect ? (auctionSelect.value || '') : '';
-            console.log('🔧 [DEBUG] Manage button clicked - auctionName:', auctionName);
-            // Open modal even if supplier is empty (for new supplier creation)
-            showAuctionMappingsModal(auctionName);
-        }
-        
-        if (e.target.id === 'manageEditAuctionMappings' || e.target.closest('#manageEditAuctionMappings')) {
-            e.preventDefault();
-            e.stopPropagation();
-            const auctionSelect = document.getElementById('editAuctionName');
-            const auctionName = auctionSelect ? (auctionSelect.value || '') : '';
-            console.log('🔧 [DEBUG] Edit manage button clicked - auctionName:', auctionName);
-            // Open modal even if supplier is empty (for new supplier creation)
-            showAuctionMappingsModal(auctionName);
-        }
-        
-        // company-specific manage buttons removed; both gear icons open supplier modal
-    });
-    
-    // Toggle manage buttons on dropdown changes
-    const dropdowns = ['auctionName', 'editAuctionName'];
-    dropdowns.forEach(id => {
-        const element = document.getElementById(id);
-        if (element) {
-            element.addEventListener('change', toggleManageButtons);
-        }
-    });
+    // Modal functionality removed - gear buttons now navigate to Supplier Master List
+    // Event listeners for gear buttons are handled in MinimalPurchaseApp.kt
 });

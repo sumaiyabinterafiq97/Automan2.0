@@ -5,12 +5,7 @@ import java.time.LocalDateTime
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 
 @Entity
-@Table(
-    name = "purchases",
-    uniqueConstraints = [
-        UniqueConstraint(columnNames = ["chassis"], name = "uk_chassis")
-    ]
-)
+@Table(name = "purchases")
 @JsonIgnoreProperties(ignoreUnknown = true)
 @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
 data class Purchase(
@@ -76,6 +71,9 @@ data class Purchase(
     
     @Column(name = "WD")
     val wd: String? = null,
+    
+    @Column(name = "drive_type")
+    val driveType: String? = null,
     
     @Column(name = "auction_no")
     val auctionNo: String? = null,

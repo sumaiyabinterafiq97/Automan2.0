@@ -16,6 +16,7 @@ import com.itextpdf.layout.properties.UnitValue
 import com.itextpdf.io.font.PdfEncodings
 import com.itextpdf.kernel.font.PdfFont
 import com.itextpdf.kernel.font.PdfFontFactory
+import com.automan.backend.util.Logger
 import java.io.InputStream
 import org.springframework.stereotype.Service
 import java.io.ByteArrayOutputStream
@@ -293,9 +294,7 @@ class PdfService {
     }
 
     fun generateRixoTransportPdf(purchases: List<Purchase>, transportData: Map<String, String>): ByteArray {
-        println("🎌 PDF Service: Starting Japanese PDF generation")
-        println("🎌 PDF Service: Purchases count: ${purchases.size}")
-        println("🎌 PDF Service: Transport data: $transportData")
+        Logger.debug("PDF Service: Starting Japanese PDF generation, purchases count: ${purchases.size}")
         
         val outputStream = ByteArrayOutputStream()
         val pdfWriter = PdfWriter(outputStream)
@@ -306,7 +305,7 @@ class PdfService {
         
         // Get Japanese-compatible font
         val japaneseFont = getJapaneseFont()
-        println("🎌 PDF Service: Using font: ${japaneseFont.fontProgram?.fontNames?.getFontName()}")
+        Logger.debug("PDF Service: Using font: ${japaneseFont.fontProgram?.fontNames?.getFontName()}")
 
         // Add title with 陸送 on upper left, KLC in center, 様 on upper right, and date on upper right
         val titleTable = Table(UnitValue.createPercentArray(floatArrayOf(25f, 25f, 25f, 25f)))
@@ -324,13 +323,11 @@ class PdfService {
         titleTable.addCell(createTitleCell("様", japaneseFont))
         
         // Date on upper right (4th column)
-        println("🎌 PDF Service: transportData keys: ${transportData.keys}")
-        println("🎌 PDF Service: transportData values: ${transportData.values}")
-        println("🎌 PDF Service: buyingDate value: '${transportData["buyingDate"]}'")
+        Logger.debug("PDF Service: transportData keys: ${transportData.keys}")
         val transportDate = transportData["buyingDate"] ?: ""
         // Header wants full date with year and weekday in Japanese, e.g. 2025年9月30日火曜日
         val formattedDateWithWeekday = formatDateToJapanese(transportDate, includeYear = true)
-        println("🎌 PDF Service: Original date: '$transportDate' -> Formatted: '$formattedDateWithWeekday'")
+        Logger.debug("PDF Service: Original date: '$transportDate' -> Formatted: '$formattedDateWithWeekday'")
         
         val dateCell = Cell()
             .add(Paragraph()
@@ -364,12 +361,13 @@ class PdfService {
         val table = Table(UnitValue.createPercentArray(floatArrayOf(12f, 7f, 14f, 12f, 9f, 9f, 10f, 14f, 13f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginBottom(20f)
+            .setKeepTogether(false) // Allow table to break across pages for many vehicles
 
         // Add table headers in Japanese
         val headers = listOf("日付", "出品番号", "型式・車体番号", "年式", "車名", "取引先名", "搬入先名", "会場ID", "ナンバーカット")
-        println("🎌 PDF Service: Adding Japanese headers: $headers")
+        Logger.debug("PDF Service: Adding Japanese headers: $headers")
         headers.forEach { header ->
-            println("🎌 PDF Service: Adding header: '$header'")
+            Logger.debug("PDF Service: Adding header: '$header'")
             table.addCell(createHeaderCell(header, japaneseFont))
         }
 
@@ -402,7 +400,7 @@ class PdfService {
             
             // Auction House (取引先名 - Supplier Name)
             val auctionHouseValue = purchase.auctionHouse ?: ""
-            println("🎌 PDF Service: Auction House value: '$auctionHouseValue' for purchase ID: ${purchase.id}")
+            Logger.debug("PDF Service: Auction House value: '$auctionHouseValue' for purchase ID: ${purchase.id}")
             table.addCell(createCell(auctionHouseValue, japaneseFont))
             
             // Stock Location (from purchase data or default to KLC)
@@ -428,21 +426,33 @@ class PdfService {
 
         document.add(table)
 
-        // Create a table to position total count on the right side under the table
+        // Create a table to position extra message on left and total count on right, same level
+        val extraMessage = transportData["extraMessage"]?.takeIf { it.isNotBlank() }
         val totalTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginBottom(20f)
         
-        // Empty cell on the left (invisible box)
-        val emptyCell = Cell()
-            .add(Paragraph("").setFont(japaneseFont))
-            .setPadding(8f)
-            .setTextAlignment(TextAlignment.LEFT)
-            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
-            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        totalTable.addCell(emptyCell)
+        // Extra message on the left side (if provided), otherwise empty
+        val leftCell = if (extraMessage != null) {
+            Cell()
+                .add(Paragraph(extraMessage)
+                    .setFont(japaneseFont)
+                    .setFontSize(9f))
+                .setPadding(8f)
+                .setTextAlignment(TextAlignment.LEFT)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+                .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+        } else {
+            Cell()
+                .add(Paragraph("").setFont(japaneseFont))
+                .setPadding(8f)
+                .setTextAlignment(TextAlignment.LEFT)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+                .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+        }
+        totalTable.addCell(leftCell)
         
-        // Total count on the right side (invisible box) - use actual purchases count, not total rows
+        // Total count on the right side - use actual purchases count, not total rows
         val totalCell = Cell()
             .add(Paragraph("合計 ${purchases.size} 台")
                 .setFont(japaneseFont)
@@ -454,19 +464,19 @@ class PdfService {
         totalTable.addCell(totalCell)
         document.add(totalTable)
 
-        // Add important note in Japanese
-        val note = Paragraph("※港や船での盗難が多発の為、スペアキーやリモコンキーが車内に")
-            .setFont(japaneseFont)
-            .setFontSize(9f)
-            .setMarginBottom(5f)
-        document.add(note)
-
-        // Add the new line about mailing spare keys
-        val mailNote = Paragraph("ありましたら弊社まで郵送していただけると助かります。")
-            .setFont(japaneseFont)
-            .setFontSize(9f)
-            .setMarginBottom(20f)
-        document.add(mailNote)
+        // Add footer message (dynamic from form or default)
+        val footerMessage = transportData["footerMessage"]?.takeIf { it.isNotBlank() } 
+            ?: "※港や船での盗難が多発の為、スペアキーやリモコンキーが車内にありましたら弊社まで郵送していただけると助かります。"
+        
+        // Split footer message into lines if it contains newlines
+        val footerLines = footerMessage.split("\n")
+        footerLines.forEachIndexed { index, line ->
+            val footerParagraph = Paragraph(line.trim())
+                .setFont(japaneseFont)
+                .setFontSize(9f)
+                .setMarginBottom(if (index < footerLines.size - 1) 5f else 20f)
+            document.add(footerParagraph)
+        }
 
         // Add contact information in Japanese positioned in lower right
         val contactTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
@@ -507,11 +517,24 @@ class PdfService {
         if (font != null) {
             paragraph.setFont(font)
         }
-        return Cell()
+        val cell = Cell()
             .add(paragraph)
             .setPadding(8f)
             .setTextAlignment(TextAlignment.LEFT)
             .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+        
+        // Add borders based on content
+        if (text.isNotBlank()) {
+            // Black borders for cells with content
+            cell.setBorder(com.itextpdf.layout.borders.SolidBorder(
+                com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+        } else {
+            // White borders for empty cells (maintains structure but less visible)
+            cell.setBorder(com.itextpdf.layout.borders.SolidBorder(
+                com.itextpdf.kernel.colors.ColorConstants.WHITE, 1f))
+        }
+        
+        return cell
     }
 
     private fun createHeaderCell(text: String, font: PdfFont? = null): Cell {
@@ -525,6 +548,8 @@ class PdfService {
             .setTextAlignment(TextAlignment.CENTER)
             .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
             .setBackgroundColor(com.itextpdf.kernel.colors.ColorConstants.LIGHT_GRAY)
+            .setBorder(com.itextpdf.layout.borders.SolidBorder(
+                com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
     }
 
     private fun createTitleCell(text: String, font: PdfFont? = null): Cell {
@@ -543,7 +568,7 @@ class PdfService {
     private fun formatDateToJapanese(dateString: String, includeYear: Boolean = true): String {
         if (dateString.isBlank()) return ""
         
-        println("🎌 PDF Service: formatDateToJapanese input: '$dateString', includeYear: $includeYear")
+        Logger.debug("PDF Service: formatDateToJapanese input: '$dateString', includeYear: $includeYear")
         
         try {
             // Try to parse various date formats
@@ -558,12 +583,12 @@ class PdfService {
             var parsedDate: java.time.LocalDate? = null
             for (formatter in formatters) {
                 try {
-                    println("🎌 PDF Service: Trying formatter: ${formatter.toString()}")
+                    Logger.debug("PDF Service: Trying formatter: ${formatter.toString()}")
                     parsedDate = java.time.LocalDate.parse(dateString, formatter)
-                    println("🎌 PDF Service: Successfully parsed with ${formatter.toString()}: $parsedDate")
+                    Logger.debug("PDF Service: Successfully parsed with ${formatter.toString()}: $parsedDate")
                     break
                 } catch (e: Exception) {
-                    println("🎌 PDF Service: Failed with ${formatter.toString()}: ${e.message}")
+                    Logger.debug("PDF Service: Failed with ${formatter.toString()}: ${e.message}")
                     // Continue to next formatter
                 }
             }

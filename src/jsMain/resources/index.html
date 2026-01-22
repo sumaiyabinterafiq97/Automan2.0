@@ -15,29 +15,11 @@
 <body>
     <div id="root"></div>
     
-    <!-- Rixo Mapping Management Modal -->
-    <div id="rixoMappingModal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3 id="modalTitle">Manage Rixo Mappings</h3>
-                <span class="close">&times;</span>
-            </div>
-            <div class="modal-body">
-                <!-- Dynamic content will be inserted here -->
-            </div>
-            <div class="modal-footer">
-                <button id="saveMappings" class="btn btn-primary">Save Changes</button>
-                <button id="cancelMappings" class="btn btn-secondary">Cancel</button>
-            </div>
-        </div>
-    </div>
-    
     <!-- Application Scripts -->
-    <!-- Webpack bundles the Kotlin runtime into automan-car-purchase.js, 
-         so only our custom helpers plus the bundle need to be loaded. -->
-    <script src="rixo-price-mapping.js?v=1762684000"></script>
+    <!-- Load custom helpers, then main bundle (Kotlin stdlib is bundled in automan-car-purchase.js) -->
+    <script src="rixo-price-mapping.js?v=1766504204"></script>
     <script src="booking-mapping.js?v=1762413065"></script>
     <script src="booking-mapping-modal.js?v=1762413066"></script>
-        <script src="automan-car-purchase.js?v=1762687000"></script>
+    <script src="automan-car-purchase.js?v=1768506000"></script>
 </body>
 </html>

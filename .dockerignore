@@ -2,6 +2,7 @@
 .gradle/
 build/
 !build/distributions/
+!build/dist/js/productionExecutable/
 
 # IDE
 .idea/

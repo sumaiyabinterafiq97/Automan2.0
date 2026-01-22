@@ -8,5 +8,6 @@ data class ShippingSchedulePdfRequest(
     val shippingDate: String,
     val consigneeName: String,
     val consigneeAddress: String,
-    val chassisNumbers: List<String>
+    val chassisNumbers: List<String>,
+    val calculationMode: String? = null // "C&F" or "FOB" - determines PDF column header
 )

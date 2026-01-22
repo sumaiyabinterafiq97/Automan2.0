@@ -70,8 +70,13 @@ class AuthService(
     }
 
     private fun generateMockToken(user: User): String {
-        // Simple non-secure token for now; can be replaced with JWT later
-        return ("tok_" + user.id + "_" + System.currentTimeMillis())
+        // TODO: Replace with proper JWT token generation for production
+        // For now, using a more secure approach with random component
+        val randomComponent = java.util.UUID.randomUUID().toString().replace("-", "").substring(0, 16)
+        val timestamp = System.currentTimeMillis()
+        val userId = user.id ?: 0L
+        // Combine with hash-like structure (not cryptographically secure, but better than predictable)
+        return "tok_${userId}_${timestamp}_$randomComponent"
     }
 }
 

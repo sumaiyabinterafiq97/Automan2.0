@@ -28,11 +28,9 @@ RUN ls -la build/libs/ && cp build/libs/automan-backend-1.0-SNAPSHOT.jar app.jar
 # Expose port 8083
 EXPOSE 8083
 
-# Set environment variables
+# Set environment variables (non-sensitive defaults - will be overridden by docker-compose)
 ENV SPRING_PROFILES_ACTIVE=docker
-ENV SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-ENV SPRING_DATASOURCE_USERNAME=automan_user
-ENV SPRING_DATASOURCE_PASSWORD=automan_password
+# Note: Database credentials should be provided via docker-compose environment variables, not hardcoded here
 
 # Health check - hit an existing public endpoint
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

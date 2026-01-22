@@ -36,6 +36,10 @@ data class BookingMapping(
     @Lob
     @Column(name = "consignee_address")
     val consigneeAddress: String? = null,
+    
+    @Lob
+    @Column(name = "notes")
+    val notes: String? = null,
 )
 
 

@@ -4,6 +4,7 @@ import com.automan.backend.model.Event
 import com.automan.backend.model.Client
 import com.automan.backend.repository.EventRepository
 import com.automan.backend.repository.ClientRepository
+import com.automan.backend.util.Logger
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
@@ -37,52 +38,51 @@ class EventService(
     
     @Transactional
     fun createEvent(event: Event): Event {
-        println("DEBUG: createEvent called for client ID: ${event.clientId}")
+        Logger.debug("createEvent called for client ID: ${event.clientId}")
         try {
             val client = clientRepository.findById(event.clientId).orElse(null)
                 ?: throw IllegalArgumentException("Client not found: ${event.clientId}")
-            println("DEBUG: Client found: ${client.clientName}")
+            Logger.debug("Client found: ${client.clientName}")
 
             // Use client's current balance as the starting point
             val currentBalance = client.currentBalance
-            println("DEBUG: Current client balance: $currentBalance")
+            Logger.debug("Current client balance: $currentBalance")
 
             val newBalance = currentBalance + (event.paymentReceived ?: 0.0) - (event.transactionPrice ?: 0.0)
-            println("DEBUG: New balance: $newBalance")
+            Logger.debug("New balance: $newBalance")
 
             val eventWithBalance = event.copy(runningBalance = newBalance)
-            println("DEBUG: Saving event...")
+            Logger.debug("Saving event...")
             val saved = eventRepository.save(eventWithBalance)
-            println("DEBUG: Event saved with ID: ${saved.id}")
-            println("DEBUG: Skipping client balance update for now...")
+            Logger.debug("Event saved with ID: ${saved.id}")
+            Logger.debug("Skipping client balance update for now...")
             // updateClientBalance(event.clientId, newBalance)
-            println("DEBUG: Event creation completed successfully")
+            Logger.debug("Event creation completed successfully")
             return saved
         } catch (e: Exception) {
-            println("ERROR: Exception type: ${e.javaClass.simpleName}")
-            println("ERROR: Stack trace: ${e.stackTrace.joinToString("\n")}")
+            Logger.error("Exception in createEvent: ${e.message}", e)
             throw e
         }
     }
 
     @Transactional
     fun createEventFromDto(req: com.automan.backend.dto.CreateEventRequest): Event {
-        println("DEBUG: createEventFromDto called for client ID: ${req.clientId}")
+        Logger.debug("createEventFromDto called for client ID: ${req.clientId}")
         try {
             val client = clientRepository.findById(req.clientId).orElseThrow { IllegalArgumentException("Client not found: ${req.clientId}") }
-            println("DEBUG: Client found: ${client.clientName}")
+            Logger.debug("Client found: ${client.clientName}")
             val clientId = client.id!!
             // Determine previous balance using aggregates to avoid non-unique-result
-            println("DEBUG: Calculating aggregates...")
+            Logger.debug("Calculating aggregates...")
             val totalPayments = eventRepository.calculateTotalPaymentsByClientId(clientId) ?: 0.0
-            println("DEBUG: Total payments: $totalPayments")
+            Logger.debug("Total payments: $totalPayments")
             val totalShipments = eventRepository.calculateTotalTransactionPricesByClientId(clientId) ?: 0.0
-            println("DEBUG: Total shipments: $totalShipments")
+            Logger.debug("Total shipments: $totalShipments")
             val previousBalance = totalPayments - totalShipments
-            println("DEBUG: Previous balance: $previousBalance")
+            Logger.debug("Previous balance: $previousBalance")
 
             val newBalance = previousBalance + (req.paymentReceived ?: 0.0) - (req.transactionPrice ?: 0.0)
-            println("DEBUG: New balance: $newBalance")
+            Logger.debug("New balance: $newBalance")
 
             val event = Event(
                 clientId = client.id!!,
@@ -95,17 +95,15 @@ class EventService(
                 runningBalance = newBalance
             )
 
-            println("DEBUG: Saving event...")
+            Logger.debug("Saving event...")
             val saved = eventRepository.save(event)
-            println("DEBUG: Event saved with ID: ${saved.id}")
-            println("DEBUG: Updating client balance...")
+            Logger.debug("Event saved with ID: ${saved.id}")
+            Logger.debug("Updating client balance...")
             updateClientBalance(client.id!!, newBalance)
-            println("DEBUG: Client balance updated successfully")
+            Logger.debug("Client balance updated successfully")
             return saved
         } catch (e: Exception) {
-            println("ERROR: Exception in createEventFromDto: ${e.message}")
-            println("ERROR: Exception type: ${e.javaClass.simpleName}")
-            println("ERROR: Stack trace: ${e.stackTrace.joinToString("\n")}")
+            Logger.error("Exception in createEventFromDto: ${e.message}", e)
             throw e
         }
     }
@@ -401,17 +399,20 @@ class EventService(
                 clientIssues.add("No transaction data provided")
             } else {
                 // Check for required columns
-                val firstRow = csvData.first()
-                val requiredColumns = listOf("DATE", "Event", "T. BALANCE")
-                val missingColumns = requiredColumns.filter { !firstRow.containsKey(it) }
+                val firstRow = csvData.firstOrNull()
+                if (firstRow == null) {
+                    clientIssues.add("CSV data is empty")
+                } else {
+                    val requiredColumns = listOf("DATE", "Event", "T. BALANCE")
+                    val missingColumns = requiredColumns.filter { !firstRow.containsKey(it) }
                 
-                if (missingColumns.isNotEmpty()) {
-                    clientIssues.add("Missing required columns: ${missingColumns.joinToString(", ")}")
-                }
+                    if (missingColumns.isNotEmpty()) {
+                        clientIssues.add("Missing required columns: ${missingColumns.joinToString(", ")}")
+                    }
                 
-                // Validate each row
-                csvData.forEachIndexed { index, row ->
-                    val rowIssues = mutableListOf<String>()
+                    // Validate each row
+                    csvData.forEachIndexed { index, row ->
+                        val rowIssues = mutableListOf<String>()
                     
                     // Check date format
                     val dateStr = row["DATE"]
@@ -444,8 +445,9 @@ class EventService(
                         }
                     }
                     
-                    if (rowIssues.isNotEmpty()) {
-                        clientIssues.add("Row ${index + 1}: ${rowIssues.joinToString(", ")}")
+                        if (rowIssues.isNotEmpty()) {
+                            clientIssues.add("Row ${index + 1}: ${rowIssues.joinToString(", ")}")
+                        }
                     }
                 }
             }

@@ -3,6 +3,7 @@ package com.automan.backend.controller
 import com.automan.backend.dto.CreateTransactionRequest
 import com.automan.backend.dto.TransactionResponse
 import com.automan.backend.service.TransactionService
+import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
@@ -15,8 +16,7 @@ class TransactionController(
     
     @PostMapping
     fun createTransaction(@RequestBody request: CreateTransactionRequest): ResponseEntity<TransactionResponse> {
-        println("DEBUG: TransactionController.createTransaction called")
-        println("DEBUG: Request: $request")
+        Logger.debug("TransactionController.createTransaction called")
         
         val response = transactionService.createTransaction(request)
         

@@ -8,5 +8,6 @@ data class ShippingSchedulePdfData(
     val pod: String,
     val shippingDate: String, // Formatted as "DD.MON.YYYY"
     val consigneeDetails: ConsigneeDetailsDto,
-    val carList: List<CarPdfDto>
+    val carList: List<CarPdfDto>,
+    val calculationMode: String? = null // "C&F" or "FOB" - determines PDF column header
 )

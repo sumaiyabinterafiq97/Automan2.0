@@ -1,1 +1,0 @@
-ALTER TABLE purchases ADD COLUMN total_fob_price DECIMAL(15,2) DEFAULT NULL;

@@ -7,6 +7,7 @@ import com.automan.backend.model.EventType
 import com.automan.backend.service.PurchaseService
 import com.automan.backend.service.ClientService
 import com.automan.backend.repository.EventRepository
+import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
@@ -35,6 +36,21 @@ class PurchaseController(
         return ResponseEntity.ok(purchases)
     }
     
+    @GetMapping("/chassis/{chassis}")
+    fun getPurchaseByChassis(@PathVariable chassis: String): ResponseEntity<Purchase> {
+        return try {
+            val purchase = purchaseService.getPurchaseByChassis(chassis)
+            if (purchase != null) {
+                ResponseEntity.ok(purchase)
+            } else {
+                ResponseEntity.notFound().build()
+            }
+        } catch (e: Exception) {
+            Logger.error("Error fetching purchase by chassis '$chassis': ${e.message}", e)
+            ResponseEntity.status(500).build()
+        }
+    }
+    
     @GetMapping("/countries")
     fun getCountries(): ResponseEntity<List<String>> {
         val countries = purchaseService.getUniqueCountries()
@@ -47,12 +63,26 @@ class PurchaseController(
         return ResponseEntity.ok(stockLocations)
     }
     
+    @GetMapping("/stock-locations-by-country")
+    fun getStockLocationsByCountry(@RequestParam country: String): ResponseEntity<List<String>> {
+        val stockLocations = purchaseService.getStockLocationsByCountry(country)
+        return ResponseEntity.ok(stockLocations)
+    }
+    
     @GetMapping("/filtered-chassis")
     fun getFilteredChassis(
         @RequestParam country: String,
         @RequestParam polPort: String
     ): ResponseEntity<List<String>> {
         val chassis = purchaseService.getFilteredChassis(country, polPort)
+        return ResponseEntity.ok(chassis)
+    }
+    
+    @GetMapping("/unshipped-chassis")
+    fun getUnshippedChassisByPol(
+        @RequestParam pol: String
+    ): ResponseEntity<List<String>> {
+        val chassis = purchaseService.getUnshippedChassisByPolPort(pol)
         return ResponseEntity.ok(chassis)
     }
     
@@ -72,8 +102,8 @@ class PurchaseController(
             val packagePrice = (costData["packagePrice"] as? Number)?.toDouble() ?: 0.0
             val isPackageMode = costData["isPackageMode"] as? Boolean ?: false
             
-            println("🔍 DEBUG: Received package data - packagePrice: $packagePrice, isPackageMode: $isPackageMode")
-            println("🔍 DEBUG: Full costData: $costData")
+            Logger.debug("Received package data - packagePrice: $packagePrice, isPackageMode: $isPackageMode")
+            Logger.debug("Full costData: $costData")
             
             purchaseService.saveCarCostDetails(
                 chassis, carPrice, auctionFee, rixoPrice, shippingCharge, 
@@ -92,11 +122,33 @@ class PurchaseController(
             val chassis = costData["chassis"] as String
             val totalCnfPrice = (costData["totalCnfPrice"] as? Number)?.toDouble() ?: 0.0
             
-            println("🔍 DEBUG: Saving total C&F price - chassis: $chassis, totalCnfPrice: $totalCnfPrice")
+            Logger.debug("Saving total C&F price - chassis: $chassis, totalCnfPrice: $totalCnfPrice")
             
             purchaseService.saveTotalCnfPrice(chassis, totalCnfPrice)
             
             ResponseEntity.ok(mapOf("message" to "Total C&F price saved successfully", "chassis" to chassis, "totalCnfPrice" to totalCnfPrice.toString()))
+        } catch (e: Exception) {
+            ResponseEntity.status(500).body(mapOf("error" to "Failed to save total C&F price: ${e.message}"))
+        }
+    }
+    
+    @PostMapping("/save-total-cnf-by-ids")
+    fun saveTotalCnfPriceByPurchaseIds(@RequestBody requestData: Map<String, Any>): ResponseEntity<Map<String, String>> {
+        return try {
+            val purchaseIds = (requestData["purchaseIds"] as? List<*>)?.mapNotNull { 
+                when (it) {
+                    is Number -> it.toLong()
+                    is String -> it.toLongOrNull()
+                    else -> null
+                }
+            } ?: emptyList()
+            val totalCnfPrice = (requestData["totalCnfPrice"] as? Number)?.toDouble() ?: 0.0
+            
+            Logger.debug("Saving total C&F price by purchase IDs - purchaseIds: $purchaseIds, totalCnfPrice: $totalCnfPrice")
+            
+            purchaseService.saveTotalCnfPriceByPurchaseIds(purchaseIds, totalCnfPrice)
+            
+            ResponseEntity.ok(mapOf("message" to "Total C&F price saved successfully", "count" to purchaseIds.size.toString(), "totalCnfPrice" to totalCnfPrice.toString()))
         } catch (e: Exception) {
             ResponseEntity.status(500).body(mapOf("error" to "Failed to save total C&F price: ${e.message}"))
         }
@@ -136,11 +188,11 @@ class PurchaseController(
     @GetMapping("/costs-by-chassis/{chassis}")
     fun getCarCostDetails(@PathVariable chassis: String): ResponseEntity<Map<String, Any>> {
         return try {
-            println("DEBUG: Looking for chassis: $chassis")
+            Logger.debug("Looking for chassis: $chassis")
             val purchase = purchaseService.getPurchaseByChassis(chassis)
-            println("DEBUG: Purchase result: $purchase")
+            Logger.debug("Purchase result found")
             if (purchase != null) {
-                println("DEBUG: Purchase found - chassis: ${purchase.chassis}, price: ${purchase.price}, shipmentCharges: ${purchase.shipmentCharges}, miscCharges: ${purchase.miscCharges}, repairCharges: ${purchase.repairCharges}")
+                Logger.debug("Purchase found - chassis: ${purchase.chassis}, price: ${purchase.price}")
                 
                 // Helper function to safely parse price strings to BigDecimal
                 fun parsePrice(priceStr: String?): BigDecimal {
@@ -149,7 +201,7 @@ class PurchaseController(
                         val cleaned = priceStr.replace(",", "").replace("¥", "").replace("Â¥", "").trim()
                         if (cleaned.isEmpty()) BigDecimal.ZERO else BigDecimal(cleaned)
                     } catch (e: Exception) {
-                        println("WARNING: Failed to parse price '$priceStr': ${e.message}")
+                        Logger.warn("Failed to parse price '$priceStr': ${e.message}")
                         BigDecimal.ZERO
                     }
                 }
@@ -167,14 +219,14 @@ class PurchaseController(
                     "mscCharges" to parsePrice(purchase.miscCharges),
                     "profit" to (purchase.profit ?: BigDecimal.ZERO)
                 )
-                println("DEBUG: Cost details prepared: $costDetails")
+                Logger.debug("Cost details prepared")
                 ResponseEntity.ok(costDetails)
             } else {
-                println("DEBUG: Purchase not found for chassis: $chassis")
+                Logger.debug("Purchase not found for chassis: $chassis")
                 ResponseEntity.notFound().build()
             }
         } catch (e: Exception) {
-            println("ERROR: Exception in getCarCostDetails: ${e.message}")
+            Logger.error("Exception in getCarCostDetails: ${e.message}", e)
             e.printStackTrace()
             ResponseEntity.status(500).body(mapOf(
                 "error" to (e.message ?: "Unknown error"),
@@ -208,7 +260,7 @@ class PurchaseController(
     @GetMapping("/purchase/{id}")
     fun getPurchaseById(@PathVariable id: Long): ResponseEntity<Purchase> {
         val purchase = purchaseService.getPurchaseById(id)
-        println("🔍 [Controller] getPurchaseById - ID: $id, shaken: ${purchase?.shaken} (type: ${purchase?.shaken?.javaClass?.simpleName})")
+        Logger.debug("[Controller] getPurchaseById - ID: $id, shaken: ${purchase?.shaken}")
         return if (purchase != null) {
             ResponseEntity.ok(purchase)
         } else {
@@ -218,32 +270,24 @@ class PurchaseController(
     
     @PostMapping
     fun createPurchase(@RequestBody purchase: Purchase): ResponseEntity<Purchase> {
-        println("🔍 [Controller] Creating purchase - received shaken=${purchase.shaken} (type: ${purchase.shaken?.javaClass?.simpleName})")
+        Logger.debug("[Controller] Creating purchase - received shaken=${purchase.shaken}")
         val createdPurchase = purchaseService.createPurchase(purchase)
-        println("🔍 [Controller] Created purchase - saved shaken=${createdPurchase.shaken}")
+        Logger.debug("[Controller] Created purchase - saved shaken=${createdPurchase.shaken}")
         return ResponseEntity.ok(createdPurchase)
     }
     
     
     @PutMapping("/{id}")
     fun updatePurchase(@PathVariable id: Long, @RequestBody updateData: Map<String, Any>): ResponseEntity<Purchase> {
-        println("🔍 [Controller] Updating purchase ID: $id")
-        println("🔍 [Controller] Update data received: $updateData")
-        println("🔍 [Controller] Update data keys: ${updateData.keys}")
-        println("🔍 [Controller] Shaken value in updateData: ${updateData["shaken"]} (type: ${updateData["shaken"]?.javaClass?.simpleName})")
-        println("🔍 [Controller] shipmentDate: ${updateData["shipmentDate"]} (type: ${updateData["shipmentDate"]?.javaClass?.simpleName})")
-        println("🔍 [Controller] bookingId: ${updateData["bookingId"]} (type: ${updateData["bookingId"]?.javaClass?.simpleName})")
-        println("🔍 [Controller] vessel: ${updateData["vessel"]} (type: ${updateData["vessel"]?.javaClass?.simpleName})")
+        Logger.debug("[Controller] Updating purchase ID: $id")
+        Logger.debug("[Controller] Update data keys: ${updateData.keys}")
         
         val updatedPurchase = purchaseService.updatePurchasePartial(id, updateData)
         return if (updatedPurchase != null) {
-            println("✅ [Controller] Purchase updated successfully:")
-            println("   - shipmentDate: ${updatedPurchase.shipmentDate}")
-            println("   - bookingId: ${updatedPurchase.bookingId}")
-            println("   - vessel: ${updatedPurchase.vessel}")
+            Logger.debug("[Controller] Purchase updated successfully - shipmentDate: ${updatedPurchase.shipmentDate}, bookingId: ${updatedPurchase.bookingId}, vessel: ${updatedPurchase.vessel}, totalCnfPrice: ${updatedPurchase.totalCnfPrice}")
             ResponseEntity.ok(updatedPurchase)
         } else {
-            println("❌ [Controller] Purchase not found or update failed")
+            Logger.error("[Controller] Purchase not found or update failed")
             ResponseEntity.notFound().build()
         }
     }
@@ -260,7 +304,7 @@ class PurchaseController(
     
     @PostMapping("/ship")
     fun shipPurchases(@RequestBody request: Map<String, Any>): ResponseEntity<Map<String, Any>> {
-        println("🚢 [Controller] Ship purchases request received: $request")
+        Logger.debug("[Controller] Ship purchases request received")
         val purchaseIds = (request["purchaseIds"] as? List<*>)?.mapNotNull { 
             when (it) {
                 is Number -> it.toLong()
@@ -270,11 +314,11 @@ class PurchaseController(
         } ?: emptyList()
         
         if (purchaseIds.isEmpty()) {
-            println("❌ [Controller] No purchase IDs provided")
+            Logger.error("[Controller] No purchase IDs provided")
             return ResponseEntity.badRequest().body(mapOf("error" to "No purchase IDs provided"))
         }
         
-        println("🚢 [Controller] Marking ${purchaseIds.size} purchases as shipped: $purchaseIds")
+        Logger.debug("[Controller] Marking ${purchaseIds.size} purchases as shipped")
         val updatedPurchases = purchaseService.markPurchasesAsShipped(purchaseIds)
         
         return ResponseEntity.ok(mapOf(
@@ -288,7 +332,7 @@ class PurchaseController(
     @PostMapping("/invoice/generate-pdf")
     fun generateInvoicePdf(@RequestBody request: com.automan.backend.dto.InvoicePdfRequest): ResponseEntity<ByteArray> {
         try {
-            println("📄 [Controller] Generating invoice PDF for invoice number: ${request.invoiceNumber}")
+            Logger.debug("[Controller] Generating invoice PDF for invoice number: ${request.invoiceNumber}")
             
             val pdfBytes = pdfService.generateInvoicePdf(request)
             
@@ -297,14 +341,13 @@ class PurchaseController(
             headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"invoice_${request.invoiceNumber}.pdf\"")
             headers.contentLength = pdfBytes.size.toLong()
             
-            println("✅ [Controller] Invoice PDF generated successfully")
+            Logger.debug("[Controller] Invoice PDF generated successfully")
             return ResponseEntity.ok()
                 .headers(headers)
                 .body(pdfBytes)
                 
         } catch (e: Exception) {
-            println("❌ [Controller] Error generating invoice PDF: ${e.message}")
-            e.printStackTrace()
+            Logger.error("[Controller] Error generating invoice PDF: ${e.message}", e)
             return ResponseEntity.internalServerError().build()
         }
     }
@@ -312,14 +355,12 @@ class PurchaseController(
     @PostMapping("/import")
     fun importPurchases(@RequestParam("file") file: MultipartFile): ResponseEntity<ImportResponse> {
         try {
-            println("Controller: Received file: ${file.originalFilename}")
-            println("Controller: File size: ${file.size}")
+            Logger.debug("Controller: Received file: ${file.originalFilename}, size: ${file.size}")
             val importResponse = purchaseService.importPurchases(file)
-            println("Controller: ${importResponse.message}")
+            Logger.debug("Controller: ${importResponse.message}")
             return ResponseEntity.ok(importResponse)
         } catch (e: Exception) {
-            println("Controller: Error during import: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Controller: Error during import: ${e.message}", e)
             return ResponseEntity.status(500).body(
                 ImportResponse(
                     success = false,
@@ -340,36 +381,36 @@ class PurchaseController(
             val idsRaw = request["ids"]
             val invoiceDataRaw = request["invoiceData"] as? Map<String, Any>
             val missingRixoDataRaw = request["missingRixoData"] as? List<Map<String, Any>>
-            println("Controller: Raw request body: $request")
-            println("Controller: Raw ids: $idsRaw (type: ${idsRaw?.javaClass?.simpleName})")
-            println("Controller: Raw invoice data: $invoiceDataRaw")
-            println("Controller: Raw missing Rixo data: $missingRixoDataRaw")
+            Logger.debug("Controller: Raw request body: $request")
+            Logger.debug("Controller: Raw ids: $idsRaw (type: ${idsRaw?.javaClass?.simpleName})")
+            Logger.debug("Controller: Raw invoice data: $invoiceDataRaw")
+            Logger.debug("Controller: Raw missing Rixo data: $missingRixoDataRaw")
             
             val selectedIds = when (idsRaw) {
                 is List<*> -> {
-                    println("Controller: Processing List with ${idsRaw.size} items")
+                    Logger.debug("Controller: Processing List with ${idsRaw.size} items")
                     idsRaw.mapNotNull { item ->
-                        println("Controller: Processing item: $item (type: ${item?.javaClass?.simpleName})")
+                        Logger.debug("Controller: Processing item: $item (type: ${item?.javaClass?.simpleName})")
                         when (item) {
                             is Number -> {
                                 val longValue = item.toLong()
-                                println("Controller: Converted Number $item to Long $longValue")
+                                Logger.debug("Controller: Converted Number $item to Long $longValue")
                                 longValue
                             }
                             is String -> {
                                 val longValue = item.toLongOrNull()
-                                println("Controller: Converted String '$item' to Long $longValue")
+                                Logger.debug("Controller: Converted String '$item' to Long $longValue")
                                 longValue
                             }
                             else -> {
-                                println("Controller: Unknown item type: ${item?.javaClass?.simpleName}")
+                                Logger.warn("Controller: Unknown item type: ${item?.javaClass?.simpleName}")
                                 null
                             }
                         }
                     }
                 }
                 else -> {
-                    println("Controller: idsRaw is not a List, it's: ${idsRaw?.javaClass?.simpleName}")
+                    Logger.warn("Controller: idsRaw is not a List, it's: ${idsRaw?.javaClass?.simpleName}")
                     emptyList()
                 }
             }
@@ -388,10 +429,10 @@ class PurchaseController(
                 )
             } ?: emptyList()
             
-            println("Controller: Final selectedIds: $selectedIds (size: ${selectedIds.size})")
-            println("Controller: Invoice data: $invoiceData")
-            println("Controller: Missing Rixo data: $missingRixoData")
-            println("Controller: Generating Rixo PDF for ${selectedIds.size} purchases")
+            Logger.debug("Controller: Final selectedIds: $selectedIds (size: ${selectedIds.size})")
+            Logger.debug("Controller: Invoice data: $invoiceData")
+            Logger.debug("Controller: Missing Rixo data: $missingRixoData")
+            Logger.debug("Controller: Generating Rixo PDF for ${selectedIds.size} purchases")
             
             val pdfBytes = purchaseService.generateRixoPdf(selectedIds, invoiceData, missingRixoData)
             
@@ -400,8 +441,7 @@ class PurchaseController(
                 .header("Content-Disposition", "attachment; filename=\"rixo-purchases.pdf\"")
                 .body(pdfBytes)
         } catch (e: Exception) {
-            println("Controller: Error generating Rixo PDF: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Controller: Error generating Rixo PDF: ${e.message}", e)
             return ResponseEntity.status(500).build()
         }
     }
@@ -411,35 +451,35 @@ class PurchaseController(
         try {
             val idsRaw = request["ids"]
             val transportDataRaw = request["transportData"] as? Map<String, Any>
-            println("Controller: Raw Rixo Transport request body: $request")
-            println("Controller: Raw ids: $idsRaw (type: ${idsRaw?.javaClass?.simpleName})")
-            println("Controller: Raw transport data: $transportDataRaw")
+            Logger.debug("Controller: Raw Rixo Transport request body: $request")
+            Logger.debug("Controller: Raw ids: $idsRaw (type: ${idsRaw?.javaClass?.simpleName})")
+            Logger.debug("Controller: Raw transport data: $transportDataRaw")
             
             val selectedIds = when (idsRaw) {
                 is List<*> -> {
-                    println("Controller: Processing List with ${idsRaw.size} items")
+                    Logger.debug("Controller: Processing List with ${idsRaw.size} items")
                     idsRaw.mapNotNull { item ->
-                        println("Controller: Processing item: $item (type: ${item?.javaClass?.simpleName})")
+                        Logger.debug("Controller: Processing item: $item (type: ${item?.javaClass?.simpleName})")
                         when (item) {
                             is Number -> {
                                 val longValue = item.toLong()
-                                println("Controller: Converted Number $item to Long $longValue")
+                                Logger.debug("Controller: Converted Number $item to Long $longValue")
                                 longValue
                             }
                             is String -> {
                                 val longValue = item.toLongOrNull()
-                                println("Controller: Converted String '$item' to Long $longValue")
+                                Logger.debug("Controller: Converted String '$item' to Long $longValue")
                                 longValue
                             }
                             else -> {
-                                println("Controller: Unknown item type: ${item?.javaClass?.simpleName}")
+                                Logger.warn("Controller: Unknown item type: ${item?.javaClass?.simpleName}")
                                 null
                             }
                         }
                     }
                 }
                 else -> {
-                    println("Controller: idsRaw is not a List, it's: ${idsRaw?.javaClass?.simpleName}")
+                    Logger.warn("Controller: idsRaw is not a List, it's: ${idsRaw?.javaClass?.simpleName}")
                     emptyList()
                 }
             }
@@ -452,10 +492,10 @@ class PurchaseController(
             // Extract purchase data from transport data
             val purchaseData = transportDataRaw?.get("purchaseData") as? List<Map<String, Any>> ?: emptyList()
             
-            println("Controller: Final selectedIds: $selectedIds (size: ${selectedIds.size})")
-            println("Controller: Transport data: $transportData")
-            println("Controller: Purchase data: $purchaseData")
-            println("Controller: Generating Rixo Transport PDF for ${selectedIds.size} purchases")
+            Logger.debug("Controller: Final selectedIds: $selectedIds (size: ${selectedIds.size})")
+            Logger.debug("Controller: Transport data: $transportData")
+            Logger.debug("Controller: Purchase data: $purchaseData")
+            Logger.debug("Controller: Generating Rixo Transport PDF for ${selectedIds.size} purchases")
             
             val pdfBytes = purchaseService.generateRixoTransportPdf(selectedIds, transportData, purchaseData)
             
@@ -464,8 +504,7 @@ class PurchaseController(
                 .header("Content-Disposition", "attachment; filename=\"rixo-transport.pdf\"")
                 .body(pdfBytes)
         } catch (e: Exception) {
-            println("Controller: Error generating Rixo Transport PDF: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Controller: Error generating Rixo Transport PDF: ${e.message}", e)
             return ResponseEntity.status(500).build()
         }
     }
@@ -516,6 +555,16 @@ class PurchaseController(
         return ResponseEntity.ok(purchases)
     }
     
+    @GetMapping("/filter/invoice")
+    fun filterForInvoice(
+        @RequestParam(required = false) consignee: String?,
+        @RequestParam(required = false) vessel: String?,
+        @RequestParam(required = false) shipmentDate: String?
+    ): ResponseEntity<List<Purchase>> {
+        val purchases = purchaseService.filterByConsigneeAndVesselAndShipmentDate(consignee, vessel, shipmentDate)
+        return ResponseEntity.ok(purchases)
+    }
+    
     @PostMapping("/transaction")
     fun createTransaction(@RequestBody transactionData: Map<String, Any>): ResponseEntity<Map<String, Any>> {
         return try {
@@ -523,14 +572,14 @@ class PurchaseController(
             val clientId = (transactionData["clientId"] as? Number)?.toLong() 
                 ?: throw IllegalArgumentException("Client ID is required")
             
-            println("DEBUG: Creating transaction for client $clientId")
-            println("DEBUG: Transaction data: $transactionData")
+            Logger.debug("Creating transaction for client $clientId")
+            Logger.debug("Transaction data: $transactionData")
             
             // Verify client exists
             val client = clientService.getClientById(clientId)
                 ?: throw IllegalArgumentException("Client not found: $clientId")
             
-            println("DEBUG: Client found: ${client.clientName}")
+            Logger.debug("Client found: ${client.clientName}")
             
             // Calculate running balance based on client's current balance
             val currentBalance = client.currentBalance
@@ -538,7 +587,7 @@ class PurchaseController(
             val paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble() ?: 0.0
             val newBalance = currentBalance + paymentReceived - transactionPrice
             
-            println("DEBUG: Current balance: $currentBalance, New balance: $newBalance")
+            Logger.debug("Current balance: $currentBalance, New balance: $newBalance")
             
             // Create Event object
             val event = Event(
@@ -555,11 +604,11 @@ class PurchaseController(
             
             // Save event directly using EventRepository
             val savedEvent = eventRepository.save(event)
-            println("DEBUG: Event saved with ID: ${savedEvent.id}")
+            Logger.debug("Event saved with ID: ${savedEvent.id}")
             
             // Update client balance
             clientService.updateClientBalance(clientId, newBalance)
-            println("DEBUG: Client balance updated to: $newBalance")
+            Logger.debug("Client balance updated to: $newBalance")
             
             ResponseEntity.ok(mapOf(
                 "success" to true,
@@ -568,8 +617,7 @@ class PurchaseController(
                 "runningBalance" to newBalance
             ))
         } catch (e: Exception) {
-            println("ERROR: Exception in createTransaction: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Exception in createTransaction: ${e.message}", e)
             ResponseEntity.status(500).body(mapOf(
                 "success" to false,
                 "error" to (e.message ?: "Unknown error")
@@ -580,7 +628,7 @@ class PurchaseController(
     @PostMapping("/shipping-schedule/generate-pdf")
     fun generateShippingSchedulePdf(@RequestBody request: com.automan.backend.dto.ShippingSchedulePdfRequest): ResponseEntity<ByteArray> {
         try {
-            println("📋 Generating PDF for booking: ${request.bookingNo}")
+            Logger.debug("Generating PDF for booking: ${request.bookingNo}")
             
             // Get PDF data from service
             val pdfData = purchaseService.getShippingSchedulePdfData(request)
@@ -594,14 +642,13 @@ class PurchaseController(
             headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"shipping_schedule_${request.bookingNo}.pdf\"")
             headers.contentLength = pdfBytes.size.toLong()
             
-            println("✅ PDF generated successfully for booking: ${request.bookingNo}")
+            Logger.debug("PDF generated successfully for booking: ${request.bookingNo}")
             return ResponseEntity.ok()
                 .headers(headers)
                 .body(pdfBytes)
                 
         } catch (e: Exception) {
-            println("❌ Error generating PDF: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Error generating PDF: ${e.message}", e)
             return ResponseEntity.internalServerError().build()
         }
     }
@@ -609,7 +656,7 @@ class PurchaseController(
     @PostMapping("/fob-shipping-schedule/generate-pdf")
     fun generateFobShippingSchedulePdf(@RequestBody request: com.automan.backend.dto.ShippingSchedulePdfRequest): ResponseEntity<ByteArray> {
         try {
-            println("📋 Generating FOB PDF for booking: ${request.bookingNo}")
+            Logger.debug("Generating FOB PDF for booking: ${request.bookingNo}")
             
             // Get PDF data from service (same as regular shipping schedule)
             val pdfData = purchaseService.getShippingSchedulePdfData(request)
@@ -623,14 +670,13 @@ class PurchaseController(
             headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"fob_shipping_schedule_${request.bookingNo}.pdf\"")
             headers.contentLength = pdfBytes.size.toLong()
             
-            println("✅ FOB PDF generated successfully for booking: ${request.bookingNo}")
+            Logger.debug("FOB PDF generated successfully for booking: ${request.bookingNo}")
             return ResponseEntity.ok()
                 .headers(headers)
                 .body(pdfBytes)
                 
         } catch (e: Exception) {
-            println("❌ Error generating FOB PDF: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Error generating FOB PDF: ${e.message}", e)
             return ResponseEntity.internalServerError().build()
         }
     }
@@ -694,7 +740,7 @@ class PurchaseController(
     }
     
     private fun generatePdfDocument(pdfData: com.automan.backend.dto.ShippingSchedulePdfData): ByteArray {
-        println("🔥🔥🔥 GENERATING PDF WITH TABLE FORMAT - UPDATED CODE - ${System.currentTimeMillis()} 🔥🔥🔥")
+        Logger.debug("GENERATING PDF WITH TABLE FORMAT - UPDATED CODE - ${System.currentTimeMillis()}")
         val outputStream = java.io.ByteArrayOutputStream()
         val pdfWriter = com.itextpdf.kernel.pdf.PdfWriter(outputStream)
         val pdfDocument = com.itextpdf.kernel.pdf.PdfDocument(pdfWriter)
@@ -757,7 +803,19 @@ class PurchaseController(
         carTable.addHeaderCell(createHeaderCell("NAME"))
         carTable.addHeaderCell(createHeaderCell("CHASIS NUMBER"))
         carTable.addHeaderCell(createHeaderCell("YEAR"))
-        carTable.addHeaderCell(createHeaderCell("C&F PRICE"))
+        // Use calculationMode to determine column header (C&F PRICE or FOB PRICE)
+        val calculationMode = pdfData.calculationMode?.trim()?.uppercase() ?: ""
+        Logger.debug("PDF Generation - Calculation Mode: '$calculationMode' (original: '${pdfData.calculationMode}')")
+        val priceColumnHeader = when {
+            calculationMode == "FOB" -> "FOB PRICE"
+            calculationMode == "C&F" || calculationMode == "CNF" -> "C&F PRICE"
+            else -> {
+                Logger.warn("Unknown calculation mode: '$calculationMode', defaulting to C&F PRICE")
+                "C&F PRICE"
+            }
+        }
+        Logger.debug("PDF Generation - Using column header: '$priceColumnHeader'")
+        carTable.addHeaderCell(createHeaderCell(priceColumnHeader))
         
         // Add car data rows
         pdfData.carList.forEach { car ->
@@ -780,67 +838,45 @@ class PurchaseController(
         // Add consignee label row (first row) - center aligned
         consigneeTable.addCell(createCellWithBorderCentered("CONSIGNEE:", true))
         
-        // Add consignee name row (second row) - bold, center aligned
+        // Get consignee name value (contains full consignee details)
         val consigneeName = pdfData.consigneeDetails.name ?: ""
-        println("🔍 PDF Generation - Consignee Name: '$consigneeName'")
-        println("🔍 PDF Generation - Consignee Name length: ${consigneeName.length}")
-        println("🔍 PDF Generation - Consignee Name contains newline: ${consigneeName.contains("\n")}")
+        Logger.debug("PDF Generation - Consignee Name: '$consigneeName'")
+        Logger.debug("PDF Generation - Consignee Name length: ${consigneeName.length}")
         
-        val consigneeNameText = com.itextpdf.layout.element.Text(consigneeName)
-            .setBold()
-            .setFontSize(11f)
-        val consigneeNameParagraph = com.itextpdf.layout.element.Paragraph()
-            .add(consigneeNameText)
-            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-        val consigneeNameCell = com.itextpdf.layout.element.Cell()
-            .add(consigneeNameParagraph)
-            .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-            .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-            .setBorderTop(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-            .setBorderBottom(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove bottom border to eliminate horizontal line
-            .setPadding(8f)
-            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-        consigneeTable.addCell(consigneeNameCell)
-        
-        // Add consignee address rows - split into separate lines for P.O.BOX, location, TEL, E-MAIL
-        val consigneeAddress = pdfData.consigneeDetails.address ?: ""
-        println("🔍 PDF Generation - Consignee Address: '$consigneeAddress'")
-        println("🔍 PDF Generation - Consignee Address length: ${consigneeAddress.length}")
-        println("🔍 PDF Generation - Consignee Address is empty: ${consigneeAddress.isEmpty()}")
-        
-        if (consigneeAddress.isNotEmpty()) {
-            // Parse address into components: P.O.BOX, location, TEL, E-MAIL
-            val addressComponents = parseConsigneeAddress(consigneeAddress)
-            println("📋 Parsed address components: $addressComponents")
+        if (consigneeName.isNotEmpty()) {
+            // Split consignee name by commas and add each part as a separate row
+            val consigneeParts = consigneeName.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            Logger.debug("Split consignee into ${consigneeParts.size} parts: $consigneeParts")
             
-            // Add each component as a separate row
-            addressComponents.forEach { component ->
-                if (component.isNotEmpty()) {
-                    val componentText = com.itextpdf.layout.element.Text(component)
-                        .setFontSize(10f)
-                    val componentParagraph = com.itextpdf.layout.element.Paragraph()
-                        .add(componentText)
-                        .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-                    val componentCell = com.itextpdf.layout.element.Cell()
-                        .add(componentParagraph)
-                        .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-                        .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-                        .setBorderTop(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove top border between rows
-                        .setBorderBottom(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove bottom border between rows
-                        .setPadding(4f)
-                        .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-                    consigneeTable.addCell(componentCell)
-                }
+            // Add each comma-separated part as a separate row (center-aligned, not bold)
+            consigneeParts.forEachIndexed { index, part ->
+                Logger.debug("Processing consignee part $index: '$part'")
+                
+                val partText = com.itextpdf.layout.element.Text(part)
+                    .setFontSize(10f)
+                
+                val partParagraph = com.itextpdf.layout.element.Paragraph(partText)
+                    .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                    .setMargin(0f)
+                
+                val partCell = com.itextpdf.layout.element.Cell()
+                    .add(partParagraph as com.itextpdf.layout.element.IBlockElement)
+                    .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                    .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                    .setBorderTop(if (index == 0) com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f) else com.itextpdf.layout.borders.Border.NO_BORDER)
+                    .setBorderBottom(if (index == consigneeParts.size - 1) com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f) else com.itextpdf.layout.borders.Border.NO_BORDER)
+                    .setPadding(6f)
+                    .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                    .setMinHeight(20f) // Increased height to ensure visible separation
+                    .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+                
+                consigneeTable.addCell(partCell)
+                Logger.debug("Added consignee part $index to table: '$part'")
             }
             
-            // Add bottom border to the last address row
-            if (addressComponents.isNotEmpty()) {
-                val lastCellIndex = consigneeTable.numberOfRows - 1
-                val lastCell = consigneeTable.getCell(lastCellIndex, 0)
-                lastCell.setBorderBottom(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-            }
+            Logger.debug("Total rows in consignee table after adding parts: ${consigneeTable.numberOfRows}")
         } else {
-            println("⚠️ PDF Generation - Consignee address is empty, not adding address row")
+            Logger.warn("PDF Generation - Consignee name is empty, not adding consignee rows")
         }
         
         document.add(consigneeTable)
@@ -850,7 +886,7 @@ class PurchaseController(
     }
     
     private fun generateFobPdfDocument(pdfData: com.automan.backend.dto.ShippingSchedulePdfData): ByteArray {
-        println("🔥🔥🔥 GENERATING FOB PDF WITH TABLE FORMAT - UPDATED CODE - ${System.currentTimeMillis()} 🔥🔥🔥")
+        Logger.debug("GENERATING FOB PDF WITH TABLE FORMAT - UPDATED CODE - ${System.currentTimeMillis()}")
         val outputStream = java.io.ByteArrayOutputStream()
         val pdfWriter = com.itextpdf.kernel.pdf.PdfWriter(outputStream)
         val pdfDocument = com.itextpdf.kernel.pdf.PdfDocument(pdfWriter)
@@ -938,57 +974,39 @@ class PurchaseController(
         
         consigneeTable.addCell(createCellWithBorderCentered("CONSIGNEE:", true))
         
-        // Add consignee name row - bold, center aligned
+        // Get consignee name value (contains full consignee details)
         val consigneeName = pdfData.consigneeDetails.name ?: ""
-        val consigneeNameText = com.itextpdf.layout.element.Text(consigneeName)
-            .setBold()
-            .setFontSize(11f)
-        val consigneeNameParagraph = com.itextpdf.layout.element.Paragraph()
-            .add(consigneeNameText)
-            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-        val consigneeNameCell = com.itextpdf.layout.element.Cell()
-            .add(consigneeNameParagraph)
-            .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-            .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-            .setBorderTop(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-            .setBorderBottom(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove bottom border to eliminate horizontal line
-            .setPadding(8f)
-            .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-        consigneeTable.addCell(consigneeNameCell)
+        Logger.debug("FOB PDF Generation - Consignee Name: '$consigneeName'")
         
-        // Add consignee address rows - split into separate lines for P.O.BOX, location, TEL, E-MAIL
-        val consigneeAddress = pdfData.consigneeDetails.address ?: ""
-        if (consigneeAddress.isNotEmpty()) {
-            // Parse address into components: P.O.BOX, location, TEL, E-MAIL
-            val addressComponents = parseConsigneeAddress(consigneeAddress)
-            println("📋 FOB PDF - Parsed address components: $addressComponents")
+        if (consigneeName.isNotEmpty()) {
+            // Split consignee name by commas and add each part as a separate row
+            val consigneeParts = consigneeName.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            Logger.debug("FOB PDF - Split consignee into ${consigneeParts.size} parts: $consigneeParts")
             
-            // Add each component as a separate row
-            addressComponents.forEach { component ->
-                if (component.isNotEmpty()) {
-                    val componentText = com.itextpdf.layout.element.Text(component)
-                        .setFontSize(10f)
-                    val componentParagraph = com.itextpdf.layout.element.Paragraph()
-                        .add(componentText)
-                        .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-                    val componentCell = com.itextpdf.layout.element.Cell()
-                        .add(componentParagraph)
-                        .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-                        .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-                        .setBorderTop(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove top border between rows
-                        .setBorderBottom(com.itextpdf.layout.borders.Border.NO_BORDER) // Remove bottom border between rows
-                        .setPadding(4f)
-                        .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-                    consigneeTable.addCell(componentCell)
-                }
+            // Add each comma-separated part as a separate row (center-aligned, not bold)
+            consigneeParts.forEachIndexed { index, part ->
+                val partText = com.itextpdf.layout.element.Text(part)
+                    .setFontSize(10f)
+                val partParagraph = com.itextpdf.layout.element.Paragraph()
+                    .add(partText)
+                    .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                    .setMargin(0f) // Remove paragraph margins to ensure proper line breaks
+                
+                val partCell = com.itextpdf.layout.element.Cell()
+                    .add(partParagraph)
+                    .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                    .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                    .setBorderTop(if (index == 0) com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f) else com.itextpdf.layout.borders.Border.NO_BORDER)
+                    .setBorderBottom(if (index == consigneeParts.size - 1) com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f) else com.itextpdf.layout.borders.Border.NO_BORDER)
+                    .setPadding(4f)
+                    .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                    .setMinHeight(15f) // Ensure minimum height for each row
+                
+                consigneeTable.addCell(partCell)
+                Logger.debug("FOB PDF - Added consignee part $index: '$part'")
             }
-            
-            // Add bottom border to the last address row
-            if (addressComponents.isNotEmpty()) {
-                val lastCellIndex = consigneeTable.numberOfRows - 1
-                val lastCell = consigneeTable.getCell(lastCellIndex, 0)
-                lastCell.setBorderBottom(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-            }
+        } else {
+            Logger.warn("FOB PDF Generation - Consignee name is empty, not adding consignee rows")
         }
         
         document.add(consigneeTable)

@@ -86,6 +86,9 @@ function populatePODDropdown(mappings) {
   
   const pods = getUniquePODs(mappings);
   
+  // Preserve current value before converting/updating
+  const currentValue = podInput.value ? podInput.value.trim() : '';
+  
   // Convert input to select if it's not already
   let podSelect = podInput;
   if (podInput.tagName !== 'SELECT') {
@@ -105,7 +108,7 @@ function populatePODDropdown(mappings) {
     });
     
     // Replace input with select
-    podInput.parentNode.replaceChild(select, podInput);
+    podInput.parentNode.replaceChild(select, podSelect);
     podSelect = select;
   }
   
@@ -120,8 +123,24 @@ function populatePODDropdown(mappings) {
     podSelect.appendChild(option);
   });
   
-  // Auto-select first POD if available
-  if (pods.length > 0 && !podSelect.value) {
+  // Restore preserved value if it exists and is in the options, otherwise auto-select first POD only if no value
+  if (currentValue && currentValue !== '') {
+    // Check if current value exists in options
+    const valueExists = Array.from(podSelect.options).some(opt => opt.value === currentValue);
+    if (valueExists) {
+      podSelect.value = currentValue;
+      console.log('✅ Preserved POD value:', currentValue);
+    } else {
+      // If value doesn't exist in options, add it as a custom option
+      const customOption = document.createElement('option');
+      customOption.value = currentValue;
+      customOption.textContent = currentValue;
+      podSelect.appendChild(customOption);
+      podSelect.value = currentValue;
+      console.log('✅ Preserved POD value (custom):', currentValue);
+    }
+  } else if (pods.length > 0 && !podSelect.value) {
+    // Only auto-select first POD if no value was preserved
     podSelect.value = pods[0];
     // Trigger change event for any listeners
     podSelect.dispatchEvent(new Event('change', { bubbles: true }));
@@ -283,6 +302,10 @@ function escapeHtml(text) {
  * Main function to apply booking mappings when country is selected
  */
 window.applyBookingMappingsByCountry = async function(country) {
+  // Preserve POD value before any operations
+  const podElement = document.getElementById('podPort');
+  const preservedPodValue = podElement ? (podElement.value ? podElement.value.trim() : '') : '';
+  
   if (!country) {
     console.log('🌍 No country selected, clearing fields');
     // Clear fields
@@ -308,10 +331,24 @@ window.applyBookingMappingsByCountry = async function(country) {
   
   if (mappings.length === 0) {
     console.log('⚠️ No mappings found for country:', country);
-    // Clear fields if no mappings
+    // Clear fields if no mappings, but preserve POD if it was manually entered
     const podSelect = document.getElementById('podPort');
-    if (podSelect && podSelect.tagName === 'SELECT') {
-      podSelect.innerHTML = '<option value="">Select POD</option>';
+    if (podSelect) {
+      if (podSelect.tagName === 'SELECT') {
+        podSelect.innerHTML = '<option value="">Select POD</option>';
+        // Restore preserved value if it exists
+        if (preservedPodValue && preservedPodValue !== '') {
+          const option = document.createElement('option');
+          option.value = preservedPodValue;
+          option.textContent = preservedPodValue;
+          podSelect.appendChild(option);
+          podSelect.value = preservedPodValue;
+          console.log('✅ Preserved POD value (no mappings):', preservedPodValue);
+        }
+      } else {
+        // For input element, just restore the value
+        podSelect.value = preservedPodValue;
+      }
     }
     const consigneeDisplay = document.getElementById('consigneeDisplay');
     if (consigneeDisplay) {
@@ -320,7 +357,7 @@ window.applyBookingMappingsByCountry = async function(country) {
     return;
   }
   
-  // Populate POD dropdown
+  // Populate POD dropdown (will preserve value if it exists)
   populatePODDropdown(mappings);
   
   // Populate CONSIGNEE field and dropdown

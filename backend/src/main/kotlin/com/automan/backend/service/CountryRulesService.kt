@@ -1,22 +1,16 @@
 package com.automan.backend.service
 
-import com.automan.backend.repository.BookingRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
 @Service
 @Transactional(readOnly = true)
-class CountryRulesService(
-    private val bookingRepository: BookingRepository
-) {
+class CountryRulesService {
     
-    fun getCountryRules(bookingId: Long): Map<String, Double> {
-        val booking = bookingRepository.findById(bookingId)
-            .orElseThrow { IllegalArgumentException("Booking not found with id: $bookingId") }
+    fun getCountryRules(country: String): Map<String, Double> {
+        val normalizedCountry = country.uppercase()
         
-        val country = booking.consigneeCountry ?: "DEFAULT"
-        
-        return when (country.uppercase()) {
+        return when (normalizedCountry) {
             "PAKISTAN" -> getPakistanRules()
             "SOUTH AFRICA" -> getSouthAfricaRules()
             "KENYA" -> getKenyaRules()

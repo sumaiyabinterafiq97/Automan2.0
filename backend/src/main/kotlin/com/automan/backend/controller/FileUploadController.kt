@@ -3,6 +3,7 @@ package com.automan.backend.controller
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
 import com.automan.backend.service.PurchaseService
+import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
@@ -15,15 +16,14 @@ class FileUploadController(private val purchaseService: PurchaseService) {
     @PostMapping("/excel")
     fun uploadExcel(@RequestParam("file") file: MultipartFile): ResponseEntity<ImportResponse> {
         try {
-            println("FileUploadController: Received file: ${file.originalFilename}")
-            println("FileUploadController: File size: ${file.size}")
-            println("FileUploadController: About to call purchaseService.importPurchases")
+            Logger.debug("FileUploadController: Received file: ${file.originalFilename}")
+            Logger.debug("FileUploadController: File size: ${file.size}")
+            Logger.debug("FileUploadController: About to call purchaseService.importPurchases")
             val importResponse = purchaseService.importPurchases(file)
-            println("FileUploadController: ${importResponse.message}")
+            Logger.debug("FileUploadController: ${importResponse.message}")
             return ResponseEntity.ok(importResponse)
         } catch (e: Exception) {
-            println("FileUploadController: Error during import: ${e.message}")
-            e.printStackTrace()
+            Logger.error("FileUploadController: Error during import: ${e.message}", e)
             return ResponseEntity.status(500).body(
                 ImportResponse(
                     success = false,

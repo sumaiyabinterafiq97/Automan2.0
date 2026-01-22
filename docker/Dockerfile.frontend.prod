@@ -1,0 +1,18 @@
+# Production Frontend Dockerfile for Automan
+# Builds Kotlin/JS frontend and serves with nginx
+
+FROM nginx:alpine
+
+# Copy built frontend files from build directory
+# IMPORTANT: Run ./gradlew jsBrowserProductionWebpack FIRST before building this image
+# The build output should be in: build/dist/js/productionExecutable/
+COPY build/dist/js/productionExecutable/ /usr/share/nginx/html/
+
+# Copy production nginx configuration
+COPY docker/nginx/nginx-prod.conf /etc/nginx/conf.d/default.conf
+
+# Expose port 80
+EXPOSE 80
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

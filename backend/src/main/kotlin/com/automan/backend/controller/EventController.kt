@@ -8,6 +8,7 @@ import com.automan.backend.repository.EventRepository
 import com.automan.backend.service.AsyncImportService
 import com.automan.backend.service.PerformanceMonitoringService
 import com.automan.backend.dto.TransactionRequest
+import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
@@ -47,7 +48,7 @@ class EventController(
     
     @PostMapping("/test")
     fun testEndpoint(@RequestBody request: Map<String, Any>): ResponseEntity<Map<String, Any>> {
-        println("DEBUG: Test endpoint called with: $request")
+        Logger.debug("Test endpoint called with: $request")
         return ResponseEntity.ok(mapOf("message" to "Test endpoint working", "received" to request))
     }
     
@@ -175,7 +176,7 @@ class EventController(
             val client = clientService.getClientById(clientId)
                 ?: throw IllegalArgumentException("Client not found: $clientId")
             
-            println("DEBUG: Client found: ${client.clientName}, Currency: ${client.currency}, Status: ${client.status}")
+            Logger.debug("Client found: ${client.clientName}, Currency: ${client.currency}, Status: ${client.status}")
             
             // Create Event object with just clientId
             val event = Event(
@@ -201,8 +202,7 @@ class EventController(
                 "runningBalance" to createdEvent.runningBalance
             ))
         } catch (e: Exception) {
-            println("ERROR: Exception in createEvent: ${e.message}")
-            e.printStackTrace()
+            Logger.error("Exception in createEvent: ${e.message}", e)
             ResponseEntity.status(500).body(mapOf("error" to (e.message ?: "Unknown error")))
         }
     }

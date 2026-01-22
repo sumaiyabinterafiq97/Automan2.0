@@ -2,9 +2,11 @@ package com.automan.backend.service
 
 import com.automan.backend.model.*
 import com.automan.backend.repository.*
+import com.automan.backend.util.Logger
 import org.springframework.boot.CommandLineRunner
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
 import java.time.LocalDateTime
@@ -14,38 +16,37 @@ class DataSeederService(
     private val userRepository: UserRepository,
     private val clientRepository: ClientRepository,
     private val purchaseRepository: PurchaseRepository,
-    private val vesselRepository: VesselRepository,
     private val rixoPriceRepository: RixoPriceRepository
 ) : CommandLineRunner {
 
     private val passwordEncoder = BCryptPasswordEncoder()
 
-    @Transactional
     override fun run(vararg args: String?) {
-        println("🌱 Starting database seeding...")
+        Logger.debug("Starting database seeding check...")
         
-        // Only seed if database is empty
-        if (userRepository.count() > 0) {
-            println("📊 Database already has data, skipping seeding")
+        // TEMPORARILY DISABLED: Skip all seeding to prevent startup crashes
+        // Database already has data from previous runs
+        Logger.warn("Seeding disabled - using existing database data")
+        return
+        
+        // Original seeding code commented out to prevent transaction issues
+        /*
+        val userCount = try {
+            userRepository.count()
+        } catch (e: Exception) {
+            Logger.error("Error checking user count: ${e.message}")
             return
         }
 
-        try {
-            seedUsers()
-            seedClients()
-            seedVessels()
-            seedRixoPrices()
-            seedPurchases()
-            
-            println("✅ Database seeding completed successfully!")
-        } catch (e: Exception) {
-            println("❌ Error during database seeding: ${e.message}")
-            e.printStackTrace()
+        if (userCount > 0) {
+            Logger.warn("Database already has data (${userCount} users), skipping seeding")
+            return
         }
+        */
     }
 
     private fun seedUsers() {
-        println("👤 Seeding users...")
+        Logger.debug("Seeding users...")
         
         val adminUser = User(
             email = "admin@automan.com",
@@ -54,11 +55,11 @@ class DataSeederService(
             role = UserRole.ADMIN
         )
         userRepository.save(adminUser)
-        println("✅ Created admin user: admin@automan.com (password: admin123)")
+        Logger.debug("Created admin user: admin@automan.com (password: admin123)")
     }
 
     private fun seedClients() {
-        println("🏢 Seeding clients...")
+        Logger.debug("Seeding clients...")
         
         val client = Client(
             clientNumber = "CL001",
@@ -69,30 +70,12 @@ class DataSeederService(
             currentBalance = 50000.0
         )
         clientRepository.save(client)
-        println("✅ Created client: CROWN EAGLE")
+        Logger.debug("Created client: CROWN EAGLE")
     }
 
-    private fun seedVessels() {
-        println("🚢 Seeding vessels...")
-        
-        val vessels = listOf(
-            Vessel(
-                vesselNo = "V001",
-                vesselName = "OCEAN EXPRESS",
-                company = "Maritime Shipping Co."
-            ),
-            Vessel(
-                vesselNo = "V002", 
-                vesselName = "PACIFIC CARRIER",
-                company = "Global Transport Ltd."
-            )
-        )
-        vesselRepository.saveAll(vessels)
-        println("✅ Created ${vessels.size} vessels")
-    }
 
     private fun seedRixoPrices() {
-        println("💰 Seeding Rixo prices...")
+        Logger.debug("Seeding Rixo prices...")
         
         val rixoPrices = listOf(
             RixoPrice(
@@ -121,15 +104,15 @@ class DataSeederService(
             )
         )
         rixoPriceRepository.saveAll(rixoPrices)
-        println("✅ Created ${rixoPrices.size} Rixo prices")
+        Logger.debug("Created ${rixoPrices.size} Rixo prices")
     }
 
     private fun seedPurchases() {
-        println("🚗 Seeding purchases...")
+        Logger.debug("Seeding purchases...")
         
         val client = clientRepository.findByClientNumber("CL001")
         if (client == null) {
-            println("❌ Client not found, cannot create purchases")
+            Logger.error("Client not found, cannot create purchases")
             return
         }
 
@@ -215,6 +198,6 @@ class DataSeederService(
         )
         
         purchaseRepository.saveAll(purchases)
-        println("✅ Created ${purchases.size} purchases")
+        Logger.debug("Created ${purchases.size} purchases")
     }
 }
