@@ -47,7 +47,7 @@ replay_pid*
 .LSOverride
 
 # Icon must end with two \r
-Icon
+Icon
 
 # Thumbnails
 ._*
@@ -276,3 +276,7 @@ automan-single-image-fixed/automan-complete-fresh.tar
 *.mov
 *.tar
 *.zip
+
+# AWS Deployment Guides (keep local only, not in repo)
+AWS-FREE-TIER-DEPLOYMENT-GUIDE.md
+AWS-DEPLOYMENT-GUIDE.md
