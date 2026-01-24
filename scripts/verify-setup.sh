@@ -56,7 +56,7 @@ echo "📋 Checking database tables..."
 tables=$(docker exec automan_mysql_multiplatform mysql -u automan_user -pautoman_password \
   -e "USE automan_car_purchase; SHOW TABLES;" 2>/dev/null | grep -v "Tables_in" | tr -d '\r')
 
-required_tables=("purchases" "clients" "users" "bookings" "car_brand_mapping" "booking_mappings" "rixo_prices" "vessels" "booking_calculations" "events")
+required_tables=("purchases" "clients" "users" "car_brand_mapping" "booking_mappings" "rixo_prices" "events")
 missing_tables=()
 
 for table in "${required_tables[@]}"; do

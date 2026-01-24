@@ -480,14 +480,13 @@ Automan2.0/
 │       ├── booking-mapping.js        # Booking mapping logic
 │       └── booking-mapping-modal.js  # Booking modal logic
 ├── database/                         # Database Migrations
-│   ├── 01-init-multiplatform.sql    # Main schema (purchases, bookings, vessels)
+│   ├── 01-init-multiplatform.sql    # Main schema (purchases table)
 │   ├── 02-car-brand-mapping.sql     # Car brand mappings
 │   ├── 03-booking-mappings.sql      # Booking country mappings
 │   ├── 04-rixo-prices.sql          # Rixo prices (fully consolidated)
 │   ├── 10-clients-table.sql         # Clients table
 │   ├── 11-events-table.sql          # Events table
 │   ├── 12-users-table.sql          # Users table
-│   ├── init.sql                     # Legacy init file
 │   └── archived/                    # Archived migrations (reference only)
 ├── docker/                          # Docker Configuration
 │   ├── docker-compose.multiplatform.yml  # Main compose file
@@ -569,9 +568,9 @@ cd backend
   docker exec automan_frontend_multiplatform nginx -s reload
   ```
 - **Database Schema**: 
-  - Main tables: `purchases`, `clients`, `events`, `users`, `bookings`, `vessels`, `booking_calculations`
+  - Main tables: `purchases`, `clients`, `events`, `users`
   - Mapping tables: `car_brand_mapping`, `booking_mappings`, `rixo_prices`
-  - Key columns: `drive_type` (VARCHAR(50) NULL), `booking_id` (BIGINT NULL, no FK constraint), `total_fob_price` (DECIMAL(15,2) NULL), `shipped` (BOOLEAN DEFAULT FALSE)
+  - Key columns: `drive_type` (VARCHAR(50) NULL), `booking_id` (BIGINT NULL, no FK constraint), `total_fob_price` (DECIMAL(15,2) NULL), `shipped` (BOOLEAN DEFAULT FALSE), `vessel` (VARCHAR(255) NULL)
 - **Invoice Page**: Uses CLIENT (consignee) dropdown and VESSEL input to dynamically fetch matching purchases by shipment date.
 - **Client Accounts**: Full client management with balance tracking, credit limits, alerts, and transaction history.
 - **Security**: 
@@ -636,9 +635,7 @@ All new pages will follow the existing pattern:
 5. Follow code quality guidelines (use Logger, AppConstants, escape HTML)
 6. Submit a pull request
 
-## 📄 License
 
-This project is licensed under the MIT License.
 
 ---
 
