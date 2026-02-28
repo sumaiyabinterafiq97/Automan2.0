@@ -56,6 +56,8 @@ A comprehensive car purchase management system built with Kotlin JS Compose for 
 - **Professional Design**: Clean, modern UI with Material Design principles
 - **Real-time Calculations**: Automatic calculation of total costs, C&F/FOB prices, and expenses
 - **Auto-fill Features**: Smart auto-fill from mapping tables for chassis, supplier, and booking information
+- **Rixo Import**: CSV/text import for Rixo prices and mappings; Rixo PDF generation
+- **Admin Approval Flow**: Signup requests require admin approval; Resend emails for verification
 
 ## 🏗️ Architecture
 
@@ -79,17 +81,17 @@ A comprehensive car purchase management system built with Kotlin JS Compose for 
   - For Windows: Docker Desktop for Windows
   - For macOS: Docker Desktop for Mac
   - For Linux: Docker Engine and Docker Compose
-- **Multi-platform Docker Images**: The `automan-complete-multiplatform.tar` file (included in the project)
+- **Multi-platform Docker Images** (for `load-and-run-multiplatform.sh`): The `automan-complete-multiplatform.tar` file in the project root. If not present, build images from source (see Development section).
 
 ## 🛠️ Quick Start (Recommended)
 
 ### For macOS and Linux:
 
 ```bash
-# Make the script executable (first time only)
+# From project root - make the script executable (first time only)
 chmod +x scripts/run/load-and-run-multiplatform.sh
 
-# Run the system
+# Run the system (requires automan-complete-multiplatform.tar in project root)
 ./scripts/run/load-and-run-multiplatform.sh
 ```
 
@@ -198,6 +200,22 @@ docker compose -f docker/docker-compose.multiplatform.yml ps
 ./scripts/verify-setup.sh
 ```
 
+### Scripts Reference
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/run/load-and-run-multiplatform.sh` | Load Docker images and start all services (recommended) |
+| `scripts/run/load-and-run.sh` | Alternative load script |
+| `scripts/run/run-automan-multiplatform.sh` | Start services (assumes images already loaded) |
+| `scripts/run/start-prod.sh` | Production start |
+| `scripts/run/start-client.sh` | Client-only start |
+| `scripts/build-and-deploy-frontend.sh` | Build and deploy frontend (version bump, Gradle, Docker) |
+| `scripts/rebuild-and-restart-backend.sh` | Rebuild backend image and restart container |
+| `scripts/restart-backend.sh` | Restart backend container (no rebuild) |
+| `scripts/verify-setup.sh` | Verify Docker, DB, API, frontend |
+| `scripts/verify-schema.sh` | Display database schema |
+| `scripts/test-migrations.sh` | Test SQL migration syntax |
+
 This script checks:
 - Docker is running
 - All containers are up
@@ -251,10 +269,30 @@ docker system prune -a --volumes
 
 ## 🔧 API Endpoints
 
+All endpoints are prefixed with `/api` (backend context-path). Base URL: `http://localhost:8083/api`
+
 ### Authentication
 - `POST /api/auth/login` - User login
-- `POST /api/auth/register` - User registration
+- `POST /api/auth/signup` - User registration (admin approval flow)
+- `GET /api/auth/check-email` - Check if email exists
+- `GET /api/auth/pending-signups` - Get pending signup requests (admin)
+- `GET /api/auth/verify-signup` - Verify signup token (email link)
 - `GET /api/auth/users/count` - Get user count
+- `POST /api/auth/setup` - Initial admin setup
+
+### Users
+- `GET /api/users` - Get all users
+- `GET /api/users/{id}` - Get user by ID
+- `POST /api/users` - Create user
+- `PUT /api/users/{id}` - Update user
+- `DELETE /api/users/{id}` - Delete user
+- `POST /api/users/{userId}/role-request` - Request role change
+
+### Role Requests
+- `POST /api/role-requests/{userId}` - Create role request
+- `GET /api/role-requests/user/{userId}` - Get requests by user
+- `GET /api/role-requests/pending` - Get pending requests
+- `POST /api/role-requests/{requestId}/review/{reviewerId}` - Review (approve/reject)
 
 ### Purchases
 - `GET /api/purchases` - Get all purchases
@@ -274,13 +312,66 @@ docker system prune -a --volumes
 - `GET /api/purchases/countries` - Get list of countries
 - `GET /api/purchases/stock-locations` - Get stock locations
 - `POST /api/purchases/invoice/generate-pdf` - Generate invoice PDF
+- `POST /api/purchases/shipping-schedule/generate-pdf` - Generate shipping schedule PDF
+- `POST /api/purchases/fob-shipping-schedule/generate-pdf` - Generate FOB shipping schedule PDF
+- `POST /api/purchases/rixo-pdf` - Generate Rixo PDF
+- `POST /api/purchases/rixo-transport-pdf` - Generate Rixo transport PDF
+- `POST /api/purchases/import` - Import purchases
+- `GET /api/purchases/filter/car-name`, `/filter/auction-house`, `/filter/client-name`, `/filter/date` - Filter purchases
+- `POST /api/purchases/transaction` - Add transaction to purchase
 
-### Booking
-- `GET /api/booking-mappings` - Get booking mappings
-- `GET /api/booking-mappings/country/{country}` - Get mappings by country
-- `POST /api/booking-mappings` - Create booking mapping
-- `PUT /api/booking-mappings/{id}` - Update booking mapping
-- `DELETE /api/booking-mappings/{id}` - Delete booking mapping
+### Booking Mappings
+- `GET /api/booking/mappings` - Get all booking mappings
+- `GET /api/booking/mappings/by-country/{country}` - Get mappings by country
+- `POST /api/booking/mappings/add` - Create booking mapping
+- `PUT /api/booking/mappings/{id}` - Update booking mapping
+- `DELETE /api/booking/mappings/{id}` - Delete booking mapping
+
+### Car Brand Mapping
+- `GET /api/car-brand-mapping/mappings` - Get all car brand mappings
+- `GET /api/car-brand-mapping/brand/{brandName}` - Get mappings by brand
+- `GET /api/car-brand-mapping/chassis/{chassis}` - Get mapping by chassis
+- `GET /api/car-brand-mapping/chassis/all` - Get all chassis mappings
+- `POST /api/car-brand-mapping/mappings` - Create mapping
+- `PUT /api/car-brand-mapping/mappings/{id}` - Update mapping
+- `DELETE /api/car-brand-mapping/mappings/{id}` - Delete mapping
+
+### Rixo Import & Prices
+- `GET /api/rixo/prices` - Get Rixo prices
+- `GET /api/rixo/prices/by-auction-house/{auctionHouse}` - Get prices by auction house
+- `GET /api/rixo/dropdowns/auction-names`, `/dropdowns/stock-locations`, `/dropdowns/rixo-companies`, `/dropdowns/rixo-prices` - Dropdown data
+- `POST /api/rixo/import/csv` - Import from CSV
+- `POST /api/rixo/import/text` - Import from text
+- `GET /api/rixo/mappings/by-auction/{auctionHouse}` - Get mappings by auction
+- `POST /api/rixo/mappings/add` - Add Rixo mapping
+- `PUT /api/rixo/mappings/{id}` - Update Rixo mapping
+- `DELETE /api/rixo/mappings/{id}` - Delete Rixo mapping
+
+### Calculations (C&F/FOB)
+- `POST /api/calculations/freight` - Calculate freight
+- `POST /api/calculations/caf` - Calculate C&F
+- `POST /api/calculations/fob` - Calculate FOB
+- `POST /api/calculations/pakistan` - Pakistan-specific calculation
+
+### Car Search & Booking
+- `GET /api/cars/search` - Search cars
+- `GET /api/cars/booking/{bookingId}` - Get booking by ID
+- `POST /api/booking-cars` - Create booking
+- `DELETE /api/booking-cars/{bookingId}` - Delete booking
+
+### File Upload
+- `POST /api/upload/excel` - Upload Excel file
+- `POST /api/upload/simple` - Simple file upload
+
+### Transactions
+- `POST /api/transactions` - Create transaction
+
+### Events (Client Transactions)
+- `GET /api/events` - Get events
+- `GET /api/events/client/{clientId}` - Get events by client
+- `POST /api/events` - Create event
+- `GET /api/events/export/{clientId}` - Export client events
+- `GET /api/events/export/all-clients` - Export all clients' events
 
 ### Clients
 - `GET /api/clients` - Get all clients
@@ -291,6 +382,8 @@ docker system prune -a --volumes
 - `GET /api/clients/{id}/transactions` - Get client transactions
 - `GET /api/clients/alerts` - Get client alerts (credit limit, low balance)
 - `POST /api/clients/{id}/transactions` - Add transaction to client
+- `POST /api/clients/add-transaction` - Add transaction (alternate)
+- `POST /api/clients/import` - Import clients
 
 ## 🎯 Usage Guide
 
@@ -463,18 +556,25 @@ The following report pages are planned:
 Automan2.0/
 ├── backend/                          # Spring Boot Backend (separate Gradle project)
 │   ├── Dockerfile                   # Backend Dockerfile (builds from source)
-│   ├── Dockerfile.prebuilt          # Prebuilt backend (use after ./gradlew build -x test)
-│   ├── src/main/kotlin/
-│   │   └── com/automan/backend/
-│   │       ├── BackendApplication.kt
-│   │       ├── controller/           # REST Controllers
-│   │       ├── model/                # Data Models (Purchase, Client, etc.)
-│   │       ├── repository/           # Data Repositories (JPA)
-│   │       ├── service/              # Business Logic
-│   │       ├── config/               # Configuration (CORS, AppConstants)
-│   │       └── util/                 # Utilities (Logger)
-│   └── src/main/resources/
-│       └── application.yml           # Configuration
+│   ├── Dockerfile.prebuilt          # Prebuilt backend (faster builds)
+│   ├── build.gradle.kts             # Backend build config
+│   ├── src/main/kotlin/com/automan/backend/
+│   │   ├── BackendApplication.kt
+│   │   ├── controller/               # Auth, Purchase, Client, User, CarBrandMapping,
+│   │   │                             # BookingMapping, RixoImport, Calculation, etc.
+│   │   ├── model/                    # Purchase, Client, User, Event, PendingSignup, etc.
+│   │   ├── repository/               # JPA repositories
+│   │   ├── service/                  # Auth, Purchase, Pdf, Email, RixoImport, etc.
+│   │   ├── dto/                      # Request/response DTOs
+│   │   ├── config/                   # WebConfig, WebCorsConfig, AppConstants
+│   │   ├── exception/                # GlobalExceptionHandler
+│   │   └── util/                     # Logger
+│   ├── src/main/resources/
+│   │   ├── application.yml           # Main config
+│   │   ├── application-docker.yml   # Docker profile
+│   │   ├── application-dev.yml     # Dev profile
+│   │   └── db/migration/             # Flyway migrations (V30, V31, etc.)
+│   └── src/test/                    # Integration tests
 ├── src/jsMain/                       # Kotlin JS Frontend
 │   ├── kotlin/com/automan/purchase/
 │   │   ├── MinimalPurchaseApp.kt    # Main Application & Routing
@@ -484,18 +584,22 @@ Automan2.0/
 │   │   ├── Invoice.kt              # Invoice generation
 │   │   ├── MasterList.kt           # Master data lists (Car Brands, Suppliers, etc.)
 │   │   ├── CnfFobCalculation.kt   # C&F/FOB price calculations
-│   │   ├── Utils.kt                # Utility functions (date formatting, HTML escaping)
+│   │   ├── FreightCalculation.kt   # Freight calculations
+│   │   ├── ApiService.kt           # API client
+│   │   ├── ApiClient.kt            # HTTP client utilities
+│   │   ├── Models.kt               # Data models
+│   │   ├── Utils.kt                # Date formatting, HTML escaping
 │   │   ├── AppConstants.kt         # Centralized constants
-│   │   ├── Logger.kt                # Logging utility
-│   │   └── AuthSetup.kt            # Authentication & user setup
+│   │   ├── Logger.kt               # Logging utility
+│   │   └── AuthSetup.kt           # Authentication & user setup
 │   └── resources/
 │       ├── index.html                # HTML Template
 │       ├── styles.css                # Global styles
 │       ├── rixo-price-mapping.js     # Rixo price mapping logic
 │       ├── booking-mapping.js        # Booking mapping logic
 │       └── booking-mapping-modal.js  # Booking modal logic
-├── database/                         # Database Migrations
-│   ├── 01-init-multiplatform.sql    # Main schema (purchases table)
+├── database/                         # MySQL init migrations (run on first DB start)
+│   ├── 01-init-multiplatform.sql    # Main schema, cleanup, purchases table
 │   ├── 02-car-brand-mapping.sql     # Car brand mappings
 │   ├── 03-booking-mappings.sql      # Booking country mappings
 │   ├── 04-rixo-prices.sql          # Rixo prices (fully consolidated)
@@ -504,29 +608,50 @@ Automan2.0/
 │   ├── 12-users-table.sql          # Users table
 │   ├── 13-pending-signups.sql      # Pending signups (admin approval flow)
 │   └── archived/                    # Archived migrations (reference only)
-├── docker/                          # Docker Configuration
-│   ├── docker-compose.multiplatform.yml  # Main compose file
-│   ├── Dockerfile.frontend.prod     # Production frontend (nginx + built assets)
-│   ├── Dockerfile.multiplatform     # Multi-platform build
-│   └── nginx/                       # Nginx Configuration
-│       └── nginx-prod.conf
-├── scripts/                         # Utility Scripts
-│   ├── run/                         # Run Scripts
-│   │   └── load-and-run-multiplatform.sh
+├── docker/
+│   ├── docker-compose.multiplatform.yml  # Main compose (MySQL, backend, frontend, phpMyAdmin)
+│   ├── docker-compose.prod.yml.example   # Production compose example
+│   ├── docker-compose.hub.yml.example    # Docker Hub compose example
+│   ├── Dockerfile.frontend.prod     # Frontend: nginx + built assets
+│   ├── Dockerfile.multiplatform    # Multi-platform build
+│   ├── Dockerfile                   # Legacy single Dockerfile
+│   ├── Dockerfile.client            # Client-only build
+│   ├── supervisord.conf             # Process manager config
+│   └── nginx/
+│       ├── nginx-prod.conf          # Production (proxies /api to backend)
+│       ├── nginx.conf               # Default config
+│       ├── nginx-single.conf        # Single-container config
+│       └── nginx-client.conf        # Client-only config
+├── scripts/
+│   ├── run/
+│   │   ├── load-and-run-multiplatform.sh   # Load images + start (recommended)
+│   │   ├── load-and-run.sh                 # Alternative load script
+│   │   ├── run-automan-multiplatform.sh    # Run without loading
+│   │   ├── start-prod.sh                   # Production start
+│   │   ├── start-client.sh                 # Client-only start
+│   │   └── seed_booking_mappings.py        # Seed booking mappings
 │   ├── build-and-deploy-frontend.sh # Frontend: bump version, build, deploy
-│   ├── rebuild-and-restart-backend.sh # Backend: rebuild image, restart container
-│   ├── verify-setup.sh              # Setup verification
-│   └── verify-schema.sh             # Schema verification
-├── docs/                            # Documentation
+│   ├── rebuild-and-restart-backend.sh # Backend: rebuild image, restart
+│   ├── restart-backend.sh           # Restart backend (no rebuild)
+│   ├── verify-setup.sh              # Verify containers, DB, API, frontend
+│   ├── verify-schema.sh             # Show DB schema
+│   ├── test-migrations.sh           # Test SQL migrations
+│   └── update_venue_ids_from_csv.py # Update venue IDs from CSV
+├── webpack.config.d/                # Webpack config for Kotlin/JS
+├── docs/                             # Page documentation
 │   ├── ADD_PURCHASE_PAGE_DOCUMENTATION.md
 │   ├── EDIT_PURCHASE_PAGE_DOCUMENTATION.md
 │   ├── CAR_BOOKING_SYSTEM_DOCUMENTATION.md
 │   ├── CLIENT_ACCOUNTS_AND_TRANSACTION_PAGE_DOCUMENTATION.md
 │   └── INVOICE_PAGE_DOCUMENTATION.md
-├── build.gradle.kts                 # Build Configuration
-├── settings.gradle.kts              # Project Settings
-├── gradle.properties                # Gradle Properties
-└── README.md                        # This File
+├── .env.example                     # Env template (Resend, etc.)
+├── .dockerignore
+├── .gitignore
+├── build.gradle.kts                 # Root build (Kotlin/JS)
+├── settings.gradle.kts
+├── gradle.properties
+├── copy-kotlin-dependencies.sh      # Copy Kotlin deps utility
+└── README.md
 ```
 
 ## 🚀 Development
@@ -575,10 +700,14 @@ This script: bumps cache-bust version in `index.html`, runs `./gradlew jsBrowser
 
 ### Running Backend Locally
 
+The backend is a separate Gradle project. Ensure MySQL is running (or use Docker for MySQL only).
+
 ```bash
 cd backend
 ./gradlew bootRun
 ```
+
+Backend will use `application.yml` (localhost:3306). For Docker profile: `SPRING_PROFILES_ACTIVE=docker ./gradlew bootRun`
 
 ### Running Frontend Locally
 
@@ -588,11 +717,11 @@ cd backend
 
 ## 📝 Notes
 
-- **Docker Volumes**: The system uses Docker volumes to persist database data. Data is retained even after stopping containers. To start fresh, use `docker-compose down -v` to remove volumes.
-- **Database Migrations**: All migrations run automatically on first startup in alphabetical order. Migrations are idempotent and safe to run multiple times.
+- **Docker Volumes**: The system uses Docker volumes to persist database data. Data is retained even after stopping containers. To start fresh, use `docker compose -f docker/docker-compose.multiplatform.yml down -v` to remove volumes.
+- **Database Migrations**: MySQL runs `database/*.sql` on first init (empty volume) in alphabetical order. Migrations are idempotent. Backend Flyway is disabled; schema is managed via MySQL init scripts.
 - **Frontend Cache Busting**: The frontend uses cache busting. Use `./scripts/build-and-deploy-frontend.sh` to bump version, build, and deploy. The script updates `index.html`, builds the Kotlin/JS bundle, rebuilds the Docker image, and recreates the container.
 - **Database Schema**: 
-  - Main tables: `purchases`, `clients`, `events`, `users`
+  - Main tables: `purchases`, `clients`, `events`, `users`, `pending_signups`
   - Mapping tables: `car_brand_mapping`, `booking_mappings`, `rixo_prices`
   - Key columns: `drive_type` (VARCHAR(50) NULL), `booking_id` (BIGINT NULL, no FK constraint), `total_fob_price` (DECIMAL(15,2) NULL), `shipped` (BOOLEAN DEFAULT FALSE), `vessel` (VARCHAR(255) NULL)
 - **Invoice Page**: Uses CLIENT (consignee) dropdown and VESSEL input to dynamically fetch matching purchases by shipment date.
