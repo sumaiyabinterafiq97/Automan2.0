@@ -49,144 +49,144 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
     val calculateFreightButton = if (isFobMode) "" else """
                     <!-- Calculate Freight Button -->
                     <div style="margin-top: 15px;">
-                        <button id="calculateFreightBtn" style="padding: 12px 32px; background-color: #8b5cf6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; width: 100%;">CALCULATE FREIGHT</button>
+                        <button id="calculateFreightBtn" class="cnf-btn cnf-btn-freight">CALCULATE FREIGHT</button>
                     </div>
 """
     val freightField = if (isFobMode) "" else """
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">FREIGHT (¥):</label>
-                                <div style="display: flex; align-items: center;">
-                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
-                                    <input type="number" id="freight" value="0" min="0" step="1" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div class="cnf-cost-field">
+                                <label>FREIGHT (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="number" id="freight" value="0" min="0" step="1">
                                 </div>
                             </div>
 """
     return """
-        <div style="padding: 20px; background-color: #f9fafb; min-height: 100vh;">
+        <div class="cnf-calculation-container">
             <!-- Back Button -->
             <div style="margin-bottom: 20px;">
-                <button id="backToBookingBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">← Back to Car Booking</button>
+                <button id="backToBookingBtn" class="cnf-back-btn">← Back to Car Booking</button>
             </div>
             
             <!-- C&F Calculation Container -->
-            <div style="background-color: white; border: 2px solid #8b5cf6; border-radius: 12px; padding: 30px; max-width: 800px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+            <div class="cnf-card">
                 
                 <!-- Header -->
-                <div style="text-align: center; margin-bottom: 30px;">
-                    <h1 style="color: #1f2937; font-size: 24px; font-weight: bold; margin: 0;">$pageTitle</h1>
+                <div class="cnf-header">
+                    <h1>$pageTitle</h1>
                 </div>
                 
                 <!-- Car Selection -->
-                <div style="margin-bottom: 20px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 16px;">SELECT CAR CHASSIS :</label>
-                    <select id="chassisSelect" style="width: 100%; padding: 12px; border: 2px solid #d1d5db; border-radius: 6px; font-size: 14px; background-color: white;">
+                <div class="cnf-chassis-selector">
+                    <label>SELECT CAR CHASSIS :</label>
+                    <select id="chassisSelect">
                         <option value="">Select a car chassis...</option>
                     </select>
                     $calculateFreightButton
                 </div>
                 
                 <!-- Cost Fields -->
-                <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <div class="cnf-cost-fields">
+                    <div class="cnf-cost-grid">
                         <!-- Left Column -->
                         <div>
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">CAR PRICE (¥):</label>
-                                <div style="display: flex; align-items: center;">
-                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
-                                    <input type="number" id="carPrice" value="0" min="0" step="1" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div class="cnf-cost-field">
+                                <label>CAR PRICE (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="number" id="carPrice" value="0" min="0" step="1">
                                 </div>
                             </div>
                             
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">RIXO PRICE (¥):</label>
-                                <div style="display: flex; align-items: center;">
-                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
-                                    <input type="number" id="rixoPrice" value="0" min="0" step="1" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div class="cnf-cost-field">
+                                <label>RIXO PRICE (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="number" id="rixoPrice" value="0" min="0" step="1">
                                 </div>
                             </div>
                             $freightField
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">REPAIR FEE (¥):</label>
-                                <div style="display: flex; align-items: center;">
-                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
-                                    <input type="number" id="repairFee" value="0" min="0" step="1" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div class="cnf-cost-field">
+                                <label>REPAIR FEE (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="number" id="repairFee" value="0" min="0" step="1">
                                 </div>
                             </div>
                             
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">PROFIT (¥):</label>
-                                <div style="display: flex; align-items: center;">
-                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
-                                    <input type="number" id="profit" value="0" min="0" step="1" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div class="cnf-cost-field">
+                                <label>PROFIT (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="number" id="profit" value="0" min="0" step="1">
                                 </div>
                             </div>
                         </div>
                         
                         <!-- Right Column -->
                         <div>
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">AUCTION FEE (¥):</label>
-                                <div style="display: flex; align-items: center;">
-                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
-                                    <input type="number" id="auctionFee" value="0" min="0" step="1" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div class="cnf-cost-field">
+                                <label>AUCTION FEE (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="number" id="auctionFee" value="0" min="0" step="1">
                                 </div>
                             </div>
                             
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">SHIPPING CHARGE (¥):</label>
-                                <div style="display: flex; align-items: center;">
-                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
-                                    <input type="number" id="shippingCharge" value="0" min="0" step="1" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div class="cnf-cost-field">
+                                <label>SHIPPING CHARGE (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="number" id="shippingCharge" value="0" min="0" step="1">
                                 </div>
                             </div>
                             
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">INSPECTION FEE (¥):</label>
-                                <div style="display: flex; align-items: center;">
-                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
-                                    <input type="number" id="inspectionFee" value="0" min="0" step="1" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div class="cnf-cost-field">
+                                <label>INSPECTION FEE (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="number" id="inspectionFee" value="0" min="0" step="1">
                                 </div>
                             </div>
                             
-                            <div style="margin-bottom: 15px;">
-                                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #374151;">MSC. CHARGES (¥):</label>
-                                <div style="display: flex; align-items: center;">
-                                    <span style="margin-right: 5px; font-weight: bold;">¥</span>
-                                    <input type="number" id="mscCharges" value="0" min="0" step="1" style="flex: 1; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <div class="cnf-cost-field">
+                                <label>MSC. CHARGES (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="number" id="mscCharges" value="0" min="0" step="1">
                                 </div>
                             </div>
                         </div>
                     </div>
                     
                     <!-- Total Calculations -->
-                    <div style="text-align: center; margin-top: 20px; padding-top: 20px; border-top: 2px solid #e5e7eb;">
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start;">
+                    <div class="cnf-totals">
+                        <div class="cnf-totals-grid">
                             <!-- Total C&F/FOB Price -->
-                            <div>
-                                <label id="totalPriceLabel" style="display: block; margin-bottom: 10px; font-weight: 600; color: #374151; font-size: 16px;">$totalPriceLabel</label>
-                                <div id="totalCnfPrice" style="font-size: 20px; font-weight: bold; color: #059669; background-color: #f0fdf4; padding: 15px; border-radius: 8px; border: 2px solid #22c55e; display: inline-block; min-width: 200px;">0</div>
+                            <div class="cnf-total-box">
+                                <label id="totalPriceLabel">$totalPriceLabel</label>
+                                <div id="totalCnfPrice" class="cnf-total-value green">0</div>
                             </div>
                             
                             <!-- Total Expense -->
-                            <div>
-                                <label style="display: block; margin-bottom: 10px; font-weight: 600; color: #374151; font-size: 16px;">TOTAL EXPENSE (¥):</label>
-                                <div id="totalExpense" style="font-size: 20px; font-weight: bold; color: #dc2626; background-color: #fef2f2; padding: 15px; border-radius: 8px; border: 2px solid #ef4444; display: inline-block; min-width: 200px;">0</div>
+                            <div class="cnf-total-box">
+                                <label>TOTAL EXPENSE (¥):</label>
+                                <div id="totalExpense" class="cnf-total-value red">0</div>
                             </div>
                         </div>
                     </div>
                     
                     <!-- Action Buttons -->
-                    <div style="display: flex; justify-content: center; gap: 15px; margin-top: 20px; flex-wrap: wrap;">
-                        <button id="saveCarCostsBtn" style="padding: 12px 32px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">SAVE</button>
-                        <button id="previewPdfBtn" style="padding: 12px 32px; background-color: #8b5cf6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
+                    <div class="cnf-action-buttons">
+                        <button id="saveCarCostsBtn" class="cnf-btn cnf-btn-save">SAVE</button>
+                        <button id="previewPdfBtn" class="cnf-btn cnf-btn-preview">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                                 <circle cx="12" cy="12" r="3"></circle>
                             </svg>
                             PREVIEW
                         </button>
-                        <button id="downloadPdfBtn" style="padding: 12px 32px; background-color: #3b82f6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500; display: flex; align-items: center; gap: 6px;">
+                        <button id="downloadPdfBtn" class="cnf-btn cnf-btn-download">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                 <polyline points="14,2 14,8 20,8"></polyline>
@@ -195,7 +195,7 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                             </svg>
                             DOWNLOAD PDF
                         </button>
-                        <button id="confirmCarCostsBtn" style="padding: 12px 32px; background-color: #059669; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">FINISH</button>
+                        <button id="confirmCarCostsBtn" class="cnf-btn cnf-btn-finish">FINISH</button>
                     </div>
                 </div>
             </div>

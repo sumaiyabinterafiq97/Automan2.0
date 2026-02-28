@@ -42,9 +42,6 @@ data class Purchase(
     @Column(name = "color")
     val color: String? = null,
     
-    @Column(name = "displacement")
-    val displacement: String? = null,
-    
     @Column(name = "fuel")
     val fuel: String? = null,
     
@@ -65,9 +62,6 @@ data class Purchase(
     
     @Column(name = "shift")
     val shift: String? = null,
-    
-    @Column(name = "steering_wheel")
-    val steeringWheel: String? = null,
     
     @Column(name = "WD")
     val wd: String? = null,
@@ -188,9 +182,6 @@ data class Purchase(
     
     @Column(name = "profit")
     val profit: java.math.BigDecimal? = null,
-    
-    @Column(name = "package_price")
-    val packagePrice: String? = null,
     
     @Column(name = "is_package_mode")
     val isPackageMode: Boolean? = null,

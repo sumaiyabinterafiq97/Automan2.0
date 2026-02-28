@@ -83,6 +83,71 @@ fun extractNumericFromDbValue(value: dynamic): String {
     return str.replace(Regex("Â¥"), "").replace(Regex("[¥,\\s]"), "").replace(Regex("[^0-9.]"), "")
 }
 
+/**
+ * Device Detection Utilities for Responsive Design
+ */
+
+/**
+ * Get current device type based on window width
+ * @return "mobile", "tablet", or "desktop"
+ */
+fun getDeviceType(): String {
+    val width = window.innerWidth
+    return when {
+        width <= AppConstants.MOBILE_MAX_WIDTH -> "mobile"
+        width <= AppConstants.TABLET_MAX_WIDTH -> "tablet"
+        else -> "desktop"
+    }
+}
+
+/**
+ * Get maximum columns allowed for current device
+ * @return Maximum number of columns (4 for mobile, 6 for tablet, 9 for desktop)
+ */
+fun getMaxColumnsForDevice(deviceType: String? = null): Int {
+    val device = deviceType ?: getDeviceType()
+    return when (device) {
+        "mobile" -> AppConstants.MOBILE_MAX_COLUMNS
+        "tablet" -> AppConstants.TABLET_MAX_COLUMNS
+        "desktop" -> AppConstants.DESKTOP_MAX_COLUMNS
+        else -> AppConstants.DESKTOP_MAX_COLUMNS
+    }
+}
+
+/**
+ * Get default columns for a specific device type
+ * @param deviceType Device type ("mobile", "tablet", or "desktop")
+ * @return List of default column keys for the device
+ */
+fun getDefaultColumnsForDevice(deviceType: String? = null): List<String> {
+    val device = deviceType ?: getDeviceType()
+    return when (device) {
+        "mobile" -> listOf("date", "chassis", "carName", "price")
+        "tablet" -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "price")
+        "desktop" -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany", "price", "brand")
+        else -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany", "price")
+    }
+}
+
+/**
+ * Auto-adjust columns when device changes
+ * If saved columns exceed device limit, replace with device defaults
+ * @return Adjusted list of columns
+ */
+fun autoAdjustColumnsForDevice(savedColumns: List<String>, deviceType: String? = null): List<String> {
+    val device = deviceType ?: getDeviceType()
+    val maxColumns = getMaxColumnsForDevice(device)
+    val defaultColumns = getDefaultColumnsForDevice(device)
+    
+    return if (savedColumns.size > maxColumns) {
+        // If saved columns exceed limit, use device defaults
+        defaultColumns
+    } else {
+        // If within limit, keep user's selection (but ensure it's valid)
+        savedColumns.filter { it.isNotBlank() }.take(maxColumns)
+    }
+}
+
 // Helper function to safely extract numeric value from text fields with suffixes (CC, WD, km)
 fun extractNumericFromSuffixedValue(value: dynamic): String {
     if (value == null || value == js("undefined")) return ""

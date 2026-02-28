@@ -69,6 +69,24 @@ class PurchaseController(
         return ResponseEntity.ok(stockLocations)
     }
     
+    @GetMapping("/rixo-companies")
+    fun getRixoCompanies(): ResponseEntity<List<String>> {
+        val companies = purchaseService.getUniqueRixoCompanies()
+        return ResponseEntity.ok(companies)
+    }
+    
+    @GetMapping("/repair-companies")
+    fun getRepairCompanies(): ResponseEntity<List<String>> {
+        val companies = purchaseService.getUniqueRepairCompanies()
+        return ResponseEntity.ok(companies)
+    }
+    
+    @GetMapping("/venue-ids")
+    fun getVenueIds(): ResponseEntity<List<String>> {
+        val venueIds = purchaseService.getUniqueVenueIds()
+        return ResponseEntity.ok(venueIds)
+    }
+    
     @GetMapping("/filtered-chassis")
     fun getFilteredChassis(
         @RequestParam country: String,
@@ -99,15 +117,14 @@ class PurchaseController(
             val repairFee = (costData["repairFee"] as? Number)?.toDouble() ?: 0.0
             val mscCharges = (costData["mscCharges"] as? Number)?.toDouble() ?: 0.0
             val profit = (costData["profit"] as? Number)?.toDouble() ?: 0.0
-            val packagePrice = (costData["packagePrice"] as? Number)?.toDouble() ?: 0.0
             val isPackageMode = costData["isPackageMode"] as? Boolean ?: false
             
-            Logger.debug("Received package data - packagePrice: $packagePrice, isPackageMode: $isPackageMode")
+            Logger.debug("Received cost data - isPackageMode: $isPackageMode")
             Logger.debug("Full costData: $costData")
             
             purchaseService.saveCarCostDetails(
                 chassis, carPrice, auctionFee, rixoPrice, shippingCharge, 
-                freight, inspectionFee, repairFee, mscCharges, profit, packagePrice, isPackageMode
+                freight, inspectionFee, repairFee, mscCharges, profit, isPackageMode
             )
             
             ResponseEntity.ok(mapOf("message" to "Car cost details saved successfully", "chassis" to chassis))
@@ -278,17 +295,26 @@ class PurchaseController(
     
     
     @PutMapping("/{id}")
-    fun updatePurchase(@PathVariable id: Long, @RequestBody updateData: Map<String, Any>): ResponseEntity<Purchase> {
+    fun updatePurchase(@PathVariable id: Long, @RequestBody updateData: Map<String, Any>): ResponseEntity<Any> {
         Logger.debug("[Controller] Updating purchase ID: $id")
         Logger.debug("[Controller] Update data keys: ${updateData.keys}")
+        Logger.debug("[Controller] Update data values: $updateData")
         
-        val updatedPurchase = purchaseService.updatePurchasePartial(id, updateData)
-        return if (updatedPurchase != null) {
-            Logger.debug("[Controller] Purchase updated successfully - shipmentDate: ${updatedPurchase.shipmentDate}, bookingId: ${updatedPurchase.bookingId}, vessel: ${updatedPurchase.vessel}, totalCnfPrice: ${updatedPurchase.totalCnfPrice}")
-            ResponseEntity.ok(updatedPurchase)
-        } else {
-            Logger.error("[Controller] Purchase not found or update failed")
-            ResponseEntity.notFound().build()
+        return try {
+            val updatedPurchase = purchaseService.updatePurchasePartial(id, updateData)
+            if (updatedPurchase != null) {
+                Logger.debug("[Controller] Purchase updated successfully - shipmentDate: ${updatedPurchase.shipmentDate}, bookingId: ${updatedPurchase.bookingId}, vessel: ${updatedPurchase.vessel}, totalCnfPrice: ${updatedPurchase.totalCnfPrice}, auctionHouse: ${updatedPurchase.auctionHouse}")
+                ResponseEntity.ok(updatedPurchase)
+            } else {
+                Logger.error("[Controller] Purchase not found or update failed")
+                ResponseEntity.status(404).body(mapOf("error" to "Purchase with ID $id not found"))
+            }
+        } catch (e: IllegalArgumentException) {
+            Logger.error("[Controller] Validation error updating purchase: ${e.message}", e)
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Validation error: ${e.javaClass.simpleName}")))
+        } catch (e: Exception) {
+            Logger.error("[Controller] Error updating purchase: ${e.message}", e)
+            ResponseEntity.status(500).body(mapOf("error" to "Failed to update purchase: ${e.message ?: e.javaClass.simpleName}"))
         }
     }
     

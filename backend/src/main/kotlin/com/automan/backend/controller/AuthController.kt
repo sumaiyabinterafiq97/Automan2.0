@@ -33,37 +33,56 @@ class AuthController(
     @PostMapping("/signup")
     fun signup(@RequestBody body: SignupDto): ResponseEntity<Map<String, Any>> {
         return try {
-            val userCount = authService.getUserCount()
-            
-            // If this is the first user, automatically make them ADMIN
-            val userRole = if (userCount == 0L) {
-                UserRole.ADMIN
-            } else {
-                // Allow users to select their role during signup
-                try {
-                    UserRole.valueOf(body.role.uppercase())
-                } catch (e: IllegalArgumentException) {
-                    return ResponseEntity.badRequest().body(mapOf(
-                        "success" to false,
-                        "message" to "Invalid role. Please select a valid role."
-                    ))
-                }
+            val userRole = try {
+                UserRole.valueOf(body.role.uppercase())
+            } catch (e: IllegalArgumentException) {
+                return ResponseEntity.badRequest().body(mapOf(
+                    "success" to false,
+                    "message" to "Invalid role. Please select a valid role."
+                ))
             }
-            
-            val result = authService.signup(
-                SignupRequest(
-                    email = body.email,
-                    name = body.name,
-                    password = body.password,
-                    role = userRole,
-                    createdByRole = null // For now, no authentication middleware - will be VIEWER level
-                )
-            )
-            
+            authService.signupPending(body.email, body.name, body.password, userRole)
             ResponseEntity.ok(mapOf(
                 "success" to true,
-                "message" to "User created successfully",
-                "data" to result
+                "message" to "Registration submitted. You will receive an email once an admin approves your account."
+            ))
+        } catch (e: Exception) {
+            ResponseEntity.badRequest().body(mapOf(
+                "success" to false,
+                "message" to (e.message ?: "Unknown error")
+            ))
+        }
+    }
+
+    @GetMapping("/check-email")
+    fun checkEmail(@RequestParam email: String): ResponseEntity<Map<String, Any>> {
+        val exists = authService.emailExists(email)
+        return ResponseEntity.ok(mapOf("exists" to exists))
+    }
+
+    @GetMapping("/pending-signups")
+    fun listPendingSignups(): ResponseEntity<Map<String, Any>> {
+        val list = authService.listPendingSignups()
+        return ResponseEntity.ok(mapOf("data" to list))
+    }
+
+    @GetMapping("/verify-signup")
+    fun verifySignup(
+        @RequestParam token: String,
+        @RequestParam action: String
+    ): ResponseEntity<Map<String, Any>> {
+        return try {
+            when (action.lowercase()) {
+                "approve" -> authService.approvePending(token)
+                "reject" -> authService.rejectPending(token)
+                else -> return ResponseEntity.badRequest().body(mapOf(
+                    "success" to false,
+                    "message" to "Invalid action. Use approve or reject."
+                ))
+            }
+            ResponseEntity.ok(mapOf(
+                "success" to true,
+                "message" to if (action.lowercase() == "approve") "User approved. They have been notified by email." else "Signup request rejected. The user has been notified."
             ))
         } catch (e: Exception) {
             ResponseEntity.badRequest().body(mapOf(
@@ -104,7 +123,7 @@ class AuthController(
         
         
         // Create first ADMIN user
-        val result = authService.signup(
+        authService.signup(
             SignupRequest(
                 email = body.email,
                 name = body.name,

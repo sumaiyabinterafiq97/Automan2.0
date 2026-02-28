@@ -74,3 +74,21 @@ tasks.named("jsBrowserDevelopmentWebpack") {
         }
     }
 }
+
+// Ensure production build gets latest index.html and styles.css (for Docker / version updates)
+tasks.named("jsBrowserProductionWebpack") {
+    doLast {
+        val targetDir = file("build/dist/js/productionExecutable")
+        val resourcesDir = file("src/jsMain/resources")
+        if (resourcesDir.exists()) {
+            targetDir.mkdirs()
+            listOf("index.html", "styles.css", "rixo-price-mapping.js", "booking-mapping.js", "booking-mapping-modal.js").forEach { name ->
+                val f = resourcesDir.resolve(name)
+                if (f.exists()) {
+                    f.copyTo(targetDir.resolve(name), overwrite = true)
+                    println("✅ Copied $name to productionExecutable")
+                }
+            }
+        }
+    }
+}

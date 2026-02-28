@@ -188,7 +188,8 @@ class PdfService {
                 .add(Text("E-Mail: ").setBold()).add("memonco@ymail.com\n")
                 .add(Text("CONSIGNEE").setBold())
                 .add("\n${invoiceData["consignee"] ?: ""}")
-                .setFontSize(10f))
+                .setFontSize(10f)
+                .setFixedLeading(12f)) // Tighter line spacing
             .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
             .setPadding(0f)
         mainTable.addCell(leftCell)
@@ -310,7 +311,7 @@ class PdfService {
         // Add title with 陸送 on upper left, KLC in center, 様 on upper right, and date on upper right
         val titleTable = Table(UnitValue.createPercentArray(floatArrayOf(25f, 25f, 25f, 25f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginBottom(20f)
+            .setMarginBottom(10f) // Reduced from 20f to 10f
         
         // 陸送 on upper left
         titleTable.addCell(createTitleCell("陸送", japaneseFont))
@@ -347,20 +348,22 @@ class PdfService {
         val thankYou = Paragraph("いつもお世話になっております。")
             .setFont(japaneseFont)
             .setFontSize(10f)
-            .setMarginBottom(5f)
+            .setFixedLeading(12f) // Tighter line spacing
+            .setMarginBottom(2f) // Reduced margin
         document.add(thankYou)
 
         val request = Paragraph("下記の車両の陸送手配をお願いいたします。")
             .setFont(japaneseFont)
             .setFontSize(10f)
-            .setMarginBottom(20f)
+            .setFixedLeading(12f) // Tighter line spacing
+            .setMarginBottom(10f) // Reduced from 20f to 10f
         document.add(request)
 
         // Create table for vehicle data with Japanese headers
         // Column widths: 日付 (12f), 出品番号 (7f), 型式・車体番号 (14f), 年式 (12f), 車名 (9f), 取引先名 (9f), 搬入先名 (10f), 会場ID (14f), ナンバーカット (13f)
         val table = Table(UnitValue.createPercentArray(floatArrayOf(12f, 7f, 14f, 12f, 9f, 9f, 10f, 14f, 13f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginBottom(20f)
+            .setMarginBottom(10f) // Reduced from 20f to 10f
             .setKeepTogether(false) // Allow table to break across pages for many vehicles
 
         // Add table headers in Japanese
@@ -430,14 +433,15 @@ class PdfService {
         val extraMessage = transportData["extraMessage"]?.takeIf { it.isNotBlank() }
         val totalTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginBottom(20f)
+            .setMarginBottom(8f) // Reduced from 20f to 8f
         
         // Extra message on the left side (if provided), otherwise empty
         val leftCell = if (extraMessage != null) {
             Cell()
                 .add(Paragraph(extraMessage)
                     .setFont(japaneseFont)
-                    .setFontSize(9f))
+                    .setFontSize(9f)
+                    .setFixedLeading(11f)) // Tighter line spacing
                 .setPadding(8f)
                 .setTextAlignment(TextAlignment.LEFT)
                 .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
@@ -456,7 +460,8 @@ class PdfService {
         val totalCell = Cell()
             .add(Paragraph("合計 ${purchases.size} 台")
                 .setFont(japaneseFont)
-                .setFontSize(10f))
+                .setFontSize(10f)
+                .setFixedLeading(12f)) // Tighter line spacing
             .setPadding(8f)
             .setTextAlignment(TextAlignment.LEFT)
             .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
@@ -474,14 +479,15 @@ class PdfService {
             val footerParagraph = Paragraph(line.trim())
                 .setFont(japaneseFont)
                 .setFontSize(9f)
-                .setMarginBottom(if (index < footerLines.size - 1) 5f else 20f)
+                .setFixedLeading(11f) // Tighter line spacing
+                .setMarginBottom(if (index < footerLines.size - 1) 2f else 8f) // Reduced margins
             document.add(footerParagraph)
         }
 
         // Add contact information in Japanese positioned in lower right
         val contactTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginTop(30f)
+            .setMarginTop(10f) // Reduced from 30f to 10f
         
         // Empty cell on the left (invisible box)
         val contactEmptyCell = Cell()
@@ -492,15 +498,14 @@ class PdfService {
             .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
         contactTable.addCell(contactEmptyCell)
         
-        // Contact info on the right side with line gaps before 有限会社メモン
+        // Contact info on the right side with minimal spacing before 有限会社メモン
         val contactCell = Cell()
             .add(Paragraph()
                 .add(Text("担当：芽紋 080-3918-1478\n").setFont(japaneseFont))
                 .add(Text("FAX: 047-711-0409\n").setFont(japaneseFont))
-                .add(Text("\n").setFont(japaneseFont)) // Line gap
-                .add(Text("\n").setFont(japaneseFont)) // Another line gap
                 .add(Text("有限会社メモン").setFont(japaneseFont).setBold()) // Make company name bold
-                .setFontSize(9f))
+                .setFontSize(9f)
+                .setFixedLeading(11f)) // Tighter line spacing, removed extra newlines
             .setPadding(8f)
             .setTextAlignment(TextAlignment.LEFT)
             .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
@@ -517,22 +522,17 @@ class PdfService {
         if (font != null) {
             paragraph.setFont(font)
         }
+        // Reduce line spacing for tighter text
+        paragraph.setFixedLeading(11f) // Line height = font size + 2pt
         val cell = Cell()
             .add(paragraph)
             .setPadding(8f)
             .setTextAlignment(TextAlignment.LEFT)
             .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
         
-        // Add borders based on content
-        if (text.isNotBlank()) {
-            // Black borders for cells with content
-            cell.setBorder(com.itextpdf.layout.borders.SolidBorder(
-                com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-        } else {
-            // White borders for empty cells (maintains structure but less visible)
-            cell.setBorder(com.itextpdf.layout.borders.SolidBorder(
-                com.itextpdf.kernel.colors.ColorConstants.WHITE, 1f))
-        }
+        // Always use black borders for all cells (including empty ones) to maintain table structure
+        cell.setBorder(com.itextpdf.layout.borders.SolidBorder(
+            com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
         
         return cell
     }
@@ -542,6 +542,8 @@ class PdfService {
         if (font != null) {
             paragraph.setFont(font)
         }
+        // Reduce line spacing for tighter text
+        paragraph.setFixedLeading(11f) // Line height = font size + 2pt
         return Cell()
             .add(paragraph)
             .setPadding(8f)

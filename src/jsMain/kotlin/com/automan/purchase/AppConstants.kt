@@ -60,4 +60,13 @@ object AppConstants {
     // Pagination
     const val DEFAULT_PAGE_NUMBER = 1
     const val MAX_PAGE_SIZE = 100
+    
+    // Device breakpoints (pixels)
+    const val MOBILE_MAX_WIDTH = 767
+    const val TABLET_MAX_WIDTH = 1024
+    
+    // Column limits per device
+    const val MOBILE_MAX_COLUMNS = 4
+    const val TABLET_MAX_COLUMNS = 6
+    const val DESKTOP_MAX_COLUMNS = 9
 }

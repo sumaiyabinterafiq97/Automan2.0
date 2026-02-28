@@ -10,7 +10,6 @@ data class Purchase(
     val grade: String? = null,
     val rank: String? = null,
     val color: String? = null,
-    val displacement: String? = null,
     val fuel: String? = null,
     val seat: String? = null,
     val door: String? = null,

@@ -2838,7 +2838,7 @@ window.triggerAutoSelection = function(auctionName) {
         const typeSelect = document.getElementById('typeOfVehicle');
         if (typeSelect) {
             typeSelect.value = auctionData.typeOfVehicle[0];
-            console.log('✅ Auto-selected Type of Vehicle:', auctionData.typeOfVehicle[0]);
+            console.log('✅ Auto-selected Vehicle type:', auctionData.typeOfVehicle[0]);
             typeSelect.dispatchEvent(new Event('change', { bubbles: true }));
         }
     }
@@ -3187,7 +3187,7 @@ window.displayCurrentMappings = function(mappings) {
     // Build table header + rows
     const headerHtml = `
         <div class="mapping-item mapping-header">
-            <div class="mapping-field"><strong>Shipment Size</strong></div>
+            <div class="mapping-field"><strong>Vehicle type</strong></div>
             <div class="mapping-field"><strong>Stock Location</strong></div>
             <div class="mapping-field"><strong>Rixo Company</strong></div>
             <div class="mapping-field"><strong>Price</strong></div>

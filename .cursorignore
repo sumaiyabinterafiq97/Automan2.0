@@ -1,0 +1,19 @@
+# Cursor ignore file - prevents Cursor from indexing/watching these
+**/build/
+**/target/
+**/.gradle/
+**/kotlin-js-store/
+**/*.jar
+**/*.war
+**/*.ear
+**/*.zip
+**/*.tar
+**/*.tar.gz
+**/*.otf
+**/*.ttf
+**/*.woff
+**/*.woff2
+**/.DS_Store
+**/._*
+**/.git/objects/
+**/node_modules/

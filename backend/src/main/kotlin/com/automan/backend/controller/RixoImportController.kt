@@ -220,14 +220,19 @@ class RixoImportController(
                 ))
             }
             
+            // Stock Location and Rixo Company are NOT NULL in database, so provide defaults if empty
+            val finalStockLocation = stockLocation?.takeIf { it.isNotBlank() } ?: "-"
+            val finalRixoCompany = rixoCompany?.takeIf { it.isNotBlank() } ?: "-"
+            
             // Use service method that handles auction_house properly
+            // Convert empty strings to null for nullable fields to avoid database constraint issues
             val savedMapping = rixoImportService.saveRixoPriceWithAuctionHouse(
                 auctionHouse = auctionHouse.trim(),
-                shipmentSize = vehicleType,
-                stockLocation = stockLocation ?: "",
-                rixoCompany = rixoCompany ?: "",
-                rixoPrice = rixoPrice,
-                venueId = venueId
+                shipmentSize = vehicleType?.takeIf { it.isNotBlank() },
+                stockLocation = finalStockLocation,
+                rixoCompany = finalRixoCompany,
+                rixoPrice = rixoPrice?.takeIf { it.isNotBlank() },
+                venueId = venueId?.takeIf { it.isNotBlank() }
             )
             
             ResponseEntity.ok(mapOf(
@@ -237,10 +242,14 @@ class RixoImportController(
             ))
         } catch (e: Exception) {
             e.printStackTrace()
+            var cause: Throwable? = e
+            while (cause?.cause != null) { cause = cause.cause }
+            val rootMessage = cause?.message ?: e.message
             ResponseEntity.badRequest().body(mapOf(
                 "success" to false,
                 "message" to "Failed to add mapping: ${e.message}",
-                "error" to e.javaClass.simpleName
+                "error" to e.javaClass.simpleName,
+                "rootCause" to (rootMessage?.take(500) ?: "")
             ))
         }
     }

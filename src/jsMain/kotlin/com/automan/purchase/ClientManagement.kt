@@ -17,18 +17,20 @@ import kotlinx.coroutines.launch
 fun showClientDetailsPage(clientId: Long) {
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div style="border: 1px solid #e9ecef; border-radius: 4px; padding: 20px;">
-            <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom: 16px;">
-                <h2 style="margin:0;">Client Details</h2>
-                <div>
-                    <button id="exportClientTxBtn" style="padding: 8px 14px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 8px;">Export Data</button>
-                    <button id="backToClientsBtn" style="padding: 8px 14px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Back to Clients</button>
+        <div class="client-details-container">
+            <div class="client-details-card">
+                <div class="client-details-header">
+                    <h2>Client Details</h2>
+                    <div class="client-details-actions">
+                        <button id="exportClientTxBtn" class="client-btn client-btn-info">Export Data</button>
+                        <button id="backToClientsBtn" class="client-btn client-btn-secondary">Back to Clients</button>
+                    </div>
                 </div>
-            </div>
-            <div id="clientDetailsContent"></div>
-            <div id="clientEventsTable" style="margin-top: 20px;">
-                <div style="text-align: center; color: #666; padding: 20px;">
-                    Loading transactions...
+                <div id="clientDetailsContent"></div>
+                <div id="clientEventsTable" class="client-transactions-section">
+                    <div style="text-align: center; color: #666; padding: 20px;">
+                        Loading transactions...
+                    </div>
                 </div>
             </div>
         </div>
@@ -51,42 +53,38 @@ fun showClientAccountsPage() {
     val isMasterList = window.location.hash.startsWith("#/master/clients")
     val pageTitle = if (isMasterList) "Clients" else "Client Accounts Management"
     content.innerHTML = """
-        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 20px;">
-            <h2>$pageTitle</h2>
-            <div style="margin-bottom: 20px;">
-                <button id="addClientBtn" style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">Add New Client</button>
-                <button id="clientAlertsBtn" style="padding: 10px 20px; background-color: #ffc107; color: black; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">View Alerts</button>
-                <button id="exportClientsBtn" style="padding: 10px 20px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;">Export Data</button>
-            </div>
-            
-            
-            <!-- Client Alerts Section -->
-            <div id="clientAlertsSection" style="display: none; margin-bottom: 30px; border: 1px solid #ffc107; border-radius: 4px; padding: 20px; background-color: #fffbf0;">
-                <h3 style="color: #856404; margin-top: 0;">Client Alerts</h3>
-                <div id="clientAlertsTable">
-                    <div style="text-align: center; color: #666; padding: 20px;">
-                        Loading client alerts...
+        <div class="client-page-container">
+            <div class="client-page-card">
+                <div class="client-page-header">
+                    <h2>$pageTitle</h2>
+                    <div class="client-action-buttons">
+                        <button id="addClientBtn" class="client-btn client-btn-primary">Add New Client</button>
+                        <button id="clientAlertsBtn" class="client-btn client-btn-warning">View Alerts</button>
+                        <button id="exportClientsBtn" class="client-btn client-btn-info">Export Data</button>
                     </div>
                 </div>
-            </div>
-            
-            <!-- Client Accounts Section -->
-            <div id="clientAccountsSection">
-                <div style="display: grid; grid-template-columns: 1fr; gap: 20px;">
-                    <!-- Client List (Left Side) -->
-                    <div style="border: 1px solid #e9ecef; border-radius: 4px; padding: 20px;">
-                        <h3>Client List</h3>
-                        <div style="margin-bottom: 15px;">
-                            <input id="clientSearchInput" type="text" placeholder="Search clients..." 
-                                   style="width: 100%; padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
-                        </div>
-                        <div id="clientListTable" style="max-height: 400px; overflow-y: auto;">
-                            <div style="text-align: center; color: #666; padding: 20px;">
-                                Loading clients...
-                            </div>
+                
+                <!-- Client Alerts Section -->
+                <div id="clientAlertsSection" class="client-alerts-section">
+                    <h3>Client Alerts</h3>
+                    <div id="clientAlertsTable">
+                        <div style="text-align: center; color: #666; padding: 20px;">
+                            Loading client alerts...
                         </div>
                     </div>
-                    
+                </div>
+                
+                <!-- Client List Section -->
+                <div class="client-list-section">
+                    <h3>Client List</h3>
+                    <div class="client-search-container">
+                        <input id="clientSearchInput" type="text" placeholder="Search clients..." class="client-search-input">
+                    </div>
+                    <div id="clientListTable" class="client-list-container">
+                        <div style="text-align: center; color: #666; padding: 20px;">
+                            Loading clients...
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -171,30 +169,27 @@ fun displayClients(clients: dynamic) {
         }
         
         """
-        <div class="client-item" style="border: 1px solid #e9ecef; border-radius: 4px; padding: 15px; margin-bottom: 10px; transition: background-color 0.2s; $alertStyle" 
-             onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='white'">
-            <div style="display: flex; align-items: center; gap: 15px;">
+        <div class="client-item" style="$alertStyle">
+            <div class="client-item-content">
                 <!-- Edit Button -->
                 <button onclick="event.stopPropagation(); window.editClientFromList(${client.id})" 
-                        style="background: #007bff; border: none; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"
-                        onmouseover="this.style.background='#0056b3'; this.style.transform='scale(1.05)'" 
-                        onmouseout="this.style.background='#007bff'; this.style.transform='scale(1)'"
+                        class="client-edit-btn"
                         title="Edit Client">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="white">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
                         <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
                     </svg>
                 </button>
                 
                 <!-- Client Info (clickable for details) -->
-                <div style="flex: 1; cursor: pointer;" onclick="window.location.hash='#/client/${client.id}'">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="client-info" onclick="window.location.hash='#/client/${client.id}'">
+                    <div class="client-info-row">
                         <div>
-                            <div style="font-weight: bold; color: #333; margin-bottom: 5px;">$alertIcon ${client.clientName}</div>
-                            <div style="font-size: 12px; color: #666;">#${client.clientNumber}</div>
+                            <div class="client-name">$alertIcon ${client.clientName}</div>
+                            <div class="client-number">#${client.clientNumber}</div>
                         </div>
-                        <div style="text-align: right;">
-                            <div style="font-weight: bold; color: $balanceColor;">$balanceText</div>
-                            <div style="font-size: 12px; color: #666;">${client.status}</div>
+                        <div>
+                            <div class="client-balance" style="color: $balanceColor;">$balanceText</div>
+                            <div class="client-status">${client.status}</div>
                         </div>
                     </div>
                 </div>
@@ -265,22 +260,20 @@ fun displayClientDetails(client: ClientResponse) {
     val balanceText = if (balance < 0) "¥${kotlin.math.abs(balance).toInt()}" else if (balance > 0) "+¥${balance.toInt()}" else "¥0"
     
     clientDetailsContent.innerHTML = """
-        <div style="margin-bottom: 20px;">
-            <h4 style="margin: 0 0 10px 0; color: #333;">${client.clientName}</h4>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
-                <div><strong>Client #:</strong> ${client.clientNumber}</div>
-                <div><strong>Status:</strong> ${client.status ?: "N/A"}</div>
-                <div><strong>Phone:</strong> ${client.phone ?: "N/A"}</div>
-                <div><strong>Currency:</strong> ${client.currency ?: "JPY"}</div>
+        <div class="client-info-card">
+            <h4 class="client-info-name">${client.clientName}</h4>
+            <div class="client-info-grid">
+                <div class="client-info-item"><strong>Client #:</strong> ${client.clientNumber}</div>
+                <div class="client-info-item"><strong>Status:</strong> ${client.status ?: "N/A"}</div>
+                <div class="client-info-item"><strong>Phone:</strong> ${client.phone ?: "N/A"}</div>
+                <div class="client-info-item"><strong>Currency:</strong> ${client.currency ?: "JPY"}</div>
             </div>
-            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 15px;">
-                <div style="text-align: center;">
-                    <div id="currentBalanceValue" style="font-size: 24px; font-weight: bold; color: $balanceColor; margin-bottom: 5px;">$balanceText</div>
-                    <div style="color: #666;">Current Balance</div>
-                </div>
+            <div class="client-balance-card">
+                <div id="currentBalanceValue" class="client-balance-amount" style="color: $balanceColor;">$balanceText</div>
+                <div class="client-balance-label">Current Balance</div>
             </div>
-            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                <button onclick="addClientTransaction(${client.id})" style="padding: 8px 16px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Add Transaction</button>
+            <div class="client-action-buttons">
+                <button onclick="addClientTransaction(${client.id})" class="client-btn client-btn-success">Add Transaction</button>
             </div>
         </div>
     """
@@ -320,6 +313,7 @@ fun displayClientEvents(events: dynamic) {
     
     if (js("Array.isArray(events)") as Boolean && (events as Array<dynamic>).isEmpty()) {
         clientEventsTable.innerHTML = """
+            <h3>Transactions</h3>
             <div style="text-align: center; color: #666; padding: 20px;">
                 No transactions found
             </div>
@@ -354,38 +348,88 @@ fun displayClientEvents(events: dynamic) {
         val balanceText = if (balance < 0) "¥${kotlin.math.abs(balance).toInt()}" else if (balance > 0) "+¥${balance.toInt()}" else "¥0"
         
         """
-        <tr style="border-bottom: 1px solid #f1f3f4; transition: background-color 0.2s;" 
-            onmouseover="this.style.backgroundColor='#f8f9fa'" 
-            onmouseout="this.style.backgroundColor='white'">
-            <td style="padding: 12px;">${event.eventDate}</td>
-            <td style="padding: 12px;">${event.eventDescription}</td>
-            <td style="padding: 12px; text-align: right;">$qtyText</td>
-            <td style="padding: 12px;">${event.billNumber ?: ""}</td>
-            <td style="padding: 12px; text-align: right; color: $tPriceColor;">${fmtAmount(tPrice)}</td>
-            <td style="padding: 12px; text-align: right; color: $paymentColor;">${fmtAmount(payment)}</td>
-            <td style="padding: 12px; text-align: right; color: $balanceColor; font-weight: bold;">$balanceText</td>
+        <tr>
+            <td>${event.eventDate}</td>
+            <td>${event.eventDescription}</td>
+            <td style="text-align: right;">$qtyText</td>
+            <td>${event.billNumber ?: ""}</td>
+            <td style="text-align: right; color: $tPriceColor;">${fmtAmount(tPrice)}</td>
+            <td style="text-align: right; color: $paymentColor;">${fmtAmount(payment)}</td>
+            <td style="text-align: right; color: $balanceColor; font-weight: bold;">$balanceText</td>
         </tr>
         """
     }.joinToString("")
     
+    // Mobile cards HTML
+    val cardsHtml = eventsArray.map { event ->
+        val qtyRaw = event.quantity
+        val qty = if (qtyRaw != null) (qtyRaw as Number).toInt() else null
+        val qtyText = if (qty != null) "${qty} UNITS" else "-"
+        val tPrice = event.transactionPrice
+        val payment = event.paymentReceived
+        val balance = (event.runningBalance as Number).toDouble()
+        val tPriceColor = if (tPrice != null) {
+            val v = (tPrice as Number).toDouble()
+            if (v < 0) "#e74c3c" else if (v > 0) "#27ae60" else "#666"
+        } else "#666"
+        val paymentColor = if (payment != null) {
+            val v = (payment as Number).toDouble()
+            if (v < 0) "#e74c3c" else if (v > 0) "#27ae60" else "#666"
+        } else "#666"
+        val balanceColor = if (balance < 0) "#e74c3c" else if (balance > 0) "#27ae60" else "#666"
+        val balanceText = if (balance < 0) "¥${kotlin.math.abs(balance).toInt()}" else if (balance > 0) "+¥${balance.toInt()}" else "¥0"
+        
+        """
+        <div class="transaction-card">
+            <div class="transaction-card-header">
+                <span class="transaction-date">${event.eventDate}</span>
+                <span class="transaction-event">${event.eventDescription}</span>
+            </div>
+            <div class="transaction-card-body">
+                <div class="transaction-card-row">
+                    <span class="transaction-card-label">Quantity</span>
+                    <span class="transaction-card-value">$qtyText</span>
+                </div>
+                <div class="transaction-card-row">
+                    <span class="transaction-card-label">Shipment Price</span>
+                    <span class="transaction-card-value" style="color: $tPriceColor;">${fmtAmount(tPrice)}</span>
+                </div>
+                <div class="transaction-card-row">
+                    <span class="transaction-card-label">Payment</span>
+                    <span class="transaction-card-value" style="color: $paymentColor;">${fmtAmount(payment)}</span>
+                </div>
+                <div class="transaction-balance" style="color: $balanceColor;">Balance: $balanceText</div>
+            </div>
+        </div>
+        """
+    }.joinToString("")
+    
     clientEventsTable.innerHTML = """
-        <div style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse;">
+        <h3>Transactions</h3>
+        
+        <!-- Table for Tablet/Desktop -->
+        <div class="transactions-table-container">
+            <table class="transactions-table">
                 <thead>
-                    <tr style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #764ba2; font-weight: 600;">DATE</th>
-                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #764ba2; font-weight: 600;">Event</th>
-                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #764ba2; font-weight: 600;">QUANTITY</th>
-                        <th style="padding: 12px; text-align: left; border-bottom: 2px solid #764ba2; font-weight: 600;">BILL. NO</th>
-                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #764ba2; font-weight: 600;">TOTAL SHIPMENT PRICE</th>
-                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #764ba2; font-weight: 600;">PAYMENT RECEIVED</th>
-                        <th style="padding: 12px; text-align: right; border-bottom: 2px solid #764ba2; font-weight: 600;">TOTAL BALANCE</th>
+                    <tr>
+                        <th>DATE</th>
+                        <th>Event</th>
+                        <th style="text-align: right;">QUANTITY</th>
+                        <th>BILL. NO</th>
+                        <th style="text-align: right;">SHIPMENT PRICE</th>
+                        <th style="text-align: right;">PAYMENT</th>
+                        <th style="text-align: right;">BALANCE</th>
                     </tr>
                 </thead>
                 <tbody>
                     $rowsHtml
                 </tbody>
             </table>
+        </div>
+        
+        <!-- Cards for Mobile -->
+        <div class="transactions-cards-container">
+            $cardsHtml
         </div>
     """
 }
@@ -396,77 +440,68 @@ fun displayClientEvents(events: dynamic) {
 
 fun showAddClientForm() {
     val modalHTML = """
-        <div id="addClientModal" class="modal" style="display: block; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
-            <div class="modal-content" style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 600px; border-radius: 8px;">
-                <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h2 style="margin: 0; color: #333;">Add New Client</h2>
-                    <span class="close" onclick="closeAddClientModal()" style="color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+        <div id="addClientModal" class="client-modal">
+            <div class="client-modal-content">
+                <div class="client-modal-header">
+                    <h2>Add New Client</h2>
+                    <button class="client-modal-close" onclick="closeAddClientModal()">&times;</button>
                 </div>
-                <form id="addClientForm" style="display: flex; flex-direction: column; gap: 15px;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="clientNumber" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Client Number *</label>
+                <form id="addClientForm" class="client-form">
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="clientNumber" class="client-form-label">Client Number *</label>
                             <input type="text" id="clientNumber" name="clientNumber" required 
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   placeholder="e.g., 128">
+                                   class="client-form-input" placeholder="e.g., 128">
                         </div>
-                        <div>
-                            <label for="clientName" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Client Name *</label>
+                        <div class="client-form-field">
+                            <label for="clientName" class="client-form-label">Client Name *</label>
                             <input type="text" id="clientName" name="clientName" required 
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   placeholder="e.g., ABC COMPANY">
+                                   class="client-form-input" placeholder="e.g., ABC COMPANY">
                         </div>
                     </div>
                     
-                    <div>
-                        <label for="address" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Address *</label>
+                    <div class="client-form-field">
+                        <label for="address" class="client-form-label">Address *</label>
                         <input type="text" id="address" name="address" required 
-                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                               placeholder="e.g., Tokyo, Japan">
+                               class="client-form-input" placeholder="e.g., Tokyo, Japan">
                     </div>
                     
-                    <div>
-                        <label for="phone" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Phone *</label>
+                    <div class="client-form-field">
+                        <label for="phone" class="client-form-label">Phone *</label>
                         <input type="text" id="phone" name="phone" required 
-                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                               placeholder="e.g., +81-3-1234-5678">
+                               class="client-form-input" placeholder="e.g., +81-3-1234-5678">
                     </div>
                     
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="currentBalance" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Initial Balance</label>
+                    <div class="client-form-row-3">
+                        <div class="client-form-field">
+                            <label for="currentBalance" class="client-form-label">Initial Balance</label>
                             <input type="number" id="currentBalance" name="currentBalance" step="0.01" value="0.00"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   placeholder="0.00">
+                                   class="client-form-input" placeholder="0.00">
                         </div>
-                        <div>
-                            <label for="creditLimit" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Credit Limit</label>
+                        <div class="client-form-field">
+                            <label for="creditLimit" class="client-form-label">Credit Limit</label>
                             <input type="number" id="creditLimit" name="creditLimit" step="0.01"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   placeholder="e.g., 50000000">
+                                   class="client-form-input" placeholder="e.g., 50000000">
                         </div>
-                        <div>
-                            <label for="alertThreshold" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Alert Threshold</label>
+                        <div class="client-form-field">
+                            <label for="alertThreshold" class="client-form-label">Alert Threshold</label>
                             <input type="number" id="alertThreshold" name="alertThreshold" step="0.01"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   placeholder="e.g., 10000000">
+                                   class="client-form-input" placeholder="e.g., 10000000">
                         </div>
                     </div>
                     
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="currency" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Currency</label>
-                            <select id="currency" name="currency" 
-                                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="currency" class="client-form-label">Currency</label>
+                            <select id="currency" name="currency" class="client-form-select">
                                 <option value="JPY" selected>JPY (Japanese Yen)</option>
                                 <option value="USD">USD (US Dollar)</option>
                                 <option value="EUR">EUR (Euro)</option>
                             </select>
                         </div>
-                        <div>
-                            <label for="status" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Status</label>
-                            <select id="status" name="status" 
-                                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <div class="client-form-field">
+                            <label for="status" class="client-form-label">Status</label>
+                            <select id="status" name="status" class="client-form-select">
                                 <option value="ACTIVE" selected>Active</option>
                                 <option value="SUSPENDED">Suspended</option>
                                 <option value="CLOSED">Closed</option>
@@ -474,13 +509,11 @@ fun showAddClientForm() {
                         </div>
                     </div>
                     
-                    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-                        <button type="button" onclick="closeAddClientModal()" 
-                                style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    <div class="client-modal-actions">
+                        <button type="button" onclick="closeAddClientModal()" class="client-btn client-btn-secondary">
                             Cancel
                         </button>
-                        <button type="submit" 
-                                style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        <button type="submit" class="client-btn client-btn-primary">
                             Add Client
                         </button>
                     </div>
@@ -587,78 +620,69 @@ fun showEditClientForm(client: dynamic) {
     val alertThreshold = (client.alertThreshold as Number?)?.toDouble()
     
     val modalHTML = """
-        <div id="editClientModal" class="modal" style="display: block; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
-            <div class="modal-content" style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 600px; border-radius: 8px;">
-                <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h2 style="margin: 0; color: #333;">Edit Client</h2>
-                    <span class="close" onclick="closeEditClientModal()" style="color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+        <div id="editClientModal" class="client-modal">
+            <div class="client-modal-content">
+                <div class="client-modal-header">
+                    <h2>Edit Client</h2>
+                    <button class="client-modal-close" onclick="closeEditClientModal()">&times;</button>
                 </div>
-                <form id="editClientForm" style="display: flex; flex-direction: column; gap: 15px;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="editClientNumber" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Client Number *</label>
+                <form id="editClientForm" class="client-form">
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="editClientNumber" class="client-form-label">Client Number *</label>
                             <input type="text" id="editClientNumber" name="editClientNumber" required 
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   value="${client.clientNumber}">
+                                   class="client-form-input" value="${client.clientNumber}">
                         </div>
-                        <div>
-                            <label for="editClientName" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Client Name *</label>
+                        <div class="client-form-field">
+                            <label for="editClientName" class="client-form-label">Client Name *</label>
                             <input type="text" id="editClientName" name="editClientName" required 
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   value="${client.clientName}">
+                                   class="client-form-input" value="${client.clientName}">
                         </div>
                     </div>
                     
-                    <div>
-                        <label for="editAddress" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Address *</label>
+                    <div class="client-form-field">
+                        <label for="editAddress" class="client-form-label">Address *</label>
                         <input type="text" id="editAddress" name="editAddress" required 
-                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                               value="${client.address ?: ""}">
+                               class="client-form-input" value="${client.address ?: ""}">
                     </div>
                     
-                    <div>
-                        <label for="editPhone" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Phone *</label>
+                    <div class="client-form-field">
+                        <label for="editPhone" class="client-form-label">Phone *</label>
                         <input type="text" id="editPhone" name="editPhone" required 
-                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                               value="${client.phone ?: ""}">
+                               class="client-form-input" value="${client.phone ?: ""}">
                     </div>
                     
-                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="editCurrentBalance" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Current Balance</label>
+                    <div class="client-form-row-3">
+                        <div class="client-form-field">
+                            <label for="editCurrentBalance" class="client-form-label">Current Balance</label>
                             <input type="number" id="editCurrentBalance" name="editCurrentBalance" step="0.01"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   value="$originalBalance"
+                                   class="client-form-input" value="$originalBalance"
                                    data-original-balance="$originalBalance">
                         </div>
-                        <div>
-                            <label for="editCreditLimit" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Credit Limit</label>
+                        <div class="client-form-field">
+                            <label for="editCreditLimit" class="client-form-label">Credit Limit</label>
                             <input type="number" id="editCreditLimit" name="editCreditLimit" step="0.01"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   value="${creditLimit ?: ""}">
+                                   class="client-form-input" value="${creditLimit ?: ""}">
                         </div>
-                        <div>
-                            <label for="editAlertThreshold" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Alert Threshold</label>
+                        <div class="client-form-field">
+                            <label for="editAlertThreshold" class="client-form-label">Alert Threshold</label>
                             <input type="number" id="editAlertThreshold" name="editAlertThreshold" step="0.01"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;"
-                                   value="${alertThreshold ?: ""}">
+                                   class="client-form-input" value="${alertThreshold ?: ""}">
                         </div>
                     </div>
                     
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="editCurrency" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Currency</label>
-                            <select id="editCurrency" name="editCurrency" 
-                                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="editCurrency" class="client-form-label">Currency</label>
+                            <select id="editCurrency" name="editCurrency" class="client-form-select">
                                 <option value="JPY" ${if (client.currency == "JPY") "selected" else ""}>JPY (Japanese Yen)</option>
                                 <option value="USD" ${if (client.currency == "USD") "selected" else ""}>USD (US Dollar)</option>
                                 <option value="EUR" ${if (client.currency == "EUR") "selected" else ""}>EUR (Euro)</option>
                             </select>
                         </div>
-                        <div>
-                            <label for="editStatus" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Status</label>
-                            <select id="editStatus" name="editStatus" 
-                                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <div class="client-form-field">
+                            <label for="editStatus" class="client-form-label">Status</label>
+                            <select id="editStatus" name="editStatus" class="client-form-select">
                                 <option value="ACTIVE" ${if (client.status == "ACTIVE") "selected" else ""}>Active</option>
                                 <option value="SUSPENDED" ${if (client.status == "SUSPENDED") "selected" else ""}>Suspended</option>
                                 <option value="CLOSED" ${if (client.status == "CLOSED") "selected" else ""}>Closed</option>
@@ -666,18 +690,15 @@ fun showEditClientForm(client: dynamic) {
                         </div>
                     </div>
                     
-                    <div style="display: flex; justify-content: space-between; gap: 10px; margin-top: 20px;">
-                        <button type="button" onclick="deleteClientFromModal($clientId)" 
-                                style="padding: 10px 20px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    <div class="client-modal-actions-split">
+                        <button type="button" onclick="deleteClientFromModal($clientId)" class="client-btn client-btn-danger">
                             Delete
                         </button>
-                        <div style="display: flex; gap: 10px;">
-                            <button type="button" onclick="closeEditClientModal()" 
-                                    style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        <div class="client-modal-actions-right">
+                            <button type="button" onclick="closeEditClientModal()" class="client-btn client-btn-secondary">
                                 Cancel
                             </button>
-                            <button type="submit" 
-                                    style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                            <button type="submit" class="client-btn client-btn-primary">
                                 Update Client
                             </button>
                         </div>
@@ -840,70 +861,61 @@ fun addClientTransaction(clientId: Long) {
 
 fun openAddTransactionModal(clientId: Long) {
     val modalHTML = """
-        <div id="addTransactionModal" class="modal" style="display: block; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);">
-            <div class="modal-content" style="background-color: #fefefe; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 600px; border-radius: 8px;">
-                <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <h2 style="margin: 0; color: #333;">Add Transaction</h2>
-                    <span id="closeTxModalBtn" class="close" style="color: #aaa; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+        <div id="addTransactionModal" class="client-modal">
+            <div class="client-modal-content">
+                <div class="client-modal-header">
+                    <h2>Add Transaction</h2>
+                    <button id="closeTxModalBtn" class="client-modal-close">&times;</button>
                 </div>
-                <form id="addTransactionForm" style="display: flex; flex-direction: column; gap: 15px;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="txDate" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">DATE *</label>
-                            <input type="date" id="txDate" name="txDate" required 
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                <form id="addTransactionForm" class="client-form">
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="txDate" class="client-form-label">DATE *</label>
+                            <input type="date" id="txDate" name="txDate" required class="client-form-input">
                         </div>
-                        <div>
-                            <label for="txEvent" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Event *</label>
-                            <select id="txEvent" name="txEvent" required 
-                                    style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <div class="client-form-field">
+                            <label for="txEvent" class="client-form-label">Event *</label>
+                            <select id="txEvent" name="txEvent" required class="client-form-select">
                                 <option value="">Select Event</option>
                             </select>
                         </div>
                     </div>
-                    <div id="txQtyWrap" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="txQuantity" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">QUANTITY</label>
-                            <input type="number" id="txQuantity" name="txQuantity" step="1" 
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    <div id="txQtyWrap" class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="txQuantity" class="client-form-label">QUANTITY</label>
+                            <input type="number" id="txQuantity" name="txQuantity" step="1" class="client-form-input">
                         </div>
-                        <div>
-                            <label for="txBillNo" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">BILL. NO</label>
-                            <input type="text" id="txBillNo" name="txBillNo" 
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <div class="client-form-field">
+                            <label for="txBillNo" class="client-form-label">BILL. NO</label>
+                            <input type="text" id="txBillNo" name="txBillNo" class="client-form-input">
                         </div>
                     </div>
-                    <div id="txPriceWrap" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="txTransactionPrice" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Total Shipment PRICE</label>
+                    <div id="txPriceWrap" class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="txTransactionPrice" class="client-form-label">Total Shipment PRICE</label>
                             <input type="text" id="txTransactionPrice" name="txTransactionPrice" 
-                                   placeholder="e.g. ¥5,000 or -¥5,000"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                                   placeholder="e.g. ¥5,000 or -¥5,000" class="client-form-input">
                         </div>
-                        <div>
-                            <label for="txPaymentReceived" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">PAYMENT RECEIVED</label>
+                        <div class="client-form-field">
+                            <label for="txPaymentReceived" class="client-form-label">PAYMENT RECEIVED</label>
                             <input type="text" id="txPaymentReceived" name="txPaymentReceived" 
-                                   placeholder="e.g. ¥10,000 or -¥10,000"
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                                   placeholder="e.g. ¥10,000 or -¥10,000" class="client-form-input">
                         </div>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                        <div>
-                            <label for="txRunningBalance" style="display: block; margin-bottom: 5px; font-weight: bold; color: #333;">Total BALANCE</label>
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="txRunningBalance" class="client-form-label">Total BALANCE</label>
                             <input type="text" id="txRunningBalance" name="txRunningBalance" 
-                                   placeholder="Auto-calculated by system"
-                                   readonly
-                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; background-color: #f5f5f5;">
+                                   placeholder="Auto-calculated" readonly
+                                   class="client-form-input" style="background-color: #f5f5f5;">
                         </div>
-                        <div>
+                        <div class="client-form-field">
                             <!-- Empty div for spacing -->
                         </div>
                     </div>
-                    <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-                        <button type="button" id="cancelTxBtn" 
-                                style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Cancel</button>
-                        <button type="submit" 
-                                style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Save Transaction</button>
+                    <div class="client-modal-actions">
+                        <button type="button" id="cancelTxBtn" class="client-btn client-btn-secondary">Cancel</button>
+                        <button type="submit" class="client-btn client-btn-primary">Save Transaction</button>
                     </div>
                 </form>
             </div>
@@ -962,13 +974,13 @@ fun openAddTransactionModal(clientId: Long) {
     fun toggleByEvent(value: String) {
         val hide = value == "TT RECIEVED" || value == "TT RECIEVED(CASH 5-7)"
         (document.getElementById("txQtyWrap") as? HTMLElement)?.let {
-            it.style.display = if (hide) "none" else "grid"
+            it.style.display = if (hide) "none" else ""
         }
         // Only hide the first part of txPriceWrap (Total Shipment PRICE), keep PAYMENT RECEIVED visible
         val txPriceWrap = document.getElementById("txPriceWrap") as? HTMLElement
         txPriceWrap?.let {
             val firstChild = it.firstElementChild as? HTMLElement
-            firstChild?.style?.display = if (hide) "none" else "block"
+            firstChild?.style?.display = if (hide) "none" else ""
         }
     }
     eventSelect?.addEventListener("change", { _: Event ->

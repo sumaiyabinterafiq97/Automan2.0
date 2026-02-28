@@ -595,7 +595,6 @@ class CarBrandMappingController(
             
             Logger.debug("🔄 [UPDATE] Existing mapping: id=${existing.id}, carBrand=${existing.carBrand}, chassis=${existing.chassis}, carName=${existing.carName}, fuel=${existing.fuel}")
             
-            // Note: carBrand should not be changed in updates, use existing value
             // IMPORTANT: If a field is explicitly sent as null or empty string, clear it (set to null)
             // If a field is not present in request, keep existing value
             
@@ -607,6 +606,19 @@ class CarBrandMappingController(
                     value is String -> if (value.isBlank()) null else value
                     else -> value.toString().takeIf { it.isNotBlank() }
                 }
+            }
+            
+            // Car Brand: allow update from request (required field - fallback to existing if not present or blank)
+            val carBrandValue = if (request.containsKey("carBrand")) {
+                getStringValue("carBrand") ?: existing.carBrand
+            } else {
+                existing.carBrand
+            }
+            if (carBrandValue.isNullOrBlank()) {
+                return ResponseEntity.badRequest().body(mapOf(
+                    "success" to false,
+                    "message" to "Car Brand is required"
+                ))
             }
             
             // If field is present in request (even if null/empty), use the new value (null if blank)
@@ -679,7 +691,7 @@ class CarBrandMappingController(
                 existing.door  // Field not in request, keep existing
             }
             
-            Logger.debug("🔄 [UPDATE] New values: chassis=$chassisValue, carName=$carNameValue, fuel=$fuelValue, wd=$wdValue, shift=$shiftValue, cc=$ccValue, door=$doorValue, grade=$gradeValue")
+            Logger.debug("🔄 [UPDATE] New values: carBrand=$carBrandValue, chassis=$chassisValue, carName=$carNameValue, fuel=$fuelValue, wd=$wdValue, shift=$shiftValue, cc=$ccValue, door=$doorValue, grade=$gradeValue")
             Logger.debug("🔄 [UPDATE] Fields being cleared: wd=${wdValue == null && existing.wd != null} (wdValue=$wdValue, existing.wd=${existing.wd}), shift=${shiftValue == null && existing.shift != null} (shiftValue=$shiftValue, existing.shift=${existing.shift})")
             
             // CRITICAL: Instead of using .copy() which creates a detached entity,
@@ -693,7 +705,7 @@ class CarBrandMappingController(
             // Create updated entity with same ID - JPA should recognize this as update
             val updated = existing.copy(
                 id = existing.id, // CRITICAL: Explicitly preserve ID
-                carBrand = existing.carBrand, // Preserve carBrand
+                carBrand = carBrandValue, // Allow car brand to be updated from request
                 chassis = chassisValue,
                 carName = carNameValue,
                 fuel = fuelValue,
@@ -750,13 +762,14 @@ class CarBrandMappingController(
             
             Logger.debug("✅ [UPDATE] Successfully updated existing mapping with ID: ${saved.id}")
             
-            Logger.debug("🔄 [UPDATE] Saved entity: id=${saved.id}, chassis=${saved.chassis}, carName=${saved.carName}, fuel=${saved.fuel}")
+            Logger.debug("🔄 [UPDATE] Saved entity: id=${saved.id}, carBrand=${saved.carBrand}, chassis=${saved.chassis}, carName=${saved.carName}, fuel=${saved.fuel}")
             
             return ResponseEntity.ok(mapOf(
                 "success" to true,
                 "message" to "Mapping updated successfully",
                 "data" to mapOf(
                     "id" to saved.id,
+                    "carBrand" to (saved.carBrand ?: ""),
                     "chassis" to (saved.chassis ?: ""),
                     "carName" to (saved.carName ?: ""),
                     "fuel" to (saved.fuel ?: ""),

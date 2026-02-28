@@ -14,6 +14,32 @@ class PurchaseService(
     private val pdfService: PdfService
 ) {
     
+    /**
+     * Validates Production Date (carModelYear): 4-digit year only, no range check.
+     * Format should be YYYY-MM (e.g., "2013-12"). Year must be exactly 4 digits.
+     * Returns null if valid, or error message if invalid.
+     */
+    private fun validateCarModelYear(carModelYear: String?): String? {
+        if (carModelYear.isNullOrBlank()) return null // Empty is allowed
+        
+        // Expected format: YYYY-MM
+        val parts = carModelYear.split("-")
+        if (parts.size != 2) {
+            return "Invalid Production Date format. Expected YYYY-MM, got: $carModelYear"
+        }
+        
+        val yearStr = parts[0].trim()
+        // Limit to 4 digits only: year must be exactly 4 digits and numeric
+        if (yearStr.length != 4) {
+            return "Production year must be exactly 4 digits. Got: $yearStr"
+        }
+        if (!yearStr.all { it.isDigit() }) {
+            return "Production year must be 4 digits only. Got: $yearStr"
+        }
+        
+        return null // Valid
+    }
+    
     fun getAllPurchases(): List<Purchase> {
         return purchaseRepository.findAll()
     }
@@ -24,6 +50,12 @@ class PurchaseService(
     
     @Transactional
     fun createPurchase(purchase: Purchase): Purchase {
+        // Validate carModelYear (Production Date)
+        val yearError = validateCarModelYear(purchase.carModelYear)
+        if (yearError != null) {
+            throw IllegalArgumentException(yearError)
+        }
+        
         // Ensure shaken has a value (default to false if null)
         // Explicitly convert to boolean to ensure proper database storage
         val shakenValue = when {
@@ -60,7 +92,6 @@ class PurchaseService(
                 grade = purchase.grade ?: existingPurchase.grade,
                 rank = purchase.rank ?: existingPurchase.rank,
                 color = purchase.color ?: existingPurchase.color,
-                displacement = purchase.displacement ?: existingPurchase.displacement,
                 fuel = purchase.fuel ?: existingPurchase.fuel,
                 seat = purchase.seat ?: existingPurchase.seat,
                 door = purchase.door ?: existingPurchase.door,
@@ -68,7 +99,6 @@ class PurchaseService(
                 options = purchase.options ?: existingPurchase.options,
                 cc = purchase.cc ?: existingPurchase.cc,
                 shift = purchase.shift ?: existingPurchase.shift,
-                steeringWheel = purchase.steeringWheel ?: existingPurchase.steeringWheel,
                 wd = purchase.wd ?: existingPurchase.wd,
                 driveType = purchase.driveType ?: existingPurchase.driveType,
                 auctionNo = purchase.auctionNo ?: existingPurchase.auctionNo,
@@ -135,6 +165,15 @@ class PurchaseService(
         Logger.debug("🔍 [Service] Updating purchase ID: $id with partial data")
         Logger.debug("🔍 [Service] Update data received: $updateData")
         
+        // Validate carModelYear if provided
+        val carModelYearValue = updateData["carModelYear"] as? String
+        if (carModelYearValue != null) {
+            val yearError = validateCarModelYear(carModelYearValue)
+            if (yearError != null) {
+                throw IllegalArgumentException(yearError)
+            }
+        }
+        
         val existingPurchase = purchaseRepository.findById(id).orElse(null)
         if (existingPurchase != null) {
             Logger.debug("🔍 [Service] Found existing purchase: $existingPurchase")
@@ -156,7 +195,6 @@ class PurchaseService(
                 grade = updateData["grade"] as? String ?: existingPurchase.grade,
                 rank = updateData["rank"] as? String ?: existingPurchase.rank,
                 color = updateData["color"] as? String ?: existingPurchase.color,
-                displacement = updateData["displacement"] as? String ?: existingPurchase.displacement,
                 fuel = updateData["fuel"] as? String ?: existingPurchase.fuel,
                 seat = updateData["seat"] as? String ?: existingPurchase.seat,
                 door = updateData["door"] as? String ?: existingPurchase.door,
@@ -179,7 +217,6 @@ class PurchaseService(
                     }
                 },
                 shift = updateData["shift"] as? String ?: existingPurchase.shift,
-                steeringWheel = updateData["steeringWheel"] as? String ?: existingPurchase.steeringWheel,
                 wd = updateData["wd"] as? String ?: existingPurchase.wd,
                 driveType = updateData["driveType"] as? String ?: existingPurchase.driveType,
                 auctionNo = updateData["auctionNo"] as? String ?: existingPurchase.auctionNo,
@@ -811,7 +848,6 @@ class PurchaseService(
             grade = getColumnValue(values, columnMapping, "GRADE")?.take(20) ?: "",
             rank = getColumnValue(values, columnMapping, "RANK")?.take(20) ?: "",
             color = getColumnValue(values, columnMapping, "COLOR")?.take(20) ?: "",
-            displacement = getColumnValue(values, columnMapping, "DISPLACEMENT")?.take(20) ?: "",
             fuel = getColumnValue(values, columnMapping, "FUEL")?.take(20) ?: "",
             seat = getColumnValue(values, columnMapping, "SEAT")?.take(20) ?: "",
             door = getColumnValue(values, columnMapping, "DOOR")?.take(20) ?: "",
@@ -990,6 +1026,7 @@ class PurchaseService(
         }
     }
     
+    // Generates Rixo PDF only; does NOT persist rixoRequested. Client sets Rixo Requested manually after faxing.
     fun generateRixoPdf(selectedIds: List<Long>, invoiceData: Map<String, String>, missingRixoData: List<Map<String, String>> = emptyList()): ByteArray {
         Logger.log("Starting Rixo PDF generation for ${selectedIds.size} purchases")
         Logger.debug("Missing Rixo data: $missingRixoData")
@@ -1048,6 +1085,7 @@ class PurchaseService(
         }
     }
     
+    // Generates Rixo Transport PDF only; does NOT persist rixoRequested. Client sets Rixo Requested manually after faxing.
     fun generateRixoTransportPdf(selectedIds: List<Long>, transportData: Map<String, String>, purchaseData: List<Map<String, Any>> = emptyList()): ByteArray {
         Logger.log("Starting Rixo Transport PDF generation for ${selectedIds.size} purchases")
         
@@ -1179,6 +1217,18 @@ class PurchaseService(
         return purchaseRepository.findDistinctStockLocationsByCountry(country)
     }
     
+    fun getUniqueRixoCompanies(): List<String> {
+        return purchaseRepository.findDistinctRixoCompanies()
+    }
+    
+    fun getUniqueRepairCompanies(): List<String> {
+        return purchaseRepository.findDistinctRepairCompanies()
+    }
+    
+    fun getUniqueVenueIds(): List<String> {
+        return purchaseRepository.findDistinctVenueIds()
+    }
+    
     @Transactional(readOnly = true)
     fun getFilteredChassis(country: String, polPort: String): List<String> {
         // Use optimized database query instead of loading all purchases into memory
@@ -1201,7 +1251,6 @@ class PurchaseService(
         repairFee: Double,
         mscCharges: Double,
         profit: Double,
-        packagePrice: Double = 0.0,
         isPackageMode: Boolean = false
     ) {
         val existingPurchases = purchaseRepository.findByChassis(chassis)
@@ -1219,7 +1268,6 @@ class PurchaseService(
                     repairCharges = repairFee.toString(),
                     miscCharges = mscCharges.toString(),
                     profit = java.math.BigDecimal(profit),
-                    packagePrice = packagePrice.toString(),
                     isPackageMode = isPackageMode,
                     updatedAt = java.time.LocalDateTime.now()
                 )
@@ -1349,14 +1397,13 @@ class PurchaseService(
                     // Use saved total C&F price
                     purchase.totalCnfPrice!!
                 } else {
-                    // Fallback: Calculate final C&F price based on package mode
+                    // Fallback: Calculate final C&F price (package_price column removed)
                     val carPrice = try { java.math.BigDecimal(purchase.price ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
-                    val packagePrice = try { java.math.BigDecimal(purchase.packagePrice ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
                     val isPackageMode = purchase.isPackageMode ?: false
                     
                     if (isPackageMode) {
-                        // Package mode: C&F = Car Price + Package Price
-                        carPrice.add(packagePrice)
+                        // Package mode: C&F = Car Price (package_price column was removed)
+                        carPrice
                     } else {
                         // Normal mode: C&F = Car Price + All Fees
                         val auctionFee = try { java.math.BigDecimal(purchase.auctionFee ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }

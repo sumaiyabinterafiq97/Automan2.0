@@ -41,95 +41,95 @@ fun showCarBookingPage() {
         }
 
     content.innerHTML = """
-        <div style="width: 100%; min-height: calc(100vh - 140px); padding: 20px; box-sizing: border-box;">
+        <div class="booking-page-container">
             <!-- Header -->
-            <div style="background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e5e7eb;">
+            <div class="booking-header">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                      <h1 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">AUTOMAN | CREATE SHIPPING SCHEDULE</h1>
+                      <h1>AUTOMAN | CREATE SHIPPING SCHEDULE</h1>
                 </div>
             </div>
             
             <!-- Main Content Container -->
-            <div style="background: white; border-radius: 12px; padding: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e5e7eb;">
-                <div style="display: flex; gap: 30px; min-height: 600px;">
+            <div class="booking-main-content">
+                <div class="booking-columns">
                     
                     <!-- Left Section: BOOKING DETAILS -->
-                    <div style="flex: 1; padding-right: 20px; border-right: 2px solid #e5e7eb;">
-                        <h2 style="margin: 0 0 24px 0; color: #111827; font-size: 20px; font-weight: 700; text-transform: uppercase;">BOOKING DETAILS</h2>
+                    <div class="booking-details-section">
+                        <h2 class="booking-section-header">BOOKING DETAILS</h2>
                         
                         <!-- CONSIGNEE -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">CONSIGNEE:</label>
-                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <div class="booking-form-group">
+                            <label>CONSIGNEE:</label>
+                            <div class="booking-consignee-row">
                                 <span style="color: #6b7280; font-size: 16px;">👤</span>
-                                <select id="consigneeCountry" style="flex: 1; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                                <select id="consigneeCountry">
                                     <option value="">Select Country</option>
                                 </select>
                                 <button id="manageBookingMappingsBtn" type="button" style="display: none; background: none; border: none; cursor: pointer; padding: 4px; font-size: 18px; color: #6b7280;" title="Manage Mappings">
                                     ⚙️
                                 </button>
                             </div>
-                            <input type="text" id="consigneeName" placeholder="(CONSIGNEE NAME)" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <input type="text" id="consigneeName" placeholder="(CONSIGNEE NAME)">
                         </div>
                         
                         <!-- ETD -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">ETD:</label>
-                            <input type="date" id="etdDate" placeholder="ESTIMATED SHIPPING DATE" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; color: #000000;">
+                        <div class="booking-form-group">
+                            <label>ETD:</label>
+                            <input type="date" id="etdDate" placeholder="ESTIMATED SHIPPING DATE" style="color: #000000;">
                         </div>
                         
                         <!-- POL -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">POL:</label>
-                            <select id="polPort" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; color: #000000;">
+                        <div class="booking-form-group">
+                            <label>POL:</label>
+                            <select id="polPort" style="color: #000000;">
                                 <option value="">Select Port of Loading</option>
                             </select>
                         </div>
                         
                         <!-- POD -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">POD:</label>
-                            <input type="text" id="podPort" placeholder="PORT OF DISCHARGE" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; color: #000000;">
+                        <div class="booking-form-group">
+                            <label>POD:</label>
+                            <input type="text" id="podPort" placeholder="PORT OF DISCHARGE" style="color: #000000;">
                         </div>
                         
                         <!-- BOOKING NO -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">BOOKING NO:</label>
-                            <input type="text" id="bookingNo" placeholder="" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                        <div class="booking-form-group">
+                            <label>BOOKING NO:</label>
+                            <input type="text" id="bookingNo" placeholder="">
                         </div>
                         
                         <!-- VESSEL -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">VESSEL:</label>
-                            <input type="text" id="vesselSelect" placeholder="Enter Vessel" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                        <div class="booking-form-group">
+                            <label>VESSEL:</label>
+                            <input type="text" id="vesselSelect" placeholder="Enter Vessel">
                         </div>
                         
                         <!-- Selection Options -->
-                        <div style="margin-top: 30px;">
-                            <div style="display: flex; gap: 20px; margin-bottom: 15px;">
-                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 600; color: #111827;">
-                                    <input type="checkbox" id="cnfCheckbox" style="width: 18px; height: 18px; accent-color: #3b82f6;">
+                        <div class="booking-selection-options">
+                            <div class="booking-checkbox-row">
+                                <label class="booking-checkbox-label">
+                                    <input type="checkbox" id="cnfCheckbox">
                                     C&F
                                 </label>
-                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 600; color: #111827;">
-                                    <input type="checkbox" id="fobCheckbox" style="width: 18px; height: 18px; accent-color: #3b82f6;">
+                                <label class="booking-checkbox-label">
+                                    <input type="checkbox" id="fobCheckbox">
                                     FOB
                                 </label>
                             </div>
-                            <button id="calculateBtn" style="width: 100%; padding: 12px 20px; background: #3b82f6; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600;">Calculate</button>
+                            <button id="calculateBtn" class="booking-calculate-btn">Calculate</button>
                         </div>
                         
                         <!-- Additional Action Buttons -->
-                        <div style="display: flex; gap: 12px; margin-top: 15px; justify-content: space-between;">
-                            <a href="#" id="cancelBtn" style="text-decoration: underline; color: #111827; font-size: 14px; font-weight: 600; padding: 8px 0;">CANCEL</a>
-                            <button id="emailBtn" style="padding: 8px 16px; background: white; color: #111827; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                        <div class="booking-action-buttons">
+                            <a href="#" id="cancelBtn" class="booking-cancel-link">CANCEL</a>
+                            <button id="emailBtn" class="booking-action-btn">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
                                     <polyline points="22,6 12,13 2,6"></polyline>
                                 </svg>
                                 EMAIL
                             </button>
-                            <button id="exportExcelBtn" style="padding: 8px 16px; background: white; color: #111827; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                            <button id="exportExcelBtn" class="booking-action-btn">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                     <polyline points="14,2 14,8 20,8"></polyline>
@@ -143,27 +143,27 @@ fun showCarBookingPage() {
                     </div>
                     
                     <!-- Right Section: LIST -->
-                    <div style="flex: 1; padding-left: 20px;">
-                        <h2 style="margin: 0 0 24px 0; color: #111827; font-size: 20px; font-weight: 700; text-transform: uppercase;">LIST</h2>
+                    <div class="booking-list-section">
+                        <h2 class="booking-section-header">LIST</h2>
                         
                         <!-- SEARCH CHASSIS -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">SEARCH CHASSIS:</label>
+                        <div class="booking-form-group">
+                            <label>SEARCH CHASSIS:</label>
                             ${createEditableCombobox("chassisSearch", "Type to search chassis (Filtered by Country & POL)", required = false)}
                         </div>
                         
                         <!-- Car Selection Table -->
-                        <div style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 20px;">
-                            <table style="width: 100%; border-collapse: collapse;">
-                                <thead style="background-color: #f9fafb;">
+                        <div style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin-bottom: 20px; overflow-x: auto;">
+                            <table class="booking-chassis-table">
+                                <thead>
                                     <tr>
-                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">
+                                        <th>
                                             <input type="checkbox" id="selectAllCars" style="margin-right: 8px;">SELECT
                                         </th>
-                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">NO.</th>
-                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">CHASSIS</th>
-                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">NAME</th>
-                                        <th style="padding: 12px; text-align: left; font-weight: 600; color: #374151; border-bottom: 1px solid #e5e7eb;">YEAR</th>
+                                        <th>NO.</th>
+                                        <th>CHASSIS</th>
+                                        <th>NAME</th>
+                                        <th>YEAR</th>
                                         $listPriceHeader
                                     </tr>
                                 </thead>

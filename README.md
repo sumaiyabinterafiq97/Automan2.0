@@ -4,28 +4,35 @@ A comprehensive car purchase management system built with Kotlin JS Compose for 
 
 ## 🆕 Recent Updates
 
-### Latest Changes (January 2026)
-- **Security Improvements**: 
-  - XSS protection with HTML escaping for all user-generated content
-  - Safe localStorage wrappers with error handling
-  - Improved error logging and handling
-- **Code Quality Enhancements**:
-  - Centralized constants in `AppConstants` (frontend and backend)
-  - Logger utilities for conditional logging (replacing console.log/println)
-  - Fixed race conditions in concurrent purchase updates
-  - Improved Promise.all error handling
-- **Bug Fixes**: 
-  - Fixed memory leaks (event listeners, URL.createObjectURL)
-  - Fixed race conditions in form population
-  - Improved date parsing edge cases
-  - Enhanced null safety and array bounds checking
-- **Sidebar Navigation Reorganization**: 
-  - Renamed "Purchase List" to "Home"
-  - Renamed "Rixo Request" to "Rixo Note"
-  - Added new sections: Shipment, Sales, Reports
-  - Organized navigation with collapsible sections
+### Latest Changes (February 2026)
+- **Email & Signup Flow**:
+  - Switched from SendGrid to **Resend** for signup approval emails
+  - Admin approval workflow: signup requests → admin approves/rejects → verification emails sent via Resend
+  - `pending_signups` table for email verification tokens
+- **Master Data & UI**:
+  - **Supplier Master** fully implemented (add/edit/delete/duplicate, column filters, pagination)
+  - Supplier dropdown auto-refresh when suppliers are added/edited in master tab
+  - Label change: "Shipment Size/Type of Vehicle" → **Vehicle type**
+  - Duplicate button in Edit Supplier modal
+- **Purchase Form**:
+  - Total Cost (Before/After Tax) now includes **Rixo Price**
+  - Production date validation relaxed (no year range restriction; supports antique cars)
+  - Chassis dropdown preserves suffix when selecting (e.g. `B43W-t6yg` stays intact)
+  - Car brand updates correctly when editing in Car Brand modal
+- **Deployment Scripts**:
+  - `./scripts/build-and-deploy-frontend.sh` – bump version, build Kotlin/JS, build Docker image, recreate frontend container (uses compose for correct network)
+  - `./scripts/rebuild-and-restart-backend.sh` – rebuild backend image and restart container
+- **Database Migrations**:
+  - `13-pending-signups.sql` – pending signups table for admin approval flow
+  - `displacement` and `package_price` column drops consolidated into `01-init-multiplatform.sql` cleanup section
 
-### Previous Updates
+### Previous Updates (January 2026)
+- **Security Improvements**: XSS protection, safe localStorage, improved error handling
+- **Code Quality**: Centralized constants in `AppConstants`, Logger utilities, race condition fixes
+- **Bug Fixes**: Memory leaks, form population races, date parsing, null safety
+- **Sidebar Navigation**: Renamed "Purchase List" to "Home", "Rixo Request" to "Rixo Note", added Shipment/Sales/Reports sections
+
+### Earlier Updates
 - **Database Migration Consolidation**: Streamlined database migrations into 8 main files for easier setup and maintenance
 - **Invoice Page Redesign**: New invoice workflow with CLIENT (consignee) dropdown and VESSEL-based purchase fetching
 - **Purchase Form Enhancements**: Added Drive Type (LHD/RHD), improved Number Cut Information, button-based Options selection
@@ -106,6 +113,18 @@ After starting the system, access the application at:
 - **Email**: `admin@automan.com`
 - **Password**: `admin123`
 
+### Optional: Resend for signup approval emails
+
+To enable admin approval emails (signup requests to admin, then approve/reject emails to users):
+
+1. Create a [Resend](https://resend.com) account and create an API key at [API Keys](https://resend.com/api-keys). Use `onboarding@resend.dev` as sender for testing.
+2. Copy `.env.example` to `.env` in the project root.
+3. Set `RESEND_API_KEY=` your Resend API key. Optionally set `APP_FRONTEND_URL=` (e.g. `http://localhost:8080` or your app URL) for the "Sign In" link in approval emails.
+4. From the project root, start (or restart) the stack:  
+   `docker compose -f docker/docker-compose.multiplatform.yml up -d`
+
+If `RESEND_API_KEY` is not set, the backend still runs; signup approval emails are simply skipped.
+
 ## 📊 Pre-populated Data
 
 The system comes with sample data:
@@ -147,6 +166,7 @@ All SQL migration files in the `database/` directory are automatically executed 
 - `10-clients-table.sql` - Clients table with indexes and sample data
 - `11-events-table.sql` - Events table for client transactions
 - `12-users-table.sql` - Users table for authentication
+- `13-pending-signups.sql` - Pending signups table for admin approval email verification
 
 **Note**: All migrations are idempotent and can be run multiple times safely. The `04-rixo-prices.sql` file includes all consolidated rixo-related migrations (data import, venue updates, currency cleanup).
 
@@ -164,11 +184,11 @@ docker load -i automan-complete-multiplatform.tar
 ### 2. Start Services
 
 ```bash
-# Start all services
-docker-compose -f docker/docker-compose.multiplatform.yml up -d
+# Start all services (from project root)
+docker compose -f docker/docker-compose.multiplatform.yml up -d
 
 # Check status
-docker-compose -f docker/docker-compose.multiplatform.yml ps
+docker compose -f docker/docker-compose.multiplatform.yml ps
 ```
 
 ### 3. Verify Setup
@@ -192,32 +212,32 @@ This script checks:
 ### Stop the System
 
 ```bash
-docker-compose -f docker/docker-compose.multiplatform.yml down
+docker compose -f docker/docker-compose.multiplatform.yml down
 ```
 
 ### Restart Services
 
 ```bash
-docker-compose -f docker/docker-compose.multiplatform.yml restart
+docker compose -f docker/docker-compose.multiplatform.yml restart
 ```
 
 ### View Logs
 
 ```bash
 # All services
-docker-compose -f docker/docker-compose.multiplatform.yml logs
+docker compose -f docker/docker-compose.multiplatform.yml logs
 
 # Specific service
-docker-compose -f docker/docker-compose.multiplatform.yml logs backend
-docker-compose -f docker/docker-compose.multiplatform.yml logs frontend
-docker-compose -f docker/docker-compose.multiplatform.yml logs mysql
+docker compose -f docker/docker-compose.multiplatform.yml logs backend
+docker compose -f docker/docker-compose.multiplatform.yml logs frontend
+docker compose -f docker/docker-compose.multiplatform.yml logs mysql
 ```
 
 ### Remove Everything (Including Data)
 
 ```bash
 # Stop and remove containers, networks, and volumes
-docker-compose -f docker/docker-compose.multiplatform.yml down -v
+docker compose -f docker/docker-compose.multiplatform.yml down -v
 ```
 
 ### Clean Docker (Remove All Images and Containers)
@@ -341,7 +361,7 @@ Access master data via the sidebar "Master" section:
 - **Clients**: Manage client master data with balance tracking
 - **Consignee**: Manage consignee information with country-based filtering
 - **Car Brands**: Manage car brand mappings with search and pagination
-- **Suppliers**: Manage supplier information (coming soon)
+- **Suppliers**: Manage supplier information (add/edit/delete/duplicate, column filters, pagination, auto-refresh in purchase forms)
 - **Countries**: Manage country data (coming soon)
 - **Rixo Companies**: Manage Rixo company data (coming soon)
 - **Stock Locations**: Manage stock locations (coming soon)
@@ -391,7 +411,7 @@ The following report pages are planned:
 **Problem**: Cannot connect to database
 - **Solution**: 
   1. Check if MySQL container is running: `docker ps | grep mysql`
-  2. Check MySQL logs: `docker-compose -f docker/docker-compose.multiplatform.yml logs mysql`
+  2. Check MySQL logs: `docker compose -f docker/docker-compose.multiplatform.yml logs mysql`
   3. Wait a few seconds after starting - MySQL needs time to initialize
 
 **Problem**: Database migrations not running
@@ -404,7 +424,7 @@ The following report pages are planned:
 
 **Problem**: Backend not responding
 - **Solution**:
-  1. Check backend logs: `docker-compose -f docker/docker-compose.multiplatform.yml logs backend`
+  1. Check backend logs: `docker compose -f docker/docker-compose.multiplatform.yml logs backend`
   2. Verify backend container is running: `docker ps | grep backend`
   3. Check if port 8083 is available
 
@@ -416,25 +436,18 @@ The following report pages are planned:
 
 ### Frontend Issues
 
-**Problem**: Frontend not loading
+**Problem**: Frontend not loading (ERR_CONNECTION_REFUSED on localhost:8080)
 - **Solution**:
-  1. Check frontend logs: `docker-compose -f docker/docker-compose.multiplatform.yml logs frontend`
-  2. Clear browser cache (Ctrl+Shift+Delete or Cmd+Shift+Delete)
-  3. Try accessing in incognito/private mode
-  4. Check browser console for JavaScript errors
+  1. Verify frontend container is running: `docker ps | grep frontend`
+  2. Use `./scripts/build-and-deploy-frontend.sh` for deployment (it uses compose so the frontend joins the same network as the backend; nginx needs to resolve the backend host)
+  3. Check frontend logs: `docker compose -f docker/docker-compose.multiplatform.yml logs frontend`
+  4. Clear browser cache and hard refresh (Cmd+Shift+R / Ctrl+Shift+R)
 
 **Problem**: Changes not appearing
 - **Solution**: The frontend uses cache busting. If changes don't appear:
-  1. Rebuild frontend: `./gradlew compileKotlinJs`
-  2. Update version in `src/jsMain/resources/index.html`
-  3. Copy files to container:
-     ```bash
-     docker cp src/jsMain/resources/index.html automan_frontend_multiplatform:/usr/share/nginx/html/
-     docker cp build/dist/js/productionExecutable/automan-car-purchase.js automan_frontend_multiplatform:/usr/share/nginx/html/
-     docker exec automan_frontend_multiplatform nginx -s reload
-     ```
-  4. Hard refresh the page (Ctrl+F5 or Cmd+Shift+R)
-  5. Clear browser cache
+  1. Run the deploy script (recommended): `./scripts/build-and-deploy-frontend.sh`
+  2. Hard refresh the page (Ctrl+Shift+R or Cmd+Shift+R)
+  3. Clear browser cache if needed
 
 ### phpMyAdmin Issues
 
@@ -448,7 +461,9 @@ The following report pages are planned:
 
 ```
 Automan2.0/
-├── backend/                          # Spring Boot Backend
+├── backend/                          # Spring Boot Backend (separate Gradle project)
+│   ├── Dockerfile                   # Backend Dockerfile (builds from source)
+│   ├── Dockerfile.prebuilt          # Prebuilt backend (use after ./gradlew build -x test)
 │   ├── src/main/kotlin/
 │   │   └── com/automan/backend/
 │   │       ├── BackendApplication.kt
@@ -456,7 +471,7 @@ Automan2.0/
 │   │       ├── model/                # Data Models (Purchase, Client, etc.)
 │   │       ├── repository/           # Data Repositories (JPA)
 │   │       ├── service/              # Business Logic
-│   │       ├── config/              # Configuration (CORS, AppConstants)
+│   │       ├── config/               # Configuration (CORS, AppConstants)
 │   │       └── util/                 # Utilities (Logger)
 │   └── src/main/resources/
 │       └── application.yml           # Configuration
@@ -487,22 +502,21 @@ Automan2.0/
 │   ├── 10-clients-table.sql         # Clients table
 │   ├── 11-events-table.sql          # Events table
 │   ├── 12-users-table.sql          # Users table
+│   ├── 13-pending-signups.sql      # Pending signups (admin approval flow)
 │   └── archived/                    # Archived migrations (reference only)
 ├── docker/                          # Docker Configuration
 │   ├── docker-compose.multiplatform.yml  # Main compose file
-│   ├── Dockerfile                    # Frontend Dockerfile
+│   ├── Dockerfile.frontend.prod     # Production frontend (nginx + built assets)
 │   ├── Dockerfile.multiplatform     # Multi-platform build
 │   └── nginx/                       # Nginx Configuration
-│       └── nginx.conf
+│       └── nginx-prod.conf
 ├── scripts/                         # Utility Scripts
 │   ├── run/                         # Run Scripts
-│   │   └── run-automan-multiplatform.sh
-│   ├── build/                       # Build Scripts
-│   ├── sql/                         # SQL Scripts
-│   │   └── archived/                # Archived SQL (reference only)
-│   ├── test-migrations.sh           # Migration testing
-│   ├── verify-schema.sh             # Schema verification
-│   └── verify-setup.sh              # Setup verification
+│   │   └── load-and-run-multiplatform.sh
+│   ├── build-and-deploy-frontend.sh # Frontend: bump version, build, deploy
+│   ├── rebuild-and-restart-backend.sh # Backend: rebuild image, restart container
+│   ├── verify-setup.sh              # Setup verification
+│   └── verify-schema.sh             # Schema verification
 ├── docs/                            # Documentation
 │   ├── ADD_PURCHASE_PAGE_DOCUMENTATION.md
 │   ├── EDIT_PURCHASE_PAGE_DOCUMENTATION.md
@@ -522,12 +536,22 @@ Automan2.0/
 If you need to rebuild the Docker images:
 
 ```bash
-# Build multi-platform images
-./scripts/build/build-multiplatform.sh
+# Backend (from project root)
+docker build -t automan20-backend:latest -f backend/Dockerfile backend/
 
-# Or manually
+# Frontend (build Kotlin/JS first, then Docker)
+./gradlew jsBrowserProductionWebpack
+docker build -t automan20-frontend:latest -f docker/Dockerfile.frontend.prod .
+
+# Or use the convenience scripts:
+./scripts/rebuild-and-restart-backend.sh
+./scripts/build-and-deploy-frontend.sh
+```
+
+For multi-platform builds (e.g. ARM64 for AWS Graviton):
+```bash
 docker buildx build --platform linux/amd64,linux/arm64 -t automan20-backend:latest -f backend/Dockerfile backend/
-docker buildx build --platform linux/amd64,linux/arm64 -t automan20-frontend:latest -f docker/Dockerfile.multiplatform .
+docker buildx build --platform linux/amd64,linux/arm64 -t automan20-frontend:latest -f docker/Dockerfile.frontend.prod .
 ```
 
 ### Quick Frontend Rebuild and Deploy
@@ -536,13 +560,18 @@ For quick frontend updates (after code changes):
 
 **macOS/Linux:**
 ```bash
-# Build and deploy frontend
-cd docker
-docker-compose -f docker-compose.multiplatform.yml build frontend
-docker-compose -f docker-compose.multiplatform.yml up -d --force-recreate frontend
+# Build and deploy frontend (bumps version, builds Kotlin/JS, rebuilds Docker image, recreates container)
+./scripts/build-and-deploy-frontend.sh
 ```
 
-Or use the build scripts in `scripts/build/` directory.
+This script: bumps cache-bust version in `index.html`, runs `./gradlew jsBrowserProductionWebpack`, builds the frontend Docker image, and recreates the frontend container via compose (so it joins the same network as the backend for nginx proxy).
+
+### Quick Backend Rebuild and Restart
+
+```bash
+# Rebuild backend image and restart container
+./scripts/rebuild-and-restart-backend.sh
+```
 
 ### Running Backend Locally
 
@@ -561,12 +590,7 @@ cd backend
 
 - **Docker Volumes**: The system uses Docker volumes to persist database data. Data is retained even after stopping containers. To start fresh, use `docker-compose down -v` to remove volumes.
 - **Database Migrations**: All migrations run automatically on first startup in alphabetical order. Migrations are idempotent and safe to run multiple times.
-- **Frontend Cache Busting**: The frontend uses cache busting - update the version in `src/jsMain/resources/index.html` when deploying new changes. After updating, copy files to container and reload nginx:
-  ```bash
-  docker cp src/jsMain/resources/index.html automan_frontend_multiplatform:/usr/share/nginx/html/
-  docker cp build/dist/js/productionExecutable/automan-car-purchase.js automan_frontend_multiplatform:/usr/share/nginx/html/
-  docker exec automan_frontend_multiplatform nginx -s reload
-  ```
+- **Frontend Cache Busting**: The frontend uses cache busting. Use `./scripts/build-and-deploy-frontend.sh` to bump version, build, and deploy. The script updates `index.html`, builds the Kotlin/JS bundle, rebuilds the Docker image, and recreates the container.
 - **Database Schema**: 
   - Main tables: `purchases`, `clients`, `events`, `users`
   - Mapping tables: `car_brand_mapping`, `booking_mappings`, `rixo_prices`
@@ -605,7 +629,6 @@ The following pages are planned for future implementation:
 
 ### Master Lists
 - **Country Master**: Manage target countries with statistics
-- **Supplier Master**: Manage suppliers/auction houses with purchase statistics
 - **Rixo Company Master**: Manage Rixo companies with usage statistics
 - **Stock Location Master**: Manage stock locations with current stock counts
 - **Repair Company Master**: Manage repair companies with repair statistics

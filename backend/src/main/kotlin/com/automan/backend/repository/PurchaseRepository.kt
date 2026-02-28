@@ -81,6 +81,18 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.country = :country AND p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
     fun findDistinctStockLocationsByCountry(@Param("country") country: String): List<String>
     
+    // Rixo company (from purchases only)
+    @Query("SELECT DISTINCT p.rixoCompany FROM Purchase p WHERE p.rixoCompany IS NOT NULL AND p.rixoCompany != '' ORDER BY p.rixoCompany")
+    fun findDistinctRixoCompanies(): List<String>
+    
+    // Repair company (from purchases only)
+    @Query("SELECT DISTINCT p.repairCompany FROM Purchase p WHERE p.repairCompany IS NOT NULL AND p.repairCompany != '' ORDER BY p.repairCompany")
+    fun findDistinctRepairCompanies(): List<String>
+    
+    // Venue ID (from purchases only)
+    @Query("SELECT DISTINCT p.venueId FROM Purchase p WHERE p.venueId IS NOT NULL AND p.venueId != '' ORDER BY p.venueId")
+    fun findDistinctVenueIds(): List<String>
+    
     // Filtered chassis methods - filter by shipped=0 (unshipped cars only)
     // Simplified: removed redundant condition (shipped <> 1 is redundant when we already check for NULL or 0)
     @Query(value = "SELECT DISTINCT p.chassis FROM purchases p WHERE p.country = :country AND p.stock_location = :polPort AND p.chassis IS NOT NULL AND p.chassis != '' AND (p.shipped IS NULL OR p.shipped = 0) ORDER BY p.chassis", nativeQuery = true)

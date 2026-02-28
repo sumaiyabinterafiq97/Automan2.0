@@ -4,7 +4,6 @@ import com.automan.backend.model.RixoPrice
 import com.automan.backend.repository.RixoPriceRepository
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -12,7 +11,8 @@ import java.io.InputStreamReader
 @Service
 class RixoImportService(
     private val rixoPriceRepository: RixoPriceRepository,
-    private val entityManager: EntityManager
+    private val entityManager: EntityManager,
+    private val rixoMappingInsertService: RixoMappingInsertService
 ) {
     
     fun importRixoPricesFromCsv(csvContent: String): ImportResult {
@@ -146,7 +146,11 @@ class RixoImportService(
         return saved
     }
     
-    @Transactional
+    /**
+     * Saves a rixo mapping. Tries INSERT with auction_house first (for schemas that have it);
+     * on failure (e.g. AWS with older schema without auction_house), retries in a new transaction
+     * without auction_house so the outer flow is not marked rollback-only.
+     */
     fun saveRixoPriceWithAuctionHouse(
         auctionHouse: String,
         shipmentSize: String?,
@@ -155,27 +159,17 @@ class RixoImportService(
         rixoPrice: String?,
         venueId: String?
     ): RixoPrice {
-        // Use native INSERT to include auction_house in the INSERT statement
-        // This avoids the "Field 'auction_house' doesn't have a default value" error
-        val query = entityManager.createNativeQuery("""
-            INSERT INTO rixo_prices (auction_name, auction_house, type_of_vehicle, stock_location, rixo_company, venue_id, rixo_price, created_at)
-            VALUES (:auctionName, :auctionHouse, :typeOfVehicle, :stockLocation, :rixoCompany, :venueId, :rixoPrice, CURRENT_TIMESTAMP)
-        """)
-        
-        query.setParameter("auctionName", auctionHouse)
-        query.setParameter("auctionHouse", auctionHouse)
-        query.setParameter("typeOfVehicle", shipmentSize)
-        query.setParameter("stockLocation", stockLocation)
-        query.setParameter("rixoCompany", rixoCompany)
-        query.setParameter("venueId", venueId)
-        query.setParameter("rixoPrice", rixoPrice)
-        
-        query.executeUpdate()
-        
-        // Get the inserted ID using LAST_INSERT_ID()
-        val idResult = entityManager.createNativeQuery("SELECT LAST_INSERT_ID()").singleResult
-        val id = (idResult as? Number)?.toLong() ?: throw IllegalStateException("Failed to get inserted ID")
-        
+        val id = try {
+            rixoMappingInsertService.insertWithAuctionHouse(
+                auctionHouse, shipmentSize, stockLocation, rixoCompany, rixoPrice, venueId
+            )
+        } catch (e: Exception) {
+            // First insert failed (e.g. Unknown column 'auction_house', or schema differs on AWS).
+            // Retry without auction_house in a new transaction so we don't mark any transaction rollback-only.
+            rixoMappingInsertService.insertWithoutAuctionHouse(
+                auctionHouse, shipmentSize, stockLocation, rixoCompany, rixoPrice, venueId
+            )
+        }
         return rixoPriceRepository.findById(id).orElseThrow {
             IllegalStateException("Failed to retrieve inserted RixoPrice with id: $id")
         }

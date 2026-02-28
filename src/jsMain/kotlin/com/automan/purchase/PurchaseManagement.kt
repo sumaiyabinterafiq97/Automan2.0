@@ -17,6 +17,9 @@ var currentPage = 1
 var itemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allPurchases: Array<dynamic> = emptyArray()
 
+// Global variable to track last device type for auto-adjustment
+var lastDeviceType: String? = getDeviceType()
+
 fun showPurchaseList() {
     window.location.hash = "#/purchase"
     val content = document.getElementById("content")!!
@@ -49,6 +52,12 @@ fun showPurchaseList() {
         Logger.error("Error clearing selected purchases: ${e.toString()}")
     }
     
+    // Check for device change and auto-adjust columns
+    checkAndAdjustColumnsForDeviceChange()
+    
+    // Setup window resize listener for device change detection
+    setupDeviceChangeListener()
+    
     // Hamburger button listener is set up by ensureSidebarPresent()
     
     // Add column filter button event listener
@@ -68,6 +77,84 @@ fun showPurchaseList() {
     ensureSidebarPresent()
     
     loadPurchases()
+}
+
+/**
+ * Check if device type changed and auto-adjust columns if needed
+ */
+fun checkAndAdjustColumnsForDeviceChange() {
+    val currentDeviceType = getDeviceType()
+    
+    // If device changed, auto-adjust columns
+    if (lastDeviceType != null && lastDeviceType != currentDeviceType) {
+        Logger.debug("Device type changed from $lastDeviceType to $currentDeviceType, auto-adjusting columns")
+        
+        // Get saved columns
+        val saved = safeLocalStorageGet("selectedColumns")
+        val savedColumns = if (saved != null) {
+            try {
+                JSON.parse<Array<String>>(saved).toList()
+            } catch (e: dynamic) {
+                null
+            }
+        } else {
+            null
+        }
+        
+        // Auto-adjust if needed
+        if (savedColumns != null) {
+            val adjustedColumns = autoAdjustColumnsForDevice(savedColumns, currentDeviceType)
+            
+            // Save adjusted columns if they changed
+            if (adjustedColumns != savedColumns) {
+                safeLocalStorageSet("selectedColumns", JSON.stringify(adjustedColumns.toTypedArray()))
+                Logger.debug("Auto-adjusted columns from ${savedColumns.size} to ${adjustedColumns.size} for $currentDeviceType")
+            }
+        }
+    }
+    
+    // Update last device type
+    lastDeviceType = currentDeviceType
+}
+
+/**
+ * Setup window resize listener to detect device changes
+ */
+fun setupDeviceChangeListener() {
+    // Remove existing listener if any (to avoid duplicates)
+    val existingListener = window.asDynamic().__deviceChangeListener
+    if (existingListener != null) {
+        val listenerFunc = existingListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("resize", listenerFunc)
+    }
+    
+    // Debounce resize events
+    var resizeTimeout: dynamic = null
+    val resizeListener: (Event) -> Unit = { _: Event ->
+        if (resizeTimeout != null) {
+            window.clearTimeout(resizeTimeout)
+        }
+        resizeTimeout = window.setTimeout({
+            // Check if device type actually changed
+            val newDeviceType = getDeviceType()
+            if (lastDeviceType != null && lastDeviceType != newDeviceType) {
+                // Device changed - auto-adjust columns and reload if on purchase list page
+                checkAndAdjustColumnsForDeviceChange()
+                
+                // If we're on the purchase list page, reload to show adjusted columns
+                if (window.location.hash.contains("#/purchase")) {
+                    loadPurchases()
+                }
+            }
+            lastDeviceType = newDeviceType
+        }, 300) // 300ms debounce
+    }
+    
+    // Store listener reference
+    window.asDynamic().__deviceChangeListener = resizeListener
+    
+    // Add event listener
+    window.addEventListener("resize", resizeListener)
 }
 
 fun loadPurchases() {
@@ -135,6 +222,13 @@ fun displayPurchases(purchases: dynamic) {
 
 fun displayPurchasesWithPagination() {
     val table = document.getElementById("purchaseTable")!!
+    val deviceType = getDeviceType()
+    
+    // Use card layout for mobile, table for tablet/desktop
+    if (deviceType == "mobile") {
+        displayPurchasesAsCards()
+        return
+    }
     
     if (allPurchases.isEmpty()) {
         // Show table headers even when no data, so users can access filters
@@ -154,7 +248,6 @@ fun displayPurchasesWithPagination() {
             "grade" to "Grade",
             "rank" to "Rank",
             "color" to "Color",
-            "displacement" to "Displacement",
             "fuel" to "Fuel",
             "seat" to "Seat",
             "door" to "Door",
@@ -163,10 +256,11 @@ fun displayPurchasesWithPagination() {
             "auctionNo" to "Auction No",
             "rixoPrice" to "Rixo Price",
             "venueId" to "Venue ID",
-            "shipmentSize" to "Shipment Size"
-        )
-        
-        val tableHTML = StringBuilder()
+            "shipmentSize" to "Vehicle type",
+            "totalPrice" to "Total Price"
+    )
+    
+    val tableHTML = StringBuilder()
         tableHTML.append("<table class='table table-striped'>")
         tableHTML.append("<thead><tr>")
         
@@ -248,7 +342,6 @@ fun displayPurchasesWithPagination() {
         "grade" to "Grade",
         "rank" to "Rank",
         "color" to "Color",
-        "displacement" to "Displacement",
         "fuel" to "Fuel",
         "seat" to "Seat",
         "door" to "Door",
@@ -277,11 +370,10 @@ fun displayPurchasesWithPagination() {
         "repairCompany" to "Repair Company",
         "repairCharges" to "Repair Charges",
         "venueId" to "Venue ID",
-        "shipmentSize" to "Shipment Size",
+        "shipmentSize" to "Vehicle type",
         "numberCut" to "Number Cut",
         "taxTotal" to "Tax Total",
         "profit" to "Profit",
-        "packagePrice" to "Package Price",
         "bookingId" to "Booking ID",
         "notes" to "Notes"
     )
@@ -349,32 +441,31 @@ fun displayPurchasesWithPagination() {
         val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
         // Safely handle date - could be null, empty string, or other types
         val dateValue = try {
-            val dateStr = purchase.date?.toString() ?: ""
-            if (dateStr.isBlank()) "" else formatWithWeekday(dateStr)
+            val dateStr = (purchase.date?.toString() ?: "").toString()
+            if (dateStr.isEmpty() || dateStr.trim().isEmpty()) "" else formatWithWeekday(dateStr)
         } catch (e: dynamic) {
             ""
         }
         val date = dateValue
-        val chassis = purchase.chassis ?: ""
-        val carName = purchase.carName ?: ""
-        val auctionHouse = purchase.auctionHouse ?: ""
-        val stockLocation = purchase.stockLocation ?: ""
-        val clientName = purchase.clientName ?: ""
-        val rixoCompany = purchase.rixoCompany ?: ""
+        val chassis = (purchase.chassis ?: "").toString()
+        val carName = (purchase.carName ?: "").toString()
+        val auctionHouse = (purchase.auctionHouse ?: "").toString()
+        val stockLocation = (purchase.stockLocation ?: "").toString()
+        val clientName = (purchase.clientName ?: "").toString()
+        val rixoCompany = (purchase.rixoCompany ?: "").toString()
         val priceStr = (purchase.price as? String) ?: ""
         val carModelYear = purchase.carModelYear ?: ""
         val brand = purchase.brand ?: ""
         val grade = purchase.grade ?: ""
         val rank = purchase.rank ?: ""
         val color = purchase.color ?: ""
-        val displacement = purchase.displacement ?: ""
         val fuel = purchase.fuel ?: ""
         val seat = purchase.seat ?: ""
         val door = purchase.door ?: ""
         val distance = purchase.distance ?: ""
         val options = purchase.options ?: ""
         val auctionNo = purchase.auctionNo ?: ""
-        val rixoPrice = purchase.rixoPrice ?: 0
+        val rixoPriceRaw = purchase.rixoPrice
         val venueId = purchase.venueId ?: ""
         val shipmentSize = purchase.shipmentSize ?: ""
         
@@ -383,8 +474,8 @@ fun displayPurchasesWithPagination() {
                 <td style="padding: 8px 12px;">
                     ${if (isEditor() && purchaseId > 0L) """
                     <button class="edit-btn" data-id="${purchaseId}" aria-label="Edit" title="Edit"
-                            style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(76,201,255,0.30);">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            style="display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                             <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
                         </svg>
@@ -414,7 +505,6 @@ fun displayPurchasesWithPagination() {
                 "grade" -> grade
                 "rank" -> rank
                 "color" -> color
-                "displacement" -> displacement
                 "fuel" -> fuel
                 "seat" -> seat
                 "door" -> door
@@ -422,14 +512,24 @@ fun displayPurchasesWithPagination() {
                 "options" -> options
                 "auctionNo" -> auctionNo
                 "country" -> (purchase.country as? String) ?: ""
+                "totalPrice" -> {
+                    val raw = purchase.totalPrice as? String ?: ""
+                    if (raw.isEmpty()) "" else (if (raw.startsWith("¥")) raw else "¥$raw")
+                }
                 "auctionFee" -> (purchase.auctionFee as? String) ?: ""
                 "recycleFee" -> (purchase.recycleFee as? String) ?: ""
                 "roadTax" -> (purchase.roadTax as? String) ?: ""
-                "totalPrice" -> (purchase.totalPrice as? String) ?: ""
                 "paymentDate" -> (purchase.paymentDate as? String) ?: ""
                 "rixoRequested" -> (purchase.rixoRequested as? String) ?: ""
                 "rixoConfirmed" -> (purchase.rixoConfirmed as? String) ?: ""
-                "rixoPrice" -> formatCurrency((rixoPrice as? Number)?.toDouble() ?: 0.0)
+                "rixoPrice" -> {
+                    val num = when (rixoPriceRaw) {
+                        null -> 0.0
+                        is Number -> (rixoPriceRaw as Number).toDouble()
+                        else -> parseCurrency(rixoPriceRaw.toString())
+                    }
+                    if (num > 0.0) "¥" + formatCurrency(num) else "¥0"
+                }
                 "shipmentDate" -> (purchase.shipmentDate as? String) ?: ""
                 "blNo" -> (purchase.blNo as? String) ?: ""
                 "vesselNo" -> (purchase.vesselNo as? String) ?: ""
@@ -447,7 +547,6 @@ fun displayPurchasesWithPagination() {
                 "numberCut" -> (purchase.numberCut as? String) ?: ""
                 "taxTotal" -> (purchase.taxTotal as? String) ?: ""
                 "profit" -> (purchase.profit as? String) ?: ""
-                "packagePrice" -> (purchase.packagePrice as? String) ?: ""
                 "bookingId" -> (purchase.bookingId as? String) ?: ""
                 "notes" -> (purchase.notes as? String) ?: ""
                 else -> ""
@@ -528,6 +627,225 @@ fun displayPurchasesWithPagination() {
     setupColumnSorting()
 }
 
+/**
+ * Display purchases as cards for mobile view
+ */
+fun displayPurchasesAsCards() {
+    val table = document.getElementById("purchaseTable")!!
+    
+    if (allPurchases.isEmpty()) {
+        table.innerHTML = """
+            <div style="text-align: center; color: #666; padding: 40px;">
+                No purchases found. Click the menu button (☰) in the top-left corner to add a purchase or import data.
+            </div>
+        """
+        return
+    }
+    
+    // Calculate pagination
+    val totalPages = kotlin.math.ceil(allPurchases.size.toDouble() / itemsPerPage).toInt()
+    val startIndex = (currentPage - 1) * itemsPerPage
+    val endIndex = kotlin.math.min(startIndex + itemsPerPage, allPurchases.size)
+    val paginatedPurchases = allPurchases.sliceArray(startIndex until endIndex)
+    
+    val selectedColumns = getSelectedColumns()
+    val columnLabels = mapOf(
+        "date" to "Purchase Date",
+        "chassis" to "Chassis",
+        "carName" to "Car Name",
+        "auctionHouse" to "Supplier Name",
+        "stockLocation" to "Stock Location",
+        "clientName" to "Client Name",
+        "rixoCompany" to "Rixo Company",
+        "price" to "Car Price",
+        "carModelYear" to "Production Date",
+        "brand" to "Brand",
+        "grade" to "Grade",
+        "rank" to "Rank",
+        "color" to "Color",
+        "fuel" to "Fuel",
+        "seat" to "Seat",
+        "door" to "Door",
+        "distance" to "Distance",
+        "options" to "Options",
+        "auctionNo" to "Auction No",
+        "country" to "Target Country",
+        "auctionFee" to "Auction Fee",
+        "recycleFee" to "Recycle Fee",
+        "roadTax" to "Road Tax",
+        "totalPrice" to "Total Price",
+        "paymentDate" to "Payment Date",
+        "rixoRequested" to "Rixo Requested",
+        "rixoConfirmed" to "Rixo Confirmed",
+        "rixoPrice" to "Rixo Price",
+        "shipmentDate" to "Shipment Date",
+        "blNo" to "BL No",
+        "vesselNo" to "Vessel No",
+        "destination" to "Destination",
+        "shipmentCharges" to "Shipment Charges",
+        "freight" to "Freight",
+        "storageCharges" to "Storage Charges",
+        "miscCharges" to "Misc Charges",
+        "inspectionFee" to "Inspection Fee",
+        "commission" to "Commission",
+        "repairCompany" to "Repair Company",
+        "repairCharges" to "Repair Charges",
+        "venueId" to "Venue ID",
+        "shipmentSize" to "Vehicle type",
+        "numberCut" to "Number Cut",
+        "taxTotal" to "Tax Total",
+        "profit" to "Profit",
+        "bookingId" to "Booking ID",
+        "notes" to "Notes"
+    )
+    
+    val cardsHTML = StringBuilder()
+    cardsHTML.append("""<div class="purchase-cards-container">""")
+    
+    for (purchase in paginatedPurchases) {
+        val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
+        
+        // Safely handle date
+        val dateValue = try {
+            val dateStr = (purchase.date?.toString() ?: "").toString()
+            if (dateStr.isEmpty() || dateStr.trim().isEmpty()) "" else formatWithWeekday(dateStr)
+        } catch (e: dynamic) {
+            ""
+        }
+        val date = dateValue
+        val chassis = purchase.chassis ?: ""
+        val carName = purchase.carName ?: ""
+        val auctionHouse = purchase.auctionHouse ?: ""
+        val stockLocation = purchase.stockLocation ?: ""
+        val clientName = purchase.clientName ?: ""
+        val rixoCompany = purchase.rixoCompany ?: ""
+        val priceStr = (purchase.price as? String) ?: ""
+        val brand = purchase.brand ?: ""
+        val country = (purchase.country as? String) ?: ""
+        
+        // Build card content based on selected columns
+        val cardFields = StringBuilder()
+        for (columnKey in selectedColumns) {
+            val label = columnLabels[columnKey] ?: columnKey
+            val value = when (columnKey) {
+                "date" -> date
+                "chassis" -> chassis
+                "carName" -> carName
+                "auctionHouse" -> auctionHouse
+                "stockLocation" -> stockLocation
+                "clientName" -> clientName
+                "rixoCompany" -> rixoCompany
+                "price" -> {
+                    val priceValue = parseCurrency(priceStr)
+                    if (priceValue > 0.0) formatCurrency(priceValue) else ""
+                }
+                "brand" -> brand
+                "country" -> country
+                else -> {
+                    val purchaseValue = purchase.asDynamic()[columnKey]
+                    when {
+                        purchaseValue != null && purchaseValue != js("undefined") -> purchaseValue.toString()
+                        else -> ""
+                    }
+                }
+            }
+            
+            // Convert to string and check if not blank (safe for JS strings)
+            val valueStr = value.toString()
+            val isValueNotEmpty = valueStr.isNotEmpty() && valueStr.trim().isNotEmpty()
+            
+            if (isValueNotEmpty) {
+                cardFields.append("""
+                    <div class="card-field">
+                        <span class="card-label">$label:</span>
+                        <span class="card-value">$valueStr</span>
+                    </div>
+                """)
+            }
+        }
+        
+        // Safe check for chassis (convert to string first)
+        val chassisStr = chassis.toString()
+        val hasChassis = chassisStr.isNotEmpty() && chassisStr.trim().isNotEmpty()
+        
+        cardsHTML.append("""
+            <div class="purchase-card">
+                <div class="card-header">
+                    ${if (isEditor() && purchaseId > 0L) """
+                    <button class="card-edit-btn" data-id="${purchaseId}" aria-label="Edit" title="Edit">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                            <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                        </svg>
+                    </button>
+                    """ else ""}
+                    <div class="card-title">${if (hasChassis) chassisStr else "Purchase #$purchaseId"}</div>
+                </div>
+                <div class="card-body">
+                    $cardFields
+                </div>
+            </div>
+        """)
+    }
+    
+    cardsHTML.append("</div>")
+    
+    // Add pagination controls
+    if (totalPages > 1) {
+        cardsHTML.append("""
+            <div class="pagination-controls">
+                <div class="pagination-info">
+                    Showing ${startIndex + 1} to $endIndex of ${allPurchases.size} purchases
+                </div>
+                <div class="pagination-buttons">
+                    <button id="prevPageBtn" ${if (currentPage == 1) "disabled" else ""} class="pagination-btn ${if (currentPage == 1) "disabled" else ""}">
+                        Previous
+                    </button>
+                    <span class="pagination-page">
+                        Page $currentPage of $totalPages
+                    </span>
+                    <button id="nextPageBtn" ${if (currentPage == totalPages) "disabled" else ""} class="pagination-btn ${if (currentPage == totalPages) "disabled" else ""}">
+                        Next
+                    </button>
+                </div>
+            </div>
+        """)
+    }
+    
+    table.innerHTML = cardsHTML.toString()
+    
+    // Add event listeners for edit buttons
+    val editButtons = document.querySelectorAll(".card-edit-btn")
+    for (i in 0 until editButtons.length) {
+        val button = editButtons.item(i) as HTMLElement
+        button.addEventListener("click", { event ->
+            val btn = event.currentTarget as HTMLElement
+            val id = btn.getAttribute("data-id")
+            if (id != null && id.isNotEmpty() && id != "0") {
+                window.location.hash = "#/edit/$id"
+            } else {
+                showMessage("Invalid purchase ID. Cannot edit this purchase.", "error")
+            }
+        })
+    }
+    
+    // Setup pagination event listeners
+    document.getElementById("prevPageBtn")?.addEventListener("click", { _: Event ->
+        if (currentPage > 1) {
+            currentPage--
+            displayPurchasesWithPagination()
+        }
+    })
+    
+    document.getElementById("nextPageBtn")?.addEventListener("click", { _: Event ->
+        val totalPages = kotlin.math.ceil(allPurchases.size.toDouble() / itemsPerPage).toInt()
+        if (currentPage < totalPages) {
+            currentPage++
+            displayPurchasesWithPagination()
+        }
+    })
+}
+
 fun deletePurchase(id: Long) {
     if (window.confirm("Are you sure you want to delete this purchase?")) {
         val scope = MainScope()
@@ -550,13 +868,34 @@ fun deletePurchase(id: Long) {
 
 // Helper functions (these may be defined elsewhere or need to be implemented)
 fun getSelectedColumns(): List<String> {
-    // This should read from localStorage or return default columns
+    // Get current device type
+    val deviceType = getDeviceType()
+    val maxColumns = getMaxColumnsForDevice(deviceType)
+    val defaultColumns = getDefaultColumnsForDevice(deviceType)
+    
+    // Try to get saved columns from localStorage
     val saved = safeLocalStorageGet("selectedColumns")
-    return if (saved != null) {
-        JSON.parse<Array<String>>(saved).toList()
+    val savedColumns = if (saved != null) {
+        try {
+            JSON.parse<Array<String>>(saved).toList()
+        } catch (e: dynamic) {
+            Logger.warn("Failed to parse saved columns: ${e.toString()}")
+            null
+        }
     } else {
-        listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany", "price")
+        null
     }
+    
+    // If no saved columns, return device defaults
+    if (savedColumns == null || savedColumns.isEmpty()) {
+        return defaultColumns
+    }
+    
+    // Filter out removed columns (displacement, packagePrice)
+    val validColumns = savedColumns.filter { it != "displacement" && it != "packagePrice" }
+    
+    // Auto-adjust if saved columns exceed device limit
+    return autoAdjustColumnsForDevice(validColumns, deviceType)
 }
 
 fun setupColumnSorting() {
@@ -588,18 +927,27 @@ fun showColumnFilterModal() {
         display: flex; align-items: center; justify-content: center;
     """
     
+    // Get current device type and limits
+    val deviceType = getDeviceType()
+    val maxColumns = getMaxColumnsForDevice(deviceType)
+    val deviceDisplayName = when (deviceType) {
+        "mobile" -> "Mobile View"
+        "tablet" -> "Tablet View"
+        else -> "Desktop View"
+    }
+    
     val selectedColumnsList = getSelectedColumns()
     val selectedColumns = selectedColumnsList.toSet()
     
     modal.innerHTML = """
         <div style="background: white; border-radius: 8px; padding: 24px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h3 style="margin: 0; color: #333;">Select Columns to Display</h3>
-                <button id="closeColumnFilter" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">&times;</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; position: relative;">
+                <h3 style="margin: 0; color: #333; flex: 1;">Select Columns to Display</h3>
+                <button id="closeColumnFilter" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 4px 8px; line-height: 1; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">&times;</button>
             </div>
             <div style="margin-bottom: 16px; padding: 12px; background-color: #f8f9fa; border-radius: 4px; border-left: 4px solid #007bff;">
-                <strong>Maximum 9 columns allowed</strong><br>
-                <span style="color: #666; font-size: 14px;">Currently selected: <span id="selectedCount">${selectedColumns.size}</span>/9</span>
+                <strong>$deviceDisplayName - Maximum $maxColumns columns allowed</strong><br>
+                <span style="color: #666; font-size: 14px;">Currently selected: <span id="selectedCount">0</span></span>
             </div>
             <div id="columnCheckboxes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
                 <!-- Column checkboxes will be populated here -->
@@ -616,7 +964,7 @@ fun showColumnFilterModal() {
     // Populate column checkboxes (using function from MinimalPurchaseApp.kt)
     populateColumnCheckboxes(selectedColumns)
     
-    // Update selection count initially
+    // Update selection count initially (this will set the correct format)
     updateColumnSelection()
     
     // Add event listeners

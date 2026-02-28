@@ -11,36 +11,36 @@ import com.automan.purchase.Logger
 
 fun createFreightCalculationHTML(selectedCars: List<dynamic>): String {
     return """
-        <div style="padding: 20px; background-color: #f9fafb; min-height: 100vh;">
+        <div class="freight-container">
             <!-- Back Button -->
             <div style="margin-bottom: 20px;">
-                <button id="backToCnfBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">← Back to C&F</button>
+                <button id="backToCnfBtn" class="cnf-back-btn">← Back to C&F</button>
             </div>
             
             <!-- Freight Calculation Container -->
-            <div style="background-color: white; border: 2px solid #8b5cf6; border-radius: 12px; padding: 30px; max-width: 1000px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.1);">
+            <div class="freight-card">
                 
                 <!-- Header -->
-                <div style="text-align: center; margin-bottom: 30px;">
-                    <h1 style="color: #1f2937; font-size: 24px; font-weight: bold; margin: 0;">CALCULATE FREIGHT:</h1>
+                <div class="freight-header">
+                    <h1>CALCULATE FREIGHT:</h1>
                 </div>
                 
                 <!-- Overall Container Price Calculation Section -->
-                <div style="background-color: #f8fafc; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
-                    <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 15px;">
-                        <label style="font-weight: 600; color: #374151;">CONTAINER PRICE :</label>
-                        <input type="number" id="containerPrice" value="3000" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 120px;">
-                        <span style="font-size: 18px; font-weight: bold;">×</span>
-                        <label style="font-weight: 600; color: #374151;">YEN RATE :</label>
-                        <input type="number" id="yenRate" value="150" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 120px;">
-                        <span style="font-size: 18px; font-weight: bold;">=</span>
-                        <label style="font-weight: 600; color: #374151;">TOTAL PER CONTAINER PRICE :</label>
-                        <input type="text" id="totalPerContainerPrice" value="¥450,000" readonly style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 150px; background-color: #f3f4f6; font-weight: bold;">
+                <div class="freight-price-section">
+                    <div class="freight-price-row">
+                        <label>CONTAINER PRICE :</label>
+                        <input type="number" id="containerPrice" value="3000">
+                        <span class="operator">×</span>
+                        <label>YEN RATE :</label>
+                        <input type="number" id="yenRate" value="150">
+                        <span class="operator">=</span>
+                        <label>TOTAL PER CONTAINER PRICE :</label>
+                        <input type="text" id="totalPerContainerPrice" value="¥450,000" readonly style="background-color: #f3f4f6; font-weight: bold; width: 150px;">
                     </div>
                     
-                    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
-                        <label style="font-weight: 600; color: #374151;">NO. OF CONTAINERS:</label>
-                        <input type="number" id="numberOfContainers" value="2" min="1" max="10" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 100px;">
+                    <div class="freight-price-row">
+                        <label>NO. OF CONTAINERS:</label>
+                        <input type="number" id="numberOfContainers" value="2" min="1" max="10" style="width: 100px;">
                     </div>
                     
                 </div>
@@ -52,7 +52,7 @@ fun createFreightCalculationHTML(selectedCars: List<dynamic>): String {
                 
                 <!-- Confirm Button -->
                 <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
-                    <button id="confirmFreightBtn" style="padding: 16px 32px; background-color: #374151; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600;">CONFIRM</button>
+                    <button id="confirmFreightBtn" class="freight-confirm-btn">CONFIRM</button>
                 </div>
             </div>
         </div>
@@ -122,15 +122,15 @@ fun generateContainerSections(allSelectedCars: List<dynamic>) {
         val isFirstContainer = i == 1
         
         containerHTML += """
-            <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; margin-top: 20px;">
-                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
-                    <label style="font-weight: 600; color: #374151;">CONTAINER NO.$i:</label>
-                    <input type="text" id="${containerId}Price" value="$totalPerContainerPrice" readonly style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 150px; background-color: #f3f4f6; font-weight: bold;">
+            <div class="freight-container-section">
+                <div class="freight-container-row">
+                    <label>CONTAINER NO.$i:</label>
+                    <input type="text" id="${containerId}Price" value="$totalPerContainerPrice" readonly style="background-color: #f3f4f6; font-weight: bold; width: 150px;">
                 </div>
                 
-                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 15px;">
-                    <label style="font-weight: 600; color: #374151;">SELECT CARS IN CONTAINER .$i :</label>
-                    <select id="${containerId}CarSelect" style="padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; width: 200px;">
+                <div class="freight-container-row">
+                    <label>SELECT CARS IN CONTAINER .$i :</label>
+                    <select id="${containerId}CarSelect" style="width: 200px;">
                         <option value="">SELECT</option>
         """
         

@@ -38,6 +38,12 @@ SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN repair_charges
 SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'package_price_decimal');
 SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN package_price_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- Drop displacement and package_price columns (legacy, removed from schema)
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'displacement');
+SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN displacement', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'package_price');
+SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN package_price', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- Drop lot_number column and idx_lot_chassis index (if they exist)
 SET @index_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND INDEX_NAME = 'idx_lot_chassis');
 SET @sql = IF(@index_exists > 0, 'ALTER TABLE purchases DROP INDEX idx_lot_chassis', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
@@ -91,7 +97,6 @@ CREATE TABLE IF NOT EXISTS purchases (
     grade VARCHAR(100),
     `rank` VARCHAR(100),
     color VARCHAR(100),
-    displacement VARCHAR(100),
     fuel VARCHAR(100),
     seat VARCHAR(100),
     door VARCHAR(100),
@@ -99,7 +104,6 @@ CREATE TABLE IF NOT EXISTS purchases (
     options TEXT,
     CC INT NULL,
     shift VARCHAR(50) NULL,
-    steering_wheel VARCHAR(50) NULL,
     WD VARCHAR(50) NULL,
     drive_type VARCHAR(50) NULL,
     auction_no VARCHAR(100),
@@ -139,7 +143,6 @@ CREATE TABLE IF NOT EXISTS purchases (
     repair_company VARCHAR(100),
     repair_charges VARCHAR(50),
     profit DECIMAL(15,2) DEFAULT 0,
-    package_price VARCHAR(255) DEFAULT NULL,
     is_package_mode BOOLEAN DEFAULT FALSE,
     total_cnf_price DECIMAL(15,2) DEFAULT NULL,
     total_fob_price DECIMAL(15,2) DEFAULT NULL,

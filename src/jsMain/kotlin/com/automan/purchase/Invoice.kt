@@ -44,42 +44,18 @@ fun showInvoicePage() {
     }
     
     content.innerHTML = """
-        <div style="width: 100%; min-height: calc(100vh - 60px); padding: 20px; background: #f5f5f5;">
-            <style>
-                .invoice-container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-                .invoice-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid #e5e7eb; }
-                .invoice-title { font-size: 24px; font-weight: 700; color: #111827; margin: 0; }
-                .invoice-help { color: #6b7280; text-decoration: none; }
-                .invoice-close { background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280; }
-                .invoice-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-                .invoice-field { margin-bottom: 16px; }
-                .invoice-field label { display: block; margin-bottom: 6px; font-weight: 600; color: #374151; font-size: 14px; }
-                .invoice-input, .invoice-select, .invoice-textarea { width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
-                .invoice-input:focus, .invoice-select:focus, .invoice-textarea:focus { outline: none; border-color: #059669; box-shadow: 0 0 0 3px rgba(5,150,105,0.1); }
-                .invoice-radio-group { display: flex; gap: 16px; margin-top: 8px; }
-                .invoice-radio { display: flex; align-items: center; gap: 6px; }
-                .invoice-actions { display: flex; gap: 12px; margin-top: 24px; padding-top: 24px; border-top: 1px solid #e5e7eb; }
-                .invoice-btn { padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 14px; }
-                .invoice-btn-primary { background: #059669; color: white; }
-                .invoice-btn-secondary { background: #6b7280; color: white; }
-                .invoice-btn-danger { background: #dc2626; color: white; }
-                .invoice-list-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-                .invoice-list-table th, .invoice-list-table td { padding: 12px; text-align: left; border-bottom: 1px solid #e5e7eb; }
-                .invoice-list-table th { background: #f9fafb; font-weight: 600; color: #374151; }
-                .invoice-total { margin-top: 16px; padding: 16px; background: #f9fafb; border-radius: 6px; text-align: right; font-size: 18px; font-weight: 700; }
-                .invoice-generate-btn { padding: 8px 16px; background: #6d28d9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px; margin-left: 8px; }
-            </style>
-            <div class="invoice-container">
-                <div class="invoice-header">
-                    <h1 class="invoice-title">AUTOMAN | CREATE CUSTOMER INVOICE</h1>
+        <div class="invoice-page-container">
+            <div class="invoice-card">
+                <div class="invoice-page-header">
+                    <h1>AUTOMAN | CREATE CUSTOMER INVOICE</h1>
                 </div>
                 
                 <div class="invoice-layout">
                     <!-- Left Column: Form Fields -->
-                    <div>
+                    <div class="invoice-form-section">
                         <div class="invoice-field">
                             <label for="invoiceClient">CLIENT:</label>
-                            <select id="invoiceClient" class="invoice-select" style="width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                            <select id="invoiceClient" class="invoice-select">
                                 <option value="">Select client (consignee)</option>
                             </select>
                         </div>
@@ -87,53 +63,53 @@ fun showInvoicePage() {
                         <div class="invoice-field">
                             <label for="invoiceVessel">VESSEL:</label>
                             <input type="text" id="invoiceVessel" class="invoice-input" placeholder="Enter vessel name" />
-                    </div>
+                        </div>
                         
                         <div class="invoice-field">
                             <label for="invoiceShippingDate">SHIPPING DATE:</label>
                             <input type="date" id="invoiceShippingDate" class="invoice-input" placeholder="Select shipping date" />
-                                </div>
+                        </div>
                         
                         <div class="invoice-field">
                             <label>SHIPPING LOCATION:</label>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                            <div class="invoice-shipping-grid">
                                 <div>
-                                    <label style="font-size: 12px; color: #6b7280;">FROM:</label>
+                                    <label>FROM:</label>
                                     <input type="text" id="invoiceFrom" class="invoice-input" placeholder="Origin port" />
                                 </div>
                                 <div>
-                                    <label style="font-size: 12px; color: #6b7280;">TO:</label>
+                                    <label>TO:</label>
                                     <input type="text" id="invoiceTo" class="invoice-input" placeholder="Destination port" />
+                                </div>
                             </div>
                         </div>
-                                </div>
                         
                         <div class="invoice-field">
                             <label for="invoiceNumber">INVOICE NUMBER:</label>
-                            <div style="display: flex;">
+                            <div class="invoice-number-row">
                                 <input type="text" id="invoiceNumber" class="invoice-input" placeholder="Enter invoice number" />
                                 <button type="button" id="generateInvoiceNumberBtn" class="invoice-generate-btn">GENERATE INVOICE NUMBER</button>
-                                </div>
-                                    </div>
+                            </div>
+                        </div>
                         
                         <div class="invoice-field">
                             <label for="invoiceLcNo">LC NO.:</label>
                             <input type="text" id="invoiceLcNo" class="invoice-input" placeholder="Enter LC number" />
-                                    </div>
+                        </div>
                         
                         <div class="invoice-field">
                             <label>PRICE TYPE:</label>
                             <div class="invoice-radio-group">
                                 <div class="invoice-radio">
                                     <input type="radio" id="invoiceCnf" name="invoicePriceType" value="CNF" checked />
-                                    <label for="invoiceCnf" style="margin: 0; font-weight: normal;">C&F</label>
+                                    <label for="invoiceCnf">C&F</label>
                                 </div>
                                 <div class="invoice-radio">
                                     <input type="radio" id="invoiceFob" name="invoicePriceType" value="FOB" />
-                                    <label for="invoiceFob" style="margin: 0; font-weight: normal;">FOB</label>
+                                    <label for="invoiceFob">FOB</label>
+                                </div>
                             </div>
                         </div>
-                    </div>
                         
                         <div class="invoice-field">
                             <label for="invoiceBankAccount">SELECT BANK ACCOUNT:</label>
@@ -147,17 +123,19 @@ A/C NO: 0398932
 A/C NAME: MEMON Co. Ltd.
 SWIFT CODE: SMBCJPJT</option>
                             </select>
-                    </div>
+                        </div>
                         
                         <div class="invoice-field">
                             <label for="invoiceMessage">MESSAGE:</label>
                             <textarea id="invoiceMessage" class="invoice-textarea" rows="4" placeholder="Enter message"></textarea>
-                    </div>
+                        </div>
                     </div>
                     
                     <!-- Right Column: LIST Table -->
-                    <div>
-                        <h2 style="margin: 0 0 16px 0; font-size: 20px; font-weight: 700; text-transform: uppercase;">LIST</h2>
+                    <div class="invoice-list-section">
+                        <h2>LIST</h2>
+                        
+                        <!-- Table for Tablet/Desktop -->
                         <table class="invoice-list-table" id="invoiceListTable">
                             <thead>
                                 <tr>
@@ -172,6 +150,12 @@ SWIFT CODE: SMBCJPJT</option>
                                 <!-- Will be populated by JavaScript -->
                             </tbody>
                         </table>
+                        
+                        <!-- Cards for Mobile -->
+                        <div class="invoice-cards-container" id="invoiceCardsContainer">
+                            <!-- Will be populated by JavaScript -->
+                        </div>
+                        
                         <div class="invoice-total" id="invoiceTotalAmount">
                             TOTAL AMOUNT: ¥000,000
                         </div>
@@ -506,13 +490,15 @@ fun loadInvoicePurchases(client: String, vessel: String) {
 
 fun populateInvoiceListTable(purchases: Array<dynamic>) {
     val tableBody = document.getElementById("invoiceListTableBody")
+    val cardsContainer = document.getElementById("invoiceCardsContainer")
     if (tableBody == null) return
     
     // Store purchase IDs for PDF and Ship Cars functions
     val purchaseIds = mutableListOf<Long>()
     
-    // Clear table body
+    // Clear table body and cards container
     tableBody.innerHTML = ""
+    cardsContainer?.innerHTML = ""
     
     var totalAmount = 0.0
     var rowNumber = 1
@@ -520,7 +506,7 @@ fun populateInvoiceListTable(purchases: Array<dynamic>) {
     // Get price type (C&F or FOB)
     val priceType = (document.querySelector("input[name='invoicePriceType']:checked") as? HTMLInputElement)?.value ?: "CNF"
     
-    // Populate table rows
+    // Populate table rows and mobile cards
     for (purchase in purchases) {
         val id = js("purchase.id")?.toString()?.toLongOrNull()
         if (id != null) {
@@ -554,6 +540,7 @@ fun populateInvoiceListTable(purchases: Array<dynamic>) {
         val finalReversed = joined.reversed()
         val formattedAmount = "¥$finalReversed"
         
+        // Add table row (for tablet/desktop)
         val row = document.createElement("tr")
         row.innerHTML = """
             <td>$rowNumber</td>
@@ -563,6 +550,32 @@ fun populateInvoiceListTable(purchases: Array<dynamic>) {
             <td>$formattedAmount</td>
         """
         tableBody.appendChild(row)
+        
+        // Add mobile card
+        if (cardsContainer != null) {
+            val card = document.createElement("div")
+            card.className = "invoice-card-item"
+            card.innerHTML = """
+                <div class="card-row">
+                    <span class="card-label">NO.</span>
+                    <span class="card-value">$rowNumber</span>
+                </div>
+                <div class="card-row">
+                    <span class="card-label">CHASSIS</span>
+                    <span class="card-value">$chassis</span>
+                </div>
+                <div class="card-row">
+                    <span class="card-label">NAME</span>
+                    <span class="card-value">$carName</span>
+                </div>
+                <div class="card-row">
+                    <span class="card-label">AMOUNT</span>
+                    <span class="card-amount">$formattedAmount</span>
+                </div>
+            """
+            cardsContainer.appendChild(card)
+        }
+        
         rowNumber++
     }
     

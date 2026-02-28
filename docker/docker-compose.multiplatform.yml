@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
@@ -32,6 +30,11 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: automan_user
       SPRING_DATASOURCE_PASSWORD: automan_password
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      APP_MAIL_ADMIN_EMAIL: ${APP_MAIL_ADMIN_EMAIL:-automan.dev.team@gmail.com}
+      APP_VERIFICATION_BASE_URL: ${APP_VERIFICATION_BASE_URL:-http://localhost:8083/api}
+      APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://localhost:8080}
+      APP_MAIL_VALIDATE_MX: ${APP_MAIL_VALIDATE_MX:-true}
     networks:
       - automan_network
 
@@ -40,7 +43,7 @@ services:
     container_name: automan_frontend_multiplatform
     restart: always
     ports:
-      - "8080:8080"
+      - "8080:80"
     depends_on:
       - backend
     networks:

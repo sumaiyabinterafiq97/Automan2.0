@@ -81,7 +81,7 @@ echo "📋 Checking purchases table columns..."
 columns=$(docker exec automan_mysql_multiplatform mysql -u automan_user -pautoman_password \
   -e "USE automan_car_purchase; DESCRIBE purchases;" 2>/dev/null)
 
-critical_columns=("total_cnf_price" "shipped" "consignee" "vessel" "shipment_size" "CC" "shift" "steering_wheel" "WD" "auction_house" "tax_total" "venue_id" "package_price" "is_package_mode" "car_pictures")
+critical_columns=("total_cnf_price" "shipped" "consignee" "vessel" "shipment_size" "CC" "shift" "WD" "auction_house" "tax_total" "venue_id" "is_package_mode" "car_pictures")
 missing_columns=()
 
 for col in "${critical_columns[@]}"; do

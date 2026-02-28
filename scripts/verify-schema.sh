@@ -25,10 +25,10 @@ FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = '$DB_NAME' 
 AND TABLE_NAME = 'purchases' 
 AND COLUMN_NAME IN (
-    'id', 'chassis', 'lot_number', 'client_id', 
+    'id', 'chassis', 'client_id', 
     'shipment_size', 'drive_type', 'total_cnf_price', 
     'total_fob_price', 'booking_id', 'car_pictures',
-    'package_price', 'is_package_mode', 'venue_id',
+    'is_package_mode', 'venue_id',
     'tax_total', 'vessel', 'consignee'
 )
 ORDER BY COLUMN_NAME;

@@ -231,6 +231,7 @@ fun initializeAppSetup() {
     window.asDynamic().handleGenerateInvoice = ::handleGenerateInvoice
     window.asDynamic().editMasterConsignee = ::editMasterConsignee
     window.asDynamic().deleteMasterConsignee = ::deleteMasterConsignee
+    window.asDynamic().editMasterCountry = ::editMasterCountry
     window.asDynamic().editMasterCarBrand = ::editMasterCarBrand
     window.asDynamic().deleteMasterCarBrand = ::deleteMasterCarBrand
     window.asDynamic().editMasterSupplier = ::editMasterSupplier
@@ -254,6 +255,12 @@ fun initializeAppSetup() {
     
     // Expose saveNewPurchase to global scope for onclick handler
     window.asDynamic().saveNewPurchase = ::saveNewPurchase
+    
+    // Expose sidebar open so hamburger works even if addEventListener fails (e.g. mobile)
+    window.asDynamic().openSidebar = ::openSidebar
+    
+    // Form section collapse (Add/Edit) - same pattern as Master menu onclick for reliable mobile tap
+    window.asDynamic().toggleFormSection = ::toggleFormSection
     
     // Expose handleImport and closeImportModal to global scope for Import CSV modal
     window.asDynamic().handleImport = ::handleImport
@@ -319,7 +326,9 @@ fun main() {
                 val rootElement = document.getElementById("root")
                 if (rootElement != null) {
                     Logger.debug("Root element found after DOMContentLoaded")
-                    checkSystemInitialization(rootElement)
+                    createApp(rootElement)
+                    window.addEventListener("hashchange", { _: Event -> updateContent(rootElement) })
+                    updateContent(rootElement)
                 } else {
                     Logger.error("Root element still not found after DOMContentLoaded!")
                 }
@@ -335,8 +344,10 @@ fun main() {
     // Ensure scrolling is enabled on page load
     js("if (typeof window.ensureScrollingRestored === 'function') { window.ensureScrollingRestored(); }")
     
-    // Check if system is initialized first, then create app if needed
-    checkSystemInitialization(root)
+    // Create app (sign in / sign up only; no setup page)
+    createApp(root)
+    window.addEventListener("hashchange", { _: Event -> updateContent(root) })
+    updateContent(root)
     
     // Setup brand selection handlers
     setupBrandSelectionHandlers()
@@ -366,6 +377,147 @@ fun createEditableCombobox(id: String, placeholder: String, required: Boolean = 
             </div>
         </div>
     """.trimIndent()
+}
+
+// Create editable combobox with pre-populated options (like chassis dropdown design)
+fun createEditableComboboxWithOptions(id: String, placeholder: String, options: List<Pair<String, String>>, initialValue: String = "", required: Boolean = false): String {
+    val requiredAttr = if (required) "required" else ""
+    val optionsHTML = options.joinToString("\n") { (value, text) ->
+        val selected = if (value == initialValue) " selected" else ""
+        "<option value=\"${value.replace("\"", "&quot;")}\"$selected>${text.replace("<", "&lt;").replace(">", "&gt;")}</option>"
+    }
+    
+    return """
+        <div style="position: relative; width: 100%;">
+            <input type="text" id="${id}Input" placeholder="$placeholder" $requiredAttr ${if (initialValue.isNotEmpty()) "value=\"${initialValue.replace("\"", "&quot;")}\"" else ""}
+                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                   autocomplete="off"
+                   onfocus="this.select();">
+            <select id="$id" $requiredAttr 
+                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('$id');"
+                    onchange="syncComboboxInput('$id');">
+                <option value="">▼</option>
+                $optionsHTML
+            </select>
+            <div id="${id}Button" onclick="openComboboxDropdown('$id')" 
+                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                ▼
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+// Shared options for Number Cut Place (chassis-style combobox on Add/Edit and Rixo modal)
+fun getNumberCutPlaceOptions(): List<Pair<String, String>> = listOf(
+    "札幌" to "札幌 (Sapporo)", "函館" to "函館 (Hakodate)", "旭川" to "旭川 (Asahikawa)", "室蘭" to "室蘭 (Muroran)",
+    "釧路" to "釧路 (Kushiro)", "帯広" to "帯広 (Obihiro)", "十勝" to "十勝 (Tokachi)", "北見" to "北見 (Kitami)",
+    "知床" to "知床 (Shiretoko)", "苫小牧" to "苫小牧 (Tomakomai)", "青森" to "青森 (Aomori)", "弘前" to "弘前 (Hirosaki)",
+    "岩手" to "岩手 (Iwate)", "盛岡" to "盛岡 (Morioka)", "平泉" to "平泉 (Hiraizumi)", "宮城" to "宮城 (Miyagi)",
+    "仙台" to "仙台 (Sendai)", "八戸" to "八戸 (Hachinohe)", "秋田" to "秋田 (Akita)", "山形" to "山形 (Yamagata)",
+    "福島" to "福島 (Fukushima)", "茨城" to "茨城 (Ibaraki)", "栃木" to "栃木 (Tochigi)", "群馬" to "群馬 (Gunma)",
+    "埼玉" to "埼玉 (Saitama)", "千葉" to "千葉 (Chiba)", "東京" to "東京 (Tokyo)", "神奈川" to "神奈川 (Kanagawa)",
+    "新潟" to "新潟 (Niigata)", "富山" to "富山 (Toyama)", "石川" to "石川 (Ishikawa)", "福井" to "福井 (Fukui)",
+    "山梨" to "山梨 (Yamanashi)", "長野" to "長野 (Nagano)", "岐阜" to "岐阜 (Gifu)", "静岡" to "静岡 (Shizuoka)",
+    "愛知" to "愛知 (Aichi)", "三重" to "三重 (Mie)", "滋賀" to "滋賀 (Shiga)", "京都" to "京都 (Kyoto)",
+    "大阪" to "大阪 (Osaka)", "兵庫" to "兵庫 (Hyogo)", "奈良" to "奈良 (Nara)", "和歌山" to "和歌山 (Wakayama)",
+    "鳥取" to "鳥取 (Tottori)", "島根" to "島根 (Shimane)", "岡山" to "岡山 (Okayama)", "広島" to "広島 (Hiroshima)",
+    "山口" to "山口 (Yamaguchi)", "徳島" to "徳島 (Tokushima)", "香川" to "香川 (Kagawa)", "愛媛" to "愛媛 (Ehime)",
+    "高知" to "高知 (Kochi)", "福岡" to "福岡 (Fukuoka)", "佐賀" to "佐賀 (Saga)", "長崎" to "長崎 (Nagasaki)",
+    "熊本" to "熊本 (Kumamoto)", "大分" to "大分 (Oita)", "宮崎" to "宮崎 (Miyazaki)", "鹿児島" to "鹿児島 (Kagoshima)",
+    "沖縄" to "沖縄 (Okinawa)"
+)
+
+// Shared options for Number Cut Hiragana (chassis-style combobox on Add/Edit and Rixo modal)
+fun getNumberCutHiraganaOptions(): List<Pair<String, String>> = listOf(
+    "あ" to "あ (a)", "い" to "い (i)", "う" to "う (u)", "え" to "え (e)", "お" to "お (o)",
+    "か" to "か (ka)", "き" to "き (ki)", "く" to "く (ku)", "け" to "け (ke)", "こ" to "こ (ko)",
+    "さ" to "さ (sa)", "し" to "し (shi)", "す" to "す (su)", "せ" to "せ (se)", "そ" to "そ (so)",
+    "た" to "た (ta)", "ち" to "ち (chi)", "つ" to "つ (tsu)", "て" to "て (te)", "と" to "と (to)",
+    "な" to "な (na)", "に" to "に (ni)", "ぬ" to "ぬ (nu)", "ね" to "ね (ne)", "の" to "の (no)",
+    "は" to "は (ha)", "ひ" to "ひ (hi)", "ふ" to "ふ (fu)", "へ" to "へ (he)", "ほ" to "ほ (ho)",
+    "ま" to "ま (ma)", "み" to "み (mi)", "む" to "む (mu)", "め" to "め (me)", "も" to "も (mo)",
+    "や" to "や (ya)", "ゆ" to "ゆ (yu)", "よ" to "よ (yo)",
+    "ら" to "ら (ra)", "り" to "り (ri)", "る" to "る (ru)", "れ" to "れ (re)", "ろ" to "ろ (ro)",
+    "わ" to "わ (wa)", "ゐ" to "ゐ (wi)", "ゑ" to "ゑ (we)", "を" to "を (wo)", "ん" to "ん (n)"
+)
+
+fun getInitialPlaceFromNumberCut(numberCut: Any?): String {
+    val s = numberCut?.toString() ?: return ""
+    return getNumberCutPlaceOptions().find { (p, _) -> s.startsWith(p) }?.first ?: ""
+}
+
+fun getInitialHiraganaFromNumberCut(numberCut: Any?): String {
+    val s = numberCut?.toString() ?: return ""
+    return getNumberCutHiraganaOptions().find { (c, _) -> s.contains(c) }?.first ?: ""
+}
+
+// Client name suggestions for Add/Edit purchase (Shipment Information)
+private val CLIENT_NAME_SUGGESTIONS = listOf(
+    "LOCAL", "AN KIKAKU", "TARIQ BUDHANI", "HARIS VAYANI", "JAWAD", "UGANDA LAKHANI",
+    "IRSHAD", "IRFAN HYDRABAD", "AUTOHANDLER", "DUBAI LAKHANI", "SHEHROZE", "NIRIANDER",
+    "CROWN", "DAAVI"
+)
+
+fun createClientNameField(inputId: String, value: String = ""): String {
+    val dataList = CLIENT_NAME_SUGGESTIONS.joinToString("|") { it.replace("|", " ") }
+    val suggestionsId = "${inputId}Suggestions"
+    val caretId = "${inputId}SuggestionsCaret"
+    val escapedValue = value.replace("\"", "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+    return """
+        <div class="client-name-suggestion-wrap" style="position: relative; width: 100%;" data-suggestions="$dataList">
+            <input type="text" id="$inputId" ${if (escapedValue.isNotEmpty()) "value=\"$escapedValue\"" else ""} placeholder="Select Client" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;" autocomplete="off">
+            <div id="$caretId" class="client-name-suggestions-caret" style="display: none; position: absolute; left: 50%; transform: translateX(-50%); top: 100%; width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 8px solid #333; z-index: 1001; margin-top: 2px;"></div>
+            <ul id="$suggestionsId" class="client-name-suggestions" style="display: none; position: absolute; left: 0; right: 0; top: calc(100% + 10px); margin: 0; padding: 4px 0; list-style: none; border-radius: 6px; max-height: 200px; overflow-y: auto; background: #333; color: #fff; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.25); font-family: inherit; font-size: 14px;"></ul>
+        </div>
+    """.trimIndent()
+}
+
+fun setupClientNameSuggestions(inputId: String) {
+    val input = document.getElementById(inputId) as? HTMLInputElement ?: return
+    val wrapper = input.closest(".client-name-suggestion-wrap") ?: input.parentElement ?: return
+    val suggestionsId = "${inputId}Suggestions"
+    val caretId = "${inputId}SuggestionsCaret"
+    val ul = document.getElementById(suggestionsId) as? HTMLElement ?: return
+    val caret = document.getElementById(caretId) as? HTMLElement
+    val dataList = (wrapper.getAttribute("data-suggestions") ?: "").split("|").map { it.trim() }.filter { it.isNotEmpty() }
+    fun showSuggestions(query: String) {
+        val q = query.trim().lowercase()
+        val matches = if (q.isEmpty()) dataList else dataList.filter { it.lowercase().contains(q) }
+        ul.innerHTML = ""
+        matches.forEach { name ->
+            val li = document.createElement("li")
+            li.textContent = name
+            li.setAttribute("style", "padding: 8px 12px; cursor: pointer; color: #fff; background: transparent; font-size: 14px;")
+            li.addEventListener("mouseenter", { (li as HTMLElement).style.background = "#555" })
+            li.addEventListener("mouseleave", { (li as HTMLElement).style.background = "transparent" })
+            li.addEventListener("mousedown", { e: Event ->
+                e.preventDefault()
+                input.value = name
+                ul.style.display = "none"
+                caret?.style?.display = "none"
+            })
+            ul.appendChild(li)
+        }
+        val visible = matches.isNotEmpty()
+        ul.style.display = if (visible) "block" else "none"
+        caret?.style?.display = if (visible) "block" else "none"
+    }
+    input.addEventListener("input", { showSuggestions(input.value) })
+    input.addEventListener("focus", { showSuggestions(input.value) })
+    input.addEventListener("blur", {
+        window.setTimeout({
+            ul.style.display = "none"
+            caret?.style?.display = "none"
+        }, 200)
+    })
+    document.addEventListener("click", { e: Event ->
+        val target = e.target as? Element ?: return@addEventListener
+        if (!wrapper.contains(target)) {
+            ul.style.display = "none"
+            caret?.style?.display = "none"
+        }
+    })
 }
 
 // Helper to ensure base options exist for combobox select elements (add & edit)
@@ -653,7 +805,7 @@ fun setupEditableComboboxHandlers() {
                 if (fieldId === 'auctionName' || fieldId === 'editAuctionName') {
                     fieldLabel = 'Supplier Name';
                 } else if (fieldId === 'typeOfVehicle' || fieldId === 'editTypeOfVehicle') {
-                    fieldLabel = 'Shipment Size';
+                    fieldLabel = 'Vehicle type';
                 } else if (fieldId === 'chassis' || fieldId === 'editChassis') {
                     fieldLabel = 'Chassis';
                     // For chassis, mention Part 1 specifically
@@ -708,8 +860,10 @@ fun setupEditableComboboxHandlers() {
             var baseOptionsMap = {
                 fuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 editFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
+                carBrandFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 shift: ["AT", "MT", "6F", "5F"],
                 editShift: ["AT", "MT", "6F", "5F"],
+                carBrandShift: ["AT", "MT", "6F", "5F"],
                 grade: ["G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI"],
                 editGrade: ["G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI"]
             };
@@ -727,11 +881,45 @@ fun setupEditableComboboxHandlers() {
             
             // Filter options based on search text (case-insensitive)
             var searchLower = (searchText || '').toLowerCase().trim();
+            
+            // For chassis fields, extract prefix before "-" for searching
+            // This allows users to type "B43W-123456" and it will search for "B43W" only
+            var isChassisField = (selectId === 'chassis' || selectId === 'editChassis');
+            var searchPrefix = searchLower;
+            if (isChassisField && searchLower.indexOf('-') !== -1) {
+                searchPrefix = searchLower.substring(0, searchLower.indexOf('-')).trim();
+            }
+            
             var filteredOptions = allOptions.filter(function(opt) {
                 if (!searchLower) return true;
                 var optText = (opt.text || opt.value || '').toLowerCase();
-                return optText.indexOf(searchLower) !== -1;
+                // For chassis fields, match against prefix only
+                if (isChassisField) {
+                    var optPrefix = optText.indexOf('-') !== -1 ? optText.substring(0, optText.indexOf('-')).trim() : optText;
+                    return optPrefix.indexOf(searchPrefix) !== -1 || optText.indexOf(searchPrefix) !== -1;
+                } else {
+                    return optText.indexOf(searchLower) !== -1;
+                }
             });
+            
+            // For chassis: match selected value by prefix (before "-") and case-insensitive
+            var currentPrefix = currentSelectedValue;
+            if (isChassisField && currentSelectedValue.indexOf('-') !== -1) {
+                currentPrefix = currentSelectedValue.substring(0, currentSelectedValue.indexOf('-')).trim();
+            }
+            var currentLower = (currentSelectedValue || '').toLowerCase();
+            var currentPrefixLower = (currentPrefix || '').toLowerCase();
+            
+            function chassisOptionMatchesSelected(opt) {
+                var optVal = (opt.value || '').trim();
+                var optText = (opt.text || opt.value || '').trim();
+                var optLower = optVal.toLowerCase();
+                if (!currentSelectedValue) return false;
+                if (optVal === currentSelectedValue || optText === currentSelectedValue) return true;
+                if (optLower === currentLower || optLower === currentPrefixLower) return true;
+                if (currentPrefixLower && (optLower.indexOf(currentPrefixLower) === 0 || currentPrefixLower.indexOf(optLower) === 0)) return true;
+                return false;
+            }
             
             // Separate selected value from other options
             var selectedOption = null;
@@ -739,7 +927,11 @@ fun setupEditableComboboxHandlers() {
             
             // First, try to find selected option in filtered options
             filteredOptions.forEach(function(opt) {
-                if (currentSelectedValue && (opt.value === currentSelectedValue || opt.text === currentSelectedValue)) {
+                var isMatch = currentSelectedValue && (opt.value === currentSelectedValue || opt.text === currentSelectedValue);
+                if (isChassisField && currentSelectedValue && !isMatch) {
+                    isMatch = chassisOptionMatchesSelected(opt);
+                }
+                if (isMatch) {
                     selectedOption = opt;
                 } else {
                     otherOptions.push(opt);
@@ -747,26 +939,37 @@ fun setupEditableComboboxHandlers() {
             });
             
             // If selected value not found in filtered options, check all options
-            // This handles cases where selected value doesn't match filter but should still be shown
             if (!selectedOption && currentSelectedValue) {
                 allOptions.forEach(function(opt) {
-                    if (opt.value === currentSelectedValue || opt.text === currentSelectedValue) {
-                        selectedOption = opt;
+                    var isMatch = opt.value === currentSelectedValue || opt.text === currentSelectedValue;
+                    if (isChassisField && !isMatch) {
+                        isMatch = chassisOptionMatchesSelected(opt);
                     }
+                    if (isMatch) selectedOption = opt;
                 });
             }
             
             // Rebuild options array: selected first (if exists), then others
             var orderedOptions = [];
             if (selectedOption) {
-                // Always show selected value first if it exists and matches filter (or no filter)
+                // For chassis: always show selected at top when it matches by prefix/case; for others use filter
                 var selectedMatchesFilter = !searchLower || 
                     selectedOption.value.toLowerCase().indexOf(searchLower) !== -1 || 
                     (selectedOption.text || '').toLowerCase().indexOf(searchLower) !== -1;
+                if (isChassisField) {
+                    selectedMatchesFilter = !searchPrefix || 
+                        selectedOption.value.toLowerCase().indexOf(searchPrefix) !== -1 || 
+                        (selectedOption.text || '').toLowerCase().indexOf(searchPrefix) !== -1 ||
+                        chassisOptionMatchesSelected(selectedOption);
+                }
                 
                 if (selectedMatchesFilter) {
                     orderedOptions.push(selectedOption);
                     console.log('🔵 [DROPDOWN] Selected value "' + currentSelectedValue + '" will appear at top of dropdown');
+                } else if (isChassisField) {
+                    // For chassis: always show selected at top so we never show "No matches found" after user selects
+                    orderedOptions.push(selectedOption);
+                    console.log('🔵 [DROPDOWN] Chassis selected value "' + currentSelectedValue + '" at top of dropdown');
                 } else {
                     console.log('[DROPDOWN] Selected value "' + currentSelectedValue + '" does not match filter, hiding it');
                 }
@@ -783,60 +986,72 @@ fun setupEditableComboboxHandlers() {
             // Clear existing options
             dropdown.innerHTML = '';
             
-            // Add filtered options
+            // Add filtered options (for chassis with selectedOption we already added it above, so no "No matches found")
             if (orderedOptions.length === 0 && searchLower) {
                 var noResults = document.createElement('div');
-                noResults.style.padding = '8px';
+                noResults.style.padding = '12px';
                 noResults.style.textAlign = 'center';
-                noResults.style.color = '#ffffff';
+                noResults.style.color = '#666666';
+                noResults.style.fontSize = '14px';
                 noResults.textContent = 'No matches found';
                 dropdown.appendChild(noResults);
             } else {
                 orderedOptions.forEach(function(opt, index) {
                     var optionDiv = document.createElement('div');
-                    optionDiv.style.padding = '2px 4px';
-                    optionDiv.style.cursor = 'default';
+                    optionDiv.style.padding = '8px 12px';
+                    optionDiv.style.cursor = 'pointer';
                     optionDiv.style.whiteSpace = 'nowrap';
                     optionDiv.style.overflow = 'hidden';
                     optionDiv.style.textOverflow = 'ellipsis';
-                    optionDiv.style.lineHeight = '1.4';
+                    optionDiv.style.lineHeight = '1.5';
+                    optionDiv.style.transition = 'background-color 0.15s ease';
                     optionDiv.textContent = opt.text || opt.value;
                     
-                    // Check if this is the selected value
-                    var isSelected = currentSelectedValue && opt.value === currentSelectedValue;
+                    // Check if this is the selected value (for chassis use prefix/case-insensitive match)
+                    var isSelected = currentSelectedValue && (opt.value === currentSelectedValue || (isChassisField && chassisOptionMatchesSelected(opt)));
                     
-                    // Highlight selected value with blue background (always at top)
+                    // Highlight selected value with blue background (like image 4)
                     if (isSelected) {
-                        optionDiv.style.backgroundColor = '#316AC5';
+                        optionDiv.style.backgroundColor = '#007bff';
                         optionDiv.style.color = '#ffffff';
-                        optionDiv.style.fontWeight = 'bold';
+                        optionDiv.style.fontWeight = '500';
                     } else {
-                        optionDiv.style.backgroundColor = '#808080';
-                        optionDiv.style.color = '#ffffff';
+                        optionDiv.style.backgroundColor = 'transparent';
+                        optionDiv.style.color = '#333333';
                     }
                     
                     optionDiv.onmouseenter = function() {
                         // Don't change color if it's the selected option
                         if (!isSelected) {
-                            this.style.backgroundColor = '#316AC5';
-                            this.style.color = '#ffffff';
+                            this.style.backgroundColor = '#e9ecef';
+                            this.style.color = '#333333';
                         }
                     };
                     optionDiv.onmouseleave = function() {
                         // Restore selected styling if it's the selected option
                         if (isSelected) {
-                            this.style.backgroundColor = '#316AC5';
+                            this.style.backgroundColor = '#007bff';
                             this.style.color = '#ffffff';
-                            this.style.fontWeight = 'bold';
+                            this.style.fontWeight = '500';
                         } else {
-                            this.style.backgroundColor = '#808080';
-                            this.style.color = '#ffffff';
+                            this.style.backgroundColor = 'transparent';
+                            this.style.color = '#333333';
                         }
                     };
                     
                     optionDiv.onclick = function(e) {
                         e.stopPropagation();
-                        input.value = opt.value;
+                        // For chassis: preserve part after hyphen if user already typed it (e.g. B43W-t6yg)
+                        var valueToSet = opt.value;
+                        var preserveChassisSuffix = false;
+                        if (selectId === 'chassis' || selectId === 'editChassis') {
+                            var currentInputVal = (input && input.value) ? input.value.trim() : '';
+                            if (currentInputVal.indexOf('-') !== -1 && currentInputVal.toLowerCase().indexOf(opt.value.toLowerCase()) === 0) {
+                                valueToSet = currentInputVal;
+                                preserveChassisSuffix = true;
+                            }
+                        }
+                        input.value = valueToSet;
                         select.value = opt.value;
                         
                         // For chassis field, trigger change event on select BEFORE syncComboboxInput to ensure auto-fill fires
@@ -846,7 +1061,17 @@ fun setupEditableComboboxHandlers() {
                             select.dispatchEvent(changeEvent);
                         }
                         
+                        // For rixoCompany, also dispatch change event on select to trigger loadRowsForDateAndCompany
+                        if (selectId === 'rixoCompany') {
+                            var changeEvent = new Event('change', { bubbles: true });
+                            select.dispatchEvent(changeEvent);
+                        }
+                        
                         syncComboboxInput(selectId);
+                        // Chassis: sync overwrites input with select; restore full value if we preserved suffix
+                        if (preserveChassisSuffix && (selectId === 'chassis' || selectId === 'editChassis') && input) {
+                            input.value = valueToSet;
+                        }
                         // Clear invalid field marker when valid option is selected
                         if (typeof window.clearInvalidFieldMarker === 'function') {
                             window.clearInvalidFieldMarker(selectId);
@@ -955,8 +1180,10 @@ fun setupEditableComboboxHandlers() {
             var baseOptionsMap = {
                 fuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 editFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
+                carBrandFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 shift: ["AT", "MT", "6F", "5F"],
                 editShift: ["AT", "MT", "6F", "5F"],
+                carBrandShift: ["AT", "MT", "6F", "5F"],
                 grade: ["G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI"],
                 editGrade: ["G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI"]
             };
@@ -997,32 +1224,34 @@ fun setupEditableComboboxHandlers() {
             
             // Don't return early - even if select has no options, filterComboboxDropdown will add base options
             
-            // Create dropdown overlay - styled with white text and ash background
+            // Create dropdown overlay - styled like image 4: light grey background, dark text
             var dropdown = document.createElement('div');
             dropdown.id = selectId + '_dropdown';
             dropdown.style.position = 'fixed';
-            dropdown.style.backgroundColor = '#808080';
-            dropdown.style.border = '1px solid #a0a0a0';
+            dropdown.style.backgroundColor = '#f5f5f5';
+            dropdown.style.border = '1px solid #ddd';
             dropdown.style.borderTop = 'none';
-            dropdown.style.borderRadius = '0';
-            dropdown.style.boxShadow = '0 2px 4px rgba(0,0,0,0.15)';
-            dropdown.style.maxHeight = '200px';
-            dropdown.style.overflowY = 'auto';
-            dropdown.style.overflowX = 'hidden';
+            dropdown.style.borderRadius = '0 0 4px 4px';
+            dropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+            // Car Brand modal: start with strict max so list scrolls inside modal from first paint
+            if (selectId === 'carBrandFuel' || selectId === 'carBrandShift') {
+                dropdown.style.maxHeight = '180px';
+                dropdown.style.overflowY = 'auto';
+                dropdown.style.overflowX = 'hidden';
+                dropdown.style.webkitOverflowScrolling = 'touch';
+            } else {
+                dropdown.style.maxHeight = '200px';
+            }
+            dropdown.style.overflowY = dropdown.style.overflowY || 'auto';
+            dropdown.style.overflowX = dropdown.style.overflowX || 'hidden';
             dropdown.style.zIndex = '10000';
-            dropdown.style.fontSize = '13px';
+            dropdown.style.fontSize = '14px';
             dropdown.style.fontFamily = 'Arial, sans-serif';
-            dropdown.style.color = '#ffffff';
+            dropdown.style.color = '#333333';
             dropdown.style.padding = '0';
             dropdown.style.margin = '0';
             dropdown.style.listStyle = 'none';
-            
-            // Position dropdown below the input (aligned with input border)
-            var rect = input.getBoundingClientRect();
-            dropdown.style.left = rect.left + 'px';
-            dropdown.style.top = rect.bottom + 'px';
-            dropdown.style.width = rect.width + 'px';
-            dropdown.style.minWidth = rect.width + 'px';
+            dropdown.style.boxSizing = 'border-box';
             
             // Store all options for filtering
             dropdown.dataset.allOptions = JSON.stringify(options);
@@ -1047,6 +1276,270 @@ fun setupEditableComboboxHandlers() {
             // Re-get dropdown after filtering
             dropdown = document.getElementById(selectId + '_dropdown');
             if (!dropdown) return;
+            
+                    // Ensure styling is applied (in case it was reset during filtering)
+                    dropdown.style.backgroundColor = '#ffffff';
+                    dropdown.style.color = '#333333';
+                    dropdown.style.border = '1px solid #d1d5db';
+                    dropdown.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                    dropdown.style.position = 'fixed';
+                    dropdown.style.zIndex = '10002'; // Higher than modal (10001)
+                    dropdown.style.borderRadius = '6px';
+                    // Car Brand modal: cap height to modal space so list scrolls inside boundary (never 300px)
+                    if (selectId === 'carBrandFuel' || selectId === 'carBrandShift') {
+                        var modalBox = document.getElementById('carBrandModalContent');
+                        if (modalBox) {
+                            var inputRect = input.getBoundingClientRect();
+                            var modalRect = modalBox.getBoundingClientRect();
+                            var spaceBelow = modalRect.bottom - inputRect.bottom - 16;
+                            // Cap to space inside modal so list never exceeds boundary (scroll when more options)
+                            var maxH = (spaceBelow > 0) ? Math.min(250, spaceBelow) : 180;
+                            dropdown.style.maxHeight = maxH + 'px';
+                        } else {
+                            dropdown.style.maxHeight = '180px';
+                        }
+                        dropdown.style.overflowY = 'auto';
+                        dropdown.style.overflowX = 'hidden';
+                        dropdown.style.webkitOverflowScrolling = 'touch';
+                    } else {
+                        dropdown.style.maxHeight = '300px';
+                        dropdown.style.overflowY = 'auto';
+                        dropdown.style.overflowX = 'hidden';
+                        dropdown.style.webkitOverflowScrolling = 'touch';
+                    }
+            
+            // Position dropdown AFTER it's in DOM and content is rendered
+            // Use double requestAnimationFrame to ensure DOM is fully updated and layout is complete
+            requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                    // Re-get dropdown in case it was recreated
+                    var dropdownEl = document.getElementById(selectId + '_dropdown');
+                    if (!dropdownEl) return;
+                    
+                    // Re-get input rect in case page scrolled or layout changed
+                    var rect = input.getBoundingClientRect();
+                    
+                    // Find if input is inside a modal, form container, or scrollable container
+                    var container = input;
+                    var modalContainer = null;
+                    var formContainer = null;
+                    
+                    while (container && container !== document.body) {
+                        var computedStyle = window.getComputedStyle(container);
+                        // Prefer modal content box (e.g. Car Brand modal inner white box) so dropdown stays inside modal
+                        if (container.id === 'carBrandModalContent' || (container.id && container.id.endsWith('ModalContent'))) {
+                            modalContainer = container;
+                            break;
+                        }
+                        var isModal = container.classList && (
+                            container.classList.contains('modal-content') ||
+                            container.classList.contains('rixo-edit-modal-content') ||
+                            container.classList.contains('modal') ||
+                            container.id && container.id.includes('Modal')
+                        );
+                        var isForm = container.tagName === 'FORM' || 
+                                    container.id === 'editForm' ||
+                                    container.id === 'rixoEditForm';
+                        var isScrollable = computedStyle.overflowY === 'auto' || 
+                                          computedStyle.overflowY === 'scroll';
+                        var hasMaxHeight = computedStyle.maxHeight !== 'none' && 
+                                          computedStyle.maxHeight !== '100%';
+                        
+                        // Check if container has visible boundaries (not full viewport)
+                        var containerRect = container.getBoundingClientRect();
+                        var viewportHeightCheck = window.innerHeight;
+                        var isBounded = containerRect.height < viewportHeightCheck * 0.9 || 
+                                       containerRect.top > 10 || 
+                                       containerRect.bottom < viewportHeightCheck - 10;
+                        
+                        if (isModal) {
+                            modalContainer = container;
+                            break;
+                        } else if (isForm && isBounded) {
+                            formContainer = container;
+                        } else if ((isScrollable || hasMaxHeight) && isBounded && !formContainer) {
+                            // Only use scrollable container if we haven't found a form yet
+                            if (!formContainer) {
+                                formContainer = container;
+                            }
+                        }
+                        container = container.parentElement;
+                    }
+                    
+                    // Get viewport dimensions
+                    var viewportWidth = window.innerWidth;
+                    var viewportHeight = window.innerHeight;
+                    var isMobile = viewportWidth <= 767;
+                    var isTablet = viewportWidth > 767 && viewportWidth <= 1024;
+                    var dropdownMaxHeight = isMobile ? 200 : (isTablet ? 250 : 300);
+                    
+                    // Calculate available space - respect container boundaries
+                    var spaceBelow, spaceAbove;
+                    var boundingContainer = modalContainer || formContainer;
+                    
+                    if (boundingContainer) {
+                        var containerRect = boundingContainer.getBoundingClientRect();
+                        var containerBottom = containerRect.bottom;
+                        var containerTop = containerRect.top;
+                        
+                        // Calculate space within the container (with padding)
+                        var padding = 10;
+                        spaceBelow = containerBottom - rect.bottom - padding;
+                        spaceAbove = rect.top - containerTop - padding;
+                        
+                        // Also consider viewport boundaries (use the smaller)
+                        var viewportSpaceBelow = viewportHeight - rect.bottom - padding;
+                        var viewportSpaceAbove = rect.top - padding;
+                        
+                        // Use the smaller of container space or viewport space
+                        spaceBelow = Math.min(spaceBelow, viewportSpaceBelow);
+                        spaceAbove = Math.min(spaceAbove, viewportSpaceAbove);
+                        
+                        // CRITICAL: For modals, ensure dropdown never exceeds container height
+                        if (boundingContainer === modalContainer) {
+                            // Calculate maximum allowed height based on container
+                            var maxContainerHeight = containerRect.height - (rect.bottom - containerRect.top) - padding;
+                            dropdownMaxHeight = Math.min(dropdownMaxHeight, maxContainerHeight);
+                            
+                            // Also limit by available space
+                            var availableSpace = Math.max(spaceBelow, spaceAbove) - padding;
+                            dropdownMaxHeight = Math.min(dropdownMaxHeight, availableSpace);
+                            
+                            // Ensure minimum height for usability but never exceed available space
+                            dropdownMaxHeight = Math.max(dropdownMaxHeight, Math.min(100, availableSpace));
+                            
+                            // For modals, ensure dropdown stays within modal bounds
+                            var modalPadding = 16;
+                            if (leftPos + rect.width > containerRect.right - modalPadding) {
+                                leftPos = containerRect.right - rect.width - modalPadding;
+                            }
+                            if (leftPos < containerRect.left + modalPadding) {
+                                leftPos = containerRect.left + modalPadding;
+                                dropdownWidth = Math.min(rect.width, containerRect.width - (modalPadding * 2));
+                            }
+                        }
+                        
+                        // Ensure we have at least some space
+                        if (spaceBelow < 50 && spaceAbove > 50) {
+                            spaceBelow = 0; // Force showing above
+                        }
+                    } else {
+                        // Not in a bounded container, use viewport
+                        spaceBelow = viewportHeight - rect.bottom - 10;
+                        spaceAbove = rect.top - 10;
+                    }
+                    
+                    // Default: show below input
+                    var leftPos = rect.left;
+                    var topPos = rect.bottom;
+                    var showAbove = false;
+                    
+                    // Calculate actual dropdown content height (count options)
+                    var optionCount = dropdownEl.querySelectorAll('div').length;
+                    var estimatedHeight = Math.min(optionCount * 40 + 10, dropdownMaxHeight); // ~40px per option
+                    
+                    // If not enough space below, show above the input
+                    // BUT: prefer showing below if there's at least reasonable space (100px or estimated height)
+                    var minSpaceForBelow = Math.min(estimatedHeight, 120); // At least 100-120px or estimated height
+                    if (spaceBelow < minSpaceForBelow && spaceAbove > spaceBelow && spaceAbove > estimatedHeight) {
+                        showAbove = true;
+                        var maxAbove = Math.max(spaceAbove - 10, 0);
+                        topPos = rect.top - Math.min(dropdownMaxHeight, Math.max(maxAbove, 80));
+                        dropdownEl.style.maxHeight = Math.min(dropdownMaxHeight, Math.max(maxAbove, 80)) + 'px';
+                        dropdownEl.style.borderTop = '1px solid #d1d5db';
+                        dropdownEl.style.borderBottom = 'none';
+                        dropdownEl.style.borderRadius = '6px 6px 0 0';
+                    } else {
+                        // Ensure dropdown doesn't exceed available space (strict cap so list stays inside modal and scrolls like mobile)
+                        var maxAllowedHeight = Math.max(spaceBelow - 10, 0);
+                        var finalHeight = Math.min(dropdownMaxHeight, maxAllowedHeight);
+                        if (finalHeight < 80 && maxAllowedHeight > 0) { finalHeight = Math.min(80, maxAllowedHeight); }
+                        dropdownEl.style.maxHeight = finalHeight + 'px';
+                        dropdownEl.style.borderTop = 'none';
+                        dropdownEl.style.borderBottom = '1px solid #d1d5db';
+                        dropdownEl.style.borderRadius = '0 0 6px 6px';
+                    }
+                    
+                    // Ensure dropdown doesn't extend beyond viewport width
+                    var dropdownWidth = rect.width;
+                    if (leftPos + dropdownWidth > viewportWidth - 10) {
+                        leftPos = Math.max(10, viewportWidth - dropdownWidth - 10);
+                    }
+                    
+                    // Ensure dropdown doesn't go off left edge
+                    if (leftPos < 10) {
+                        leftPos = 10;
+                        dropdownWidth = Math.min(rect.width, viewportWidth - 20);
+                    }
+                    
+                    // Apply positioning - ensure it's exactly aligned with input
+                    // MOBILE FIX: On mobile, use simpler positioning that works reliably
+                    if (isMobile) {
+                        // For mobile: position dropdown directly below input using viewport-relative coords
+                        var inputRect = input.getBoundingClientRect();
+                        dropdownEl.style.left = '16px';
+                        dropdownEl.style.right = '16px';
+                        dropdownEl.style.width = 'auto';
+                        // Respect showAbove for mobile too
+                        if (showAbove) {
+                            var dropdownHeight = Math.min(estimatedHeight, 200);
+                            dropdownEl.style.top = (inputRect.top - dropdownHeight - 4) + 'px';
+                            console.log('📱 Mobile dropdown positioned ABOVE at top: ' + (inputRect.top - dropdownHeight - 4) + 'px');
+                        } else {
+                            dropdownEl.style.top = (inputRect.bottom + 4) + 'px';
+                            console.log('📱 Mobile dropdown positioned BELOW at top: ' + (inputRect.bottom + 4) + 'px');
+                        }
+                    } else {
+                        dropdownEl.style.left = leftPos + 'px';
+                        dropdownEl.style.top = topPos + 'px';
+                        dropdownEl.style.width = dropdownWidth + 'px';
+                        dropdownEl.style.minWidth = dropdownWidth + 'px';
+                    }
+                    
+                    // Ensure styling is maintained
+                    dropdownEl.style.backgroundColor = '#ffffff';
+                    dropdownEl.style.color = '#333333';
+                    dropdownEl.style.position = 'fixed';
+                    dropdownEl.style.zIndex = '999999'; // Very high to ensure visibility
+                    dropdownEl.style.borderRadius = '6px';
+                    dropdownEl.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+                    dropdownEl.style.border = '1px solid #d1d5db';
+                    
+                    // Adjust max height based on device and container
+                    var isMobile = viewportWidth <= 767;
+                    var isTablet = viewportWidth > 767 && viewportWidth <= 1024;
+                    var isInModal = boundingContainer === modalContainer;
+                    
+                    if (isInModal) {
+                        // Do not overwrite maxHeight: it was already set by container-aware logic above
+                        // so the dropdown stays inside the modal boundary. Overwriting with 250px caused overflow.
+                    } else {
+                        // Regular max height for non-modal dropdowns
+                        if (isMobile) {
+                            dropdownEl.style.maxHeight = '200px';
+                        } else if (isTablet) {
+                            dropdownEl.style.maxHeight = '250px';
+                        } else {
+                            dropdownEl.style.maxHeight = '300px';
+                        }
+                    }
+                    
+                    // Car Brand modal (Fuel/Transmission): always cap to modal boundary and force scroll
+                    if (selectId === 'carBrandFuel' || selectId === 'carBrandShift') {
+                        var modalContent = document.getElementById('carBrandModalContent');
+                        if (modalContent) {
+                            var mcRect = modalContent.getBoundingClientRect();
+                            var spaceBelowModal = mcRect.bottom - rect.bottom - 16;
+                            var currentMax = parseInt(dropdownEl.style.maxHeight, 10) || 250;
+                            var capped = (spaceBelowModal > 0) ? Math.min(currentMax, spaceBelowModal) : 180;
+                            dropdownEl.style.maxHeight = capped + 'px';
+                            dropdownEl.style.overflowY = 'auto';
+                            dropdownEl.style.overflowX = 'hidden';
+                            dropdownEl.style.webkitOverflowScrolling = 'touch';
+                        }
+                    }
+                });
+            });
             
             // Ensure dropdown is always scrollable
             dropdown.style.overflowY = 'auto';
@@ -1412,39 +1905,6 @@ var currentSortOrder: String = "desc" // desc = newest first for date, Z-A for t
 // Multi-select state
 var selectedPurchases = mutableSetOf<Long>()
 
-// System initialization check
-fun checkSystemInitialization(root: Element) {
-    val url = apiUrl("auth/users/count")
-    Logger.debug("Checking system initialization - URL: $url")
-    window.fetch(url)
-        .then { it.json() }
-        .then { response ->
-            val responseDynamic = response.asDynamic()
-            val count = (responseDynamic.count as? Number) ?: 0
-            val isInitialized = (responseDynamic.isInitialized as? Boolean) ?: false
-            
-            if (isInitialized) {
-                // System is initialized, create app and proceed with normal flow
-                createApp(root)
-                window.addEventListener("hashchange", { _: Event -> updateContent(root) })
-                updateContent(root)
-            } else {
-                // System not initialized, show setup page
-                showSetupPage(root)
-            }
-        }
-        .catch { error ->
-            Logger.error("Failed to check system initialization: ${error.toString()}")
-            // On error, assume system is initialized and proceed normally
-            createApp(root)
-            window.addEventListener("hashchange", { _: Event -> updateContent(root) })
-            updateContent(root)
-        }
-}
-
-// Initial Setup Page
-// Setup functions moved to AuthSetup.kt
-
 fun createApp(root: Element) {
     root.innerHTML = """
         <div style="padding: 20px; font-family: Arial, sans-serif;">
@@ -1458,23 +1918,23 @@ fun createApp(root: Element) {
                 .checkwrap input:checked + .checkmark { background: #1e90ff; border-color: #1e90ff; }
                 .checkwrap input:checked + .checkmark::after { content: "✓"; position: absolute; left: 4px; top: -1px; color: #fff; font-size: 16px; }
             </style>
-            <!-- Hamburger Menu Button -->
-            <div id="hamburgerBtnContainer" style="position: fixed; top: 20px; left: 20px; z-index: 10000;">
-                <button id="hamburgerBtn" style="background-color: #2c3e50; color: white; border: none; padding: 12px 16px; border-radius: 6px; cursor: pointer; font-size: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#34495e'" onmouseout="this.style.backgroundColor='#2c3e50'">
+            <!-- Hamburger Menu Button (size controlled by CSS for mobile) -->
+            <div id="hamburgerBtnContainer" class="hamburger-container" style="position: fixed; top: 20px; left: 20px; z-index: 10000;">
+                <button id="hamburgerBtn" class="hamburger-btn" type="button" style="background-color: #2c3e50; color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#34495e'" onmouseout="this.style.backgroundColor='#2c3e50'" onclick="if(window.openSidebar) window.openSidebar();">
                     ☰
                 </button>
             </div>
             
-            <div style="text-align: center; width: 100%;">
+            <div class="page-title-bar" style="text-align: center; width: 100%;">
                 <h1 style="margin: 0; display: inline-block;">Automan Car Purchase Management</h1>
             </div>
             
             <!-- Sidebar -->
-            <div id="sidebar" style="position: fixed; top: 0; left: -250px; width: 250px; height: 100vh; background-color: #2c3e50; transition: left 0.3s ease; z-index: 1000; box-shadow: 2px 0 5px rgba(0,0,0,0.1); overflow-y: auto; overflow-x: hidden;">
-                <div style="padding: 20px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+            <div id="sidebar" class="app-sidebar" style="position: fixed; top: 0; left: -250px; width: 250px; height: 100vh; background-color: #2c3e50; transition: left 0.3s ease; z-index: 1000; box-shadow: 2px 0 5px rgba(0,0,0,0.1); overflow-y: auto; overflow-x: hidden;">
+                <div class="sidebar-inner" style="padding: 20px;">
+                    <div class="sidebar-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
                         <h3 style="color: white; margin: 0;">Menu</h3>
-                        <button id="closeSidebar" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">×</button>
+                        <button id="closeSidebar" class="sidebar-close-btn" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">×</button>
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 15px;">
                         <!-- Home Button at Top -->
@@ -1487,6 +1947,7 @@ fun createApp(root: Element) {
                         <!-- Main Navigation -->
                         <button id="rixoRequestBtn" style="padding: 12px 20px; background-color: #8e44ad; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Rixo Note</button>
                         <button id="carBookingBtn" style="padding: 12px 20px; background-color: #17a2b8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Car Booking</button>
+                        <button id="anInvoiceBtn" style="padding: 12px 20px; background-color: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Invoice</button>
                         <button id="vehicleDetailsBtn" style="padding: 12px 20px; background-color: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Vehicle Details</button>
                         
                         <!-- Shipment Section -->
@@ -1705,6 +2166,10 @@ fun createApp(root: Element) {
         window.location.hash = "#/booking"
     })
     
+    document.getElementById("anInvoiceBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/invoice"
+    })
+    
     document.getElementById("rixoTransportBtn")?.addEventListener("click", { _: Event ->
         handleRixoTransportPdfGeneration()
     })
@@ -1827,6 +2292,21 @@ fun createApp(root: Element) {
                     items.style.display = 'none';
                     arrow.textContent = '▼';
                 }
+            }
+        };
+        // Form section collapse (Add/Edit Purchase) - same pattern as master menu for reliable mobile tap
+        window.toggleFormSection = function(sectionName) {
+            var header = document.querySelector('.form-section-header[data-section="' + sectionName + '"]');
+            var contentDivs = document.querySelectorAll('.form-section-content[data-section="' + sectionName + '"]');
+            if (!header || contentDivs.length === 0) return;
+            var isCollapsed = header.classList.contains('collapsed');
+            for (var i = 0; i < contentDivs.length; i++) {
+                contentDivs[i].style.display = isCollapsed ? '' : 'none';
+            }
+            if (isCollapsed) {
+                header.classList.remove('collapsed');
+            } else {
+                header.classList.add('collapsed');
             }
         };
         // Initialize all collapsible sections as closed by default
@@ -1965,8 +2445,10 @@ fun updateContent(root: Element) {
             Logger.debug("[ROUTER] HTML set, about to call setupAddFormListeners()")
             Logger.debug("[ROUTER] Calling setupAddFormListeners() NOW...")
             try {
-                setupAddFormListeners()
+            setupAddFormListeners()
+                setupResponsiveFormSections() // Setup collapsible sections for mobile
                 Logger.debug("[ROUTER] setupAddFormListeners() call completed")
+                js("if (typeof window.setupOptionButtons === 'function') window.setupOptionButtons();")
             } catch (e: dynamic) {
                 Logger.error("[ROUTER] Error calling setupAddFormListeners(): ${e.toString()}")
             }
@@ -2004,6 +2486,27 @@ fun updateContent(root: Element) {
         hash.startsWith("#/booking") -> {
             showCarBookingPage()
             ensureSidebarPresent() // Call after content is set
+        }
+        hash.startsWith("#/users/edit/") -> {
+            val id = hash.substring(13).toLongOrNull()
+            if (id != null) {
+                showEditUserPage(id)
+            } else {
+                showUserManagementPage()
+            }
+            ensureSidebarPresent() // Call after content is set
+            // Hide sorting bar on edit user page
+            // Hide PDF buttons on edit user page
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/pending-signups") -> {
+            showPendingSignupsPage()
+            ensureSidebarPresent() // Call after content is set
+            // Hide sorting bar on pending signups page
+            // Hide PDF buttons on pending signups page
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/users/edit/") -> {
             val id = hash.substring(13).toLongOrNull()
@@ -2148,8 +2651,8 @@ fun showAuthPage() {
                                 <input id="su_email" type="email" placeholder="Enter your email" class="form-input"/>
                                 <span class="input-icon">✉️</span>
                     </div> 
+                            <span id="su_email_error" class="auth-field-error" style="display:none;"></span>
                     </div> 
-                        
                         <div class="form-group">
                             <label class="form-label">Your Name</label>
                             <div class="input-container">
@@ -2164,8 +2667,13 @@ fun showAuthPage() {
                                 <input id="su_pass" type="password" placeholder="Enter your password" class="form-input"/>
                                 <span class="input-icon">🔒</span>
                     </div> 
+                            <div id="su_pass_strength" class="auth-password-hints">
+                                <span id="su_pass_len" class="hint">At least 8 characters</span>
+                                <span id="su_pass_upper" class="hint">One uppercase letter</span>
+                                <span id="su_pass_lower" class="hint">One lowercase letter</span>
+                                <span id="su_pass_digit" class="hint">One number</span>
                         </div>
-                        
+                        </div>
                         <div class="form-group">
                             <label class="form-label">Role</label>
                             <div class="input-container">
@@ -2187,8 +2695,8 @@ fun showAuthPage() {
                             <a href="#" class="forgot-link">Forget Password?</a>
                         </div>
                         
+                        <div id="signupMessage" class="auth-message" style="display:none;"></div>
                         <button id="btn_signup" class="auth-button">Sign Up</button>
-                        
                         <div class="auth-switch">
                             <span>Already have an account? </span>
                             <button id="toggleToSignin" class="switch-link">Sign In</button>
@@ -2534,6 +3042,20 @@ private fun setupAuthHandlers() {
 
     var isSigninMode = false
 
+    fun showSignupMessage(text: String, isError: Boolean) {
+        val el = document.getElementById("signupMessage") as? HTMLElement
+        if (el != null) {
+            el.style.display = "block"
+            el.textContent = text
+            el.style.color = if (isError) "#b91c1c" else "#166534"
+            el.style.backgroundColor = if (isError) "#fee2e2" else "#d1fae5"
+        }
+    }
+    fun clearSignupMessages() {
+        (document.getElementById("signupMessage") as? HTMLElement)?.let { it.style.display = "none"; it.textContent = "" }
+        (document.getElementById("su_email_error") as? HTMLElement)?.let { it.style.display = "none"; it.textContent = "" }
+    }
+
     // Check if user is already logged in and get their role
     val currentUserRole = window.localStorage.getItem("authUserRole")
     
@@ -2547,6 +3069,7 @@ private fun setupAuthHandlers() {
             signupPanel.style.display = "block"
             signinPanel.style.display = "none"
             titleEl.textContent = "Sign Up"
+            clearSignupMessages()
         }
     }
     toSignin.addEventListener("click", { _: Event -> setModeSignin(true) })
@@ -2577,41 +3100,42 @@ private fun setupAuthHandlers() {
     }
 
     fun doSignup() {
-        val email = (document.getElementById("su_email") as HTMLInputElement).value
-        val name = (document.getElementById("su_name") as HTMLInputElement).value
+        clearSignupMessages()
+        val email = (document.getElementById("su_email") as HTMLInputElement).value.trim()
+        val name = (document.getElementById("su_name") as HTMLInputElement).value.trim()
         val pass = (document.getElementById("su_pass") as HTMLInputElement).value
         val role = (document.getElementById("su_role") as HTMLSelectElement).value
         if (email.isBlank() || name.isBlank() || pass.isBlank() || role.isBlank()) {
-            js("alert('Please fill in all fields')")
+            showSignupMessage("Please fill in all fields", true)
             return
         }
         val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:email,name:name,password:pass,role:role})})")
+        (document.getElementById("btn_signup") as? HTMLButtonElement)?.disabled = true
         window.fetch(apiUrl("auth/signup"), body)
             .then { it.json() }
             .then { resp ->
+                (document.getElementById("btn_signup") as? HTMLButtonElement)?.disabled = false
                 val success = resp.asDynamic().success as Boolean?
                 if (success == true) {
-                    val data = resp.asDynamic().data
-                    val token = data?.token as String?
-                    val role = data?.role as String?
-                    val nameResp = data?.name as String?
-                    val userId = data?.id as Number?
-                    if (token != null) {
-                        safeLocalStorageSet("authToken", token)
-                        if (role != null) safeLocalStorageSet("authUserRole", role)
-                        if (nameResp != null) safeLocalStorageSet("authUserName", nameResp)
-                        if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
-                        window.location.hash = ""
-                        showPurchaseList()
-                        updateUserInfoInSidebar()
-                        applyRoleBasedRestrictions()
-                    } else js("alert('Signup failed: Invalid response')")
+                    val message = resp.asDynamic().message as String? ?: "Registration submitted. You will receive an email once an admin approves your account."
+                    showSignupMessage(message, false)
                 } else {
                     val message = resp.asDynamic().message as String? ?: "Signup failed"
-                    js("alert(message)")
+                    showSignupMessage(message, true)
+                    val emailErr = document.getElementById("su_email_error") as? HTMLElement
+                    if (message.contains("already registered", ignoreCase = true)) {
+                        emailErr?.let { it.style.display = "block"; it.textContent = "This email is already registered." }
+                    } else if (message.contains("email does not exist", ignoreCase = true) || message.contains("does not exist", ignoreCase = true)) {
+                        emailErr?.let { it.style.display = "block"; it.textContent = "The email does not exist." }
+                    } else {
+                        emailErr?.let { it.style.display = "none"; it.textContent = "" }
+                    }
                 }
             }
-            .catch { _ -> js("alert('Network error during signup')") }
+            .catch { _ ->
+                (document.getElementById("btn_signup") as? HTMLButtonElement)?.disabled = false
+                showSignupMessage("Network error during signup", true)
+            }
     }
 
     fun doSignin() {
@@ -2647,6 +3171,35 @@ private fun setupAuthHandlers() {
     }
     document.getElementById("btn_signup")?.addEventListener("click", { _: Event -> doSignup() })
     document.getElementById("btn_signin")?.addEventListener("click", { _: Event -> doSignin() })
+    
+    // Password strength (real-time)
+    document.getElementById("su_pass")?.addEventListener("input", { _: Event ->
+        val pass = (document.getElementById("su_pass") as? HTMLInputElement)?.value ?: ""
+        (document.getElementById("su_pass_len") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.length >= 8) }
+        (document.getElementById("su_pass_upper") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.any { c -> c.isUpperCase() }) }
+        (document.getElementById("su_pass_lower") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.any { c -> c.isLowerCase() }) }
+        (document.getElementById("su_pass_digit") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.any { c -> c.isDigit() }) }
+    })
+    // Email existence check on blur (optional)
+    document.getElementById("su_email")?.addEventListener("blur", { _: Event ->
+        val email = (document.getElementById("su_email") as? HTMLInputElement)?.value?.trim() ?: ""
+        if (email.isBlank()) return@addEventListener
+        val encodedEmail = js("encodeURIComponent")(email).unsafeCast<String>()
+        window.fetch(apiUrl("auth/check-email?email=$encodedEmail"))
+            .then { it.json() }
+            .then { resp ->
+                val exists = resp.asDynamic().exists as Boolean?
+                val emailErr = document.getElementById("su_email_error") as? HTMLElement
+                if (exists == true && emailErr != null) {
+                    emailErr.style.display = "block"
+                    emailErr.textContent = "This email is already registered."
+                } else if (emailErr != null) {
+                    emailErr.style.display = "none"
+                    emailErr.textContent = ""
+                }
+            }
+            .catch { _ -> Unit }
+    })
     
     // Close button handler
     document.getElementById("closeAuth")?.addEventListener("click", { _: Event ->
@@ -2957,6 +3510,11 @@ fun setupHamburgerListener() {
         hamburgerBtn.addEventListener("click", { _: Event ->
             openSidebar()
         })
+        // Touch: open on touchend so mobile tap works; preventDefault avoids double-trigger from synthetic click
+        hamburgerBtn.addEventListener("touchend", { e: Event ->
+            e.preventDefault()
+            openSidebar()
+        }, js("({ passive: false })"))
     }
 }
 
@@ -3003,57 +3561,100 @@ private fun displayUsers(users: dynamic) {
     }
     
     val tableHTML = StringBuilder()
+    val cardsHTML = StringBuilder()
+    
+    // Table for tablet/desktop
     tableHTML.append("""
-        <table style="width: 100%; border-collapse: collapse;">
+        <div class="users-table-container">
+            <table class="users-table">
             <thead>
-                <tr style="background-color: #f8f9fa;">
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; width: 50px;"></th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">Email</th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">Name</th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">Role</th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">Created</th>
+                    <tr>
+                        <th style="width: 50px;"></th>
+                        <th>Email</th>
+                        <th>Name</th>
+                        <th>Role</th>
+                        <th>Created</th>
                 </tr>
             </thead>
             <tbody>
     """)
     
+    // Cards container for mobile
+    cardsHTML.append("""<div class="users-cards-container">""")
+    
     val usersArray = users as Array<dynamic>
     for (i in 0 until usersArray.size) {
         val user = usersArray[i]
+        val roleClass = when (user.role as String) {
+            "ADMIN" -> "admin"
+            "EDITOR" -> "editor"
+            else -> "viewer"
+        }
+        val initial = (user.name as String).firstOrNull()?.uppercaseChar() ?: 'U'
+        
+        // Table row
         tableHTML.append("""
-            <tr style="border-bottom: 1px solid #f0f0f0;" data-user-id="${user.id}">
-                <td style="padding: 12px; text-align: center;">
-                    <button class="edit-user-btn" data-id="${user.id}" style="width: 32px; height: 32px; background-color: #007bff; color: white; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px;" title="Edit User">
+            <tr data-user-id="${user.id}">
+                <td style="text-align: center;">
+                    <button class="edit-user-btn" data-id="${user.id}" style="width: 36px; height: 36px; background-color: #007bff; color: white; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px;" title="Edit User">
                         ✏️
                     </button>
                 </td>
-                <td style="padding: 12px;">${user.email}</td>
-                <td style="padding: 12px;">${user.name}</td>
-                <td style="padding: 12px;">
-                    <span style="padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; 
-                        background-color: ${getRoleColor(user.role)}; color: white;">
+                <td>${user.email}</td>
+                <td>${user.name}</td>
+                <td>
+                    <span class="role-badge" style="background-color: ${getRoleColor(user.role)};">
                         ${user.role}
                     </span>
                 </td>
-                <td style="padding: 12px;">${user.createdAt}</td>
+                <td>${user.createdAt}</td>
             </tr>
+        """)
+        
+        // Mobile card
+        cardsHTML.append("""
+            <div class="user-card" data-user-id="${user.id}">
+                <div class="user-card-content">
+                    <div class="user-card-avatar">$initial</div>
+                    <div class="user-card-info">
+                        <div class="user-card-name">${user.name}</div>
+                        <div class="user-card-email">${user.email}</div>
+                        <span class="user-card-role $roleClass">${user.role}</span>
+                    </div>
+                </div>
+            </div>
         """)
     }
     
     tableHTML.append("""
             </tbody>
         </table>
+        </div>
     """)
     
-    table.innerHTML = tableHTML.toString()
+    cardsHTML.append("""</div>""")
     
-    // Add event listeners for edit buttons
+    table.innerHTML = tableHTML.toString() + cardsHTML.toString()
+    
+    // Add event listeners for edit buttons (table)
     val editButtons = document.querySelectorAll(".edit-user-btn")
     for (i in 0 until editButtons.length) {
         val button = editButtons.item(i) as HTMLElement
         button.addEventListener("click", { event ->
+            event.stopPropagation()
             val btn = event.currentTarget as HTMLElement
             val id = btn.getAttribute("data-id")
+            editUser(id?.toLongOrNull())
+        })
+    }
+    
+    // Add event listeners for mobile cards
+    val userCards = document.querySelectorAll(".user-card")
+    for (i in 0 until userCards.length) {
+        val card = userCards.item(i) as HTMLElement
+        card.addEventListener("click", { event ->
+            val cardEl = event.currentTarget as HTMLElement
+            val id = cardEl.getAttribute("data-user-id")
             editUser(id?.toLongOrNull())
         })
     }
@@ -3071,47 +3672,49 @@ fun showAddUserForm() {
     window.location.hash = "#/users/add"
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 600px; margin: 0 auto;">
-            <div style="display: flex; align-items: center; margin-bottom: 30px;">
-                <button id="backToUsersBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 15px;">← Back</button>
-                <h2 style="margin: 0; color: #333;">Add New User</h2>
+        <div class="user-form-container">
+            <div class="user-form-card">
+                <div class="user-form-header">
+                    <button id="backToUsersBtn" class="user-back-btn">← Back</button>
+                    <h2>Add New User</h2>
             </div>
             
-            <form id="addUserForm" style="background-color: #f8f9fa; padding: 25px; border-radius: 8px; border: 1px solid #e9ecef;">
-                <div style="margin-bottom: 20px;">
-                    <label for="userEmail" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Email Address *</label>
-                    <input type="email" id="userEmail" required style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box;" placeholder="Enter email address">
-                    <div id="emailError" style="color: #dc3545; font-size: 12px; margin-top: 4px; display: none;"></div>
+                <form id="addUserForm" class="user-form">
+                    <div class="user-form-field">
+                        <label for="userEmail" class="user-form-label">Email Address *</label>
+                        <input type="email" id="userEmail" required class="user-form-input" placeholder="Enter email address">
+                        <div id="emailError" class="user-form-error"></div>
                 </div>
                 
-                <div style="margin-bottom: 20px;">
-                    <label for="userName" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Full Name *</label>
-                    <input type="text" id="userName" required style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box;" placeholder="Enter full name">
-                    <div id="nameError" style="color: #dc3545; font-size: 12px; margin-top: 4px; display: none;"></div>
+                    <div class="user-form-field">
+                        <label for="userName" class="user-form-label">Full Name *</label>
+                        <input type="text" id="userName" required class="user-form-input" placeholder="Enter full name">
+                        <div id="nameError" class="user-form-error"></div>
                 </div>
                 
-                <div style="margin-bottom: 20px;">
-                    <label for="userPassword" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Password *</label>
-                    <input type="password" id="userPassword" required style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box;" placeholder="Enter password (min 6 characters)">
-                    <div id="passwordError" style="color: #dc3545; font-size: 12px; margin-top: 4px; display: none;"></div>
+                    <div class="user-form-field">
+                        <label for="userPassword" class="user-form-label">Password *</label>
+                        <input type="password" id="userPassword" required class="user-form-input" placeholder="Enter password (min 6 characters)">
+                        <div id="passwordError" class="user-form-error"></div>
                 </div>
                 
-                <div style="margin-bottom: 25px;">
-                    <label for="userRole" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Role *</label>
-                    <select id="userRole" required style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box; background-color: white;">
+                    <div class="user-form-field">
+                        <label for="userRole" class="user-form-label">Role *</label>
+                        <select id="userRole" required class="user-form-select">
                         <option value="">Select a role</option>
                         <option value="VIEWER">Viewer - Can view data only</option>
                         <option value="EDITOR">Editor - Can view and edit data</option>
                         <option value="ADMIN">Admin - Full access including user management</option>
                     </select>
-                    <div id="roleError" style="color: #dc3545; font-size: 12px; margin-top: 4px; display: none;"></div>
+                        <div id="roleError" class="user-form-error"></div>
                 </div>
                 
-                <div style="display: flex; gap: 15px; justify-content: flex-end;">
-                    <button type="button" id="cancelAddUserBtn" style="padding: 12px 24px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Cancel</button>
-                    <button type="submit" id="submitAddUserBtn" style="padding: 12px 24px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Create User</button>
+                    <div class="user-form-actions">
+                        <button type="button" id="cancelAddUserBtn" class="user-btn user-btn-secondary">Cancel</button>
+                        <button type="submit" id="submitAddUserBtn" class="user-btn user-btn-primary">Create User</button>
                 </div>
             </form>
+            </div>
         </div>
     """
     
@@ -3151,15 +3754,17 @@ private fun showEditUserPage(userId: Long) {
     window.location.hash = "#/users/edit/$userId"
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 600px; margin: 0 auto;">
-            <div style="display: flex; align-items: center; margin-bottom: 30px;">
-                <button id="backToUsersBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 15px;">← Back</button>
-                <h2 style="margin: 0; color: #333;">Edit User</h2>
+        <div class="user-form-container">
+            <div class="user-form-card">
+                <div class="user-form-header">
+                    <button id="backToUsersBtn" class="user-back-btn">← Back</button>
+                    <h2>Edit User</h2>
             </div>
             
-            <div id="editUserContent" style="background-color: #f8f9fa; padding: 25px; border-radius: 8px; border: 1px solid #e9ecef;">
+                <div id="editUserContent" class="user-form">
                 <div style="text-align: center; color: #666; padding: 40px;">
                     Loading user information...
+                    </div>
                 </div>
             </div>
         </div>
@@ -3196,33 +3801,33 @@ private fun displayEditUserForm(user: dynamic) {
     val editUserContent = document.getElementById("editUserContent")!!
     editUserContent.innerHTML = """
         <form id="editUserForm">
-            <div style="margin-bottom: 20px;">
-                <label for="editUserEmail" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Email Address</label>
-                <input type="email" id="editUserEmail" value="${user.email}" readonly style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box; background-color: #e9ecef; color: #6c757d;">
-                <div style="color: #6c757d; font-size: 12px; margin-top: 4px;">Email cannot be changed</div>
+            <div class="user-form-field">
+                <label for="editUserEmail" class="user-form-label">Email Address</label>
+                <input type="email" id="editUserEmail" value="${user.email}" readonly class="user-form-input readonly">
+                <div class="user-form-hint">Email cannot be changed</div>
             </div>
             
-            <div style="margin-bottom: 20px;">
-                <label for="editUserName" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Full Name</label>
-                <input type="text" id="editUserName" value="${user.name}" readonly style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box; background-color: #e9ecef; color: #6c757d;">
-                <div style="color: #6c757d; font-size: 12px; margin-top: 4px;">Name cannot be changed</div>
+            <div class="user-form-field">
+                <label for="editUserName" class="user-form-label">Full Name</label>
+                <input type="text" id="editUserName" value="${user.name}" readonly class="user-form-input readonly">
+                <div class="user-form-hint">Name cannot be changed</div>
             </div>
             
-            <div style="margin-bottom: 25px;">
-                <label for="editUserRole" style="display: block; margin-bottom: 8px; font-weight: 600; color: #495057;">Role *</label>
-                <select id="editUserRole" required style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; box-sizing: border-box; background-color: white;">
+            <div class="user-form-field">
+                <label for="editUserRole" class="user-form-label">Role *</label>
+                <select id="editUserRole" required class="user-form-select">
                     <option value="VIEWER" ${if (user.role == "VIEWER") "selected" else ""}>Viewer - Can view data only</option>
                     <option value="EDITOR" ${if (user.role == "EDITOR") "selected" else ""}>Editor - Can view and edit data</option>
                     <option value="ADMIN" ${if (user.role == "ADMIN") "selected" else ""}>Admin - Full access including user management</option>
                 </select>
-                <div id="editRoleError" style="color: #dc3545; font-size: 12px; margin-top: 4px; display: none;"></div>
+                <div id="editRoleError" class="user-form-error"></div>
             </div>
             
-            <div style="display: flex; gap: 15px; justify-content: space-between;">
-                <button type="button" id="deleteUserBtn" style="padding: 12px 24px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Delete User</button>
-                <div style="display: flex; gap: 15px;">
-                    <button type="button" id="cancelEditUserBtn" style="padding: 12px 24px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Cancel</button>
-                    <button type="submit" id="submitEditUserBtn" style="padding: 12px 24px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Update Role</button>
+            <div class="user-form-actions-split">
+                <button type="button" id="deleteUserBtn" class="user-btn user-btn-danger">Delete User</button>
+                <div class="user-form-actions-right">
+                    <button type="button" id="cancelEditUserBtn" class="user-btn user-btn-secondary">Cancel</button>
+                    <button type="submit" id="submitEditUserBtn" class="user-btn user-btn-primary">Update Role</button>
                 </div>
             </div>
         </form>
@@ -3478,8 +4083,8 @@ fun createAddFormHTML(): String {
         <div style="border: 1px solid #ddd; border-radius: 4px; padding: 20px;">
             <h2>Add New Purchase</h2>
             <form id="addForm" novalidate>
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Basic Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('basic')"><h3 class="form-section-header" data-section="basic">Basic Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="basic">
                     <div>
                         <label>Purchase Date</label>
                         <div style="position:relative;">
@@ -3511,7 +4116,7 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Production Date</label>
                         <input type="month" id="carModelYear" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                    </div>
+                </div>
                     <div>
                         <label>Grade</label>
                         <input type="text" id="grade" placeholder="e.g., G" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -3530,74 +4135,11 @@ fun createAddFormHTML(): String {
 
                 <!-- Number Cut Information Section (initially hidden, shows when Shaken is checked) -->
                 <div id="numberCutSection" style="display: none;">
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Number Cut Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; align-items: end;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('numberCut')"><h3 class="form-section-header" data-section="numberCut">Number Cut Information</h3></div>
+                <div class="form-section-content form-grid-4col" data-section="numberCut">
                     <div>
                         <label>Place Name (Japanese)</label>
-                        <select id="numberCutPlace" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Place</option>
-                            <option value="札幌">札幌 (Sapporo)</option>
-                            <option value="函館">函館 (Hakodate)</option>
-                            <option value="旭川">旭川 (Asahikawa)</option>
-                            <option value="室蘭">室蘭 (Muroran)</option>
-                            <option value="釧路">釧路 (Kushiro)</option>
-                            <option value="帯広">帯広 (Obihiro)</option>
-                            <option value="十勝">十勝 (Tokachi)</option>
-                            <option value="北見">北見 (Kitami)</option>
-                            <option value="知床">知床 (Shiretoko)</option>
-                            <option value="苫小牧">苫小牧 (Tomakomai)</option>
-                            <option value="青森">青森 (Aomori)</option>
-                            <option value="弘前">弘前 (Hirosaki)</option>
-                            <option value="岩手">岩手 (Iwate)</option>
-                            <option value="盛岡">盛岡 (Morioka)</option>
-                            <option value="平泉">平泉 (Hiraizumi)</option>
-                            <option value="宮城">宮城 (Miyagi)</option>
-                            <option value="仙台">仙台 (Sendai)</option>
-                            <option value="八戸">八戸 (Hachinohe)</option>
-                            <option value="秋田">秋田 (Akita)</option>
-                            <option value="山形">山形 (Yamagata)</option>
-                            <option value="福島">福島 (Fukushima)</option>
-                            <option value="茨城">茨城 (Ibaraki)</option>
-                            <option value="栃木">栃木 (Tochigi)</option>
-                            <option value="群馬">群馬 (Gunma)</option>
-                            <option value="埼玉">埼玉 (Saitama)</option>
-                            <option value="千葉">千葉 (Chiba)</option>
-                            <option value="東京">東京 (Tokyo)</option>
-                            <option value="神奈川">神奈川 (Kanagawa)</option>
-                            <option value="新潟">新潟 (Niigata)</option>
-                            <option value="富山">富山 (Toyama)</option>
-                            <option value="石川">石川 (Ishikawa)</option>
-                            <option value="福井">福井 (Fukui)</option>
-                            <option value="山梨">山梨 (Yamanashi)</option>
-                            <option value="長野">長野 (Nagano)</option>
-                            <option value="岐阜">岐阜 (Gifu)</option>
-                            <option value="静岡">静岡 (Shizuoka)</option>
-                            <option value="愛知">愛知 (Aichi)</option>
-                            <option value="三重">三重 (Mie)</option>
-                            <option value="滋賀">滋賀 (Shiga)</option>
-                            <option value="京都">京都 (Kyoto)</option>
-                            <option value="大阪">大阪 (Osaka)</option>
-                            <option value="兵庫">兵庫 (Hyogo)</option>
-                            <option value="奈良">奈良 (Nara)</option>
-                            <option value="和歌山">和歌山 (Wakayama)</option>
-                            <option value="鳥取">鳥取 (Tottori)</option>
-                            <option value="島根">島根 (Shimane)</option>
-                            <option value="岡山">岡山 (Okayama)</option>
-                            <option value="広島">広島 (Hiroshima)</option>
-                            <option value="山口">山口 (Yamaguchi)</option>
-                            <option value="徳島">徳島 (Tokushima)</option>
-                            <option value="香川">香川 (Kagawa)</option>
-                            <option value="愛媛">愛媛 (Ehime)</option>
-                            <option value="高知">高知 (Kochi)</option>
-                            <option value="福岡">福岡 (Fukuoka)</option>
-                            <option value="佐賀">佐賀 (Saga)</option>
-                            <option value="長崎">長崎 (Nagasaki)</option>
-                            <option value="熊本">熊本 (Kumamoto)</option>
-                            <option value="大分">大分 (Oita)</option>
-                            <option value="宮崎">宮崎 (Miyazaki)</option>
-                            <option value="鹿児島">鹿児島 (Kagoshima)</option>
-                            <option value="沖縄">沖縄 (Okinawa)</option>
-                        </select>
+                        ${createEditableComboboxWithOptions("numberCutPlace", "Select Place", getNumberCutPlaceOptions(), "")}
                     </div>
                     <div>
                         <label>Number (English)</label>
@@ -3605,57 +4147,7 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Hiragana Character</label>
-                        <select id="numberCutHiragana" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Character</option>
-                            <option value="あ">あ (a)</option>
-                            <option value="い">い (i)</option>
-                            <option value="う">う (u)</option>
-                            <option value="え">え (e)</option>
-                            <option value="お">お (o)</option>
-                            <option value="か">か (ka)</option>
-                            <option value="き">き (ki)</option>
-                            <option value="く">く (ku)</option>
-                            <option value="け">け (ke)</option>
-                            <option value="こ">こ (ko)</option>
-                            <option value="さ">さ (sa)</option>
-                            <option value="し">し (shi)</option>
-                            <option value="す">す (su)</option>
-                            <option value="せ">せ (se)</option>
-                            <option value="そ">そ (so)</option>
-                            <option value="た">た (ta)</option>
-                            <option value="ち">ち (chi)</option>
-                            <option value="つ">つ (tsu)</option>
-                            <option value="て">て (te)</option>
-                            <option value="と">と (to)</option>
-                            <option value="な">な (na)</option>
-                            <option value="に">に (ni)</option>
-                            <option value="ぬ">ぬ (nu)</option>
-                            <option value="ね">ね (ne)</option>
-                            <option value="の">の (no)</option>
-                            <option value="は">は (ha)</option>
-                            <option value="ひ">ひ (hi)</option>
-                            <option value="ふ">ふ (fu)</option>
-                            <option value="へ">へ (he)</option>
-                            <option value="ほ">ほ (ho)</option>
-                            <option value="ま">ま (ma)</option>
-                            <option value="み">み (mi)</option>
-                            <option value="む">む (mu)</option>
-                            <option value="め">め (me)</option>
-                            <option value="も">も (mo)</option>
-                            <option value="や">や (ya)</option>
-                            <option value="ゆ">ゆ (yu)</option>
-                            <option value="よ">よ (yo)</option>
-                            <option value="ら">ら (ra)</option>
-                            <option value="り">り (ri)</option>
-                            <option value="る">る (ru)</option>
-                            <option value="れ">れ (re)</option>
-                            <option value="ろ">ろ (ro)</option>
-                            <option value="わ">わ (wa)</option>
-                            <option value="ゐ">ゐ (wi)</option>
-                            <option value="ゑ">ゑ (we)</option>
-                            <option value="を">を (wo)</option>
-                            <option value="ん">ん (n)</option>
-                        </select>
+                        ${createEditableComboboxWithOptions("numberCutHiragana", "Select Character", getNumberCutHiraganaOptions(), "")}
                     </div>
                     <div>
                         <label>Number (English)</label>
@@ -3668,8 +4160,8 @@ fun createAddFormHTML(): String {
                 </div>
                 </div> <!-- End of numberCutSection -->
 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Car Specifications</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('specifications')"><h3 class="form-section-header" data-section="specifications">Car Specifications</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label>Rank</label>
                         <input type="text" id="rank" placeholder="e.g., S" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -3685,7 +4177,7 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Seat</label>
                         <input type="number" id="seat" placeholder="e.g., 5" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                        </div>
+                    </div>
                     <div>
                         <label>Door</label>
                         <input type="number" id="door" placeholder="e.g., 4" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -3705,11 +4197,7 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Transmission</label>
                         ${createEditableCombobox("shift", "Select Transmission")}
-                    </div>
-                    <div>
-                        <label>Steering Wheel</label>
-                        ${createEditableCombobox("steeringWheel", "Select Steering Wheel")}
-                    </div>
+                </div>
                     <div>
                         <label>WD</label>
                         <input type="text" id="wd" placeholder="e.g., 2" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
@@ -3731,28 +4219,29 @@ fun createAddFormHTML(): String {
                             </label>
                         </div>
                     </div>
-                </div>
-                <div style="margin-bottom: 20px;">
-                    <label>Options</label>
-                    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
-                        <button type="button" class="option-btn" data-option="ABS">ABS</button>
-                        <button type="button" class="option-btn" data-option="Air Bag">Air Bag</button>
-                        <button type="button" class="option-btn" data-option="Aluminum Wheels">Aluminum Wheels</button>
-                        <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
-                        <button type="button" class="option-btn" data-option="Power Window">Power Window</button>
-                        <button type="button" class="option-btn" data-option="Sunroof">Sunroof</button>
-                        <button type="button" class="option-btn" data-option="Navigation">Navigation</button>
-                        <button type="button" class="option-btn" data-option="TV">TV</button>
-                        <button type="button" class="option-btn" data-option="Leather Seats">Leather Seats</button>
-                        <button type="button" class="option-btn" data-option="Spare Key">Spare Key</button>
-                        <button type="button" class="option-btn" data-option="4WD">4WD</button>
-                        <button type="button" class="option-btn" data-option="AC">AC</button>
+                    <div style="grid-column: 1 / -1; margin-bottom: 20px;">
+                        <label>Options</label>
+                        <div class="options-buttons-grid">
+                            <button type="button" class="option-btn" data-option="ABS">ABS</button>
+                            <button type="button" class="option-btn" data-option="Air Bag">Air Bag</button>
+                            <button type="button" class="option-btn" data-option="Aluminum Wheels">Aluminum Wheels</button>
+                            <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
+                            <button type="button" class="option-btn" data-option="Power Window">Power Window</button>
+                            <button type="button" class="option-btn" data-option="Sunroof">Sunroof</button>
+                            <button type="button" class="option-btn" data-option="Navigation">Navigation</button>
+                            <button type="button" class="option-btn" data-option="TV">TV</button>
+                            <button type="button" class="option-btn" data-option="Leather Seats">Leather Seats</button>
+                            <button type="button" class="option-btn" data-option="Spare Key">Spare Key</button>
+                            <button type="button" class="option-btn" data-option="4WD">4WD</button>
+                            <button type="button" class="option-btn" data-option="AC">AC</button>
+                        </div>
+                        <input type="hidden" id="optionsPredefined" value="">
+                        <input type="text" id="options" placeholder="Type custom option and press Enter..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
-                    <input type="text" id="options" placeholder="Type custom option and press Enter..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                 </div>
                 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Supplier Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('supplier')"><h3 class="form-section-header" data-section="supplier">Supplier Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="supplier">
                     <div>
                         <label>Supplier Name *</label>
                         <div style="display: flex; gap: 8px; align-items: center;">
@@ -3769,13 +4258,13 @@ fun createAddFormHTML(): String {
                         ${createEditableCombobox("venueId", "Select Venue ID")}
                     </div>
                     <div>
-                        <label>Shipment Size</label>
-                        ${createEditableCombobox("shipmentSize", "Select Shipment Size")}
+                        <label>Vehicle type</label>
+                        ${createEditableCombobox("shipmentSize", "Select Vehicle type")}
                     </div>
                 </div>
                 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Rixo Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('rixo')"><h3 class="form-section-header" data-section="rixo">Rixo Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="rixo">
                     <div>
                         <label>Rixo Company</label>
                         ${createEditableCombobox("rixoCompany", "Select Rixo Company", additionalAttrs = "onchange=\"handleRixoCompanyChange(window.getComboboxValue('rixoCompany'))\"")}
@@ -3802,11 +4291,11 @@ fun createAddFormHTML(): String {
                             <div id="rixoPriceDropdownButton" onclick="openComboboxDropdown('rixoPriceDropdown')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                                 ▼
-                            </div>
                         </div>
                     </div>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                    </div>
+                    </div>
+                <div class="form-section-content form-grid-2col" data-section="rixo">
                     <div>
                         <label>Rixo Requested</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
@@ -3837,36 +4326,36 @@ fun createAddFormHTML(): String {
                             </label>
                         </div>
                     </div>
-                </div>
+                        </div>
 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Pricing Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="pricing">
                     <div>
                         <label>Car Price</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="price" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
-                        </div>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="price" min="0" step="0.01" placeholder="0">
+                </div>
                     </div>
                     <div>
                         <label>Auction Fees</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="auctionFee" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="auctionFee" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Recycle Fees</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="recycleFee" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="recycleFee" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Road Tax</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="roadTax" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="roadTax" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
@@ -3874,15 +4363,15 @@ fun createAddFormHTML(): String {
                         <div style="position:relative;">
                             <input type="date" id="paymentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="paymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
-                        </div>
                     </div>
                 </div>
-                
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Shipment Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                </div>
+
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="shipment">
                     <div>
                         <label>Client Name</label>
-                        <input type="text" id="clientName" placeholder="Select Client" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createClientNameField("clientName", "")}
                     </div>
                     <div>
                         <label>Target Country</label>
@@ -3893,7 +4382,7 @@ fun createAddFormHTML(): String {
                         <div style="position:relative;">
                             <input type="date" id="shipmentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="shipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
-                        </div>
+                    </div>
                     </div>
                     <div>
                         <label>B/L No.</label>
@@ -3905,23 +4394,23 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Shipment Charges</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="shipmentCharges" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="shipmentCharges" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Freight</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="freight" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="freight" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Storage Fees</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="storageCharges" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="storageCharges" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
@@ -3930,45 +4419,45 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Repair Charges</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="repairCharges" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
-                        </div>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="repairCharges" min="0" step="0.01" placeholder="0">
                     </div>
+                </div>
                     <div>
                         <label>Misc. Charges</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="miscCharges" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
-                        </div>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="miscCharges" min="0" step="0.01" placeholder="0">
+                    </div>
                     </div>
                     <div>
                         <label>Inspection Fees</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="inspectionFee" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="inspectionFee" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Commission</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="commission" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="commission" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Total Cost (Before Tax)</label>
                         <input type="text" id="totalCostBeforeTax" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
-                </div>
+                    </div>
                     <div>
                         <label>Tax Total</label>
-                        <div style="display: flex; gap: 8px;">
-                            <div style="flex: 1; position: relative;">
-                                <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                                <input type="number" id="taxTotal" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
-                            </div>
-                            <button type="button" id="calculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">10% Tax</button>
-                        </div>
+                        <div style="display: flex; gap: 8px; align-items: stretch;">
+                            <div class="currency-input" style="flex: 1;">
+                                <span class="currency-symbol">¥</span>
+                                <input type="number" id="taxTotal" min="0" step="0.01" placeholder="0">
+                    </div>
+                            <button type="button" id="calculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; min-height: 44px; align-self: stretch;">10% Tax</button>
+                </div>
                     </div>
                     <div>
                         <label>Total Cost (After Tax 10%)</label>
@@ -3980,9 +4469,9 @@ fun createAddFormHTML(): String {
                     <label>Notes</label>
                     <textarea id="notes" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-height: 80px;"></textarea>
                 </div>
-                <div style="display: flex; gap: 10px;">
-                    <button type="button" id="addSaveBtn" style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Save</button>
-                    <button type="button" id="cancelBtn" style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+                <div class="form-actions">
+                    <button type="button" id="addSaveBtn" class="btn-primary">Save</button>
+                    <button type="button" id="cancelBtn" class="btn-secondary">Cancel</button>
                 </div>
             </form>
         </div>
@@ -4084,7 +4573,7 @@ fun setupRixoDropdowns() {
             switch(elementId) {
                 case 'typeOfVehicle':
                 case 'editTypeOfVehicle':
-                    return 'Shipment size';
+                    return 'Vehicle type';
                 case 'stockLocation':
                 case 'editStockLocation':
                     return 'Stock Location';
@@ -4638,7 +5127,7 @@ fun setupRixoDropdowns() {
                     }
                 }
                 
-                // Set Shipment Size (Type of Vehicle)
+                // Set Vehicle type
                 var editShipmentSelect = document.getElementById('editTypeOfVehicle');
                 if (editShipmentSelect && (purchaseData.shipmentSize || purchaseData.vehicleType)) {
                     var shipmentValue = purchaseData.shipmentSize || purchaseData.vehicleType;
@@ -4728,20 +5217,38 @@ fun setupRixoDropdowns() {
                     }
                 }
                 
-                // Set Options field and highlight selected option buttons
+                // Set Options: predefined go to hidden + button highlight; custom go to text box only
+                var PREDEFINED_OPTIONS = ['ABS', 'Air Bag', 'Aluminum Wheels', 'Power Steering', 'Power Window', 'Sunroof', 'Navigation', 'TV', 'Leather Seats', 'Spare Key', '4WD', 'AC'];
                 var editOptions = document.getElementById('editOptions');
-                if (editOptions && purchaseData.options) {
-                    editOptions.value = purchaseData.options;
-                    // Highlight option buttons that match the options value
-                    var optionsArray = purchaseData.options.split(',').map(function(o) { return o.trim(); });
-                    var optionButtons = document.querySelectorAll('.option-btn');
-                    optionButtons.forEach(function(btn) {
-                        var optionValue = btn.getAttribute('data-option');
-                        if (optionsArray.indexOf(optionValue) > -1) {
-                            btn.classList.add('selected');
-                        }
-                    });
-                    console.log('Set edit options:', purchaseData.options);
+                var editOptionsPredefined = document.getElementById('editOptionsPredefined');
+                if (editOptions && editOptionsPredefined) {
+                    if (purchaseData.options) {
+                        var optionsArray = purchaseData.options.split(',').map(function(o) { return o.trim(); }).filter(Boolean);
+                        var predefined = [];
+                        var custom = [];
+                        optionsArray.forEach(function(opt) {
+                            if (PREDEFINED_OPTIONS.indexOf(opt) > -1) {
+                                predefined.push(opt);
+                            } else {
+                                custom.push(opt);
+                            }
+                        });
+                        editOptionsPredefined.value = predefined.join(', ');
+                        editOptions.value = custom.join(', ');
+                        var optionButtons = document.querySelectorAll('.option-btn');
+                        optionButtons.forEach(function(btn) {
+                            var optionValue = btn.getAttribute('data-option');
+                            if (predefined.indexOf(optionValue) > -1) {
+                                btn.classList.add('selected');
+                            } else {
+                                btn.classList.remove('selected');
+                            }
+                        });
+                    } else {
+                        editOptionsPredefined.value = '';
+                        editOptions.value = '';
+                        document.querySelectorAll('.option-btn').forEach(function(btn) { btn.classList.remove('selected'); });
+                    }
                 }
                 
                 // Set Rixo Requested radio button
@@ -4892,18 +5399,6 @@ fun setupRixoDropdowns() {
         window.handleClientSelection = handleClientSelection;
         window.handleEditClientSelection = handleEditClientSelection;
         
-        // Populate Steering Wheel dropdown for edit form
-        var editSteeringWheelSelect = document.getElementById('editSteeringWheel');
-        if (editSteeringWheelSelect && editSteeringWheelSelect.options.length <= 1) {
-            editSteeringWheelSelect.innerHTML = '<option value="">▼</option>';
-            ['Right', 'Left'].forEach(function(value) {
-                var option = document.createElement('option');
-                option.value = value;
-                option.textContent = value;
-                editSteeringWheelSelect.appendChild(option);
-            });
-        }
-        
         // Setup option buttons for edit form - call after a short delay to ensure DOM is ready
         setTimeout(function() {
             if (typeof window.setupOptionButtons === 'function') {
@@ -4911,58 +5406,38 @@ fun setupRixoDropdowns() {
             } else if (typeof setupOptionButtons === 'function') {
                 setupOptionButtons();
             } else {
-                // If setupOptionButtons is not available, set it up manually
+                // Fallback: option buttons only update highlight + hidden predefined; text box is custom only
                 var optionButtons = document.querySelectorAll('.option-btn');
+                var editOptionsPredefined = document.getElementById('editOptionsPredefined');
                 var editOptionsInput = document.getElementById('editOptions');
-                
-                function addOptionToInput(option, input) {
-                    if (!input) return;
-                    var currentValue = input.value.trim();
-                    var options = currentValue ? currentValue.split(',').map(function(o) { return o.trim(); }).filter(function(o) { return o.length > 0; }) : [];
-                    if (options.indexOf(option) === -1) {
-                        options.push(option);
-                        input.value = options.join(', ');
-                    }
+                function updatePredefined(option, add) {
+                    if (!editOptionsPredefined) return;
+                    var current = editOptionsPredefined.value.trim();
+                    var opts = current ? current.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
+                    var idx = opts.indexOf(option);
+                    if (add && idx === -1) opts.push(option);
+                    if (!add && idx > -1) opts.splice(idx, 1);
+                    editOptionsPredefined.value = opts.join(', ');
                 }
-                
-                function removeOptionFromInput(option, input) {
-                    if (!input) return;
-                    var currentValue = input.value.trim();
-                    var options = currentValue ? currentValue.split(',').map(function(o) { return o.trim(); }).filter(function(o) { return o.length > 0; }) : [];
-                    var index = options.indexOf(option);
-                    if (index > -1) {
-                        options.splice(index, 1);
-                        input.value = options.join(', ');
-                    }
-                }
-                
                 optionButtons.forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         var option = this.getAttribute('data-option');
                         if (this.classList.contains('selected')) {
                             this.classList.remove('selected');
-                            removeOptionFromInput(option, editOptionsInput);
+                            updatePredefined(option, false);
                         } else {
                             this.classList.add('selected');
-                            addOptionToInput(option, editOptionsInput);
+                            updatePredefined(option, true);
                         }
                     });
                 });
-                
                 if (editOptionsInput) {
                     editOptionsInput.addEventListener('keypress', function(e) {
                         if (e.key === 'Enter') {
                             e.preventDefault();
-                            var customOption = this.value.trim();
-                            if (customOption && customOption !== 'Type custom option and press Enter...') {
-                                var currentValue = document.getElementById('editOptions').value.trim();
-                                var options = currentValue ? currentValue.split(',').map(function(o) { return o.trim(); }).filter(function(o) { return o.length > 0; }) : [];
-                                if (options.indexOf(customOption) === -1) {
-                                    options.push(customOption);
-                                    document.getElementById('editOptions').value = options.join(', ');
-                                }
-                                this.value = 'Type custom option and press Enter...';
-                            }
+                            var v = editOptionsInput.value.trim();
+                            var opts = v ? v.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
+                            editOptionsInput.value = opts.join(', ');
                         }
                     });
                 }
@@ -5030,33 +5505,22 @@ fun setupAddFormListeners() {
     console.log("🔧 [ADD] About to populate brand options")
     populateBrandOptions("brand")
     console.log("✅ [ADD] Brand options populated")
+    
+    // Setup auto-refresh for brand dropdown when tab regains focus
+    setupBrandAutoRefresh(isEditForm = false)
     // Ensure base options exist for fuel/shift/grade (add form)
     ensureBaseComboboxOptionsForAddEdit()
     
     // Load all chassis from car_brand_mapping table (chassis-first flow support)
     loadAllChassisDropdown(isEditForm = false)
     
-    // Populate Steering Wheel dropdown options (for Add form)
-    val steeringWheelSelect = document.getElementById("steeringWheel") as? HTMLSelectElement
-    if (steeringWheelSelect != null && steeringWheelSelect.options.length <= 1) {
-        steeringWheelSelect.innerHTML = "<option value=\"\">▼</option>"
-        listOf("Right", "Left").forEach { value ->
-            val option = js("new Option(value, value)")
-            steeringWheelSelect.add(option)
-        }
-    }
-    
-    // Populate Steering Wheel dropdown options (for Edit form)
-    val editSteeringWheelSelect = document.getElementById("editSteeringWheel") as? HTMLSelectElement
-    if (editSteeringWheelSelect != null && editSteeringWheelSelect.options.length <= 1) {
-        editSteeringWheelSelect.innerHTML = "<option value=\"\">▼</option>"
-        listOf("Right", "Left").forEach { value ->
-            val option = js("new Option(value, value)")
-            editSteeringWheelSelect.add(option)
-        }
-    }
-    
-    // Client dropdown removed; using plain Client Name field
+    // Setup auto-refresh for chassis dropdown when tab regains focus
+    setupChassisAutoRefresh(isEditForm = false)
+    // Setup auto-refresh for supplier dropdown when tab regains focus or supplier added/edited in master tab
+    setupSupplierAutoRefresh(isEditForm = false)
+
+    // Client name suggestions (Add form)
+    setupClientNameSuggestions("clientName")
     
     // Setup Rixo dropdowns
     setupRixoDropdowns()
@@ -5108,7 +5572,7 @@ fun setupAddFormListeners() {
             console.log("✅ [NEW] Save button found, attaching click listener")
             saveButton.addEventListener("click", { event: Event ->
                 console.log("💾 [NEW] Save button clicked - EVENT LISTENER")
-                event.preventDefault()
+        event.preventDefault()
                 event.stopPropagation()
                 console.log("💾 [NEW] Save button clicked - calling saveNewPurchase()")
                 try {
@@ -5129,8 +5593,11 @@ fun setupAddFormListeners() {
     console.log("🔍 [NEW] About to call attachSaveButtonListener()")
     attachSaveButtonListener()
     
+    // Setup responsive form sections (collapsible on mobile)
+    setupResponsiveFormSections()
+    
     // Add event listeners for real-time calculation of Total Cost (Before Tax)
-    listOf("price", "auctionFee", "recycleFee", "roadTax", "freight", "shipmentCharges", "storageCharges", "repairCharges", "miscCharges", "inspectionFee", "commission").forEach { fieldId ->
+    listOf("price", "auctionFee", "recycleFee", "roadTax", "freight", "shipmentCharges", "storageCharges", "repairCharges", "miscCharges", "inspectionFee", "commission", "rixoPriceInput").forEach { fieldId ->
         document.getElementById(fieldId)?.addEventListener("input", { _: Event ->
             calculateTotalCostBeforeTax()
         })
@@ -5177,8 +5644,17 @@ fun setupAddFormListeners() {
     document.getElementById("shakenCheckbox")?.addEventListener("change", { event: Event ->
         val target = event.target as HTMLInputElement
         val numberCutSection = document.getElementById("numberCutSection") as HTMLElement?
+        val numberCutHeader = document.querySelector(".form-section-header[data-section='numberCut']") as? HTMLElement
+        val numberCutContent = document.querySelectorAll(".form-section-content[data-section='numberCut']")
+        
         if (target.checked) {
             numberCutSection?.style?.setProperty("display", "block")
+            // Ensure section is expanded when shown
+            numberCutHeader?.classList?.remove("collapsed")
+            for (i in 0 until numberCutContent.length) {
+                val content = numberCutContent.item(i) as HTMLElement
+                content.style.display = ""
+            }
         } else {
             numberCutSection?.style?.setProperty("display", "none")
         }
@@ -5192,90 +5668,63 @@ fun setupAddFormListeners() {
         hint?.textContent = isoToWeekdayLabel(v)
     })
     
-    // Option buttons handler
+    // Option buttons: highlight selected only; text box is for custom options only (no predefined in text box)
+    // Use event delegation so Add and Edit forms both work (form can be rendered after initial load)
     js("""
+        function updatePredefinedInput(predefinedInput, option, add) {
+            if (!predefinedInput) return;
+            var current = predefinedInput.value.trim();
+            var opts = current ? current.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
+            var idx = opts.indexOf(option);
+            if (add && idx === -1) { opts.push(option); }
+            if (!add && idx > -1) { opts.splice(idx, 1); }
+            predefinedInput.value = opts.join(', ');
+        }
+        function onOptionButtonClick(e) {
+            var btn = e.target;
+            if (!btn || !btn.classList || !btn.classList.contains('option-btn')) return;
+            var option = btn.getAttribute('data-option');
+            var grid = btn.closest('.options-buttons-grid');
+            if (!grid) return;
+            var predefinedInput = grid.nextElementSibling;
+            if (!predefinedInput || predefinedInput.type !== 'hidden') return;
+            e.preventDefault();
+            if (btn.classList.contains('selected')) {
+                btn.classList.remove('selected');
+                updatePredefinedInput(predefinedInput, option, false);
+            } else {
+                btn.classList.add('selected');
+                updatePredefinedInput(predefinedInput, option, true);
+            }
+        }
+        document.addEventListener('click', onOptionButtonClick, true);
         function setupOptionButtons() {
-            var optionButtons = document.querySelectorAll('.option-btn');
             var optionsInput = document.getElementById('options');
             var editOptionsInput = document.getElementById('editOptions');
-            
-            function addOptionToInput(option, input) {
-                if (!input) return;
-                var currentValue = input.value.trim();
-                var options = currentValue ? currentValue.split(',').map(function(o) { return o.trim(); }).filter(function(o) { return o.length > 0; }) : [];
-                
-                // Check if option already exists
-                if (options.indexOf(option) === -1) {
-                    options.push(option);
-                    input.value = options.join(', ');
-                }
-            }
-            
-            function removeOptionFromInput(option, input) {
-                if (!input) return;
-                var currentValue = input.value.trim();
-                var options = currentValue ? currentValue.split(',').map(function(o) { return o.trim(); }).filter(function(o) { return o.length > 0; }) : [];
-                var index = options.indexOf(option);
-                if (index > -1) {
-                    options.splice(index, 1);
-                    input.value = options.join(', ');
-                }
-            }
-            
-            optionButtons.forEach(function(btn) {
-                btn.addEventListener('click', function() {
-                    var option = this.getAttribute('data-option');
-                    if (this.classList.contains('selected')) {
-                        this.classList.remove('selected');
-                        removeOptionFromInput(option, optionsInput);
-                        removeOptionFromInput(option, editOptionsInput);
-                    } else {
-                        this.classList.add('selected');
-                        addOptionToInput(option, optionsInput);
-                        addOptionToInput(option, editOptionsInput);
-                    }
-                });
-            });
-            
-            // Custom option input handler
-            if (optionsInput) {
+            if (optionsInput && !optionsInput._optionsCustomBound) {
+                optionsInput._optionsCustomBound = true;
                 optionsInput.addEventListener('keypress', function(e) {
                     if (e.key === 'Enter') {
                         e.preventDefault();
-                        var customOption = this.value.trim();
-                        if (customOption && customOption !== 'Type custom option and press Enter...') {
-                            var currentValue = document.getElementById('options').value.trim();
-                            var options = currentValue ? currentValue.split(',').map(function(o) { return o.trim(); }).filter(function(o) { return o.length > 0; }) : [];
-                            if (options.indexOf(customOption) === -1) {
-                                options.push(customOption);
-                                document.getElementById('options').value = options.join(', ');
-                            }
-                            this.value = 'Type custom option and press Enter...';
-                        }
+                        var v = this.value.trim();
+                        var opts = v ? v.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
+                        this.value = opts.join(', ');
                     }
                 });
             }
-            
-            if (editOptionsInput) {
+            if (editOptionsInput && !editOptionsInput._optionsCustomBound) {
+                editOptionsInput._optionsCustomBound = true;
                 editOptionsInput.addEventListener('keypress', function(e) {
                     if (e.key === 'Enter') {
                         e.preventDefault();
-                        var customOption = this.value.trim();
-                        if (customOption && customOption !== 'Type custom option and press Enter...') {
-                            var currentValue = document.getElementById('editOptions').value.trim();
-                            var options = currentValue ? currentValue.split(',').map(function(o) { return o.trim(); }).filter(function(o) { return o.length > 0; }) : [];
-                            if (options.indexOf(customOption) === -1) {
-                                options.push(customOption);
-                                document.getElementById('editOptions').value = options.join(', ');
-                            }
-                            this.value = 'Type custom option and press Enter...';
-                        }
+                        var v = editOptionsInput.value.trim();
+                        var opts = v ? v.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
+                        editOptionsInput.value = opts.join(', ');
                     }
                 });
             }
         }
-        
-        // Setup option buttons when DOM is ready
+        window.setupOptionButtons = setupOptionButtons;
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', setupOptionButtons);
         } else {
@@ -5488,6 +5937,7 @@ fun calculateTotalCostBeforeTax() {
         val miscChargesValue = (document.getElementById("miscCharges") as? HTMLInputElement)?.value?.trim() ?: ""
         val inspectionFeeValue = (document.getElementById("inspectionFee") as? HTMLInputElement)?.value?.trim() ?: ""
         val commissionValue = (document.getElementById("commission") as? HTMLInputElement)?.value?.trim() ?: ""
+        val rixoPriceValue = (document.getElementById("rixoPriceInput") as? HTMLInputElement)?.value?.trim() ?: ""
         
         // Extract numeric values
         val price = extractNumericValue(priceValue)
@@ -5501,9 +5951,10 @@ fun calculateTotalCostBeforeTax() {
         val miscCharges = extractNumericValue(miscChargesValue)
         val inspectionFee = extractNumericValue(inspectionFeeValue)
         val commission = extractNumericValue(commissionValue)
+        val rixoPrice = extractNumericValue(rixoPriceValue)
         
-        // Calculate total: Sum of all fields
-        val total = price + auctionFee + recycleFee + roadTax + freight + shipmentCharges + storageCharges + repairCharges + miscCharges + inspectionFee + commission
+        // Calculate total: Sum of all fields (including Rixo Price)
+        val total = price + auctionFee + recycleFee + roadTax + freight + shipmentCharges + storageCharges + repairCharges + miscCharges + inspectionFee + commission + rixoPrice
         
         // Format the result with currency symbol
         val formattedTotal = if (total > 0) "¥${total.toInt()}" else "¥0"
@@ -5554,6 +6005,7 @@ fun calculateEditTotalCostBeforeTax() {
         val miscChargesValue = (document.getElementById("editMiscCharges") as? HTMLInputElement)?.value?.trim() ?: ""
         val inspectionFeeValue = (document.getElementById("editInspectionFee") as? HTMLInputElement)?.value?.trim() ?: ""
         val commissionValue = (document.getElementById("editCommission") as? HTMLInputElement)?.value?.trim() ?: ""
+        val rixoPriceValue = (document.getElementById("editRixoPriceInput") as? HTMLInputElement)?.value?.trim() ?: ""
         
         // Extract numeric values
         val price = extractNumericValue(priceValue)
@@ -5567,9 +6019,10 @@ fun calculateEditTotalCostBeforeTax() {
         val miscCharges = extractNumericValue(miscChargesValue)
         val inspectionFee = extractNumericValue(inspectionFeeValue)
         val commission = extractNumericValue(commissionValue)
+        val rixoPrice = extractNumericValue(rixoPriceValue)
         
-        // Calculate total: Sum of all fields
-        val total = price + auctionFee + recycleFee + roadTax + freight + shipmentCharges + storageCharges + repairCharges + miscCharges + inspectionFee + commission
+        // Calculate total: Sum of all fields (including Rixo Price)
+        val total = price + auctionFee + recycleFee + roadTax + freight + shipmentCharges + storageCharges + repairCharges + miscCharges + inspectionFee + commission + rixoPrice
         
         // Format the result with currency symbol
         val formattedTotal = if (total > 0) "¥${total.toInt()}" else "¥0"
@@ -5778,26 +6231,100 @@ fun fetchBrandMappings(brandName: String, isEditForm: Boolean = false): dynamic 
 // Function to populate brand options in combobox select element
 fun populateBrandOptions(brandSelectId: String) {
     val brandSelect = document.getElementById(brandSelectId) as? HTMLSelectElement
-    if (brandSelect != null) {
-        // Clear existing options except the first empty one
-        brandSelect.innerHTML = "<option value=\"\">▼</option>"
-        
-        // List of all brand options
-        val brands = listOf(
-            "Toyota", "Nissan", "Subaru", "Honda", "Suzuki", "Isuzu", "Daihatsu", "Mitsuoka", "Hino",
-            "Mitsubishi Fuso", "Mitsubishi", "Lexus", "Mazda", "Nissan Diesel", "Cadillac", "Chevrolet", "GMC",
-            "Hummer", "Lincoln", "Ford", "Chrisler", "Chrisler Jeep", "Dodge", "Infiniti", "Acura", "Tesla",
-            "Mercedes Benz", "MB AMG", "Smart", "BMW", "Audi", "VolksWagen", "Porsche", "Rolls-Royce", "Bentely",
-            "Jaguar", "Land Rover", "Mini", "Lotus", "Aston Martin", "McLaren", "Fiat", "Ferrari", "Lancia",
-            "Alfa Romeo", "Maserati", "Lamborghini", "Abarth", "Renault", "Peugeot", "Citroen", "Ds Automobiles",
-            "Volvo", "Hyundai", "Kia", "BYD", "TOMMYKAIRA"
-        )
-        
-        brands.forEach { brand ->
-            val option = js("new Option(brand, brand)")
-            brandSelect.add(option)
-        }
+    if (brandSelect == null) {
+        console.warn("⚠️ Brand select element not found: $brandSelectId")
+        return
     }
+    
+    // Store current value to restore after refresh
+    val currentValue = brandSelect.value
+    
+    // Clear existing options except the first empty one
+    brandSelect.innerHTML = "<option value=\"\">▼</option>"
+    
+    // Fetch unique brands from API
+    val url = apiUrl("car-brand-mapping/mappings")
+    console.log("🔄 Fetching unique brands from API for dropdown: $brandSelectId")
+    
+    window.fetch(url)
+        .then { response ->
+            if (!response.ok) {
+                throw Exception("Failed to fetch brand mappings: ${response.status}")
+            }
+            response.json()
+        }
+        .then { data: dynamic ->
+            val success = (data.success as? Boolean) ?: false
+            val uniqueValuesRaw = js("data.uniqueValues")
+            val brandsArray = if (uniqueValuesRaw != null && uniqueValuesRaw != js("undefined")) {
+                val uv = uniqueValuesRaw.unsafeCast<dynamic>()
+                (uv.brands as? Array<*>)?.map { it.toString() }?.toList() ?: emptyList()
+            } else {
+                // Fallback: extract from mappings if uniqueValues not available
+                val mappings = (data.data as? Array<*>) ?: (data.mappings as? Array<*>)
+                if (mappings != null) {
+                    mappings.mapNotNull { mapping ->
+                        val map = mapping.unsafeCast<dynamic>()
+                        (map.brand as? String) ?: (map.carBrand as? String)
+                    }.distinct().sorted()
+                } else {
+                    emptyList()
+                }
+            }
+            
+            if (brandsArray.isEmpty()) {
+                console.warn("⚠️ No brands found in API response, using fallback list")
+                // Fallback to hardcoded list if API returns empty
+                val fallbackBrands = listOf(
+                    "Toyota", "Nissan", "Subaru", "Honda", "Suzuki", "Isuzu", "Daihatsu", "Mitsuoka", "Hino",
+                    "Mitsubishi Fuso", "Mitsubishi", "Lexus", "Mazda", "Nissan Diesel", "Cadillac", "Chevrolet", "GMC",
+                    "Hummer", "Lincoln", "Ford", "Chrisler", "Chrisler Jeep", "Dodge", "Infiniti", "Acura", "Tesla",
+                    "Mercedes Benz", "MB AMG", "Smart", "BMW", "Audi", "VolksWagen", "Porsche", "Rolls-Royce", "Bentely",
+                    "Jaguar", "Land Rover", "Mini", "Lotus", "Aston Martin", "McLaren", "Fiat", "Ferrari", "Lancia",
+                    "Alfa Romeo", "Maserati", "Lamborghini", "Abarth", "Renault", "Peugeot", "Citroen", "Ds Automobiles",
+                    "Volvo", "Hyundai", "Kia", "BYD", "TOMMYKAIRA"
+                )
+                fallbackBrands.forEach { brand ->
+                    val option = js("new Option(brand, brand)")
+                    brandSelect.add(option)
+                }
+            } else {
+                brandsArray.forEach { brand ->
+                    if (brand.isNotBlank()) {
+                        val option = js("new Option(brand, brand)")
+                        brandSelect.add(option)
+                    }
+                }
+                console.log("✅ Populated brand dropdown with ${brandsArray.size} brands from API")
+            }
+            
+            // Restore previous value if it still exists
+            if (currentValue.isNotBlank()) {
+                val optionExists = brandsArray.any { it.equals(currentValue, ignoreCase = true) }
+                if (optionExists) {
+                    brandSelect.value = currentValue
+                    val brandInput = document.getElementById("${brandSelectId}Input") as? HTMLInputElement
+                    brandInput?.value = currentValue
+                }
+            }
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error fetching brands from API, using fallback list:", error)
+            // Fallback to hardcoded list on error
+            val fallbackBrands = listOf(
+                "Toyota", "Nissan", "Subaru", "Honda", "Suzuki", "Isuzu", "Daihatsu", "Mitsuoka", "Hino",
+                "Mitsubishi Fuso", "Mitsubishi", "Lexus", "Mazda", "Nissan Diesel", "Cadillac", "Chevrolet", "GMC",
+                "Hummer", "Lincoln", "Ford", "Chrisler", "Chrisler Jeep", "Dodge", "Infiniti", "Acura", "Tesla",
+                "Mercedes Benz", "MB AMG", "Smart", "BMW", "Audi", "VolksWagen", "Porsche", "Rolls-Royce", "Bentely",
+                "Jaguar", "Land Rover", "Mini", "Lotus", "Aston Martin", "McLaren", "Fiat", "Ferrari", "Lancia",
+                "Alfa Romeo", "Maserati", "Lamborghini", "Abarth", "Renault", "Peugeot", "Citroen", "Ds Automobiles",
+                "Volvo", "Hyundai", "Kia", "BYD", "TOMMYKAIRA"
+            )
+            fallbackBrands.forEach { brand ->
+                val option = js("new Option(brand, brand)")
+                brandSelect.add(option)
+            }
+        }
 }
 
 // Function to populate dropdowns for chassis-first flow (does NOT filter chassis dropdown)
@@ -6427,6 +6954,151 @@ fun loadAllChassisDropdown(isEditForm: Boolean = false) {
         .catch { error: dynamic ->
             console.error("❌ Error loading all chassis:", error)
         }
+}
+
+// Function to setup auto-refresh for chassis dropdown when tab regains focus
+fun setupChassisAutoRefresh(isEditForm: Boolean = false) {
+    val fieldId = if (isEditForm) "editChassis" else "chassis"
+    
+    // Remove existing listeners if any (to avoid duplicates)
+    val existingFocusListener = window.asDynamic().__chassisFocusListener
+    val existingStorageListener = window.asDynamic().__chassisStorageListener
+    val existingCustomListener = window.asDynamic().__chassisCustomListener
+    
+    if (existingFocusListener != null) {
+        val listenerFunc = existingFocusListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("focus", listenerFunc)
+    }
+    if (existingStorageListener != null) {
+        val listenerFunc = existingStorageListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("storage", listenerFunc)
+    }
+    if (existingCustomListener != null) {
+        val listenerFunc = existingCustomListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("chassisUpdated", listenerFunc)
+    }
+    
+    // Create listener function
+    val refreshListener: (Event) -> Unit = { _: Event ->
+        // Check if we're on the add or edit purchase page (#/add or #/edit/... on 1st tab)
+        val hash = window.location.hash
+        val isAddPage = hash.startsWith("#/add")
+        val isEditPage = hash.startsWith("#/edit")
+        
+        if (isAddPage || isEditPage) {
+            console.log("🔄 Tab regained focus or chassis update detected - reloading chassis dropdown (hash=$hash)")
+            loadAllChassisDropdown(isEditForm)
+        }
+    }
+    
+    // Store listener references
+    window.asDynamic().__chassisFocusListener = refreshListener
+    window.asDynamic().__chassisStorageListener = refreshListener
+    window.asDynamic().__chassisCustomListener = refreshListener
+    
+    // Listen for window focus (when user switches back to tab)
+    window.addEventListener("focus", refreshListener)
+    
+    // Listen for localStorage changes (when chassis is added in another tab)
+    window.addEventListener("storage", refreshListener)
+    
+    // Listen for custom event (when chassis is added in same tab)
+    window.addEventListener("chassisUpdated", refreshListener)
+    
+    console.log("✅ Chassis auto-refresh listener set up (isEditForm: $isEditForm)")
+}
+
+// Function to setup auto-refresh for brand dropdown when tab regains focus
+fun setupBrandAutoRefresh(isEditForm: Boolean = false) {
+    val fieldId = if (isEditForm) "editBrand" else "brand"
+    
+    // Remove existing listeners if any (to avoid duplicates)
+    val existingFocusListener = window.asDynamic().__brandFocusListener
+    val existingStorageListener = window.asDynamic().__brandStorageListener
+    val existingCustomListener = window.asDynamic().__brandCustomListener
+    
+    if (existingFocusListener != null) {
+        val listenerFunc = existingFocusListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("focus", listenerFunc)
+    }
+    if (existingStorageListener != null) {
+        val listenerFunc = existingStorageListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("storage", listenerFunc)
+    }
+    if (existingCustomListener != null) {
+        val listenerFunc = existingCustomListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("brandUpdated", listenerFunc)
+    }
+    
+    // Create listener function
+    val refreshListener: (Event) -> Unit = { _: Event ->
+        // Check if we're on the add or edit purchase page (#/add or #/edit/... on 1st tab)
+        val hash = window.location.hash
+        val isAddPage = hash.startsWith("#/add")
+        val isEditPage = hash.startsWith("#/edit")
+        
+        if (isAddPage || isEditPage) {
+            console.log("🔄 Tab regained focus or brand update detected - reloading brand dropdown (hash=$hash)")
+            populateBrandOptions(fieldId)
+        }
+    }
+    
+    // Store listener references
+    window.asDynamic().__brandFocusListener = refreshListener
+    window.asDynamic().__brandStorageListener = refreshListener
+    window.asDynamic().__brandCustomListener = refreshListener
+    
+    // Listen for window focus (when user switches back to tab)
+    window.addEventListener("focus", refreshListener)
+    
+    // Listen for localStorage changes (when brand is added/updated in another tab)
+    window.addEventListener("storage", refreshListener)
+    
+    // Listen for custom event (when brand is added/updated in same tab)
+    window.addEventListener("brandUpdated", refreshListener)
+    
+    console.log("✅ Brand auto-refresh listener set up (isEditForm: $isEditForm)")
+}
+
+// Function to setup auto-refresh for supplier dropdown when tab regains focus or supplier is added/edited in master tab
+fun setupSupplierAutoRefresh(isEditForm: Boolean = false) {
+    // Remove existing listeners if any (to avoid duplicates)
+    val existingFocusListener = window.asDynamic().__supplierFocusListener
+    val existingStorageListener = window.asDynamic().__supplierStorageListener
+    val existingCustomListener = window.asDynamic().__supplierCustomListener
+
+    if (existingFocusListener != null) {
+        val listenerFunc = existingFocusListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("focus", listenerFunc)
+    }
+    if (existingStorageListener != null) {
+        val listenerFunc = existingStorageListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("storage", listenerFunc)
+    }
+    if (existingCustomListener != null) {
+        val listenerFunc = existingCustomListener.unsafeCast<((Event) -> Unit)?>()
+        window.removeEventListener("supplierUpdated", listenerFunc)
+    }
+
+    val refreshListener: (Event) -> Unit = { _: Event ->
+        val hash = window.location.hash
+        val isAddPage = hash.startsWith("#/add")
+        val isEditPage = hash.startsWith("#/edit")
+        if (isAddPage || isEditPage) {
+            console.log("🔄 Tab focus or supplier update - refreshing supplier dropdown (hash=$hash)")
+            js("if (typeof window.refreshRixoDropdowns === 'function') { window.refreshRixoDropdowns(); }")
+        }
+    }
+
+    window.asDynamic().__supplierFocusListener = refreshListener
+    window.asDynamic().__supplierStorageListener = refreshListener
+    window.asDynamic().__supplierCustomListener = refreshListener
+
+    window.addEventListener("focus", refreshListener)
+    window.addEventListener("storage", refreshListener)
+    window.addEventListener("supplierUpdated", refreshListener)
+
+    console.log("✅ Supplier auto-refresh listener set up (isEditForm: $isEditForm)")
 }
 
 // Function to fetch mapping by chassis only (chassis-first flow)
@@ -7530,21 +8202,38 @@ fun setupBrandSelectionHandlers() {
                 val part1 = chassisSelect?.value ?: ""
                 
                 if (part1.isNotBlank()) {
-                    // Part 1 selected from dropdown - clear Part 2 and trigger auto-fill
+                    // Part 1 selected from dropdown - preserve Part 2 if user already typed it (e.g. B43W-t6yg)
                     console.log("🔵 Part 1 selected from dropdown: $part1")
                     
                     // Set flag to prevent infinite recursion
                     js("window.__syncingChassis = true")
                     
-                    // Set input to Part 1 only (clear any Part 2)
                     if (chassisInput != null) {
-                        chassisInput.value = part1
-                        console.log("✅ Set chassis input to Part 1 only: $part1")
+                        val currentInput = chassisInput.value.trim()
+                        val hasSuffix = currentInput.contains("-") && currentInput.startsWith(part1, ignoreCase = true)
+                        if (hasSuffix) {
+                            chassisInput.setAttribute("data-chassis-before-sync", currentInput)
+                            chassisInput.value = currentInput
+                            console.log("✅ Set chassis input to full value (preserving suffix): $currentInput")
+                        } else {
+                            chassisInput.value = part1
+                            console.log("✅ Set chassis input to Part 1 only: $part1")
+                        }
                     }
                     
                     // Sync combobox input (but prevent it from dispatching change event)
                     js("window.__tempSelectFieldId = selectFieldId")
                     js("if (typeof window.syncComboboxInput === 'function') { window.syncComboboxInput(window.__tempSelectFieldId); }")
+                    
+                    // Restore full chassis in input if we preserved it (sync overwrites input from select)
+                    if (chassisInput != null) {
+                        val beforeSync = chassisInput.getAttribute("data-chassis-before-sync")
+                        if (!beforeSync.isNullOrBlank()) {
+                            chassisInput.value = beforeSync
+                            chassisInput.removeAttribute("data-chassis-before-sync")
+                            console.log("✅ Restored chassis input after sync: $beforeSync")
+                        }
+                    }
                     
                     // Clear flag after sync
                     js("setTimeout(function() { window.__syncingChassis = false; }, 100);")
@@ -7739,7 +8428,7 @@ fun calculateTax(priceFieldId: String, auctionFeeFieldId: String, roadTaxFieldId
                 taxTotalField.value = taxAmount.toString()
             } else {
                 // For text inputs, format with currency symbol
-                val formattedTax = "¥${taxAmount.toInt()}"
+        val formattedTax = "¥${taxAmount.toInt()}"
                 taxTotalField.value = formattedTax
             }
         }
@@ -7788,6 +8477,31 @@ fun validateChassisPart1(chassis: String, isEditForm: Boolean): Boolean {
     return false
 }
 
+// Helper function to validate Production Date (carModelYear): 4-digit year only, no range check
+fun validateProductionDateYear(value: String): Pair<Boolean, String> {
+    if (value.isBlank()) {
+        // Empty is allowed (optional field)
+        return Pair(true, "")
+    }
+    
+    // HTML month input format is YYYY-MM (e.g., "2013-12")
+    val parts = value.split("-")
+    if (parts.size != 2) {
+        return Pair(false, "Invalid Production Date format. Please use the date picker (YYYY-MM).")
+    }
+    
+    val yearStr = parts[0].trim()
+    // Limit to 4 digits only: year must be exactly 4 digits and numeric
+    if (yearStr.length != 4) {
+        return Pair(false, "Production year must be exactly 4 digits. Got: $yearStr")
+    }
+    if (!yearStr.all { it.isDigit() }) {
+        return Pair(false, "Production year must be 4 digits only. Got: $yearStr")
+    }
+    
+    return Pair(true, "")
+}
+
 // NEW: Simple save function for adding new purchase - chassis only logic
 fun saveNewPurchase() {
     console.log("💾 [NEW] saveNewPurchase() called")
@@ -7826,6 +8540,16 @@ fun saveNewPurchase() {
         return
     }
     
+    // Validate Production Date year
+    val carModelYearValue = (document.getElementById("carModelYear") as? HTMLInputElement)?.value ?: ""
+    val (isValidYear, yearErrorMsg) = validateProductionDateYear(carModelYearValue)
+    if (!isValidYear) {
+        saveButton?.disabled = false
+        saveButton?.textContent = originalText
+        showErrorModal("Invalid Production Date", yearErrorMsg)
+        return
+    }
+    
     // Collect all form values (empty strings for empty fields)
     val purchaseData = js("{}")
     
@@ -7846,7 +8570,9 @@ fun saveNewPurchase() {
     purchaseData.door = (document.getElementById("door") as? HTMLInputElement)?.value ?: ""
     purchaseData.distance = (document.getElementById("distance") as? HTMLInputElement)?.value ?: ""
     purchaseData.driveType = (document.querySelector("input[name=\"driveType\"]:checked") as? HTMLInputElement)?.value ?: ""
-    purchaseData.options = (document.getElementById("options") as? HTMLInputElement)?.value ?: ""
+    val predefinedOpts = (document.getElementById("optionsPredefined") as? HTMLInputElement)?.value?.trim() ?: ""
+    val customOpts = (document.getElementById("options") as? HTMLInputElement)?.value?.trim() ?: ""
+    purchaseData.options = listOf(predefinedOpts, customOpts).filter { it.isNotEmpty() }.joinToString(", ")
     val ccValue = (document.getElementById("cc") as? HTMLInputElement)?.value ?: ""
     // Backend expects Int? for cc field, so send only the numeric value
     purchaseData.cc = if (ccValue.isNotEmpty()) {
@@ -7854,7 +8580,6 @@ fun saveNewPurchase() {
         numValue.toIntOrNull()  // Send as Integer, not string with "CC"
     } else null
     purchaseData.shift = js("getComboboxValue('shift')").unsafeCast<String>()
-    purchaseData.steeringWheel = js("getComboboxValue('steeringWheel')").unsafeCast<String>()
     val wdValue = (document.getElementById("wd") as? HTMLInputElement)?.value ?: ""
     // Backend expects String? for wd field, so send with "WD" suffix
     purchaseData.wd = if (wdValue.isNotEmpty()) {
@@ -7925,7 +8650,7 @@ fun saveNewPurchase() {
     // Send POST request to create purchase
     val requestInit = js("{}")
     requestInit.method = "POST"
-    val headers = js("{}")
+      val headers = js("{}")
     headers["Content-Type"] = "application/json"
     requestInit.headers = headers
     requestInit.body = JSON.stringify(purchaseData)
@@ -7961,7 +8686,7 @@ fun saveNewPurchase() {
                         (errorText.contains("chassis") && errorText.contains("already exists"))) {
                         showErrorModal("Duplicate Chassis", errorText)
                     } else {
-                        showMessage("Failed to create purchase: $errorText", "error")
+                showMessage("Failed to create purchase: $errorText", "error")
                     }
                 }
             }
@@ -8007,13 +8732,13 @@ fun showEditFormWithData(purchaseData: dynamic) {
     
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 20px;">
+        <div class="edit-purchase-container" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; position: relative;">
             <h2>Edit Purchase</h2>
             <form id="editForm">
                 <input type="hidden" id="editId" value="${purchaseData.id}">
                 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Basic Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('basic')"><h3 class="form-section-header" data-section="basic">Basic Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="basic">
                     <div>
                         <label>Purchase Date</label>
                         <div style="position:relative;">
@@ -8025,8 +8750,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Chassis *</label>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <div style="flex: 1; position: relative;">
+                        <div class="chassis-input-row" style="display: flex; gap: 8px; align-items: center;">
+                            <div class="chassis-input-wrap" style="flex: 1; position: relative; min-width: 0;">
                                 <input type="text" id="editChassisInput" value="${purchaseData.chassis ?: ""}" placeholder="Select Chassis" required 
                                        style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
                                        autocomplete="off" onfocus="this.select();">
@@ -8068,7 +8793,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                                 ▼
                     </div>
-                    </div>
+                </div>
                     </div>
                     <div>
                         <label>Grade</label>
@@ -8095,74 +8820,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
 
                 <!-- Number Cut Information Section (initially hidden, shows when Shaken is checked) -->
                 <div id="editNumberCutSection" style="display: ${if (purchaseData.shaken == true) "block" else "none"};">
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Number Cut Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; align-items: end;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('numberCut')"><h3 class="form-section-header" data-section="numberCut">Number Cut Information</h3></div>
+                <div class="form-section-content form-grid-4col" data-section="numberCut">
                     <div>
                         <label>Place Name (Japanese)</label>
-                        <select id="editNumberCutPlace" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Place</option>
-                            <option value="札幌">札幌 (Sapporo)</option>
-                            <option value="函館">函館 (Hakodate)</option>
-                            <option value="旭川">旭川 (Asahikawa)</option>
-                            <option value="室蘭">室蘭 (Muroran)</option>
-                            <option value="釧路">釧路 (Kushiro)</option>
-                            <option value="帯広">帯広 (Obihiro)</option>
-                            <option value="十勝">十勝 (Tokachi)</option>
-                            <option value="北見">北見 (Kitami)</option>
-                            <option value="知床">知床 (Shiretoko)</option>
-                            <option value="苫小牧">苫小牧 (Tomakomai)</option>
-                            <option value="青森">青森 (Aomori)</option>
-                            <option value="弘前">弘前 (Hirosaki)</option>
-                            <option value="岩手">岩手 (Iwate)</option>
-                            <option value="盛岡">盛岡 (Morioka)</option>
-                            <option value="平泉">平泉 (Hiraizumi)</option>
-                            <option value="宮城">宮城 (Miyagi)</option>
-                            <option value="仙台">仙台 (Sendai)</option>
-                            <option value="八戸">八戸 (Hachinohe)</option>
-                            <option value="秋田">秋田 (Akita)</option>
-                            <option value="山形">山形 (Yamagata)</option>
-                            <option value="福島">福島 (Fukushima)</option>
-                            <option value="茨城">茨城 (Ibaraki)</option>
-                            <option value="栃木">栃木 (Tochigi)</option>
-                            <option value="群馬">群馬 (Gunma)</option>
-                            <option value="埼玉">埼玉 (Saitama)</option>
-                            <option value="千葉">千葉 (Chiba)</option>
-                            <option value="東京">東京 (Tokyo)</option>
-                            <option value="神奈川">神奈川 (Kanagawa)</option>
-                            <option value="新潟">新潟 (Niigata)</option>
-                            <option value="富山">富山 (Toyama)</option>
-                            <option value="石川">石川 (Ishikawa)</option>
-                            <option value="福井">福井 (Fukui)</option>
-                            <option value="山梨">山梨 (Yamanashi)</option>
-                            <option value="長野">長野 (Nagano)</option>
-                            <option value="岐阜">岐阜 (Gifu)</option>
-                            <option value="静岡">静岡 (Shizuoka)</option>
-                            <option value="愛知">愛知 (Aichi)</option>
-                            <option value="三重">三重 (Mie)</option>
-                            <option value="滋賀">滋賀 (Shiga)</option>
-                            <option value="京都">京都 (Kyoto)</option>
-                            <option value="大阪">大阪 (Osaka)</option>
-                            <option value="兵庫">兵庫 (Hyogo)</option>
-                            <option value="奈良">奈良 (Nara)</option>
-                            <option value="和歌山">和歌山 (Wakayama)</option>
-                            <option value="鳥取">鳥取 (Tottori)</option>
-                            <option value="島根">島根 (Shimane)</option>
-                            <option value="岡山">岡山 (Okayama)</option>
-                            <option value="広島">広島 (Hiroshima)</option>
-                            <option value="山口">山口 (Yamaguchi)</option>
-                            <option value="徳島">徳島 (Tokushima)</option>
-                            <option value="香川">香川 (Kagawa)</option>
-                            <option value="愛媛">愛媛 (Ehime)</option>
-                            <option value="高知">高知 (Kochi)</option>
-                            <option value="福岡">福岡 (Fukuoka)</option>
-                            <option value="佐賀">佐賀 (Saga)</option>
-                            <option value="長崎">長崎 (Nagasaki)</option>
-                            <option value="熊本">熊本 (Kumamoto)</option>
-                            <option value="大分">大分 (Oita)</option>
-                            <option value="宮崎">宮崎 (Miyazaki)</option>
-                            <option value="鹿児島">鹿児島 (Kagoshima)</option>
-                            <option value="沖縄">沖縄 (Okinawa)</option>
-                        </select>
+                        ${createEditableComboboxWithOptions("editNumberCutPlace", "Select Place", getNumberCutPlaceOptions(), getInitialPlaceFromNumberCut(purchaseData.numberCut))}
                     </div>
                     <div>
                         <label>Number (English)</label>
@@ -8170,57 +8832,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Hiragana Character</label>
-                        <select id="editNumberCutHiragana" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <option value="">Select Character</option>
-                            <option value="あ">あ (a)</option>
-                            <option value="い">い (i)</option>
-                            <option value="う">う (u)</option>
-                            <option value="え">え (e)</option>
-                            <option value="お">お (o)</option>
-                            <option value="か">か (ka)</option>
-                            <option value="き">き (ki)</option>
-                            <option value="く">く (ku)</option>
-                            <option value="け">け (ke)</option>
-                            <option value="こ">こ (ko)</option>
-                            <option value="さ">さ (sa)</option>
-                            <option value="し">し (shi)</option>
-                            <option value="す">す (su)</option>
-                            <option value="せ">せ (se)</option>
-                            <option value="そ">そ (so)</option>
-                            <option value="た">た (ta)</option>
-                            <option value="ち">ち (chi)</option>
-                            <option value="つ">つ (tsu)</option>
-                            <option value="て">て (te)</option>
-                            <option value="と">と (to)</option>
-                            <option value="な">な (na)</option>
-                            <option value="に">に (ni)</option>
-                            <option value="ぬ">ぬ (nu)</option>
-                            <option value="ね">ね (ne)</option>
-                            <option value="の">の (no)</option>
-                            <option value="は">は (ha)</option>
-                            <option value="ひ">ひ (hi)</option>
-                            <option value="ふ">ふ (fu)</option>
-                            <option value="へ">へ (he)</option>
-                            <option value="ほ">ほ (ho)</option>
-                            <option value="ま">ま (ma)</option>
-                            <option value="み">み (mi)</option>
-                            <option value="む">む (mu)</option>
-                            <option value="め">め (me)</option>
-                            <option value="も">も (mo)</option>
-                            <option value="や">や (ya)</option>
-                            <option value="ゆ">ゆ (yu)</option>
-                            <option value="よ">よ (yo)</option>
-                            <option value="ら">ら (ra)</option>
-                            <option value="り">り (ri)</option>
-                            <option value="る">る (ru)</option>
-                            <option value="れ">れ (re)</option>
-                            <option value="ろ">ろ (ro)</option>
-                            <option value="わ">わ (wa)</option>
-                            <option value="ゐ">ゐ (wi)</option>
-                            <option value="ゑ">ゑ (we)</option>
-                            <option value="を">を (wo)</option>
-                            <option value="ん">ん (n)</option>
-                        </select>
+                        ${createEditableComboboxWithOptions("editNumberCutHiragana", "Select Character", getNumberCutHiraganaOptions(), getInitialHiraganaFromNumberCut(purchaseData.numberCut))}
                     </div>
                     <div>
                         <label>Number (English)</label>
@@ -8233,8 +8845,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 </div>
                 </div> <!-- End of editNumberCutSection -->
 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Car Specifications</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('specifications')"><h3 class="form-section-header" data-section="specifications">Car Specifications</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label>Rank</label>
                         <input type="text" id="editRank" value="${purchaseData.rank ?: ""}" placeholder="e.g., S" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -8266,7 +8878,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                         <label>Seat</label>
                         <input type="number" id="editSeat" value="${purchaseData.seat ?: ""}" placeholder="e.g., 5" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                        </div>
+                    </div>
                     <div>
                         <label>Door</label>
                         <input type="number" id="editDoor" value="${purchaseData.door ?: ""}" placeholder="e.g., 4" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -8302,12 +8914,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <div id="editShiftButton" onclick="openComboboxDropdown('editShift')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                                 ▼
-                            </div>
+                </div>
                         </div>
-                    </div>
-                    <div>
-                        <label>Steering Wheel</label>
-                        ${createEditableCombobox("editSteeringWheel", "Select Steering Wheel", initialValue = purchaseData.steeringWheel?.toString() ?: "")}
                     </div>
                     <div>
                         <label>WD</label>
@@ -8330,28 +8938,29 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             </label>
                         </div>
                     </div>
-                </div>
-                <div style="margin-bottom: 20px;">
-                    <label>Options</label>
-                    <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
-                        <button type="button" class="option-btn" data-option="ABS">ABS</button>
-                        <button type="button" class="option-btn" data-option="Air Bag">Air Bag</button>
-                        <button type="button" class="option-btn" data-option="Aluminum Wheels">Aluminum Wheels</button>
-                        <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
-                        <button type="button" class="option-btn" data-option="Power Window">Power Window</button>
-                        <button type="button" class="option-btn" data-option="Sunroof">Sunroof</button>
-                        <button type="button" class="option-btn" data-option="Navigation">Navigation</button>
-                        <button type="button" class="option-btn" data-option="TV">TV</button>
-                        <button type="button" class="option-btn" data-option="Leather Seats">Leather Seats</button>
-                        <button type="button" class="option-btn" data-option="Spare Key">Spare Key</button>
-                        <button type="button" class="option-btn" data-option="4WD">4WD</button>
-                        <button type="button" class="option-btn" data-option="AC">AC</button>
+                    <div style="grid-column: 1 / -1; margin-bottom: 20px;">
+                        <label>Options</label>
+                        <div class="options-buttons-grid">
+                            <button type="button" class="option-btn" data-option="ABS">ABS</button>
+                            <button type="button" class="option-btn" data-option="Air Bag">Air Bag</button>
+                            <button type="button" class="option-btn" data-option="Aluminum Wheels">Aluminum Wheels</button>
+                            <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
+                            <button type="button" class="option-btn" data-option="Power Window">Power Window</button>
+                            <button type="button" class="option-btn" data-option="Sunroof">Sunroof</button>
+                            <button type="button" class="option-btn" data-option="Navigation">Navigation</button>
+                            <button type="button" class="option-btn" data-option="TV">TV</button>
+                            <button type="button" class="option-btn" data-option="Leather Seats">Leather Seats</button>
+                            <button type="button" class="option-btn" data-option="Spare Key">Spare Key</button>
+                            <button type="button" class="option-btn" data-option="4WD">4WD</button>
+                            <button type="button" class="option-btn" data-option="AC">AC</button>
+                        </div>
+                        <input type="hidden" id="editOptionsPredefined" value="">
+                        <input type="text" id="editOptions" placeholder="Type custom option and press Enter..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
-                    <input type="text" id="editOptions" value="${purchaseData.options ?: ""}" placeholder="Type custom option and press Enter..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                 </div>
                 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Supplier Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('supplier')"><h3 class="form-section-header" data-section="supplier">Supplier Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="supplier">
                     <div>
                         <label>Supplier Name *</label>
                         <div style="display: flex; gap: 8px; align-items: center;">
@@ -8384,13 +8993,13 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         </div>
                     </div>
                     <div>
-                        <label>Shipment Size</label>
-                        ${createEditableCombobox("editShipmentSize", "Select Shipment Size", initialValue = (purchaseData.shipmentSize ?: purchaseData.vehicleType ?: ""))}
+                        <label>Vehicle type</label>
+                        ${createEditableCombobox("editShipmentSize", "Select Vehicle type", initialValue = (purchaseData.shipmentSize ?: purchaseData.vehicleType ?: ""))}
                     </div>
                 </div>
                 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Rixo Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('rixo')"><h3 class="form-section-header" data-section="rixo">Rixo Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="rixo">
                     <div>
                         <label>Rixo Company</label>
                         ${createEditableCombobox("editRixoCompany", "Select Rixo Company", initialValue = (purchaseData.rixoCompany ?: ""))}
@@ -8432,12 +9041,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <div id="editRixoPriceDropdownButton" onclick="openComboboxDropdown('editRixoPriceDropdown')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                                 ▼
-                            </div>
                         </div>
                     </div>
-                </div>
-                
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                    </div>
+                    </div>
+                <div class="form-section-content form-grid-2col" data-section="rixo">
                     <div>
                         <label>Rixo Requested</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
@@ -8468,36 +9076,36 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             </label>
                         </div>
                     </div>
-                </div>
+                        </div>
 
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Pricing Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="pricing">
                     <div>
                         <label>Car Price</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editPrice" value="${extractNumericFromDbValue(purchaseData.price)}" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
-                        </div>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editPrice" value="${extractNumericFromDbValue(purchaseData.price)}" min="0" step="0.01" placeholder="0">
+                </div>
                     </div>
                     <div>
                         <label>Auction Fees</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editAuctionFee" value="${extractNumericFromDbValue(purchaseData.auctionFee)}" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editAuctionFee" value="${extractNumericFromDbValue(purchaseData.auctionFee)}" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Recycle Fees</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editRecycleFee" value="${extractNumericFromDbValue(purchaseData.recycleFee)}" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editRecycleFee" value="${extractNumericFromDbValue(purchaseData.recycleFee)}" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Road Tax</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editRoadTax" value="${extractNumericFromDbValue(purchaseData.roadTax)}" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editRoadTax" value="${extractNumericFromDbValue(purchaseData.roadTax)}" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
@@ -8505,15 +9113,15 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <div style="position:relative;">
                             <input type="date" id="editPaymentDate" value="${toIsoFromLabel(purchaseData.paymentDate ?: purchaseData.payment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.paymentDate ?: purchaseData.payment_date) ?: ""}">
                             <span id="editPaymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
-                        </div>
                     </div>
                 </div>
-                
-                <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Shipment Information</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+                </div>
+
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="shipment">
                     <div>
                         <label>Client Name</label>
-                        <input type="text" id="editClientName" value="${purchaseData.clientName ?: ""}" placeholder="Select Client" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createClientNameField("editClientName", purchaseData.clientName?.toString() ?: "")}
                     </div>
                     <div>
                         <label>Target Country</label>
@@ -8524,7 +9132,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <div style="position:relative;">
                             <input type="date" id="editShipmentDate" value="${toIsoFromLabel(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date) ?: ""}">
                             <span id="editShipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
-                        </div>
+                    </div>
                     </div>
                     <div>
                         <label>B/L No.</label>
@@ -8536,23 +9144,23 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Shipment Charges</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editShipmentCharges" value="${extractNumericFromDbValue(purchaseData.shipmentCharges)}" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editShipmentCharges" value="${extractNumericFromDbValue(purchaseData.shipmentCharges)}" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Freight</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editFreight" value="${extractNumericFromDbValue(purchaseData.freight)}" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editFreight" value="${extractNumericFromDbValue(purchaseData.freight)}" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Storage Fees</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editStorageCharges" value="${extractNumericFromDbValue(purchaseData.storageCharges)}" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editStorageCharges" value="${extractNumericFromDbValue(purchaseData.storageCharges)}" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
@@ -8561,49 +9169,49 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Repair Charges</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editRepairCharges" value="${extractNumericFromDbValue(purchaseData.repairCharges)}" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
-                        </div>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editRepairCharges" value="${extractNumericFromDbValue(purchaseData.repairCharges)}" min="0" step="0.01" placeholder="0">
                     </div>
+                </div>
                     <div>
                         <label>Misc. Charges</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editMiscCharges" value="${extractNumericFromDbValue(purchaseData.miscCharges)}" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
-                        </div>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editMiscCharges" value="${extractNumericFromDbValue(purchaseData.miscCharges)}" min="0" step="0.01" placeholder="0">
+                    </div>
                     </div>
                     <div>
                         <label>Inspection Fees</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editInspectionFee" value="${extractNumericFromDbValue(purchaseData.inspectionFee)}" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editInspectionFee" value="${extractNumericFromDbValue(purchaseData.inspectionFee)}" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Commission</label>
-                        <div style="position: relative;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editCommission" value="${extractNumericFromDbValue(purchaseData.commission)}" min="0" step="0.01" placeholder="0" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="number" id="editCommission" value="${extractNumericFromDbValue(purchaseData.commission)}" min="0" step="0.01" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Total Cost (Before Tax)</label>
                         <input type="text" id="editTotalCostBeforeTax" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
-                </div>
+                    </div>
                     <div>
                         <label>Tax Total</label>
-                        <div style="display: flex; gap: 8px;">
-                            <div style="flex: 1; position: relative;">
-                                <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                                <input type="number" id="editTaxTotal" value="${extractNumericFromDbValue(purchaseData.taxTotal)}" min="0" step="0.01" style="width: 100%; padding: 8px 8px 8px 20px; border: 1px solid #ddd; border-radius: 4px;" placeholder="0">
-                            </div>
-                            <button type="button" id="editCalculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">10% Tax</button>
-                        </div>
+                        <div style="display: flex; gap: 8px; align-items: stretch;">
+                            <div class="currency-input" style="flex: 1;">
+                                <span class="currency-symbol">¥</span>
+                                <input type="number" id="editTaxTotal" value="${extractNumericFromDbValue(purchaseData.taxTotal)}" min="0" step="0.01" placeholder="0">
+                    </div>
+                            <button type="button" id="editCalculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; min-height: 44px; align-self: stretch;">10% Tax</button>
+                </div>
                     </div>
                     <div>
                         <label>Total Cost (After Tax 10%)</label>
-                        <input type="text" id="editTotalCostAfterTax" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
+                        <input type="text" id="editTotalCostAfterTax" value="${purchaseData.totalPrice ?: ""}" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
                     </div>
                 </div>
                 
@@ -8644,10 +9252,10 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                 </div>
                 
-                <div style="display: flex; gap: 10px;">
-                    <button type="submit" id="editUpdateBtn" style="padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Update</button>
-                    <button type="button" id="deleteBtn" style="padding: 10px 20px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">Delete</button>
-                    <button type="button" id="editCancelBtn" style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Cancel</button>
+                <div class="form-actions">
+                    <button type="button" id="editCancelBtn" class="btn-secondary">Cancel</button>
+                    <button type="button" id="deleteBtn" class="btn-danger">Delete</button>
+                    <button type="submit" id="editUpdateBtn" class="btn-primary">Update</button>
                 </div>
             </form>
         </div>
@@ -8684,6 +9292,9 @@ fun showEditFormWithData(purchaseData: dynamic) {
     ensureBaseComboboxOptionsForAddEdit()
     
     setupEditFormListeners()
+    
+    // Client name suggestions (Edit form)
+    setupClientNameSuggestions("editClientName")
     
     // Setup Rixo dropdowns and set values
     setupRixoDropdowns()
@@ -8790,9 +9401,17 @@ fun setupEditFormListeners() {
     console.log("🔧 setupEditFormListeners() called")
     // Load all chassis from car_brand_mapping table (chassis-first flow support)
     loadAllChassisDropdown(isEditForm = true)
+    
+    // Setup auto-refresh for chassis dropdown when tab regains focus
+    setupChassisAutoRefresh(isEditForm = true)
     // Populate Brand dropdown options
     populateBrandOptions("editBrand")
     
+    // Setup auto-refresh for brand dropdown when tab regains focus
+    setupBrandAutoRefresh(isEditForm = true)
+    // Setup auto-refresh for supplier dropdown when tab regains focus or supplier added/edited in master tab
+    setupSupplierAutoRefresh(isEditForm = true)
+
     // Client dropdown removed; using plain Client Name field
     
     // Add event listener for auction name change - works with combobox
@@ -8967,6 +9586,11 @@ fun setupEditFormListeners() {
     
     // Form submit listener - matches documentation (simple approach)
     val editForm = document.getElementById("editForm") as HTMLFormElement?
+    // Setup responsive form sections (collapsible on mobile) - call after DOM is ready
+    window.setTimeout({
+        setupResponsiveFormSections()
+    }, 100)
+    
     if (editForm != null) {
         console.log("✅ [TEST] Attaching form submit listener to editForm")
         
@@ -8988,11 +9612,11 @@ fun setupEditFormListeners() {
             if (submitButton != null) {
                 console.log("✅ [TEST] Found submit button (ID: ${submitButton.id}, type: ${submitButton.type}), adding direct click listener as fallback")
                 submitButton.addEventListener("click", { event: Event ->
-                    event.preventDefault()
+        event.preventDefault()
                     event.stopPropagation()
                     console.log("🖱️ [TEST] Submit button clicked directly - calling handleEditPurchase()")
-                    handleEditPurchase()
-                })
+        handleEditPurchase()
+    })
                 console.log("✅ [TEST] Direct click listener attached successfully")
             } else {
                 console.warn("⚠️ [TEST] Submit button not found for direct click listener")
@@ -9003,7 +9627,7 @@ fun setupEditFormListeners() {
     }
     
     // Add event listeners for real-time calculation of Total Cost (Before Tax) in Edit form
-    listOf("editPrice", "editAuctionFee", "editRecycleFee", "editRoadTax", "editFreight", "editShipmentCharges", "editStorageCharges", "editRepairCharges", "editMiscCharges", "editInspectionFee", "editCommission").forEach { fieldId ->
+    listOf("editPrice", "editAuctionFee", "editRecycleFee", "editRoadTax", "editFreight", "editShipmentCharges", "editStorageCharges", "editRepairCharges", "editMiscCharges", "editInspectionFee", "editCommission", "editRixoPriceInput").forEach { fieldId ->
         document.getElementById(fieldId)?.addEventListener("input", { _: Event ->
             calculateEditTotalCostBeforeTax()
         })
@@ -9066,7 +9690,7 @@ fun setupEditFormListeners() {
         updateDateDayHint("editPaymentDate", "editPaymentDateDayHint")
         updateDateDayHint("editShipmentDate", "editShipmentDateDayHint")
     }, 100)
-    
+
     (document.getElementById("editDate") as HTMLInputElement?)?.addEventListener("change", { ev: Event ->
         val v = (ev.target as HTMLInputElement).value
         val hint = document.getElementById("editDateDayHint") as HTMLElement?
@@ -9087,8 +9711,17 @@ fun setupEditFormListeners() {
     document.getElementById("editShakenCheckbox")?.addEventListener("change", { event: Event ->
         val target = event.target as HTMLInputElement
         val numberCutSection = document.getElementById("editNumberCutSection") as HTMLElement?
+        val numberCutHeader = document.querySelector(".form-section-header[data-section='numberCut']") as? HTMLElement
+        val numberCutContent = document.querySelectorAll(".form-section-content[data-section='numberCut']")
+        
         if (target.checked) {
             numberCutSection?.style?.setProperty("display", "block")
+            // Ensure section is expanded when shown
+            numberCutHeader?.classList?.remove("collapsed")
+            for (i in 0 until numberCutContent.length) {
+                val content = numberCutContent.item(i) as HTMLElement
+                content.style.display = ""
+            }
         } else {
             numberCutSection?.style?.setProperty("display", "none")
         }
@@ -9238,7 +9871,7 @@ fun getFieldDisplayName(fieldName: String): String {
         "brand" -> "Brand"
         "carName" -> "Car Name"
         "vehicleType" -> "Vehicle Type"
-        "shipmentSize" -> "Shipment Size"
+        "shipmentSize" -> "Vehicle type"
         "grade" -> "Grade"
         "rank" -> "Rank"
         "color" -> "Color"
@@ -9249,7 +9882,6 @@ fun getFieldDisplayName(fieldName: String): String {
         "options" -> "Options"
         "cc" -> "CC"
         "shift" -> "Shift"
-        "steeringWheel" -> "Steering Wheel"
         "wd" -> "WD"
         "driveType" -> "Drive Type"
         "auctionNo" -> "Auction No"
@@ -9320,7 +9952,9 @@ fun collectCurrentEditFormData(): dynamic {
     val door = (document.getElementById("editDoor") as? HTMLInputElement)?.value ?: ""
     val distance = (document.getElementById("editDistance") as? HTMLInputElement)?.value ?: ""
     val driveType = (document.querySelector("input[name=\"editDriveType\"]:checked") as HTMLInputElement?)?.value ?: ""
-    val options = (document.getElementById("editOptions") as? HTMLInputElement)?.value ?: ""
+    val editPredefinedOpts = (document.getElementById("editOptionsPredefined") as? HTMLInputElement)?.value?.trim() ?: ""
+    val editCustomOpts = (document.getElementById("editOptions") as? HTMLInputElement)?.value?.trim() ?: ""
+    val options = listOf(editPredefinedOpts, editCustomOpts).filter { it.isNotEmpty() }.joinToString(", ")
     val ccValue = (document.getElementById("editCc") as? HTMLInputElement)?.value ?: ""
     // Backend expects Int? for cc field, so send only the numeric value
     val cc = if (ccValue.isNotEmpty()) {
@@ -9328,7 +9962,6 @@ fun collectCurrentEditFormData(): dynamic {
         numValue.toIntOrNull()  // Send as Integer, not string with "CC"
     } else null
     val shift = getComboboxValueSafe("editShift")
-    val steeringWheel = getComboboxValueSafe("editSteeringWheel")
     val wdValue = (document.getElementById("editWd") as? HTMLInputElement)?.value ?: ""
     val wd = if (wdValue.isNotEmpty()) {
         val numValue = wdValue.replace(Regex("[^0-9]"), "")
@@ -9352,7 +9985,7 @@ fun collectCurrentEditFormData(): dynamic {
     val roadTax = if (roadTaxValue.isNotEmpty()) "¥$roadTaxValue" else ""
     val taxTotalValue = (document.getElementById("editTaxTotal") as? HTMLInputElement)?.value ?: ""
     val taxTotal = if (taxTotalValue.isNotEmpty()) "¥$taxTotalValue" else ""
-    val totalPrice = (document.getElementById("editTotalPrice") as? HTMLInputElement)?.value ?: ""
+    val totalPrice = (document.getElementById("editTotalCostAfterTax") as? HTMLInputElement)?.value ?: ""
     val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
@@ -9403,7 +10036,6 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.options = options
     purchaseData.cc = cc
     purchaseData.shift = shift
-    purchaseData.steeringWheel = steeringWheel
     purchaseData.wd = wd
     purchaseData.driveType = driveType
     purchaseData.auctionNo = auctionNo
@@ -9459,7 +10091,7 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
     val fieldsToCompare = listOf(
         "date", "chassis", "carModelYear", "brand", "carName", "vehicleType", "shipmentSize",
         "grade", "rank", "color", "fuel", "seat", "door", "distance", "options", "cc",
-        "shift", "steeringWheel", "wd", "driveType", "auctionNo", "auctionHouse", "stockLocation",
+        "shift", "wd", "driveType", "auctionNo", "auctionHouse", "stockLocation",
         "rixoCompany", "clientName", "country", "venueId", "price", "auctionFee", "recycleFee",
         "roadTax", "taxTotal", "totalPrice", "paymentDate", "rixoRequested", "rixoConfirmed",
         "rixoPrice", "shipmentDate", "blNo", "vesselNo", "destination", "shipmentCharges",
@@ -9680,7 +10312,6 @@ fun handleEditPurchase() {
     val shift = getComboboxValueSafe("editShift")
     val wd = getComboboxValueSafe("editWd")
     val cc = getComboboxValueSafe("editCc")
-    val steeringWheel = getComboboxValueSafe("editSteeringWheel")
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
     val venueId = getComboboxValueSafe("editVenueId")
@@ -9689,7 +10320,7 @@ fun handleEditPurchase() {
     
     // Check if at least one field is filled
     val hasAtLeastOneField = listOf(
-        chassis, brand, carName, grade, fuel, door, shift, wd, cc, steeringWheel,
+        chassis, brand, carName, grade, fuel, door, shift, wd, cc,
         auctionName, stockLocation, venueId, rixoCompany, vehicleType
     ).any { it.isNotBlank() }
     
@@ -9702,6 +10333,14 @@ fun handleEditPurchase() {
     val editDateIso = (document.getElementById("editDate") as? HTMLInputElement)?.value ?: ""
     if (editDateIso.isNotBlank() && !editDateIso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) {
         showErrorModal("Invalid Date", "Please enter a valid date in YYYY-MM-DD format.")
+        return
+    }
+    
+    // Validate Production Date year
+    val editCarModelYear = (document.getElementById("editCarModelYear") as? HTMLInputElement)?.value ?: ""
+    val (isValidYear, yearErrorMsg) = validateProductionDateYear(editCarModelYear)
+    if (!isValidYear) {
+        showErrorModal("Invalid Production Date", yearErrorMsg)
         return
     }
     
@@ -9718,7 +10357,6 @@ fun handleEditPurchase() {
         "editShift" to shift,
         "editWd" to wd,
         "editCc" to cc,
-        "editSteeringWheel" to steeringWheel,
         "editAuctionName" to auctionName,
         "editStockLocation" to stockLocation,
         "editVenueId" to venueId,
@@ -9837,7 +10475,9 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     val door = (document.getElementById("editDoor") as? HTMLInputElement)?.value ?: ""
     val distance = (document.getElementById("editDistance") as? HTMLInputElement)?.value ?: ""
     val driveType = (document.querySelector("input[name=\"editDriveType\"]:checked") as HTMLInputElement?)?.value ?: ""
-    val options = (document.getElementById("editOptions") as? HTMLInputElement)?.value ?: ""
+    val editPredefinedOpts = (document.getElementById("editOptionsPredefined") as? HTMLInputElement)?.value?.trim() ?: ""
+    val editCustomOpts = (document.getElementById("editOptions") as? HTMLInputElement)?.value?.trim() ?: ""
+    val options = listOf(editPredefinedOpts, editCustomOpts).filter { it.isNotEmpty() }.joinToString(", ")
     val ccValue = (document.getElementById("editCc") as? HTMLInputElement)?.value ?: ""
     // Backend expects Int? for cc field, so send only the numeric value
     val cc = if (ccValue.isNotEmpty()) {
@@ -9845,7 +10485,6 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
         numValue.toIntOrNull()  // Send as Integer, not string with "CC"
     } else null
     val shift = getComboboxValueSafe("editShift")
-    val steeringWheel = getComboboxValueSafe("editSteeringWheel")
     val wdValue = (document.getElementById("editWd") as? HTMLInputElement)?.value ?: ""
     val wd = if (wdValue.isNotEmpty()) {
         val numValue = wdValue.replace(Regex("[^0-9]"), "")
@@ -9869,7 +10508,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     val roadTax = if (roadTaxValue.isNotEmpty()) "¥$roadTaxValue" else ""
     val taxTotalValue = (document.getElementById("editTaxTotal") as? HTMLInputElement)?.value ?: ""
     val taxTotal = if (taxTotalValue.isNotEmpty()) "¥$taxTotalValue" else ""
-    val totalPrice = (document.getElementById("editTotalPrice") as? HTMLInputElement)?.value ?: ""
+    val totalPrice = (document.getElementById("editTotalCostAfterTax") as? HTMLInputElement)?.value ?: ""
     val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
@@ -9924,7 +10563,6 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.options = options
     purchaseData.cc = cc
     purchaseData.shift = shift
-    purchaseData.steeringWheel = steeringWheel
     purchaseData.wd = wd
     purchaseData.driveType = driveType
     purchaseData.auctionNo = auctionNo
@@ -10414,7 +11052,7 @@ fun showImportModal() {
                 return@addEventListener
             }
             
-            handleImport()
+        handleImport()
             closeModal()
         }, true)
         
@@ -11107,7 +11745,7 @@ fun restoreCarBookingState() {
         
         // Restore selected rows after a longer delay to ensure table is fully rendered
         js("setTimeout(function() { window.restoreSelectedRows(); }, 500)")
-    } else {
+            } else {
         console.log("⚠️ No displayed cars to restore")
     }
     
@@ -11438,9 +12076,9 @@ fun applyDateFilter(selectedDate: String) {
             onSuccess = { purchases ->
                 val filteredPurchases = purchases.filter { purchase ->
                     val purchaseDate = purchase.date ?: ""
-                    val isMatch = purchaseDate == formattedDate ||
-                        purchaseDate == formattedDate.split("(")[0].trim() ||
-                        normalizeDateForComparison(purchaseDate) == normalizeDateForComparison(formattedDate)
+                    val isMatch = purchaseDate == formattedDate || 
+                                 purchaseDate == formattedDate.split("(")[0].trim() ||
+                                 normalizeDateForComparison(purchaseDate) == normalizeDateForComparison(formattedDate)
                     
                     if (isMatch) {
                         Logger.debug("Date match for chassis ${purchase.chassis ?: ""} on $purchaseDate")
@@ -12004,7 +12642,7 @@ fun fetchInvoicePurchases(consignee: String, vessel: String) {
                             val day = dateDynamic.getDate() as? Int ?: 0
                             if (year > 0 && month > 0 && day > 0) {
                                 "${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}"
-                            } else {
+    } else {
                                 ""
                             }
                         } catch (e: dynamic) {
@@ -12243,7 +12881,7 @@ fun handleInvoicePdfDownload() {
             } else {
                 invoiceShippingDate
             }
-        } catch (e: dynamic) {
+            } catch (e: dynamic) {
             invoiceShippingDate
         }
     } else {
@@ -12360,7 +12998,7 @@ fun handleInvoicePdfDownload() {
                 
                 val description = if (line2.isNotEmpty()) {
                     "$line1\n$line2"
-                        } else {
+        } else {
                     line1
                 }
                 
@@ -12392,19 +13030,19 @@ fun handleInvoicePdfDownload() {
             
             val lcNumberPart = if (invoiceLcNo.isNotEmpty()) {
                 "\"" + escapeJsonString(invoiceLcNo) + "\""
+                        } else {
+                "null"
+                        }
+            val clientAddressPart = if (clientAddress != null) {
+                "\"" + escapeJsonString(clientAddress) + "\""
                     } else {
                 "null"
                     }
-            val clientAddressPart = if (clientAddress != null) {
-                "\"" + escapeJsonString(clientAddress) + "\""
-            } else {
-                "null"
-                }
             val bankAccountPart = if (bankAccountValue.isNotEmpty()) {
                 "\"" + escapeJsonString(bankAccountValue) + "\""
             } else {
                 "null"
-            }
+                }
             val messagePart = if (invoiceMessage.isNotEmpty()) {
                 "\"" + escapeJsonString(invoiceMessage) + "\""
             } else {
@@ -12467,7 +13105,7 @@ fun handleInvoicePdfDownload() {
                                 console.error("❌ Error processing blob:", error)
                                 showMessage("Error processing PDF: ${error.toString()}", "error")
                             }
-                    } else {
+        } else {
                         response.text().then { errorText ->
                             console.error("❌ Invoice PDF generation failed:", errorText)
                             showMessage("Failed to generate invoice PDF: $errorText", "error")
@@ -12619,72 +13257,78 @@ fun showRixoRequestGeneratorPage() {
     val content = document.getElementById("content") ?: return
     
     content.innerHTML = """
-        <div style="width: 100%; min-height: calc(100vh - 140px); padding: 20px; box-sizing: border-box;">
-            <div style="display: flex; gap: 20px; height: 100%;">
+        <div class="rixo-request-container">
+            <div class="rixo-request-layout">
                 <!-- Left Panel: Rixo Request Generator Form -->
-                <div style="flex: 1; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e5e7eb;">
-                    <h2 style="margin: 0 0 24px 0; color: #111827; font-size: 24px; font-weight: 600;">Rixo Request Generator</h2>
+                <div class="rixo-request-form-panel">
+                    <h2 class="rixo-request-title">Rixo Request Generator</h2>
                     
                     <form id="rixoRequestForm">
                         <!-- Buying Date -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Buying Date</label>
-                            <input type="date" id="buyingDate" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
+                        <div class="rixo-form-field">
+                            <label for="buyingDate">Buying Date</label>
+                            <input type="date" id="buyingDate" class="rixo-input">
                         </div>
                         
                         <!-- Rixo Company -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Rixo Company</label>
-                            <select id="rixoCompany" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; background: white;">
-                                <option value="">Select Rixo Company</option>
-                            </select>
+                        <div class="rixo-form-field">
+                            <label for="rixoCompany">Rixo Company</label>
+                            ${createEditableCombobox("rixoCompany", "Select Rixo Company")}
                         </div>
                         
                         <!-- Head Message -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Head Message</label>
-                            <textarea id="headMessage" rows="3" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical;">いつもお世話になっております。
+                        <div class="rixo-form-field">
+                            <label for="headMessage">Head Message</label>
+                            <textarea id="headMessage" rows="3" class="rixo-textarea rixo-textarea-head">いつもお世話になっております。
 下記の車両の陸送手配をお願いいたします。</textarea>
                         </div>
                         
                         <!-- Footer Message -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Footer Message</label>
-                            <textarea id="footerMessage" rows="3" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical;">※港や船での盗難が多発の為、スペアキーやリモコンキーが車内に
+                        <div class="rixo-form-field">
+                            <label for="footerMessage">Footer Message</label>
+                            <textarea id="footerMessage" rows="3" class="rixo-textarea rixo-textarea-footer">※港や船での盗難が多発の為、スペアキーやリモコンキーが車内に
 ありましたら弊社まで郵送していただけると助かります。</textarea>
                         </div>
                         
                         <!-- Extra Message -->
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Extra Message</label>
-                            <textarea id="extraMessage" rows="2" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical;"></textarea>
+                        <div class="rixo-form-field">
+                            <label for="extraMessage">Extra Message</label>
+                            <textarea id="extraMessage" rows="2" class="rixo-textarea rixo-textarea-extra"></textarea>
                         </div>
                         
                         <!-- Contact Details -->
-                        <div style="margin-bottom: 24px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Contact Details</label>
-                            <textarea id="contactDetails" rows="3" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px; resize: vertical;">担当：芽紋 080-3918-1478
+                        <div class="rixo-form-field">
+                            <div class="rixo-contact-header">
+                                <label for="contactDetails">Contact Details</label>
+                                <button type="button" class="rixo-contact-toggle" id="contactToggle" aria-expanded="true">
+                                    <span class="rixo-toggle-icon">▼</span>
+                                </button>
+                            </div>
+                            <div class="rixo-contact-content" id="contactContent">
+                                <textarea id="contactDetails" rows="3" class="rixo-textarea rixo-textarea-contact" readonly>担当：芽紋 080-3918-1478
 FAX: 047-711-0409
 有限会社メモン</textarea>
+                            </div>
                         </div>
                         
                         <!-- Print Button -->
-                        <button type="button" id="printRixoRequest" style="width: 100%; padding: 14px; background: linear-gradient(135deg, #8e44ad, #9b59b6); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; transition: all 0.2s;">
+                        <button type="button" id="printRixoRequest" class="rixo-print-btn">
+                            <span class="rixo-print-icon">🖨️</span>
                             Print
                         </button>
                     </form>
                 </div>
                 
                 <!-- Right Panel: Rows Preview -->
-                <div style="flex: 1; background: white; border-radius: 12px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e5e7eb;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h2 style="margin: 0; color: #111827; font-size: 24px; font-weight: 600;">Rows Preview</h2>
+                <div class="rixo-rows-preview-panel">
+                    <div class="rixo-rows-header">
+                        <h2 class="rixo-rows-title">Rows Preview</h2>
                     </div>
                     
-                    <div id="selectedCount" style="margin-bottom: 16px; color: #6b7280; font-size: 14px;">Selected: 0 of 0</div>
+                    <div id="selectedCount" class="rixo-selected-count">Selected: 0 of 0</div>
                     
-                    <div id="rixoRowsPreview" style="border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden;">
-                        <div style="text-align: center; padding: 40px; color: #9ca3af;">
+                    <div id="rixoRowsPreview" class="rixo-rows-content">
+                        <div class="rixo-empty-state">
                             Please select a buying date and Rixo company to view available rows.
                         </div>
                     </div>
@@ -12735,6 +13379,7 @@ FAX: 047-711-0409
             .rixo-table {
                 width: 100%;
                 border-collapse: collapse;
+                table-layout: auto;
             }
             
             .rixo-table th,
@@ -12742,21 +13387,84 @@ FAX: 047-711-0409
                 padding: 12px;
                 text-align: left;
                 border-bottom: 1px solid #e5e7eb;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
             
             .rixo-table th {
                 background: #f9fafb;
                 font-weight: 600;
                 color: #374151;
+                position: sticky;
+                top: 0;
+                z-index: 10;
             }
             
             .rixo-table tr:hover {
                 background: #f9fafb;
             }
             
+            /* Column width classes */
+            .rixo-col-select {
+                width: 100px;
+                min-width: 80px;
+            }
+            
+            .rixo-col-edit {
+                width: 50px;
+                min-width: 50px;
+            }
+            
+            .rixo-col-chassis {
+                width: 120px;
+                min-width: 100px;
+            }
+            
+            .rixo-col-auction {
+                width: 100px;
+                min-width: 80px;
+            }
+            
+            .rixo-col-year {
+                width: 100px;
+                min-width: 80px;
+            }
+            
+            .rixo-col-car {
+                width: 150px;
+                min-width: 120px;
+            }
+            
+            .rixo-col-supplier {
+                width: 120px;
+                min-width: 100px;
+            }
+            
+            .rixo-col-stock {
+                width: 80px;
+                min-width: 60px;
+            }
+            
+            .rixo-col-venue {
+                width: 100px;
+                min-width: 80px;
+            }
+            
+            .rixo-col-numbercut {
+                width: 120px;
+                min-width: 100px;
+            }
+            
+            .rixo-select-all-text {
+                margin-left: 8px;
+                font-weight: 600;
+                white-space: nowrap;
+            }
+            
             .rixo-edit-btn {
-                width: 28px;
-                height: 28px;
+                width: 32px;
+                height: 32px;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
@@ -12765,10 +13473,87 @@ FAX: 047-711-0409
                 border-radius: 50%;
                 cursor: pointer;
                 box-shadow: 0 2px 6px rgba(76,201,255,0.30);
+                flex-shrink: 0;
             }
             
             .rixo-edit-btn:hover {
                 background-color: #3bb5e6;
+            }
+            
+            .rixo-edit-btn svg {
+                width: 14px;
+                height: 14px;
+            }
+            
+            /* Responsive table for mobile */
+            @media (max-width: 767px) {
+                .rixo-table {
+                    font-size: 12px;
+                    display: block;
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                }
+                
+                .rixo-table thead,
+                .rixo-table tbody,
+                .rixo-table tr {
+                    display: block;
+                }
+                
+                .rixo-table thead {
+                    display: none;
+                }
+                
+                .rixo-table tr {
+                    border: 1px solid #e5e7eb;
+                    border-radius: 8px;
+                    margin-bottom: 12px;
+                    padding: 12px;
+                    background: white;
+                }
+                
+                .rixo-table td {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 8px 0;
+                    border: none;
+                    border-bottom: 1px solid #f3f4f6;
+                }
+                
+                .rixo-table td:last-child {
+                    border-bottom: none;
+                }
+                
+                .rixo-table td::before {
+                    content: attr(data-label);
+                    font-weight: 600;
+                    color: #6b7280;
+                    margin-right: 12px;
+                    flex-shrink: 0;
+                }
+                
+                .rixo-col-select,
+                .rixo-col-edit {
+                    display: inline-flex;
+                    width: auto;
+                }
+                
+                .rixo-edit-btn {
+                    width: 32px;
+                    height: 32px;
+                    min-width: 32px;
+                    min-height: 32px;
+                }
+                
+                .rixo-edit-btn svg {
+                    width: 12px;
+                    height: 12px;
+                }
+                
+                .rixo-select-all-text {
+                    display: none;
+                }
             }
         </style>
     """
@@ -12789,14 +13574,38 @@ fun setupRixoRequestGeneratorListeners() {
         loadRowsForDateAndCompany()
     })
     
-    // Rixo Company change - load rows
-    document.getElementById("rixoCompany")?.addEventListener("change", { _: Event ->
+    // Rixo Company change - load rows (combobox structure)
+    val rixoCompanyInput = document.getElementById("rixoCompanyInput")
+    val rixoCompanySelect = document.getElementById("rixoCompany") as HTMLSelectElement?
+    
+    // Listen to select change event (dispatched when option is clicked from dropdown)
+    rixoCompanySelect?.addEventListener("change", { _: Event ->
+        js("window.syncComboboxInput('rixoCompany')")
+        loadRowsForDateAndCompany()
+    })
+    // Also listen to input change event (dispatched by syncComboboxInput)
+    rixoCompanyInput?.addEventListener("change", { _: Event ->
         loadRowsForDateAndCompany()
     })
     
     // Print button
     document.getElementById("printRixoRequest")?.addEventListener("click", { _: Event ->
         generateRixoRequestPdf()
+    })
+    
+    // Contact Details Toggle (Mobile only)
+    val contactToggle = document.getElementById("contactToggle")
+    val contactContent = document.getElementById("contactContent")
+    
+    contactToggle?.addEventListener("click", { _: Event ->
+        val isExpanded = contactToggle.getAttribute("aria-expanded") == "true"
+        if (isExpanded) {
+            contactToggle.setAttribute("aria-expanded", "false")
+            contactContent?.classList?.add("collapsed")
+        } else {
+            contactToggle.setAttribute("aria-expanded", "true")
+            contactContent?.classList?.remove("collapsed")
+        }
     })
 }
 
@@ -12829,15 +13638,16 @@ fun loadRixoCompaniesForDate() {
                 
                 console.log("Found rixoCompanies:", rixoCompanies)
                 
-                // Update dropdown
+                // Update combobox dropdown (like chassis dropdown)
                 val select = document.getElementById("rixoCompany") as HTMLSelectElement
-                select.innerHTML = "<option value=\"\">Select Rixo Company</option>"
+                if (select != null) {
+                    // Clear existing options except the first empty one
+                    select.innerHTML = "<option value=\"\">▼</option>"
                 
                 rixoCompanies.sorted().forEach { company ->
-                    val option = document.createElement("option")
-                    option.setAttribute("value", company)
-                    option.textContent = company
-                    select.appendChild(option)
+                        val option = js("new Option(company, company)")
+                        select.add(option)
+                    }
                 }
             }
         }
@@ -12847,7 +13657,7 @@ fun loadRixoCompaniesForDate() {
 // Load rows for the selected date and company
 fun loadRowsForDateAndCompany() {
     val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
-    val rixoCompany = (document.getElementById("rixoCompany") as HTMLSelectElement).value
+    val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
     
     if (buyingDate.isEmpty() || rixoCompany.isEmpty()) {
         document.getElementById("rixoRowsPreview")?.innerHTML = """
@@ -12905,21 +13715,21 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
         <table class="rixo-table">
             <thead>
                 <tr>
-                    <th style="width: 60px;">
+                    <th class="rixo-col-select">
                         <label class="rixo-checkwrap">
                             <input type="checkbox" id="selectAllRixo" class="rixo-check">
-                            <span style="margin-left: 8px; font-weight: 600;">Select All</span>
+                            <span class="rixo-select-all-text">Select All</span>
                         </label>
                     </th>
-                    <th style="width: 50px;"></th>
-                    <th>Chassis</th>
-                    <th>Auction No</th>
-                    <th>Year</th>
-                    <th>Car</th>
-                    <th>Supplier Name</th>
-                    <th>Stock</th>
-                    <th>Venue ID</th>
-                    <th>Number Cut</th>
+                    <th class="rixo-col-edit"></th>
+                    <th class="rixo-col-chassis">Chassis</th>
+                    <th class="rixo-col-auction">Auction No</th>
+                    <th class="rixo-col-year">Year</th>
+                    <th class="rixo-col-car">Car</th>
+                    <th class="rixo-col-supplier">Supplier</th>
+                    <th class="rixo-col-stock">Stock</th>
+                    <th class="rixo-col-venue">Venue ID</th>
+                    <th class="rixo-col-numbercut">Number Cut</th>
                 </tr>
             </thead>
             <tbody>
@@ -12939,12 +13749,12 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
         
         tableHTML.append("""
             <tr>
-                <td>
+                <td class="rixo-col-select" data-label="">
                     <label class="rixo-checkwrap">
                         <input type="checkbox" class="rixo-check rixo-row-check" data-id="$id" checked>
                     </label>
                 </td>
-                <td>
+                <td class="rixo-col-edit" data-label="">
                     <button class="rixo-edit-btn" data-id="$id" title="Edit">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
@@ -12952,14 +13762,14 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
                         </svg>
                     </button>
                 </td>
-                <td>$chassis</td>
-                <td>$auctionNo</td>
-                <td>$year</td>
-                <td>$carName</td>
-                <td>$auctionHouse</td>
-                <td>$stockLocation</td>
-                <td>$venueId</td>
-                <td>$numberCut</td>
+                <td class="rixo-col-chassis" data-label="Chassis:">$chassis</td>
+                <td class="rixo-col-auction" data-label="Auction No:">$auctionNo</td>
+                <td class="rixo-col-year" data-label="Year:">$year</td>
+                <td class="rixo-col-car" data-label="Car:">$carName</td>
+                <td class="rixo-col-supplier" data-label="Supplier:">$auctionHouse</td>
+                <td class="rixo-col-stock" data-label="Stock:">$stockLocation</td>
+                <td class="rixo-col-venue" data-label="Venue ID:">$venueId</td>
+                <td class="rixo-col-numbercut" data-label="Number Cut:">$numberCut</td>
             </tr>
         """)
     }
@@ -13043,6 +13853,18 @@ fun updateSelectAllRixoCheckbox() {
     }
 }
 
+// Helper function to create Place Name combobox with options (Rixo modal)
+fun createRixoNumberCutPlaceCombobox(purchaseData: dynamic): String {
+    val currentPlace = getInitialPlaceFromNumberCut(purchaseData.numberCut)
+    return createEditableComboboxWithOptions("rixoEditNumberCutPlace", "Select Place", getNumberCutPlaceOptions(), currentPlace)
+}
+
+// Helper function to create Hiragana Character combobox with options (Rixo modal)
+fun createRixoNumberCutHiraganaCombobox(purchaseData: dynamic): String {
+    val currentHiragana = getInitialHiraganaFromNumberCut(purchaseData.numberCut)
+    return createEditableComboboxWithOptions("rixoEditNumberCutHiragana", "Select Character", getNumberCutHiraganaOptions(), currentHiragana)
+}
+
 // Show edit modal for a Rixo row
 fun showRixoEditModal(purchaseId: Long) {
     // Fetch the purchase data first
@@ -13059,14 +13881,14 @@ fun showRixoEditModal(purchaseId: Long) {
 
 fun createRixoEditModal(purchaseData: dynamic) {
     val modalHTML = """
-        <div id="rixoEditModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;">
-            <div style="background: white; border-radius: 12px; padding: 24px; max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
-                    <h2 style="margin: 0; color: #111827; font-size: 24px; font-weight: 600;">Edit Purchase</h2>
-                    <button id="closeRixoModal" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280;">&times;</button>
+        <div id="rixoEditModal" class="rixo-edit-modal-overlay">
+            <div class="rixo-edit-modal-content">
+                <div class="rixo-edit-modal-header">
+                    <h2 class="rixo-edit-modal-title">Edit</h2>
+                    <button id="closeRixoModal" class="rixo-edit-modal-close">&times;</button>
                 </div>
                 
-                <form id="rixoEditForm">
+                <form id="rixoEditForm" class="rixo-edit-form">
                     <input type="hidden" id="rixoEditId" value="${purchaseData.id}">
                     
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
@@ -13125,148 +13947,35 @@ fun createRixoEditModal(purchaseData: dynamic) {
                     </div>
 
                     <!-- Number Cut Information Section (initially hidden) -->
-                    <div id="rixoEditNumberCutSection" style="display: none;">
+                    <div id="rixoEditNumberCutSection" class="rixo-number-cut-section" style="display: none;">
                         <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Number Cut Information</h3>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; align-items: end;">
-                            <div>
-                                <label>Place Name (Japanese)</label>
-                                <select id="rixoEditNumberCutPlace" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                                    <option value="">Select Place</option>
-                                    <option value="札幌">札幌 (Sapporo)</option>
-                                    <option value="函館">函館 (Hakodate)</option>
-                                    <option value="旭川">旭川 (Asahikawa)</option>
-                                    <option value="室蘭">室蘭 (Muroran)</option>
-                                    <option value="釧路">釧路 (Kushiro)</option>
-                                    <option value="帯広">帯広 (Obihiro)</option>
-                                    <option value="十勝">十勝 (Tokachi)</option>
-                                    <option value="北見">北見 (Kitami)</option>
-                                    <option value="知床">知床 (Shiretoko)</option>
-                                    <option value="苫小牧">苫小牧 (Tomakomai)</option>
-                                    <option value="青森">青森 (Aomori)</option>
-                                    <option value="弘前">弘前 (Hirosaki)</option>
-                                    <option value="岩手">岩手 (Iwate)</option>
-                                    <option value="盛岡">盛岡 (Morioka)</option>
-                                    <option value="平泉">平泉 (Hiraizumi)</option>
-                                    <option value="宮城">宮城 (Miyagi)</option>
-                                    <option value="仙台">仙台 (Sendai)</option>
-                                    <option value="八戸">八戸 (Hachinohe)</option>
-                                    <option value="秋田">秋田 (Akita)</option>
-                                    <option value="山形">山形 (Yamagata)</option>
-                                    <option value="福島">福島 (Fukushima)</option>
-                                    <option value="茨城">茨城 (Ibaraki)</option>
-                                    <option value="栃木">栃木 (Tochigi)</option>
-                                    <option value="群馬">群馬 (Gunma)</option>
-                                    <option value="埼玉">埼玉 (Saitama)</option>
-                                    <option value="千葉">千葉 (Chiba)</option>
-                                    <option value="東京">東京 (Tokyo)</option>
-                                    <option value="神奈川">神奈川 (Kanagawa)</option>
-                                    <option value="新潟">新潟 (Niigata)</option>
-                                    <option value="富山">富山 (Toyama)</option>
-                                    <option value="石川">石川 (Ishikawa)</option>
-                                    <option value="福井">福井 (Fukui)</option>
-                                    <option value="山梨">山梨 (Yamanashi)</option>
-                                    <option value="長野">長野 (Nagano)</option>
-                                    <option value="岐阜">岐阜 (Gifu)</option>
-                                    <option value="静岡">静岡 (Shizuoka)</option>
-                                    <option value="愛知">愛知 (Aichi)</option>
-                                    <option value="三重">三重 (Mie)</option>
-                                    <option value="滋賀">滋賀 (Shiga)</option>
-                                    <option value="京都">京都 (Kyoto)</option>
-                                    <option value="大阪">大阪 (Osaka)</option>
-                                    <option value="兵庫">兵庫 (Hyogo)</option>
-                                    <option value="奈良">奈良 (Nara)</option>
-                                    <option value="和歌山">和歌山 (Wakayama)</option>
-                                    <option value="鳥取">鳥取 (Tottori)</option>
-                                    <option value="島根">島根 (Shimane)</option>
-                                    <option value="岡山">岡山 (Okayama)</option>
-                                    <option value="広島">広島 (Hiroshima)</option>
-                                    <option value="山口">山口 (Yamaguchi)</option>
-                                    <option value="徳島">徳島 (Tokushima)</option>
-                                    <option value="香川">香川 (Kagawa)</option>
-                                    <option value="愛媛">愛媛 (Ehime)</option>
-                                    <option value="高知">高知 (Kochi)</option>
-                                    <option value="福岡">福岡 (Fukuoka)</option>
-                                    <option value="佐賀">佐賀 (Saga)</option>
-                                    <option value="長崎">長崎 (Nagasaki)</option>
-                                    <option value="熊本">熊本 (Kumamoto)</option>
-                                    <option value="大分">大分 (Oita)</option>
-                                    <option value="宮崎">宮崎 (Miyazaki)</option>
-                                    <option value="鹿児島">鹿児島 (Kagoshima)</option>
-                                    <option value="沖縄">沖縄 (Okinawa)</option>
-                                </select>
+                        <div class="rixo-number-cut-grid">
+                            <div class="rixo-number-cut-field">
+                                <label class="rixo-number-cut-label">Place Name (Japanese)</label>
+                                ${createRixoNumberCutPlaceCombobox(purchaseData)}
                             </div>
-                            <div>
-                                <label>Number (English)</label>
-                                <input type="number" id="rixoEditNumberCutNumber1" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <div class="rixo-number-cut-field">
+                                <label class="rixo-number-cut-label">Number (English)</label>
+                                <input type="number" id="rixoEditNumberCutNumber1" class="rixo-number-cut-input" placeholder="Enter number">
                             </div>
-                            <div>
-                                <label>Hiragana Character</label>
-                                <select id="rixoEditNumberCutHiragana" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                                    <option value="">Select Character</option>
-                                    <option value="あ">あ (a)</option>
-                                    <option value="い">い (i)</option>
-                                    <option value="う">う (u)</option>
-                                    <option value="え">え (e)</option>
-                                    <option value="お">お (o)</option>
-                                    <option value="か">か (ka)</option>
-                                    <option value="き">き (ki)</option>
-                                    <option value="く">く (ku)</option>
-                                    <option value="け">け (ke)</option>
-                                    <option value="こ">こ (ko)</option>
-                                    <option value="さ">さ (sa)</option>
-                                    <option value="し">し (shi)</option>
-                                    <option value="す">す (su)</option>
-                                    <option value="せ">せ (se)</option>
-                                    <option value="そ">そ (so)</option>
-                                    <option value="た">た (ta)</option>
-                                    <option value="ち">ち (chi)</option>
-                                    <option value="つ">つ (tsu)</option>
-                                    <option value="て">て (te)</option>
-                                    <option value="と">と (to)</option>
-                                    <option value="な">な (na)</option>
-                                    <option value="に">に (ni)</option>
-                                    <option value="ぬ">ぬ (nu)</option>
-                                    <option value="ね">ね (ne)</option>
-                                    <option value="の">の (no)</option>
-                                    <option value="は">は (ha)</option>
-                                    <option value="ひ">ひ (hi)</option>
-                                    <option value="ふ">ふ (fu)</option>
-                                    <option value="へ">へ (he)</option>
-                                    <option value="ほ">ほ (ho)</option>
-                                    <option value="ま">ま (ma)</option>
-                                    <option value="み">み (mi)</option>
-                                    <option value="む">む (mu)</option>
-                                    <option value="め">め (me)</option>
-                                    <option value="も">も (mo)</option>
-                                    <option value="や">や (ya)</option>
-                                    <option value="ゆ">ゆ (yu)</option>
-                                    <option value="よ">よ (yo)</option>
-                                    <option value="ら">ら (ra)</option>
-                                    <option value="り">り (ri)</option>
-                                    <option value="る">る (ru)</option>
-                                    <option value="れ">れ (re)</option>
-                                    <option value="ろ">ろ (ro)</option>
-                                    <option value="わ">わ (wa)</option>
-                                    <option value="ゐ">ゐ (wi)</option>
-                                    <option value="ゑ">ゑ (we)</option>
-                                    <option value="を">を (wo)</option>
-                                    <option value="ん">ん (n)</option>
-                                </select>
+                            <div class="rixo-number-cut-field">
+                                <label class="rixo-number-cut-label">Hiragana Character</label>
+                                ${createRixoNumberCutHiraganaCombobox(purchaseData)}
                             </div>
-                            <div>
-                                <label>Number (English)</label>
-                                <input type="number" id="rixoEditNumberCutNumber2" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <div class="rixo-number-cut-field">
+                                <label class="rixo-number-cut-label">Number (English)</label>
+                                <input type="number" id="rixoEditNumberCutNumber2" class="rixo-number-cut-input" placeholder="Enter number">
                             </div>
                         </div>
-                        <div style="margin-bottom: 20px;">
-                            <label>Generated Number Cut String:</label>
-                            <input type="text" id="rixoEditNumberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
+                        <div class="rixo-number-cut-generated" style="margin-bottom: 20px;">
+                            <label class="rixo-number-cut-label">Generated Number Cut String:</label>
+                            <input type="text" id="rixoEditNumberCutString" class="rixo-number-cut-input" readonly placeholder="Will be generated automatically">
                         </div>
                     </div>
                     
-                    <div style="display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px;">
-                        <button type="button" id="rixoEditCancel" style="padding: 12px 24px; background: #6b7280; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">Cancel</button>
-                        <button type="submit" id="rixoEditSave" style="padding: 12px 24px; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">Save Changes</button>
+                    <div class="rixo-edit-modal-actions">
+                        <button type="button" id="rixoEditCancel" class="rixo-modal-btn rixo-modal-btn-cancel">Cancel</button>
+                        <button type="submit" id="rixoEditSave" class="rixo-modal-btn rixo-modal-btn-save">Save Changes</button>
                     </div>
                 </form>
             </div>
@@ -13276,6 +13985,10 @@ fun createRixoEditModal(purchaseData: dynamic) {
     // Remove any existing modal
     document.getElementById("rixoEditModal")?.remove()
     
+    // Hide hamburger menu when modal is open
+    val hamburgerContainer = document.getElementById("hamburgerBtnContainer") as? HTMLElement
+    hamburgerContainer?.style?.setProperty("display", "none")
+    
     // Add the modal to the page
     document.body?.insertAdjacentHTML("beforeend", modalHTML)
     
@@ -13284,20 +13997,32 @@ fun createRixoEditModal(purchaseData: dynamic) {
 }
 
 fun setupRixoEditModalListeners(purchaseData: dynamic) {
+    // Function to show hamburger menu
+    fun showHamburgerMenu() {
+        val hamburgerContainer = document.getElementById("hamburgerBtnContainer") as? HTMLElement
+        hamburgerContainer?.style?.setProperty("display", "block")
+    }
+    
+    // Function to close modal and restore hamburger menu
+    fun closeModal() {
+        document.getElementById("rixoEditModal")?.remove()
+        showHamburgerMenu()
+    }
+    
     // Close modal functionality
     document.getElementById("closeRixoModal")?.addEventListener("click", { _: Event ->
-        document.getElementById("rixoEditModal")?.remove()
+        closeModal()
     })
     
     document.getElementById("rixoEditCancel")?.addEventListener("click", { _: Event ->
-        document.getElementById("rixoEditModal")?.remove()
+        closeModal()
     })
     
     // Close modal when clicking outside
     document.getElementById("rixoEditModal")?.addEventListener("click", { event: Event ->
         val target = event.target as HTMLElement?
         if (target?.id == "rixoEditModal") {
-            document.getElementById("rixoEditModal")?.remove()
+            closeModal()
         }
     })
     
@@ -13335,17 +14060,20 @@ fun setupRixoEditModalListeners(purchaseData: dynamic) {
 }
 
 fun setupRixoModalNumberCutListeners() {
-    // Add listeners for number cut generation (similar to the main form)
+    // Add listeners for number cut generation (using combobox structure like chassis dropdown)
+    val placeInput = document.getElementById("rixoEditNumberCutPlaceInput") as HTMLInputElement?
     val placeSelect = document.getElementById("rixoEditNumberCutPlace") as HTMLSelectElement?
     val number1Input = document.getElementById("rixoEditNumberCutNumber1") as HTMLInputElement?
+    val hiraganaInput = document.getElementById("rixoEditNumberCutHiraganaInput") as HTMLInputElement?
     val hiraganaSelect = document.getElementById("rixoEditNumberCutHiragana") as HTMLSelectElement?
     val number2Input = document.getElementById("rixoEditNumberCutNumber2") as HTMLInputElement?
     val resultInput = document.getElementById("rixoEditNumberCutString") as HTMLInputElement?
     
     fun updateNumberCutString() {
-        val place = placeSelect?.value ?: ""
+        // Get values from combobox inputs (like chassis dropdown)
+        val place = js("window.getComboboxValue('rixoEditNumberCutPlace')") as? String ?: ""
         val number1 = number1Input?.value ?: ""
-        val hiragana = hiraganaSelect?.value ?: ""
+        val hiragana = js("window.getComboboxValue('rixoEditNumberCutHiragana')") as? String ?: ""
         val number2 = number2Input?.value ?: ""
         
         if (place.isNotEmpty() && number1.isNotEmpty() && hiragana.isNotEmpty() && number2.isNotEmpty()) {
@@ -13356,9 +14084,18 @@ fun setupRixoModalNumberCutListeners() {
         }
     }
     
-    placeSelect?.addEventListener("change", { _: Event -> updateNumberCutString() })
+    // Listen to both input and select changes (combobox structure)
+    placeInput?.addEventListener("input", { _: Event -> updateNumberCutString() })
+    placeSelect?.addEventListener("change", { _: Event -> 
+        js("window.syncComboboxInput('rixoEditNumberCutPlace')")
+        updateNumberCutString() 
+    })
     number1Input?.addEventListener("input", { _: Event -> updateNumberCutString() })
-    hiraganaSelect?.addEventListener("change", { _: Event -> updateNumberCutString() })
+    hiraganaInput?.addEventListener("input", { _: Event -> updateNumberCutString() })
+    hiraganaSelect?.addEventListener("change", { _: Event -> 
+        js("window.syncComboboxInput('rixoEditNumberCutHiragana')")
+        updateNumberCutString() 
+    })
     number2Input?.addEventListener("input", { _: Event -> updateNumberCutString() })
 }
 
@@ -13374,6 +14111,10 @@ fun handleRixoEditSubmit() {
     val numberCut = (document.getElementById("rixoEditNumberCut") as HTMLInputElement).value
     val shaken = (document.getElementById("rixoEditShakenCheckbox") as HTMLInputElement).checked
     val numberCutString = (document.getElementById("rixoEditNumberCutString") as HTMLInputElement).value
+    
+    // Get values from combobox inputs (like chassis dropdown)
+    val placeValue = js("window.getComboboxValue('rixoEditNumberCutPlace')") as? String ?: ""
+    val hiraganaValue = js("window.getComboboxValue('rixoEditNumberCutHiragana')") as? String ?: ""
     
     val updateData = js("{}")
     updateData.auctionNo = auctionNo
@@ -13399,26 +14140,42 @@ fun handleRixoEditSubmit() {
             if (response.ok) {
                 showMessage("Purchase updated successfully", "success")
                 document.getElementById("rixoEditModal")?.remove()
+                // Restore hamburger menu after closing modal
+                val hamburgerContainer = document.getElementById("hamburgerBtnContainer") as? HTMLElement
+                hamburgerContainer?.style?.setProperty("display", "block")
                 // Refresh the rows preview
                 val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
-                val rixoCompany = (document.getElementById("rixoCompany") as HTMLSelectElement).value
+                val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
                 if (buyingDate.isNotEmpty() && rixoCompany.isNotEmpty()) {
                     loadRowsForDateAndCompany()
-                }
+                } else Unit
             } else {
-                showMessage("Error updating purchase", "error")
+                // Try to read error message from response
+                response.text().then { errorText ->
+                    val errorMessage = try {
+                        val errorJson = JSON.parse(errorText) as? dynamic
+                        errorJson?.message?.toString() ?: errorJson?.error?.toString() ?: errorText.takeIf { it.isNotEmpty() } ?: "Error updating purchase"
+                    } catch (e: Exception) {
+                        errorText.takeIf { it.isNotEmpty() } ?: "Error updating purchase (Status: ${response.status})"
+                    }
+                    console.error("Error updating purchase:", errorMessage)
+                    showMessage("Error updating purchase: $errorMessage", "error")
+                }.catch { _ ->
+                    showMessage("Error updating purchase (Status: ${response.status})", "error")
+                }
             }
         }
         .catch { error ->
             console.error("Error updating purchase:", error)
-            showMessage("Error updating purchase", "error")
+            val errorMessage = error.toString().takeIf { it.isNotEmpty() } ?: "Network error or server unavailable"
+            showMessage("Error updating purchase: $errorMessage", "error")
         }
 }
 
 // Generate Rixo Request PDF
 fun generateRixoRequestPdf() {
     val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
-    val rixoCompany = (document.getElementById("rixoCompany") as HTMLSelectElement).value
+    val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
     val headMessage = (document.getElementById("headMessage") as HTMLTextAreaElement).value
     val footerMessage = (document.getElementById("footerMessage") as HTMLTextAreaElement).value
     val extraMessage = (document.getElementById("extraMessage") as HTMLTextAreaElement).value
@@ -13514,14 +14271,14 @@ fun generateRixoRequestPdfViaBackend(purchases: List<dynamic>, buyingDate: Strin
                         // Revoke URL after download completes
                         window.setTimeout({
                             try {
-                                js("URL.revokeObjectURL(url)")
+                js("URL.revokeObjectURL(url)")
                             } catch (e: dynamic) {
                                 Logger.warn("Failed to revoke URL: ${e.toString()}")
                             }
                         }, AppConstants.URL_REVOKE_DELAY_SHORT)
                 
-                // Update rixoRequested status
-                updateRixoRequestedStatus(selectedIds)
+                // Client sets Rixo Requested manually (e.g. after faxing PDF to Rixo company)
+                showMessage("PDF downloaded successfully. Set Rixo Requested to TRUE manually when you have faxed the PDF.", "success")
             }.catch { error ->
                 console.error("❌ Error processing blob:", error)
                 showMessage("Error processing PDF: ${error.toString()}", "error")
@@ -13685,37 +14442,22 @@ fun generateRixoRequestPdfDocument(purchases: List<dynamic>, buyingDate: String,
     printWindow?.document?.write(htmlContent)
     printWindow?.document?.close()
     
-    // Flag to ensure update only happens once
-    var updateCalled = false
-    
-    fun updateStatusOnce() {
-        if (!updateCalled) {
-            updateCalled = true
-            console.log("🔧 [DEBUG] updateStatusOnce called with IDs:", selectedIds)
-            console.log("🔧 [DEBUG] selectedIds size:", selectedIds.size)
-            updateRixoRequestedStatus(selectedIds)
-        } else {
-            console.log("🔧 [DEBUG] updateStatusOnce already called, skipping")
-        }
-    }
-    
-    // Wait for content to load, then print
+    // Wait for content to load, then print. Rixo Requested is NOT set automatically; client sets it manually after faxing.
     printWindow?.onload = {
         printWindow?.print()
         
         // Use setTimeout to ensure the print dialog has time to appear
         window.setTimeout({
             printWindow?.close()
-            updateStatusOnce()
         }, 1000) // 1 second delay
     }
     
-    // Fallback: if onload doesn't fire, update after a delay anyway
+    // Fallback: if onload doesn't fire, close the print window after 3s (do not update rixoRequested)
     window.setTimeout({
-        updateStatusOnce()
-    }, 3000) // 3 second fallback
+        printWindow?.close()
+    }, 3000)
     
-    showMessage("PDF generated successfully for ${purchases.size} vehicles", "success")
+    showMessage("PDF generated successfully for ${purchases.size} vehicles. Set Rixo Requested to TRUE manually after faxing.", "success")
 }
 
 // Generate table rows for the PDF
@@ -13748,7 +14490,8 @@ fun generateTableRows(purchases: List<dynamic>, formattedDate: String): String {
     return rows.toString()
 }
 
-// Update rixoRequested status to TRUE for selected purchases
+// Update rixoRequested status to TRUE for selected purchases.
+// Only call this when the user explicitly marks requests as sent (e.g. after faxing). Do NOT call from PDF generation.
 fun updateRixoRequestedStatus(selectedIds: List<Long>) {
     console.log("🔧 [DEBUG] updateRixoRequestedStatus called with IDs:", selectedIds)
     
@@ -14251,17 +14994,17 @@ fun updatePurchasesForRixoTransport(updates: List<dynamic>, selectedIds: List<Lo
         
         if (successCount == totalCount) {
             Logger.log("✅ All updates completed successfully, proceeding to PDF generation")
-            showMessage("Missing data saved successfully!", "success")
+                showMessage("Missing data saved successfully!", "success")
         } else {
             Logger.warn("⚠️ Some updates failed ($successCount/$totalCount succeeded), but proceeding to PDF generation")
             showMessage("Some updates failed, but proceeding to PDF generation", "warning")
         }
-        
-        // Wait a moment for database to commit, then generate PDF
-        window.setTimeout({
-            generateRixoTransportPdf(selectedIds)
+                
+                // Wait a moment for database to commit, then generate PDF
+                window.setTimeout({
+                    generateRixoTransportPdf(selectedIds)
         }, AppConstants.URL_REVOKE_DELAY_SHORT)
-    }.catch { error ->
+        }.catch { error ->
         Logger.error("❌ Fatal error in updatePurchasesForRixoTransport: ${error.toString()}")
         showMessage("Error saving updates. Please try again.", "error")
     }
@@ -14355,7 +15098,7 @@ fun showRixoTransportPdfGenerationSuccessModal(blob: dynamic) {
                     <span style="color: white; font-size: 24px; font-weight: bold;">✓</span>
                 </div>
                 <h2 style="margin: 0; color: #333;">Rixo Transport PDF Generated!</h2>
-                <p style="margin: 10px 0 0; color: #666;">Your land transportation report has been generated. What would you like to do next?</p>
+                <p style="margin: 10px 0 0; color: #666;">Your land transportation report has been generated. Rixo Requested is not changed automatically; set it manually after faxing if needed.</p>
             </div>
             
             <div style="display: flex; gap: 15px; justify-content: center; margin-top: 25px;">
@@ -14543,17 +15286,17 @@ fun updatePurchasesAndThenGenerate(updates: List<dynamic>, selectedIds: List<Lon
         
         if (successCount == totalCount) {
             Logger.log("✅ All updates completed successfully, proceeding to PDF generation")
-            showMessage("Missing data saved successfully!", "success")
+                showMessage("Missing data saved successfully!", "success")
         } else {
             Logger.warn("⚠️ Some updates failed ($successCount/$totalCount succeeded), but proceeding to PDF generation")
             showMessage("Some updates failed, but proceeding to PDF generation", "warning")
         }
-        
-        // Wait a moment for database to commit, then generate PDF
-        window.setTimeout({
-            collectInvoiceDataAndGeneratePdf(selectedIds)
+                
+                // Wait a moment for database to commit, then generate PDF
+                window.setTimeout({
+                    collectInvoiceDataAndGeneratePdf(selectedIds)
         }, AppConstants.URL_REVOKE_DELAY_SHORT)
-    }.catch { error ->
+        }.catch { error ->
         Logger.error("❌ Fatal error in updatePurchasesAndThenGenerate: ${error.toString()}")
         showMessage("Error saving updates. Please try again.", "error")
     }
@@ -14706,7 +15449,7 @@ fun showPdfGenerationSuccessModal(blob: dynamic) {
                     <span style="color: white; font-size: 24px; font-weight: bold;">✓</span>
                 </div>
                 <h2 style="margin: 0; color: #333;">PDF Generated Successfully!</h2>
-                <p style="margin: 10px 0 0; color: #666;">Your Rixo purchase report has been generated. What would you like to do next?</p>
+                <p style="margin: 10px 0 0; color: #666;">Your Rixo purchase report has been generated. Rixo Requested is not changed automatically; set it manually after faxing if needed.</p>
             </div>
             
             <div style="display: flex; gap: 15px; justify-content: center; margin-top: 25px;">
@@ -14944,145 +15687,157 @@ fun showErrorModal(title: String, message: String) {
 fun openSidebar() {
     val sidebar = document.getElementById("sidebar") as HTMLElement?
     val overlay = document.getElementById("sidebarOverlay") as HTMLElement?
+    val isMobile = window.innerWidth <= 767
     
-    sidebar?.style?.left = "0px"
-    overlay?.style?.display = "block"
+    sidebar?.style?.setProperty("left", "0px")
+    sidebar?.classList?.add("sidebar-open")
+    if (isMobile) {
+        sidebar?.style?.setProperty("transform", "translateX(0)")
+        sidebar?.style?.setProperty("z-index", "10001")
+    } else {
+        sidebar?.style?.setProperty("transform", "")
+        sidebar?.style?.setProperty("z-index", "")
+    }
+    overlay?.style?.setProperty("display", "block")
 }
 
 // closeSidebar moved to AuthSetup.kt
 
-// Role Request Functions
-fun loadRoleRequests() {
-    window.fetch(apiUrl("role-requests/pending"))
-        .then { response ->
-            if (response.ok) {
-                response.json().then { data ->
-                    val requests = data.asDynamic().data
-                    displayRoleRequests(requests)
-                }
-            } else {
-                showMessage("Failed to load role requests", "error")
-            }
-        }
-        .catch { error ->
-            showMessage("Failed to load role requests: $error", "error")
-        }
-}
-
-fun reviewRoleRequest(requestId: Long, status: String) {
-    val currentUserId = safeLocalStorageGet("authUserId")?.toLongOrNull()
-    if (currentUserId == null) {
-        showMessage("User not authenticated", "error")
+// Pending Signups (admin approval) Functions
+fun loadPendingSignups() {
+    console.log("🔵 [PENDING] loadPendingSignups() called")
+    val table = document.getElementById("pendingSignupsTable")
+    if (table == null) {
+        console.log("🔴 [PENDING] pendingSignupsTable element NOT found!")
         return
     }
+    console.log("🟢 [PENDING] pendingSignupsTable element found, fetching data...")
+    val url = apiUrl("auth/pending-signups")
+    console.log("🔵 [PENDING] API URL: $url")
     
-    val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({status:status, reviewComment:'Reviewed by admin'})})")
-    
-    window.fetch(apiUrl("role-requests/$requestId/review/$currentUserId"), body)
+    window.fetch(url)
         .then { response ->
+            console.log("🔵 [PENDING] Response status: ${response.status}")
             if (response.ok) {
                 response.json().then { data ->
-                    showMessage("Role request $status successfully", "success")
-                    loadRoleRequests()
-                    loadUsers() // Refresh users to show updated roles
+                    console.log("🟢 [PENDING] Data received:", data)
+                    val list = data.asDynamic().data as? Array<dynamic>
+                    console.log("🔵 [PENDING] List parsed, count: ${list?.size ?: 0}")
+                    displayPendingSignups(list ?: emptyArray())
                 }
             } else {
-                response.json().then { errorData ->
-                    showMessage("Failed to review request: ${errorData.asDynamic().message}", "error")
-                }
+                console.log("🔴 [PENDING] Response not OK")
+                (table as HTMLElement).innerHTML = """<div style="text-align: center; color: #dc3545; padding: 20px;">Failed to load pending signups.</div>"""
             }
         }
-        .catch { error ->
-            showMessage("Failed to review request: $error", "error")
+        .catch { err ->
+            console.log("🔴 [PENDING] Fetch error:", err)
+            (table as HTMLElement).innerHTML = """<div style="text-align: center; color: #dc3545; padding: 20px;">Failed to load pending signups.</div>"""
         }
 }
 
-fun displayRoleRequests(requests: dynamic) {
-    val table = document.getElementById("roleRequestsTable")!!
+fun reviewPendingSignup(token: String, action: String) {
+    val encodedToken = js("encodeURIComponent")(token).unsafeCast<String>()
+    val url = apiUrl("auth/verify-signup?token=$encodedToken&action=$action")
+    window.fetch(url)
+        .then { response ->
+            response.json().then { data ->
+                val success = data.asDynamic().success as? Boolean
+                val message = data.asDynamic().message as? String ?: ""
+                if (success == true) {
+                    showMessage(message, "success")
+                    // Reload pending signups (user will be removed from list)
+                    loadPendingSignups()
+                } else {
+                    showMessage(message, "error")
+                    loadPendingSignups()
+                }
+            }
+        }
+        .catch { _ ->
+            showMessage("Failed to $action signup", "error")
+            loadPendingSignups()
+        }
+}
+
+fun displayPendingSignups(list: Array<dynamic>) {
+    console.log("🔵 [PENDING] displayPendingSignups() called with ${list.size} items")
+    val table = document.getElementById("pendingSignupsTable")
+    if (table == null) {
+        console.log("🔴 [PENDING] pendingSignupsTable not found in displayPendingSignups!")
+        return
+    }
+    console.log("🔵 [PENDING] Table element found")
     
-    if (js("requests.length") == 0) {
-        table.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 20px;">
-                No pending role requests.
+    if (list.isEmpty()) {
+        console.log("🔵 [PENDING] List is empty, showing 'no pending' message")
+        (table as HTMLElement).innerHTML = """
+            <div style="text-align: center; color: #666; padding: 20px; background: #f9f9f9; border-radius: 8px;">
+                No pending signups.
             </div>
         """
         return
     }
+    console.log("🔵 [PENDING] List is NOT empty, building HTML...")
     
-    val tableHTML = StringBuilder()
-    tableHTML.append("""
-        <table style="width: 100%; border-collapse: collapse;">
-            <thead>
-                <tr style="background-color: #fff3cd;">
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ffeaa7;">User</th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ffeaa7;">Current Role</th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ffeaa7;">Requested Role</th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ffeaa7;">Reason</th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ffeaa7;">Date</th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #ffeaa7;">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-    """)
+    val html = StringBuilder()
     
-    val requestsArray = requests as Array<dynamic>
-    for (i in 0 until requestsArray.size) {
-        val request = requestsArray[i]
-        tableHTML.append("""
-            <tr style="border-bottom: 1px solid #ffeaa7;">
-                <td style="padding: 12px;">
-                    <div style="font-weight: bold;">${request.userName ?: "Unknown User"}</div>
-                    <div style="font-size: 12px; color: #666;">${request.userEmail ?: "No email"}</div>
-                </td>
-                <td style="padding: 12px;">
-                    <span style="padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; 
-                        background-color: ${getRoleColor(request.currentRole ?: "VIEWER")}; color: white;">
-                        ${request.currentRole ?: "VIEWER"}
-                    </span>
-                </td>
-                <td style="padding: 12px;">
-                    <span style="padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; 
-                        background-color: ${getRoleColor(request.requestedRole)}; color: white;">
-                        ${request.requestedRole}
-                    </span>
-                </td>
-                <td style="padding: 12px; max-width: 200px; word-wrap: break-word;">${request.reason ?: "No reason provided"}</td>
-                <td style="padding: 12px; font-size: 12px;">${request.createdAt}</td>
-                <td style="padding: 12px;">
-                    <button class="approve-request-btn" data-id="${request.id}" style="padding: 6px 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 5px;">Approve</button>
-                    <button class="reject-request-btn" data-id="${request.id}" style="padding: 6px 12px; background-color: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer;">Reject</button>
-                </td>
-            </tr>
+    // Build simple card-based layout with full inline styles
+    for (i in 0 until list.size) {
+        console.log("🔵 [PENDING] Processing item $i")
+        val p = list[i]
+        console.log("🔵 [PENDING] Item data:", p)
+        val token = (p.verificationToken as? String) ?: ""
+        val email = (p.email as? String) ?: ""
+        val name = (p.name as? String) ?: ""
+        val role = (p.role as? String) ?: "VIEWER"
+        val createdAt = (p.createdAt as? String) ?: ""
+        console.log("🔵 [PENDING] Parsed: token=$token, email=$email, name=$name, role=$role")
+        
+        html.append("""
+            <div style="background: #fffbeb; border: 2px solid #f59e0b; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 8px;">
+                    <div>
+                        <div style="font-weight: 700; font-size: 18px; color: #1f2937; margin-bottom: 4px;">$name</div>
+                        <div style="color: #6b7280; font-size: 14px;">$email</div>
+                    </div>
+                    <div style="background: #3b82f6; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;">$role</div>
+                </div>
+                <div style="color: #9ca3af; font-size: 12px; margin-bottom: 16px;">Requested: $createdAt</div>
+                <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <button class="pending-approve-btn" data-token="$token" style="padding: 10px 24px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;">✓ Accept</button>
+                    <button class="pending-reject-btn" data-token="$token" style="padding: 10px 24px; background: #ef4444; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;">✕ Reject</button>
+                </div>
+            </div>
         """)
     }
     
-    tableHTML.append("""
-            </tbody>
-        </table>
-    """)
+    val finalHTML = html.toString()
+    console.log("🔵 [PENDING] Generated HTML length: ${finalHTML.length}")
+    console.log("🔵 [PENDING] Setting innerHTML...")
+    (table as HTMLElement).innerHTML = finalHTML
+    console.log("🟢 [PENDING] innerHTML set successfully")
+    console.log("🔵 [PENDING] Table innerHTML now: ", (table as HTMLElement).innerHTML.take(300))
     
-    table.innerHTML = tableHTML.toString()
+    // Verify the DOM was actually updated
+    val checkTable = document.getElementById("pendingSignupsTable")
+    console.log("🔵 [PENDING] Re-checking table element: ", checkTable)
+    console.log("🔵 [PENDING] Table children count: ", (checkTable as? HTMLElement)?.children?.length)
     
-    // Add event listeners for approve/reject buttons
-    val approveButtons = document.querySelectorAll(".approve-request-btn")
+    val approveButtons = document.querySelectorAll(".pending-approve-btn")
     for (i in 0 until approveButtons.length) {
-        val btn = approveButtons.item(i) as HTMLElement
-        btn.addEventListener("click", { event ->
-            val requestId = (event.target as HTMLElement).getAttribute("data-id")?.toLongOrNull()
-            if (requestId != null) {
-                reviewRoleRequest(requestId, "APPROVED")
-            }
+        val el = approveButtons.item(i) as HTMLElement
+        el.addEventListener("click", { event ->
+            val t = (event.currentTarget as HTMLElement).getAttribute("data-token")
+            if (t != null) reviewPendingSignup(t, "approve")
         })
     }
-    
-    val rejectButtons = document.querySelectorAll(".reject-request-btn")
+    val rejectButtons = document.querySelectorAll(".pending-reject-btn")
     for (i in 0 until rejectButtons.length) {
-        val btn = rejectButtons.item(i) as HTMLElement
-        btn.addEventListener("click", { event ->
-            val requestId = (event.target as HTMLElement).getAttribute("data-id")?.toLongOrNull()
-            if (requestId != null) {
-                reviewRoleRequest(requestId, "REJECTED")
-            }
+        val el = rejectButtons.item(i) as HTMLElement
+        el.addEventListener("click", { event ->
+            val t = (event.currentTarget as HTMLElement).getAttribute("data-token")
+            if (t != null) reviewPendingSignup(t, "reject")
         })
         }
 }
@@ -15611,7 +16366,6 @@ fun populateColumnCheckboxes(selectedColumns: Set<String>) {
         "grade" to "Grade",
         "rank" to "Rank",
         "color" to "Color",
-        "displacement" to "Displacement",
         "fuel" to "Fuel",
         "seat" to "Seat",
         "door" to "Door",
@@ -15640,11 +16394,10 @@ fun populateColumnCheckboxes(selectedColumns: Set<String>) {
         "repairCompany" to "Repair Company",
         "repairCharges" to "Repair Charges",
         "venueId" to "Venue ID",
-        "shipmentSize" to "Shipment Size",
+        "shipmentSize" to "Vehicle type",
         "numberCut" to "Number Cut",
         "taxTotal" to "Tax Total",
         "profit" to "Profit",
-        "packagePrice" to "Package Price",
         "bookingId" to "Booking ID",
         "notes" to "Notes"
     )
@@ -15671,12 +16424,20 @@ fun updateColumnSelection() {
         if (checkbox.checked) count++
     }
     
-    document.getElementById("selectedCount")?.textContent = count.toString()
+    // Get current device type and max columns
+    val deviceType = getDeviceType()
+    val maxColumns = getMaxColumnsForDevice(deviceType)
     
-    // Disable checkboxes if 9 are selected
+    // Update count display with device-specific limit (only 2 numbers: selected/max)
+    val countElement = document.getElementById("selectedCount")
+    if (countElement != null) {
+        countElement.textContent = "$count/$maxColumns"
+    }
+    
+    // Disable checkboxes if device limit is reached
     for (i in 0 until selectedCount) {
         val checkbox = checkboxes.item(i) as HTMLInputElement
-        if (!checkbox.checked && count >= 9) {
+        if (!checkbox.checked && count >= maxColumns) {
             checkbox.disabled = true
             checkbox.parentElement?.asDynamic()?.style?.setProperty("opacity", "0.5")
         } else {
@@ -15689,7 +16450,9 @@ fun updateColumnSelection() {
 // getSelectedColumns moved to PurchaseManagement.kt (returns List<String> there)
 
 fun getDefaultColumns(): Set<String> {
-    return setOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany", "price")
+    // Return device-specific defaults
+    val defaultColumns = getDefaultColumnsForDevice()
+    return defaultColumns.toSet()
 }
 
 fun saveSelectedColumns(columns: Set<String>) {
@@ -15714,11 +16477,22 @@ fun applyColumnChanges() {
         }
     }
     
-    if (selectedColumns.size > 9) {
-        showMessage("Please select maximum 9 columns", "error")
+    // Get current device type and max columns
+    val deviceType = getDeviceType()
+    val maxColumns = getMaxColumnsForDevice(deviceType)
+    
+    // Validate against device-specific limit
+    if (selectedColumns.size > maxColumns) {
+        val deviceDisplayName = when (deviceType) {
+            "mobile" -> "mobile"
+            "tablet" -> "tablet"
+            else -> "desktop"
+        }
+        showMessage("Please select maximum $maxColumns columns for $deviceDisplayName view", "error")
         return
     }
     
+    // Save selected columns
     saveSelectedColumns(selectedColumns)
     closeColumnFilterModal()
     // Call loadPurchases from PurchaseManagement.kt - expose it globally if needed
@@ -15734,6 +16508,66 @@ fun applyColumnChanges() {
 
 fun closeColumnFilterModal() {
     document.getElementById("columnFilterModal")?.remove()
+}
+
+/**
+ * Toggle form section collapse/expand (Add and Edit purchase forms).
+ * Exposed as window.toggleFormSection(sectionName) so inline onclick works on mobile (same pattern as Master menu).
+ */
+fun toggleFormSection(sectionName: String) {
+    val header = document.querySelector(".form-section-header[data-section='$sectionName']") as? HTMLElement ?: return
+    val contentDivs = document.querySelectorAll(".form-section-content[data-section='$sectionName']")
+    if (contentDivs.length == 0) return
+    val isCollapsed = header.classList.contains("collapsed")
+    for (i in 0 until contentDivs.length) {
+        val contentDiv = contentDivs.item(i) as HTMLElement
+        contentDiv.style.display = if (isCollapsed) "" else "none"
+    }
+    if (isCollapsed) header.classList.remove("collapsed") else header.classList.add("collapsed")
+}
+
+/**
+ * Setup form section collapse/expand for Add and Edit purchase forms.
+ * Works on all devices; on mobile, sections other than Basic are initially collapsed.
+ * Toggle is handled by inline onclick="window.toggleFormSection(...)" (same as Master menu).
+ */
+fun setupResponsiveFormSections() {
+    val deviceType = getDeviceType()
+    val isMobile = deviceType == "mobile"
+
+    // Get all section headers
+    val sectionHeaders = document.querySelectorAll(".form-section-header")
+
+    for (i in 0 until sectionHeaders.length) {
+        val header = sectionHeaders.item(i) as HTMLElement
+        val sectionName = header.getAttribute("data-section")
+
+        if (sectionName != null) {
+            // Find ALL content divs with this section name (some sections have multiple content divs)
+            val allContentDivs = document.querySelectorAll(".form-section-content[data-section='$sectionName']")
+
+            if (allContentDivs.length > 0) {
+                // On mobile: initially collapse all sections except Basic Information. On desktop/tablet: all expanded.
+                val shouldCollapse = isMobile && sectionName != "basic"
+
+                for (j in 0 until allContentDivs.length) {
+                    val contentDiv = allContentDivs.item(j) as HTMLElement
+                    if (shouldCollapse) {
+                        contentDiv.style.display = "none"
+                    } else {
+                        contentDiv.style.display = ""
+                    }
+                }
+
+                if (shouldCollapse) {
+                    header.classList.add("collapsed")
+        } else {
+                    header.classList.remove("collapsed")
+                }
+                // Toggle is handled by inline onclick="window.toggleFormSection(...)" (same as master menu) for reliable mobile tap
+            }
+        }
+    }
 }
 
 // Expose column filter functions globally
@@ -15965,7 +16799,7 @@ fun generateShippingSchedulePdfPreview() {
                     js("document.body.removeChild(link)")
                     // Revoke URL after download
                     window.setTimeout({ revokeUrl() }, 1000)
-                } else {
+            } else {
                     // Revoke URL when window is closed or after delay
                     js("""
                         if (newWindow) {
