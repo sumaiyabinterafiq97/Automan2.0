@@ -4,6 +4,7 @@ import com.automan.backend.model.RixoPrice
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
+import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 import org.springframework.transaction.annotation.Transactional
 
@@ -30,6 +31,9 @@ interface RixoPriceRepository : JpaRepository<RixoPrice, Long> {
     
     @Modifying
     @Transactional
-    @Query("UPDATE rixo_prices SET auction_house = :auctionHouse WHERE id = :id", nativeQuery = true)
-    fun updateAuctionHouse(id: Long, auctionHouse: String)
+    @Query(
+        value = "UPDATE rixo_prices SET auction_house = :auctionHouse WHERE id = :id",
+        nativeQuery = true
+    )
+    fun updateAuctionHouse(@Param("id") id: Long, @Param("auctionHouse") auctionHouse: String)
 }

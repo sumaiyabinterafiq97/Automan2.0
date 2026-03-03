@@ -52,7 +52,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
         @Param("polPort") polPort: String
     ): List<Purchase>
     
-    @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND p.chassis LIKE %:chassis%")
+    @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND LOWER(p.chassis) LIKE LOWER(CONCAT('%', :chassis, '%'))")
     fun findUnshippedCarsByChassisContaining(@Param("chassis") chassis: String): List<Purchase>
     
     @Modifying

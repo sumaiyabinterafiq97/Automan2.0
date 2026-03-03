@@ -4,7 +4,6 @@ import com.automan.backend.model.Event
 import com.automan.backend.model.EventType
 import com.automan.backend.service.EventService
 import com.automan.backend.service.ClientService
-import com.automan.backend.repository.EventRepository
 import com.automan.backend.service.AsyncImportService
 import com.automan.backend.service.PerformanceMonitoringService
 import com.automan.backend.dto.TransactionRequest
@@ -23,7 +22,6 @@ import java.util.concurrent.CompletableFuture
 class EventController(
     private val eventService: EventService,
     private val clientService: ClientService,
-    private val eventRepository: EventRepository,
     private val asyncImportService: AsyncImportService,
     private val performanceMonitoringService: PerformanceMonitoringService
 ) {
@@ -191,8 +189,7 @@ class EventController(
                 runningBalance = (eventData["runningBalance"] as? Number)?.toDouble() ?: 0.0
             )
             
-            // Try to save directly to repository to bypass service issues
-            val createdEvent = eventRepository.save(event)
+            val createdEvent = eventService.createEvent(event)
             ResponseEntity.ok(mapOf(
                 "id" to (createdEvent.id ?: 0L),
                 "message" to "Transaction created successfully",

@@ -1,12 +1,11 @@
 package com.automan.backend.controller
 
+import com.automan.backend.dto.CreateTransactionRequest
 import com.automan.backend.model.Client
 import com.automan.backend.model.ClientStatus
-import com.automan.backend.model.Event
-import com.automan.backend.model.EventType
 import com.automan.backend.service.ClientService
+import com.automan.backend.service.TransactionService
 import com.automan.backend.util.Logger
-import com.automan.backend.repository.EventRepository
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDate
@@ -24,7 +23,7 @@ import java.time.LocalDate
 ])
 class ClientController(
     private val clientService: ClientService,
-    private val eventRepository: EventRepository
+    private val transactionService: TransactionService
 ) {
     
     @GetMapping
@@ -189,57 +188,38 @@ class ClientController(
         @RequestBody transactionData: Map<String, Any>
     ): ResponseEntity<Map<String, Any>> {
         return try {
-            // Extract clientId from request body
-            val clientId = (transactionData["clientId"] as? Number)?.toLong() 
-                ?: throw IllegalArgumentException("Client ID is required")
-            
-            Logger.debug("Creating transaction for client $clientId")
-            Logger.debug("Transaction data: $transactionData")
-            
-            // Verify client exists
-            val client = clientService.getClientById(clientId)
-                ?: throw IllegalArgumentException("Client not found: $clientId")
-            
-            Logger.debug("Client found: ${client.clientName}")
-            
-            // Calculate running balance based on client's current balance
-            val currentBalance = client.currentBalance
-            val transactionPrice = (transactionData["transactionPrice"] as? Number)?.toDouble() ?: 0.0
-            val paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble() ?: 0.0
-            val newBalance = currentBalance + paymentReceived - transactionPrice
-            
-            Logger.debug("Current balance: $currentBalance, New balance: $newBalance")
-            
-            // Create Event object
-            val event = Event(
-                clientId = clientId,
-                eventDate = LocalDate.parse(transactionData["eventDate"] as String),
-                eventType = EventType.OTHER,
-                eventDescription = transactionData["eventDescription"] as? String,
+            val request = CreateTransactionRequest(
+                clientId = (transactionData["clientId"] as? Number)?.toLong()
+                    ?: throw IllegalArgumentException("Client ID is required"),
+                eventDate = transactionData["eventDate"] as String,
+                eventDescription = transactionData["eventDescription"] as? String ?: "",
                 quantity = (transactionData["quantity"] as? Number)?.toInt(),
                 billNumber = transactionData["billNumber"] as? String,
-                transactionPrice = transactionPrice,
-                paymentReceived = paymentReceived,
-                runningBalance = newBalance
+                transactionPrice = (transactionData["transactionPrice"] as? Number)?.toDouble(),
+                paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble()
             )
-            
-            // Save event directly using EventRepository
-            val savedEvent = eventRepository.save(event)
-            Logger.debug("Event saved with ID: ${savedEvent.id}")
-            
-            // Update client balance
-            clientService.updateClientBalance(clientId, newBalance)
-            Logger.debug("Client balance updated to: $newBalance")
-            
-            ResponseEntity.ok(mapOf(
-                "success" to true,
-                "transactionId" to (savedEvent.id ?: 0L),
-                "message" to "Transaction created successfully",
-                "runningBalance" to newBalance
+            val response = transactionService.createTransaction(request)
+            if (response.success) {
+                ResponseEntity.ok(mapOf<String, Any>(
+                    "success" to true,
+                    "transactionId" to (response.transactionId ?: 0L),
+                    "message" to response.message,
+                    "runningBalance" to (response.runningBalance ?: 0.0)
+                ))
+            } else {
+                ResponseEntity.status(500).body(mapOf<String, Any>(
+                    "success" to false,
+                    "error" to response.message
+                ))
+            }
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf<String, Any>(
+                "success" to false,
+                "error" to (e.message ?: "Invalid request")
             ))
         } catch (e: Exception) {
             Logger.error("Exception in createTransaction: ${e.message}", e)
-            ResponseEntity.status(500).body(mapOf(
+            ResponseEntity.status(500).body(mapOf<String, Any>(
                 "success" to false,
                 "error" to (e.message ?: "Unknown error")
             ))
