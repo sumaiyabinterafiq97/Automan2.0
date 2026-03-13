@@ -1,91 +1,105 @@
 -- ===========================================
--- CLEANUP: Remove unused columns and tables (idempotent)
+-- AUTOMAN CAR PURCHASE DATABASE INITIALIZATION
 -- ===========================================
--- This section ensures old schema elements are removed before creating new ones
--- Safe to run multiple times - checks existence before dropping
+-- This script creates all tables and seeds essential data.
+-- Run this on a fresh database or when setting up a new environment.
+--
+-- IMPORTANT: This script contains REQUIRED seed data that the application
+-- depends on. Without this data, the following features will NOT work:
+--   - User login (users table)
+--   - Form dropdowns (master_menu table)
+--   - Chassis auto-fill (car_brand_mapping table)
+--   - Consignee/POD/POL auto-fill (booking_mappings table)
+--   - Rixo price lookup (rixo_prices table)
+-- ===========================================
 
 USE automan_car_purchase;
 
--- Drop all _decimal columns from purchases table (if they exist)
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'price_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN price_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'auction_fee_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN auction_fee_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'recycle_fee_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN recycle_fee_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'road_tax_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN road_tax_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'tax_total_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN tax_total_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'total_price_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN total_price_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'shipment_charges_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN shipment_charges_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'freight_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN freight_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'storage_charges_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN storage_charges_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'misc_charges_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN misc_charges_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'inspection_fee_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN inspection_fee_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'commission_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN commission_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'rixo_price_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN rixo_price_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'repair_charges_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN repair_charges_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'package_price_decimal');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN package_price_decimal', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
--- Drop displacement and package_price columns (legacy, removed from schema)
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'displacement');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN displacement', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'package_price');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN package_price', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
--- Drop lot_number column and idx_lot_chassis index (if they exist)
-SET @index_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND INDEX_NAME = 'idx_lot_chassis');
-SET @sql = IF(@index_exists > 0, 'ALTER TABLE purchases DROP INDEX idx_lot_chassis', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'lot_number');
-SET @sql = IF(@col_exists > 0, 'ALTER TABLE purchases DROP COLUMN lot_number', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
--- Drop foreign key constraints to unused tables (if they exist)
-SET @constraint_name = (SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND CONSTRAINT_NAME = 'fk_purchase_stock_location_id' LIMIT 1);
-SET @sql = IF(@constraint_name IS NOT NULL, CONCAT('ALTER TABLE purchases DROP FOREIGN KEY ', @constraint_name), 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @constraint_name = (SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND CONSTRAINT_NAME = 'fk_purchase_repair_company_id' LIMIT 1);
-SET @sql = IF(@constraint_name IS NOT NULL, CONCAT('ALTER TABLE purchases DROP FOREIGN KEY ', @constraint_name), 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @constraint_name = (SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND CONSTRAINT_NAME = 'fk_purchase_country_id' LIMIT 1);
-SET @sql = IF(@constraint_name IS NOT NULL, CONCAT('ALTER TABLE purchases DROP FOREIGN KEY ', @constraint_name), 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @constraint_name = (SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND CONSTRAINT_NAME = 'fk_purchase_rixo_company_id' LIMIT 1);
-SET @sql = IF(@constraint_name IS NOT NULL, CONCAT('ALTER TABLE purchases DROP FOREIGN KEY ', @constraint_name), 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @constraint_name = (SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND CONSTRAINT_NAME = 'fk_purchase_supplier_id' LIMIT 1);
-SET @sql = IF(@constraint_name IS NOT NULL, CONCAT('ALTER TABLE purchases DROP FOREIGN KEY ', @constraint_name), 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
--- Drop unused tables (if they exist)
-SET @table_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'booking_calculations');
-SET @sql = IF(@table_exists > 0, 'DROP TABLE IF EXISTS booking_calculations', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @table_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bookings');
-SET @sql = IF(@table_exists > 0, 'DROP TABLE IF EXISTS bookings', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @table_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'vessels');
-SET @sql = IF(@table_exists > 0, 'DROP TABLE IF EXISTS vessels', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @table_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_locations');
-SET @sql = IF(@table_exists > 0, 'DROP TABLE IF EXISTS stock_locations', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @table_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'countries');
-SET @sql = IF(@table_exists > 0, 'DROP TABLE IF EXISTS countries', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @table_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'repair_companies');
-SET @sql = IF(@table_exists > 0, 'DROP TABLE IF EXISTS repair_companies', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @table_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rixo_companies');
-SET @sql = IF(@table_exists > 0, 'DROP TABLE IF EXISTS rixo_companies', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @table_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'suppliers');
-SET @sql = IF(@table_exists > 0, 'DROP TABLE IF EXISTS suppliers', 'SELECT 1'); PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-
 -- ===========================================
--- PURCHASES TABLE
+-- TABLE CREATION: CORE TABLES
 -- ===========================================
 
--- Create the purchases table
--- Note: booking_id has no foreign key constraint to allow any number value
+-- Users table: Authentication and authorization
+CREATE TABLE IF NOT EXISTS users (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(120) NOT NULL UNIQUE,
+    name VARCHAR(80) NOT NULL,
+    password_hash VARCHAR(120) NOT NULL,
+    role VARCHAR(16) NOT NULL DEFAULT 'VIEWER',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_users_email (email),
+    INDEX idx_users_role (role)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Pending signups table: Admin approval email verification
+CREATE TABLE IF NOT EXISTS pending_signups (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(120) NOT NULL,
+    name VARCHAR(80) NOT NULL,
+    password_hash VARCHAR(120) NOT NULL,
+    role VARCHAR(16) NOT NULL,
+    verification_token VARCHAR(64) NOT NULL UNIQUE,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NULL,
+    INDEX idx_pending_signups_email (email),
+    INDEX idx_pending_signups_token (verification_token),
+    INDEX idx_pending_signups_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Role requests table: User role upgrade requests
+CREATE TABLE IF NOT EXISTS role_requests (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    requested_role VARCHAR(16) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP NULL,
+    INDEX idx_role_requests_user_id (user_id),
+    INDEX idx_role_requests_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Clients table: Client accounts management
+CREATE TABLE IF NOT EXISTS clients (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    client_number VARCHAR(50) UNIQUE NOT NULL,
+    client_name VARCHAR(255) NOT NULL,
+    address TEXT,
+    phone VARCHAR(50),
+    current_balance DECIMAL(15,2) DEFAULT 0,
+    credit_limit DECIMAL(15,2),
+    alert_threshold DECIMAL(15,2),
+    currency VARCHAR(3) DEFAULT 'JPY',
+    status ENUM('ACTIVE', 'SUSPENDED', 'CLOSED') DEFAULT 'ACTIVE',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_client_number (client_number),
+    INDEX idx_client_name (client_name),
+    INDEX idx_client_status (status),
+    INDEX idx_client_balance (current_balance)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Events table: Client transaction events
+CREATE TABLE IF NOT EXISTS events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    client_id BIGINT NOT NULL,
+    event_date DATE NOT NULL,
+    event_type ENUM('PAYMENT_RECEIVED', 'SHIPMENT', 'ADJUSTMENT', 'OTHER') NOT NULL,
+    event_description VARCHAR(500),
+    quantity INT,
+    bill_number VARCHAR(100),
+    transaction_price DECIMAL(15,2),
+    payment_received DECIMAL(15,2),
+    running_balance DECIMAL(15,2) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    INDEX idx_event_client_id (client_id),
+    INDEX idx_event_date (event_date),
+    INDEX idx_event_type (event_type),
+    INDEX idx_event_balance (running_balance)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Purchases table: Main car purchase records
 CREATE TABLE IF NOT EXISTS purchases (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     date VARCHAR(50),
@@ -109,6 +123,7 @@ CREATE TABLE IF NOT EXISTS purchases (
     auction_no VARCHAR(100),
     auction_house VARCHAR(100),
     stock_location VARCHAR(100),
+    pol VARCHAR(100),
     rixo_company VARCHAR(100),
     client_name VARCHAR(100),
     consignee TEXT DEFAULT NULL,
@@ -150,130 +165,585 @@ CREATE TABLE IF NOT EXISTS purchases (
     car_pictures TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_chassis (chassis)
+    INDEX idx_chassis (chassis),
+    INDEX idx_date (date),
+    INDEX idx_car_name (car_name),
+    INDEX idx_auction_no (auction_no),
+    INDEX idx_client_name (client_name),
+    INDEX idx_purchase_client_id (client_id),
+    INDEX idx_purchase_booking_id (booking_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Master menu table: Configurable dropdown values for forms
+CREATE TABLE IF NOT EXISTS master_menu (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    field_name VARCHAR(100) NOT NULL,
+    field_values TEXT,
+    UNIQUE KEY uk_master_menu_field_name (field_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Car brand mapping table: Chassis code to vehicle details mapping
+CREATE TABLE IF NOT EXISTS car_brand_mapping (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    car_brand VARCHAR(100) NOT NULL,
+    chassis VARCHAR(50),
+    car_name VARCHAR(100),
+    fuel VARCHAR(50),
+    wd VARCHAR(50),
+    shift VARCHAR(50),
+    cc INT,
+    door INT,
+    grade VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_car_brand (car_brand),
+    INDEX idx_chassis (chassis),
+    INDEX idx_car_name (car_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Booking mappings table: Country/client to consignee/POD/POL mappings
+CREATE TABLE IF NOT EXISTS booking_mappings (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    country VARCHAR(100) NOT NULL,
+    client_name VARCHAR(150),
+    pod VARCHAR(120),
+    stock_location VARCHAR(150),
+    pols VARCHAR(255),
+    consignee_name VARCHAR(255),
+    consignee_address TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_country (country),
+    INDEX idx_client_country (country, client_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Rixo prices table: Auction house pricing data
+CREATE TABLE IF NOT EXISTS rixo_prices (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    auction_name VARCHAR(255) NOT NULL,
+    type_of_vehicle VARCHAR(255),
+    stock_location VARCHAR(255) NOT NULL,
+    rixo_company VARCHAR(255) NOT NULL,
+    venue_id VARCHAR(255),
+    rixo_price VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===========================================
--- NOTE: Clients, Events, and Users tables
--- are created in separate migration files:
--- - database/10-clients-table.sql
--- - database/11-events-table.sql
--- - database/12-users-table.sql
+-- ESSENTIAL SEED DATA
 -- ===========================================
+-- The following INSERT statements are REQUIRED for the application to function.
+-- DO NOT REMOVE these unless you understand the consequences.
 
--- Create indexes for purchases table (idempotent)
--- Check and create idx_date
-SET @index_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'purchases' 
-    AND INDEX_NAME = 'idx_date');
-SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_date ON purchases(date)', 'SELECT 1');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- ---------------------------------------------
+-- USERS: Default admin account
+-- REQUIRED: Without this, no one can log into the system initially
+-- Password: password (BCrypt hashed)
+-- ---------------------------------------------
+INSERT IGNORE INTO users (email, name, password_hash, role, created_at) VALUES
+('admin@automan.com', 'System Administrator', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'ADMIN', NOW());
 
--- Check and create idx_car_name
-SET @index_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'purchases' 
-    AND INDEX_NAME = 'idx_car_name');
-SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_car_name ON purchases(car_name)', 'SELECT 1');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- ---------------------------------------------
+-- MASTER_MENU: Form dropdown values
+-- REQUIRED: All form dropdowns (clients, countries, suppliers, etc.) 
+-- pull their options from this table. Without this data, all dropdowns
+-- will be empty and users cannot select values.
+-- ---------------------------------------------
+REPLACE INTO master_menu (field_name, field_values) VALUES
+('clients', 'SHEHROZE MOTORS,DAAVI AUTO,NEW GRAND AUTO (JAWAD),IRSHAD ALI AKHTAR,AAMIR DEDHI,AUTOHANDLER,ESSA ADMANI,IRFAN MEMON HYDERABAD,NAVEES AHMAD,NIPPON TRADING INTERNATIONAL ISHRAT HUSSEIN,ARYAN MOTORS (NIRIANDER),SUSHIL KUMAR,TARIQ BUDHANI,LAKHANI MOTORS UGANDA,LAKHANI MOTORS DUBAI,LAKHANI MOTORS KENYA,ADEENA AUTO,HARIS VAYANI,CROWN EAGLE (KARAVAN MOTORS),LOCAL,OFFICE USE'),
+('consignee', 'LAKHANI MOTORS (K) LTD,LAKHANI MOTORS FZE,OVERSEAS TRANSIT AGENCY (PVT) LTD'),
+('country', 'Japan,Kenya,MOZAMBIQUE,NEWZEALAND,PAKISTAN,SOUTH AFRICA,UAE,Uganda,UK'),
+('supplier', 'ARAI BAYSIDE,ARAI BAYSIDE (FUKUOKA YARD),ARAI BAYSIDE (DAI 2 YARD),ARAI OYAMA,ARAI SENDAI,AUCNETVAA (KISARAZU),AUCNETVAA (SAKURA),BAYAUC,CAA CHUBU,CAA GIFU,CAA TOHOKU,CAA TOKYO,HAA KOBE,HAA KOBE (SHIKOKU),HERO,HONDA HOKKAIDO,HONDA KANSAI,HONDA KYUSHU,HONDA NAGOYA,HONDA SENDAI,HONDA TOKYO,IAA OSAKA,ISUZU KOBE,ISUZU KOBE (SAKURAI YARD),ISUZU KYUSHU,ISUZU TOKYO,JAA,JU AICHI,JU AOMORI,JU CHIBA,JU FUKUI,JU FUKUOKA,JU FUKUSHIMA,JU GIFU,JU GUNMA,JU HIROSHIMA,JU HOKKAIDO,JU IBARAKI,JU ISHIKAWA,JU KANAGAWA,JU KUMAMOTO,JU MIE,JU MIYAGI,JU MIYAZAKI,JU NAGANO,JU NAGASAKI,JU NARA,JU NIIGATA,JU OITA,JU OKINAWA,JU SAITAMA,JU SHIMANE,JU SHIZUOKA,JU TOCHIGI,JU TOKYO,JU TOYAMA,JU YAMAGATA,JU YAMAGUCHI,JU YAMANASHI,KCAA FUKUOKA,KCAA KYOTO,KCAA MINAMI KYUSHU,KCAA YAMAGUCHI,LAA OKAYAMA,LAA SHIKOKU,LUM FUKUOKA,LUM HOKKAIDO,LUM KOBE,LUM KOBE (HIROSHIMA),LUM NAGOYA,LUM NAGOYA (KANAZAWA),LUM TOKYO,LUM TOKYO (SENDAI),MIRIVE AICHI,MIRIVE OSAKA,MIRIVE SAITAMA,NAA FUKUOKA,NAA NAGOYA,NAA NAGOYA (HOKURIKU),NAA OSAKA,NAA TOKYO,NOAA,NPS FUKUOKA,NPS OSAKA,NPS SENDAI,NPS TOCHIGI,NPS TOKYO,NPS TOMAKOMAI,ORIX ATSUGI,ORIX ATSUGI (OYAMA),ORIX FUKUOKA,ORIX KOBE,ORIX SENDAI,SAA HAMAMATSU,SAA SAPPORO,TAA CHUBU,TAA CHUBU (HOKURIKU),TAA CHUBU (SHIZUOKA),TAA HIROSHIMA,TAA HOKKAIDO,TAA HYOGO,TAA KANTO,TAA KANTO (KITA KANTO),TAA KANTO (SAITAMA),TAA KANTO (TAMA),TAA KINKI,TAA KINKI (SHIGA YARD),TAA KYUSHU,TAA MINAMI KYUSHU,TAA SHIKOKU,TAA SHIKOKU (EHIME),TAA TOHOKU,TAA TOHOKU (MIYAGI),TAA YOKOHAMA,TAA YOKOHAMA (ATSUGI),USS FUKUOKA,USS GUNMA,USS HOKURIKU,USS KOBE,USS KYUSHU,USS NAGOYA,USS NIIGATA,USS OKAYAMA,USS OSAKA,USS R-NAGOYA,USS SAITAMA,USS SAPPORO,USS SHIZUOKA,USS TOHOKU,USS TOKYO,USS YOKOHAMA,ZERO CHIBA,ZERO HAKATA,ZERO HOKKAIDO,ZERO OSAKA,ZERO SENDAI,ZERO SHONAN,ZIP OSAKA,ZIP TOKYO'),
+('rixo_company', 'HIDA,KLC,LOGICO,SHAHBAZ,STYLISH AUTO,TAA,Y''S,YAMAZAKI'),
+('stock_location', 'AQUA LOGISTICS,ECL KOBE,GLOBAL HAKATA,GLOBAL KAWASAKI,GLOBAL NAGOYA,KLC,FLASHRISE,BARAKI PARKING,LOCAL'),
+('pol', 'YOKOHAMA,NAGOYA,OSAKA,SENBOKU,KOBE,HAKATA'),
+('pod', 'KARACHI-PAKISTAN,MOMBASA-KENYA,UGANDA,MAPUTO-MOZAMBIQUE,JABEL ALI-DUBAI,DURBAN-SOUTH AFRICA,UK,NEWZEALAND,LOCAL-JAPAN'),
+('repair_company', ''),
+('car_brands', 'Toyota,Nissan,Subaru,Honda,Suzuki,Isuzu,Daihatsu,Mitsuoka,Hino,Mitsubishi Fuso,Mitsubishi,Lexus,Mazda,Nissan Diesel,Cadillac,Chevrolet,GMC,Hummer,Lincoln,Ford,Chrisler,Chrisler Jeep,Dodge,Infiniti,Acura,Tesla,Mercedes Benz,MB AMG,Smart,BMW,Audi,VolksWagen,Porsche,Rolls-Royce,Bentely,Jaguar,Land Rover,Mini,Lotus,Aston Martin,McLaren,Fiat,Ferrari,Lancia,Alfa Romeo,Maserati,Lamborghini,Abarth,Renault,Peugeot,Citroen,Ds Automobiles,Volvo,Hyundai,Kia,BYD,TOMMYKAIRA'),
+('fuel', 'GASOLINE,DIESEL,HYBRID,CNG,EV,HYDROGEN,PHEV'),
+('car_grade', 'G,S,Z,OPEN DECK,S X VER,S KIRAMEKI,S-T'),
+('shift', 'AT,MT,6F,5F'),
+('type_of_vehicle', 'PASSENGER CAR,CAR,BUS,TRUCK,MACHINERY'),
+('bank_accounts', 'BANK OF SMBC MITSUI SUMITOMO (GYOUTOKU) BRANCH - 0398932 (ORDINARY) - MEMON CO., LTD. - SMBCJPJT; MUFG BANK LTD (GYOUTOKU BRANCH) - 1293891 - MEMONCO.LTD. - BOTKJPJT'),
+('venue_id', '1564,3732,7378,11390,16845,20558,22431,24016,27791,30617,37488,41452,45522,45548,50354,53143,57455,59077,59160,63257,65010,70496,70506,70513,70519,77510,80521,80536,80548,88472,90471,90532,95518,126589,130528,200539,300541,316009,600525,700485,710596,900513,1355400,9733100,50000052,00S7784,A052166,B2B901,E0483,E0484,J2671,T008288,Z289700');
 
--- Check and create idx_auction_no
-SET @index_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'purchases' 
-    AND INDEX_NAME = 'idx_auction_no');
-SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_auction_no ON purchases(auction_no)', 'SELECT 1');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- ---------------------------------------------
+-- BOOKING_MAPPINGS: Consignee/POD/POL auto-fill data
+-- REQUIRED: When users select a country or client on the booking page,
+-- the system looks up this table to auto-fill consignee, POD, POL, and
+-- stock location. Without this data, auto-fill will not work.
+-- ---------------------------------------------
 
--- Check and create idx_client_name
-SET @index_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'purchases' 
-    AND INDEX_NAME = 'idx_client_name');
-SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_client_name ON purchases(client_name)', 'SELECT 1');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+-- Country-level defaults (POD and Consignee)
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
+VALUES ('PAKISTAN', 'KARACHI', 'OVERSEAS TRANSIT AGENCY (PVT) LTD.', '1201-1203, 12TH FLOOR, Q.M.HOUSE, PLOT NO. 11/2RY9, ELLANDER ROAD, OFF.I.I CHUNDRIGAR ROAD (OPP. SHAHEEN COMPLEX), KARACHI');
 
--- Check and create idx_purchase_client_id
-SET @index_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'purchases' 
-    AND INDEX_NAME = 'idx_purchase_client_id');
-SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_purchase_client_id ON purchases(client_id)', 'SELECT 1');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
+VALUES ('KENYA', 'MOMBASA', 'LAKHANI MOTORS (K) LTD', 'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM');
 
--- Add foreign key constraint for purchases.client_id (if not exists)
--- This references the clients table created in 10-clients-table.sql
-SET @constraint_name = (SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'purchases' 
-    AND CONSTRAINT_NAME = 'fk_purchase_client_id' 
-    LIMIT 1);
-SET @sql = IF(@constraint_name IS NULL, 
-    'ALTER TABLE purchases ADD CONSTRAINT fk_purchase_client_id FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL', 
-    'SELECT 1');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
+VALUES ('SOUTH AFRICA', 'DURBAN', 'LAKHANI MOTORS (K) LTD', 'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM');
+
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
+VALUES ('MOZAMBIQUE', 'MAPUTO', 'LAKHANI MOTORS (K) LTD', 'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM');
+
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
+VALUES ('UGANDA', NULL, 'LAKHANI MOTORS (K) LTD', 'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM');
+
+INSERT IGNORE INTO booking_mappings (country, pod, consignee_name, consignee_address)
+VALUES ('UAE', 'JABEL ALI-DUBAI', 'LAKHANI MOTORS FZE', 'SHOWROOM# 108 DUCAMZ RAS AL KHOR, AL AWEER ROAD, DUBAI- UAE, PO BOX: 63280, TEL: 971-4-3339141 FAX:971-4-3338574, EMAIL: lakhanimotors@gmail.com');
+
+-- Client-specific overrides
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('PAKISTAN', 'SHEHROZE MOTORS', 'KARACHI', 'GLOBAL KAWASAKI', 'YOKOHAMA', 'OVERSEAS TRANSIT AGENCY (PVT) LTD.', '1201-1203, 12TH FLOOR, Q.M.HOUSE, PLOT NO. 11/2RY9, ELLANDER ROAD, OFF.I.I CHUNDRIGAR ROAD (OPP. SHAHEEN COMPLEX), KARACHI');
+
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('KENYA', 'DAAVI AUTO', 'MOMBASA', 'AQUA LOGISTICS', 'YOKOHAMA', 'LAKHANI MOTORS (K) LTD', 'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM');
+
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('UGANDA', 'NEW GRAND AUTO (JAWAD)', NULL, 'GLOBAL NAGOYA', 'NAGOYA', 'LAKHANI MOTORS (K) LTD', 'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM');
+
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('MOZAMBIQUE', 'IRSHAD ALI AKHTAR', 'MAPUTO', 'FLASHRISE', 'NAGOYA', 'LAKHANI MOTORS (K) LTD', 'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM');
+
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('UAE', 'AAMIR DEDHI', 'JABEL ALI-DUBAI', 'KLC', 'OSAKA,SENBOKU,KOBE', 'LAKHANI MOTORS FZE', 'SHOWROOM# 108 DUCAMZ RAS AL KHOR, AL AWEER ROAD, DUBAI- UAE, PO BOX: 63280, TEL: 971-4-3339141 FAX:971-4-3338574, EMAIL: lakhanimotors@gmail.com');
+
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('SOUTH AFRICA', 'AUTOHANDLER', 'DURBAN', 'GLOBAL HAKATA', 'HAKATA', 'LAKHANI MOTORS (K) LTD', 'P.O.BOX=86338-80100, MOMBASA-KENYA, TEL:+254724666786, E-MAIL:LAKHANIMOTORS.KENYA@YAHOO.COM');
+
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('UK', 'ESSA ADMANI', NULL, 'BARAKI PARKING', NULL, NULL, NULL);
+
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('NEWZEALAND', 'IRFAN MEMON HYDERABAD', NULL, 'LOCAL', NULL, NULL, NULL);
+
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('JAPAN', 'NAVEES AHMAD', NULL, NULL, NULL, NULL, NULL);
+
+-- Stock location to POL canonical mappings
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('STOCK_LOCATION_POL', NULL, NULL, 'GLOBAL KAWASAKI', 'YOKOHAMA', NULL, NULL);
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('STOCK_LOCATION_POL', NULL, NULL, 'AQUA LOGISTICS', 'YOKOHAMA', NULL, NULL);
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('STOCK_LOCATION_POL', NULL, NULL, 'GLOBAL NAGOYA', 'NAGOYA', NULL, NULL);
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('STOCK_LOCATION_POL', NULL, NULL, 'FLASHRISE', 'NAGOYA', NULL, NULL);
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('STOCK_LOCATION_POL', NULL, NULL, 'KLC', 'OSAKA,SENBOKU,KOBE', NULL, NULL);
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('STOCK_LOCATION_POL', NULL, NULL, 'GLOBAL HAKATA', 'HAKATA', NULL, NULL);
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('STOCK_LOCATION_POL', NULL, NULL, 'BARAKI PARKING', NULL, NULL, NULL);
+INSERT IGNORE INTO booking_mappings (country, client_name, pod, stock_location, pols, consignee_name, consignee_address)
+VALUES ('STOCK_LOCATION_POL', NULL, NULL, 'LOCAL', NULL, NULL, NULL);
+
+-- ---------------------------------------------
+-- CAR_BRAND_MAPPING: Chassis code to vehicle details (228 rows)
+-- REQUIRED: When users enter a chassis number, the system looks up
+-- the first characters against this table to auto-fill brand, car name,
+-- fuel type, WD, CC, door count, and grade. Without this data,
+-- chassis auto-fill will not work.
+-- ---------------------------------------------
+INSERT INTO car_brand_mapping (car_brand, chassis, car_name, fuel, wd, shift, cc, door, grade) VALUES
+('TOYOTA', 'ZN6', '86', 'GASOLINE', '2WD', NULL, 2000, 2, 'G'),
+('TOYOTA', 'NCP30', 'bB', 'GASOLINE', '2WD', NULL, 1300, 5, 'S'),
+('TOYOTA', 'NCP31', 'bB', 'GASOLINE', '2WD', NULL, 1500, 5, 'Z'),
+('TOYOTA', 'NCP34', 'bB', 'GASOLINE', '2WD', NULL, 1500, 2, 'OPEN DECK'),
+('TOYOTA', 'NCP35', 'bB', 'GASOLINE', '4WD', NULL, 1500, 5, 'Z'),
+('TOYOTA', 'QNC20', 'bB', 'GASOLINE', '2WD', NULL, 1300, 5, 'S X VER'),
+('TOYOTA', 'QNC21', 'bB', 'GASOLINE', '2WD', NULL, 1300, 5, 'S KIRAMEKI'),
+('TOYOTA', 'QNC25', 'bB', 'GASOLINE', '4WD', NULL, 1300, 5, 'S'),
+('TOYOTA', 'NGX10', 'C-HR', 'GASOLINE', '2WD', NULL, 1200, 5, 'S-T'),
+('TOYOTA', 'NGX50', 'C-HR', 'GASOLINE', '4WD', NULL, 1200, 5, 'S-T'),
+('TOYOTA', 'ZYX10', 'C-HR', 'HYBRID', '2WD', NULL, 1800, 5, 'S'),
+('TOYOTA', 'ZYX11', 'C-HR', 'HYBRID', '2WD', NULL, 1800, 5, 'S'),
+('TOYOTA', 'ACA21', 'RAV4', 'GASOLINE', '4WD', NULL, 2000, 5, 'X'),
+('TOYOTA', 'ACA31', 'RAV4', 'GASOLINE', '4WD', NULL, 2400, 5, 'X'),
+('TOYOTA', 'ACA36', 'RAV4', 'GASOLINE', '2WD', NULL, 2400, 5, 'X'),
+('TOYOTA', 'AXAH52', 'RAV4', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AXAH54', 'RAV4', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MXAA52', 'RAV4', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MXAA54', 'RAV4', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SXA10', 'RAV4', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SXA11', 'RAV4', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SXA15', 'RAV4', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZCA26', 'RAV4', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANM10', 'ISIS', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANM15', 'ISIS', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZGM10', 'ISIS', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZGM11', 'ISIS', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZGM15', 'ISIS', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZNM10', 'ISIS', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MXPK10', 'AQUA', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MXPK11', 'AQUA', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MXPK16', 'AQUA', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NHP10', 'AQUA', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AZT240', 'ALLION', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZT240', 'ALLION', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZT260', 'ALLION', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRT260', 'ALLION', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRT261', 'ALLION', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRT265', 'ALLION', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZZT240', 'ALLION', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZZT245', 'ALLION', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANH10', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANH15', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MNH10', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MNH15', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AGH30', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AGH35', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AGH40', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AGH45', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANH20', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANH25', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GGH20', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GGH25', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GGH30', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GGH35', 'ALPHARD', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AAHP45', 'ALPHARD PHEV', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AAHH40', 'ALPHARD HV', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AAHH45', 'ALPHARD HV', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ATH10', 'ALPHARD HV', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ATH20', 'ALPHARD HV', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AYH30', 'ALPHARD HV', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE121', 'ALLEX', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE124', 'ALLEX', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZZE122', 'ALLEX', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZZE123', 'ALLEX', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZZE124', 'ALLEX', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP110', 'IST', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP115', 'IST', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP60', 'IST', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP61', 'IST', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP65', 'IST', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZSP110', 'IST', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACM21', 'IPSUM', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACM26', 'IPSUM', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SXM10', 'IPSUM', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SXM15', 'IPSUM', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANE10', 'WISH', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANE11', 'WISH', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZGE20', 'WISH', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZGE21', 'WISH', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZGE22', 'WISH', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZGE25', 'WISH', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZNE10', 'WISH', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZNE14', 'WISH', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'KSP130', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'KSP90', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP10', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP13', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NC131', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP15', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP91', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NCP95', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NHP130', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NSP130', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NSP131', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NSP135', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SCP10', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SCP13', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SCP90', 'VITZ', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AGH30', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AGH35', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANH20', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ANH25', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GGH20', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GGH25', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GGH30', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GGH35', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TAHA40', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TAHA45', 'VELLFIRE', 'GASOLINE', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AAHP45W', 'VELLFIRE', 'PHEV', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AAHH40', 'VELLFIRE', 'HYBRID', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AAHH45', 'VELLFIRE', 'HYBRID', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ATH20', 'VELLFIRE', 'HYBRID', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AYH30', 'VELLFIRE', 'HYBRID', NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AZR60', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AZR65', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MZRA90', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MZRA92', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MZRA95', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRR70', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRR75', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRR80', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRR85', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWR80', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWR90', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWR92', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWR95', 'VOXY', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRR80', 'ESQUIRE', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRR85', 'ESQUIRE', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWR80', 'ESQUIRE', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACR30', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACR40', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACR50', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACR55', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GSR50', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'GSR55', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MCR30', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MCR40', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR10', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR11', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR20', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR21', 'ESTIMA', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'CXR10', 'Toyota Estima Emina', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'CXR20', 'Toyota Estima Emina', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR10', 'Toyota Estima Emina', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR20', 'Toyota Estima Emina', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR21', 'Toyota Estima Emina', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR10', 'Toyota Estima Lucida', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR11', 'Toyota Estima Lucida', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR20', 'Toyota Estima Lucida', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'TCR21', 'Toyota Estima Lucida', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AHR10', 'Toyota Estima Hybrid', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AHR20', 'Toyota Estima Hybrid', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NRE185', 'Toyota Auris', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE151', 'Toyota Auris', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE154', 'Toyota Auris', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE181', 'Toyota Auris', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE184', 'Toyota Auris', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRE152', 'Toyota Auris', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRE154', 'Toyota Auris', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRE186', 'Toyota Auris', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWE186', 'Toyota Auris', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACV30', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACV35', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACV40', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ACV45', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AVV50', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AXVH70', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AXVH75', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SV22', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SV30', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SV32', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SV40', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SV41', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SXV20', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'SXV25', 'Toyota Camry', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AE100', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AE101', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AE110', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AE111', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AE114', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AE91', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AE92', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'CE100', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'CE104', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'CE110', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'CE113', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'CE114', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'EE111', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'KE10', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'KE11', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'KE15', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'KE20', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MZEA17', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NRE210', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE120', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE121', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE124', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRE212', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWE211', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWE214', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWE215', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZWE219', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZZE122', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZZE124', 'Toyota Corolla', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NKE165', 'Toyota Corolla Axio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NRE160', 'Toyota Corolla Axio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NRE161', 'Toyota Corolla Axio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE141', 'Toyota Corolla Axio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE144', 'Toyota Corolla Axio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE161', 'Toyota Corolla Axio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE164', 'Toyota Corolla Axio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRE142', 'Toyota Corolla Axio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZRE144', 'Toyota Corolla Axio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MXGA10', 'Toyota Corolla Cross', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'MXGH15', 'Toyota Corolla Cross', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZSG10', 'Toyota Corolla Cross', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZVG11', 'Toyota Corolla Cross', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZVG13', 'Toyota Corolla Cross', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZVG15', 'Toyota Corolla Cross', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZVG16', 'Toyota Corolla Cross', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AE111', 'Toyota Corolla Spacio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'AE115', 'Toyota Corolla Spacio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'NZE121', 'Toyota Corolla Spacio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZZE122', 'Toyota Corolla Spacio', NULL, NULL, NULL, NULL, NULL, NULL),
+('TOYOTA', 'ZZE124', 'Toyota Corolla Spacio', NULL, NULL, NULL, NULL, NULL, NULL);
+
+-- ---------------------------------------------
+-- RIXO_PRICES: Auction house pricing data (164 rows)
+-- REQUIRED: When users select an auction house and vehicle type,
+-- the system looks up this table to auto-fill the Rixo price,
+-- stock location, Rixo company, and venue ID. Without this data,
+-- price lookup will not work.
+-- ---------------------------------------------
+INSERT INTO rixo_prices (auction_name, type_of_vehicle, stock_location, rixo_company, venue_id, rixo_price) VALUES
+('AUCNETVAA (KISARAZU)', 'CAR, TRUCK', 'GLOBAL KAWASAKI', 'YAMAZAKI', 'A052166', '8000'),
+('AUCNETVAA (SAKURA)', 'Car', 'GLOBAL KAWASAKI', 'YAMAZAKI', 'A052166', '8000'),
+('HONDA TOKYO', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', '1355400', '8000'),
+('HONDA KANSAI', 'Car', 'KLC', 'KLC', '1355400', '5500'),
+('HONDA NAGOYA', 'Truck', 'GLOBAL NAGOYA', 'STYLISH AUTO', '1355400', '5000'),
+('HONDA KYUSHU', 'Car', 'GLOBAL HAKATA', 'Y''S', '1355400', '6820'),
+('HONDA SENDAI', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '1355400', '19800'),
+('HONDA HOKKAIDO', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '1355400', '33600'),
+('JU TOKYO', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', '20558', '6000'),
+('NOAA', 'Car', 'KLC', 'KLC', 'Z289700', '5500'),
+('CAA TOKYO', 'Car', 'GLOBAL KAWASAKI', 'YAMAZAKI', 'T008288', '6000'),
+('CAA TOKYO', 'Truck', 'GLOBAL KAWASAKI', 'SHAHBAZ', 'T008288', '7000'),
+('CAA GIFU', 'Truck', 'GLOBAL NAGOYA', 'STYLISH AUTO', 'T008288', '7500'),
+('CAA TOHOKU', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', 'T008288', '28200'),
+('TAA KINKI', 'Truck', 'KLC', 'KLC', '65010', '9500'),
+('TAA KINKI (SHIGA YARD)', 'Car', 'KLC', 'KLC', '65010', '18000'),
+('TAA KYUSHU', 'Truck', 'GLOBAL HAKATA', 'Y''S', '65010', '4620'),
+('TAA MINAMI KYUSHU', 'Car', 'GLOBAL HAKATA', 'Y''S', '65010', '15400'),
+('TAA HIROSHIMA', 'Truck', 'GLOBAL HAKATA', 'Y''S', '65010', '12000'),
+('TAA SHIKOKU', 'Car', 'KLC', 'KLC', '65010', '15000'),
+('TAA SHIKOKU (EHIME)', 'Truck', 'KLC', 'TAA', '65010', '20000'),
+('JU SAITAMA', 'Car', 'GLOBAL KAWASAKI', 'YAMAZAKI', '16845', '7000'),
+('JU SAITAMA', 'Truck', 'GLOBAL KAWASAKI', 'SHAHBAZ', '16845', '7000'),
+('JU SHIZUOKA', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', '900513', '14000'),
+('JU NAGANO', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '80536', '26400'),
+('JU MIE', 'Car', 'KLC', 'KLC', '316009', ''),
+('JU YAMAGUCHI', 'Truck', 'GLOBAL HAKATA', 'Y''S', '59160', ''),
+('JU AOMORI', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '200539', '52400'),
+('JU FUKUI', 'Truck', '-', '-', '126589', ''),
+('NAA FUKUOKA', 'Car', 'GLOBAL HAKATA', 'Y''S', '9733100', '3900'),
+('SAA SAPPORO', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '57455', '34600'),
+('ORIX KOBE', 'Car', 'KLC', 'KLC', '50000052', '5500'),
+('ORIX FUKUOKA', 'Truck', 'GLOBAL HAKATA', 'Y''S', '50000052', '3900'),
+('ORIX SENDAI', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '50000052', '19800'),
+('NPS TOKYO', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', '7378', '7000'),
+('NPS OSAKA', 'Car', 'KLC', 'KLC', '7378', '3800'),
+('NPS SENDAI', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '7378', '19800'),
+('NPS FUKUOKA', 'Car', 'GLOBAL HAKATA', 'Y''S', '7378', ''),
+('NPS TOCHIGI', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '7378', '13200'),
+('NPS TOMAKOMAI', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '7378', ''),
+('LUM NAGOYA', 'Truck', 'GLOBAL NAGOYA', 'LOGICO', '1564', '6000'),
+('LUM FUKUOKA', 'Car', 'GLOBAL HAKATA', 'LOGICO', '1564', '6200'),
+('USS YOKOHAMA', 'Car', 'GLOBAL KAWASAKI', 'YAMAZAKI', 'E0483', '4000'),
+('USS YOKOHAMA', 'Truck', 'GLOBAL KAWASAKI', 'SHAHBAZ', 'E0483', '3500'),
+('USS YOKOHAMA', 'TRUCKS BUS', 'GLOBAL KAWASAKI', 'SHAHBAZ', 'E0483', '8000'),
+('USS R-NAGOYA', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', 'E0483', '5000'),
+('CAA CHUBU', 'Truck', 'GLOBAL NAGOYA', 'STYLISH AUTO', 'T008288', '6000'),
+('BAYAUC', 'Car', 'KLC', 'KLC', '24016', '5000'),
+('IAA OSAKA', 'Truck', 'KLC', 'KLC', '27791', '3800'),
+('LAA SHIKOKU', 'Car', 'KLC', 'KLC', '00S7784', '15000'),
+('HERO', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', '30617', '10000'),
+('KCAA MINAMI KYUSHU', 'Car', 'GLOBAL HAKATA', 'Y''S', 'J2671', '14300'),
+('KCAA KYOTO', 'Truck', 'KLC', 'KLC', 'J2671', '9500'),
+('ISUZU TOKYO', 'Car', 'GLOBAL KAWASAKI', '-', 'A052166', ''),
+('MIRIVE SAITAMA', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '710596', '10800'),
+('JU IBARAKI', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '80548', '14400'),
+('JU ISHIKAWA', 'Truck', 'GLOBAL NAGOYA', 'LOGICO', '70496', '16600'),
+('JU KUMAMOTO', 'Car', 'GLOBAL HAKATA', 'Y''S', '70513', '12100'),
+('JU OITA', 'Truck', 'GLOBAL HAKATA', 'Y''S', '45522', ''),
+('JU NAGASAKI', 'Car', 'GLOBAL HAKATA', 'Y''S', 'A052166', ''),
+('ORIX ATSUGI', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '50000052', '8900'),
+('ORIX ATSUGI (OYAMA)', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '50000052', '13200'),
+('LUM TOKYO', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '1564', '9600'),
+('LUM TOKYO (SENDAI)', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '1564', '19800'),
+('USS SAPPORO', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', 'E0483', '34600'),
+('USS TOHOKU', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', 'E0483', '19400'),
+('USS NIIGATA', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', 'E0483', '22200'),
+('USS KOBE', 'Truck', 'KLC', 'KLC', 'E0483', '5500'),
+('USS FUKUOKA', 'Car', 'GLOBAL HAKATA', 'Y''S', 'E0483', '4620'),
+('JAA', 'Car', 'GLOBAL KAWASAKI', 'YAMAZAKI', '11390', '6000'),
+('JAA', 'Truck', 'GLOBAL KAWASAKI', 'SHAHBAZ', '11390', '6000'),
+('TAA CHUBU', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', '65010', '5000'),
+('TAA CHUBU (SHIZUOKA)', 'Truck', 'GLOBAL NAGOYA', 'STYLISH AUTO', '65010', '13000'),
+('TAA CHUBU (HOKURIKU)', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', '65010', '18000'),
+('TAA CHUBU (HOKURIKU)', 'Truck', 'GLOBAL NAGOYA', 'LOGICO', '65010', '16600'),
+('TAA KANTO', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', '65010', '6000'),
+('TAA KANTO', 'CAR', 'GLOBAL KAWASAKI', 'SHAHBAZ', '65010', '6000'),
+('TAA KANTO', 'BIG CAR/TRUCK', 'GLOBAL KAWASAKI', 'SHAHBAZ', '65010', '8000'),
+('TAA KANTO (KITA KANTO)', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '65010', '12000'),
+('TAA KANTO (SAITAMA)', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', '65010', '7000'),
+('TAA KANTO (SAITAMA)', 'Car', 'GLOBAL KAWASAKI', 'SHAHBAZ', '65010', '8000'),
+('TAA KANTO (TAMA)', 'Truck', 'GLOBAL KAWASAKI', 'TAA', '65010', '12000'),
+('TAA TOHOKU', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '65010', '18000'),
+('TAA TOHOKU (MIYAGI)', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '65010', '19800'),
+('TAA HOKKAIDO', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '65010', '34600'),
+('KCAA FUKUOKA', 'Truck', 'GLOBAL HAKATA', 'Y''S', 'J2671', '3900'),
+('MIRIVE OSAKA', 'Car', 'KLC', 'KLC', '710596', '6000'),
+('ARAI OYAMA', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', '22431', '10000'),
+('ARAI OYAMA', 'CAR', 'GLOBAL KAWASAKI', 'SHAHBAZ', '22431', '10000'),
+('ARAI OYAMA', 'HIACE', 'GLOBAL KAWASAKI', 'SHAHBAZ', '22431', '12000'),
+('ARAI OYAMA', 'TRUCKS', 'GLOBAL KAWASAKI', 'SHAHBAZ', '22431', '18000'),
+('NAA NAGOYA', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', '9733100', '7000'),
+('NAA NAGOYA (HOKURIKU)', 'Truck', 'GLOBAL NAGOYA', 'STYLISH AUTO', '9733100', '28000'),
+('NAA NAGOYA (HOKURIKU)', 'Car', 'GLOBAL NAGOYA', 'HIDA', '9733100', '15000'),
+('NAA OSAKA', 'Truck', 'KLC', 'KLC', '9733100', '5500'),
+('JU AICHI', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', '95518', '4000'),
+('JU HIROSHIMA', 'Truck', 'GLOBAL HAKATA', 'Y''S', '77510', '14300'),
+('JU FUKUSHIMA', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '88472', '18000'),
+('JU GUNMA', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '700485', '12000'),
+('JU KANAGAWA', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '90471', '12000'),
+('JU KANAGAWA', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', '90471', ''),
+('JU TOYAMA', 'Truck', 'GLOBAL NAGOYA', 'STYLISH AUTO', '600525', ''),
+('JU TOYAMA', 'Car', 'GLOBAL NAGOYA', 'LOGICO', '600525', '18100'),
+('JU MIYAZAKI', 'Truck', 'GLOBAL HAKATA', 'Y''S', '70519', ''),
+('ZIP OSAKA', 'Car', 'KLC', 'KLC', '41452', '5500'),
+('SAA HAMAMATSU', 'Truck', 'GLOBAL NAGOYA', 'STYLISH AUTO', '3732', '10000'),
+('ISUZU KYUSHU', 'Car', 'GLOBAL HAKATA', 'Y''S', 'A052166', '4400'),
+('LUM HOKKAIDO', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '1564', '33600'),
+('LUM KOBE', 'Car', 'KLC', 'LOGICO', '1564', '6500'),
+('LUM KOBE (HIROSHIMA)', 'Truck', 'GLOBAL HAKATA', 'LOGICO', '1564', '30600'),
+('ZERO SHONAN', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', 'B2B901', '8900'),
+('ZERO OSAKA', 'Truck', 'KLC', 'KLC', 'B2B901', ''),
+('USS TOKYO', 'CAR', 'GLOBAL KAWASAKI', 'YAMAZAKI', 'E0483', '7000'),
+('USS TOKYO', 'CAR', 'GLOBAL KAWASAKI', 'SHAHBAZ', 'E0483', '7000'),
+('USS TOKYO', 'G CLASS/ LAND CRUISER/', 'GLOBAL KAWASAKI', 'SHAHBAZ', 'E0483', '10000'),
+('USS TOKYO', 'TRUCKS', 'GLOBAL KAWASAKI', 'SHAHBAZ', 'E0483', '15000'),
+('JU FUKUOKA', 'Car', 'GLOBAL HAKATA', 'Y''S', '37488', '3900'),
+('JU MIYAGI', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '70506', '19400'),
+('JU CHIBA', 'Car', 'GLOBAL KAWASAKI', 'YAMAZAKI', '59077', '8000'),
+('JU CHIBA', 'Truck', 'GLOBAL KAWASAKI', 'SHAHBAZ', '59077', '7000'),
+('JU NIIGATA', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '45548', '22200'),
+('JU TOCHIGI', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '80521', '13200'),
+('JU OKINAWA', 'Car', '-', '-', '53143', ''),
+('JU HOKKAIDO', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '63257', '34600'),
+('JU SHIMANE', 'Car', '-', '-', 'A052166', ''),
+('ARAI BAYSIDE', 'Car', 'GLOBAL KAWASAKI', 'YAMAZAKI', '22431', '3000'),
+('ARAI BAYSIDE', 'Truck', 'GLOBAL KAWASAKI', 'SHAHBAZ', '22431', '3000'),
+('ARAI BAYSIDE (DAI 2 YARD)', 'Car', 'GLOBAL KAWASAKI', 'SHAHBAZ', '22431', '3500'),
+('ARAI SENDAI', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '22431', '19800'),
+('LAA OKAYAMA', 'Car', 'KLC', 'KLC', '00S7784', '10800'),
+('NAA TOKYO', 'CAR', 'GLOBAL KAWASAKI', 'YAMAZAKI', '9733100', '4000'),
+('NAA TOKYO', 'CAR', 'GLOBAL KAWASAKI', 'SHAHBAZ', '9733100', '3500'),
+('KCAA YAMAGUCHI', 'Truck', 'GLOBAL HAKATA', 'Y''S', 'J2671', '10200'),
+('ISUZU KOBE', 'Car', 'KLC', 'KLC', 'A052166', '14000'),
+('ISUZU KOBE (SAKURAI YARD)', 'Truck', 'KLC', 'KLC', 'A052166', '28000'),
+('MIRIVE AICHI', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', '710596', '6000'),
+('ZERO HOKKAIDO', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', 'B2B901', '33600'),
+('ZERO SENDAI', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', 'B2B901', '19800'),
+('ZERO CHIBA', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', 'B2B901', '7000'),
+('ZERO HAKATA', 'Car', 'GLOBAL HAKATA', 'Y''S', 'B2B901', '7200'),
+('USS SAITAMA', 'Truck', 'GLOBAL KAWASAKI', 'YAMAZAKI', 'E0483', '8000'),
+('USS NAGOYA', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', 'E0483', '5000'),
+('USS OSAKA', 'Truck', 'KLC', 'KLC', 'E0483', '5500'),
+('JU GIFU', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', '50354', '7500'),
+('JU NARA', 'Truck', 'KLC', 'KLC', '130528', '9500'),
+('JU YAMAGATA', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', '90532', ''),
+('JU YAMANASHI', 'Truck', 'GLOBAL KAWASAKI', 'LOGICO', '300541', '21600'),
+('TAA YOKOHAMA', 'Car', 'GLOBAL KAWASAKI', 'YAMAZAKI', '65010', '9000'),
+('TAA YOKOHAMA', 'Truck', 'GLOBAL KAWASAKI', 'SHAHBAZ', '65010', '3500'),
+('TAA YOKOHAMA (ATSUGI)', 'Car', 'GLOBAL KAWASAKI', 'TAA', '65010', '9900'),
+('TAA HYOGO', 'Truck', 'KLC', 'KLC', '65010', '5500'),
+('ZIP TOKYO', 'Car', 'GLOBAL KAWASAKI', 'YAMAZAKI', '41452', '8000'),
+('ZIP TOKYO', 'Truck', 'GLOBAL KAWASAKI', 'SHAHBAZ', '41452', '6000'),
+('USS GUNMA', 'Car', 'GLOBAL KAWASAKI', 'LOGICO', 'E0483', '13200'),
+('USS HOKURIKU', 'Truck', 'GLOBAL NAGOYA', 'LOGICO', 'E0483', '19800'),
+('USS HOKURIKU', 'Car', 'GLOBAL NAGOYA', 'STYLISH AUTO', 'E0483', '18000'),
+('USS SHIZUOKA', 'Truck', 'GLOBAL NAGOYA', 'STYLISH AUTO', 'E0483', '13000'),
+('USS OKAYAMA', 'Car', 'KLC', 'KLC', 'E0483', '10800'),
+('USS KYUSHU', 'Truck', 'GLOBAL HAKATA', 'Y''S', 'E0483', '4620'),
+('HAA KOBE', 'Car', 'KLC', 'KLC', 'E0483', '5500'),
+('HAA KOBE', 'Truck', 'ECL KOBE', 'KLC', 'E0483', '4500');
 
 -- ===========================================
--- PRE-POPULATED DATA FOR MULTI-PLATFORM IMAGE
+-- END OF INITIALIZATION SCRIPT
 -- ===========================================
--- Note: Sample data for clients, events, and users
--- is included in their respective migration files:
--- - database/10-clients-table.sql
--- - database/11-events-table.sql
--- - database/12-users-table.sql
-
--- Insert sample purchase data (3+ records)
-INSERT INTO purchases (date, chassis, car_model_year, brand, car_name, auction_no, stock_location, rixo_company, client_name, client_id, country, price, auction_fee, rixo_price, shipment_charges, freight, inspection_fee, repair_charges, misc_charges, rixo_requested, rixo_confirmed, notes) VALUES
-('24 Oct, 2025', 'JHMGD38408S123456', '2018', 'Honda', 'Civic', 'USS', 'Global Hakata', 'Rixo Japan', 'Tokyo Auto Import', 1, 'Japan', '15,500', '500', '45000', '5000', '400', '300', '200', '150', 'TRUE', 'TRUE', 'Sample purchase 1'),
-('24 Oct, 2025', 'JT2BF28K123456789', '2015', 'Toyota', 'Prius', 'CAA', 'Global Hakata', 'Rixo Tokyo', 'Tokyo Auto Import', 1, 'Japan', '12,800', '400', '38000', '4000', '350', '250', '180', '120', 'TRUE', 'TRUE', 'Sample purchase 2'),
-('24 Oct, 2025', 'WDB12345678901234', '2017', 'Mercedes', 'C-Class', 'TAA', 'Global Hakata', 'Rixo Osaka', 'Tokyo Auto Import', 1, 'Japan', '28,500', '800', '85000', '8000', '700', '500', '400', '300', 'TRUE', 'TRUE', 'Sample purchase 3'),
-('24 Oct, 2025', '1HGBH41JXMN123456', '2019', 'Honda', 'Accord', 'USS', 'Global Hakata', 'Rixo Japan', 'Tokyo Auto Import', 1, 'Japan', '18,200', '600', '52000', '6000', '500', '400', '300', '200', 'TRUE', 'TRUE', 'Sample purchase 4');
-
--- ===========================================
--- BOOKING SYSTEM TABLES REMOVED
--- ===========================================
--- Note: bookings, booking_calculations, and vessels tables have been removed
--- booking_id column remains in purchases table but without foreign key constraints
-
--- Add drive_type column if it doesn't exist (for existing databases)
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'purchases' 
-    AND COLUMN_NAME = 'drive_type');
-SET @sql = IF(@col_exists = 0, 
-    'ALTER TABLE purchases ADD COLUMN drive_type VARCHAR(50) NULL', 
-    'SELECT 1');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Add tax_total column if it doesn't exist (for existing databases)
-SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS 
-    WHERE TABLE_SCHEMA = DATABASE() 
-    AND TABLE_NAME = 'purchases' 
-    AND COLUMN_NAME = 'tax_total');
-SET @sql = IF(@col_exists = 0, 
-    'ALTER TABLE purchases ADD COLUMN tax_total VARCHAR(50) NULL', 
-    'SELECT 1');
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- Create index for booking_id if needed (idempotent)
-SET @index_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS 
-    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND INDEX_NAME = 'idx_purchase_booking_id');
-SET @sql = IF(@index_exists = 0, 'CREATE INDEX idx_purchase_booking_id ON purchases(booking_id)', 'SELECT 1');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

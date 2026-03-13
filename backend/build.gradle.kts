@@ -40,10 +40,6 @@ dependencies {
     // Security - for BCrypt password hashing only (no full security filterchain)
     implementation("org.springframework.security:spring-security-crypto:6.2.0")
     
-    // Flyway for database migrations
-    implementation("org.flywaydb:flyway-core")
-    implementation("org.flywaydb:flyway-mysql")
-    
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
 

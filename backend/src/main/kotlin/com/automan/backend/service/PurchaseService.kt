@@ -104,6 +104,7 @@ class PurchaseService(
                 auctionNo = purchase.auctionNo ?: existingPurchase.auctionNo,
                 auctionHouse = purchase.auctionHouse ?: existingPurchase.auctionHouse,
                 stockLocation = purchase.stockLocation ?: existingPurchase.stockLocation,
+                pol = purchase.pol ?: existingPurchase.pol,
                 rixoCompany = purchase.rixoCompany ?: existingPurchase.rixoCompany,
                 clientName = purchase.clientName ?: existingPurchase.clientName,
                 consignee = purchase.consignee ?: existingPurchase.consignee,
@@ -224,6 +225,7 @@ class PurchaseService(
                     ?: (updateData["auctionName"] as? String)
                     ?: existingPurchase.auctionHouse,
                 stockLocation = updateData["stockLocation"] as? String ?: existingPurchase.stockLocation,
+                pol = updateData["pol"] as? String ?: existingPurchase.pol,
                 rixoCompany = updateData["rixoCompany"] as? String ?: existingPurchase.rixoCompany,
                 clientName = updateData["clientName"] as? String ?: existingPurchase.clientName,
                 consignee = run {
@@ -856,6 +858,7 @@ class PurchaseService(
             auctionNo = getColumnValue(values, columnMapping, "AUCTION NO", "AUCTION NO.", "AUCTION")?.take(10) ?: "",
             auctionHouse = getColumnValue(values, columnMapping, "AUCTION HOUSE", "AUCTION NAME", "AUCTION")?.take(255) ?: "",
             stockLocation = getColumnValue(values, columnMapping, "STOCK LOCATION")?.take(255) ?: "",
+            pol = getColumnValue(values, columnMapping, "POL")?.take(255) ?: null,
             rixoCompany = getColumnValue(values, columnMapping, "RIXO COMPANY")?.take(255) ?: "",
             clientName = getColumnValue(values, columnMapping, "CLIENT NAME")?.take(255) ?: "",
             country = getColumnValue(values, columnMapping, "COUNTRY")?.take(50) ?: "",
@@ -1060,6 +1063,7 @@ class PurchaseService(
                     
                     updatedPurchase = when (field) {
                         "rixoCompany" -> updatedPurchase.copy(rixoCompany = value)
+                        "pol" -> updatedPurchase.copy(pol = value)
                         "rixoRequested" -> updatedPurchase.copy(rixoRequested = value)
                         "rixoConfirmed" -> updatedPurchase.copy(rixoConfirmed = value)
                         "rixoPrice" -> updatedPurchase.copy(rixoPrice = value)
@@ -1127,6 +1131,7 @@ class PurchaseService(
                         carName = formData["carName"] as? String ?: purchase.carName,
                         clientName = formData["clientName"] as? String ?: purchase.clientName,
                         stockLocation = formData["stockLocation"] as? String ?: purchase.stockLocation,
+                        pol = formData["pol"] as? String ?: purchase.pol,
                         venueId = formData["venueId"] as? String ?: purchase.venueId,
                         numberCut = formData["numberCut"] as? String ?: purchase.numberCut
                     )
@@ -1217,6 +1222,10 @@ class PurchaseService(
         return purchaseRepository.findDistinctStockLocationsByCountry(country)
     }
     
+    fun getPolByCountry(country: String): List<String> {
+        return purchaseRepository.findDistinctPolByCountry(country)
+    }
+    
     fun getUniqueRixoCompanies(): List<String> {
         return purchaseRepository.findDistinctRixoCompanies()
     }
@@ -1234,6 +1243,11 @@ class PurchaseService(
         // Use optimized database query instead of loading all purchases into memory
         // This is much more efficient, especially with large datasets
         return purchaseRepository.findFilteredChassis(country, polPort)
+    }
+
+    @Transactional(readOnly = true)
+    fun getFilteredPurchasesByCountryAndPol(country: String, polPort: String): List<Purchase> {
+        return purchaseRepository.findFilteredPurchasesByCountryAndPol(country, polPort)
     }
     
     fun getUnshippedChassisByPolPort(polPort: String): List<String> {

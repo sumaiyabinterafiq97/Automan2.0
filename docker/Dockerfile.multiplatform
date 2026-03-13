@@ -88,14 +88,8 @@ mysql -u root -e "CREATE USER IF NOT EXISTS '\''automan_user'\''@'\''localhost'\
 mysql -u root -e "GRANT ALL PRIVILEGES ON automan_car_purchase.* TO '\''automan_user'\''@'\''localhost'\'';"\n\
 mysql -u root -e "FLUSH PRIVILEGES;"\n\
 \n\
-# Import database schema and migrations\n\
+# Import database schema and seed data (single consolidated file)\n\
 mysql -u root automan_car_purchase < /app/01-init-multiplatform.sql\n\
-mysql -u root automan_car_purchase < /app/02-car-brand-mapping.sql\n\
-mysql -u root automan_car_purchase < /app/03-booking-mappings.sql\n\
-mysql -u root automan_car_purchase < /app/04-rixo-prices.sql\n\
-mysql -u root automan_car_purchase < /app/10-clients-table.sql\n\
-mysql -u root automan_car_purchase < /app/11-events-table.sql\n\
-mysql -u root automan_car_purchase < /app/12-users-table.sql\n\
 \n\
 # Start backend in background\n\
 java -jar app.jar &\n\
@@ -105,14 +99,8 @@ nginx -g "daemon off;"' > /app/start.sh
 
 RUN chmod +x /app/start.sh
 
-# Copy database migration scripts
+# Copy database initialization script (consolidated)
 COPY database/01-init-multiplatform.sql /app/01-init-multiplatform.sql
-COPY database/02-car-brand-mapping.sql /app/02-car-brand-mapping.sql
-COPY database/03-booking-mappings.sql /app/03-booking-mappings.sql
-COPY database/04-rixo-prices.sql /app/04-rixo-prices.sql
-COPY database/10-clients-table.sql /app/10-clients-table.sql
-COPY database/11-events-table.sql /app/11-events-table.sql
-COPY database/12-users-table.sql /app/12-users-table.sql
 
 # Expose ports
 EXPOSE 8080 8083 3306

@@ -22,9 +22,10 @@ A comprehensive car purchase management system built with Kotlin JS Compose for 
 - **Deployment Scripts**:
   - `./scripts/build-and-deploy-frontend.sh` – bump version, build Kotlin/JS, build Docker image, recreate frontend container (uses compose for correct network)
   - `./scripts/rebuild-and-restart-backend.sh` – rebuild backend image and restart container
-- **Database Migrations**:
-  - `13-pending-signups.sql` – pending signups table for admin approval flow
-  - `displacement` and `package_price` column drops consolidated into `01-init-multiplatform.sql` cleanup section
+- **Database Consolidation**:
+  - All SQL files consolidated into single `01-init-multiplatform.sql`
+  - Contains all table definitions and essential seed data
+  - Comments explain why each INSERT is required
 
 ### Previous Updates (January 2026)
 - **Security Improvements**: XSS protection, safe localStorage, improved error handling
@@ -154,23 +155,20 @@ The database is automatically initialized with:
 - **Password**: `automan_password`
 - **Root Password**: `rootpassword`
 
-### Database Migrations
+### Database Initialization
 
-All SQL migration files in the `database/` directory are automatically executed in order:
+The `database/` directory contains a single consolidated SQL file:
 
-**Main Migrations:**
-- `01-init-multiplatform.sql` - Main schema (purchases table and related indexes)
-- `02-car-brand-mapping.sql` - Car brand mappings table and seed data
-- `03-booking-mappings.sql` - Booking country mappings table and seed data
-- `04-rixo-prices.sql` - Rixo prices table, data import, venue ID updates, and currency cleanup (fully consolidated)
+- `01-init-multiplatform.sql` - Complete database initialization including:
+  - All table definitions (users, clients, events, purchases, etc.)
+  - **Essential seed data** with comments explaining why each INSERT is required:
+    - `users` - Default admin account for initial login
+    - `master_menu` - Form dropdown values (clients, countries, suppliers, etc.)
+    - `car_brand_mapping` - Chassis code to vehicle details mapping
+    - `booking_mappings` - Country/client to consignee/POD/POL mappings
+    - `rixo_prices` - Auction house pricing data
 
-**Client & User Management:**
-- `10-clients-table.sql` - Clients table with indexes and sample data
-- `11-events-table.sql` - Events table for client transactions
-- `12-users-table.sql` - Users table for authentication
-- `13-pending-signups.sql` - Pending signups table for admin approval email verification
-
-**Note**: All migrations are idempotent and can be run multiple times safely. The `04-rixo-prices.sql` file includes all consolidated rixo-related migrations (data import, venue updates, currency cleanup).
+**Note**: This file is run automatically on first database initialization.
 
 ## 🛠️ Manual Setup (Alternative)
 
@@ -572,8 +570,7 @@ Automan2.0/
 │   ├── src/main/resources/
 │   │   ├── application.yml           # Main config
 │   │   ├── application-docker.yml   # Docker profile
-│   │   ├── application-dev.yml     # Dev profile
-│   │   └── db/migration/             # Flyway migrations (V30, V31, etc.)
+│   │   └── application-dev.yml     # Dev profile
 │   └── src/test/                    # Integration tests
 ├── src/jsMain/                       # Kotlin JS Frontend
 │   ├── kotlin/com/automan/purchase/
@@ -598,16 +595,8 @@ Automan2.0/
 │       ├── rixo-price-mapping.js     # Rixo price mapping logic
 │       ├── booking-mapping.js        # Booking mapping logic
 │       └── booking-mapping-modal.js  # Booking modal logic
-├── database/                         # MySQL init migrations (run on first DB start)
-│   ├── 01-init-multiplatform.sql    # Main schema, cleanup, purchases table
-│   ├── 02-car-brand-mapping.sql     # Car brand mappings
-│   ├── 03-booking-mappings.sql      # Booking country mappings
-│   ├── 04-rixo-prices.sql          # Rixo prices (fully consolidated)
-│   ├── 10-clients-table.sql         # Clients table
-│   ├── 11-events-table.sql          # Events table
-│   ├── 12-users-table.sql          # Users table
-│   ├── 13-pending-signups.sql      # Pending signups (admin approval flow)
-│   └── archived/                    # Archived migrations (reference only)
+├── database/                         # MySQL initialization (run on first DB start)
+│   └── 01-init-multiplatform.sql    # Complete schema + essential seed data
 ├── docker/
 │   ├── docker-compose.multiplatform.yml  # Main compose (MySQL, backend, frontend, phpMyAdmin)
 │   ├── docker-compose.prod.yml.example   # Production compose example
@@ -718,7 +707,7 @@ Backend will use `application.yml` (localhost:3306). For Docker profile: `SPRING
 ## 📝 Notes
 
 - **Docker Volumes**: The system uses Docker volumes to persist database data. Data is retained even after stopping containers. To start fresh, use `docker compose -f docker/docker-compose.multiplatform.yml down -v` to remove volumes.
-- **Database Migrations**: MySQL runs `database/*.sql` on first init (empty volume) in alphabetical order. Migrations are idempotent. Backend Flyway is disabled; schema is managed via MySQL init scripts.
+- **Database Initialization**: MySQL runs `database/01-init-multiplatform.sql` on first init (empty volume). The script creates all tables and inserts essential seed data.
 - **Frontend Cache Busting**: The frontend uses cache busting. Use `./scripts/build-and-deploy-frontend.sh` to bump version, build, and deploy. The script updates `index.html`, builds the Kotlin/JS bundle, rebuilds the Docker image, and recreates the container.
 - **Database Schema**: 
   - Main tables: `purchases`, `clients`, `events`, `users`, `pending_signups`

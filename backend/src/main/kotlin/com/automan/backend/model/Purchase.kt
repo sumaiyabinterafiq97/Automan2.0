@@ -79,6 +79,9 @@ data class Purchase(
     @Column(name = "stock_location")
     val stockLocation: String? = null,
     
+    @Column(name = "pol")
+    val pol: String? = null,
+    
     @Column(name = "rixo_company")
     val rixoCompany: String? = null,
     

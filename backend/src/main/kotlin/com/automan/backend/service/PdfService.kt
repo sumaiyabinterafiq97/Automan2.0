@@ -308,22 +308,16 @@ class PdfService {
         val japaneseFont = getJapaneseFont()
         Logger.debug("PDF Service: Using font: ${japaneseFont.fontProgram?.fontNames?.getFontName()}")
 
-        // Add title with 陸送 on upper left, KLC in center, 様 on upper right, and date on upper right
-        val titleTable = Table(UnitValue.createPercentArray(floatArrayOf(25f, 25f, 25f, 25f)))
+        // Add title: "陸送 STYLISH AUTO 様" (one space, left-aligned), date (right)
+        val titleTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginBottom(10f) // Reduced from 20f to 10f
+            .setMarginBottom(10f)
         
-        // 陸送 on upper left
-        titleTable.addCell(createTitleCell("陸送", japaneseFont))
-        
-        // Rixo Company in center (dynamic from form)
+        // 陸送 + one space + Rixo Company 様 in one cell, left-aligned
         val rixoCompany = transportData["rixoCompany"] ?: "KLC"
-        titleTable.addCell(createTitleCell(rixoCompany, japaneseFont))
+        titleTable.addCell(createTitleCellLeft("陸送 $rixoCompany 様", japaneseFont))
         
-        // 様 on upper right
-        titleTable.addCell(createTitleCell("様", japaneseFont))
-        
-        // Date on upper right (4th column)
+        // Date on right
         Logger.debug("PDF Service: transportData keys: ${transportData.keys}")
         val transportDate = transportData["buyingDate"] ?: ""
         // Header wants full date with year and weekday in Japanese, e.g. 2025年9月30日火曜日
@@ -374,10 +368,7 @@ class PdfService {
             table.addCell(createHeaderCell(header, japaneseFont))
         }
 
-        // Determine total rows needed (minimum 5, or actual count if more)
-        val totalRows = maxOf(5, purchases.size)
-
-        // Add vehicle data rows
+        // Add vehicle data rows only (no empty rows; table height = selected row count)
         purchases.forEachIndexed { index, purchase ->
             // Date (only show in first row, formatted as "2025年9月11日Thursday")
             if (index == 0) {
@@ -394,9 +385,10 @@ class PdfService {
             // Chassis
             table.addCell(createCell(purchase.chassis ?: "", japaneseFont))
             
-            // Car Model Year - format to "Month YYYY" format
-            val formattedYear = formatCarModelYear(purchase.carModelYear?.toString())
-            table.addCell(createCell(formattedYear, japaneseFont))
+            // Car Model Year - Japanese calendar (e.g. 令和8年)
+            val yearOnly = extractYearFromCarModelYear(purchase.carModelYear?.toString())
+            val japaneseEraYear = westernYearToJapaneseEra(yearOnly)
+            table.addCell(createCell(japaneseEraYear, japaneseFont))
             
             // Car Name
             table.addCell(createCell(purchase.carName ?: "", japaneseFont))
@@ -416,17 +408,6 @@ class PdfService {
             table.addCell(createCell(purchase.numberCut ?: "", japaneseFont))
         }
         
-        // Add empty rows if needed to reach minimum of 5 rows
-        if (purchases.size < 5) {
-            val emptyRowsNeeded = 5 - purchases.size
-            repeat(emptyRowsNeeded) {
-                // Add 9 empty cells for each empty row (one for each column)
-                repeat(9) {
-                    table.addCell(createCell("", japaneseFont))
-                }
-            }
-        }
-
         document.add(table)
 
         // Create a table to position extra message on left and total count on right, same level
@@ -469,49 +450,42 @@ class PdfService {
         totalTable.addCell(totalCell)
         document.add(totalTable)
 
-        // Add footer message (dynamic from form or default)
+        // Footer: disclaimer (bottom-left) and contact (bottom-right) on the same baseline
         val footerMessage = transportData["footerMessage"]?.takeIf { it.isNotBlank() } 
             ?: "※港や船での盗難が多発の為、スペアキーやリモコンキーが車内にありましたら弊社まで郵送していただけると助かります。"
-        
-        // Split footer message into lines if it contains newlines
         val footerLines = footerMessage.split("\n")
+        val footerBlock = com.itextpdf.layout.element.Div()
         footerLines.forEachIndexed { index, line ->
-            val footerParagraph = Paragraph(line.trim())
+            footerBlock.add(Paragraph(line.trim())
                 .setFont(japaneseFont)
                 .setFontSize(9f)
-                .setFixedLeading(11f) // Tighter line spacing
-                .setMarginBottom(if (index < footerLines.size - 1) 2f else 8f) // Reduced margins
-            document.add(footerParagraph)
+                .setFixedLeading(11f)
+                .setMarginBottom(if (index < footerLines.size - 1) 2f else 0f))
         }
-
-        // Add contact information in Japanese positioned in lower right
-        val contactTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
+        val contactBlock = Paragraph()
+            .add(Text("担当：芽紋 080-3918-1478\n").setFont(japaneseFont))
+            .add(Text("FAX: 047-711-0409\n").setFont(japaneseFont))
+            .add(Text("有限会社メモン").setFont(japaneseFont).setBold())
+            .setFontSize(9f)
+            .setFixedLeading(11f)
+        val footerTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginTop(10f) // Reduced from 30f to 10f
-        
-        // Empty cell on the left (invisible box)
-        val contactEmptyCell = Cell()
-            .add(Paragraph("").setFont(japaneseFont))
+            .setMarginTop(10f)
+        val leftFooterCell = Cell()
+            .add(footerBlock)
             .setPadding(8f)
             .setTextAlignment(TextAlignment.LEFT)
-            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.BOTTOM)
             .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        contactTable.addCell(contactEmptyCell)
-        
-        // Contact info on the right side with minimal spacing before 有限会社メモン
-        val contactCell = Cell()
-            .add(Paragraph()
-                .add(Text("担当：芽紋 080-3918-1478\n").setFont(japaneseFont))
-                .add(Text("FAX: 047-711-0409\n").setFont(japaneseFont))
-                .add(Text("有限会社メモン").setFont(japaneseFont).setBold()) // Make company name bold
-                .setFontSize(9f)
-                .setFixedLeading(11f)) // Tighter line spacing, removed extra newlines
+        val rightFooterCell = Cell()
+            .add(contactBlock)
             .setPadding(8f)
-            .setTextAlignment(TextAlignment.LEFT)
-            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+            .setTextAlignment(TextAlignment.RIGHT)
+            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.BOTTOM)
             .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        contactTable.addCell(contactCell)
-        document.add(contactTable)
+        footerTable.addCell(leftFooterCell)
+        footerTable.addCell(rightFooterCell)
+        document.add(footerTable)
 
         document.close()
         return outputStream.toByteArray()
@@ -563,6 +537,19 @@ class PdfService {
             .add(paragraph)
             .setPadding(8f)
             .setTextAlignment(TextAlignment.CENTER)
+            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+    }
+
+    private fun createTitleCellLeft(text: String, font: PdfFont? = null): Cell {
+        val paragraph = Paragraph(text).setFontSize(16f).setBold()
+        if (font != null) {
+            paragraph.setFont(font)
+        }
+        return Cell()
+            .add(paragraph)
+            .setPadding(8f)
+            .setTextAlignment(TextAlignment.LEFT)
             .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
             .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
     }
@@ -662,6 +649,51 @@ class PdfService {
             return yearStr
         } catch (e: Exception) {
             return yearStr
+        }
+    }
+
+    /** Extracts only the 4-digit year from car_model_year (e.g. "July 2026" -> "2026", "2025-07" -> "2025"). */
+    private fun extractYearFromCarModelYear(yearStr: String?): String {
+        if (yearStr == null || yearStr.isBlank()) return ""
+        if (yearStr.contains("-")) {
+            val parts = yearStr.split("-")
+            if (parts.isNotEmpty()) {
+                val y = parts[0].trim()
+                if (y.length == 4 && y.all { it.isDigit() }) return y
+            }
+        }
+        if (yearStr.contains("/")) {
+            val parts = yearStr.split("/")
+            if (parts.size >= 2) {
+                val y = parts[1].trim()
+                if (y.length == 4 && y.all { it.isDigit() }) return y
+            }
+        }
+        val tokens = yearStr.trim().split(Regex("\\s+"))
+        for (t in tokens.reversed()) {
+            if (t.length == 4 && t.all { it.isDigit() }) return t
+        }
+        if (yearStr.length == 4 && yearStr.all { it.isDigit() }) return yearStr
+        return yearStr
+    }
+
+    /** Converts Gregorian year to Japanese era (令和X年, 平成X年, 昭和X年). First year of era uses 元年. */
+    private fun westernYearToJapaneseEra(westernYearStr: String?): String {
+        val y = westernYearStr?.trim()?.toIntOrNull() ?: return westernYearStr ?: ""
+        return when {
+            y >= 2019 -> {
+                val n = y - 2018
+                if (n == 1) "令和元年" else "令和${n}年"
+            }
+            y >= 1989 -> {
+                val n = y - 1988
+                if (n == 1) "平成元年" else "平成${n}年"
+            }
+            y >= 1926 -> {
+                val n = y - 1925
+                if (n == 1) "昭和元年" else "昭和${n}年"
+            }
+            else -> westernYearStr
         }
     }
 

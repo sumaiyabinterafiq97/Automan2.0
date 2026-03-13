@@ -410,15 +410,17 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
         // Save C&F form state
         js("if (window.saveCnfFormState) window.saveCnfFormState()")
         
+        // Save Car Booking state (selected rows from cnfPageSelectedCars) before navigating
+        js("if (window.saveCarBookingState) window.saveCarBookingState()")
+        
         // Get purchase IDs to refresh (use stored IDs from navigation)
         val purchaseIdsToRefresh = if (cnfPageSelectedPurchaseIds.isNotEmpty()) {
             cnfPageSelectedPurchaseIds
         } else {
             console.warn("⚠️ No purchase IDs stored in cnfPageSelectedPurchaseIds, trying fallback...")
-            // Fallback: try to get from selected cars
+            // Fallback: try to get from selected cars (use js() - car may be plain JS object)
             cnfPageSelectedCars.mapNotNull { car ->
-                val carDynamic = car.asDynamic()
-                val purchaseId = carDynamic.purchaseId
+                val purchaseId = js("(car.purchaseId != null && car.purchaseId !== undefined) ? car.purchaseId : car.id")
                 if (purchaseId != null && purchaseId != js("undefined")) {
                     (purchaseId as? Number)?.toLong()
                 } else {
@@ -1011,14 +1013,10 @@ fun refreshPurchasesByIds(purchaseIds: List<Long>) {
                     console.log("✅ Updated purchase ${purchaseId} with fresh totalCnfPrice: ${freshPurchase.totalCnfPrice}")
                     
                     // Check if this purchase has a destination (POD) value and save it to state
-                    val freshPurchaseObj = freshPurchase.asDynamic()
+                    // Use js() to avoid asDynamic on API response (plain JS objects may not have Kotlin extensions)
                     val destination = when {
-                        freshPurchaseObj.destination != null && freshPurchaseObj.destination != js("undefined") -> {
-                            val dest = freshPurchaseObj.destination as? String
-                            dest?.trim() ?: ""
-                        }
                         js("typeof freshPurchase.destination !== 'undefined' && freshPurchase.destination !== null") as Boolean -> {
-                            js("freshPurchase.destination") as? String ?: ""
+                            (js("freshPurchase.destination") as? String)?.trim() ?: ""
                         }
                         else -> ""
                     }
@@ -1032,14 +1030,9 @@ fun refreshPurchasesByIds(purchaseIds: List<Long>) {
                     carBookingDisplayedCars = carBookingDisplayedCars + arrayOf(freshPurchase)
                     
                     // Also check for POD in new purchase
-                    val freshPurchaseObj = freshPurchase.asDynamic()
                     val destination = when {
-                        freshPurchaseObj.destination != null && freshPurchaseObj.destination != js("undefined") -> {
-                            val dest = freshPurchaseObj.destination as? String
-                            dest?.trim() ?: ""
-                        }
                         js("typeof freshPurchase.destination !== 'undefined' && freshPurchase.destination !== null") as Boolean -> {
-                            js("freshPurchase.destination") as? String ?: ""
+                            (js("freshPurchase.destination") as? String)?.trim() ?: ""
                         }
                         else -> ""
                     }

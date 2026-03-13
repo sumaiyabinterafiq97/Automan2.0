@@ -253,6 +253,35 @@ fun formatCarModelYear(yearStr: String?): String {
     }
 }
 
+/** Extracts only the 4-digit year from car_model_year (e.g. "July 2026" -> "2026", "2025-07" -> "2025"). */
+fun carModelYearToYearOnly(yearStr: String?): String {
+    if (yearStr == null || yearStr.isBlank()) return ""
+    // YYYY-MM
+    if (yearStr.contains("-")) {
+        val parts = yearStr.split("-")
+        if (parts.isNotEmpty()) {
+            val y = parts[0].trim()
+            if (y.length == 4 && y.all { it.isDigit() }) return y
+        }
+    }
+    // MM/YYYY or M/YYYY
+    if (yearStr.contains("/")) {
+        val parts = yearStr.split("/")
+        if (parts.size >= 2) {
+            val y = parts[1].trim()
+            if (y.length == 4 && y.all { it.isDigit() }) return y
+        }
+    }
+    // "Month YYYY" (e.g. July 2026) - take last token if it's 4 digits
+    val tokens = yearStr.trim().split(Regex("\\s+"))
+    for (t in tokens.reversed()) {
+        if (t.length == 4 && t.all { it.isDigit() }) return t
+    }
+    // Already a single year?
+    if (yearStr.length == 4 && yearStr.all { it.isDigit() }) return yearStr
+    return yearStr
+}
+
 fun normalizeDateForComparison(dateStr: String?): String {
     if (dateStr == null || dateStr.isBlank()) return ""
     

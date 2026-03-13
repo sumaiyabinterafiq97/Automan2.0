@@ -23,7 +23,7 @@ fun showClientDetailsPage(clientId: Long) {
                     <h2>Client Details</h2>
                     <div class="client-details-actions">
                         <button id="exportClientTxBtn" class="client-btn client-btn-info">Export Data</button>
-                        <button id="backToClientsBtn" class="client-btn client-btn-secondary">Back to Clients</button>
+                        <button id="backToClientsBtn" class="client-btn client-btn-secondary">Back to Client Transactions</button>
                     </div>
                 </div>
                 <div id="clientDetailsContent"></div>
@@ -36,7 +36,7 @@ fun showClientDetailsPage(clientId: Long) {
         </div>
     """
     document.getElementById("backToClientsBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/clients"
+        window.location.hash = "#/master/client-transactions"
     })
     document.getElementById("exportClientTxBtn")?.addEventListener("click", { _: Event ->
         exportClientTransactions(clientId)
@@ -50,14 +50,15 @@ fun showClientAccountsPage() {
     // Stay on current hash; this function renders list view
     val content = document.getElementById("content")!!
     // Check if we're on master/clients route to use appropriate title
-    val isMasterList = window.location.hash.startsWith("#/master/clients")
-    val pageTitle = if (isMasterList) "Clients" else "Client Accounts Management"
+    val isMasterList = window.location.hash.startsWith("#/master/client-transactions")
+    val pageTitle = if (isMasterList) "Client Transactions" else "Client Accounts Management"
     content.innerHTML = """
         <div class="client-page-container">
             <div class="client-page-card">
                 <div class="client-page-header">
                     <h2>$pageTitle</h2>
                     <div class="client-action-buttons">
+                        <button id="backToClientPageBtn" class="client-btn client-btn-secondary">Back to Client Page</button>
                         <button id="addClientBtn" class="client-btn client-btn-primary">Add New Client</button>
                         <button id="clientAlertsBtn" class="client-btn client-btn-warning">View Alerts</button>
                         <button id="exportClientsBtn" class="client-btn client-btn-info">Export Data</button>
@@ -91,6 +92,10 @@ fun showClientAccountsPage() {
     """
     
     // Add event listeners
+    document.getElementById("backToClientPageBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/master/client"
+    })
+    
     document.getElementById("addClientBtn")?.addEventListener("click", { _: Event ->
         showAddClientForm()
     })
@@ -444,7 +449,7 @@ fun showAddClientForm() {
             <div class="client-modal-content">
                 <div class="client-modal-header">
                     <h2>Add New Client</h2>
-                    <button class="client-modal-close" onclick="closeAddClientModal()">&times;</button>
+                    <button id="closeAddClientModalBtn" class="client-modal-close">&times;</button>
                 </div>
                 <form id="addClientForm" class="client-form">
                     <div class="client-form-row">
@@ -510,7 +515,7 @@ fun showAddClientForm() {
                     </div>
                     
                     <div class="client-modal-actions">
-                        <button type="button" onclick="closeAddClientModal()" class="client-btn client-btn-secondary">
+                        <button type="button" id="cancelAddClientBtn" class="client-btn client-btn-secondary">
                             Cancel
                         </button>
                         <button type="submit" class="client-btn client-btn-primary">
@@ -532,6 +537,16 @@ fun showAddClientForm() {
     document.getElementById("addClientForm")?.addEventListener("submit", { event ->
         event.preventDefault()
         handleAddClientSubmit()
+    })
+    
+    // Add close button (X) handler
+    document.getElementById("closeAddClientModalBtn")?.addEventListener("click", { _: Event ->
+        closeAddClientModal()
+    })
+    
+    // Add cancel button handler
+    document.getElementById("cancelAddClientBtn")?.addEventListener("click", { _: Event ->
+        closeAddClientModal()
     })
 }
 
@@ -560,36 +575,97 @@ fun handleAddClientSubmit() {
     val submitBtn = document.querySelector("#addClientForm button[type='submit']") as? HTMLButtonElement
     submitBtn?.let {
         it.disabled = true
-        it.textContent = "Adding..."
+        it.textContent = "Validating..."
     }
     
-    // Submit to backend
-    val requestOptions = js("{}")
-    requestOptions["method"] = "POST"
-    requestOptions["headers"] = js("{\"Content-Type\": \"application/json\"}")
-    requestOptions["body"] = JSON.stringify(clientData)
+    val clientName = clientData["clientName"] as String
     
-    window.fetch(apiUrl("clients"), requestOptions)
-    .then { response ->
-        if (response.ok) {
-            showMessage("Client added successfully!", "success")
-            closeAddClientModal()
-            showClientAccountsPage() // Refresh the client list
-        } else {
-            response.text().then { errorText ->
-                showMessage("Failed to add client: $errorText", "error")
+    // First, validate that client name exists in master list
+    window.fetch(apiUrl("master-menu/clients"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load master client list')")
+        }
+        .then { raw: dynamic ->
+            val masterList: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim().uppercase() }.filter { it.isNotEmpty() }
+            } else emptyList()
+            
+            // Check if client name exists in master list (case-insensitive)
+            if (!masterList.contains(clientName.uppercase())) {
+                // Client name not in master list - show error modal
+                closeAddClientModal()
+                showClientNameNotInMasterListModal()
+                return@then
+            }
+            
+            // Client name exists, proceed with adding
+            submitBtn?.textContent = "Adding..."
+            
+            val requestOptions = js("{}")
+            requestOptions["method"] = "POST"
+            requestOptions["headers"] = js("{\"Content-Type\": \"application/json\"}")
+            requestOptions["body"] = JSON.stringify(clientData)
+            
+            window.fetch(apiUrl("clients"), requestOptions)
+                .then { response ->
+                    if (response.ok) {
+                        showMessage("Client added successfully!", "success")
+                        closeAddClientModal()
+                        showClientAccountsPage()
+                    } else {
+                        response.text().then { errorText ->
+                            showMessage("Failed to add client: $errorText", "error")
+                        }
+                    }
+                }
+                .catch { error ->
+                    showMessage("Error adding client: $error", "error")
+                }
+                .finally {
+                    submitBtn?.let {
+                        it.disabled = false
+                        it.textContent = "Add Client"
+                    }
+                }
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error validating client name: ${error.toString()}")
+            showMessage("Error validating client name", "error")
+            submitBtn?.let {
+                it.disabled = false
+                it.textContent = "Add Client"
             }
         }
-    }
-    .catch { error ->
-        showMessage("Error adding client: $error", "error")
-    }
-    .finally {
-        submitBtn?.let {
-            it.disabled = false
-            it.textContent = "Add Client"
-        }
-    }
+}
+
+fun showClientNameNotInMasterListModal() {
+    document.getElementById("clientNameErrorModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "clientNameErrorModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10001;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #ef4444;">Client Name Not Found</h3>
+            <p style="margin-bottom: 20px; color: #374151; font-size: 14px; line-height: 1.6;">
+                Client Name does not exist in Master List. Go to the Client page and Add New Client.
+            </p>
+            <div style="display: flex; justify-content: flex-end;">
+                <button id="closeClientNameErrorModalBtn" style="padding: 10px 24px; border-radius: 6px; border: none; background: #3b82f6; color: white; cursor: pointer; font-size: 14px; font-weight: 500;">
+                    Close
+                </button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    
+    document.getElementById("closeClientNameErrorModalBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
 }
 
 @JsName("closeAddClientModalFromClientManagement")
@@ -624,7 +700,7 @@ fun showEditClientForm(client: dynamic) {
             <div class="client-modal-content">
                 <div class="client-modal-header">
                     <h2>Edit Client</h2>
-                    <button class="client-modal-close" onclick="closeEditClientModal()">&times;</button>
+                    <button id="closeEditClientModalBtn" class="client-modal-close">&times;</button>
                 </div>
                 <form id="editClientForm" class="client-form">
                     <div class="client-form-row">
@@ -691,11 +767,11 @@ fun showEditClientForm(client: dynamic) {
                     </div>
                     
                     <div class="client-modal-actions-split">
-                        <button type="button" onclick="deleteClientFromModal($clientId)" class="client-btn client-btn-danger">
+                        <button type="button" id="deleteClientBtn" class="client-btn client-btn-danger">
                             Delete
                         </button>
                         <div class="client-modal-actions-right">
-                            <button type="button" onclick="closeEditClientModal()" class="client-btn client-btn-secondary">
+                            <button type="button" id="cancelEditClientBtn" class="client-btn client-btn-secondary">
                                 Cancel
                             </button>
                             <button type="submit" class="client-btn client-btn-primary">
@@ -718,6 +794,21 @@ fun showEditClientForm(client: dynamic) {
     document.getElementById("editClientForm")?.addEventListener("submit", { event ->
         event.preventDefault()
         handleEditClientSubmit(clientId)
+    })
+    
+    // Add delete button handler
+    document.getElementById("deleteClientBtn")?.addEventListener("click", { _: Event ->
+        deleteClientFromModal(clientId)
+    })
+    
+    // Add cancel button handler
+    document.getElementById("cancelEditClientBtn")?.addEventListener("click", { _: Event ->
+        closeEditClientModal()
+    })
+    
+    // Add close button (X) handler
+    document.getElementById("closeEditClientModalBtn")?.addEventListener("click", { _: Event ->
+        closeEditClientModal()
     })
 }
 
@@ -750,78 +841,110 @@ fun handleEditClientSubmit(clientId: Long) {
     val submitBtn = document.querySelector("#editClientForm button[type='submit']") as? HTMLButtonElement
     submitBtn?.let {
         it.disabled = true
-        it.textContent = "Updating..."
+        it.textContent = "Validating..."
     }
     
-    // Submit to backend - first update client
-    val requestOptions = js("({})")
-    requestOptions["method"] = "PUT"
-    val headers = js("({})")
-    headers["Content-Type"] = "application/json"
-    requestOptions["headers"] = headers
-    requestOptions["body"] = JSON.stringify(clientData)
+    val clientName = clientData["clientName"] as String
     
-    window.fetch(apiUrl("clients/$clientId"), requestOptions)
-    .then { response ->
-        if (response.ok) {
-            // If balance changed, update balance separately
-            if (balanceChanged) {
-                val balanceRequest = js("({})")
-                balanceRequest["method"] = "PUT"
-                val balanceHeaders = js("({})")
-                balanceHeaders["Content-Type"] = "application/json"
-                balanceRequest["headers"] = balanceHeaders
-                val balanceBody = js("({})")
-                balanceBody["balance"] = newBalance
-                balanceRequest["body"] = JSON.stringify(balanceBody)
-                
-                window.fetch(apiUrl("clients/$clientId/balance"), balanceRequest)
-                .then { balanceResponse ->
-                    if (balanceResponse.ok) {
-                        showMessage("Client updated successfully!", "success")
-                        closeEditClientModal()
-                        showClientAccountsPage() // Refresh the client list
+    // First, validate that client name exists in master list
+    window.fetch(apiUrl("master-menu/clients"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load master client list')")
+        }
+        .then { raw: dynamic ->
+            val masterList: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim().uppercase() }.filter { it.isNotEmpty() }
+            } else emptyList()
+            
+            // Check if client name exists in master list (case-insensitive)
+            if (!masterList.contains(clientName.uppercase())) {
+                // Client name not in master list - show error modal
+                closeEditClientModal()
+                showClientNameNotInMasterListModal()
+                return@then
+            }
+            
+            // Client name exists, proceed with updating
+            submitBtn?.textContent = "Updating..."
+            
+            val requestOptions = js("({})")
+            requestOptions["method"] = "PUT"
+            val headers = js("({})")
+            headers["Content-Type"] = "application/json"
+            requestOptions["headers"] = headers
+            requestOptions["body"] = JSON.stringify(clientData)
+            
+            window.fetch(apiUrl("clients/$clientId"), requestOptions)
+                .then { response ->
+                    if (response.ok) {
+                        // If balance changed, update balance separately
+                        if (balanceChanged) {
+                            val balanceRequest = js("({})")
+                            balanceRequest["method"] = "PUT"
+                            val balanceHeaders = js("({})")
+                            balanceHeaders["Content-Type"] = "application/json"
+                            balanceRequest["headers"] = balanceHeaders
+                            val balanceBody = js("({})")
+                            balanceBody["balance"] = newBalance
+                            balanceRequest["body"] = JSON.stringify(balanceBody)
+                            
+                            window.fetch(apiUrl("clients/$clientId/balance"), balanceRequest)
+                                .then { balanceResponse ->
+                                    if (balanceResponse.ok) {
+                                        showMessage("Client updated successfully!", "success")
+                                        closeEditClientModal()
+                                        showClientAccountsPage()
+                                    } else {
+                                        balanceResponse.text().then { errorText ->
+                                            showMessage("Failed to update balance: $errorText", "error")
+                                        }
+                                    }
+                                }
+                                .catch { error ->
+                                    showMessage("Error updating balance: $error", "error")
+                                }
+                                .finally {
+                                    submitBtn?.let {
+                                        it.disabled = false
+                                        it.textContent = "Update Client"
+                                    }
+                                }
+                        } else {
+                            showMessage("Client updated successfully!", "success")
+                            closeEditClientModal()
+                            showClientAccountsPage()
+                            submitBtn?.let {
+                                it.disabled = false
+                                it.textContent = "Update Client"
+                            }
+                        }
                     } else {
-                        balanceResponse.text().then { errorText ->
-                            showMessage("Failed to update balance: $errorText", "error")
+                        response.text().then { errorText ->
+                            showMessage("Failed to update client: $errorText", "error")
+                        }
+                        submitBtn?.let {
+                            it.disabled = false
+                            it.textContent = "Update Client"
                         }
                     }
                 }
                 .catch { error ->
-                    showMessage("Error updating balance: $error", "error")
-                }
-                .finally {
+                    showMessage("Error updating client: $error", "error")
                     submitBtn?.let {
                         it.disabled = false
                         it.textContent = "Update Client"
                     }
                 }
-            } else {
-                showMessage("Client updated successfully!", "success")
-                closeEditClientModal()
-                showClientAccountsPage() // Refresh the client list
-                submitBtn?.let {
-                    it.disabled = false
-                    it.textContent = "Update Client"
-                }
-            }
-        } else {
-            response.text().then { errorText ->
-                showMessage("Failed to update client: $errorText", "error")
-            }
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error validating client name: ${error.toString()}")
+            showMessage("Error validating client name", "error")
             submitBtn?.let {
                 it.disabled = false
                 it.textContent = "Update Client"
             }
         }
-    }
-    .catch { error ->
-        showMessage("Error updating client: $error", "error")
-        submitBtn?.let {
-            it.disabled = false
-            it.textContent = "Update Client"
-        }
-    }
 }
 
 @JsName("closeEditClientModalFromClientManagement")

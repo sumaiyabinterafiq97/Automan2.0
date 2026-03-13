@@ -51,6 +51,25 @@ class BookingMappingController(
         }
     }
 
+    /** Returns list of POL (Port of Loading) strings for a stock location from booking_mappings. Uses any row that has this stock_location (canonical STOCK_LOCATION_POL or client-specific rows). Comma-separated pols are split into separate items. */
+    @GetMapping("/pols-by-stock-location")
+    fun polsByStockLocation(@RequestParam stockLocation: String): ResponseEntity<ApiResponse<List<String>>> {
+        return try {
+            if (stockLocation.isBlank()) {
+                return ResponseEntity.ok(ApiResponse(true, emptyList()))
+            }
+            val mappings = repo.findByStockLocationIgnoreCase(stockLocation.trim())
+            val pols = mappings
+                .flatMap { m -> (m.pols?.split(',') ?: emptyList()).map { it.trim() }.filter { it.isNotEmpty() } }
+                .distinct()
+            Logger.debug("POLs for stock location '$stockLocation': $pols")
+            ResponseEntity.ok(ApiResponse(true, pols))
+        } catch (e: Exception) {
+            Logger.error("Error in polsByStockLocation: ${e.message}")
+            ResponseEntity.status(500).body(ApiResponse(false, null, "Error: ${e.message}"))
+        }
+    }
+
     @PostMapping("/add")
     fun add(@RequestBody payload: BookingMapping): ResponseEntity<ApiResponse<BookingMapping>> {
         val saved = repo.save(payload.copy(id = 0))

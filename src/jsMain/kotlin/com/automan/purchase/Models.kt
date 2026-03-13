@@ -18,6 +18,7 @@ data class Purchase(
     val auctionNo: String? = null,
     val auctionHouse: String? = null,
     val stockLocation: String? = null,
+    val pol: String? = null,
     val rixoCompany: String? = null,
     val clientName: String? = null,
     val country: String? = null,

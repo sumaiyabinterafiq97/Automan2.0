@@ -368,7 +368,7 @@ fun createEditableCombobox(id: String, placeholder: String, required: Boolean = 
             <select id="$id" $requiredAttr 
                     style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
                     onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('$id');"
-                    onchange="syncComboboxInput('$id'); if (typeof handleRixoCompanyChange === 'function' && '$id' === 'rixoCompany') { handleRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleEditRixoCompanyChange === 'function' && '$id' === 'editRixoCompany') { handleEditRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleChassisSearchChange === 'function' && '$id' === 'chassisSearch') { handleChassisSearchChange(); }">
+                    onchange="syncComboboxInput('$id'); if (typeof handleRixoCompanyChange === 'function' && '$id' === 'rixoCompany') { handleRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleEditRixoCompanyChange === 'function' && '$id' === 'editRixoCompany') { handleEditRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleChassisSearchChange === 'function' && '$id' === 'chassisSearch') { handleChassisSearchChange(); } if (typeof window.fetchPolsByStockLocationAndUpdate === 'function' && ('$id' === 'stockLocation' || '$id' === 'editStockLocation')) { window.fetchPolsByStockLocationAndUpdate(window.getComboboxValue('$id')); }">
                 <option value="">▼</option>
             </select>
             <div id="${id}Button" onclick="openComboboxDropdown('$id')" 
@@ -1333,13 +1333,11 @@ fun setupEditableComboboxHandlers() {
                         }
                         var isModal = container.classList && (
                             container.classList.contains('modal-content') ||
-                            container.classList.contains('rixo-edit-modal-content') ||
                             container.classList.contains('modal') ||
                             container.id && container.id.includes('Modal')
                         );
                         var isForm = container.tagName === 'FORM' || 
-                                    container.id === 'editForm' ||
-                                    container.id === 'rixoEditForm';
+                                    container.id === 'editForm';
                         var isScrollable = computedStyle.overflowY === 'auto' || 
                                           computedStyle.overflowY === 'scroll';
                         var hasMaxHeight = computedStyle.maxHeight !== 'none' && 
@@ -2032,7 +2030,7 @@ fun createApp(root: Element) {
                                 <span id="masterListArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▲</span>
                             </div>
                             <div id="masterListItems" style="display: flex; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="masterClientsBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Clients</button>
+                                <button id="masterClientsBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client</button>
                                 <button id="masterConsigneeBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee</button>
                                 <button id="masterCountryBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Country</button>
                                 <button id="masterSupplierBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier</button>
@@ -2042,6 +2040,12 @@ fun createApp(root: Element) {
                                 <button id="masterCarBrandsBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Brands</button>
                                 <button id="masterBankAccountsBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Bank Accounts</button>
                                 <button id="masterVenueIdBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Venue ID List</button>
+                                <button id="masterPolBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">POL</button>
+                                <button id="masterPodBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">POD</button>
+                                <button id="masterFuelBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Fuel</button>
+                                <button id="masterCarGradeBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Grade</button>
+                                <button id="masterCarShiftBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Shift</button>
+                                <button id="masterTypeOfVehiclesBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Type of Vehicles</button>
                             </div>
                         </div>
                         
@@ -2368,11 +2372,11 @@ fun createApp(root: Element) {
     // Master List event listeners
     document.getElementById("masterClientsBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
-        showMasterClientsPage()
+        window.location.hash = "#/master/client"
     })
     document.getElementById("masterConsigneeBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
-        showMasterConsigneePage()
+        window.location.hash = "#/master/consignee"
     })
     document.getElementById("masterCountryBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
@@ -2380,7 +2384,7 @@ fun createApp(root: Element) {
     })
     document.getElementById("masterSupplierBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
-        showMasterSuppliersPage()
+        window.location.hash = "#/master/supplier"
     })
     document.getElementById("masterRixoCompanyBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
@@ -2396,7 +2400,7 @@ fun createApp(root: Element) {
     })
     document.getElementById("masterCarBrandsBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
-        showMasterCarBrandsPage()
+        window.location.hash = "#/master/car-brands"
     })
     document.getElementById("masterBankAccountsBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
@@ -2405,6 +2409,30 @@ fun createApp(root: Element) {
     document.getElementById("masterVenueIdBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
         showMasterVenueIdsPage()
+    })
+    document.getElementById("masterPolBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        showMasterPolPage()
+    })
+    document.getElementById("masterPodBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        showMasterPodPage()
+    })
+    document.getElementById("masterFuelBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        showMasterFuelPage()
+    })
+    document.getElementById("masterCarGradeBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        showMasterCarGradePage()
+    })
+    document.getElementById("masterCarShiftBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        showMasterCarShiftPage()
+    })
+    document.getElementById("masterTypeOfVehiclesBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        showMasterTypeOfVehiclesPage()
     })
     
     // Load initial data only if we're on the purchase list page
@@ -2537,14 +2565,26 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        hash.startsWith("#/master/clients") -> {
+        hash.startsWith("#/master/client-transactions") -> {
             showMasterClientsPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        hash.startsWith("#/master/client") -> {
+            showClientPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/consignee-map") -> {
+            showConsigneeMapPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
         hash.startsWith("#/master/consignee") -> {
-            showMasterConsigneePage()
+            showConsigneePage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -2555,8 +2595,14 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        hash.startsWith("#/master/supplier-map") -> {
+            showSupplierMapPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
         hash.startsWith("#/master/supplier") -> {
-            showMasterSuppliersPage()
+            showSupplierPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -2579,8 +2625,14 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        hash.startsWith("#/master/car-brands-map") -> {
+            showCarBrandsMapPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
         hash.startsWith("#/master/car-brands") -> {
-            showMasterCarBrandsPage()
+            showCarBrandsPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -2597,6 +2649,42 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        hash.startsWith("#/master/pol") -> {
+            showMasterPolPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/pod") -> {
+            showMasterPodPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/fuel") -> {
+            showMasterFuelPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/car-grade") -> {
+            showMasterCarGradePage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/car-shift") -> {
+            showMasterCarShiftPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/type-of-vehicles") -> {
+            showMasterTypeOfVehiclesPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
         hash.startsWith("#/client/") -> {
             val id = hash.substring(9).toLongOrNull()
             if (id != null) {
@@ -2609,8 +2697,8 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/clients") -> {
-            // Redirect to master/clients
-            window.location.hash = "#/master/clients"
+            // Redirect to master/client-transactions
+            window.location.hash = "#/master/client-transactions"
         }
         else -> {
             if (token == null || token.isBlank()) {
@@ -3281,7 +3369,7 @@ fun setupSidebarListeners() {
         masterClientsBtn.setAttribute("data-listener-attached", "true")
         masterClientsBtn.addEventListener("click", { _: Event ->
             closeSidebar()
-            showMasterClientsPage()
+            window.location.hash = "#/master/client"
         })
     }
     
@@ -3290,7 +3378,7 @@ fun setupSidebarListeners() {
         masterConsigneeBtn.setAttribute("data-listener-attached", "true")
         masterConsigneeBtn.addEventListener("click", { _: Event ->
             closeSidebar()
-            showMasterConsigneePage()
+            window.location.hash = "#/master/consignee"
         })
     }
     
@@ -3308,7 +3396,7 @@ fun setupSidebarListeners() {
         masterSupplierBtn.setAttribute("data-listener-attached", "true")
         masterSupplierBtn.addEventListener("click", { _: Event ->
             closeSidebar()
-            showMasterSuppliersPage()
+            window.location.hash = "#/master/supplier"
         })
     }
     
@@ -3344,7 +3432,7 @@ fun setupSidebarListeners() {
         masterCarBrandsBtn.setAttribute("data-listener-attached", "true")
         masterCarBrandsBtn.addEventListener("click", { _: Event ->
             closeSidebar()
-            showMasterCarBrandsPage()
+            window.location.hash = "#/master/car-brands"
         })
     }
     
@@ -3365,7 +3453,21 @@ fun setupSidebarListeners() {
             showMasterVenueIdsPage()
         })
     }
-    
+    listOf(
+        "masterPolBtn" to { closeSidebar(); showMasterPolPage() },
+        "masterPodBtn" to { closeSidebar(); showMasterPodPage() },
+        "masterFuelBtn" to { closeSidebar(); showMasterFuelPage() },
+        "masterCarGradeBtn" to { closeSidebar(); showMasterCarGradePage() },
+        "masterCarShiftBtn" to { closeSidebar(); showMasterCarShiftPage() },
+        "masterTypeOfVehiclesBtn" to { closeSidebar(); showMasterTypeOfVehiclesPage() }
+    ).forEach { (id, action) ->
+        val btn = document.getElementById(id)
+        if (btn != null && !btn.hasAttribute("data-listener-attached")) {
+            btn.setAttribute("data-listener-attached", "true")
+            btn.addEventListener("click", { _: Event -> action() })
+        }
+    }
+
     // Vehicle Details button
     val vehicleDetailsBtn = document.getElementById("vehicleDetailsBtn")
     if (vehicleDetailsBtn != null && !vehicleDetailsBtn.hasAttribute("data-listener-attached")) {
@@ -4274,6 +4376,10 @@ fun createAddFormHTML(): String {
                         ${createEditableCombobox("stockLocation", "Select Stock Location")}
                     </div>
                     <div>
+                        <label>POL</label>
+                        ${createEditableCombobox("pol", "Select POL")}
+                    </div>
+                    <div>
                         <label>Rixo Price</label>
                         <div style="position: relative; width: 100%;">
                             <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
@@ -4556,6 +4662,8 @@ fun setupRixoDropdowns() {
             clearDropdown('editTypeOfVehicle');
             clearDropdown('stockLocation');
             clearDropdown('editStockLocation');
+            clearDropdown('pol');
+            clearDropdown('editPol');
             clearDropdown('rixoCompany');
             clearDropdown('editRixoCompany');
             clearDropdown('rixoPrice');
@@ -4577,6 +4685,9 @@ fun setupRixoDropdowns() {
                 case 'stockLocation':
                 case 'editStockLocation':
                     return 'Stock Location';
+                case 'pol':
+                case 'editPol':
+                    return 'POL';
                 case 'rixoCompany':
                 case 'editRixoCompany':
                     return 'Rixo Company';
@@ -5087,6 +5198,20 @@ fun setupRixoDropdowns() {
                     editStockSelect.value = purchaseData.stockLocation;
                     console.log('Set edit stock location:', purchaseData.stockLocation);
                 }
+                var editStockInput = document.getElementById('editStockLocationInput');
+                if (editStockInput && purchaseData.stockLocation) { editStockInput.value = purchaseData.stockLocation; }
+                
+                // Set POL
+                var editPolSelect = document.getElementById('editPol');
+                var editPolInput = document.getElementById('editPolInput');
+                if (editPolSelect && purchaseData.pol) {
+                    editPolSelect.value = purchaseData.pol;
+                    if (editPolInput) editPolInput.value = purchaseData.pol;
+                }
+                // Populate POL dropdown from booking_mappings for current stock location (do not overwrite value)
+                if (purchaseData.stockLocation && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+                    window.fetchPolsByStockLocationAndUpdate(purchaseData.stockLocation, false);
+                }
                 
                 // Set Rixo Company
                 var editRixoSelect = document.getElementById('editRixoCompany');
@@ -5265,6 +5390,14 @@ fun setupRixoDropdowns() {
                     if (rixoConfirmedRadio) {
                         rixoConfirmedRadio.checked = true;
                     }
+                }
+                
+                // Set Shipping Confirmed radio button (shipped: true/1 -> TRUE, false/0/null -> FALSE)
+                var shippedValue = purchaseData.shipped;
+                var shippingConfirmedValue = (shippedValue === true || shippedValue === 1 || shippedValue === "1") ? "TRUE" : "FALSE";
+                var shippingConfirmedRadio = document.querySelector('input[name="editShippingConfirmed"][value="' + shippingConfirmedValue + '"]');
+                if (shippingConfirmedRadio) {
+                    shippingConfirmedRadio.checked = true;
                 }
                 
                 // Set SHAKEN checkbox
@@ -6029,6 +6162,9 @@ fun calculateEditTotalCostBeforeTax() {
         
         // Set the calculated value in the Total Cost (Before Tax) field
         (document.getElementById("editTotalCostBeforeTax") as? HTMLInputElement)?.value = formattedTotal
+        
+        // Also update Total Cost (After Tax 10%) so it stays in sync when cost fields change
+        calculateEditTotalCostAfterTax()
         
     } catch (e: Exception) {
         console.error("Error calculating edit total cost before tax:", e)
@@ -8502,6 +8638,192 @@ fun validateProductionDateYear(value: String): Pair<Boolean, String> {
     return Pair(true, "")
 }
 
+// Validation function for Purchase fields against master_menu
+fun validatePurchaseMasterFields(
+    brand: String,
+    grade: String,
+    fuel: String,
+    shift: String,
+    supplierName: String,
+    venueId: String,
+    vehicleType: String,
+    rixoCompany: String,
+    stockLocation: String,
+    pol: String,
+    clientName: String,
+    targetCountry: String,
+    repairCompany: String,
+    isEditMode: Boolean,
+    callback: (List<Pair<String, String>>) -> Unit
+) {
+    // Fetch all master lists in parallel
+    val masterListPromises = js("[]")
+    masterListPromises.push(window.fetch(apiUrl("master-menu/car_brands")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/car_grade")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/fuel")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/shift")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/supplier")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/venue_id")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/type_of_vehicle")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/rixo_company")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/stock_location")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/pol")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/clients")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/country")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/repair_company")))
+    
+    js("Promise.all")(masterListPromises)
+        .then { responses: dynamic ->
+            val jsonPromises = js("[]")
+            for (i in 0 until 13) {
+                val resp = responses[i]
+                if (resp.ok) {
+                    jsonPromises.push(resp.json())
+                } else {
+                    jsonPromises.push(js("Promise.resolve([])"))
+                }
+            }
+            js("Promise.all")(jsonPromises)
+        }
+        .then { results: dynamic ->
+            val brandList = parsePurchaseMasterListArray(results[0])
+            val gradeList = parsePurchaseMasterListArray(results[1])
+            val fuelList = parsePurchaseMasterListArray(results[2])
+            val shiftList = parsePurchaseMasterListArray(results[3])
+            val supplierList = parsePurchaseMasterListArray(results[4])
+            val venueIdList = parsePurchaseMasterListArray(results[5])
+            val vehicleTypeList = parsePurchaseMasterListArray(results[6])
+            val rixoCompanyList = parsePurchaseMasterListArray(results[7])
+            val stockLocationList = parsePurchaseMasterListArray(results[8])
+            val polList = parsePurchaseMasterListArray(results[9])
+            val clientsList = parsePurchaseMasterListArray(results[10])
+            val countryList = parsePurchaseMasterListArray(results[11])
+            val repairCompanyList = parsePurchaseMasterListArray(results[12])
+            
+            val missingFields = mutableListOf<Pair<String, String>>()
+            
+            // Check brand
+            if (brand.isNotEmpty() && !brandList.any { it.equals(brand, ignoreCase = true) }) {
+                missingFields.add(Pair("Brand", "Car Brands"))
+            }
+            
+            // Check grade
+            if (grade.isNotEmpty() && !gradeList.any { it.equals(grade, ignoreCase = true) }) {
+                missingFields.add(Pair("Grade", "Car Grade"))
+            }
+            
+            // Check fuel
+            if (fuel.isNotEmpty() && !fuelList.any { it.equals(fuel, ignoreCase = true) }) {
+                missingFields.add(Pair("Fuel", "Fuel"))
+            }
+            
+            // Check shift
+            if (shift.isNotEmpty() && !shiftList.any { it.equals(shift, ignoreCase = true) }) {
+                missingFields.add(Pair("Shift", "Car Shift"))
+            }
+            
+            // Check supplier name
+            if (supplierName.isNotEmpty() && !supplierList.any { it.equals(supplierName, ignoreCase = true) }) {
+                missingFields.add(Pair("Supplier Name", "Supplier"))
+            }
+            
+            // Check venue ID
+            if (venueId.isNotEmpty() && !venueIdList.any { it.equals(venueId, ignoreCase = true) }) {
+                missingFields.add(Pair("Venue ID", "Venue ID"))
+            }
+            
+            // Check vehicle type
+            if (vehicleType.isNotEmpty() && !vehicleTypeList.any { it.equals(vehicleType, ignoreCase = true) }) {
+                missingFields.add(Pair("Vehicle Type", "Type of Vehicles"))
+            }
+            
+            // Check rixo company
+            if (rixoCompany.isNotEmpty() && !rixoCompanyList.any { it.equals(rixoCompany, ignoreCase = true) }) {
+                missingFields.add(Pair("Rixo Company", "Rixo Company"))
+            }
+            
+            // Check stock location
+            if (stockLocation.isNotEmpty() && !stockLocationList.any { it.equals(stockLocation, ignoreCase = true) }) {
+                missingFields.add(Pair("Stock Location", "Stock Location"))
+            }
+            
+            // Check POL (only in edit mode)
+            if (isEditMode && pol.isNotEmpty() && !polList.any { it.equals(pol, ignoreCase = true) }) {
+                missingFields.add(Pair("POL", "POL"))
+            }
+            
+            // Check client name
+            if (clientName.isNotEmpty() && !clientsList.any { it.equals(clientName, ignoreCase = true) }) {
+                missingFields.add(Pair("Client Name", "Client"))
+            }
+            
+            // Check target country
+            if (targetCountry.isNotEmpty() && !countryList.any { it.equals(targetCountry, ignoreCase = true) }) {
+                missingFields.add(Pair("Target Country", "Country"))
+            }
+            
+            // Check repair company
+            if (repairCompany.isNotEmpty() && !repairCompanyList.any { it.equals(repairCompany, ignoreCase = true) }) {
+                missingFields.add(Pair("Repair Company", "Repair Company"))
+            }
+            
+            callback(missingFields)
+        }
+        .catch { error: dynamic ->
+            console.error("Error validating purchase fields: ${error.toString()}")
+            // On error, proceed with save (don't block the user)
+            callback(emptyList())
+        }
+}
+
+fun parsePurchaseMasterListArray(raw: dynamic): List<String> {
+    return try {
+        if (raw != null && js("Array.isArray(raw)").unsafeCast<Boolean>()) {
+            val arr = raw.unsafeCast<Array<String>>()
+            arr.map { it.trim() }.filter { it.isNotEmpty() }
+        } else {
+            emptyList()
+        }
+    } catch (e: dynamic) {
+        console.error("Error parsing master list: ${e.toString()}")
+        emptyList()
+    }
+}
+
+fun showPurchaseMasterFieldsErrorModal(missingFields: List<Pair<String, String>>) {
+    document.getElementById("purchaseMasterFieldsErrorModal")?.remove()
+    
+    // Build the error message
+    val fieldNames = missingFields.map { it.first }.joinToString(", ")
+    val pageNames = missingFields.map { it.second }.distinct().joinToString(", ")
+    
+    val modal = document.createElement("div")
+    modal.id = "purchaseMasterFieldsErrorModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10001;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 480px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #ef4444;">Field(s) Not Found in Master List</h3>
+            <p style="margin-bottom: 20px; color: #374151; font-size: 14px; line-height: 1.6;">
+                <strong>$fieldNames</strong> does not exist in Master List. Go to the <strong>$pageNames</strong> page(s) and Add New <strong>$fieldNames</strong>.
+            </p>
+            <div style="display: flex; justify-content: flex-end;">
+                <button id="closePurchaseMasterFieldsErrorModalBtn" style="padding: 10px 24px; border-radius: 6px; border: none; background: #3b82f6; color: white; cursor: pointer; font-size: 14px; font-weight: 500;">
+                    Close
+                </button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    
+    document.getElementById("closePurchaseMasterFieldsErrorModalBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+}
+
 // NEW: Simple save function for adding new purchase - chassis only logic
 fun saveNewPurchase() {
     console.log("💾 [NEW] saveNewPurchase() called")
@@ -8550,6 +8872,52 @@ fun saveNewPurchase() {
         return
     }
     
+    // Extract field values for master list validation
+    val valBrand = js("getComboboxValue('brand')").unsafeCast<String>()
+    val valGrade = (document.getElementById("grade") as? HTMLInputElement)?.value ?: ""
+    val valFuel = js("getComboboxValue('fuel')").unsafeCast<String>()
+    val valShift = js("getComboboxValue('shift')").unsafeCast<String>()
+    val valSupplierName = js("getComboboxValue('auctionName')").unsafeCast<String>()
+    val valVenueId = js("getComboboxValue('venueId')").unsafeCast<String>()
+    val valVehicleType = js("getComboboxValue('typeOfVehicle')").unsafeCast<String>()
+    val valRixoCompany = js("getComboboxValue('rixoCompany')").unsafeCast<String>()
+    val valStockLocation = js("getComboboxValue('stockLocation')").unsafeCast<String>()
+    val valClientName = (document.getElementById("clientName") as? HTMLInputElement)?.value ?: ""
+    val valTargetCountry = (document.getElementById("country") as? HTMLInputElement)?.value ?: ""
+    val valRepairCompany = (document.getElementById("repairCompany") as? HTMLInputElement)?.value ?: ""
+    
+    // Validate against master list before saving (POL not checked in Add mode - empty string)
+    validatePurchaseMasterFields(
+        brand = valBrand,
+        grade = valGrade,
+        fuel = valFuel,
+        shift = valShift,
+        supplierName = valSupplierName,
+        venueId = valVenueId,
+        vehicleType = valVehicleType,
+        rixoCompany = valRixoCompany,
+        stockLocation = valStockLocation,
+        pol = "", // POL validation only in Edit mode
+        clientName = valClientName,
+        targetCountry = valTargetCountry,
+        repairCompany = valRepairCompany,
+        isEditMode = false
+    ) { missingFields ->
+        if (missingFields.isNotEmpty()) {
+            // Validation failed - show error modal and re-enable button
+            saveButton?.disabled = false
+            saveButton?.textContent = originalText
+            showPurchaseMasterFieldsErrorModal(missingFields)
+            return@validatePurchaseMasterFields
+        }
+        
+        // Validation passed - proceed with saving
+        proceedWithNewPurchaseSave(chassis, saveButton, originalText)
+    }
+}
+
+// Extracted function to perform the actual new purchase save after validation
+fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, originalText: String) {
     // Collect all form values (empty strings for empty fields)
     val purchaseData = js("{}")
     
@@ -8591,6 +8959,7 @@ fun saveNewPurchase() {
     // Supplier Information
     purchaseData.auctionHouse = js("getComboboxValue('auctionName')").unsafeCast<String>()
     purchaseData.stockLocation = js("getComboboxValue('stockLocation')").unsafeCast<String>()
+    purchaseData.pol = js("getComboboxValue('pol')").unsafeCast<String>()
     purchaseData.venueId = js("getComboboxValue('venueId')").unsafeCast<String>()
     purchaseData.shipmentSize = js("getComboboxValue('shipmentSize')").unsafeCast<String>()
     
@@ -8650,7 +9019,7 @@ fun saveNewPurchase() {
     // Send POST request to create purchase
     val requestInit = js("{}")
     requestInit.method = "POST"
-      val headers = js("{}")
+    val headers = js("{}")
     headers["Content-Type"] = "application/json"
     requestInit.headers = headers
     requestInit.body = JSON.stringify(purchaseData)
@@ -8686,7 +9055,7 @@ fun saveNewPurchase() {
                         (errorText.contains("chassis") && errorText.contains("already exists"))) {
                         showErrorModal("Duplicate Chassis", errorText)
                     } else {
-                showMessage("Failed to create purchase: $errorText", "error")
+                        showMessage("Failed to create purchase: $errorText", "error")
                     }
                 }
             }
@@ -9014,10 +9383,29 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <select id="editStockLocation" 
                                     style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
                                     onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editStockLocation');"
-                                    onchange="syncComboboxInput('editStockLocation')">
+                                    onchange="syncComboboxInput('editStockLocation'); if (typeof window.fetchPolsByStockLocationAndUpdate === 'function') { window.fetchPolsByStockLocationAndUpdate(window.getComboboxValue('editStockLocation')); }">
                                 <option value="">▼</option>
                         </select>
                             <div id="editStockLocationButton" onclick="openComboboxDropdown('editStockLocation')" 
+                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                                ▼
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label>POL</label>
+                        <div style="position: relative; width: 100%;">
+                            <input type="text" id="editPolInput" value="${purchaseData.pol ?: ""}" placeholder="Select POL"
+                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off"
+                                   onfocus="this.select();">
+                            <select id="editPol"
+                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editPol');"
+                                    onchange="syncComboboxInput('editPol')">
+                                <option value="">▼</option>
+                            </select>
+                            <div id="editPolButton" onclick="openComboboxDropdown('editPol')"
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                                 ▼
                             </div>
@@ -9174,6 +9562,21 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <input type="number" id="editRepairCharges" value="${extractNumericFromDbValue(purchaseData.repairCharges)}" min="0" step="0.01" placeholder="0">
                     </div>
                 </div>
+                    <div>
+                        <label>Shipping Confirmed</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="editShippingConfirmed" value="TRUE" ${if (purchaseData.shipped == true || (purchaseData.shipped as? Number)?.toInt() == 1) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="editShippingConfirmed" value="FALSE" ${if (!(purchaseData.shipped == true || (purchaseData.shipped as? Number)?.toInt() == 1)) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
+                        </div>
+                    </div>
                     <div>
                         <label>Misc. Charges</label>
                         <div class="currency-input">
@@ -9917,6 +10320,7 @@ fun getFieldDisplayName(fieldName: String): String {
         "numberCut" -> "Number Cut"
         "notes" -> "Notes"
         "bookingId" -> "Booking ID"
+        "shipped" -> "Shipping Confirmed"
         else -> fieldName.replace(Regex("([A-Z])"), " $1").trim().replaceFirstChar { it.uppercaseChar() }
     }
 }
@@ -9970,6 +10374,7 @@ fun collectCurrentEditFormData(): dynamic {
     val auctionNo = (document.getElementById("editAuctionNo") as? HTMLInputElement)?.value ?: ""
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
+    val pol = getComboboxValueSafe("editPol")
     val rixoCompany = getComboboxValueSafe("editRixoCompany")
     val clientName = (document.getElementById("editClientName") as? HTMLInputElement)?.value ?: ""
     val country = (document.getElementById("editCountry") as? HTMLInputElement)?.value ?: ""
@@ -9989,6 +10394,7 @@ fun collectCurrentEditFormData(): dynamic {
     val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
+    val shippingConfirmed = (document.querySelector("input[name=\"editShippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
     val rixoPriceRaw = (document.getElementById("editRixoPriceInput") as? HTMLInputElement)?.value ?: ""
     val rixoPrice = if (rixoPriceRaw.isNotEmpty()) "¥$rixoPriceRaw" else ""
     val numberCutString = (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value ?: ""
@@ -10041,6 +10447,7 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.auctionNo = auctionNo
     purchaseData.auctionHouse = auctionName
     purchaseData.stockLocation = stockLocation
+    purchaseData.pol = pol
     purchaseData.rixoCompany = rixoCompany
     purchaseData.clientName = clientName
     purchaseData.country = country
@@ -10054,6 +10461,7 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.paymentDate = paymentDate
     purchaseData.rixoRequested = rixoRequested
     purchaseData.rixoConfirmed = rixoConfirmed
+    purchaseData.shipped = (shippingConfirmed == "TRUE")
     purchaseData.rixoPrice = rixoPrice
     purchaseData.shipmentDate = shipmentDate
     purchaseData.blNo = blNo
@@ -10096,7 +10504,7 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
         "roadTax", "taxTotal", "totalPrice", "paymentDate", "rixoRequested", "rixoConfirmed",
         "rixoPrice", "shipmentDate", "blNo", "vesselNo", "destination", "shipmentCharges",
         "freight", "storageCharges", "miscCharges", "inspectionFee", "commission", "repairCompany",
-        "repairCharges", "shaken", "numberCut", "notes", "bookingId"
+        "repairCharges", "shaken", "numberCut", "notes", "bookingId", "shipped"
     )
     
     Logger.debug("[COMPARE] Comparing ${fieldsToCompare.size} fields...")
@@ -10314,6 +10722,7 @@ fun handleEditPurchase() {
     val cc = getComboboxValueSafe("editCc")
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
+    val pol = getComboboxValueSafe("editPol")
     val venueId = getComboboxValueSafe("editVenueId")
     val rixoCompany = getComboboxValueSafe("editRixoCompany")
     val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
@@ -10359,6 +10768,7 @@ fun handleEditPurchase() {
         "editCc" to cc,
         "editAuctionName" to auctionName,
         "editStockLocation" to stockLocation,
+        "editPol" to pol,
         "editVenueId" to venueId,
         "editRixoCompany" to rixoCompany,
         "editTypeOfVehicle" to vehicleType
@@ -10462,6 +10872,58 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     
     console.log("📝 [TEST] Starting data collection in proceedWithEditPurchase()")
     
+    // Extract field values for master list validation first
+    val valBrand = getComboboxValueSafe("editBrand")
+    val valGrade = (document.getElementById("editGrade") as? HTMLInputElement)?.value ?: ""
+    val valFuel = getComboboxValueSafe("editFuel")
+    val valShift = getComboboxValueSafe("editShift")
+    val valSupplierName = getComboboxValueSafe("editAuctionName")
+    val valVenueId = getComboboxValueSafe("editVenueId")
+    val valVehicleType = getComboboxValueSafe("editTypeOfVehicle")
+    val valRixoCompany = getComboboxValueSafe("editRixoCompany")
+    val valStockLocation = getComboboxValueSafe("editStockLocation")
+    val valPol = getComboboxValueSafe("editPol")
+    val valClientName = (document.getElementById("editClientName") as? HTMLInputElement)?.value ?: ""
+    val valTargetCountry = (document.getElementById("editCountry") as? HTMLInputElement)?.value ?: ""
+    val valRepairCompany = (document.getElementById("editRepairCompany") as? HTMLInputElement)?.value ?: ""
+    
+    // Validate against master list before proceeding (including POL for Edit mode)
+    validatePurchaseMasterFields(
+        brand = valBrand,
+        grade = valGrade,
+        fuel = valFuel,
+        shift = valShift,
+        supplierName = valSupplierName,
+        venueId = valVenueId,
+        vehicleType = valVehicleType,
+        rixoCompany = valRixoCompany,
+        stockLocation = valStockLocation,
+        pol = valPol,
+        clientName = valClientName,
+        targetCountry = valTargetCountry,
+        repairCompany = valRepairCompany,
+        isEditMode = true
+    ) { missingFields ->
+        if (missingFields.isNotEmpty()) {
+            // Validation failed - show error modal
+            showPurchaseMasterFieldsErrorModal(missingFields)
+            return@validatePurchaseMasterFields
+        }
+        
+        // Validation passed - proceed with actual edit save
+        actuallyProceedWithEditPurchase(id, chassis)
+    }
+}
+
+// Extracted function to perform the actual edit purchase save after master list validation
+fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
+    // Helper function to get combobox value
+    fun getComboboxValueSafe(fieldId: String): String {
+        val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+        val select = document.getElementById(fieldId) as? HTMLSelectElement
+        return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
+    }
+    
     val date = formatWithWeekday((document.getElementById("editDate") as? HTMLInputElement)?.value ?: "")
     val carModelYear = (document.getElementById("editCarModelYear") as? HTMLInputElement)?.value ?: ""
     val brand = getComboboxValueSafe("editBrand")
@@ -10493,6 +10955,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     val auctionNo = (document.getElementById("editAuctionNo") as? HTMLInputElement)?.value ?: ""
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
+    val pol = getComboboxValueSafe("editPol")
     val rixoCompany = getComboboxValueSafe("editRixoCompany")
     val clientName = (document.getElementById("editClientName") as? HTMLInputElement)?.value ?: ""
     val country = (document.getElementById("editCountry") as? HTMLInputElement)?.value ?: ""
@@ -10512,6 +10975,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
+    val shippingConfirmed = (document.querySelector("input[name=\"editShippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
     // Parse rixo price - add ¥ symbol before saving
     val rixoPriceRaw = (document.getElementById("editRixoPriceInput") as? HTMLInputElement)?.value ?: ""
     val rixoPrice = if (rixoPriceRaw.isNotEmpty()) "¥$rixoPriceRaw" else ""
@@ -10568,6 +11032,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.auctionNo = auctionNo
     purchaseData.auctionHouse = auctionName
     purchaseData.stockLocation = stockLocation
+    purchaseData.pol = pol
     purchaseData.rixoCompany = rixoCompany
     purchaseData.clientName = clientName
     purchaseData.country = country
@@ -10581,6 +11046,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.paymentDate = paymentDate
     purchaseData.rixoRequested = rixoRequested
     purchaseData.rixoConfirmed = rixoConfirmed
+    purchaseData.shipped = (shippingConfirmed == "TRUE")
     purchaseData.rixoPrice = rixoPrice
     purchaseData.shipmentDate = shipmentDate
     purchaseData.blNo = blNo
@@ -10623,12 +11089,19 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     console.log("Sending update data: ${JSON.stringify(purchaseData)}")
     console.log("📷 Car pictures data:", carPictures)
     console.log("Request URL: /purchases/$id")
-    console.log("🔍 DEBUG: venueId = $venueId")
+    console.log("🔍 DEBUG: venueId = ${getComboboxValueSafe("editVenueId")}")
     console.log("🔍 DEBUG: vehicleType = $vehicleType")
     console.log("🔍 DEBUG: shipmentSize = ${purchaseData.shipmentSize}")
     
     // Submit the purchase update
     submitEditPurchase(id, purchaseData)
+}
+
+// Helper function for actuallyProceedWithEditPurchase
+private fun getComboboxValueSafe(fieldId: String): String {
+    val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+    val select = document.getElementById(fieldId) as? HTMLSelectElement
+    return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
 }
 
 // Submit edit purchase request
@@ -11595,7 +12068,6 @@ fun restoreCarBookingState() {
     val bookingNoEl = document.getElementById("bookingNo") as? HTMLInputElement
     val vesselInputEl = document.getElementById("vesselSelect") as? HTMLInputElement
     val chassisInputEl = document.getElementById("chassisSearchInput") as? HTMLInputElement
-    val chassisSelectEl = document.getElementById("chassisSearch") as? HTMLSelectElement
     
     console.log("🔍 Form elements found for restoration:")
     console.log("  - consigneeCountry: ${consigneeCountryEl != null}")
@@ -11606,7 +12078,6 @@ fun restoreCarBookingState() {
     console.log("  - bookingNo: ${bookingNoEl != null}")
     console.log("  - vesselInput: ${vesselInputEl != null}")
     console.log("  - chassisInput: ${chassisInputEl != null}")
-    console.log("  - chassisSelect: ${chassisSelectEl != null}")
     
     // Restore form field values
     consigneeCountryEl?.value = carBookingFormState.consigneeCountry ?: ""
@@ -11708,24 +12179,14 @@ fun restoreCarBookingState() {
     }
     bookingNoEl?.value = carBookingFormState.bookingNo ?: ""
     vesselInputEl?.value = carBookingFormState.vesselSelect ?: ""
-    // Restore chassis combobox value
+    // Restore chassis search input value (plain input, no dropdown)
     val chassisValue = carBookingFormState.chassisSelect ?: ""
-    if (chassisSelectEl != null && chassisValue != null && chassisValue != "" && chassisValue.trim() != "") {
-        chassisSelectEl.value = chassisValue
-        js("window.syncComboboxInput('chassisSearch')")
-        // Trigger search after restoring chassis value
-        searchCarsByChassis(chassisValue)
-    }
-    if (chassisInputEl != null) {
+    if (chassisInputEl != null && chassisValue != null && chassisValue != "" && chassisValue.trim() != "") {
         chassisInputEl.value = chassisValue
     }
     
     console.log("🔍 Form fields restored - Country: ${carBookingFormState.consigneeCountry}, POL: ${carBookingFormState.polPort}")
     console.log("🔍 After restoration - Country: ${consigneeCountryEl?.value}, POL: ${polPortEl?.value}")
-    
-    // Restore chassis dropdown first
-    console.log("🔄 Restoring chassis dropdown...")
-    loadFilteredChassis()
     
     // Restore displayed cars first, then selected rows
     // Also check carBookingTableData as fallback
@@ -12753,37 +13214,6 @@ fun populateInvoiceListTableFromPurchases(purchases: List<dynamic>) {
 
 // handleShipCars moved to Invoice.kt
 
-// Mark purchases as shipped silently (without confirmation dialog) - used in Calculate button flow
-fun markPurchasesAsShippedSilent(selectedIds: List<Long>, onComplete: () -> Unit) {
-    if (selectedIds.isEmpty()) {
-        Logger.warn("No purchase IDs to mark as shipped")
-        onComplete()
-        return
-    }
-    
-    Logger.debug("Marking ${selectedIds.size} purchases as shipped (silent mode)")
-    
-    minimalPurchaseScope.launch {
-        val payload = mapOf("purchaseIds" to selectedIds)
-        val result = ApiClient.post<Map<String, Any?>>("purchases/ship", payload)
-        result.fold(
-            onSuccess = { data ->
-                val updatedCount = when (val value = data["updatedCount"]) {
-                    is Number -> value.toInt()
-                    is String -> value.toIntOrNull() ?: selectedIds.size
-                    else -> selectedIds.size
-                }
-                Logger.debug("Successfully marked $updatedCount purchase(s) as shipped")
-                onComplete()
-            },
-            onError = { message, _ ->
-                Logger.error("Failed to mark purchases as shipped: $message")
-                onComplete() // allow flow to continue even on error
-            }
-        )
-    }
-}
-
 // Helper function to escape JSON strings
 fun escapeJsonString(str: String): String {
     // Comprehensive JSON escaping including Unicode and control characters
@@ -13324,7 +13754,6 @@ FAX: 047-711-0409
                     <div class="rixo-rows-header">
                         <h2 class="rixo-rows-title">Rows Preview</h2>
                     </div>
-                    
                     <div id="selectedCount" class="rixo-selected-count">Selected: 0 of 0</div>
                     
                     <div id="rixoRowsPreview" class="rixo-rows-content">
@@ -13483,6 +13912,37 @@ FAX: 047-711-0409
             .rixo-edit-btn svg {
                 width: 14px;
                 height: 14px;
+            }
+            
+            /* Rixo refresh pop-up */
+            .rixo-refresh-popup-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.4);
+                z-index: 10000;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 16px;
+                box-sizing: border-box;
+            }
+            .rixo-refresh-popup-box {
+                background: white;
+                border-radius: 12px;
+                padding: 24px;
+                max-width: 380px;
+                width: 100%;
+                box-shadow: 0 20px 25px -5px rgba(0,0,0,0.15);
+            }
+            .rixo-refresh-popup-text {
+                margin: 0;
+                font-size: 16px;
+                line-height: 1.5;
+                color: #374151;
+                font-weight: bold;
             }
             
             /* Responsive table for mobile */
@@ -13740,7 +14200,7 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
         val chassis = escapeHtml(js("purchase.chassis")?.toString() ?: "")
         val auctionNo = escapeHtml(js("purchase.auctionNo")?.toString() ?: "")
         val yearRaw = js("purchase.carModelYear")?.toString() ?: ""
-        val year = formatCarModelYear(yearRaw)
+        val year = carModelYearToYearOnly(yearRaw)
         val carName = escapeHtml(js("purchase.carName")?.toString() ?: "")
         val auctionHouse = escapeHtml(js("purchase.auctionHouse")?.toString() ?: "")
         val stockLocation = escapeHtml(js("purchase.stockLocation")?.toString() ?: "")
@@ -13810,7 +14270,7 @@ fun setupRixoCheckboxListeners() {
         })
     }
     
-    // Edit button listeners
+    // Edit button: open Edit Purchase page in new tab and show refresh pop-up
     val editButtons = document.querySelectorAll(".rixo-edit-btn")
     for (i in 0 until editButtons.length) {
         val button = editButtons.item(i) as HTMLElement
@@ -13818,10 +14278,31 @@ fun setupRixoCheckboxListeners() {
             val btn = event.currentTarget as HTMLElement
             val id = btn.getAttribute("data-id")?.toLongOrNull()
             if (id != null) {
-                showRixoEditModal(id)
+                val baseUrl = window.location.origin + window.location.pathname + (window.location.search ?: "")
+                window.open("$baseUrl#/edit/$id", "_blank")
+                showRixoRefreshPopup()
             }
         })
     }
+}
+
+fun showRixoRefreshPopup() {
+    document.getElementById("rixoRefreshPopupOverlay")?.remove()
+    val html = """
+        <div id="rixoRefreshPopupOverlay" class="rixo-refresh-popup-overlay">
+            <div class="rixo-refresh-popup-box">
+                <p class="rixo-refresh-popup-text">New data is available. Refresh the page to load the latest content.</p>
+            </div>
+        </div>
+    """
+    document.body?.insertAdjacentHTML("beforeend", html)
+    val overlay = document.getElementById("rixoRefreshPopupOverlay")
+    fun closePopup() {
+        document.getElementById("rixoRefreshPopupOverlay")?.remove()
+    }
+    overlay?.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "rixoRefreshPopupOverlay") closePopup()
+    })
 }
 
 // Update the selected count display
@@ -13851,325 +14332,6 @@ fun updateSelectAllRixoCheckbox() {
         selectAllCheckbox.checked = checkedCount == rowCheckboxes.length
         selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < rowCheckboxes.length
     }
-}
-
-// Helper function to create Place Name combobox with options (Rixo modal)
-fun createRixoNumberCutPlaceCombobox(purchaseData: dynamic): String {
-    val currentPlace = getInitialPlaceFromNumberCut(purchaseData.numberCut)
-    return createEditableComboboxWithOptions("rixoEditNumberCutPlace", "Select Place", getNumberCutPlaceOptions(), currentPlace)
-}
-
-// Helper function to create Hiragana Character combobox with options (Rixo modal)
-fun createRixoNumberCutHiraganaCombobox(purchaseData: dynamic): String {
-    val currentHiragana = getInitialHiraganaFromNumberCut(purchaseData.numberCut)
-    return createEditableComboboxWithOptions("rixoEditNumberCutHiragana", "Select Character", getNumberCutHiraganaOptions(), currentHiragana)
-}
-
-// Show edit modal for a Rixo row
-fun showRixoEditModal(purchaseId: Long) {
-    // Fetch the purchase data first
-    window.fetch(apiUrl("purchases/purchase/$purchaseId"))
-        .then { response -> response.json() }
-        .then { purchaseData ->
-            createRixoEditModal(purchaseData)
-        }
-        .catch { error ->
-            console.error("Error fetching purchase data:", error)
-            showMessage("Error loading purchase data", "error")
-        }
-}
-
-fun createRixoEditModal(purchaseData: dynamic) {
-    val modalHTML = """
-        <div id="rixoEditModal" class="rixo-edit-modal-overlay">
-            <div class="rixo-edit-modal-content">
-                <div class="rixo-edit-modal-header">
-                    <h2 class="rixo-edit-modal-title">Edit</h2>
-                    <button id="closeRixoModal" class="rixo-edit-modal-close">&times;</button>
-                </div>
-                
-                <form id="rixoEditForm" class="rixo-edit-form">
-                    <input type="hidden" id="rixoEditId" value="${purchaseData.id}">
-                    
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-                        <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Auction No</label>
-                            <input type="text" id="rixoEditAuctionNo" value="${purchaseData.auctionNo ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
-                        </div>
-                        <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Chassis</label>
-                            <input type="text" id="rixoEditChassis" value="${purchaseData.chassis ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
-                        </div>
-                    </div>
-                    
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-                        <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Car Model Year</label>
-                            <input type="month" id="rixoEditCarModelYear" value="${if (purchaseData.carModelYear != null) {
-                                val parts = purchaseData.carModelYear.toString().split("/")
-                                if (parts.size == 2) "${parts[1]}-${parts[0].padStart(2, '0')}" else purchaseData.carModelYear.toString()
-                            } else ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
-                        </div>
-                        <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Car Name</label>
-                            <input type="text" id="rixoEditCarName" value="${purchaseData.carName ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
-                        </div>
-                    </div>
-                    
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-                        <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Supplier Name</label>
-                            <input type="text" id="rixoEditAuctionHouse" value="${purchaseData.auctionHouse ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
-                        </div>
-                        <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Stock Location</label>
-                            <input type="text" id="rixoEditStockLocation" value="${purchaseData.stockLocation ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
-                        </div>
-                    </div>
-                    
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-                        <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Venue ID</label>
-                            <input type="text" id="rixoEditVenueId" value="${purchaseData.venueId ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
-                        </div>
-                        <div>
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Number Cut</label>
-                            <input type="text" id="rixoEditNumberCut" value="${purchaseData.numberCut ?: ""}" style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 14px;">
-                        </div>
-                    </div>
-                    
-                    <!-- SHAKEN Checkbox -->
-                    <div style="margin: 20px 0 10px 0;">
-                        <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; cursor: pointer;">
-                            <input type="checkbox" id="rixoEditShakenCheckbox" style="width: 18px; height: 18px; accent-color: #007bff;">
-                            SHAKEN
-                        </label>
-                    </div>
-
-                    <!-- Number Cut Information Section (initially hidden) -->
-                    <div id="rixoEditNumberCutSection" class="rixo-number-cut-section" style="display: none;">
-                        <h3 style="color: #333; margin: 20px 0 10px 0; border-bottom: 1px solid #eee; padding-bottom: 5px;">Number Cut Information</h3>
-                        <div class="rixo-number-cut-grid">
-                            <div class="rixo-number-cut-field">
-                                <label class="rixo-number-cut-label">Place Name (Japanese)</label>
-                                ${createRixoNumberCutPlaceCombobox(purchaseData)}
-                            </div>
-                            <div class="rixo-number-cut-field">
-                                <label class="rixo-number-cut-label">Number (English)</label>
-                                <input type="number" id="rixoEditNumberCutNumber1" class="rixo-number-cut-input" placeholder="Enter number">
-                            </div>
-                            <div class="rixo-number-cut-field">
-                                <label class="rixo-number-cut-label">Hiragana Character</label>
-                                ${createRixoNumberCutHiraganaCombobox(purchaseData)}
-                            </div>
-                            <div class="rixo-number-cut-field">
-                                <label class="rixo-number-cut-label">Number (English)</label>
-                                <input type="number" id="rixoEditNumberCutNumber2" class="rixo-number-cut-input" placeholder="Enter number">
-                            </div>
-                        </div>
-                        <div class="rixo-number-cut-generated" style="margin-bottom: 20px;">
-                            <label class="rixo-number-cut-label">Generated Number Cut String:</label>
-                            <input type="text" id="rixoEditNumberCutString" class="rixo-number-cut-input" readonly placeholder="Will be generated automatically">
-                        </div>
-                    </div>
-                    
-                    <div class="rixo-edit-modal-actions">
-                        <button type="button" id="rixoEditCancel" class="rixo-modal-btn rixo-modal-btn-cancel">Cancel</button>
-                        <button type="submit" id="rixoEditSave" class="rixo-modal-btn rixo-modal-btn-save">Save Changes</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    """
-    
-    // Remove any existing modal
-    document.getElementById("rixoEditModal")?.remove()
-    
-    // Hide hamburger menu when modal is open
-    val hamburgerContainer = document.getElementById("hamburgerBtnContainer") as? HTMLElement
-    hamburgerContainer?.style?.setProperty("display", "none")
-    
-    // Add the modal to the page
-    document.body?.insertAdjacentHTML("beforeend", modalHTML)
-    
-    // Set up the modal functionality
-    setupRixoEditModalListeners(purchaseData)
-}
-
-fun setupRixoEditModalListeners(purchaseData: dynamic) {
-    // Function to show hamburger menu
-    fun showHamburgerMenu() {
-        val hamburgerContainer = document.getElementById("hamburgerBtnContainer") as? HTMLElement
-        hamburgerContainer?.style?.setProperty("display", "block")
-    }
-    
-    // Function to close modal and restore hamburger menu
-    fun closeModal() {
-        document.getElementById("rixoEditModal")?.remove()
-        showHamburgerMenu()
-    }
-    
-    // Close modal functionality
-    document.getElementById("closeRixoModal")?.addEventListener("click", { _: Event ->
-        closeModal()
-    })
-    
-    document.getElementById("rixoEditCancel")?.addEventListener("click", { _: Event ->
-        closeModal()
-    })
-    
-    // Close modal when clicking outside
-    document.getElementById("rixoEditModal")?.addEventListener("click", { event: Event ->
-        val target = event.target as HTMLElement?
-        if (target?.id == "rixoEditModal") {
-            closeModal()
-        }
-    })
-    
-    // SHAKEN checkbox functionality
-    document.getElementById("rixoEditShakenCheckbox")?.addEventListener("change", { event: Event ->
-        val target = event.target as HTMLInputElement
-        val numberCutSection = document.getElementById("rixoEditNumberCutSection") as HTMLElement?
-        if (target.checked) {
-            numberCutSection?.style?.setProperty("display", "block")
-        } else {
-            numberCutSection?.style?.setProperty("display", "none")
-        }
-    })
-    
-    // Set initial SHAKEN checkbox state
-    val shakenCheckbox = document.getElementById("rixoEditShakenCheckbox") as HTMLInputElement?
-    val numberCutSection = document.getElementById("rixoEditNumberCutSection") as HTMLElement?
-    if (shakenCheckbox != null) {
-        shakenCheckbox.checked = purchaseData.shaken || false
-        if (shakenCheckbox.checked) {
-            numberCutSection?.style?.setProperty("display", "block")
-        } else {
-            numberCutSection?.style?.setProperty("display", "none")
-        }
-    }
-    
-    // Number cut generation listeners
-    setupRixoModalNumberCutListeners()
-    
-    // Form submission
-    document.getElementById("rixoEditForm")?.addEventListener("submit", { event: Event ->
-        event.preventDefault()
-        handleRixoEditSubmit()
-    })
-}
-
-fun setupRixoModalNumberCutListeners() {
-    // Add listeners for number cut generation (using combobox structure like chassis dropdown)
-    val placeInput = document.getElementById("rixoEditNumberCutPlaceInput") as HTMLInputElement?
-    val placeSelect = document.getElementById("rixoEditNumberCutPlace") as HTMLSelectElement?
-    val number1Input = document.getElementById("rixoEditNumberCutNumber1") as HTMLInputElement?
-    val hiraganaInput = document.getElementById("rixoEditNumberCutHiraganaInput") as HTMLInputElement?
-    val hiraganaSelect = document.getElementById("rixoEditNumberCutHiragana") as HTMLSelectElement?
-    val number2Input = document.getElementById("rixoEditNumberCutNumber2") as HTMLInputElement?
-    val resultInput = document.getElementById("rixoEditNumberCutString") as HTMLInputElement?
-    
-    fun updateNumberCutString() {
-        // Get values from combobox inputs (like chassis dropdown)
-        val place = js("window.getComboboxValue('rixoEditNumberCutPlace')") as? String ?: ""
-        val number1 = number1Input?.value ?: ""
-        val hiragana = js("window.getComboboxValue('rixoEditNumberCutHiragana')") as? String ?: ""
-        val number2 = number2Input?.value ?: ""
-        
-        if (place.isNotEmpty() && number1.isNotEmpty() && hiragana.isNotEmpty() && number2.isNotEmpty()) {
-            val result = "$place$number1$hiragana$number2"
-            resultInput?.value = result
-        } else {
-            resultInput?.value = ""
-        }
-    }
-    
-    // Listen to both input and select changes (combobox structure)
-    placeInput?.addEventListener("input", { _: Event -> updateNumberCutString() })
-    placeSelect?.addEventListener("change", { _: Event -> 
-        js("window.syncComboboxInput('rixoEditNumberCutPlace')")
-        updateNumberCutString() 
-    })
-    number1Input?.addEventListener("input", { _: Event -> updateNumberCutString() })
-    hiraganaInput?.addEventListener("input", { _: Event -> updateNumberCutString() })
-    hiraganaSelect?.addEventListener("change", { _: Event -> 
-        js("window.syncComboboxInput('rixoEditNumberCutHiragana')")
-        updateNumberCutString() 
-    })
-    number2Input?.addEventListener("input", { _: Event -> updateNumberCutString() })
-}
-
-fun handleRixoEditSubmit() {
-    val id = (document.getElementById("rixoEditId") as HTMLInputElement).value.toLong()
-    val auctionNo = (document.getElementById("rixoEditAuctionNo") as HTMLInputElement).value
-    val chassis = (document.getElementById("rixoEditChassis") as HTMLInputElement).value
-    val carModelYear = (document.getElementById("rixoEditCarModelYear") as HTMLInputElement).value
-    val carName = (document.getElementById("rixoEditCarName") as HTMLInputElement).value
-    val auctionHouse = (document.getElementById("rixoEditAuctionHouse") as HTMLInputElement).value
-    val stockLocation = (document.getElementById("rixoEditStockLocation") as HTMLInputElement).value
-    val venueId = (document.getElementById("rixoEditVenueId") as HTMLInputElement).value
-    val numberCut = (document.getElementById("rixoEditNumberCut") as HTMLInputElement).value
-    val shaken = (document.getElementById("rixoEditShakenCheckbox") as HTMLInputElement).checked
-    val numberCutString = (document.getElementById("rixoEditNumberCutString") as HTMLInputElement).value
-    
-    // Get values from combobox inputs (like chassis dropdown)
-    val placeValue = js("window.getComboboxValue('rixoEditNumberCutPlace')") as? String ?: ""
-    val hiraganaValue = js("window.getComboboxValue('rixoEditNumberCutHiragana')") as? String ?: ""
-    
-    val updateData = js("{}")
-    updateData.auctionNo = auctionNo
-    updateData.chassis = chassis
-    updateData.carModelYear = carModelYear
-    updateData.carName = carName
-    updateData.auctionHouse = auctionHouse
-    updateData.stockLocation = stockLocation
-    updateData.venueId = venueId
-    updateData.numberCut = if (numberCutString.isNotEmpty()) numberCutString else numberCut
-    updateData.shaken = shaken
-    
-    // Update the purchase
-    val requestInit = js("{}")
-    requestInit.method = "PUT"
-    val headers = js("{}")
-    headers["Content-Type"] = "application/json"
-    requestInit.headers = headers
-    requestInit.body = JSON.stringify(updateData)
-    
-    window.fetch(apiUrl("purchases/$id"), requestInit)
-        .then { response ->
-            if (response.ok) {
-                showMessage("Purchase updated successfully", "success")
-                document.getElementById("rixoEditModal")?.remove()
-                // Restore hamburger menu after closing modal
-                val hamburgerContainer = document.getElementById("hamburgerBtnContainer") as? HTMLElement
-                hamburgerContainer?.style?.setProperty("display", "block")
-                // Refresh the rows preview
-                val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
-                val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
-                if (buyingDate.isNotEmpty() && rixoCompany.isNotEmpty()) {
-                    loadRowsForDateAndCompany()
-                } else Unit
-            } else {
-                // Try to read error message from response
-                response.text().then { errorText ->
-                    val errorMessage = try {
-                        val errorJson = JSON.parse(errorText) as? dynamic
-                        errorJson?.message?.toString() ?: errorJson?.error?.toString() ?: errorText.takeIf { it.isNotEmpty() } ?: "Error updating purchase"
-                    } catch (e: Exception) {
-                        errorText.takeIf { it.isNotEmpty() } ?: "Error updating purchase (Status: ${response.status})"
-                    }
-                    console.error("Error updating purchase:", errorMessage)
-                    showMessage("Error updating purchase: $errorMessage", "error")
-                }.catch { _ ->
-                    showMessage("Error updating purchase (Status: ${response.status})", "error")
-                }
-            }
-        }
-        .catch { error ->
-            console.error("Error updating purchase:", error)
-            val errorMessage = error.toString().takeIf { it.isNotEmpty() } ?: "Network error or server unavailable"
-            showMessage("Error updating purchase: $errorMessage", "error")
-        }
 }
 
 // Generate Rixo Request PDF
@@ -14460,13 +14622,13 @@ fun generateRixoRequestPdfDocument(purchases: List<dynamic>, buyingDate: String,
     showMessage("PDF generated successfully for ${purchases.size} vehicles. Set Rixo Requested to TRUE manually after faxing.", "success")
 }
 
-// Generate table rows for the PDF
+// Generate table rows for the PDF (year column shows only the year from car_model_year)
 fun generateTableRows(purchases: List<dynamic>, formattedDate: String): String {
     val rows = StringBuilder()
     
     for (purchase in purchases) {
         val chassis = js("purchase.chassis")?.toString() ?: ""
-        val carModelYear = js("purchase.carModelYear")?.toString() ?: ""
+        val yearOnly = carModelYearToYearOnly(js("purchase.carModelYear")?.toString() ?: "")
         val carName = js("purchase.carName")?.toString() ?: ""
         val clientName = js("purchase.clientName")?.toString() ?: ""
         val stockLocation = js("purchase.stockLocation")?.toString() ?: ""
@@ -14477,7 +14639,7 @@ fun generateTableRows(purchases: List<dynamic>, formattedDate: String): String {
             <tr>
                 <td>${formattedDate}</td>
                 <td>${chassis}</td>
-                <td>${carModelYear}</td>
+                <td>${yearOnly}</td>
                 <td>${carName}</td>
                 <td>${clientName}</td>
                 <td>${stockLocation}</td>
@@ -16833,7 +16995,7 @@ fun generateShippingSchedulePdfPreview() {
 
 // loadFilteredChassis and loadFilteredChassisFallback moved to CarBooking.kt
 
-// Show chassis suggestions dropdown
+// Show chassis suggestions dropdown (used by booking chassis search - input is chassisSearchInput, add via addCarToBookingTable)
 fun showChassisSuggestions(suggestions: Array<String>) {
     val suggestionsDiv = document.getElementById("chassisSuggestions") as? HTMLElement
     if (suggestionsDiv == null) return
@@ -16850,11 +17012,15 @@ fun showChassisSuggestions(suggestions: Array<String>) {
         suggestionItem.style.cssText = "padding: 10px; cursor: pointer; border-bottom: 1px solid #e5e7eb;"
         suggestionItem.textContent = chassis
         suggestionItem.addEventListener("click", { _: Event ->
-            val chassisInput = document.getElementById("chassisSearch") as? HTMLInputElement
+            val chassisInput = document.getElementById("chassisSearchInput") as? HTMLInputElement
             chassisInput?.value = chassis
             hideChassisSuggestions()
-            // Trigger search when suggestion is selected
-            searchCarsByChassis(chassis)
+            val addCar = js("window.addCarToBookingTable")
+            if (addCar != null && js("typeof addCar === 'function'") as Boolean) {
+                (addCar as (String) -> Unit)(chassis)
+            } else {
+                searchCarsByChassis(chassis)
+            }
         })
         suggestionItem.addEventListener("mouseenter", { _: Event ->
             suggestionItem.style.setProperty("background-color", "#f3f4f6")

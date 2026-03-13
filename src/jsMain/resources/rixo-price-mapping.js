@@ -2374,6 +2374,54 @@ window.parseRixoPrice = function(value) {
     return cleaned;
 };
 
+// Fetch POLs for a stock location from booking_mappings and update POL dropdowns; optionally set first value.
+window.fetchPolsByStockLocationAndUpdate = function(stockLocation, setFirstValue) {
+    if (setFirstValue === undefined) setFirstValue = true;
+    var polSelect = document.getElementById('pol');
+    var editPolSelect = document.getElementById('editPol');
+    if (!stockLocation || String(stockLocation).trim() === '') {
+        console.log('[POL] Clearing POL (empty stock location)');
+        if (typeof window.updateDropdown === 'function') {
+            window.updateDropdown('pol', 'editPol', []);
+        }
+        if (polSelect) { polSelect.value = ''; var inp = document.getElementById('polInput'); if (inp) inp.value = ''; }
+        if (editPolSelect) { editPolSelect.value = ''; var inp = document.getElementById('editPolInput'); if (inp) inp.value = ''; }
+        return Promise.resolve();
+    }
+    // Use same API base as rest of app (window.apiUrl from Kotlin or booking-mapping.js)
+    var url = (typeof window.apiUrl === 'function')
+        ? window.apiUrl('booking/mappings/pols-by-stock-location?stockLocation=' + encodeURIComponent(stockLocation))
+        : (typeof apiUrl !== 'undefined' ? apiUrl('booking/mappings/pols-by-stock-location?stockLocation=' + encodeURIComponent(stockLocation)) : '');
+    if (!url) {
+        console.warn('[POL] No apiUrl available, skipping POL fetch for:', stockLocation);
+        return Promise.resolve();
+    }
+    console.log('[POL] Fetching POLs for stock location:', stockLocation, '->', url);
+    return fetch(url)
+        .then(function(r) {
+            if (!r.ok) {
+                console.warn('[POL] API responded with status:', r.status, r.statusText, 'for', url);
+            }
+            return r.json();
+        })
+        .then(function(res) {
+            var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+            console.log('[POL] POLs received for', stockLocation, ':', list, '(success:', res && res.success, ')');
+            if (typeof window.updateDropdown === 'function') {
+                window.updateDropdown('pol', 'editPol', list);
+            }
+            if (setFirstValue && list.length > 0 && typeof window.setFieldValue === 'function') {
+                window.setFieldValue('pol', 'editPol', list[0]);
+            }
+        })
+        .catch(function(err) {
+            console.warn('[POL] fetchPolsByStockLocationAndUpdate failed for', stockLocation, ':', err);
+            if (typeof window.updateDropdown === 'function') {
+                window.updateDropdown('pol', 'editPol', []);
+            }
+        });
+};
+
 // Helper function to auto-select related fields
 window.autoSelectRelatedFields = function(auctionName, changedField, changedValue) {
     console.log('autoSelectRelatedFields called:', auctionName, changedField, changedValue);
@@ -2450,6 +2498,10 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             // Stock Location - always select first value if available
             if (stockLocations.length > 0) {
             setFieldValue('stockLocation', 'editStockLocation', stockLocations[0]);
+                // Fetch POLs for this stock location and update POL dropdown; pre-fill first POL
+                if (typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+                    window.fetchPolsByStockLocationAndUpdate(stockLocations[0], true);
+                }
         }
             
             // Venue ID - always select first value if available

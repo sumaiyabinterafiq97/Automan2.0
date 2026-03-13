@@ -1,3 +1,52 @@
 {
-    "java.gradle.buildServer.enabled": "on"
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/build/**": true,
+    "**/target/**": true,
+    "**/.gradle/**": true,
+    "**/kotlin-js-store/**": true,
+    "**/.git/objects/**": true,
+    "**/backend/build/**": true,
+    "**/.DS_Store": true,
+    "**/*.jar": true,
+    "**/*.otf": true,
+    "**/*.ttf": true,
+    "**/*.woff": true,
+    "**/*.woff2": true,
+    "**/*.zip": true,
+    "**/*.tar": true,
+    "**/*.tar.gz": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/build": true,
+    "**/target": true,
+    "**/.gradle": true,
+    "**/kotlin-js-store": true,
+    "**/.git": true,
+    "**/backend/build": true,
+    "**/.DS_Store": true,
+    "**/*.jar": true,
+    "**/*.otf": true
+  },
+  "files.exclude": {
+    "**/.gradle": true,
+    "**/build": true,
+    "**/.DS_Store": true,
+    "**/*.jar": true
+  },
+  "files.maxMemoryForLargeFilesMB": 4096,
+  "files.watcherInclude": [
+    "**/*.kt",
+    "**/*.kts",
+    "**/*.js",
+    "**/*.ts",
+    "**/*.json",
+    "**/*.yml",
+    "**/*.yaml",
+    "**/*.md",
+    "**/*.html",
+    "**/*.css",
+    "**/*.sql"
+  ]
 }

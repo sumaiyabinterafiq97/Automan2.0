@@ -53,6 +53,46 @@ var venueIdsCurrentPage = 1
 var venueIdsItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allVenueIds: List<String> = emptyList()
 
+// Global pagination variables for POL, POD, Fuel, Car Grade, Car Shift, Type of Vehicles
+var polCurrentPage = 1
+var polItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allPol: List<String> = emptyList()
+var podCurrentPage = 1
+var podItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allPod: List<String> = emptyList()
+var fuelCurrentPage = 1
+var fuelItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allFuel: List<String> = emptyList()
+var carGradeCurrentPage = 1
+var carGradeItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allCarGrades: List<String> = emptyList()
+var carShiftCurrentPage = 1
+var carShiftItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allCarShifts: List<String> = emptyList()
+var typeOfVehiclesCurrentPage = 1
+var typeOfVehiclesItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allTypeOfVehicles: List<String> = emptyList()
+
+// Global pagination variables for Client master list (from master_menu)
+var clientMasterCurrentPage = 1
+var clientMasterItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allClientMaster: List<String> = emptyList()
+
+// Global pagination variables for Consignee master list (from master_menu)
+var consigneeMasterCurrentPage = 1
+var consigneeMasterItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allConsigneeMaster: List<String> = emptyList()
+
+// Global pagination variables for Supplier master list (from master_menu)
+var supplierMasterCurrentPage = 1
+var supplierMasterItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allSupplierMaster: List<String> = emptyList()
+
+// Global pagination variables for Car Brands master list (from master_menu)
+var carBrandsMasterCurrentPage = 1
+var carBrandsMasterItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+var allCarBrandsMaster: List<String> = emptyList()
+
 // Global variable to track last device type for Car Brands page
 var lastCarBrandDeviceType: String? = getDeviceType()
 
@@ -62,10 +102,10 @@ var lastCarBrandDeviceType: String? = getDeviceType()
 fun getDefaultSupplierColumnsForDevice(deviceType: String? = null): List<String> {
     val device = deviceType ?: getDeviceType()
     return when (device) {
-        "mobile" -> listOf("id", "supplierName", "stockLocation", "rixoCompany")
-        "tablet" -> listOf("id", "supplierName", "stockLocation", "rixoCompany", "venueId", "rixoPrice")
-        "desktop" -> listOf("id", "supplierName", "stockLocation", "rixoCompany", "venueId", "rixoPrice", "typeOfVehicle")
-        else -> listOf("id", "supplierName", "stockLocation", "rixoCompany", "venueId", "rixoPrice", "typeOfVehicle")
+        "mobile" -> listOf("supplierName", "stockLocation", "rixoCompany")
+        "tablet" -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "rixoPrice")
+        "desktop" -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "rixoPrice", "typeOfVehicle")
+        else -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "rixoPrice", "typeOfVehicle")
     }
 }
 
@@ -95,11 +135,12 @@ fun getSelectedSupplierColumns(): List<String> {
         return defaultColumns
     }
     
-    // Auto-adjust if saved columns exceed device limit
-    return if (savedColumns.size > maxColumns) {
+    // Filter out "id" column (removed from UI) and auto-adjust if saved columns exceed device limit
+    val filteredColumns = savedColumns.filter { it.isNotBlank() && it != "id" }
+    return if (filteredColumns.size > maxColumns) {
         defaultColumns
     } else {
-        savedColumns.filter { it.isNotBlank() }.take(maxColumns)
+        filteredColumns.take(maxColumns)
     }
 }
 
@@ -109,10 +150,10 @@ fun getSelectedSupplierColumns(): List<String> {
 fun getDefaultConsigneeColumnsForDevice(deviceType: String? = null): List<String> {
     val device = deviceType ?: getDeviceType()
     return when (device) {
-        "mobile" -> listOf("id", "country", "consigneeName", "pod")
-        "tablet" -> listOf("id", "country", "consigneeName", "pod", "clientName", "stockLocation")
-        "desktop" -> listOf("id", "country", "clientName", "consigneeName", "consigneeAddress", "pod", "stockLocation")
-        else -> listOf("id", "country", "clientName", "consigneeName", "consigneeAddress", "pod", "stockLocation")
+        "mobile" -> listOf("country", "consigneeName", "pod")
+        "tablet" -> listOf("country", "consigneeName", "pod", "pols", "clientName", "stockLocation")
+        "desktop" -> listOf("country", "clientName", "consigneeName", "consigneeAddress", "pod", "pols", "stockLocation")
+        else -> listOf("country", "clientName", "consigneeName", "consigneeAddress", "pod", "pols", "stockLocation")
     }
 }
 
@@ -122,10 +163,10 @@ fun getDefaultConsigneeColumnsForDevice(deviceType: String? = null): List<String
 fun getDefaultCarBrandColumnsForDevice(deviceType: String? = null): List<String> {
     val device = deviceType ?: getDeviceType()
     return when (device) {
-        "mobile" -> listOf("id", "carBrand", "chassis", "carName")
-        "tablet" -> listOf("id", "carBrand", "chassis", "carName", "fuel", "wd")
-        "desktop" -> listOf("id", "carBrand", "chassis", "carName", "fuel", "wd", "shift", "grade", "cc", "door")
-        else -> listOf("id", "carBrand", "chassis", "carName", "fuel", "wd", "shift", "grade", "cc", "door")
+        "mobile" -> listOf("carBrand", "chassis", "carName")
+        "tablet" -> listOf("carBrand", "chassis", "carName", "fuel", "wd")
+        "desktop" -> listOf("carBrand", "chassis", "carName", "fuel", "wd", "shift", "grade", "cc", "door")
+        else -> listOf("carBrand", "chassis", "carName", "fuel", "wd", "shift", "grade", "cc", "door")
     }
 }
 
@@ -155,11 +196,12 @@ fun getSelectedCarBrandColumns(): List<String> {
         return defaultColumns
     }
     
-    // Auto-adjust if saved columns exceed device limit
-    return if (savedColumns.size > maxColumns) {
+    // Filter out "id" column (removed from UI) and auto-adjust if saved columns exceed device limit
+    val filteredColumns = savedColumns.filter { it.isNotBlank() && it != "id" }
+    return if (filteredColumns.size > maxColumns) {
         defaultColumns
     } else {
-        savedColumns.filter { it.isNotBlank() }.take(maxColumns)
+        filteredColumns.take(maxColumns)
     }
 }
 
@@ -189,11 +231,12 @@ fun getSelectedConsigneeColumns(): List<String> {
         return defaultColumns
     }
     
-    // Auto-adjust if saved columns exceed device limit
-    return if (savedColumns.size > maxColumns) {
+    // Filter out "id" column (removed from UI) and auto-adjust if saved columns exceed device limit
+    val filteredColumns = savedColumns.filter { it.isNotBlank() && it != "id" }
+    return if (filteredColumns.size > maxColumns) {
         defaultColumns
     } else {
-        savedColumns.filter { it.isNotBlank() }.take(maxColumns)
+        filteredColumns.take(maxColumns)
     }
 }
 
@@ -223,9 +266,370 @@ fun getSelectedCountryColumns(): List<String> {
 
 // Master List Functions
 
+/** Client page: shows Client Transactions button and a client master list (from master_menu). */
+fun showClientPage() {
+    val content = document.getElementById("content")!!
+    content.innerHTML = """
+        <div id="clientMasterList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Client</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addClientMasterBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Client</span>
+                    </button>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <button id="clientTransactionsBtn" class="client-btn client-btn-primary" style="padding: 10px 20px; font-size: 14px;">Client Transactions</button>
+            </div>
+
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                <div style="flex: 1; min-width: 250px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Client:</label>
+                    <input type="text" id="clientMasterFilter" placeholder="Type client name to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                </div>
+            </div>
+
+            <div id="clientMasterTable" style="margin-top: 20px;">
+                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px;">Loading clients...</div>
+                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+                </div>
+            </div>
+        </div>
+    """
+    loadClientMasterList()
+
+    document.getElementById("clientTransactionsBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/master/client-transactions"
+    })
+
+    document.getElementById("clientMasterFilter")?.addEventListener("input", { _: Event ->
+        loadClientMasterList()
+    })
+
+    document.getElementById("addClientMasterBtn")?.addEventListener("click", { _: Event ->
+        showAddClientMasterModal()
+    })
+}
+
+fun loadClientMasterList() {
+    val tableDiv = document.getElementById("clientMasterTable")
+    if (tableDiv == null) return
+
+    val searchFilter = (document.getElementById("clientMasterFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
+
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+            <div style="font-size: 16px; margin-bottom: 8px;">Loading clients...</div>
+            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+        </div>
+    """
+
+    window.fetch(apiUrl("master-menu/clients"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load clients')")
+        }
+        .then { raw: dynamic ->
+            val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
+            } else emptyList()
+            val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
+            allClientMaster = filtered
+            if (searchFilter.isNotEmpty()) clientMasterCurrentPage = 1
+
+            if (filtered.isEmpty()) {
+                val message = if (searchFilter.isNotEmpty()) "No clients found for: $searchFilter" else "No clients found."
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
+                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search filter</div>
+                    </div>
+                """
+                return@then
+            }
+
+            val selectedColumns = listOf("id", "client")
+            val totalPages = kotlin.math.ceil(filtered.size.toDouble() / clientMasterItemsPerPage).toInt()
+            val startIndex = (clientMasterCurrentPage - 1) * clientMasterItemsPerPage
+            val endIndex = kotlin.math.min(startIndex + clientMasterItemsPerPage, filtered.size)
+            val pageItems = filtered.subList(startIndex, endIndex)
+
+            val columnLabels = mapOf("id" to "ID", "client" to "Client")
+            var html = """
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;" class="client-master-table">
+                        <thead>
+                            <tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+            """
+            for (col in selectedColumns) {
+                val label = columnLabels[col] ?: col
+                html += """<th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #374151; font-size: 14px;">$label</th>"""
+            }
+            html += """
+                            </tr>
+                        </thead>
+                        <tbody>
+            """
+            for ((idx, clientName) in pageItems.withIndex()) {
+                val rowNum = startIndex + idx + 1
+                html += """
+                    <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
+                """
+                for (col in selectedColumns) {
+                    val value = when (col) {
+                        "id" -> """
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="client-master-edit-btn"
+                                        data-client="${clientName.replace("\"", "&quot;")}"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        """.trimIndent()
+                        "client" -> clientName
+                        else -> ""
+                    }
+                    val cellStyle = when (col) {
+                        "id" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
+                        "client" -> "padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;"
+                        else -> "padding: 14px 16px; color: #111827; font-size: 14px;"
+                    }
+                    html += """<td style="$cellStyle">$value</td>"""
+                }
+                html += """</tr>"""
+            }
+            html += """
+                        </tbody>
+                    </table>
+                </div>
+            """
+            if (totalPages > 1) {
+                html += """
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
+                        <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
+                            Showing ${startIndex + 1} to $endIndex of ${filtered.size} client${if (filtered.size != 1) "s" else ""}${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                        </div>
+                        <div class="consignee-pagination-controls">
+                            <button id="clientMasterPrevPage" class="consignee-pagination-btn" ${if (clientMasterCurrentPage == 1) "disabled" else ""}>Previous</button>
+                            <span class="consignee-pagination-page">Page $clientMasterCurrentPage of $totalPages</span>
+                            <button id="clientMasterNextPage" class="consignee-pagination-btn" ${if (clientMasterCurrentPage >= totalPages) "disabled" else ""}>Next</button>
+                        </div>
+                    </div>
+                """
+            } else {
+                html += """
+                    <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+                        Total: ${filtered.size} client${if (filtered.size != 1) "s" else ""}${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                    </div>
+                """
+            }
+            tableDiv.innerHTML = html
+
+            // Attach edit handlers
+            val editButtons = document.querySelectorAll(".client-master-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-client") ?: return@addEventListener
+                    showEditClientMasterModal(name)
+                })
+            }
+            
+            document.getElementById("clientMasterPrevPage")?.addEventListener("click", { _: Event ->
+                if (clientMasterCurrentPage > 1) {
+                    clientMasterCurrentPage--
+                    loadClientMasterList()
+                }
+            })
+            document.getElementById("clientMasterNextPage")?.addEventListener("click", { _: Event ->
+                val totalP = kotlin.math.ceil(allClientMaster.size.toDouble() / clientMasterItemsPerPage).toInt()
+                if (clientMasterCurrentPage < totalP) {
+                    clientMasterCurrentPage++
+                    loadClientMasterList()
+                }
+            })
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error loading clients: ${error.toString()}")
+            tableDiv.innerHTML = """
+                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading clients</div>
+                    <div style="font-size: 14px; color: #9ca3af;">${(error?.message ?: error.toString())}</div>
+                </div>
+            """
+        }
+}
+
+fun showAddClientMasterModal() {
+    document.getElementById("clientMasterEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "clientMasterEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Client</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="clientMasterModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Client</label>
+                <input type="text" id="clientMasterModalInput" placeholder="Enter client name"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="clientMasterModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="clientMasterModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("clientMasterModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("clientMasterModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("clientMasterModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Client name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/clients"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add client')")
+            }
+            .then { _: dynamic ->
+                showMessage("Client added successfully", "success")
+                modal.remove()
+                clientMasterCurrentPage = 1
+                loadClientMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding client: ${error.toString()}")
+                showMessage("Error adding client: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditClientMasterModal(originalName: String) {
+    document.getElementById("clientMasterEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "clientMasterEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Client</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="clientMasterModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Client</label>
+                <input type="text" id="clientMasterModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="clientMasterModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="clientMasterModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="clientMasterModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("clientMasterModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("clientMasterModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("clientMasterModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Client name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalName
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/clients"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update client')")
+            }
+            .then { _: dynamic ->
+                showMessage("Client updated successfully", "success")
+                modal.remove()
+                loadClientMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating client: ${error.toString()}")
+                showMessage("Error updating client: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("clientMasterModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        if (!window.confirm("Are you sure you want to delete client '$originalName'?")) {
+            return@addEventListener
+        }
+
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val url = apiUrl("master-menu/clients?value=$encoded")
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete client')")
+            }
+            .then { _: dynamic ->
+                showMessage("Client deleted successfully", "success")
+                modal.remove()
+                clientMasterCurrentPage = 1
+                loadClientMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting client: ${error.toString()}")
+                showMessage("Error deleting client: ${error.message}", "error")
+            }
+    })
+}
+
 fun showMasterClientsPage() {
-    window.location.hash = "#/master/clients"
-    // Use the Client Accounts Management page functionality
     showClientAccountsPage()
 }
 
@@ -239,14 +643,381 @@ fun showAddClientModal() {
     showAddClientForm()
 }
 
+/** Consignee page: shows Consignee Map button and a consignee master list (from master_menu). */
+fun showConsigneePage() {
+    val content = document.getElementById("content")!!
+    content.innerHTML = """
+        <div id="consigneeMasterList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Consignee</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addConsigneeMasterBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Consignee</span>
+                    </button>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <button id="consigneeMapBtn" class="client-btn client-btn-primary" style="padding: 10px 20px; font-size: 14px;">Consignee Map</button>
+            </div>
+
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                <div style="flex: 1; min-width: 250px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Consignee:</label>
+                    <input type="text" id="consigneeMasterFilter" placeholder="Type consignee name to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                </div>
+            </div>
+
+            <div id="consigneeMasterTable" style="margin-top: 20px;">
+                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px;">Loading consignees...</div>
+                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+                </div>
+            </div>
+        </div>
+    """
+    loadConsigneeMasterList()
+
+    document.getElementById("consigneeMapBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/master/consignee-map"
+    })
+
+    document.getElementById("consigneeMasterFilter")?.addEventListener("input", { _: Event ->
+        loadConsigneeMasterList()
+    })
+
+    document.getElementById("addConsigneeMasterBtn")?.addEventListener("click", { _: Event ->
+        showAddConsigneeMasterModal()
+    })
+}
+
+fun loadConsigneeMasterList() {
+    val tableDiv = document.getElementById("consigneeMasterTable")
+    if (tableDiv == null) return
+
+    val searchFilter = (document.getElementById("consigneeMasterFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
+
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+            <div style="font-size: 16px; margin-bottom: 8px;">Loading consignees...</div>
+            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+        </div>
+    """
+
+    window.fetch(apiUrl("master-menu/consignee"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load consignees')")
+        }
+        .then { raw: dynamic ->
+            val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
+            } else emptyList()
+            val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
+            allConsigneeMaster = filtered
+            if (searchFilter.isNotEmpty()) consigneeMasterCurrentPage = 1
+
+            if (filtered.isEmpty()) {
+                val message = if (searchFilter.isNotEmpty()) "No consignees found for: $searchFilter" else "No consignees found."
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
+                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search filter</div>
+                    </div>
+                """
+                return@then
+            }
+
+            val selectedColumns = listOf("id", "consignee")
+            val totalPages = kotlin.math.ceil(filtered.size.toDouble() / consigneeMasterItemsPerPage).toInt()
+            val startIndex = (consigneeMasterCurrentPage - 1) * consigneeMasterItemsPerPage
+            val endIndex = kotlin.math.min(startIndex + consigneeMasterItemsPerPage, filtered.size)
+            val pageItems = filtered.subList(startIndex, endIndex)
+
+            val columnLabels = mapOf("id" to "ID", "consignee" to "Consignee")
+            var html = """
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;" class="consignee-master-table">
+                        <thead>
+                            <tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+            """
+            for (col in selectedColumns) {
+                val label = columnLabels[col] ?: col
+                html += """<th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #374151; font-size: 14px;">$label</th>"""
+            }
+            html += """
+                            </tr>
+                        </thead>
+                        <tbody>
+            """
+            for ((idx, consigneeName) in pageItems.withIndex()) {
+                val rowNum = startIndex + idx + 1
+                html += """
+                    <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
+                """
+                for (col in selectedColumns) {
+                    val value = when (col) {
+                        "id" -> """
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="consignee-master-edit-btn"
+                                        data-consignee="${consigneeName.replace("\"", "&quot;")}"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        """.trimIndent()
+                        "consignee" -> consigneeName
+                        else -> ""
+                    }
+                    val cellStyle = when (col) {
+                        "id" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
+                        "consignee" -> "padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;"
+                        else -> "padding: 14px 16px; color: #111827; font-size: 14px;"
+                    }
+                    html += """<td style="$cellStyle">$value</td>"""
+                }
+                html += """</tr>"""
+            }
+            html += """
+                        </tbody>
+                    </table>
+                </div>
+            """
+            if (totalPages > 1) {
+                html += """
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
+                        <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
+                            Showing ${startIndex + 1} to $endIndex of ${filtered.size} consignee${if (filtered.size != 1) "s" else ""}${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                        </div>
+                        <div class="consignee-pagination-controls">
+                            <button id="consigneeMasterPrevPage" class="consignee-pagination-btn" ${if (consigneeMasterCurrentPage == 1) "disabled" else ""}>Previous</button>
+                            <span class="consignee-pagination-page">Page $consigneeMasterCurrentPage of $totalPages</span>
+                            <button id="consigneeMasterNextPage" class="consignee-pagination-btn" ${if (consigneeMasterCurrentPage >= totalPages) "disabled" else ""}>Next</button>
+                        </div>
+                    </div>
+                """
+            } else {
+                html += """
+                    <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+                        Total: ${filtered.size} consignee${if (filtered.size != 1) "s" else ""}${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                    </div>
+                """
+            }
+            tableDiv.innerHTML = html
+
+            // Attach edit handlers
+            val editButtons = document.querySelectorAll(".consignee-master-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-consignee") ?: return@addEventListener
+                    showEditConsigneeMasterModal(name)
+                })
+            }
+            
+            document.getElementById("consigneeMasterPrevPage")?.addEventListener("click", { _: Event ->
+                if (consigneeMasterCurrentPage > 1) {
+                    consigneeMasterCurrentPage--
+                    loadConsigneeMasterList()
+                }
+            })
+            document.getElementById("consigneeMasterNextPage")?.addEventListener("click", { _: Event ->
+                val totalP = kotlin.math.ceil(allConsigneeMaster.size.toDouble() / consigneeMasterItemsPerPage).toInt()
+                if (consigneeMasterCurrentPage < totalP) {
+                    consigneeMasterCurrentPage++
+                    loadConsigneeMasterList()
+                }
+            })
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error loading consignees: ${error.toString()}")
+            tableDiv.innerHTML = """
+                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading consignees</div>
+                    <div style="font-size: 14px; color: #9ca3af;">${(error?.message ?: error.toString())}</div>
+                </div>
+            """
+        }
+}
+
+fun showAddConsigneeMasterModal() {
+    document.getElementById("consigneeMasterEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "consigneeMasterEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Consignee</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="consigneeMasterModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Consignee</label>
+                <input type="text" id="consigneeMasterModalInput" placeholder="Enter consignee name"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="consigneeMasterModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="consigneeMasterModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("consigneeMasterModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("consigneeMasterModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("consigneeMasterModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Consignee name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/consignee"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add consignee')")
+            }
+            .then { _: dynamic ->
+                showMessage("Consignee added successfully", "success")
+                modal.remove()
+                consigneeMasterCurrentPage = 1
+                loadConsigneeMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding consignee: ${error.toString()}")
+                showMessage("Error adding consignee: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditConsigneeMasterModal(originalName: String) {
+    document.getElementById("consigneeMasterEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "consigneeMasterEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Consignee</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="consigneeMasterModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Consignee</label>
+                <input type="text" id="consigneeMasterModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="consigneeMasterModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="consigneeMasterModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="consigneeMasterModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("consigneeMasterModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("consigneeMasterModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("consigneeMasterModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Consignee name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalName
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/consignee"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update consignee')")
+            }
+            .then { _: dynamic ->
+                showMessage("Consignee updated successfully", "success")
+                modal.remove()
+                loadConsigneeMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating consignee: ${error.toString()}")
+                showMessage("Error updating consignee: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("consigneeMasterModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        if (!window.confirm("Are you sure you want to delete consignee '$originalName'?")) {
+            return@addEventListener
+        }
+
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val url = apiUrl("master-menu/consignee?value=$encoded")
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete consignee')")
+            }
+            .then { _: dynamic ->
+                showMessage("Consignee deleted successfully", "success")
+                modal.remove()
+                consigneeMasterCurrentPage = 1
+                loadConsigneeMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting consignee: ${error.toString()}")
+                showMessage("Error deleting consignee: ${error.message}", "error")
+            }
+    })
+}
+
 fun showMasterConsigneePage() {
-    window.location.hash = "#/master/consignee"
+    showConsigneeMapPage()
+}
+
+fun showConsigneeMapPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div id="consigneeList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Consignee</h2>
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Consignee Map</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <button id="backToConsigneePageBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Back to Consignee Page</button>
                     <button id="consigneeColumnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
@@ -290,6 +1061,10 @@ fun showMasterConsigneePage() {
     loadMasterConsignee()
     
     // Event listeners
+    document.getElementById("backToConsigneePageBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/master/consignee"
+    })
+    
     document.getElementById("addConsigneeBtn")?.addEventListener("click", { _: Event ->
         showAddConsigneeModal()
     })
@@ -413,13 +1188,18 @@ fun loadMasterConsigneesWithCards() {
             val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
             
             // Filter by country if filter is set
-            val filteredMappings = if (countryFilter.isNotEmpty()) {
+            val filteredMappingsUnsorted = if (countryFilter.isNotEmpty()) {
                 mappingsArray.filter { mapping ->
                     val country = (mapping.country ?: "").toString().uppercase()
                     country.contains(countryFilter)
                 }
             } else {
                 mappingsArray.toList()
+            }
+            
+            // Sort by ID descending (newest first)
+            val filteredMappings = filteredMappingsUnsorted.sortedByDescending { 
+                (it.id as? Number)?.toLong() ?: 0L 
             }
             
             // Store all filtered mappings for pagination
@@ -466,13 +1246,18 @@ fun loadMasterConsigneesWithTable() {
             val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
             
             // Filter by country if filter is set
-            val filteredMappings = if (countryFilter.isNotEmpty()) {
+            val filteredMappingsUnsorted = if (countryFilter.isNotEmpty()) {
                 mappingsArray.filter { mapping ->
                     val country = (mapping.country ?: "").toString().uppercase()
                     country.contains(countryFilter)
                 }
             } else {
                 mappingsArray.toList()
+            }
+            
+            // Sort by ID descending (newest first)
+            val filteredMappings = filteredMappingsUnsorted.sortedByDescending { 
+                (it.id as? Number)?.toLong() ?: 0L 
             }
             
             // Store all filtered mappings for pagination
@@ -505,12 +1290,12 @@ fun loadMasterConsigneesWithTable() {
             // Get selected columns
             val selectedColumns = getSelectedConsigneeColumns()
             val columnLabels = mapOf(
-                "id" to "ID",
                 "country" to "Country",
                 "clientName" to "Client Name",
                 "consigneeName" to "Consignee Name",
                 "consigneeAddress" to "Consignee Address",
                 "pod" to "POD",
+                "pols" to "POL",
                 "stockLocation" to "Stock Location"
             )
             
@@ -542,6 +1327,7 @@ fun loadMasterConsigneesWithTable() {
                 val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
                 val consigneeAddressShort = if (consigneeAddress.length > 60) consigneeAddress.take(60) + "..." else consigneeAddress
                 val pod = (mapping.pod ?: "").toString()
+                val pols = (mapping.pols ?: "").toString()
                 val stockLocation = (mapping.stockLocation ?: "").toString()
                 
                 html += """
@@ -560,17 +1346,16 @@ fun loadMasterConsigneesWithTable() {
                 // Add cells for selected columns only
                 for (columnKey in selectedColumns) {
                     val value = when (columnKey) {
-                        "id" -> id
                         "country" -> country
                         "clientName" -> clientName
                         "consigneeName" -> consigneeName
                         "consigneeAddress" -> consigneeAddressShort
                         "pod" -> pod
+                        "pols" -> pols
                         "stockLocation" -> stockLocation
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
-                        "id" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
                         "country", "consigneeName" -> "padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;"
                         "consigneeAddress" -> "padding: 14px 16px; color: #6b7280; font-size: 13px;"
                         else -> "padding: 14px 16px; color: #111827; font-size: 14px;"
@@ -669,12 +1454,12 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, countryFilter: Str
     
     val selectedColumns = getSelectedConsigneeColumns()
     val columnLabels = mapOf(
-        "id" to "ID",
         "country" to "Country",
         "clientName" to "Client Name",
         "consigneeName" to "Consignee Name",
         "consigneeAddress" to "Consignee Address",
         "pod" to "POD",
+        "pols" to "POL",
         "stockLocation" to "Stock Location"
     )
     
@@ -688,6 +1473,7 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, countryFilter: Str
         val consigneeName = (mapping.consigneeName ?: "").toString()
         val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
         val pod = (mapping.pod ?: "").toString()
+        val pols = (mapping.pols ?: "").toString()
         val stockLocation = (mapping.stockLocation ?: "").toString()
         
         // Build card content based on selected columns
@@ -695,12 +1481,12 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, countryFilter: Str
         for (columnKey in selectedColumns) {
             val label = columnLabels[columnKey] ?: columnKey
             val value = when (columnKey) {
-                "id" -> id
                 "country" -> country
                 "clientName" -> clientName
                 "consigneeName" -> consigneeName
                 "consigneeAddress" -> consigneeAddress
                 "pod" -> pod
+                "pols" -> pols
                 "stockLocation" -> stockLocation
                 else -> ""
             }
@@ -823,12 +1609,12 @@ fun showConsigneeColumnFilterModal() {
     
     // Populate column checkboxes
     val columnLabels = mapOf(
-        "id" to "ID",
         "country" to "Country",
         "clientName" to "Client Name",
         "consigneeName" to "Consignee Name",
         "consigneeAddress" to "Consignee Address",
         "pod" to "POD",
+        "pols" to "POL",
         "stockLocation" to "Stock Location"
     )
     
@@ -1084,6 +1870,169 @@ fun saveConsignee(mappingId: Long?) {
         return
     }
     
+    val clientName = (document.getElementById("consigneeClientName") as? HTMLInputElement)?.value?.trim() ?: ""
+    val consigneeName = (document.getElementById("consigneeName") as? HTMLInputElement)?.value?.trim() ?: ""
+    val pod = (document.getElementById("consigneePOD") as? HTMLInputElement)?.value?.trim() ?: ""
+    val stockLocation = (document.getElementById("consigneeStockLocation") as? HTMLInputElement)?.value?.trim() ?: ""
+    val pols = (document.getElementById("consigneePOLs") as? HTMLInputElement)?.value?.trim() ?: ""
+    
+    val saveButton = document.getElementById("saveConsigneeBtn") as? HTMLButtonElement
+    saveButton?.disabled = true
+    saveButton?.textContent = "Validating..."
+    
+    // Validate all fields against master lists before saving
+    validateConsigneeMasterFields(country, clientName, consigneeName, pod, pols, stockLocation) { missingFields ->
+        if (missingFields.isNotEmpty()) {
+            // Close consignee modal and show error modal
+            closeConsigneeModal()
+            showConsigneeMasterFieldsErrorModal(missingFields)
+        } else {
+            // All fields are valid, proceed with save
+            performConsigneeSave(mappingId)
+        }
+    }
+}
+
+fun validateConsigneeMasterFields(
+    country: String,
+    clientName: String,
+    consigneeName: String,
+    pod: String,
+    pols: String,
+    stockLocation: String,
+    callback: (List<Pair<String, String>>) -> Unit
+) {
+    // Fetch all master lists in parallel
+    val masterListPromises = js("[]")
+    masterListPromises.push(window.fetch(apiUrl("master-menu/country")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/clients")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/consignee")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/pod")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/pol")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/stock_location")))
+    
+    js("Promise.all")(masterListPromises)
+        .then { responses: dynamic ->
+            val jsonPromises = js("[]")
+            for (i in 0 until 6) {
+                val resp = responses[i]
+                if (resp.ok) {
+                    jsonPromises.push(resp.json())
+                } else {
+                    jsonPromises.push(js("Promise.resolve([])"))
+                }
+            }
+            js("Promise.all")(jsonPromises)
+        }
+        .then { results: dynamic ->
+            val countryList = parseMasterListArray(results[0])
+            val clientsList = parseMasterListArray(results[1])
+            val consigneeList = parseMasterListArray(results[2])
+            val podList = parseMasterListArray(results[3])
+            val polList = parseMasterListArray(results[4])
+            val stockLocationList = parseMasterListArray(results[5])
+            
+            Logger.debug("Validation - Country list: $countryList")
+            Logger.debug("Validation - Checking country: '$country'")
+            
+            val missingFields = mutableListOf<Pair<String, String>>()
+            
+            // Check country (required)
+            if (country.isNotEmpty() && !countryList.any { it.equals(country, ignoreCase = true) }) {
+                missingFields.add(Pair("Country", "Country"))
+            }
+            
+            // Check client name (optional, only validate if provided)
+            if (clientName.isNotEmpty() && !clientsList.any { it.equals(clientName, ignoreCase = true) }) {
+                missingFields.add(Pair("Client Name", "Client"))
+            }
+            
+            // Check consignee name (optional, only validate if provided)
+            if (consigneeName.isNotEmpty() && !consigneeList.any { it.equals(consigneeName, ignoreCase = true) }) {
+                missingFields.add(Pair("Consignee Name", "Consignee"))
+            }
+            
+            // Check POD (optional, only validate if provided)
+            if (pod.isNotEmpty() && !podList.any { it.equals(pod, ignoreCase = true) }) {
+                missingFields.add(Pair("POD", "POD"))
+            }
+            
+            // Check POLs (comma-separated, check each)
+            if (pols.isNotEmpty()) {
+                val polValues = pols.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                for (polValue in polValues) {
+                    if (!polList.any { it.equals(polValue, ignoreCase = true) }) {
+                        missingFields.add(Pair("POL ($polValue)", "POL"))
+                        break // Only report once for POL
+                    }
+                }
+            }
+            
+            // Check stock location (optional, only validate if provided)
+            if (stockLocation.isNotEmpty() && !stockLocationList.any { it.equals(stockLocation, ignoreCase = true) }) {
+                missingFields.add(Pair("Stock Location", "Stock Location"))
+            }
+            
+            callback(missingFields)
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error validating consignee fields: ${error.toString()}")
+            // On error, proceed with save (don't block the user)
+            callback(emptyList())
+        }
+}
+
+fun parseMasterListArray(raw: dynamic): List<String> {
+    return try {
+        if (raw != null && js("Array.isArray(raw)").unsafeCast<Boolean>()) {
+            val arr = raw.unsafeCast<Array<String>>()
+            arr.map { it.trim() }.filter { it.isNotEmpty() }
+        } else {
+            emptyList()
+        }
+    } catch (e: dynamic) {
+        Logger.error("Error parsing master list: ${e.toString()}")
+        emptyList()
+    }
+}
+
+fun showConsigneeMasterFieldsErrorModal(missingFields: List<Pair<String, String>>) {
+    document.getElementById("consigneeMasterFieldsErrorModal")?.remove()
+    
+    // Build the error message
+    val fieldNames = missingFields.map { it.first }.joinToString(", ")
+    val pageNames = missingFields.map { it.second }.distinct().joinToString(", ")
+    
+    val modal = document.createElement("div")
+    modal.id = "consigneeMasterFieldsErrorModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10001;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 480px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #ef4444;">Field(s) Not Found in Master List</h3>
+            <p style="margin-bottom: 20px; color: #374151; font-size: 14px; line-height: 1.6;">
+                <strong>$fieldNames</strong> does not exist in Master List. Go to the <strong>$pageNames</strong> page and add the missing value(s).
+            </p>
+            <div style="display: flex; justify-content: flex-end;">
+                <button id="closeConsigneeMasterFieldsErrorModalBtn" style="padding: 10px 24px; border-radius: 6px; border: none; background: #3b82f6; color: white; cursor: pointer; font-size: 14px; font-weight: 500;">
+                    Close
+                </button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    
+    document.getElementById("closeConsigneeMasterFieldsErrorModalBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+}
+
+fun performConsigneeSave(mappingId: Long?) {
+    val country = (document.getElementById("consigneeCountry") as? HTMLInputElement)?.value?.trim() ?: ""
+    
     val consigneeData = js("{}")
     consigneeData.country = country
     consigneeData.clientName = (document.getElementById("consigneeClientName") as? HTMLInputElement)?.value?.trim() ?: null
@@ -1176,14 +2125,381 @@ fun editMasterConsignee(id: dynamic) {
     }
 }
 
+/** Car Brands page: shows Car Brands Map button and a car brands master list (from master_menu). */
+fun showCarBrandsPage() {
+    val content = document.getElementById("content")!!
+    content.innerHTML = """
+        <div id="carBrandsMasterList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Car Brands</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addCarBrandsMasterBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Car Brands</span>
+                    </button>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <button id="carBrandsMapBtn" class="client-btn client-btn-primary" style="padding: 10px 20px; font-size: 14px;">Car Brands Map</button>
+            </div>
+
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                <div style="flex: 1; min-width: 250px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Car Brands:</label>
+                    <input type="text" id="carBrandsMasterFilter" placeholder="Type car brand name to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                </div>
+            </div>
+
+            <div id="carBrandsMasterTable" style="margin-top: 20px;">
+                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px;">Loading car brands...</div>
+                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+                </div>
+            </div>
+        </div>
+    """
+    loadCarBrandsMasterList()
+
+    document.getElementById("carBrandsMapBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/master/car-brands-map"
+    })
+
+    document.getElementById("carBrandsMasterFilter")?.addEventListener("input", { _: Event ->
+        loadCarBrandsMasterList()
+    })
+
+    document.getElementById("addCarBrandsMasterBtn")?.addEventListener("click", { _: Event ->
+        showAddCarBrandsMasterModal()
+    })
+}
+
+fun loadCarBrandsMasterList() {
+    val tableDiv = document.getElementById("carBrandsMasterTable")
+    if (tableDiv == null) return
+
+    val searchFilter = (document.getElementById("carBrandsMasterFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
+
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+            <div style="font-size: 16px; margin-bottom: 8px;">Loading car brands...</div>
+            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+        </div>
+    """
+
+    window.fetch(apiUrl("master-menu/car_brands"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load car brands')")
+        }
+        .then { raw: dynamic ->
+            val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
+            } else emptyList()
+            val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
+            allCarBrandsMaster = filtered
+            if (searchFilter.isNotEmpty()) carBrandsMasterCurrentPage = 1
+
+            if (filtered.isEmpty()) {
+                val message = if (searchFilter.isNotEmpty()) "No car brands found for: $searchFilter" else "No car brands found."
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
+                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search filter</div>
+                    </div>
+                """
+                return@then
+            }
+
+            val selectedColumns = listOf("id", "carBrands")
+            val totalPages = kotlin.math.ceil(filtered.size.toDouble() / carBrandsMasterItemsPerPage).toInt()
+            val startIndex = (carBrandsMasterCurrentPage - 1) * carBrandsMasterItemsPerPage
+            val endIndex = kotlin.math.min(startIndex + carBrandsMasterItemsPerPage, filtered.size)
+            val pageItems = filtered.subList(startIndex, endIndex)
+
+            val columnLabels = mapOf("id" to "ID", "carBrands" to "Car Brands")
+            var html = """
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;" class="car-brands-master-table">
+                        <thead>
+                            <tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+            """
+            for (col in selectedColumns) {
+                val label = columnLabels[col] ?: col
+                html += """<th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #374151; font-size: 14px;">$label</th>"""
+            }
+            html += """
+                            </tr>
+                        </thead>
+                        <tbody>
+            """
+            for ((idx, carBrandName) in pageItems.withIndex()) {
+                val rowNum = startIndex + idx + 1
+                html += """
+                    <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
+                """
+                for (col in selectedColumns) {
+                    val value = when (col) {
+                        "id" -> """
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="car-brands-master-edit-btn"
+                                        data-car-brands="${carBrandName.replace("\"", "&quot;")}"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        """.trimIndent()
+                        "carBrands" -> carBrandName
+                        else -> ""
+                    }
+                    val cellStyle = when (col) {
+                        "id" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
+                        "carBrands" -> "padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;"
+                        else -> "padding: 14px 16px; color: #111827; font-size: 14px;"
+                    }
+                    html += """<td style="$cellStyle">$value</td>"""
+                }
+                html += """</tr>"""
+            }
+            html += """
+                        </tbody>
+                    </table>
+                </div>
+            """
+            if (totalPages > 1) {
+                html += """
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
+                        <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
+                            Showing ${startIndex + 1} to $endIndex of ${filtered.size} car brand${if (filtered.size != 1) "s" else ""}${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                        </div>
+                        <div class="consignee-pagination-controls">
+                            <button id="carBrandsMasterPrevPage" class="consignee-pagination-btn" ${if (carBrandsMasterCurrentPage == 1) "disabled" else ""}>Previous</button>
+                            <span class="consignee-pagination-page">Page $carBrandsMasterCurrentPage of $totalPages</span>
+                            <button id="carBrandsMasterNextPage" class="consignee-pagination-btn" ${if (carBrandsMasterCurrentPage >= totalPages) "disabled" else ""}>Next</button>
+                        </div>
+                    </div>
+                """
+            } else {
+                html += """
+                    <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+                        Total: ${filtered.size} car brand${if (filtered.size != 1) "s" else ""}${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                    </div>
+                """
+            }
+            tableDiv.innerHTML = html
+
+            // Attach edit handlers
+            val editButtons = document.querySelectorAll(".car-brands-master-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-car-brands") ?: return@addEventListener
+                    showEditCarBrandsMasterModal(name)
+                })
+            }
+            
+            document.getElementById("carBrandsMasterPrevPage")?.addEventListener("click", { _: Event ->
+                if (carBrandsMasterCurrentPage > 1) {
+                    carBrandsMasterCurrentPage--
+                    loadCarBrandsMasterList()
+                }
+            })
+            document.getElementById("carBrandsMasterNextPage")?.addEventListener("click", { _: Event ->
+                val totalP = kotlin.math.ceil(allCarBrandsMaster.size.toDouble() / carBrandsMasterItemsPerPage).toInt()
+                if (carBrandsMasterCurrentPage < totalP) {
+                    carBrandsMasterCurrentPage++
+                    loadCarBrandsMasterList()
+                }
+            })
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error loading car brands: ${error.toString()}")
+            tableDiv.innerHTML = """
+                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading car brands</div>
+                    <div style="font-size: 14px; color: #9ca3af;">${(error?.message ?: error.toString())}</div>
+                </div>
+            """
+        }
+}
+
+fun showAddCarBrandsMasterModal() {
+    document.getElementById("carBrandsMasterEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "carBrandsMasterEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Car Brands</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="carBrandsMasterModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Car Brands</label>
+                <input type="text" id="carBrandsMasterModalInput" placeholder="Enter car brand name"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="carBrandsMasterModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="carBrandsMasterModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("carBrandsMasterModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("carBrandsMasterModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("carBrandsMasterModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Car brand name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/car_brands"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add car brand')")
+            }
+            .then { _: dynamic ->
+                showMessage("Car brand added successfully", "success")
+                modal.remove()
+                carBrandsMasterCurrentPage = 1
+                loadCarBrandsMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding car brand: ${error.toString()}")
+                showMessage("Error adding car brand: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditCarBrandsMasterModal(originalName: String) {
+    document.getElementById("carBrandsMasterEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "carBrandsMasterEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Car Brands</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="carBrandsMasterModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Car Brands</label>
+                <input type="text" id="carBrandsMasterModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="carBrandsMasterModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="carBrandsMasterModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="carBrandsMasterModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("carBrandsMasterModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("carBrandsMasterModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("carBrandsMasterModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Car brand name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalName
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/car_brands"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update car brand')")
+            }
+            .then { _: dynamic ->
+                showMessage("Car brand updated successfully", "success")
+                modal.remove()
+                loadCarBrandsMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating car brand: ${error.toString()}")
+                showMessage("Error updating car brand: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("carBrandsMasterModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        if (!window.confirm("Are you sure you want to delete car brand '$originalName'?")) {
+            return@addEventListener
+        }
+
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val url = apiUrl("master-menu/car_brands?value=$encoded")
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete car brand')")
+            }
+            .then { _: dynamic ->
+                showMessage("Car brand deleted successfully", "success")
+                modal.remove()
+                carBrandsMasterCurrentPage = 1
+                loadCarBrandsMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting car brand: ${error.toString()}")
+                showMessage("Error deleting car brand: ${error.message}", "error")
+            }
+    })
+}
+
 fun showMasterCarBrandsPage() {
-    window.location.hash = "#/master/car-brands"
+    showCarBrandsMapPage()
+}
+
+fun showCarBrandsMapPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div id="carBrandList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Car Brands</h2>
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Car Brands Map</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <button id="backToCarBrandsPageBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Back to Car Brands Page</button>
                     <button id="carBrandColumnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
@@ -1227,6 +2543,10 @@ fun showMasterCarBrandsPage() {
     loadMasterCarBrands()
     
     // Event listeners
+    document.getElementById("backToCarBrandsPageBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/master/car-brands"
+    })
+    
     document.getElementById("addCarBrandBtn")?.addEventListener("click", { _: Event ->
         showAddCarBrandModal()
     })
@@ -1492,13 +2812,12 @@ fun loadMasterCarBrandsWithTable() {
             // Get selected columns
             val selectedColumns = getSelectedCarBrandColumns()
             val columnLabels = mapOf(
-                "id" to "ID",
                 "carBrand" to "Car Brand",
                 "chassis" to "Chassis",
                 "carName" to "Car Name",
                 "fuel" to "Fuel",
                 "wd" to "WD",
-                "shift" to "Transmission",
+                "shift" to "Shift",
                 "grade" to "Grade",
                 "cc" to "CC",
                 "door" to "Door"
@@ -1552,7 +2871,6 @@ fun loadMasterCarBrandsWithTable() {
                 // Add cells for selected columns only
                 for (columnKey in selectedColumns) {
                     val value = when (columnKey) {
-                        "id" -> id
                         "carBrand" -> carBrand
                         "chassis" -> chassis
                         "carName" -> carName
@@ -1565,7 +2883,6 @@ fun loadMasterCarBrandsWithTable() {
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
-                        "id" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
                         "carBrand" -> "padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;"
                         "chassis", "carName" -> "padding: 14px 16px; color: #111827; font-size: 14px;"
                         else -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
@@ -1663,13 +2980,12 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
     
     val selectedColumns = getSelectedCarBrandColumns()
     val columnLabels = mapOf(
-        "id" to "ID",
         "carBrand" to "Car Brand",
         "chassis" to "Chassis",
         "carName" to "Car Name",
         "fuel" to "Fuel",
         "wd" to "WD",
-        "shift" to "Transmission",
+        "shift" to "Shift",
         "grade" to "Grade",
         "cc" to "CC",
         "door" to "Door"
@@ -1695,7 +3011,6 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         for (columnKey in selectedColumns) {
             val label = columnLabels[columnKey] ?: columnKey
             val value = when (columnKey) {
-                "id" -> id
                 "carBrand" -> carBrand
                 "chassis" -> chassis
                 "carName" -> carName
@@ -1826,13 +3141,12 @@ fun showCarBrandColumnFilterModal() {
     
     // Populate column checkboxes
     val columnLabels = mapOf(
-        "id" to "ID",
         "carBrand" to "Car Brand",
         "chassis" to "Chassis",
         "carName" to "Car Name",
         "fuel" to "Fuel",
         "wd" to "WD",
-        "shift" to "Transmission",
+        "shift" to "Shift",
         "grade" to "Grade",
         "cc" to "CC",
         "door" to "Door"
@@ -2004,9 +3318,9 @@ fun showCarBrandModal(mappingId: Long?) {
                         </div>
                         <div class="car-brand-modal-grid">
                             <div>
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Transmission</label>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Shift</label>
                                 <div style="position: relative; width: 100%;">
-                                    <input type="text" id="carBrandShiftInput" placeholder="Select or type Transmission" style="width: 100%; padding: 10px 40px 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;" autocomplete="off" onfocus="this.select();">
+                                    <input type="text" id="carBrandShiftInput" placeholder="Select or type Shift" style="width: 100%; padding: 10px 40px 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;" autocomplete="off" onfocus="this.select();">
                                     <select id="carBrandShift" style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #d1d5db; background: #f5f5f5; border-radius: 0 6px 6px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 1; font-weight: bold; color: #666; opacity: 0; pointer-events: none;" aria-hidden="true" onchange="if (typeof syncComboboxInput === 'function') syncComboboxInput('carBrandShift');">
                                         <option value="">▼</option>
                                         <option value="AT">AT</option>
@@ -2014,7 +3328,7 @@ fun showCarBrandModal(mappingId: Long?) {
                                         <option value="6F">6F</option>
                                         <option value="5F">5F</option>
                                     </select>
-                                    <div id="carBrandShiftDropdownBtn" role="button" tabindex="0" aria-label="Open transmission list" style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #d1d5db; background: #f5f5f5; cursor: pointer; border-radius: 0 6px 6px 0; z-index: 3; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;" onmousedown="event.preventDefault(); event.stopPropagation(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandShift');" onclick="event.preventDefault(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandShift');" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandShift'); }">▼</div>
+                                    <div id="carBrandShiftDropdownBtn" role="button" tabindex="0" aria-label="Open shift list" style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #d1d5db; background: #f5f5f5; cursor: pointer; border-radius: 0 6px 6px 0; z-index: 3; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;" onmousedown="event.preventDefault(); event.stopPropagation(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandShift');" onclick="event.preventDefault(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandShift');" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandShift'); }">▼</div>
                                 </div>
                             </div>
                             <div>
@@ -2127,6 +3441,128 @@ fun saveCarBrand(mappingId: Long?) {
         showMessage("Car Brand is required", "error")
         return
     }
+    
+    val fuel = (document.getElementById("carBrandFuelInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    val shift = (document.getElementById("carBrandShiftInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    val grade = (document.getElementById("carBrandGrade") as? HTMLInputElement)?.value?.trim() ?: ""
+    
+    val saveButton = document.getElementById("saveCarBrandBtn") as? HTMLButtonElement
+    saveButton?.disabled = true
+    saveButton?.textContent = "Validating..."
+    
+    // Validate all fields against master lists before saving
+    validateCarBrandMasterFields(carBrand, fuel, grade, shift) { missingFields ->
+        if (missingFields.isNotEmpty()) {
+            // Close car brand modal and show error modal
+            closeCarBrandModal()
+            showCarBrandMasterFieldsErrorModal(missingFields)
+        } else {
+            // All fields are valid, proceed with save
+            performCarBrandSave(mappingId)
+        }
+    }
+}
+
+fun validateCarBrandMasterFields(
+    carBrand: String,
+    fuel: String,
+    grade: String,
+    shift: String,
+    callback: (List<Pair<String, String>>) -> Unit
+) {
+    // Fetch all master lists in parallel
+    val masterListPromises = js("[]")
+    masterListPromises.push(window.fetch(apiUrl("master-menu/car_brands")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/fuel")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/car_grade")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/shift")))
+    
+    js("Promise.all")(masterListPromises)
+        .then { responses: dynamic ->
+            val jsonPromises = js("[]")
+            for (i in 0 until 4) {
+                val resp = responses[i]
+                if (resp.ok) {
+                    jsonPromises.push(resp.json())
+                } else {
+                    jsonPromises.push(js("Promise.resolve([])"))
+                }
+            }
+            js("Promise.all")(jsonPromises)
+        }
+        .then { results: dynamic ->
+            val carBrandList = parseMasterListArray(results[0])
+            val fuelList = parseMasterListArray(results[1])
+            val gradeList = parseMasterListArray(results[2])
+            val shiftList = parseMasterListArray(results[3])
+            
+            val missingFields = mutableListOf<Pair<String, String>>()
+            
+            // Check car brand (required)
+            if (carBrand.isNotEmpty() && !carBrandList.any { it.equals(carBrand, ignoreCase = true) }) {
+                missingFields.add(Pair("Car Brand", "Car Brands"))
+            }
+            
+            // Check fuel (optional, only validate if provided)
+            if (fuel.isNotEmpty() && !fuelList.any { it.equals(fuel, ignoreCase = true) }) {
+                missingFields.add(Pair("Fuel", "Fuel"))
+            }
+            
+            // Check grade (optional, only validate if provided)
+            if (grade.isNotEmpty() && !gradeList.any { it.equals(grade, ignoreCase = true) }) {
+                missingFields.add(Pair("Grade", "Car Grade"))
+            }
+            
+            // Check shift (optional, only validate if provided)
+            if (shift.isNotEmpty() && !shiftList.any { it.equals(shift, ignoreCase = true) }) {
+                missingFields.add(Pair("Shift", "Car Shift"))
+            }
+            
+            callback(missingFields)
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error validating car brand fields: ${error.toString()}")
+            // On error, proceed with save (don't block the user)
+            callback(emptyList())
+        }
+}
+
+fun showCarBrandMasterFieldsErrorModal(missingFields: List<Pair<String, String>>) {
+    document.getElementById("carBrandMasterFieldsErrorModal")?.remove()
+    
+    // Build the error message
+    val fieldNames = missingFields.map { it.first }.joinToString(", ")
+    val pageNames = missingFields.map { it.second }.distinct().joinToString(", ")
+    
+    val modal = document.createElement("div")
+    modal.id = "carBrandMasterFieldsErrorModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10001;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 480px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #ef4444;">Field(s) Not Found in Master List</h3>
+            <p style="margin-bottom: 20px; color: #374151; font-size: 14px; line-height: 1.6;">
+                <strong>$fieldNames</strong> does not exist in Master List. Go to the <strong>$pageNames</strong> page(s) and add the missing value(s).
+            </p>
+            <div style="display: flex; justify-content: flex-end;">
+                <button id="closeCarBrandMasterFieldsErrorModalBtn" style="padding: 10px 24px; border-radius: 6px; border: none; background: #3b82f6; color: white; cursor: pointer; font-size: 14px; font-weight: 500;">
+                    Close
+                </button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    
+    document.getElementById("closeCarBrandMasterFieldsErrorModalBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+}
+
+fun performCarBrandSave(mappingId: Long?) {
+    val carBrand = (document.getElementById("carBrandBrand") as? HTMLInputElement)?.value?.trim() ?: ""
     
     val carBrandData = js("{}")
     carBrandData.carBrand = carBrand
@@ -2295,6 +3731,12 @@ fun showMasterCountriesPage() {
         <div id="countryList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Country</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addCountryBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Country</span>
+                    </button>
+                </div>
             </div>
             
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -2317,6 +3759,10 @@ fun showMasterCountriesPage() {
     document.getElementById("countryFilter")?.addEventListener("input", { _: Event ->
         loadMasterCountries()
     })
+
+    document.getElementById("addCountryBtn")?.addEventListener("click", { _: Event ->
+        showAddCountryModal()
+    })
 }
 
 fun loadMasterCountries() {
@@ -2332,14 +3778,14 @@ fun loadMasterCountries() {
         </div>
     """
     
-    window.fetch(apiUrl("purchases/countries"))
+    window.fetch(apiUrl("master-menu/country"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load countries')")
         }
         .then { raw: dynamic ->
             val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
                 val a = raw.unsafeCast<Array<*>>()
-                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
             } else emptyList()
             val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
             allCountries = filtered
@@ -2385,7 +3831,21 @@ fun loadMasterCountries() {
                 """
                 for (col in selectedColumns) {
                     val value = when (col) {
-                        "id" -> rowNum.toString()
+                        "id" -> """
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="country-edit-btn"
+                                        data-country="${countryName.replace("\"", "&quot;")}"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        """.trimIndent()
                         "country" -> countryName
                         else -> ""
                     }
@@ -2424,6 +3884,16 @@ fun loadMasterCountries() {
                 """
             }
             tableDiv.innerHTML = html
+
+            // Attach edit handlers
+            val editButtons = document.querySelectorAll(".country-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-country") ?: return@addEventListener
+                    showEditCountryModal(name)
+                })
+            }
             
             document.getElementById("countriesPrevPage")?.addEventListener("click", { _: Event ->
                 if (countriesCurrentPage > 1) {
@@ -2512,21 +3982,544 @@ fun showCountryColumnFilterModal() {
 }
 
 fun editMasterCountry(countryName: dynamic) {
-    js("alert('Edit Country - Coming soon')")
+    val name = countryName?.toString() ?: return
+    showEditCountryModal(name)
 }
 
 fun showAddCountryModal() {
-    js("alert('Add Country - Coming soon')")
+    document.getElementById("countryEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "countryEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Country</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="countryModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Country</label>
+                <input type="text" id="countryModalInput" placeholder="Enter country name"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="countryModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="countryModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("countryModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("countryModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("countryModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Country name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/country"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add country')")
+            }
+            .then { _: dynamic ->
+                showMessage("Country added successfully", "success")
+                modal.remove()
+                countriesCurrentPage = 1
+                loadMasterCountries()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding country: ${error.toString()}")
+                showMessage("Error adding country: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditCountryModal(originalName: String) {
+    document.getElementById("countryEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "countryEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Country</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="countryModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Country</label>
+                <input type="text" id="countryModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="countryModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="countryModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="countryModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("countryModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("countryModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("countryModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Country name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalName
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/country"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update country')")
+            }
+            .then { _: dynamic ->
+                showMessage("Country updated successfully", "success")
+                modal.remove()
+                loadMasterCountries()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating country: ${error.toString()}")
+                showMessage("Error updating country: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("countryModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        if (!window.confirm("Are you sure you want to delete country '$originalName'?")) {
+            return@addEventListener
+        }
+
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val url = apiUrl("master-menu/country?value=$encoded")
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete country')")
+            }
+            .then { _: dynamic ->
+                showMessage("Country deleted successfully", "success")
+                modal.remove()
+                countriesCurrentPage = 1
+                loadMasterCountries()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting country: ${error.toString()}")
+                showMessage("Error deleting country: ${error.message}", "error")
+            }
+    })
+}
+
+/** Supplier page: shows Supplier Map button and a supplier master list (from master_menu). */
+fun showSupplierPage() {
+    val content = document.getElementById("content")!!
+    content.innerHTML = """
+        <div id="supplierMasterList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Supplier</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addSupplierMasterBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Supplier</span>
+                    </button>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 16px;">
+                <button id="supplierMapBtn" class="client-btn client-btn-primary" style="padding: 10px 20px; font-size: 14px;">Supplier Map</button>
+            </div>
+
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                <div style="flex: 1; min-width: 250px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Supplier:</label>
+                    <input type="text" id="supplierMasterFilter" placeholder="Type supplier name to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                </div>
+            </div>
+
+            <div id="supplierMasterTable" style="margin-top: 20px;">
+                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px;">Loading suppliers...</div>
+                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+                </div>
+            </div>
+        </div>
+    """
+    loadSupplierMasterList()
+
+    document.getElementById("supplierMapBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/master/supplier-map"
+    })
+
+    document.getElementById("supplierMasterFilter")?.addEventListener("input", { _: Event ->
+        loadSupplierMasterList()
+    })
+
+    document.getElementById("addSupplierMasterBtn")?.addEventListener("click", { _: Event ->
+        showAddSupplierMasterModal()
+    })
+}
+
+fun loadSupplierMasterList() {
+    val tableDiv = document.getElementById("supplierMasterTable")
+    if (tableDiv == null) return
+
+    val searchFilter = (document.getElementById("supplierMasterFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
+
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+            <div style="font-size: 16px; margin-bottom: 8px;">Loading suppliers...</div>
+            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+        </div>
+    """
+
+    window.fetch(apiUrl("master-menu/supplier"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load suppliers')")
+        }
+        .then { raw: dynamic ->
+            val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
+            } else emptyList()
+            val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
+            allSupplierMaster = filtered
+            if (searchFilter.isNotEmpty()) supplierMasterCurrentPage = 1
+
+            if (filtered.isEmpty()) {
+                val message = if (searchFilter.isNotEmpty()) "No suppliers found for: $searchFilter" else "No suppliers found."
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
+                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search filter</div>
+                    </div>
+                """
+                return@then
+            }
+
+            val selectedColumns = listOf("id", "supplier")
+            val totalPages = kotlin.math.ceil(filtered.size.toDouble() / supplierMasterItemsPerPage).toInt()
+            val startIndex = (supplierMasterCurrentPage - 1) * supplierMasterItemsPerPage
+            val endIndex = kotlin.math.min(startIndex + supplierMasterItemsPerPage, filtered.size)
+            val pageItems = filtered.subList(startIndex, endIndex)
+
+            val columnLabels = mapOf("id" to "ID", "supplier" to "Supplier")
+            var html = """
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;" class="supplier-master-table">
+                        <thead>
+                            <tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+            """
+            for (col in selectedColumns) {
+                val label = columnLabels[col] ?: col
+                html += """<th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #374151; font-size: 14px;">$label</th>"""
+            }
+            html += """
+                            </tr>
+                        </thead>
+                        <tbody>
+            """
+            for ((idx, supplierName) in pageItems.withIndex()) {
+                val rowNum = startIndex + idx + 1
+                html += """
+                    <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
+                """
+                for (col in selectedColumns) {
+                    val value = when (col) {
+                        "id" -> """
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="supplier-master-edit-btn"
+                                        data-supplier="${supplierName.replace("\"", "&quot;")}"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        """.trimIndent()
+                        "supplier" -> supplierName
+                        else -> ""
+                    }
+                    val cellStyle = when (col) {
+                        "id" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
+                        "supplier" -> "padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;"
+                        else -> "padding: 14px 16px; color: #111827; font-size: 14px;"
+                    }
+                    html += """<td style="$cellStyle">$value</td>"""
+                }
+                html += """</tr>"""
+            }
+            html += """
+                        </tbody>
+                    </table>
+                </div>
+            """
+            if (totalPages > 1) {
+                html += """
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
+                        <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
+                            Showing ${startIndex + 1} to $endIndex of ${filtered.size} supplier${if (filtered.size != 1) "s" else ""}${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                        </div>
+                        <div class="consignee-pagination-controls">
+                            <button id="supplierMasterPrevPage" class="consignee-pagination-btn" ${if (supplierMasterCurrentPage == 1) "disabled" else ""}>Previous</button>
+                            <span class="consignee-pagination-page">Page $supplierMasterCurrentPage of $totalPages</span>
+                            <button id="supplierMasterNextPage" class="consignee-pagination-btn" ${if (supplierMasterCurrentPage >= totalPages) "disabled" else ""}>Next</button>
+                        </div>
+                    </div>
+                """
+            } else {
+                html += """
+                    <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+                        Total: ${filtered.size} supplier${if (filtered.size != 1) "s" else ""}${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                    </div>
+                """
+            }
+            tableDiv.innerHTML = html
+
+            // Attach edit handlers
+            val editButtons = document.querySelectorAll(".supplier-master-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-supplier") ?: return@addEventListener
+                    showEditSupplierMasterModal(name)
+                })
+            }
+            
+            document.getElementById("supplierMasterPrevPage")?.addEventListener("click", { _: Event ->
+                if (supplierMasterCurrentPage > 1) {
+                    supplierMasterCurrentPage--
+                    loadSupplierMasterList()
+                }
+            })
+            document.getElementById("supplierMasterNextPage")?.addEventListener("click", { _: Event ->
+                val totalP = kotlin.math.ceil(allSupplierMaster.size.toDouble() / supplierMasterItemsPerPage).toInt()
+                if (supplierMasterCurrentPage < totalP) {
+                    supplierMasterCurrentPage++
+                    loadSupplierMasterList()
+                }
+            })
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error loading suppliers: ${error.toString()}")
+            tableDiv.innerHTML = """
+                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading suppliers</div>
+                    <div style="font-size: 14px; color: #9ca3af;">${(error?.message ?: error.toString())}</div>
+                </div>
+            """
+        }
+}
+
+fun showAddSupplierMasterModal() {
+    document.getElementById("supplierMasterEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "supplierMasterEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Supplier</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="supplierMasterModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Supplier</label>
+                <input type="text" id="supplierMasterModalInput" placeholder="Enter supplier name"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="supplierMasterModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="supplierMasterModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("supplierMasterModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("supplierMasterModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("supplierMasterModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Supplier name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/supplier"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add supplier')")
+            }
+            .then { _: dynamic ->
+                showMessage("Supplier added successfully", "success")
+                modal.remove()
+                supplierMasterCurrentPage = 1
+                loadSupplierMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding supplier: ${error.toString()}")
+                showMessage("Error adding supplier: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditSupplierMasterModal(originalName: String) {
+    document.getElementById("supplierMasterEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "supplierMasterEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Supplier</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="supplierMasterModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Supplier</label>
+                <input type="text" id="supplierMasterModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="supplierMasterModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="supplierMasterModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="supplierMasterModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("supplierMasterModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("supplierMasterModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("supplierMasterModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Supplier name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalName
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/supplier"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update supplier')")
+            }
+            .then { _: dynamic ->
+                showMessage("Supplier updated successfully", "success")
+                modal.remove()
+                loadSupplierMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating supplier: ${error.toString()}")
+                showMessage("Error updating supplier: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("supplierMasterModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        if (!window.confirm("Are you sure you want to delete supplier '$originalName'?")) {
+            return@addEventListener
+        }
+
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val url = apiUrl("master-menu/supplier?value=$encoded")
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete supplier')")
+            }
+            .then { _: dynamic ->
+                showMessage("Supplier deleted successfully", "success")
+                modal.remove()
+                supplierMasterCurrentPage = 1
+                loadSupplierMasterList()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting supplier: ${error.toString()}")
+                showMessage("Error deleting supplier: ${error.message}", "error")
+            }
+    })
 }
 
 fun showMasterSuppliersPage() {
-    window.location.hash = "#/master/supplier"
+    showSupplierMapPage()
+}
+
+fun showSupplierMapPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div id="supplierList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Supplier</h2>
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Supplier Map</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <button id="backToSupplierPageBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Back to Supplier Page</button>
                     <button id="supplierColumnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
@@ -2570,6 +4563,10 @@ fun showMasterSuppliersPage() {
     loadMasterSuppliers()
     
     // Event listeners
+    document.getElementById("backToSupplierPageBtn")?.addEventListener("click", { _: Event ->
+        window.location.hash = "#/master/supplier"
+    })
+    
     document.getElementById("addSupplierBtn")?.addEventListener("click", { _: Event ->
         showAddSupplierModal()
     })
@@ -2769,7 +4766,6 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
     
     val selectedColumns = getSelectedSupplierColumns()
     val columnLabels = mapOf(
-        "id" to "ID",
         "supplierName" to "Supplier Name",
         "stockLocation" to "Stock Location",
         "rixoCompany" to "Rixo Company",
@@ -2795,7 +4791,6 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
         for (columnKey in selectedColumns) {
             val label = columnLabels[columnKey] ?: columnKey
             val value = when (columnKey) {
-                "id" -> id
                 "supplierName" -> supplierName
                 "stockLocation" -> stockLocation
                 "rixoCompany" -> rixoCompany
@@ -2962,7 +4957,6 @@ fun loadMasterSuppliersWithTable() {
             // Get selected columns
             val selectedColumns = getSelectedSupplierColumns()
             val columnLabels = mapOf(
-                "id" to "ID",
                 "supplierName" to "Supplier Name",
                 "stockLocation" to "Stock Location",
                 "rixoCompany" to "Rixo Company",
@@ -3016,7 +5010,6 @@ fun loadMasterSuppliersWithTable() {
                 // Add cells for selected columns only
                 for (columnKey in selectedColumns) {
                     val value = when (columnKey) {
-                        "id" -> id.toString()
                         "supplierName" -> supplierName.toString()
                         "stockLocation" -> stockLocation.toString()
                         "rixoCompany" -> rixoCompany.toString()
@@ -3026,7 +5019,7 @@ fun loadMasterSuppliersWithTable() {
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
-                        "id", "venueId", "rixoPrice", "typeOfVehicle" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
+                        "venueId", "rixoPrice", "typeOfVehicle" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
                         "supplierName" -> "padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;"
                         else -> "padding: 14px 16px; color: #111827; font-size: 14px;"
                     }
@@ -3145,7 +5138,6 @@ fun showSupplierColumnFilterModal() {
     
     // Populate column checkboxes
     val columnLabels = mapOf(
-        "id" to "ID",
         "supplierName" to "Supplier Name",
         "stockLocation" to "Stock Location",
         "rixoCompany" to "Rixo Company",
@@ -3412,6 +5404,123 @@ fun saveSupplier(priceId: Long?, isDuplicate: Boolean = false) {
     val stockLocation = (document.getElementById("supplierStockLocation") as? HTMLInputElement)?.value?.trim() ?: ""
     val rixoCompany = (document.getElementById("supplierRixoCompany") as? HTMLInputElement)?.value?.trim() ?: ""
     val venueId = (document.getElementById("supplierVenueId") as? HTMLInputElement)?.value?.trim() ?: ""
+    
+    // Validate all fields against master lists before saving
+    validateSupplierMasterFields(auctionHouse, stockLocation, rixoCompany, venueId) { missingFields ->
+        if (missingFields.isNotEmpty()) {
+            // Close supplier modal and show error modal
+            closeSupplierModal()
+            showSupplierMasterFieldsErrorModal(missingFields)
+        } else {
+            // All fields are valid, proceed with save
+            performSupplierSave(priceId, isDuplicate)
+        }
+    }
+}
+
+fun validateSupplierMasterFields(
+    supplierName: String,
+    stockLocation: String,
+    rixoCompany: String,
+    venueId: String,
+    callback: (List<Pair<String, String>>) -> Unit
+) {
+    // Fetch all master lists in parallel
+    val masterListPromises = js("[]")
+    masterListPromises.push(window.fetch(apiUrl("master-menu/supplier")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/stock_location")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/rixo_company")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/venue_id")))
+    
+    js("Promise.all")(masterListPromises)
+        .then { responses: dynamic ->
+            val jsonPromises = js("[]")
+            for (i in 0 until 4) {
+                val resp = responses[i]
+                if (resp.ok) {
+                    jsonPromises.push(resp.json())
+                } else {
+                    jsonPromises.push(js("Promise.resolve([])"))
+                }
+            }
+            js("Promise.all")(jsonPromises)
+        }
+        .then { results: dynamic ->
+            val supplierList = parseMasterListArray(results[0])
+            val stockLocationList = parseMasterListArray(results[1])
+            val rixoCompanyList = parseMasterListArray(results[2])
+            val venueIdList = parseMasterListArray(results[3])
+            
+            val missingFields = mutableListOf<Pair<String, String>>()
+            
+            // Check supplier name (required)
+            if (supplierName.isNotEmpty() && !supplierList.any { it.equals(supplierName, ignoreCase = true) }) {
+                missingFields.add(Pair("Supplier Name", "Supplier"))
+            }
+            
+            // Check stock location (optional, only validate if provided)
+            if (stockLocation.isNotEmpty() && !stockLocationList.any { it.equals(stockLocation, ignoreCase = true) }) {
+                missingFields.add(Pair("Stock Location", "Stock Location"))
+            }
+            
+            // Check rixo company (optional, only validate if provided)
+            if (rixoCompany.isNotEmpty() && !rixoCompanyList.any { it.equals(rixoCompany, ignoreCase = true) }) {
+                missingFields.add(Pair("Rixo Company", "Rixo Company"))
+            }
+            
+            // Check venue ID (optional, only validate if provided)
+            if (venueId.isNotEmpty() && !venueIdList.any { it.equals(venueId, ignoreCase = true) }) {
+                missingFields.add(Pair("Venue ID", "Venue ID"))
+            }
+            
+            callback(missingFields)
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error validating supplier fields: ${error.toString()}")
+            // On error, proceed with save (don't block the user)
+            callback(emptyList())
+        }
+}
+
+fun showSupplierMasterFieldsErrorModal(missingFields: List<Pair<String, String>>) {
+    document.getElementById("supplierMasterFieldsErrorModal")?.remove()
+    
+    // Build the error message
+    val fieldNames = missingFields.map { it.first }.joinToString(", ")
+    val pageNames = missingFields.map { it.second }.distinct().joinToString(", ")
+    
+    val modal = document.createElement("div")
+    modal.id = "supplierMasterFieldsErrorModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10001;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 480px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #ef4444;">Field(s) Not Found in Master List</h3>
+            <p style="margin-bottom: 20px; color: #374151; font-size: 14px; line-height: 1.6;">
+                <strong>$fieldNames</strong> does not exist in Master List. Go to the <strong>$pageNames</strong> page(s) and add the missing value(s).
+            </p>
+            <div style="display: flex; justify-content: flex-end;">
+                <button id="closeSupplierMasterFieldsErrorModalBtn" style="padding: 10px 24px; border-radius: 6px; border: none; background: #3b82f6; color: white; cursor: pointer; font-size: 14px; font-weight: 500;">
+                    Close
+                </button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    
+    document.getElementById("closeSupplierMasterFieldsErrorModalBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+}
+
+fun performSupplierSave(priceId: Long?, isDuplicate: Boolean = false) {
+    val auctionHouse = (document.getElementById("supplierAuctionHouse") as? HTMLInputElement)?.value?.trim() ?: ""
+    val stockLocation = (document.getElementById("supplierStockLocation") as? HTMLInputElement)?.value?.trim() ?: ""
+    val rixoCompany = (document.getElementById("supplierRixoCompany") as? HTMLInputElement)?.value?.trim() ?: ""
+    val venueId = (document.getElementById("supplierVenueId") as? HTMLInputElement)?.value?.trim() ?: ""
     val rixoPrice = (document.getElementById("supplierRixoPrice") as? HTMLInputElement)?.value?.trim() ?: ""
     val typeOfVehicle = (document.getElementById("supplierTypeOfVehicle") as? HTMLInputElement)?.value?.trim() ?: ""
     
@@ -3528,6 +5637,12 @@ fun showMasterRixoCompanyPage() {
         <div id="rixoCompanyList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Rixo Company</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addRixoCompanyBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Rixo Company</span>
+                    </button>
+                </div>
             </div>
             
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -3550,6 +5665,10 @@ fun showMasterRixoCompanyPage() {
     document.getElementById("rixoCompanyFilter")?.addEventListener("input", { _: Event ->
         loadMasterRixoCompanies()
     })
+
+    document.getElementById("addRixoCompanyBtn")?.addEventListener("click", { _: Event ->
+        showAddRixoCompanyModal()
+    })
 }
 
 fun loadMasterRixoCompanies() {
@@ -3565,15 +5684,15 @@ fun loadMasterRixoCompanies() {
         </div>
     """
     
-    // Use unique Rixo companies from purchases (same source as Purchase List)
-    window.fetch(apiUrl("purchases/rixo-companies"))
+    // Use Rixo companies from master_menu (rixo_company field)
+    window.fetch(apiUrl("master-menu/rixo_company"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load Rixo companies')")
         }
         .then { raw: dynamic ->
             val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
                 val a = raw.unsafeCast<Array<*>>()
-                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
             } else emptyList()
             val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
             allRixoCompanies = filtered
@@ -3608,9 +5727,24 @@ fun loadMasterRixoCompanies() {
             """
             for ((idx, companyName) in pageItems.withIndex()) {
                 val rowNum = startIndex + idx + 1
+                val safeName = companyName.replace("\"", "&quot;")
                 html += """
                     <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
-                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">$rowNum</td>
+                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="rixo-company-edit-btn"
+                                        data-rixo-company="$safeName"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        </td>
                         <td style="padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;">$companyName</td>
                     </tr>
                 """
@@ -3641,6 +5775,15 @@ fun loadMasterRixoCompanies() {
                 """
             }
             tableDiv.innerHTML = html
+
+            val editButtons = document.querySelectorAll(".rixo-company-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-rixo-company") ?: return@addEventListener
+                    showEditRixoCompanyModal(name)
+                })
+            }
             
             document.getElementById("rixoCompaniesPrevPage")?.addEventListener("click", { _: Event ->
                 if (rixoCompaniesCurrentPage > 1) {
@@ -3667,6 +5810,165 @@ fun loadMasterRixoCompanies() {
         }
 }
 
+fun showAddRixoCompanyModal() {
+    document.getElementById("rixoCompanyEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "rixoCompanyEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Rixo Company</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="rixoCompanyModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Rixo Company</label>
+                <input type="text" id="rixoCompanyModalInput" placeholder="Enter Rixo company name"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="rixoCompanyModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="rixoCompanyModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("rixoCompanyModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("rixoCompanyModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("rixoCompanyModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Rixo company name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/rixo_company"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add Rixo company')")
+            }
+            .then { _: dynamic ->
+                showMessage("Rixo company added successfully", "success")
+                modal.remove()
+                rixoCompaniesCurrentPage = 1
+                loadMasterRixoCompanies()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding Rixo company: ${error.toString()}")
+                showMessage("Error adding Rixo company: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditRixoCompanyModal(originalName: String) {
+    document.getElementById("rixoCompanyEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "rixoCompanyEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Rixo Company</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="rixoCompanyModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Rixo Company</label>
+                <input type="text" id="rixoCompanyModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="rixoCompanyModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="rixoCompanyModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="rixoCompanyModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("rixoCompanyModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("rixoCompanyModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("rixoCompanyModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Rixo company name is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalName
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/rixo_company"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update Rixo company')")
+            }
+            .then { _: dynamic ->
+                showMessage("Rixo company updated successfully", "success")
+                modal.remove()
+                loadMasterRixoCompanies()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating Rixo company: ${error.toString()}")
+                showMessage("Error updating Rixo company: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("rixoCompanyModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        val confirmDelete = window.confirm("Are you sure you want to delete this Rixo company?")
+        if (!confirmDelete) {
+            return@addEventListener
+        }
+
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val url = apiUrl("master-menu/rixo_company?value=" + encoded)
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete Rixo company')")
+            }
+            .then { _: dynamic ->
+                showMessage("Rixo company deleted successfully", "success")
+                modal.remove()
+                rixoCompaniesCurrentPage = 1
+                loadMasterRixoCompanies()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting Rixo company: ${error.toString()}")
+                showMessage("Error deleting Rixo company: ${error.message}", "error")
+            }
+    })
+}
+
 fun showMasterStockLocationsPage() {
     window.location.hash = "#/master/stock-location"
     val content = document.getElementById("content")!!
@@ -3674,6 +5976,12 @@ fun showMasterStockLocationsPage() {
         <div id="stockLocationList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Stock Location</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addStockLocationBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Stock Location</span>
+                    </button>
+                </div>
             </div>
             
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -3696,6 +6004,10 @@ fun showMasterStockLocationsPage() {
     document.getElementById("stockLocationFilter")?.addEventListener("input", { _: Event ->
         loadMasterStockLocations()
     })
+
+    document.getElementById("addStockLocationBtn")?.addEventListener("click", { _: Event ->
+        showAddStockLocationModal()
+    })
 }
 
 fun loadMasterStockLocations() {
@@ -3711,14 +6023,14 @@ fun loadMasterStockLocations() {
         </div>
     """
     
-    window.fetch(apiUrl("purchases/stock-locations"))
+    window.fetch(apiUrl("master-menu/stock_location"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load stock locations')")
         }
         .then { raw: dynamic ->
             val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
                 val a = raw.unsafeCast<Array<*>>()
-                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
             } else emptyList()
             val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
             allStockLocations = filtered
@@ -3753,9 +6065,24 @@ fun loadMasterStockLocations() {
             """
             for ((idx, locationName) in pageItems.withIndex()) {
                 val rowNum = startIndex + idx + 1
+                val safeName = locationName.replace("\"", "&quot;")
                 html += """
                     <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
-                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">$rowNum</td>
+                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="stock-location-edit-btn"
+                                        data-stock-location="$safeName"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        </td>
                         <td style="padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;">$locationName</td>
                     </tr>
                 """
@@ -3786,6 +6113,15 @@ fun loadMasterStockLocations() {
                 """
             }
             tableDiv.innerHTML = html
+
+            val editButtons = document.querySelectorAll(".stock-location-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-stock-location") ?: return@addEventListener
+                    showEditStockLocationModal(name)
+                })
+            }
             
             document.getElementById("stockLocationsPrevPage")?.addEventListener("click", { _: Event ->
                 if (stockLocationsCurrentPage > 1) {
@@ -3812,6 +6148,165 @@ fun loadMasterStockLocations() {
         }
 }
 
+fun showAddStockLocationModal() {
+    document.getElementById("stockLocationEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "stockLocationEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Stock Location</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="stockLocationModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Stock Location</label>
+                <input type="text" id="stockLocationModalInput" placeholder="Enter stock location"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="stockLocationModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="stockLocationModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("stockLocationModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("stockLocationModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("stockLocationModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Stock location is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/stock_location"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add stock location')")
+            }
+            .then { _: dynamic ->
+                showMessage("Stock location added successfully", "success")
+                modal.remove()
+                stockLocationsCurrentPage = 1
+                loadMasterStockLocations()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding stock location: ${error.toString()}")
+                showMessage("Error adding stock location: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditStockLocationModal(originalName: String) {
+    document.getElementById("stockLocationEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "stockLocationEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Stock Location</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="stockLocationModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Stock Location</label>
+                <input type="text" id="stockLocationModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="stockLocationModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="stockLocationModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="stockLocationModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("stockLocationModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("stockLocationModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("stockLocationModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Stock location is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalName
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/stock_location"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update stock location')")
+            }
+            .then { _: dynamic ->
+                showMessage("Stock location updated successfully", "success")
+                modal.remove()
+                loadMasterStockLocations()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating stock location: ${error.toString()}")
+                showMessage("Error updating stock location: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("stockLocationModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        if (!window.confirm("Are you sure you want to delete stock location '$originalName'?")) {
+            return@addEventListener
+        }
+
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val url = apiUrl("master-menu/stock_location?value=$encoded")
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete stock location')")
+            }
+            .then { _: dynamic ->
+                showMessage("Stock location deleted successfully", "success")
+                modal.remove()
+                stockLocationsCurrentPage = 1
+                loadMasterStockLocations()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting stock location: ${error.toString()}")
+                showMessage("Error deleting stock location: ${error.message}", "error")
+            }
+    })
+}
+
 fun showMasterRepairCompaniesPage() {
     window.location.hash = "#/master/repair-company"
     val content = document.getElementById("content")!!
@@ -3819,6 +6314,12 @@ fun showMasterRepairCompaniesPage() {
         <div id="repairCompanyList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Repair Company</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addRepairCompanyBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Repair Company</span>
+                    </button>
+                </div>
             </div>
             
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -3841,6 +6342,10 @@ fun showMasterRepairCompaniesPage() {
     document.getElementById("repairCompanyFilter")?.addEventListener("input", { _: Event ->
         loadMasterRepairCompanies()
     })
+
+    document.getElementById("addRepairCompanyBtn")?.addEventListener("click", { _: Event ->
+        showAddRepairCompanyModal()
+    })
 }
 
 fun loadMasterRepairCompanies() {
@@ -3856,15 +6361,15 @@ fun loadMasterRepairCompanies() {
         </div>
     """
     
-    // Purchases-based unique repair companies (same source as Purchase List)
-    window.fetch(apiUrl("purchases/repair-companies"))
+    // Master-menu based repair companies
+    window.fetch(apiUrl("master-menu/repair_company"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load repair companies')")
         }
         .then { raw: dynamic ->
             val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
                 val a = raw.unsafeCast<Array<*>>()
-                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
             } else emptyList()
             val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
             allRepairCompanies = filtered
@@ -3899,9 +6404,24 @@ fun loadMasterRepairCompanies() {
             """
             for ((idx, companyName) in pageItems.withIndex()) {
                 val rowNum = startIndex + idx + 1
+                val safeName = companyName.replace("\"", "&quot;")
                 html += """
                     <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
-                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">$rowNum</td>
+                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="repair-company-edit-btn"
+                                        data-repair-company="$safeName"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        </td>
                         <td style="padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;">$companyName</td>
                     </tr>
                 """
@@ -3932,6 +6452,15 @@ fun loadMasterRepairCompanies() {
                 """
             }
             tableDiv.innerHTML = html
+
+            val editButtons = document.querySelectorAll(".repair-company-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-repair-company") ?: return@addEventListener
+                    showEditRepairCompanyModal(name)
+                })
+            }
             
             document.getElementById("repairCompaniesPrevPage")?.addEventListener("click", { _: Event ->
                 if (repairCompaniesCurrentPage > 1) {
@@ -3958,28 +6487,203 @@ fun loadMasterRepairCompanies() {
         }
 }
 
+fun showAddRepairCompanyModal() {
+    document.getElementById("repairCompanyEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "repairCompanyEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Repair Company</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="repairCompanyModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Repair Company</label>
+                <input type="text" id="repairCompanyModalInput" placeholder="Enter repair company"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="repairCompanyModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="repairCompanyModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("repairCompanyModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("repairCompanyModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("repairCompanyModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Repair company is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/repair_company"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add repair company')")
+            }
+            .then { _: dynamic ->
+                showMessage("Repair company added successfully", "success")
+                modal.remove()
+                repairCompaniesCurrentPage = 1
+                loadMasterRepairCompanies()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding repair company: ${error.toString()}")
+                showMessage("Error adding repair company: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditRepairCompanyModal(originalName: String) {
+    document.getElementById("repairCompanyEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "repairCompanyEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Repair Company</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="repairCompanyModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Repair Company</label>
+                <input type="text" id="repairCompanyModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="repairCompanyModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="repairCompanyModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="repairCompanyModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("repairCompanyModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("repairCompanyModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("repairCompanyModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Repair company is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalName
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/repair_company"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update repair company')")
+            }
+            .then { _: dynamic ->
+                showMessage("Repair company updated successfully", "success")
+                modal.remove()
+                loadMasterRepairCompanies()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating repair company: ${error.toString()}")
+                showMessage("Error updating repair company: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("repairCompanyModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        val confirmDelete = window.confirm("Are you sure you want to delete this repair company?")
+        if (!confirmDelete) {
+            return@addEventListener
+        }
+
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val url = apiUrl("master-menu/repair_company?value=" + encoded)
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete repair company')")
+            }
+            .then { _: dynamic ->
+                showMessage("Repair company deleted successfully", "success")
+                modal.remove()
+                repairCompaniesCurrentPage = 1
+                loadMasterRepairCompanies()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting repair company: ${error.toString()}")
+                showMessage("Error deleting repair company: ${error.message}", "error")
+            }
+    })
+}
+
 fun showMasterBankAccountsPage() {
     window.location.hash = "#/master/bank-accounts"
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div style="padding: 20px;">
-            <h2 style="margin-bottom: 20px;">Master List - Bank Accounts</h2>
-            <div style="margin-bottom: 20px;">
-                <button id="addBankAccountBtn" style="padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">Add New Bank Account</button>
-                <button id="refreshBankAccountBtn" style="padding: 10px 20px; background-color: #17a2b8; color: white; border: none; border-radius: 4px; cursor: pointer;">Refresh</button>
+        <div id="bankAccountList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Bank Accounts</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addBankAccountBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Bank Account</span>
+                    </button>
             </div>
-            <div id="bankAccountTable" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px;">
-                <div style="text-align: center; color: #666; padding: 40px;">Loading bank accounts...</div>
+            </div>
+
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                <div style="flex: 1; min-width: 250px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Bank Account:</label>
+                    <input type="text" id="bankAccountFilter" placeholder="Type bank account to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                </div>
+            </div>
+
+            <div id="bankAccountTable" style="margin-top: 20px;">
+                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px;">Loading bank accounts...</div>
+                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+                </div>
             </div>
         </div>
     """
     loadMasterBankAccounts()
+
+    document.getElementById("bankAccountFilter")?.addEventListener("input", { _: Event ->
+        loadMasterBankAccounts()
+    })
     
     document.getElementById("addBankAccountBtn")?.addEventListener("click", { _: Event ->
         showAddBankAccountModal()
-    })
-    document.getElementById("refreshBankAccountBtn")?.addEventListener("click", { _: Event ->
-        loadMasterBankAccounts()
     })
 }
 
@@ -3987,12 +6691,293 @@ fun loadMasterBankAccounts() {
     val tableDiv = document.getElementById("bankAccountTable")
     if (tableDiv == null) return
     
-    // Bank accounts - implementation needed
-    tableDiv.innerHTML = "<div style='text-align: center; color: #666; padding: 40px;'>Bank accounts loading - implementation in progress</div>"
+    val searchFilter = (document.getElementById("bankAccountFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
+
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+            <div style="font-size: 16px; margin-bottom: 8px;">Loading bank accounts...</div>
+            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+        </div>
+    """
+
+    window.fetch(apiUrl("master-menu/bank_accounts"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load bank accounts')")
+        }
+        .then { raw: dynamic ->
+            val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
+            } else emptyList()
+            val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
+
+            if (filtered.isEmpty()) {
+                val message = if (searchFilter.isNotEmpty()) "No bank accounts found for: $searchFilter" else "No bank accounts found."
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
+                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search filter</div>
+                    </div>
+                """
+                return@then
+            }
+
+            val totalPages = kotlin.math.ceil(filtered.size.toDouble() / venueIdsItemsPerPage).toInt()
+            val startIndex = (venueIdsCurrentPage - 1) * venueIdsItemsPerPage
+            val endIndex = kotlin.math.min(startIndex + venueIdsItemsPerPage, filtered.size)
+            val pageItems = filtered.subList(startIndex, endIndex)
+
+            var html = """
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;" class="bank-account-table">
+                        <thead>
+                            <tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                                <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #374151; font-size: 14px;">ID</th>
+                                <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #374151; font-size: 14px;">Bank Account</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            """
+            for ((idx, accountName) in pageItems.withIndex()) {
+                val rowNum = startIndex + idx + 1
+                val safeName = accountName.replace("\"", "&quot;")
+                html += """
+                    <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
+                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="bank-account-edit-btn"
+                                        data-bank-account="$safeName"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        </td>
+                        <td style="padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;">$accountName</td>
+                    </tr>
+                """
+            }
+            html += """
+                        </tbody>
+                    </table>
+                </div>
+            """
+            if (totalPages > 1) {
+                html += """
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
+                        <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
+                            Showing ${startIndex + 1} to $endIndex of ${filtered.size} bank accounts${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                        </div>
+                        <div class="consignee-pagination-controls">
+                            <button id="bankAccountsPrevPage" class="consignee-pagination-btn" ${if (venueIdsCurrentPage == 1) "disabled" else ""}>Previous</button>
+                            <span class="consignee-pagination-page">Page $venueIdsCurrentPage of $totalPages</span>
+                            <button id="bankAccountsNextPage" class="consignee-pagination-btn" ${if (venueIdsCurrentPage >= totalPages) "disabled" else ""}>Next</button>
+                        </div>
+                    </div>
+                """
+            } else {
+                html += """
+                    <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+                        Total: ${filtered.size} bank accounts${if (searchFilter.isNotEmpty()) " (filtered)" else ""}
+                    </div>
+                """
+            }
+            tableDiv.innerHTML = html
+
+            val editButtons = document.querySelectorAll(".bank-account-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-bank-account") ?: return@addEventListener
+                    showEditBankAccountModal(name)
+                })
+            }
+
+            document.getElementById("bankAccountsPrevPage")?.addEventListener("click", { _: Event ->
+                if (venueIdsCurrentPage > 1) {
+                    venueIdsCurrentPage--
+                    loadMasterBankAccounts()
+                }
+            })
+            document.getElementById("bankAccountsNextPage")?.addEventListener("click", { _: Event ->
+                val totalP = kotlin.math.ceil(list.size.toDouble() / venueIdsItemsPerPage).toInt()
+                if (venueIdsCurrentPage < totalP) {
+                    venueIdsCurrentPage++
+                    loadMasterBankAccounts()
+                }
+            })
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error loading bank accounts: ${error.toString()}")
+            tableDiv.innerHTML = """
+                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading bank accounts</div>
+                    <div style="font-size: 14px; color: #9ca3af;">${(error?.message ?: error.toString())}</div>
+                </div>
+            """
+        }
 }
 
 fun showAddBankAccountModal() {
-    js("alert('Add Bank Account modal - Coming soon')")
+    document.getElementById("bankAccountEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "bankAccountEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Bank Account</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="bankAccountModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Bank Account</label>
+                <input type="text" id="bankAccountModalInput" placeholder="Enter bank account"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="bankAccountModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="bankAccountModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("bankAccountModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("bankAccountModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("bankAccountModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Bank account is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/bank_accounts"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add bank account')")
+            }
+            .then { _: dynamic ->
+                showMessage("Bank account added successfully", "success")
+                modal.remove()
+                loadMasterBankAccounts()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding bank account: ${error.toString()}")
+                showMessage("Error adding bank account: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditBankAccountModal(originalName: String) {
+    document.getElementById("bankAccountEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "bankAccountEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Bank Account</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="bankAccountModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Bank Account</label>
+                <input type="text" id="bankAccountModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="bankAccountModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="bankAccountModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="bankAccountModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("bankAccountModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("bankAccountModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("bankAccountModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Bank account is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalName
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/bank_accounts"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update bank account')")
+            }
+            .then { _: dynamic ->
+                showMessage("Bank account updated successfully", "success")
+                modal.remove()
+                loadMasterBankAccounts()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating bank account: ${error.toString()}")
+                showMessage("Error updating bank account: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("bankAccountModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        val confirmDelete = window.confirm("Are you sure you want to delete this bank account?")
+        if (!confirmDelete) {
+            return@addEventListener
+        }
+
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val url = apiUrl("master-menu/bank_accounts?value=" + encoded)
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete bank account')")
+            }
+            .then { _: dynamic ->
+                showMessage("Bank account deleted successfully", "success")
+                modal.remove()
+                loadMasterBankAccounts()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting bank account: ${error.toString()}")
+                showMessage("Error deleting bank account: ${error.message}", "error")
+            }
+    })
 }
 
 fun showMasterVenueIdsPage() {
@@ -4002,6 +6987,12 @@ fun showMasterVenueIdsPage() {
         <div id="venueIdList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Venue ID</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addVenueIdBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add Venue ID</span>
+                    </button>
+                </div>
             </div>
             
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -4024,6 +7015,10 @@ fun showMasterVenueIdsPage() {
     document.getElementById("venueIdFilter")?.addEventListener("input", { _: Event ->
         loadMasterVenueIds()
     })
+
+    document.getElementById("addVenueIdBtn")?.addEventListener("click", { _: Event ->
+        showAddVenueIdModal()
+    })
 }
 
 fun loadMasterVenueIds() {
@@ -4039,15 +7034,15 @@ fun loadMasterVenueIds() {
         </div>
     """
     
-    // Purchases-based unique venue IDs (same source as Purchase List)
-    window.fetch(apiUrl("purchases/venue-ids"))
+    // Master-menu based venue IDs
+    window.fetch(apiUrl("master-menu/venue_id"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load venue IDs')")
         }
         .then { raw: dynamic ->
             val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
                 val a = raw.unsafeCast<Array<*>>()
-                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
             } else emptyList()
             val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
             allVenueIds = filtered
@@ -4082,9 +7077,24 @@ fun loadMasterVenueIds() {
             """
             for ((idx, venueIdName) in pageItems.withIndex()) {
                 val rowNum = startIndex + idx + 1
+                val safeName = venueIdName.replace("\"", "&quot;")
                 html += """
                     <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
-                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">$rowNum</td>
+                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="venue-id-edit-btn"
+                                        data-venue-id="$safeName"
+                                        aria-label="Edit"
+                                        title="Edit"
+                                        style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        </td>
                         <td style="padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;">$venueIdName</td>
                     </tr>
                 """
@@ -4115,6 +7125,15 @@ fun loadMasterVenueIds() {
                 """
             }
             tableDiv.innerHTML = html
+
+            val editButtons = document.querySelectorAll(".venue-id-edit-btn")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    val name = btn.getAttribute("data-venue-id") ?: return@addEventListener
+                    showEditVenueIdModal(name)
+                })
+            }
             
             document.getElementById("venueIdsPrevPage")?.addEventListener("click", { _: Event ->
                 if (venueIdsCurrentPage > 1) {
@@ -4139,5 +7158,702 @@ fun loadMasterVenueIds() {
                 </div>
             """
         }
+}
+
+fun showAddVenueIdModal() {
+    document.getElementById("venueIdEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "venueIdEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Add Venue ID</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="venueIdModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Venue ID</label>
+                <input type="text" id="venueIdModalInput" placeholder="Enter venue ID"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 20px;">
+                <button id="venueIdModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                <button id="venueIdModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer; font-size: 14px;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("venueIdModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("venueIdModalAddBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("venueIdModalInput") as? HTMLInputElement
+        val value = input?.value?.trim() ?: ""
+        if (value.isEmpty()) {
+            showMessage("Venue ID is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = value
+
+        val requestInit = js("{}")
+        requestInit.method = "POST"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/venue_id"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to add venue ID')")
+            }
+            .then { _: dynamic ->
+                showMessage("Venue ID added successfully", "success")
+                modal.remove()
+                venueIdsCurrentPage = 1
+                loadMasterVenueIds()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error adding venue ID: ${error.toString()}")
+                showMessage("Error adding venue ID: ${error.message}", "error")
+            }
+    })
+}
+
+fun showEditVenueIdModal(originalValue: String) {
+    document.getElementById("venueIdEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "venueIdEditModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+    val safeOriginal = originalValue.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #111827;">Edit Venue ID</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="venueIdModalInput" style="display:block; margin-bottom: 6px; font-weight: 600; font-size: 14px; color:#374151;">Venue ID</label>
+                <input type="text" id="venueIdModalInput" value="$safeOriginal"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 20px; flex-wrap: wrap;">
+                <button id="venueIdModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer; font-size: 14px;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="venueIdModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer; font-size: 14px;">Cancel</button>
+                    <button id="venueIdModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer; font-size: 14px;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("venueIdModalCancelBtn")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+
+    document.getElementById("venueIdModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("venueIdModalInput") as? HTMLInputElement
+        val newValue = input?.value?.trim() ?: ""
+        if (newValue.isEmpty()) {
+            showMessage("Venue ID is required", "error")
+            return@addEventListener
+        }
+
+        val body = js("{}")
+        body.value = newValue
+        body.originalValue = originalValue
+
+        val requestInit = js("{}")
+        requestInit.method = "PUT"
+        val headers = js("{}")
+        headers["Content-Type"] = "application/json"
+        requestInit.headers = headers
+        requestInit.body = JSON.stringify(body)
+
+        window.fetch(apiUrl("master-menu/venue_id"), requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to update venue ID')")
+            }
+            .then { _: dynamic ->
+                showMessage("Venue ID updated successfully", "success")
+                modal.remove()
+                loadMasterVenueIds()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error updating venue ID: ${error.toString()}")
+                showMessage("Error updating venue ID: ${error.message}", "error")
+            }
+    })
+
+    document.getElementById("venueIdModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        val confirmDelete = window.confirm("Are you sure you want to delete this venue ID?")
+        if (!confirmDelete) {
+            return@addEventListener
+        }
+
+        val encoded = js("encodeURIComponent")(originalValue) as String
+        val url = apiUrl("master-menu/venue_id?value=" + encoded)
+        val requestInit = js("{}")
+        requestInit.method = "DELETE"
+
+        window.fetch(url, requestInit)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to delete venue ID')")
+            }
+            .then { _: dynamic ->
+                showMessage("Venue ID deleted successfully", "success")
+                modal.remove()
+                venueIdsCurrentPage = 1
+                loadMasterVenueIds()
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error deleting venue ID: ${error.toString()}")
+                showMessage("Error deleting venue ID: ${error.message}", "error")
+            }
+    })
+}
+
+// --- POL master page (same UI/UX as Country, data from master_menu.pol) ---
+fun showMasterPolPage() {
+    window.location.hash = "#/master/pol"
+    val content = document.getElementById("content")!!
+    content.innerHTML = """
+        <div id="polList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">POL</h2>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="addPolBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <span style="font-size: 18px; line-height: 1;">+</span>
+                        <span>Add POL</span>
+                    </button>
+                </div>
+            </div>
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                <div style="flex: 1; min-width: 250px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by POL:</label>
+                    <input type="text" id="polFilter" placeholder="Type POL to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                </div>
+            </div>
+            <div id="polTable" style="margin-top: 20px;">
+                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px;">Loading POL...</div>
+                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+                </div>
+            </div>
+        </div>
+    """
+    loadMasterPol()
+    document.getElementById("polFilter")?.addEventListener("input", { _: Event -> loadMasterPol() })
+    document.getElementById("addPolBtn")?.addEventListener("click", { _: Event -> showAddPolModal() })
+}
+
+fun loadMasterPol() {
+    val tableDiv = document.getElementById("polTable") ?: return
+    val searchFilter = (document.getElementById("polFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+            <div style="font-size: 16px; margin-bottom: 8px;">Loading POL...</div>
+            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+        </div>
+    """
+    window.fetch(apiUrl("master-menu/pol"))
+        .then { response: dynamic -> if (response.ok) response.json() else throw js("Error('Failed to load POL')") }
+        .then { raw: dynamic ->
+            val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
+            } else emptyList()
+            val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
+            allPol = filtered
+            if (searchFilter.isNotEmpty()) polCurrentPage = 1
+            if (filtered.isEmpty()) {
+                val message = if (searchFilter.isNotEmpty()) "No POL found for: $searchFilter" else "No POL found."
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
+                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search filter</div>
+                    </div>
+                """
+                return@then
+            }
+            val totalPages = kotlin.math.ceil(filtered.size.toDouble() / polItemsPerPage).toInt()
+            val startIndex = (polCurrentPage - 1) * polItemsPerPage
+            val endIndex = kotlin.math.min(startIndex + polItemsPerPage, filtered.size)
+            val pageItems = filtered.subList(startIndex, endIndex)
+            var html = """
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;" class="pol-table">
+                        <thead>
+                            <tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                                <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #374151; font-size: 14px;">ID</th>
+                                <th style="padding: 14px 16px; text-align: left; font-weight: 600; color: #374151; font-size: 14px;">POL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            """
+            for ((idx, name) in pageItems.withIndex()) {
+                val rowNum = startIndex + idx + 1
+                val safeName = name.replace("\"", "&quot;")
+                html += """
+                    <tr style="border-bottom: 1px solid #e5e7eb;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
+                        <td style="padding: 14px 16px; color: #6b7280; font-size: 14px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="pol-edit-btn" data-pol="$safeName" aria-label="Edit" title="Edit" style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer;">
+                                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+                                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                        <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                    </svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        </td>
+                        <td style="padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;">$name</td>
+                    </tr>
+                """
+            }
+            html += "</tbody></table></div>"
+            if (totalPages > 1) html += """
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb;">
+                    <div style="color: #6b7280; font-size: 14px;">Showing ${startIndex + 1} to $endIndex of ${filtered.size}</div>
+                    <div><button id="polPrevPage" class="consignee-pagination-btn" ${if (polCurrentPage == 1) "disabled" else ""}>Previous</button>
+                    <span class="consignee-pagination-page">Page $polCurrentPage of $totalPages</span>
+                    <button id="polNextPage" class="consignee-pagination-btn" ${if (polCurrentPage >= totalPages) "disabled" else ""}>Next</button></div>
+                </div>
+            """ else html += """
+                <div style="padding: 16px; background-color: #f9fafb; color: #6b7280; font-size: 14px;">Total: ${filtered.size} POL</div>
+            """
+            tableDiv.innerHTML = html
+            val polEditButtons = document.querySelectorAll(".pol-edit-btn")
+            for (i in 0 until polEditButtons.length) {
+                val btn = polEditButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event ->
+                    showEditPolModal(btn.getAttribute("data-pol") ?: return@addEventListener)
+                })
+            }
+            document.getElementById("polPrevPage")?.addEventListener("click", { _: Event ->
+                if (polCurrentPage > 1) { polCurrentPage--; loadMasterPol() }
+            })
+            document.getElementById("polNextPage")?.addEventListener("click", { _: Event ->
+                if (polCurrentPage < kotlin.math.ceil(allPol.size.toDouble() / polItemsPerPage).toInt()) { polCurrentPage++; loadMasterPol() }
+            })
+        }
+        .catch { error: dynamic ->
+            tableDiv.innerHTML = "<div style=\"text-align: center; color: #ef4444; padding: 60px 20px;\">Error loading POL: ${error?.message ?: error.toString()}</div>"
+        }
+}
+
+fun showAddPolModal() {
+    document.getElementById("polEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "polEditModal"
+    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700;">Add POL</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="polModalInput" style="display:block; margin-bottom: 6px; font-weight: 600;">POL</label>
+                <input type="text" id="polModalInput" placeholder="Enter POL" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button id="polModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
+                <button id="polModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    document.getElementById("polModalCancelBtn")?.addEventListener("click", { _: Event -> modal.remove() })
+    document.getElementById("polModalAddBtn")?.addEventListener("click", { _: Event ->
+        val value = (document.getElementById("polModalInput") as? HTMLInputElement)?.value?.trim() ?: ""
+        if (value.isEmpty()) { showMessage("POL is required", "error"); return@addEventListener }
+        val body = js("{}"); body.value = value
+        val req = js("{}"); req.method = "POST"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
+        window.fetch(apiUrl("master-menu/pol"), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to add')") }
+            .then { _: dynamic -> showMessage("POL added successfully", "success"); modal.remove(); polCurrentPage = 1; loadMasterPol() }
+            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+    })
+}
+
+fun showEditPolModal(originalName: String) {
+    document.getElementById("polEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "polEditModal"
+    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
+            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700;">Edit POL</h3>
+            <div style="margin-bottom: 16px;">
+                <label for="polModalInput" style="display:block; margin-bottom: 6px; font-weight: 600;">POL</label>
+                <input type="text" id="polModalInput" value="$safeOriginal" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; box-sizing: border-box;">
+            </div>
+            <div style="display:flex; justify-content:space-between; gap:10px;">
+                <button id="polModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="polModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
+                    <button id="polModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    document.getElementById("polModalCancelBtn")?.addEventListener("click", { _: Event -> modal.remove() })
+    document.getElementById("polModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val newValue = (document.getElementById("polModalInput") as? HTMLInputElement)?.value?.trim() ?: ""
+        if (newValue.isEmpty()) { showMessage("POL is required", "error"); return@addEventListener }
+        val body = js("{}"); body.value = newValue; body.originalValue = originalName
+        val req = js("{}"); req.method = "PUT"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
+        window.fetch(apiUrl("master-menu/pol"), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to update')") }
+            .then { _: dynamic -> showMessage("POL updated successfully", "success"); modal.remove(); loadMasterPol() }
+            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+    })
+    document.getElementById("polModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        if (!window.confirm("Delete this POL?")) return@addEventListener
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val req = js("{}"); req.method = "DELETE"
+        window.fetch(apiUrl("master-menu/pol?value=" + encoded), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete')") }
+            .then { _: dynamic -> showMessage("POL deleted successfully", "success"); modal.remove(); polCurrentPage = 1; loadMasterPol() }
+            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+    })
+}
+
+fun showMasterPodPage() {
+    window.location.hash = "#/master/pod"
+    val content = document.getElementById("content")!!
+    content.innerHTML = """
+        <div id="podList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">POD</h2>
+                <div><button id="addPodBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px;">+ Add POD</button></div>
+            </div>
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Search by POD:</label>
+                <input type="text" id="podFilter" placeholder="Type POD to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px;">
+            </div>
+            <div id="podTable" style="margin-top: 20px;"><div style="text-align: center; color: #6b7280; padding: 60px 20px;">Loading POD...</div></div>
+        </div>
+    """
+    loadMasterPod()
+    document.getElementById("podFilter")?.addEventListener("input", { _: Event -> loadMasterPod() })
+    document.getElementById("addPodBtn")?.addEventListener("click", { _: Event -> showAddPodModal() })
+}
+
+fun loadMasterPod() {
+    val tableDiv = document.getElementById("podTable") ?: return
+    val searchFilter = (document.getElementById("podFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
+    tableDiv.innerHTML = "<div style=\"text-align: center; color: #6b7280; padding: 60px 20px;\">Loading POD...</div>"
+    window.fetch(apiUrl("master-menu/pod"))
+        .then { response: dynamic -> if (response.ok) response.json() else throw js("Error('Failed to load POD')") }
+        .then { raw: dynamic ->
+            val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
+            } else emptyList()
+            val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
+            allPod = filtered
+            if (searchFilter.isNotEmpty()) podCurrentPage = 1
+            if (filtered.isEmpty()) {
+                tableDiv.innerHTML = "<div style=\"text-align: center; color: #6b7280; padding: 60px 20px;\">${if (searchFilter.isNotEmpty()) "No POD found for: $searchFilter" else "No POD found."}</div>"
+                return@then
+            }
+            val totalPages = kotlin.math.ceil(filtered.size.toDouble() / podItemsPerPage).toInt()
+            val startIndex = (podCurrentPage - 1) * podItemsPerPage
+            val endIndex = kotlin.math.min(startIndex + podItemsPerPage, filtered.size)
+            val pageItems = filtered.subList(startIndex, endIndex)
+            var html = """
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead><tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                            <th style="padding: 14px 16px; text-align: left; font-weight: 600;">ID</th>
+                            <th style="padding: 14px 16px; text-align: left; font-weight: 600;">POD</th>
+                        </tr></thead><tbody>
+            """
+            for ((idx, name) in pageItems.withIndex()) {
+                val rowNum = startIndex + idx + 1
+                val safeName = name.replace("\"", "&quot;")
+                html += """
+                    <tr style="border-bottom: 1px solid #e5e7eb;">
+                        <td style="padding: 14px 16px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="pod-edit-btn" data-pod="$safeName" style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer;">
+                                    <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/><path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/></svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        </td>
+                        <td style="padding: 14px 16px; font-weight: 500;">$name</td>
+                    </tr>
+                """
+            }
+            html += "</tbody></table></div>"
+            if (totalPages > 1) html += "<div style=\"padding: 16px; background-color: #f9fafb;\"><button id=\"podPrevPage\" ${if (podCurrentPage == 1) "disabled" else ""}>Previous</button> Page $podCurrentPage of $totalPages <button id=\"podNextPage\" ${if (podCurrentPage >= totalPages) "disabled" else ""}>Next</button></div>"
+            else html += "<div style=\"padding: 16px; background-color: #f9fafb;\">Total: ${filtered.size} POD</div>"
+            tableDiv.innerHTML = html
+            val podEditButtons = document.querySelectorAll(".pod-edit-btn")
+            for (i in 0 until podEditButtons.length) {
+                val btn = podEditButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event -> showEditPodModal(btn.getAttribute("data-pod") ?: return@addEventListener) })
+            }
+            document.getElementById("podPrevPage")?.addEventListener("click", { _: Event -> if (podCurrentPage > 1) { podCurrentPage--; loadMasterPod() } })
+            document.getElementById("podNextPage")?.addEventListener("click", { _: Event -> if (podCurrentPage < kotlin.math.ceil(allPod.size.toDouble() / podItemsPerPage).toInt()) { podCurrentPage++; loadMasterPod() } })
+        }
+        .catch { error: dynamic -> tableDiv.innerHTML = "<div style=\"text-align: center; color: #ef4444; padding: 60px 20px;\">Error loading POD</div>" }
+}
+
+fun showAddPodModal() {
+    document.getElementById("podEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "podEditModal"
+    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%;">
+            <h3 style="margin-top: 0;">Add POD</h3>
+            <label>POD</label>
+            <input type="text" id="podModalInput" placeholder="Enter POD" style="width: 100%; padding: 10px 12px; margin: 8px 0; box-sizing: border-box;">
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 16px;">
+                <button id="podModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
+                <button id="podModalAddBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    document.getElementById("podModalCancelBtn")?.addEventListener("click", { _: Event -> modal.remove() })
+    document.getElementById("podModalAddBtn")?.addEventListener("click", { _: Event ->
+        val value = (document.getElementById("podModalInput") as? HTMLInputElement)?.value?.trim() ?: ""
+        if (value.isEmpty()) { showMessage("POD is required", "error"); return@addEventListener }
+        val body = js("{}"); body.value = value
+        val req = js("{}"); req.method = "POST"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
+        window.fetch(apiUrl("master-menu/pod"), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to add')") }
+            .then { _: dynamic -> showMessage("POD added successfully", "success"); modal.remove(); podCurrentPage = 1; loadMasterPod() }
+            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+    })
+}
+
+fun showEditPodModal(originalName: String) {
+    document.getElementById("podEditModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "podEditModal"
+    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%;">
+            <h3 style="margin-top: 0;">Edit POD</h3>
+            <label>POD</label>
+            <input type="text" id="podModalInput" value="$safeOriginal" style="width: 100%; padding: 10px 12px; margin: 8px 0; box-sizing: border-box;">
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 16px;">
+                <button id="podModalDeleteBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="podModalCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
+                    <button id="podModalUpdateBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    document.getElementById("podModalCancelBtn")?.addEventListener("click", { _: Event -> modal.remove() })
+    document.getElementById("podModalUpdateBtn")?.addEventListener("click", { _: Event ->
+        val newValue = (document.getElementById("podModalInput") as? HTMLInputElement)?.value?.trim() ?: ""
+        if (newValue.isEmpty()) { showMessage("POD is required", "error"); return@addEventListener }
+        val body = js("{}"); body.value = newValue; body.originalValue = originalName
+        val req = js("{}"); req.method = "PUT"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
+        window.fetch(apiUrl("master-menu/pod"), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to update')") }
+            .then { _: dynamic -> showMessage("POD updated successfully", "success"); modal.remove(); loadMasterPod() }
+            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+    })
+    document.getElementById("podModalDeleteBtn")?.addEventListener("click", { _: Event ->
+        if (!window.confirm("Delete this POD?")) return@addEventListener
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val req = js("{}"); req.method = "DELETE"
+        window.fetch(apiUrl("master-menu/pod?value=" + encoded), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete')") }
+            .then { _: dynamic -> showMessage("POD deleted successfully", "success"); modal.remove(); podCurrentPage = 1; loadMasterPod() }
+            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+    })
+}
+
+fun showMasterFuelPage() { window.location.hash = "#/master/fuel"; renderSimpleMasterPage("fuel", "Fuel", "fuel", "fuelFilter", "fuelTable", "addFuelBtn", ::loadMasterFuel, ::showAddFuelModal) }
+fun loadMasterFuel() { loadSimpleMaster("master-menu/fuel", "fuelFilter", "fuelTable", "Fuel", fuelCurrentPage, fuelItemsPerPage, allFuel, { fuelCurrentPage = it }, { allFuel = it }, ::showEditFuelModal, "fuel-edit-btn", "data-fuel", "fuelPrevPage", "fuelNextPage", ::loadMasterFuel) }
+fun showAddFuelModal() { addSimpleMasterModal("master-menu/fuel", "Fuel", "fuelEditModal", "fuelModalInput", "fuelModalCancelBtn", "fuelModalAddBtn", { fuelCurrentPage = 1; loadMasterFuel() }) }
+fun showEditFuelModal(originalName: String) { editSimpleMasterModal("master-menu/fuel", "Fuel", originalName, "fuelEditModal", "fuelModalInput", "fuelModalCancelBtn", "fuelModalUpdateBtn", "fuelModalDeleteBtn", { loadMasterFuel() }, { fuelCurrentPage = 1; loadMasterFuel() }) }
+
+fun showMasterCarGradePage() { window.location.hash = "#/master/car-grade"; renderSimpleMasterPage("car_grade", "Car Grade", "carGrade", "carGradeFilter", "carGradeTable", "addCarGradeBtn", ::loadMasterCarGrade, ::showAddCarGradeModal) }
+fun loadMasterCarGrade() { loadSimpleMaster("master-menu/car_grade", "carGradeFilter", "carGradeTable", "Car Grade", carGradeCurrentPage, carGradeItemsPerPage, allCarGrades, { carGradeCurrentPage = it }, { allCarGrades = it }, ::showEditCarGradeModal, "car-grade-edit-btn", "data-car-grade", "carGradePrevPage", "carGradeNextPage", ::loadMasterCarGrade) }
+fun showAddCarGradeModal() { addSimpleMasterModal("master-menu/car_grade", "Car Grade", "carGradeEditModal", "carGradeModalInput", "carGradeModalCancelBtn", "carGradeModalAddBtn", { carGradeCurrentPage = 1; loadMasterCarGrade() }) }
+fun showEditCarGradeModal(originalName: String) { editSimpleMasterModal("master-menu/car_grade", "Car Grade", originalName, "carGradeEditModal", "carGradeModalInput", "carGradeModalCancelBtn", "carGradeModalUpdateBtn", "carGradeModalDeleteBtn", { loadMasterCarGrade() }, { carGradeCurrentPage = 1; loadMasterCarGrade() }) }
+
+fun showMasterCarShiftPage() { window.location.hash = "#/master/car-shift"; renderSimpleMasterPage("car_shift", "Car Shift", "carShift", "carShiftFilter", "carShiftTable", "addCarShiftBtn", ::loadMasterCarShift, ::showAddCarShiftModal) }
+fun loadMasterCarShift() { loadSimpleMaster("master-menu/shift", "carShiftFilter", "carShiftTable", "Car Shift", carShiftCurrentPage, carShiftItemsPerPage, allCarShifts, { carShiftCurrentPage = it }, { allCarShifts = it }, ::showEditCarShiftModal, "car-shift-edit-btn", "data-car-shift", "carShiftPrevPage", "carShiftNextPage", ::loadMasterCarShift) }
+fun showAddCarShiftModal() { addSimpleMasterModal("master-menu/shift", "Car Shift", "carShiftEditModal", "carShiftModalInput", "carShiftModalCancelBtn", "carShiftModalAddBtn", { carShiftCurrentPage = 1; loadMasterCarShift() }) }
+fun showEditCarShiftModal(originalName: String) { editSimpleMasterModal("master-menu/shift", "Car Shift", originalName, "carShiftEditModal", "carShiftModalInput", "carShiftModalCancelBtn", "carShiftModalUpdateBtn", "carShiftModalDeleteBtn", { loadMasterCarShift() }, { carShiftCurrentPage = 1; loadMasterCarShift() }) }
+
+fun showMasterTypeOfVehiclesPage() { window.location.hash = "#/master/type-of-vehicles"; renderSimpleMasterPage("type_of_vehicles", "Type of Vehicles", "typeOfVehicles", "typeOfVehiclesFilter", "typeOfVehiclesTable", "addTypeOfVehiclesBtn", ::loadMasterTypeOfVehicles, ::showAddTypeOfVehiclesModal) }
+fun loadMasterTypeOfVehicles() { loadSimpleMaster("master-menu/type_of_vehicle", "typeOfVehiclesFilter", "typeOfVehiclesTable", "Type of Vehicles", typeOfVehiclesCurrentPage, typeOfVehiclesItemsPerPage, allTypeOfVehicles, { typeOfVehiclesCurrentPage = it }, { allTypeOfVehicles = it }, ::showEditTypeOfVehiclesModal, "type-of-vehicles-edit-btn", "data-type-of-vehicles", "typeOfVehiclesPrevPage", "typeOfVehiclesNextPage", ::loadMasterTypeOfVehicles) }
+fun showAddTypeOfVehiclesModal() { addSimpleMasterModal("master-menu/type_of_vehicle", "Type of Vehicles", "typeOfVehiclesEditModal", "typeOfVehiclesModalInput", "typeOfVehiclesModalCancelBtn", "typeOfVehiclesModalAddBtn", { typeOfVehiclesCurrentPage = 1; loadMasterTypeOfVehicles() }) }
+fun showEditTypeOfVehiclesModal(originalName: String) { editSimpleMasterModal("master-menu/type_of_vehicle", "Type of Vehicles", originalName, "typeOfVehiclesEditModal", "typeOfVehiclesModalInput", "typeOfVehiclesModalCancelBtn", "typeOfVehiclesModalUpdateBtn", "typeOfVehiclesModalDeleteBtn", { loadMasterTypeOfVehicles() }, { typeOfVehiclesCurrentPage = 1; loadMasterTypeOfVehicles() }) }
+
+private fun renderSimpleMasterPage(apiPath: String, title: String, listId: String, filterId: String, tableId: String, addBtnId: String, loadFn: () -> Unit, addModalFn: () -> Unit) {
+    val content = document.getElementById("content")!!
+    content.innerHTML = """
+        <div id="${listId}List" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">$title</h2>
+                <div><button id="$addBtnId" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px;">+ Add $title</button></div>
+            </div>
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Search by $title:</label>
+                <input type="text" id="$filterId" placeholder="Type $title to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px;">
+            </div>
+            <div id="$tableId" style="margin-top: 20px;"><div style="text-align: center; color: #6b7280; padding: 60px 20px;">Loading $title...</div></div>
+        </div>
+    """
+    loadFn()
+    document.getElementById(filterId)?.addEventListener("input", { _: Event -> loadFn() })
+    document.getElementById(addBtnId)?.addEventListener("click", { _: Event -> addModalFn() })
+}
+
+private fun loadSimpleMaster(apiPath: String, filterId: String, tableId: String, title: String, currentPage: Int, itemsPerPage: Int, allList: List<String>, setPage: (Int) -> Unit, setList: (List<String>) -> Unit, editModalFn: (String) -> Unit, editBtnClass: String, dataAttr: String, prevBtnId: String, nextBtnId: String, loadFn: () -> Unit) {
+    val tableDiv = document.getElementById(tableId) ?: return
+    val searchFilter = (document.getElementById(filterId) as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
+    tableDiv.innerHTML = "<div style=\"text-align: center; color: #6b7280; padding: 60px 20px;\">Loading $title...</div>"
+    window.fetch(apiUrl(apiPath))
+        .then { response: dynamic -> if (response.ok) response.json() else throw js("Error('Failed to load')") }
+        .then { raw: dynamic ->
+            val list: List<String> = if (raw != null && js("Array.isArray(raw)")) {
+                val a = raw.unsafeCast<Array<*>>()
+                (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
+            } else emptyList()
+            val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
+            setList(filtered)
+            if (searchFilter.isNotEmpty()) setPage(1)
+            val page = if (searchFilter.isNotEmpty()) 1 else currentPage
+            if (filtered.isEmpty()) {
+                tableDiv.innerHTML = "<div style=\"text-align: center; color: #6b7280; padding: 60px 20px;\">No $title found.</div>"
+                return@then
+            }
+            val totalPages = kotlin.math.ceil(filtered.size.toDouble() / itemsPerPage).toInt()
+            val startIndex = ((page - 1) * itemsPerPage).coerceIn(0, filtered.size)
+            val endIndex = kotlin.math.min(startIndex + itemsPerPage, filtered.size)
+            val pageItems = filtered.subList(startIndex, endIndex)
+            var html = """
+                <div style="overflow-x: auto;">
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead><tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
+                            <th style="padding: 14px 16px; text-align: left; font-weight: 600;">ID</th>
+                            <th style="padding: 14px 16px; text-align: left; font-weight: 600;">$title</th>
+                        </tr></thead><tbody>
+            """
+            for ((idx, name) in pageItems.withIndex()) {
+                val rowNum = startIndex + idx + 1
+                val safeName = name.replace("\"", "&quot;")
+                html += """
+                    <tr style="border-bottom: 1px solid #e5e7eb;">
+                        <td style="padding: 14px 16px;">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button class="$editBtnClass" $dataAttr="$safeName" style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer;">
+                                    <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/><path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/></svg>
+                                </button>
+                                <span>$rowNum</span>
+                            </div>
+                        </td>
+                        <td style="padding: 14px 16px; font-weight: 500;">$name</td>
+                    </tr>
+                """
+            }
+            html += "</tbody></table></div>"
+            if (totalPages > 1) html += "<div style=\"padding: 16px; background-color: #f9fafb;\"><button id=\"$prevBtnId\" ${if (page == 1) "disabled" else ""}>Previous</button> Page $page of $totalPages <button id=\"$nextBtnId\" ${if (page >= totalPages) "disabled" else ""}>Next</button></div>"
+            else html += "<div style=\"padding: 16px; background-color: #f9fafb;\">Total: ${filtered.size} $title</div>"
+            tableDiv.innerHTML = html
+            val editButtons = document.querySelectorAll(".$editBtnClass")
+            for (i in 0 until editButtons.length) {
+                val btn = editButtons.item(i) as? HTMLElement ?: continue
+                btn.addEventListener("click", { _: Event -> editModalFn(btn.getAttribute(dataAttr) ?: return@addEventListener) })
+            }
+            document.getElementById(prevBtnId)?.addEventListener("click", { _: Event -> if (page > 1) { setPage(page - 1); loadFn() } })
+            document.getElementById(nextBtnId)?.addEventListener("click", { _: Event -> if (page < totalPages) { setPage(page + 1); loadFn() } })
+        }
+        .catch { error: dynamic -> tableDiv.innerHTML = "<div style=\"text-align: center; color: #ef4444; padding: 60px 20px;\">Error loading $title</div>" }
+}
+
+private fun addSimpleMasterModal(apiPath: String, title: String, modalId: String, inputId: String, cancelBtnId: String, addBtnId: String, onSuccess: () -> Unit) {
+    document.getElementById(modalId)?.remove()
+    val modal = document.createElement("div")
+    modal.id = modalId
+    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%;">
+            <h3 style="margin-top: 0;">Add $title</h3>
+            <label>$title</label>
+            <input type="text" id="$inputId" placeholder="Enter $title" style="width: 100%; padding: 10px 12px; margin: 8px 0; box-sizing: border-box;">
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 16px;">
+                <button id="$cancelBtnId" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
+                <button id="$addBtnId" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    document.getElementById(cancelBtnId)?.addEventListener("click", { _: Event -> modal.remove() })
+    document.getElementById(addBtnId)?.addEventListener("click", { _: Event ->
+        val value = (document.getElementById(inputId) as? HTMLInputElement)?.value?.trim() ?: ""
+        if (value.isEmpty()) { showMessage("$title is required", "error"); return@addEventListener }
+        val body = js("{}"); body.value = value
+        val req = js("{}"); req.method = "POST"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
+        window.fetch(apiUrl(apiPath), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to add')") }
+            .then { _: dynamic -> showMessage("$title added successfully", "success"); modal.remove(); onSuccess() }
+            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+    })
+}
+
+private fun editSimpleMasterModal(apiPath: String, title: String, originalName: String, modalId: String, inputId: String, cancelBtnId: String, updateBtnId: String, deleteBtnId: String, onUpdateSuccess: () -> Unit, onDeleteSuccess: () -> Unit) {
+    document.getElementById(modalId)?.remove()
+    val modal = document.createElement("div")
+    modal.id = modalId
+    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    val safeOriginal = originalName.replace("\"", "&quot;")
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%;">
+            <h3 style="margin-top: 0;">Edit $title</h3>
+            <label>$title</label>
+            <input type="text" id="$inputId" value="$safeOriginal" style="width: 100%; padding: 10px 12px; margin: 8px 0; box-sizing: border-box;">
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 16px;">
+                <button id="$deleteBtnId" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer;">Delete</button>
+                <div style="display:flex; gap:10px;">
+                    <button id="$cancelBtnId" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
+                    <button id="$updateBtnId" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer;">Update</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+    document.getElementById(cancelBtnId)?.addEventListener("click", { _: Event -> modal.remove() })
+    document.getElementById(updateBtnId)?.addEventListener("click", { _: Event ->
+        val newValue = (document.getElementById(inputId) as? HTMLInputElement)?.value?.trim() ?: ""
+        if (newValue.isEmpty()) { showMessage("$title is required", "error"); return@addEventListener }
+        val body = js("{}"); body.value = newValue; body.originalValue = originalName
+        val req = js("{}"); req.method = "PUT"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
+        window.fetch(apiUrl(apiPath), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to update')") }
+            .then { _: dynamic -> showMessage("$title updated successfully", "success"); modal.remove(); onUpdateSuccess() }
+            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+    })
+    document.getElementById(deleteBtnId)?.addEventListener("click", { _: Event ->
+        if (!window.confirm("Delete this $title?")) return@addEventListener
+        val encoded = js("encodeURIComponent")(originalName) as String
+        val req = js("{}"); req.method = "DELETE"
+        window.fetch(apiUrl(apiPath + "?value=" + encoded), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete')") }
+            .then { _: dynamic -> showMessage("$title deleted successfully", "success"); modal.remove(); onDeleteSuccess() }
+            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+    })
 }
 

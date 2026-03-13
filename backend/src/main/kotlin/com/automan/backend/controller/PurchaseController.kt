@@ -67,6 +67,12 @@ class PurchaseController(
         return ResponseEntity.ok(stockLocations)
     }
     
+    @GetMapping("/pols-by-country")
+    fun getPolsByCountry(@RequestParam country: String): ResponseEntity<List<String>> {
+        val pols = purchaseService.getPolByCountry(country)
+        return ResponseEntity.ok(pols)
+    }
+    
     @GetMapping("/rixo-companies")
     fun getRixoCompanies(): ResponseEntity<List<String>> {
         val companies = purchaseService.getUniqueRixoCompanies()
@@ -92,6 +98,15 @@ class PurchaseController(
     ): ResponseEntity<List<String>> {
         val chassis = purchaseService.getFilteredChassis(country, polPort)
         return ResponseEntity.ok(chassis)
+    }
+
+    @GetMapping("/filtered-purchases")
+    fun getFilteredPurchases(
+        @RequestParam country: String,
+        @RequestParam polPort: String
+    ): ResponseEntity<List<Purchase>> {
+        val purchases = purchaseService.getFilteredPurchasesByCountryAndPol(country, polPort)
+        return ResponseEntity.ok(purchases)
     }
     
     @GetMapping("/unshipped-chassis")

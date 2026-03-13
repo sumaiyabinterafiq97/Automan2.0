@@ -4,6 +4,8 @@ import kotlinx.browser.document
 import kotlinx.browser.window
 import org.w3c.dom.*
 import org.w3c.dom.events.Event
+import org.w3c.fetch.Headers
+import org.w3c.fetch.RequestInit
 import com.automan.purchase.Logger
 import com.automan.purchase.ErrorHandler
 import com.automan.purchase.ApiClient
@@ -72,18 +74,18 @@ fun showCarBookingPage() {
                             <input type="text" id="consigneeName" placeholder="(CONSIGNEE NAME)">
                         </div>
                         
-                        <!-- ETD -->
-                        <div class="booking-form-group">
-                            <label>ETD:</label>
-                            <input type="date" id="etdDate" placeholder="ESTIMATED SHIPPING DATE" style="color: #000000;">
-                        </div>
-                        
                         <!-- POL -->
                         <div class="booking-form-group">
                             <label>POL:</label>
                             <select id="polPort" style="color: #000000;">
                                 <option value="">Select Port of Loading</option>
                             </select>
+                        </div>
+                        
+                        <!-- ETD -->
+                        <div class="booking-form-group">
+                            <label>ETD:</label>
+                            <input type="date" id="etdDate" placeholder="ESTIMATED SHIPPING DATE" style="color: #000000;">
                         </div>
                         
                         <!-- POD -->
@@ -122,6 +124,7 @@ fun showCarBookingPage() {
                         <!-- Additional Action Buttons -->
                         <div class="booking-action-buttons">
                             <a href="#" id="cancelBtn" class="booking-cancel-link">CANCEL</a>
+                            <button id="shippedBtn" class="booking-action-btn">SHIPPED</button>
                             <button id="emailBtn" class="booking-action-btn">
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
@@ -146,10 +149,13 @@ fun showCarBookingPage() {
                     <div class="booking-list-section">
                         <h2 class="booking-section-header">LIST</h2>
                         
-                        <!-- SEARCH CHASSIS -->
-                        <div class="booking-form-group">
+                        <!-- SEARCH CHASSIS: plain input, suggestions from purchase table search (no dropdown button) -->
+                        <div class="booking-form-group" style="position: relative;">
                             <label>SEARCH CHASSIS:</label>
-                            ${createEditableCombobox("chassisSearch", "Type to search chassis (Filtered by Country & POL)", required = false)}
+                            <input type="text" id="chassisSearchInput" placeholder="Type to search Chassis"
+                                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                                   autocomplete="off">
+                            <div id="chassisSuggestions" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #ddd; border-top: none; border-radius: 0 0 4px 4px; max-height: 200px; overflow-y: auto; z-index: 100; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></div>
                         </div>
                         
                         <!-- Car Selection Table -->
@@ -196,17 +202,22 @@ fun showCarBookingPage() {
     // Delay restoration to ensure booking mapping initialization completes first
     js("setTimeout(function() { window.restoreCarBookingState(); }, 1000)")
     
-    // Load chassis if both country and POL are already selected (after state restoration)
+    // Auto-load purchases into LIST table if both country and POL are selected (after state restoration)
+    // Chassis search is a plain input with API suggestions - no dropdown. Skip loadFilteredPurchasesIntoTable when returning from C&F/FOB.
     window.setTimeout({
         val polSelect = document.getElementById("polPort") as? HTMLSelectElement
         val countrySelect = document.getElementById("consigneeCountry") as? HTMLSelectElement
         val selectedPol = polSelect?.value ?: ""
         val selectedCountry = countrySelect?.value ?: ""
         if (selectedPol.isNotEmpty() && selectedCountry.isNotEmpty()) {
-            Logger.debug("Loading chassis dropdown after state restoration (Country: $selectedCountry, POL: $selectedPol)")
-            loadFilteredChassis()
+            if (carBookingDisplayedCars.isEmpty()) {
+                Logger.debug("Loading purchases into table after state restoration (Country: $selectedCountry, POL: $selectedPol)")
+                loadFilteredPurchasesIntoTable()
+            } else {
+                Logger.debug("Skipping loadFilteredPurchasesIntoTable - restoring ${carBookingDisplayedCars.size} cars from state (backtrack/FINISH)")
+            }
         } else {
-            Logger.warn("Cannot load chassis - Country or POL is empty (Country: '$selectedCountry', POL: '$selectedPol')")
+            Logger.warn("Cannot load - Country or POL is empty (Country: '$selectedCountry', POL: '$selectedPol')")
         }
     }, 1000)
     
@@ -315,6 +326,49 @@ fun setupCarBookingPageListeners() {
         showPurchaseList()
     })
     
+    // Cancel button - navigate back to purchase list
+    document.getElementById("cancelBtn")?.addEventListener("click", { event: Event ->
+        event.preventDefault()
+        showPurchaseList()
+    })
+    
+    // Shipped button - mark selected rows as shipped=1 in database
+    document.getElementById("shippedBtn")?.addEventListener("click", { _: Event ->
+        val selectedIds = getSelectedPurchaseIds()
+        if (selectedIds.isEmpty()) {
+            showMessage("Please select at least one row to mark as shipped", "error")
+            return@addEventListener
+        }
+        val count = selectedIds.size
+        val confirmed = window.confirm("Mark $count selected purchase(s) as shipped?")
+        if (!confirmed) return@addEventListener
+        val purchaseIdsJson = selectedIds.joinToString(",", "[", "]")
+        val requestBodyJson = "{\"purchaseIds\":$purchaseIdsJson}"
+        Logger.debug("Shipped request body: $requestBodyJson")
+        val headers = Headers()
+        headers.set("Content-Type", "application/json")
+        val requestInit = RequestInit(
+            method = "POST",
+            headers = headers,
+            body = requestBodyJson
+        )
+        window.fetch(apiUrl("purchases/ship"), requestInit).then { response: dynamic ->
+            if (response.ok) {
+                response.json().then { data: dynamic ->
+                    val updatedCount = (js("data.updatedCount") as? Number)?.toInt() ?: count
+                    showMessage("Successfully marked $updatedCount purchase(s) as shipped", "success")
+                    loadFilteredPurchasesIntoTable()
+                }
+            } else {
+                response.text().then { errorText: dynamic ->
+                    showMessage("Failed to mark as shipped: $errorText", "error")
+                }
+            }
+        }.catch { error: dynamic ->
+            showMessage("Error marking as shipped: ${error.toString()}", "error")
+        }
+    })
+    
     // Country dropdown change - trigger filtered chassis loading and booking mappings
     document.getElementById("consigneeCountry")?.addEventListener("change", { event: Event ->
         val selectedCountry = (event.target as HTMLSelectElement).value
@@ -421,13 +475,14 @@ fun setupCarBookingPageListeners() {
             loadStockLocations()
         }
         
-        // Reload chassis dropdown when country changes (requires both country and POL)
+        // Auto-load purchases into LIST table when both country and POL selected (chassis search is global, not filtered)
         val polSelect = document.getElementById("polPort") as? HTMLSelectElement
         if (polSelect != null && polSelect.value.isNotEmpty() && selectedCountry.isNotEmpty()) {
-            Logger.debug("Reloading chassis dropdown after country change")
-            loadFilteredChassis()
+            Logger.debug("Loading purchases into table after country change")
+            loadFilteredPurchasesIntoTable()
         } else {
-            Logger.warn("Cannot reload chassis - POL or Country is empty")
+            Logger.warn("Cannot reload - POL or Country is empty")
+            if (selectedCountry.isEmpty()) clearBookingListTable()
         }
     })
     
@@ -451,17 +506,18 @@ fun setupCarBookingPageListeners() {
         }
     })
     
-    // POL dropdown change - trigger filtered chassis loading (requires both country and POL)
+    // POL dropdown change - auto-load purchases into LIST table
     document.getElementById("polPort")?.addEventListener("change", { event: Event ->
         val selectedPol = (event.target as HTMLSelectElement).value
         Logger.debug("POL selected: $selectedPol")
         val countrySelect = document.getElementById("consigneeCountry") as? HTMLSelectElement
         val selectedCountry = countrySelect?.value ?: ""
         if (selectedCountry.isNotEmpty() && selectedPol.isNotEmpty()) {
-            Logger.debug("Reloading chassis dropdown after POL change")
-            loadFilteredChassis()
+            Logger.debug("Loading purchases into table after POL change")
+            loadFilteredPurchasesIntoTable()
         } else {
-            Logger.warn("Cannot reload chassis - Country or POL is empty")
+            Logger.warn("Cannot reload - Country or POL is empty")
+            if (selectedPol.isEmpty()) clearBookingListTable()
         }
     })
     
@@ -521,40 +577,33 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
         Logger.debug("Saved existing POD value to state: $currentPodValue")
     }
     
-    // Chassis search combobox change - add car to table
-    // Listen to both select and input change events
-    val handleChassisChange = {
-        val chassisValue = js("window.getComboboxValue('chassisSearch')") as? String ?: ""
-        val chassisSearch = chassisValue.trim()
-        if (chassisSearch.isNotEmpty()) {
-            Logger.debug("Chassis selected/changed: $chassisSearch")
-            // Fetch purchase by chassis and add to table
-            addCarToBookingTable(chassisSearch)
-        }
-    }
-    
-    // Listen to select change
-    document.getElementById("chassisSearch")?.addEventListener("change", { _: Event ->
-        handleChassisChange()
+    // Chassis search: plain input - show suggestions from purchase table search, add car on Enter or suggestion click
+    window.asDynamic().addCarToBookingTable = ::addCarToBookingTable
+    var chassisSearchDebounceTimer: dynamic = 0
+    document.getElementById("chassisSearchInput")?.addEventListener("input", { event: Event ->
+        val input = event.target as? HTMLInputElement ?: return@addEventListener
+        val q = input.value.trim()
+        window.clearTimeout(chassisSearchDebounceTimer)
+        chassisSearchDebounceTimer = window.setTimeout({
+            fetchChassisSuggestionsForBooking(q)
+        }, 250)
     })
-    
-    // Listen to input change (when syncComboboxInput dispatches change event)
-    document.getElementById("chassisSearchInput")?.addEventListener("change", { _: Event ->
-        handleChassisChange()
-    })
-    
-    // Also expose as window function for direct call from onchange attribute
-    js("window.handleChassisSearchChange = function() { var chassis = window.getComboboxValue('chassisSearch'); if (chassis && chassis.trim() !== '') { console.log('🔍 Chassis selected from dropdown (direct call):', chassis); } }")
-    
-    // Update the window function to actually call our Kotlin function
-    window.asDynamic().handleChassisSearchChange = {
-        val chassisValue = js("window.getComboboxValue('chassisSearch')") as? String ?: ""
-        val chassisSearch = chassisValue.trim()
-        if (chassisSearch.isNotEmpty()) {
-            Logger.debug("Chassis selected from dropdown (window function): $chassisSearch")
-            addCarToBookingTable(chassisSearch)
+    document.getElementById("chassisSearchInput")?.addEventListener("keydown", { event: Event ->
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Enter") {
+            val input = document.getElementById("chassisSearchInput") as? HTMLInputElement
+            val chassis = input?.value?.trim() ?: ""
+            if (chassis.isNotEmpty()) {
+                keyEvent.preventDefault()
+                hideChassisSuggestions()
+                addCarToBookingTable(chassis)
+            }
         }
-    }
+    })
+    document.getElementById("chassisSearchInput")?.addEventListener("blur", { _: Event ->
+        window.setTimeout({ hideChassisSuggestions() }, 200)
+    })
+    window.asDynamic().handleChassisSearchChange = { }
     
     // Calculate button click handler
     document.getElementById("calculateBtn")?.addEventListener("click", { _: Event ->
@@ -698,7 +747,7 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
         console.log("   POD: $podPort (from form: ${podPortEl?.let { if (it.tagName == "SELECT") (it as HTMLSelectElement).value else (it as HTMLInputElement).value } ?: ""}, from state: ${carBookingFormState.podPort})")
         console.log("   Consignee: $consignee")
         
-        // Update purchases table with booking data, set booking_id, and mark as shipped=1
+        // Update purchases table with booking data and set booking_id (shipped is set via Shipped button)
         updateSelectedPurchasesWithBookingData(
             purchaseIds = selectedIds,
             etd = etd,
@@ -707,7 +756,7 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
             destination = podPort,
             consignee = consignee,
             onComplete = {
-                Logger.debug("All purchases updated with booking data, booking_id, and marked as shipped")
+                Logger.debug("All purchases updated with booking data and booking_id")
                 
                 // Store booking details for PDF generation
                 storeBookingDetailsForPdf()
@@ -800,21 +849,20 @@ fun loadCountriesFallback() {
 
 fun loadStockLocations(country: String? = null) {
     val countryParam = country ?: ""
-    console.log("Loading stock locations from purchases table${if (countryParam.isNotEmpty()) " for country: $countryParam" else " (all locations)"}...")
+    console.log("Loading POL values from purchases table${if (countryParam.isNotEmpty()) " for country: $countryParam" else " (all POLs)"}...")
     
-    // If country is specified, fetch all purchases and filter client-side as fallback
+    // If country is specified, fetch POL values filtered by country
     if (countryParam.isNotEmpty()) {
-        // Try the new API endpoint first
         val encodedCountry = js("encodeURIComponent")(countryParam).unsafeCast<String>()
-        val apiUrl = apiUrl("purchases/stock-locations-by-country?country=$encodedCountry")
+        val polApiUrl = apiUrl("purchases/pols-by-country?country=$encodedCountry")
         
-        window.fetch(apiUrl)
+        window.fetch(polApiUrl)
             .then { response: dynamic ->
-                console.log("Stock locations by country API response status:", response.status)
+                console.log("POLs by country API response status:", response.status)
                 if (response.ok) {
                     response.json()
                 } else {
-                    console.log("Stock locations by country API failed, fetching all purchases to filter client-side")
+                    console.log("POLs by country API failed, fetching all purchases to filter client-side")
                     // Fallback: fetch all purchases and filter by country
                     window.fetch(apiUrl("purchases"))
                         .then { purchasesResponse: dynamic ->
@@ -826,72 +874,79 @@ fun loadStockLocations(country: String? = null) {
                         }
                         .then { purchases: dynamic ->
                             val purchasesArray = purchases as Array<dynamic>
-                            val stockLocationsSet = mutableSetOf<String>()
+                            val polsSet = mutableSetOf<String>()
                             purchasesArray.forEach { purchase ->
                                 val purchaseCountry = js("purchase.country")?.toString() ?: ""
-                                val stockLocation = js("purchase.stockLocation")?.toString() ?: ""
-                                if (purchaseCountry.equals(countryParam, ignoreCase = true) && stockLocation.isNotEmpty()) {
-                                    stockLocationsSet.add(stockLocation)
+                                val pol = js("purchase.pol")?.toString() ?: ""
+                                if (purchaseCountry.equals(countryParam, ignoreCase = true) && pol.isNotEmpty()) {
+                                    polsSet.add(pol)
                                 }
                             }
-                            stockLocationsSet.toTypedArray()
+                            polsSet.toTypedArray()
                         }
                 }
             }
-            .then { stockLocations: dynamic ->
-                console.log("Stock locations data received:", stockLocations)
+            .then { pols: dynamic ->
+                console.log("POL data received:", pols)
                 val polSelect = document.getElementById("polPort") as HTMLSelectElement?
                 if (polSelect != null) {
                     // Clear existing options except the first one
                     polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
                     
-                    // Add stock locations from API
-                    val stockLocationsArray = stockLocations as Array<dynamic>
-                    stockLocationsArray.forEach { location ->
+                    // Add POL values from API
+                    val polsArray = pols as Array<dynamic>
+                    polsArray.forEach { pol ->
                         val option = document.createElement("option")
-                        option.setAttribute("value", location as String)
-                        option.textContent = location as String
+                        option.setAttribute("value", pol as String)
+                        option.textContent = pol as String
                         polSelect.appendChild(option)
                     }
-                    console.log("✅ Stock locations loaded: ${stockLocationsArray.size} locations for country: $countryParam")
+                    console.log("✅ POL values loaded: ${polsArray.size} POLs for country: $countryParam")
                 }
             }
             .catch { error: dynamic ->
-                console.error("Error loading stock locations:", error)
+                console.error("Error loading POL values:", error)
                 loadStockLocationsFallback()
             }
     } else {
-        // No country specified, load all stock locations
-        window.fetch(apiUrl("purchases/stock-locations"))
+        // No country specified, load all POL values from all purchases
+        window.fetch(apiUrl("purchases"))
             .then { response: dynamic ->
-                console.log("Stock locations API response status:", response.status)
+                console.log("All purchases API response status:", response.status)
                 if (response.ok) {
                     response.json()
                 } else {
-                    console.log("Stock locations API failed, using fallback")
+                    console.log("Purchases API failed, using fallback")
                     js("Promise.resolve([])")
                 }
             }
-            .then { stockLocations: dynamic ->
-                console.log("Stock locations data received:", stockLocations)
+            .then { purchases: dynamic ->
+                val purchasesArray = purchases as Array<dynamic>
+                val polsSet = mutableSetOf<String>()
+                purchasesArray.forEach { purchase ->
+                    val pol = js("purchase.pol")?.toString() ?: ""
+                    if (pol.isNotEmpty()) {
+                        polsSet.add(pol)
+                    }
+                }
+                console.log("All POL data extracted:", polsSet)
                 val polSelect = document.getElementById("polPort") as HTMLSelectElement?
                 if (polSelect != null) {
                     // Clear existing options except the first one
                     polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
                     
-                    // Add stock locations from API
-                    val stockLocationsArray = stockLocations as Array<dynamic>
-                    stockLocationsArray.forEach { location ->
+                    // Add POL values
+                    polsSet.sorted().forEach { pol ->
                         val option = document.createElement("option")
-                        option.setAttribute("value", location as String)
-                        option.textContent = location as String
+                        option.setAttribute("value", pol)
+                        option.textContent = pol
                         polSelect.appendChild(option)
                     }
-                    console.log("Stock locations loaded from API: ${stockLocationsArray.size} locations")
+                    console.log("POL values loaded from purchases: ${polsSet.size} POLs")
                 }
             }
             .catch { error: dynamic ->
-                console.error("Error loading stock locations:", error)
+                console.error("Error loading POL values:", error)
                 loadStockLocationsFallback()
             }
     }
@@ -998,12 +1053,80 @@ fun loadFilteredChassisFallback() {
     // Fallback implementation can be added if needed
 }
 
+fun loadFilteredPurchasesIntoTable() {
+    val polSelect = document.getElementById("polPort") as? HTMLSelectElement
+    val countrySelect = document.getElementById("consigneeCountry") as? HTMLSelectElement
+    val selectedPol = polSelect?.value ?: ""
+    val selectedCountry = countrySelect?.value ?: ""
+    if (selectedPol.isEmpty() || selectedCountry.isEmpty()) {
+        Logger.debug("Country or POL empty, clearing list table")
+        clearBookingListTable()
+        return
+    }
+    val encodedCountry = js("encodeURIComponent")(selectedCountry) as String
+    val encodedPol = js("encodeURIComponent")(selectedPol) as String
+    val url = apiUrl("purchases/filtered-purchases?country=$encodedCountry&polPort=$encodedPol")
+    Logger.debug("Fetching filtered purchases from: $url")
+    window.fetch(url)
+        .then { response: dynamic ->
+            if (response.ok) {
+                response.json()
+            } else {
+                console.error("Filtered purchases API failed:", response.status)
+                js("Promise.resolve([])")
+            }
+        }
+        .then { purchases: dynamic ->
+            val purchasesArray = js("Array.isArray(purchases) ? purchases : (purchases ? [purchases] : [])") as Array<dynamic>
+            Logger.debug("Loaded ${purchasesArray.size} purchases for Country: $selectedCountry, POL: $selectedPol")
+            clearBookingListTable()
+            if (purchasesArray.isNotEmpty()) {
+                displayPurchasesAsCarsAPPEND(purchasesArray)
+            }
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error loading filtered purchases: $error")
+        }
+}
+
+fun clearBookingListTable() {
+    carBookingDisplayedCars = emptyArray()
+    val tbody = document.getElementById("carSelectionTableBody")
+    tbody?.innerHTML = ""
+    Logger.debug("Cleared booking list table")
+}
+
 fun hideChassisSuggestions() {
-    // Implementation for hiding chassis suggestions dropdown
     val suggestionsDiv = document.getElementById("chassisSuggestions")
     if (suggestionsDiv != null) {
         (suggestionsDiv as HTMLElement).style.display = "none"
     }
+}
+
+/** Fetch chassis suggestions from entire purchase table by search query (not filtered by Country & POL). */
+fun fetchChassisSuggestionsForBooking(query: String) {
+    if (query.trim().isEmpty()) {
+        hideChassisSuggestions()
+        return
+    }
+    val encoded = js("encodeURIComponent")(query.trim()) as String
+    val url = apiUrl("purchases/search?query=$encoded")
+    window.fetch(url)
+        .then { response: dynamic ->
+            if (response.ok) response.json() else js("Promise.resolve([])")
+        }
+        .then { data: dynamic ->
+            val arr = js("Array.isArray(data) ? data : (data ? [data] : [])") as Array<dynamic>
+            val chassisSet = mutableSetOf<String>()
+            for (i in arr.indices) {
+                val ch = (js("arr[i].chassis") as? String) ?: ""
+                if (ch.isNotBlank()) chassisSet.add(ch)
+            }
+            showChassisSuggestions(chassisSet.toTypedArray())
+        }
+        .catch { _: dynamic ->
+            hideChassisSuggestions()
+        }
 }
 
 fun searchCarsByChassis(chassis: String) {
@@ -1393,7 +1516,7 @@ fun updateSelectedPurchasesWithBookingData(
         null
     }
     console.log("   BOOKING ID (converted): $bookingIdLong")
-    console.log("   📝 Will update: booking_id=$bookingIdLong, shipped=true for ${purchaseIds.size} purchase(s)")
+    console.log("   📝 Will update: booking_id=$bookingIdLong for ${purchaseIds.size} purchase(s)")
     
     // Update each purchase sequentially (one after another)
     fun updateNext(index: Int) {
@@ -1416,12 +1539,11 @@ fun updateSelectedPurchasesWithBookingData(
         payload["destination"] = destination
         // CONSIGNEE → consignee
         payload["consignee"] = formatConsigneeForUpdate(consignee, currentSelectedCountry)
-        // Set shipped = true (1 in database) when Calculate is clicked
-        payload["shipped"] = true
+        // Note: shipped is set via the Shipped button, not Calculate
         // POL is not sent to database (not needed)
         
         Logger.debug("Sending update payload for purchase $purchaseId")
-        Logger.debug("Payload contents: bookingId=$bookingIdLong, shipped=true, shipmentDate=$etd, vessel=$vessel, destination=$destination")
+        Logger.debug("Payload contents: bookingId=$bookingIdLong, shipmentDate=$etd, vessel=$vessel, destination=$destination")
         console.log("📦 Update payload for purchase $purchaseId:", JSON.stringify(payload))
         
         val req = js("({})")
@@ -1435,8 +1557,8 @@ fun updateSelectedPurchasesWithBookingData(
             .then { response: dynamic ->
                 if (response.ok) {
                     completedUpdates++
-                    Logger.debug("✅ Successfully updated purchase $purchaseId ($completedUpdates/$totalUpdates) - booking_id and shipped updated")
-                    console.log("✅ Purchase $purchaseId updated: booking_id=$bookingIdLong, shipped=true")
+                    Logger.debug("✅ Successfully updated purchase $purchaseId ($completedUpdates/$totalUpdates) - booking data updated")
+                    console.log("✅ Purchase $purchaseId updated: booking_id=$bookingIdLong")
                     updateNext(index + 1)
                 } else {
                     response.text().then { errorText: dynamic ->
@@ -1564,11 +1686,8 @@ fun addCarToBookingTable(chassis: String) {
             if (purchasesArray.isNotEmpty()) {
                 Logger.debug("Adding ${purchasesArray.size} car(s) to table")
                 displayPurchasesAsCarsAPPEND(purchasesArray)
-                // Clear the chassis search input after adding
                 val chassisInput = document.getElementById("chassisSearchInput") as? HTMLInputElement
                 chassisInput?.value = ""
-                val chassisSelect = document.getElementById("chassisSearch") as? HTMLSelectElement
-                chassisSelect?.value = ""
             } else {
                 Logger.debug("No purchase found for chassis: $chassis")
                 showMessage("No purchase found for chassis: $chassis", "warning")

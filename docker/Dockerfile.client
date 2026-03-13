@@ -57,14 +57,8 @@ COPY --from=backend-builder /app/build/libs/automan-backend-1.0-SNAPSHOT.jar app
 # Copy frontend build
 COPY --from=frontend-builder /app/build/dist/js/productionExecutable /usr/share/nginx/html
 
-# Copy database migration scripts
+# Copy database initialization script (consolidated)
 COPY database/01-init-multiplatform.sql /docker-entrypoint-initdb.d/01-init-multiplatform.sql
-COPY database/02-car-brand-mapping.sql /docker-entrypoint-initdb.d/02-car-brand-mapping.sql
-COPY database/03-booking-mappings.sql /docker-entrypoint-initdb.d/03-booking-mappings.sql
-COPY database/04-rixo-prices.sql /docker-entrypoint-initdb.d/04-rixo-prices.sql
-COPY database/10-clients-table.sql /docker-entrypoint-initdb.d/10-clients-table.sql
-COPY database/11-events-table.sql /docker-entrypoint-initdb.d/11-events-table.sql
-COPY database/12-users-table.sql /docker-entrypoint-initdb.d/12-users-table.sql
 
 # Copy nginx configuration
 COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf

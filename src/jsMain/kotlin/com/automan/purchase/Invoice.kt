@@ -645,9 +645,8 @@ fun handleShipCars() {
     window.fetch(apiUrl("purchases/ship"), requestInit).then { response ->
         if (response.ok) {
             response.json().then { data ->
-                val responseData = data.asDynamic()
-                val updatedCount = responseData.updatedCount?.toString()?.toIntOrNull() ?: selectedIds.size
-                val message = responseData.message?.toString() ?: "Successfully marked $updatedCount purchase(s) as shipped"
+                val updatedCount = (js("data.updatedCount") as? Number)?.toInt() ?: selectedIds.size
+                val message = (js("data.message") as? String) ?: "Successfully marked $updatedCount purchase(s) as shipped"
                 Logger.debug(message)
                 showMessage(message, "success")
             }
