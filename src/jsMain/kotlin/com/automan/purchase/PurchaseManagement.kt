@@ -17,8 +17,190 @@ var currentPage = 1
 var itemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allPurchases: Array<dynamic> = emptyArray()
 
+// Purchase table sort state (mirrors Car Brands master-list behavior: toggle asc/desc on each click)
+// Key: purchase field (e.g. "chassis", "auctionHouse", "date")
+var purchaseTableSortOrderByField: MutableMap<String, String> = mutableMapOf()
+
+// Purchase date filter state (used only for Purchase List table view)
+private var purchaseDateFilterActive: Boolean = false
+private var purchasesBeforePurchaseDateFilter: Array<dynamic> = emptyArray()
+
+private fun isoLocalToday(): String {
+    // Local (not UTC) yyyy-MM-dd
+    val d = js("new Date()").unsafeCast<dynamic>()
+    val y = d.getFullYear() as Int
+    val m = (d.getMonth() as Int) + 1
+    val day = d.getDate() as Int
+    return y.toString() + "-" + m.toString().padStart(2, '0') + "-" + day.toString().padStart(2, '0')
+}
+
+private fun isoLocalOffsetDays(daysOffset: Int): String {
+    // Local (not UTC) yyyy-MM-dd
+    val d = js("new Date()").unsafeCast<dynamic>()
+    d.setDate(d.getDate() + daysOffset)
+    val y = d.getFullYear() as Int
+    val m = (d.getMonth() as Int) + 1
+    val day = d.getDate() as Int
+    return y.toString() + "-" + m.toString().padStart(2, '0') + "-" + day.toString().padStart(2, '0')
+}
+
+private fun isoLocalThisMonthStart(): String {
+    val d = js("new Date()").unsafeCast<dynamic>()
+    val y = d.getFullYear() as Int
+    val m = (d.getMonth() as Int) + 1
+    return y.toString() + "-" + m.toString().padStart(2, '0') + "-01"
+}
+
+private fun isoLocalThisMonthEnd(): String {
+    val d = js("new Date()").unsafeCast<dynamic>()
+    val y = d.getFullYear() as Int
+    val mIndex = d.getMonth() as Int // 0..11
+    val tmp = js("new Date()").unsafeCast<dynamic>()
+    // day=0 => last day of previous month
+    tmp.setFullYear(y, mIndex + 1, 0)
+    val lastDay = tmp.getDate() as Int
+    val m = mIndex + 1
+    return y.toString() + "-" + m.toString().padStart(2, '0') + "-" + lastDay.toString().padStart(2, '0')
+}
+
+private fun isoToLocalDayRangeTimestamps(isoDate: String): Pair<Long, Long>? {
+    val trimmed = isoDate.trim()
+    if (trimmed.isEmpty()) return null
+    val parts = trimmed.split("-")
+    if (parts.size != 3) return null
+    val year = parts[0].toIntOrNull() ?: return null
+    val month = parts[1].toIntOrNull() ?: return null
+    val day = parts[2].toIntOrNull() ?: return null
+
+    // start at local 00:00:00.000
+    val start = js("new Date()").unsafeCast<dynamic>()
+    start.setFullYear(year, month - 1, day)
+    start.setHours(0, 0, 0, 0)
+    val startTs = (start.getTime() as Double).toLong()
+
+    // end at local 23:59:59.999
+    val end = js("new Date()").unsafeCast<dynamic>()
+    end.setFullYear(year, month - 1, day)
+    end.setHours(23, 59, 59, 999)
+    val endTs = (end.getTime() as Double).toLong()
+    return startTs to endTs
+}
+
+private fun applyPurchaseDateFilterRange(startIso: String, endIso: String) {
+    val range = isoToLocalDayRangeTimestamps(startIso)?.let { startPair ->
+        // Recompute end timestamps from the end iso (in case they're different)
+        val endRange = isoToLocalDayRangeTimestamps(endIso) ?: return
+        startPair.first to endRange.second
+    } ?: return
+
+    if (!purchaseDateFilterActive) {
+        purchasesBeforePurchaseDateFilter = allPurchases
+        purchaseDateFilterActive = true
+    }
+
+    val (startTs, endTs) = range
+    val base = purchasesBeforePurchaseDateFilter.toList()
+
+    val filtered = base.filter { purchase ->
+        val raw = purchase.date?.toString() ?: ""
+        val ts = parseDateForSorting(raw)
+        ts != null && ts >= startTs && ts <= endTs
+    }.toTypedArray()
+
+    allPurchases = filtered
+    currentPage = 1
+    displayPurchasesWithPagination()
+}
+
+private fun clearPurchaseDateFilter() {
+    if (!purchaseDateFilterActive) return
+    allPurchases = purchasesBeforePurchaseDateFilter
+    purchaseDateFilterActive = false
+    purchasesBeforePurchaseDateFilter = emptyArray()
+    currentPage = 1
+    displayPurchasesWithPagination()
+}
+
 // Global variable to track last device type for auto-adjustment
 var lastDeviceType: String? = getDeviceType()
+
+private fun extractPurchaseSortStringValue(purchase: dynamic, field: String): String {
+    return when (field) {
+        "date" -> (purchase.date as? String) ?: purchase.date?.toString() ?: ""
+        "chassis" -> (purchase.chassis as? String) ?: purchase.chassis?.toString() ?: ""
+        "carName" -> (purchase.carName as? String) ?: purchase.carName?.toString() ?: ""
+        "auctionHouse" -> (purchase.auctionHouse as? String) ?: purchase.auctionHouse?.toString() ?: ""
+        "stockLocation" -> (purchase.stockLocation as? String) ?: purchase.stockLocation?.toString() ?: ""
+        "clientName" -> (purchase.clientName as? String) ?: purchase.clientName?.toString() ?: ""
+        "rixoCompany" -> (purchase.rixoCompany as? String) ?: purchase.rixoCompany?.toString() ?: ""
+        "brand" -> (purchase.brand as? String) ?: purchase.brand?.toString() ?: ""
+        "country" -> (purchase.country as? String) ?: purchase.country?.toString() ?: ""
+        "repairCompany" -> (purchase.repairCompany as? String) ?: purchase.repairCompany?.toString() ?: ""
+        else -> {
+            // Fallback: try dynamic property
+            val v = purchase.asDynamic()[field]
+            if (v == null || v == js("undefined")) "" else v.toString()
+        }
+    }
+}
+
+private fun sortPurchasesInMemory(field: String, order: String): List<dynamic> {
+    val purchasesList = allPurchases.toList()
+
+    return purchasesList.sortedWith { a, b ->
+        when (field) {
+            "date" -> {
+                val dateA = parseDateForSorting(extractPurchaseSortStringValue(a, "date"))
+                val dateB = parseDateForSorting(extractPurchaseSortStringValue(b, "date"))
+
+                when {
+                    dateA == null && dateB == null -> 0
+                    dateA == null -> 1 // nulls last
+                    dateB == null -> -1 // nulls last
+                    order == "asc" -> dateA.compareTo(dateB)
+                    else -> dateB.compareTo(dateA)
+                }
+            }
+            else -> {
+                val aStr = extractPurchaseSortStringValue(a, field).trim().lowercase()
+                val bStr = extractPurchaseSortStringValue(b, field).trim().lowercase()
+
+                val aBlank = aStr.isBlank()
+                val bBlank = bStr.isBlank()
+                when {
+                    aBlank && bBlank -> 0
+                    aBlank -> 1 // blanks last
+                    bBlank -> -1 // blanks last
+                    order == "asc" -> aStr.compareTo(bStr)
+                    else -> bStr.compareTo(aStr)
+                }
+            }
+        }
+    }
+}
+
+private fun togglePurchaseTableSort(field: String) {
+    val current = purchaseTableSortOrderByField[field] ?: "desc"
+    val next = if (current == "asc") "desc" else "asc"
+    purchaseTableSortOrderByField[field] = next
+
+    // Sort the currently displayed rows (filtered or unfiltered)
+    val sortedCurrent = sortPurchasesInMemory(field, next).toTypedArray()
+    allPurchases = sortedCurrent
+
+    // If a date filter is active, keep the "base list" sorted too so clearing the date filter
+    // restores the same order the user selected.
+    if (purchaseDateFilterActive) {
+        val base = purchasesBeforePurchaseDateFilter
+        val prev = allPurchases
+        allPurchases = base
+        purchasesBeforePurchaseDateFilter = sortPurchasesInMemory(field, next).toTypedArray()
+        allPurchases = prev
+    }
+
+    currentPage = 1
+    displayPurchasesWithPagination()
+}
 
 fun showPurchaseList() {
     window.location.hash = "#/purchase"
@@ -159,11 +341,8 @@ fun setupDeviceChangeListener() {
 
 fun loadPurchases() {
     Logger.debug("loadPurchases function called")
-    val endpoint = if (currentSortField != null) {
-        "purchases/sort?field=$currentSortField&order=$currentSortOrder"
-    } else {
-        "purchases"
-    }
+    // Sorting dropdowns removed; always load base purchases.
+    val endpoint = "purchases"
     
     val scope = MainScope()
     scope.launch {
@@ -183,6 +362,10 @@ fun loadPurchases() {
 
 fun displayPurchases(purchases: dynamic) {
     val table = document.getElementById("purchaseTable")!!
+
+    // New data load => reset any active date filter to avoid stale base arrays.
+    purchaseDateFilterActive = false
+    purchasesBeforePurchaseDateFilter = emptyArray()
     
     if (js("purchases.length") == 0) {
         table.innerHTML = """
@@ -193,24 +376,18 @@ fun displayPurchases(purchases: dynamic) {
         return
     }
     
-    // Convert to array and sort by ID descending (newest first) if no custom sort is applied
+    // Always sort by ID descending (newest first).
     val purchasesArray = purchases as Array<dynamic>
-    val sortedPurchases = if (currentSortField == null) {
-        // Sort by ID descending (newest first) when no custom sort is active
-        purchasesArray.sortedByDescending { purchase ->
-            val id = purchase.id
-            when {
-                id is Number -> id.toDouble()
-                id is String -> id.toDoubleOrNull() ?: 0.0
-                else -> {
-                    val idStr = id?.toString() ?: "0"
-                    idStr.toDoubleOrNull() ?: 0.0
-                }
+    val sortedPurchases = purchasesArray.sortedByDescending { purchase ->
+        val id = purchase.id
+        when {
+            id is Number -> id.toDouble()
+            id is String -> id.toDoubleOrNull() ?: 0.0
+            else -> {
+                val idStr = id?.toString() ?: "0"
+                idStr.toDoubleOrNull() ?: 0.0
             }
         }
-    } else {
-        // Use purchases as-is when custom sort is active
-        purchasesArray.toList()
     }
     
     // Store all purchases globally for pagination
@@ -268,37 +445,41 @@ fun displayPurchasesWithPagination() {
             val label = columnLabels[columnKey] ?: columnKey
             if (columnKey == "date") {
                 tableHTML.append("""
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" class="date-filter-header" data-field="$columnKey">
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative; overflow: visible;">
+                        <div style="display:flex; align-items:center; gap:8px;">
                             <span>$label</span>
-                            <span style="margin-left: 8px;">📅</span>
+                            <button id="purchaseDateQuickFilterBtn" title="Filter by purchase date" style="background:none; border:none; cursor:pointer; font-weight:600; color:#111827; padding:0; display:inline-flex; align-items:center; justify-content:center;">
+                                📅
+                            </button>
                         </div>
-                        <div class="date-filter-menu" data-field="$columnKey" style="display: none; position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 200px;">
-                            <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #666;">Filter by Date</label>
-                            <input type="date" id="dateFilterInput" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; margin-bottom: 8px;">
-                            <div style="display: flex; gap: 5px; margin-bottom: 8px;">
-                                <button id="applyDateFilter" style="padding: 6px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Apply</button>
-                                <button id="clearDateFilter" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Clear</button>
+                        <div id="purchaseDateQuickFilterMenu" style="display:none; position:absolute; top:100%; left:0; background:white; border:1px solid #ddd; border-radius:4px; padding:10px; box-sizing:border-box; box-shadow:0 2px 8px rgba(0,0,0,0.1); z-index:20000; width:260px; min-width:260px; flex-direction:column; gap:8px;">
+                            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                <button id="purchaseDateQuickTodayBtn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">Today</button>
+                                <button id="purchaseDateQuickLast7Btn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">Last 7 days</button>
+                                <button id="purchaseDateQuickThisMonthBtn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">This month</button>
+                                <button id="purchaseDateQuickClearBtn" style="padding:6px 10px; background:#6c757d; color:white; border:1px solid #6c757d; border-radius:4px; cursor:pointer; font-size:12px;">Clear</button>
+                                <button id="purchaseDateQuickFilterApplyBtn" style="padding:6px 10px; background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Apply</button>
                             </div>
-                            <div style="border-top: 1px solid #ddd; padding-top: 8px; margin-top: 8px;">
-                                <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Sort by Date:</div>
-                                <div class="date-sort-option" data-sort="asc" style="padding: 6px 8px; cursor: pointer; font-size: 12px; border-radius: 3px; background-color: #f8f9fa;" onmouseover="this.style.backgroundColor='#e9ecef'" onmouseout="this.style.backgroundColor='#f8f9fa'">Ascending</div>
-                                <div class="date-sort-option" data-sort="desc" style="padding: 6px 8px; cursor: pointer; font-size: 12px; border-radius: 3px; background-color: #f8f9fa; margin-top: 4px;" onmouseover="this.style.backgroundColor='#e9ecef'" onmouseout="this.style.backgroundColor='#f8f9fa'">Descending</div>
+                            <div style="border-top:1px solid #eee; padding-top:8px; margin:0;">
+                                <label style="display:block; margin-bottom:6px; font-size:12px; color:#666;">Choose date</label>
+                                <input type="date" id="purchaseDateQuickFilterInput" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:3px; font-size:12px; margin-bottom:8px;">
                             </div>
                         </div>
                     </th>
                 """)
             } else if (sortableFields.contains(columnKey)) {
+                val sortOrder = purchaseTableSortOrderByField[columnKey] ?: "desc"
+                val tooltip = if (sortOrder == "asc") {
+                    "Sorted A-Z (click to sort Z-A)"
+                } else {
+                    "Sorted Z-A (click to sort A-Z)"
+                }
+                val sortBtnId = "purchaseSortBtn_$columnKey"
                 tableHTML.append("""
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative;">
-                        <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" class="sortable-header" data-field="$columnKey">
-                            <span>$label</span>
-                            <span style="margin-left: 8px;">↕</span>
-                        </div>
-                        <div class="sort-menu" data-field="$columnKey" style="display: none; position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 5px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 120px;">
-                            <div class="sort-option" data-field="$columnKey" data-order="asc" style="padding: 8px 12px; cursor: pointer; font-size: 12px;" onmouseover="this.style.backgroundColor='#e9ecef'" onmouseout="this.style.backgroundColor='transparent'">Ascending</div>
-                            <div class="sort-option" data-field="$columnKey" data-order="desc" style="padding: 8px 12px; cursor: pointer; font-size: 12px;" onmouseover="this.style.backgroundColor='#e9ecef'" onmouseout="this.style.backgroundColor='transparent'">Descending</div>
-                        </div>
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
+                        <button id="$sortBtnId" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
+                            <span>$label</span><span style="font-size: 14px;">↕</span>
+                        </button>
                     </th>
                 """)
             } else {
@@ -313,9 +494,95 @@ fun displayPurchasesWithPagination() {
         tableHTML.append("</table>")
         
         table.innerHTML = tableHTML.toString()
-        setupColumnSorting()
-        setupSortableHeaders()
-        setupDateFilter()
+        
+        // Purchase Date quick filters + calendar wiring (table header)
+        for (columnKey in selectedColumns) {
+            if (columnKey != "date" && sortableFields.contains(columnKey)) {
+                val sortBtnId = "purchaseSortBtn_$columnKey"
+                document.getElementById(sortBtnId)?.addEventListener("click", { _: Event ->
+                    togglePurchaseTableSort(columnKey)
+                })
+            }
+        }
+
+        val btn = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
+        val menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
+        val input = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
+        val applyBtn = document.getElementById("purchaseDateQuickFilterApplyBtn") as? HTMLElement
+        val todayBtn = document.getElementById("purchaseDateQuickTodayBtn") as? HTMLElement
+        val last7Btn = document.getElementById("purchaseDateQuickLast7Btn") as? HTMLElement
+        val thisMonthBtn = document.getElementById("purchaseDateQuickThisMonthBtn") as? HTMLElement
+        val clearBtn = document.getElementById("purchaseDateQuickClearBtn") as? HTMLElement
+
+        // Keep an explicit open/close flag so we never depend on style.display strings.
+        // (Some browsers + !important assignments can make style.display unreliable.)
+        if (window.asDynamic().__purchaseDateQuickFilterMenuOpen == null) {
+            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+        }
+
+        btn?.addEventListener("click", { e: Event ->
+            e.stopPropagation()
+            if (menu == null) return@addEventListener
+            val isOpen = window.asDynamic().__purchaseDateQuickFilterMenuOpen == true
+            window.asDynamic().__purchaseDateQuickFilterMenuOpen = !isOpen
+            val next = if (isOpen) "none" else "flex"
+            menu.style.setProperty("display", next, "important")
+        })
+
+        applyBtn?.addEventListener("click", { _: Event ->
+            val selected = input?.value ?: ""
+            if (selected.isNotBlank()) {
+                applyPurchaseDateFilterRange(selected, selected)
+            }
+            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+            menu?.style?.setProperty("display", "none", "important")
+        })
+
+        todayBtn?.addEventListener("click", { _: Event ->
+            val today = isoLocalToday()
+            input?.value = today
+            applyPurchaseDateFilterRange(today, today)
+            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+            menu?.style?.setProperty("display", "none", "important")
+        })
+        last7Btn?.addEventListener("click", { _: Event ->
+            val end = isoLocalToday()
+            val start = isoLocalOffsetDays(-6)
+            applyPurchaseDateFilterRange(start, end)
+            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+            menu?.style?.setProperty("display", "none", "important")
+        })
+        thisMonthBtn?.addEventListener("click", { _: Event ->
+            val start = isoLocalThisMonthStart()
+            val end = isoLocalThisMonthEnd()
+            applyPurchaseDateFilterRange(start, end)
+            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+            menu?.style?.setProperty("display", "none", "important")
+        })
+
+        clearBtn?.addEventListener("click", { _: Event ->
+            clearPurchaseDateFilter()
+            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+            menu?.style?.setProperty("display", "none", "important")
+        })
+
+        if (window.asDynamic().__purchaseDateQuickFilterOutsideListenerAttached != true) {
+            window.asDynamic().__purchaseDateQuickFilterOutsideListenerAttached = true
+            document.addEventListener("click", { event ->
+                val target = event.target as? Node ?: return@addEventListener
+                val m = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
+                val b = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
+                if (m == null) return@addEventListener
+
+                val clickInsideMenu = m.contains(target)
+                val clickInsideBtn = b != null && b.contains(target)
+
+                if (!clickInsideMenu && !clickInsideBtn) {
+                    window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+                    m.style.setProperty("display", "none", "important")
+                }
+            })
+        }
         return
     }
     
@@ -389,38 +656,42 @@ fun displayPurchasesWithPagination() {
     for (columnKey in selectedColumns) {
         val label = columnLabels[columnKey] ?: columnKey
         if (columnKey == "date") {
-            tableHTML.append("""
-                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" class="date-filter-header" data-field="$columnKey">
+                tableHTML.append("""
+                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative; overflow: visible;">
+                    <div style="display:flex; align-items:center; gap:8px;">
                         <span>$label</span>
-                        <span style="margin-left: 8px;">📅</span>
+                        <button id="purchaseDateQuickFilterBtn" title="Filter by purchase date" style="background:none; border:none; cursor:pointer; font-weight:600; color:#111827; padding:0; display:inline-flex; align-items:center; justify-content:center;">
+                            📅
+                        </button>
                     </div>
-                    <div class="date-filter-menu" data-field="$columnKey" style="display: none; position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 200px;">
-                        <label style="display: block; margin-bottom: 5px; font-size: 12px; color: #666;">Filter by Date</label>
-                        <input type="date" id="dateFilterInput" style="width: 100%; padding: 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; margin-bottom: 8px;">
-                        <div style="display: flex; gap: 5px; margin-bottom: 8px;">
-                            <button id="applyDateFilter" style="padding: 6px 12px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Apply</button>
-                            <button id="clearDateFilter" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Clear</button>
+                    <div id="purchaseDateQuickFilterMenu" style="display:none; position:absolute; top:100%; left:0; background:white; border:1px solid #ddd; border-radius:4px; padding:10px; box-sizing:border-box; box-shadow:0 2px 8px rgba(0,0,0,0.1); z-index:20000; width:260px; min-width:260px; flex-direction:column; gap:8px;">
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button id="purchaseDateQuickTodayBtn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">Today</button>
+                            <button id="purchaseDateQuickLast7Btn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">Last 7 days</button>
+                            <button id="purchaseDateQuickThisMonthBtn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">This month</button>
+                            <button id="purchaseDateQuickClearBtn" style="padding:6px 10px; background:#6c757d; color:white; border:1px solid #6c757d; border-radius:4px; cursor:pointer; font-size:12px;">Clear</button>
+                            <button id="purchaseDateQuickFilterApplyBtn" style="padding:6px 10px; background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Apply</button>
                         </div>
-                        <div style="border-top: 1px solid #ddd; padding-top: 8px; margin-top: 8px;">
-                            <div style="font-size: 12px; color: #666; margin-bottom: 5px;">Sort by Date:</div>
-                            <div class="date-sort-option" data-sort="asc" style="padding: 6px 8px; cursor: pointer; font-size: 12px; border-radius: 3px; background-color: #f8f9fa;" onmouseover="this.style.backgroundColor='#e9ecef'" onmouseout="this.style.backgroundColor='#f8f9fa'">Ascending</div>
-                            <div class="date-sort-option" data-sort="desc" style="padding: 6px 8px; cursor: pointer; font-size: 12px; border-radius: 3px; background-color: #f8f9fa; margin-top: 4px;" onmouseover="this.style.backgroundColor='#e9ecef'" onmouseout="this.style.backgroundColor='#f8f9fa'">Descending</div>
+                        <div style="border-top:1px solid #eee; padding-top:8px; margin:0;">
+                            <label style="display:block; margin-bottom:6px; font-size:12px; color:#666;">Choose date</label>
+                            <input type="date" id="purchaseDateQuickFilterInput" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:3px; font-size:12px; margin-bottom:8px;">
                         </div>
                     </div>
                 </th>
             """)
         } else if (sortableFields.contains(columnKey)) {
+            val sortOrder = purchaseTableSortOrderByField[columnKey] ?: "desc"
+            val tooltip = if (sortOrder == "asc") {
+                "Sorted A-Z (click to sort Z-A)"
+            } else {
+                "Sorted Z-A (click to sort A-Z)"
+            }
+            val sortBtnId = "purchaseSortBtn_$columnKey"
             tableHTML.append("""
-                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" class="sortable-header" data-field="$columnKey">
-                        <span>$label</span>
-                        <span style="margin-left: 8px;">↕</span>
-                    </div>
-                    <div class="sort-menu" data-field="$columnKey" style="display: none; position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ddd; border-radius: 4px; padding: 5px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 1000; min-width: 120px;">
-                        <div class="sort-option" data-field="$columnKey" data-order="asc" style="padding: 8px 12px; cursor: pointer; font-size: 12px;" onmouseover="this.style.backgroundColor='#e9ecef'" onmouseout="this.style.backgroundColor='transparent'">Ascending</div>
-                        <div class="sort-option" data-field="$columnKey" data-order="desc" style="padding: 8px 12px; cursor: pointer; font-size: 12px;" onmouseover="this.style.backgroundColor='#e9ecef'" onmouseout="this.style.backgroundColor='transparent'">Descending</div>
-                    </div>
+                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
+                    <button id="$sortBtnId" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
+                        <span>$label</span><span style="font-size: 14px;">↕</span>
+                    </button>
                 </th>
             """)
         } else {
@@ -601,12 +872,92 @@ fun displayPurchasesWithPagination() {
             }
         })
     }
-    
-    // Add event listeners for sortable headers
-    setupSortableHeaders()
-    
-    // Setup date filter
-    setupDateFilter()
+
+    // Purchase Date quick filters + calendar wiring (table header)
+    val btn = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
+    val menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
+    val input = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
+    val applyBtn = document.getElementById("purchaseDateQuickFilterApplyBtn") as? HTMLElement
+    val todayBtn = document.getElementById("purchaseDateQuickTodayBtn") as? HTMLElement
+    val last7Btn = document.getElementById("purchaseDateQuickLast7Btn") as? HTMLElement
+    val thisMonthBtn = document.getElementById("purchaseDateQuickThisMonthBtn") as? HTMLElement
+    val clearBtn = document.getElementById("purchaseDateQuickClearBtn") as? HTMLElement
+
+    // Keep an explicit open/close flag so we never depend on style.display strings.
+    if (window.asDynamic().__purchaseDateQuickFilterMenuOpen == null) {
+        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+    }
+
+    btn?.addEventListener("click", { e: Event ->
+        e.stopPropagation()
+        if (menu == null) return@addEventListener
+        val isOpen = window.asDynamic().__purchaseDateQuickFilterMenuOpen == true
+        window.asDynamic().__purchaseDateQuickFilterMenuOpen = !isOpen
+        val next = if (isOpen) "none" else "flex"
+        menu.style.setProperty("display", next, "important")
+    })
+
+    applyBtn?.addEventListener("click", { _: Event ->
+        val selected = input?.value ?: ""
+        if (selected.isNotBlank()) {
+            applyPurchaseDateFilterRange(selected, selected)
+        }
+        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+        menu?.style?.setProperty("display", "none", "important")
+    })
+
+    todayBtn?.addEventListener("click", { _: Event ->
+        val today = isoLocalToday()
+        input?.value = today
+        applyPurchaseDateFilterRange(today, today)
+        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+        menu?.style?.setProperty("display", "none", "important")
+    })
+    last7Btn?.addEventListener("click", { _: Event ->
+        val end = isoLocalToday()
+        val start = isoLocalOffsetDays(-6)
+        applyPurchaseDateFilterRange(start, end)
+        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+        menu?.style?.setProperty("display", "none", "important")
+    })
+    thisMonthBtn?.addEventListener("click", { _: Event ->
+        val start = isoLocalThisMonthStart()
+        val end = isoLocalThisMonthEnd()
+        applyPurchaseDateFilterRange(start, end)
+        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+        menu?.style?.setProperty("display", "none", "important")
+    })
+    clearBtn?.addEventListener("click", { _: Event ->
+        clearPurchaseDateFilter()
+        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+        menu?.style?.setProperty("display", "none", "important")
+    })
+
+    if (window.asDynamic().__purchaseDateQuickFilterOutsideListenerAttached != true) {
+        window.asDynamic().__purchaseDateQuickFilterOutsideListenerAttached = true
+        document.addEventListener("click", { event ->
+            val target = event.target as? Node ?: return@addEventListener
+            val m = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
+            val b = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
+            if (m == null) return@addEventListener
+
+            val clickInsideMenu = m.contains(target)
+            val clickInsideBtn = b != null && b.contains(target)
+
+            if (!clickInsideMenu && !clickInsideBtn) {
+                window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+                m.style.setProperty("display", "none", "important")
+            }
+        })
+    }
+    for (columnKey in selectedColumns) {
+        if (columnKey != "date" && sortableFields.contains(columnKey)) {
+            val sortBtnId = "purchaseSortBtn_$columnKey"
+            document.getElementById(sortBtnId)?.addEventListener("click", { _: Event ->
+                togglePurchaseTableSort(columnKey)
+            })
+        }
+    }
     
     // Setup pagination event listeners
     document.getElementById("prevPageBtn")?.addEventListener("click", { _: Event ->
@@ -623,8 +974,6 @@ fun displayPurchasesWithPagination() {
             displayPurchasesWithPagination()
         }
     })
-    
-    setupColumnSorting()
 }
 
 /**

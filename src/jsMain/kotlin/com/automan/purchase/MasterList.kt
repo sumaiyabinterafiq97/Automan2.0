@@ -20,6 +20,593 @@ var allSuppliers: List<dynamic> = emptyList()
 // Global variable to track last device type for Supplier page
 var lastSupplierDeviceType: String? = getDeviceType()
 
+private fun joinDistinctNonBlank(values: List<String>): String {
+    val seen = HashSet<String>()
+    val out = mutableListOf<String>()
+
+    for (raw in values) {
+        // Each "raw" might already contain semicolon-separated values.
+        val tokens = raw.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+        for (t in tokens) {
+            val key = t.uppercase()
+            if (seen.add(key)) out.add(t)
+        }
+    }
+    return out.joinToString(";")
+}
+
+private fun escapeJsString(s: String): String {
+    return s
+        .replace("\\", "\\\\")
+        .replace("'", "\\'")
+        .replace("\n", " ")
+        .replace("\r", " ")
+}
+
+/**
+ * View-only grouping for Supplier Map:
+ * - Group rows by Supplier Name (auctionHouse)
+ * - Join other column values with ';'
+ * - Keep the first (newest) row's id for Edit/Duplicate actions so modals stay unchanged
+ */
+private fun groupSupplierPricesForView(prices: List<dynamic>): List<dynamic> {
+    if (prices.isEmpty()) return prices
+
+    val buckets = LinkedHashMap<String, MutableList<dynamic>>()
+    for (p in prices) {
+        val idStr = (p.id ?: "").toString()
+        val supplierName = (p.auctionHouse ?: "").toString().trim()
+        val key = if (supplierName.isNotEmpty()) supplierName.uppercase() else "__EMPTY__:$idStr"
+        val list = buckets.getOrPut(key) { mutableListOf() }
+        list.add(p)
+    }
+
+    val grouped = mutableListOf<dynamic>()
+    for ((_, list) in buckets) {
+        val first = list.first()
+        val groupedObj: dynamic = js("({})")
+
+        // Use first row's id so existing edit/duplicate modals still work unchanged
+        groupedObj.id = first.id
+        groupedObj.auctionHouse = (first.auctionHouse ?: "").toString()
+
+        groupedObj.stockLocation = joinDistinctNonBlank(list.map { (it.stockLocation ?: "").toString() })
+        groupedObj.rixoCompany = joinDistinctNonBlank(list.map { (it.rixoCompany ?: "").toString() })
+        groupedObj.venueId = joinDistinctNonBlank(list.map { (it.venueId ?: "").toString() })
+        groupedObj.rixoPrice = joinDistinctNonBlank(list.map { (it.rixoPrice ?: "").toString() })
+        groupedObj.pol = joinDistinctNonBlank(list.map { (it.pol ?: "").toString() })
+        groupedObj.shipmentSize = joinDistinctNonBlank(list.map { (it.shipmentSize ?: "").toString() })
+
+        grouped.add(groupedObj)
+    }
+
+    return grouped
+}
+
+/**
+ * View-only grouping for Car Brands Map:
+ * - Group rows by Chassis (normalized uppercase)
+ * - Join other column values with ';' (deduped like Supplier Map)
+ * - Keep the first (newest) row's id for Edit/Duplicate actions
+ */
+private fun groupCarBrandMappingsForView(mappings: List<dynamic>): List<dynamic> {
+    if (mappings.isEmpty()) return mappings
+
+    val buckets = LinkedHashMap<String, MutableList<dynamic>>()
+    for (m in mappings) {
+        val idStr = (m.id ?: "").toString()
+        val chassis = (m.chassis ?: "").toString().trim()
+        val key = if (chassis.isNotEmpty()) chassis.uppercase() else "__EMPTY__:$idStr"
+        val list = buckets.getOrPut(key) { mutableListOf() }
+        list.add(m)
+    }
+
+    val grouped = mutableListOf<dynamic>()
+    for ((_, list) in buckets) {
+        val first = list.first()
+        val groupedObj: dynamic = js("({})")
+
+        groupedObj.id = first.id
+        groupedObj.chassis = (first.chassis ?: "").toString().trim()
+        groupedObj.carBrand = joinDistinctNonBlank(list.map { (it.carBrand ?: "").toString() })
+        groupedObj.carName = joinDistinctNonBlank(list.map { (it.carName ?: "").toString() })
+        groupedObj.fuel = joinDistinctNonBlank(list.map { (it.fuel ?: "").toString() })
+        groupedObj.wd = joinDistinctNonBlank(list.map { (it.wd ?: "").toString() })
+        groupedObj.shift = joinDistinctNonBlank(list.map { (it.shift ?: "").toString() })
+        groupedObj.grade = joinDistinctNonBlank(list.map { (it.grade ?: "").toString() })
+        groupedObj.cc = joinDistinctNonBlank(list.map { (it.cc ?: "").toString() })
+        groupedObj.seat = joinDistinctNonBlank(list.map { (it.seat ?: "").toString() })
+        groupedObj.door = joinDistinctNonBlank(list.map { (it.door ?: "").toString() })
+        groupedObj.vehicleType = joinDistinctNonBlank(list.map { (it.vehicleType ?: "").toString() })
+        groupedObj.rank = joinDistinctNonBlank(list.map { (it.rank ?: "").toString() })
+        groupedObj.color = joinDistinctNonBlank(list.map { (it.color ?: "").toString() })
+        groupedObj.driveType = joinDistinctNonBlank(list.map { (it.driveType ?: "").toString() })
+
+        grouped.add(groupedObj)
+    }
+
+    return grouped
+}
+
+/** When the modal shows grouped values like "20;6", send the first integer for Int? API fields. */
+private fun parseIntFirstToken(raw: String?): Int? {
+    val s = raw?.trim() ?: return null
+    if (s.isEmpty()) return null
+    val first = s.split(';', ',', '+', '/').firstOrNull()?.trim() ?: return null
+    return first.toIntOrNull()
+}
+
+private fun parseFirstToken(raw: String?): String {
+    val s = raw?.trim() ?: return ""
+    if (s.isEmpty()) return ""
+    return s.split(';', ',', '+', '/').firstOrNull()?.trim() ?: ""
+}
+
+private fun splitDistinctTokens(raw: String): List<String> {
+    val out = mutableListOf<String>()
+    val seen = HashSet<String>()
+    raw.split(';').map { it.trim() }.filter { it.isNotEmpty() }.forEach { t ->
+        val key = t.uppercase()
+        if (seen.add(key)) out.add(t)
+    }
+    return out
+}
+
+private fun populateCarBrandModalComboboxes() {
+    populateEditableComboboxFromMasterMenu("carBrandBrand", "car_brands")
+    populateEditableComboboxFromMasterMenu("carBrandFuel", "fuel")
+    populateEditableComboboxFromMasterMenu("carBrandShift", "shift")
+    populateEditableComboboxFromMasterMenu("carBrandGrade", "car_grade")
+    populateEditableComboboxFromMasterMenu("carBrandVehicleType", "type_of_vehicle")
+
+    val wdSelect = document.getElementById("carBrandWd") as? HTMLSelectElement
+    if (wdSelect != null) {
+        while (wdSelect.options.length > 1) {
+            wdSelect.remove(1)
+        }
+        val wdOptions = listOf("2WD", "4WD")
+        for (v in wdOptions) {
+            val opt = document.createElement("option") as HTMLOptionElement
+            opt.value = v
+            opt.text = v
+            wdSelect.add(opt)
+        }
+    }
+
+    val driveTypeSelect = document.getElementById("carBrandDriveType") as? HTMLSelectElement
+    if (driveTypeSelect != null) {
+        while (driveTypeSelect.options.length > 1) {
+            driveTypeSelect.remove(1)
+        }
+        val driveTypes = listOf("LHD", "RHD")
+        for (v in driveTypes) {
+            val opt = document.createElement("option") as HTMLOptionElement
+            opt.value = v
+            opt.text = v
+            driveTypeSelect.add(opt)
+        }
+    }
+}
+
+private fun tryPrefillCarBrandModalFromGroupedRow() {
+    val rowAny = js("window.__carBrandRowData") as Any?
+    if (rowAny == null) return
+    val row = rowAny.asDynamic()
+
+    val chassis = (row.chassis ?: "").toString()
+    val carBrand = (row.carBrand ?: "").toString()
+    val carName = (row.carName ?: "").toString()
+    val fuelVal = (row.fuel ?: "").toString()
+    val wd = (row.wd ?: "").toString()
+    val shiftVal = (row.shift ?: "").toString()
+    val grade = (row.grade ?: "").toString()
+    val cc = (row.cc ?: "").toString()
+    val seat = (row.seat ?: "").toString()
+    val door = (row.door ?: "").toString()
+    val vehicleType = (row.vehicleType ?: "").toString()
+    val rankVal = (row.rank ?: "").toString()
+    val colorVal = (row.color ?: "").toString()
+    val driveType = (row.driveType ?: "").toString()
+
+    (document.getElementById("carBrandChassis") as? HTMLInputElement)?.value = chassis
+    setChipFieldValue("carBrandBrand", carBrand)
+    setChipFieldValue("carBrandCarName", carName)
+    setChipFieldValue("carBrandFuel", fuelVal)
+    setChipFieldValue("carBrandWd", wd)
+    setChipFieldValue("carBrandShift", shiftVal)
+    setChipFieldValue("carBrandGrade", grade)
+    setChipFieldValue("carBrandCc", cc)
+    setChipFieldValue("carBrandSeat", seat)
+    setChipFieldValue("carBrandDoor", door)
+    setChipFieldValue("carBrandVehicleType", vehicleType)
+    setChipFieldValue("carBrandRank", rankVal)
+    setChipFieldValue("carBrandColor", colorVal)
+    setChipFieldValue("carBrandDriveType", driveType)
+
+    js("window.__carBrandRowData = null")
+}
+
+private fun getEditableComboboxValue(fieldId: String): String {
+    val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+    if (input != null) return input.value.trim()
+    return (document.getElementById(fieldId) as? HTMLInputElement)?.value?.trim() ?: ""
+}
+
+private fun setEditableComboboxValue(fieldId: String, value: String) {
+    val v = value.trim()
+    (document.getElementById("${fieldId}Input") as? HTMLInputElement)?.value = v
+    val select = document.getElementById(fieldId) as? HTMLSelectElement
+    if (select != null) {
+        // If the value exists in options, align select.value for nicer UX (optional)
+        try {
+            val opts = select.options
+            var found = false
+            for (i in 0 until opts.length) {
+                val opt = opts.item(i) as? HTMLOptionElement ?: continue
+                if (opt.value.equals(v, ignoreCase = true)) {
+                    select.value = opt.value
+                    found = true
+                    break
+                }
+            }
+            if (!found && v.isNotEmpty()) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = v
+                opt.text = v
+                select.add(opt)
+                select.value = v
+            }
+        } catch (_: dynamic) {
+            // ignore
+        }
+    }
+}
+
+private fun getChipFieldValue(fieldId: String): String {
+    val el = document.getElementById("${fieldId}Hidden") as? HTMLInputElement
+    return el?.value?.trim() ?: ""
+}
+
+private fun setChipFieldValue(fieldId: String, value: String) {
+    js("window.__tmpChipFieldId = fieldId")
+    js("window.__tmpChipFieldValue = value")
+    js("if (window.supplierChipSetValue) { window.supplierChipSetValue(window.__tmpChipFieldId, window.__tmpChipFieldValue); }")
+}
+
+private fun populateEditableComboboxFromMasterMenu(selectId: String, fieldName: String) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    window.fetch(apiUrl("master-menu/$fieldName"))
+        .then { resp: dynamic ->
+            if (resp.ok) resp.json() else js("Promise.resolve([])")
+        }
+        .then { raw: dynamic ->
+            val list = parseMasterListArray(raw).distinct().filter { it.isNotBlank() }
+
+            // Preserve first option (▼)
+            while (select.options.length > 1) {
+                select.remove(1)
+            }
+            for (v in list) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = v
+                opt.text = v
+                select.add(opt)
+            }
+
+            // If user already typed a value, ensure it's selectable
+            val current = (document.getElementById("${selectId}Input") as? HTMLInputElement)?.value?.trim() ?: ""
+            if (current.isNotEmpty()) {
+                setEditableComboboxValue(selectId, current)
+            }
+        }
+        .catch { _: dynamic ->
+            // ignore
+        }
+}
+
+private fun populateSupplierMapModalComboboxes(isDuplicate: Boolean) {
+    val prefix = if (isDuplicate) "dupSupplier" else "supplier"
+    populateEditableComboboxFromMasterMenu("${prefix}AuctionHouse", "supplier")
+    populateEditableComboboxFromMasterMenu("${prefix}StockLocation", "stock_location")
+    populateEditableComboboxFromMasterMenu("${prefix}RixoCompany", "rixo_company")
+    populateEditableComboboxFromMasterMenu("${prefix}VenueId", "venue_id")
+    populateEditableComboboxFromMasterMenu("${prefix}Pol", "pol")
+    // DB field is 'type_of_vehicle' (label: Vehicle type)
+    populateEditableComboboxFromMasterMenu("${prefix}TypeOfVehicle", "type_of_vehicle")
+}
+
+private fun createChipMultiSelectCombobox(id: String, placeholder: String): String {
+    // Structure intentionally mirrors editable combobox IDs:
+    // - input:  ${id}Input
+    // - select: ${id}
+    // plus:
+    // - chips:  ${id}Chips
+    // - hidden: ${id}Hidden  (stores ';'-joined values for saving)
+    return """
+        <div style="position: relative; width: 100%;">
+            <div id="${id}Wrap" style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; width:100%; min-height:42px; padding:6px 44px 6px 8px; border:1px solid #d1d5db; border-radius:6px; box-sizing:border-box; background:white;">
+                <div id="${id}Chips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+                <input type="text" id="${id}Input" placeholder="$placeholder"
+                       style="flex:1; min-width:120px; border:none; outline:none; font-size:14px; padding:6px 0; background:transparent;"
+                       autocomplete="off"
+                       onkeydown="return window.supplierChipHandleKey(event, '$id');"
+                       onblur="window.supplierChipAddFromInput('$id');">
+                <input type="hidden" id="${id}Hidden" value="">
+            </div>
+            <select id="$id"
+                    style="position:absolute; top:0; right:0; width:40px; height:100%; border:none; border-left:1px solid #d1d5db; background:#f5f5f5; cursor:pointer; border-radius:0 6px 6px 0; appearance:none; -webkit-appearance:none; -moz-appearance:none; padding:0; text-align:center; font-size:14px; z-index:2; font-weight:bold; color:#666; opacity:0;"
+                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('$id');"
+                    onchange="window.supplierChipAddFromSelect('$id');">
+                <option value="">▼</option>
+            </select>
+            <div id="${id}Button" onclick="openComboboxDropdown('$id')"
+                 style="position:absolute; top:0; right:0; width:40px; height:100%; border:none; border-left:1px solid #d1d5db; background:#f5f5f5; cursor:pointer; border-radius:0 6px 6px 0; z-index:3; pointer-events:auto; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; color:#666; user-select:none;">
+                ▼
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+private fun createChipInput(id: String, placeholder: String): String {
+    // For fields with no dropdown (e.g. Rixo Price)
+    return """
+        <div style="position: relative; width: 100%;">
+            <div id="${id}Wrap" style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; width:100%; min-height:42px; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; box-sizing:border-box; background:white;">
+                <div id="${id}Chips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+                <input type="text" id="${id}Input" placeholder="$placeholder"
+                       style="flex:1; min-width:120px; border:none; outline:none; font-size:14px; padding:6px 0; background:transparent;"
+                       autocomplete="off"
+                       onkeydown="return window.supplierChipHandleKey(event, '$id');"
+                       onblur="window.supplierChipAddFromInput('$id');">
+                <input type="hidden" id="${id}Hidden" value="">
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+private fun ensureSupplierChipJs() {
+    js("""
+        if (!window.__supplierChipJsReady) {
+          window.__supplierChipJsReady = true;
+
+          function _splitTokens(v) {
+            if (!v) return [];
+            var parts = v.split(';');
+            var out = [];
+            for (var i = 0; i < parts.length; i++) {
+              var s = (parts[i] || '').trim();
+              if (s) out.push(s);
+            }
+            return out;
+          }
+          function _joinTokens(tokens) {
+            // distinct, keep order
+            var seen = {};
+            var out = [];
+            for (var i = 0; i < tokens.length; i++) {
+              var t = tokens[i];
+              var key = (t || '').toUpperCase();
+              if (!key) continue;
+              if (!seen[key]) { seen[key] = true; out.push(t); }
+            }
+            return out.join(';');
+          }
+          function _getHidden(id) { return document.getElementById(id + 'Hidden'); }
+          function _getChips(id) { return document.getElementById(id + 'Chips'); }
+          function _getInput(id) { return document.getElementById(id + 'Input'); }
+          function _normalize(v) { return (v || '').toString().trim().toUpperCase(); }
+          function _isNumericChipField(id) {
+            return id === 'carBrandCc' || id === 'carBrandSeat' || id === 'carBrandDoor';
+          }
+          function _isValidNumericToken(v) {
+            return /^[0-9]+$/.test((v || '').toString().trim());
+          }
+          function _isAllowedToken(id, value) {
+            var select = document.getElementById(id);
+            // Free-text chip inputs (no select element) should accept typed values.
+            if (!select) return true;
+            var needle = _normalize(value);
+            if (!needle) return false;
+            for (var i = 0; i < select.options.length; i++) {
+              var opt = select.options[i];
+              var ov = _normalize(opt.value);
+              var ot = _normalize(opt.text);
+              if (!ov) continue;
+              if (ov === '__SEE_MORE__' || ov === '__SEE_LESS__') continue;
+              if (needle === ov || needle === ot) return true;
+            }
+            return false;
+          }
+          function _render(id) {
+            var hidden = _getHidden(id);
+            var chips = _getChips(id);
+            if (!hidden || !chips) return;
+            var tokens = _splitTokens(hidden.value);
+            chips.innerHTML = '';
+            for (var i = 0; i < tokens.length; i++) {
+              (function(t) {
+              var chip = document.createElement('span');
+              chip.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:#2563eb; color:white; border-radius:9999px; padding:6px 10px; font-size:12px; font-weight:600; line-height:1;';
+              var x = document.createElement('button');
+              x.type = 'button';
+              x.textContent = '×';
+              x.setAttribute('aria-label', 'Remove');
+              x.style.cssText = 'border:none; background:rgba(255,255,255,0.20); color:white; width:18px; height:18px; border-radius:9999px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; padding:0; line-height:1;';
+              x.addEventListener('click', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                window.supplierChipRemove(id, t);
+              });
+              var label = document.createElement('span');
+              label.textContent = t;
+              chip.appendChild(x);
+              chip.appendChild(label);
+              chips.appendChild(chip);
+              })(tokens[i]);
+            }
+          }
+
+          // Prefill from server / grouped row: show all tokens as chips even before async
+          // master_menu fetch fills the select. Missing options are added so chips validate on blur.
+          window.supplierChipSetValue = function(id, value) {
+            var hidden = _getHidden(id);
+            if (!hidden) return;
+            var tokens = _splitTokens(value || '');
+            var select = document.getElementById(id);
+            if (select) {
+              for (var i = 0; i < tokens.length; i++) {
+                var t = (tokens[i] || '').toString().trim();
+                if (!t) continue;
+                if (!_isAllowedToken(id, t)) {
+                  var opt = document.createElement('option');
+                  opt.value = t;
+                  opt.textContent = t;
+                  select.appendChild(opt);
+                }
+              }
+            }
+            hidden.value = _joinTokens(tokens);
+            _render(id);
+          };
+          window.supplierChipGetValue = function(id) {
+            var hidden = _getHidden(id);
+            return hidden ? (hidden.value || '').trim() : '';
+          };
+          window.supplierChipAdd = function(id, value) {
+            var v = (value || '').toString().trim();
+            if (!v) return;
+            if (_isNumericChipField(id) && !_isValidNumericToken(v)) {
+              var invalidNumberInput = _getInput(id);
+              if (invalidNumberInput) invalidNumberInput.value = '';
+              return;
+            }
+            if (!_isAllowedToken(id, v)) {
+              var invalidInput = _getInput(id);
+              if (invalidInput) invalidInput.value = '';
+              return;
+            }
+            var hidden = _getHidden(id);
+            if (!hidden) return;
+            var tokens = _splitTokens(hidden.value);
+            tokens.push(v);
+            hidden.value = _joinTokens(tokens);
+            var input = _getInput(id);
+            if (input) input.value = '';
+            var select = document.getElementById(id);
+            if (select) select.value = '';
+            _render(id);
+          };
+          window.supplierChipRemove = function(id, value) {
+            var v = (value || '').toString().trim();
+            var hidden = _getHidden(id);
+            if (!hidden) return;
+            var existing = _splitTokens(hidden.value);
+            var tokens = [];
+            for (var i = 0; i < existing.length; i++) {
+              if (existing[i].toUpperCase() !== v.toUpperCase()) tokens.push(existing[i]);
+            }
+            hidden.value = _joinTokens(tokens);
+            _render(id);
+          };
+          window.supplierChipAddFromSelect = function(id) {
+            var select = document.getElementById(id);
+            if (!select) return;
+            var v = (select.value || '').toString().trim();
+            if (!v) return;
+            window.supplierChipAdd(id, v);
+          };
+          window.supplierChipAddFromInput = function(id) {
+            var input = _getInput(id);
+            if (!input) return;
+            var v = (input.value || '').toString().trim();
+            if (!v) return;
+            // Support typing multiple at once separated by ';'
+            var tokens = _splitTokens(v);
+            if (tokens.length > 1) {
+              for (var i = 0; i < tokens.length; i++) window.supplierChipAdd(id, tokens[i]);
+            } else {
+              window.supplierChipAdd(id, v);
+            }
+            // If anything typed was invalid, keep the field clean.
+            if (input) input.value = '';
+          };
+          window.supplierChipHandleKey = function(e, id) {
+            if (!e) return true;
+            var key = e.key;
+            if (key === 'Enter') {
+              e.preventDefault();
+              window.supplierChipAddFromInput(id);
+              return false;
+            }
+            return true;
+          };
+
+          // Hook into the existing combobox behavior: when a dropdown selection uses syncComboboxInput(selectId),
+          // automatically convert selected value into a chip for chip-enabled fields.
+          if (!window.__supplierChipWrappedSync && typeof window.syncComboboxInput === 'function') {
+            window.__supplierChipWrappedSync = true;
+            var _origSync = window.syncComboboxInput;
+            window.syncComboboxInput = function(selectId) {
+              _origSync(selectId);
+              try {
+                var hidden = document.getElementById(selectId + 'Hidden');
+                var select = document.getElementById(selectId);
+                if (hidden && select && select.value) {
+                  window.supplierChipAdd(selectId, select.value);
+                }
+              } catch (_) {}
+            };
+          }
+        }
+    """)
+}
+
+private fun enforceSupplierModalDropdownOnly(prefix: String) {
+    js("""
+        (function() {
+          function normalize(v) { return (v || '').toString().trim().toUpperCase(); }
+          function optionExists(selectId, rawValue) {
+            var select = document.getElementById(selectId);
+            if (!select) return false;
+            var needle = normalize(rawValue);
+            if (!needle) return false;
+            for (var i = 0; i < select.options.length; i++) {
+              var opt = select.options[i];
+              var ov = normalize(opt.value);
+              var ot = normalize(opt.text);
+              if (!ov) continue;
+              if (ov === '__SEE_MORE__' || ov === '__SEE_LESS__') continue;
+              if (needle === ov || needle === ot) return true;
+            }
+            return false;
+          }
+          function clearIfInvalid(selectId) {
+            var input = document.getElementById(selectId + 'Input');
+            if (!input) return;
+            var typed = (input.value || '').toString().trim();
+            if (!typed) return;
+            if (!optionExists(selectId, typed)) {
+              input.value = '';
+              var select = document.getElementById(selectId);
+              if (select) select.value = '';
+            }
+          }
+          var base = prefix + 'AuctionHouse';
+          var input = document.getElementById(base + 'Input');
+          if (input && !input.__supplierStrictBound) {
+            input.__supplierStrictBound = true;
+            input.addEventListener('blur', function() { clearIfInvalid(base); });
+            input.addEventListener('keydown', function(e) {
+              if (e && e.key === 'Enter') {
+                e.preventDefault();
+                clearIfInvalid(base);
+              }
+            });
+          }
+        })();
+    """)
+}
+
 // Global pagination variables for Consignees
 var consigneesCurrentPage = 1
 var consigneesItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
@@ -72,6 +659,9 @@ var allCarShifts: List<String> = emptyList()
 var typeOfVehiclesCurrentPage = 1
 var typeOfVehiclesItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allTypeOfVehicles: List<String> = emptyList()
+var dynamicMasterSetCurrentPage: MutableMap<String, Int> = mutableMapOf()
+var dynamicMasterSetAllValues: MutableMap<String, List<String>> = mutableMapOf()
+var dynamicMasterSetSortOrder: MutableMap<String, String> = mutableMapOf()
 
 // Global pagination variables for Client master list (from master_menu)
 var clientMasterCurrentPage = 1
@@ -103,9 +693,9 @@ fun getDefaultSupplierColumnsForDevice(deviceType: String? = null): List<String>
     val device = deviceType ?: getDeviceType()
     return when (device) {
         "mobile" -> listOf("supplierName", "stockLocation", "rixoCompany")
-        "tablet" -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "rixoPrice")
-        "desktop" -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "rixoPrice", "typeOfVehicle")
-        else -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "rixoPrice", "typeOfVehicle")
+        "tablet" -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
+        "desktop" -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
+        else -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
     }
 }
 
@@ -135,8 +725,8 @@ fun getSelectedSupplierColumns(): List<String> {
         return defaultColumns
     }
     
-    // Filter out "id" column (removed from UI) and auto-adjust if saved columns exceed device limit
-    val filteredColumns = savedColumns.filter { it.isNotBlank() && it != "id" }
+    // Filter out "id" column (removed from UI) and columns we explicitly no longer display
+    val filteredColumns = savedColumns.filter { it.isNotBlank() && it != "id" && it != "rixoPrice" && it != "typeOfVehicle" }
     return if (filteredColumns.size > maxColumns) {
         defaultColumns
     } else {
@@ -163,10 +753,16 @@ fun getDefaultConsigneeColumnsForDevice(deviceType: String? = null): List<String
 fun getDefaultCarBrandColumnsForDevice(deviceType: String? = null): List<String> {
     val device = deviceType ?: getDeviceType()
     return when (device) {
-        "mobile" -> listOf("carBrand", "chassis", "carName")
-        "tablet" -> listOf("carBrand", "chassis", "carName", "fuel", "wd")
-        "desktop" -> listOf("carBrand", "chassis", "carName", "fuel", "wd", "shift", "grade", "cc", "door")
-        else -> listOf("carBrand", "chassis", "carName", "fuel", "wd", "shift", "grade", "cc", "door")
+        "mobile" -> listOf("chassis", "carBrand", "carName")
+        "tablet" -> listOf("chassis", "carBrand", "carName", "fuel", "wd")
+        "desktop" -> listOf(
+            "chassis", "carBrand", "carName", "fuel", "wd", "shift", "grade", "cc", "seat", "door",
+            "vehicleType", "rank", "color", "driveType"
+        )
+        else -> listOf(
+            "chassis", "carBrand", "carName", "fuel", "wd", "shift", "grade", "cc", "seat", "door",
+            "vehicleType", "rank", "color", "driveType"
+        )
     }
 }
 
@@ -175,7 +771,7 @@ fun getDefaultCarBrandColumnsForDevice(deviceType: String? = null): List<String>
  */
 fun getSelectedCarBrandColumns(): List<String> {
     val deviceType = getDeviceType()
-    val maxColumns = getMaxColumnsForDevice(deviceType)
+    val maxColumns = getMaxCarBrandMapColumnsForDevice(deviceType)
     val defaultColumns = getDefaultCarBrandColumnsForDevice(deviceType)
     
     // Try to get saved columns from localStorage
@@ -266,7 +862,7 @@ fun getSelectedCountryColumns(): List<String> {
 
 // Master List Functions
 
-/** Client page: shows Client Transactions button and a client master list (from master_menu). */
+/** Client page: shows a client master list (from master_menu). */
 fun showClientPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -279,10 +875,6 @@ fun showClientPage() {
                         <span>Add Client</span>
                     </button>
                 </div>
-            </div>
-
-            <div style="margin-bottom: 16px;">
-                <button id="clientTransactionsBtn" class="client-btn client-btn-primary" style="padding: 10px 20px; font-size: 14px;">Client Transactions</button>
             </div>
 
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -301,10 +893,6 @@ fun showClientPage() {
         </div>
     """
     loadClientMasterList()
-
-    document.getElementById("clientTransactionsBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/client-transactions"
-    })
 
     document.getElementById("clientMasterFilter")?.addEventListener("input", { _: Event ->
         loadClientMasterList()
@@ -643,7 +1231,7 @@ fun showAddClientModal() {
     showAddClientForm()
 }
 
-/** Consignee page: shows Consignee Map button and a consignee master list (from master_menu). */
+/** Consignee page: shows a consignee master list (from master_menu). */
 fun showConsigneePage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -656,10 +1244,6 @@ fun showConsigneePage() {
                         <span>Add Consignee</span>
                     </button>
                 </div>
-            </div>
-
-            <div style="margin-bottom: 16px;">
-                <button id="consigneeMapBtn" class="client-btn client-btn-primary" style="padding: 10px 20px; font-size: 14px;">Consignee Map</button>
             </div>
 
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -678,10 +1262,6 @@ fun showConsigneePage() {
         </div>
     """
     loadConsigneeMasterList()
-
-    document.getElementById("consigneeMapBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/consignee-map"
-    })
 
     document.getElementById("consigneeMasterFilter")?.addEventListener("input", { _: Event ->
         loadConsigneeMasterList()
@@ -1017,7 +1597,6 @@ fun showConsigneeMapPage() {
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Consignee Map</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="backToConsigneePageBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Back to Consignee Page</button>
                     <button id="consigneeColumnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
@@ -1061,10 +1640,6 @@ fun showConsigneeMapPage() {
     loadMasterConsignee()
     
     // Event listeners
-    document.getElementById("backToConsigneePageBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/consignee"
-    })
-    
     document.getElementById("addConsigneeBtn")?.addEventListener("click", { _: Event ->
         showAddConsigneeModal()
     })
@@ -2125,7 +2700,7 @@ fun editMasterConsignee(id: dynamic) {
     }
 }
 
-/** Car Brands page: shows Car Brands Map button and a car brands master list (from master_menu). */
+/** Car Brands page: shows a car brands master list (from master_menu). */
 fun showCarBrandsPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -2138,10 +2713,6 @@ fun showCarBrandsPage() {
                         <span>Add Car Brands</span>
                     </button>
                 </div>
-            </div>
-
-            <div style="margin-bottom: 16px;">
-                <button id="carBrandsMapBtn" class="client-btn client-btn-primary" style="padding: 10px 20px; font-size: 14px;">Car Brands Map</button>
             </div>
 
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -2160,10 +2731,6 @@ fun showCarBrandsPage() {
         </div>
     """
     loadCarBrandsMasterList()
-
-    document.getElementById("carBrandsMapBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/car-brands-map"
-    })
 
     document.getElementById("carBrandsMasterFilter")?.addEventListener("input", { _: Event ->
         loadCarBrandsMasterList()
@@ -2499,7 +3066,6 @@ fun showCarBrandsMapPage() {
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Car Brands Map</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="backToCarBrandsPageBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Back to Car Brands Page</button>
                     <button id="carBrandColumnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
@@ -2543,10 +3109,6 @@ fun showCarBrandsMapPage() {
     loadMasterCarBrands()
     
     // Event listeners
-    document.getElementById("backToCarBrandsPageBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/car-brands"
-    })
-    
     document.getElementById("addCarBrandBtn")?.addEventListener("click", { _: Event ->
         showAddCarBrandModal()
     })
@@ -2703,14 +3265,16 @@ fun loadMasterCarBrandsWithCards() {
             } else {
                 sortedMappings
             }
-            
-            // Store all filtered mappings for pagination
-            allCarBrands = filteredMappings
+
+            val groupedMappings = groupCarBrandMappingsForView(filteredMappings)
+
+            // Store grouped rows for pagination (one row per chassis)
+            allCarBrands = groupedMappings
             if (brandFilter.isNotEmpty()) {
                 carBrandsCurrentPage = 1
             }
             
-            displayCarBrandsAsCards(filteredMappings, brandFilter)
+            displayCarBrandsAsCards(groupedMappings, brandFilter)
         }
         .catch { error: dynamic ->
             Logger.error("Error loading car brands: ${error.toString()}")
@@ -2781,14 +3345,16 @@ fun loadMasterCarBrandsWithTable() {
             } else {
                 sortedMappings
             }
-            
-            // Store all filtered mappings for pagination
-            allCarBrands = filteredMappings
+
+            val groupedMappings = groupCarBrandMappingsForView(filteredMappings)
+
+            // Store grouped rows for pagination (one row per chassis)
+            allCarBrands = groupedMappings
             if (brandFilter.isNotEmpty()) {
                 carBrandsCurrentPage = 1 // Reset to first page when filter changes
             }
             
-            if (filteredMappings.isEmpty()) {
+            if (groupedMappings.isEmpty()) {
                 val message = if (brandFilter.isNotEmpty()) {
                     "No car brand data found for: $brandFilter"
                 } else {
@@ -2804,23 +3370,28 @@ fun loadMasterCarBrandsWithTable() {
             }
             
             // Calculate pagination
-            val totalPages = kotlin.math.ceil(filteredMappings.size.toDouble() / carBrandsItemsPerPage).toInt()
+            val totalPages = kotlin.math.ceil(groupedMappings.size.toDouble() / carBrandsItemsPerPage).toInt()
             val startIndex = (carBrandsCurrentPage - 1) * carBrandsItemsPerPage
-            val endIndex = kotlin.math.min(startIndex + carBrandsItemsPerPage, filteredMappings.size)
-            val paginatedMappings = filteredMappings.subList(startIndex, endIndex)
+            val endIndex = kotlin.math.min(startIndex + carBrandsItemsPerPage, groupedMappings.size)
+            val paginatedMappings = groupedMappings.subList(startIndex, endIndex)
             
             // Get selected columns
             val selectedColumns = getSelectedCarBrandColumns()
             val columnLabels = mapOf(
-                "carBrand" to "Car Brand",
                 "chassis" to "Chassis",
+                "carBrand" to "Car Brand",
                 "carName" to "Car Name",
                 "fuel" to "Fuel",
                 "wd" to "WD",
                 "shift" to "Shift",
                 "grade" to "Grade",
                 "cc" to "CC",
-                "door" to "Door"
+                "seat" to "Seat",
+                "door" to "Door",
+                "vehicleType" to "Vehicle type",
+                "rank" to "Rank",
+                "color" to "Color",
+                "driveType" to "Drive Type"
             )
             
             var html = """
@@ -2828,7 +3399,7 @@ fun loadMasterCarBrandsWithTable() {
                     <table style="width: 100%; border-collapse: collapse;" class="car-brand-table">
                         <thead>
                             <tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
-                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; width: 44px;"></th>
+                                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; min-width: 72px;"></th>
             """
             
             // Add headers for selected columns only
@@ -2853,18 +3424,34 @@ fun loadMasterCarBrandsWithTable() {
                 val shift = (mapping.shift ?: "").toString()
                 val grade = (mapping.grade ?: "").toString()
                 val cc = (mapping.cc ?: "").toString()
+                val seat = (mapping.seat ?: "").toString()
                 val door = (mapping.door ?: "").toString()
+                val vehicleType = (mapping.vehicleType ?: "").toString()
+                val rankVal = (mapping.rank ?: "").toString()
+                val colorVal = (mapping.color ?: "").toString()
+                val driveTypeVal = (mapping.driveType ?: "").toString()
+
+                val rowDataJs =
+                    "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}'};"
                 
                 html += """
                     <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
                         <td style="padding: 8px 12px;">
-                            <button onclick="window.editMasterCarBrand($id)" aria-label="Edit" title="Edit"
+                            <div style="display:flex; gap:6px; align-items:center;">
+                            <button onclick="$rowDataJs window.editMasterCarBrand($id)" aria-label="Edit" title="Edit"
                                     style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(76,201,255,0.30);">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                                     <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
                                 </svg>
                             </button>
+                                <button onclick="$rowDataJs window.duplicateMasterCarBrand($id)" aria-label="Duplicate" title="Duplicate"
+                                        style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#3b82f6; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(59,130,246,0.30);">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </td>
                 """
                 
@@ -2879,7 +3466,12 @@ fun loadMasterCarBrandsWithTable() {
                         "shift" -> shift
                         "grade" -> grade
                         "cc" -> cc
+                        "seat" -> seat
                         "door" -> door
+                        "vehicleType" -> vehicleType
+                        "rank" -> rankVal
+                        "color" -> colorVal
+                        "driveType" -> driveTypeVal
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
@@ -2904,7 +3496,7 @@ fun loadMasterCarBrandsWithTable() {
                 html += """
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
                         <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
-                            Showing ${startIndex + 1} to $endIndex of ${filteredMappings.size} car brand${if (filteredMappings.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}
+                            Showing ${startIndex + 1} to $endIndex of ${groupedMappings.size} chassis group${if (groupedMappings.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}
                         </div>
                         <div class="car-brand-pagination-controls">
                             <button id="carBrandsPrevPage" class="car-brand-pagination-btn" ${if (carBrandsCurrentPage == 1) "disabled" else ""}>
@@ -2920,7 +3512,7 @@ fun loadMasterCarBrandsWithTable() {
             } else {
                 html += """
                     <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-                        Total: ${filteredMappings.size} car brand${if (filteredMappings.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}
+                        Total: ${groupedMappings.size} chassis group${if (groupedMappings.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}
                     </div>
                 """
             }
@@ -2980,15 +3572,20 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
     
     val selectedColumns = getSelectedCarBrandColumns()
     val columnLabels = mapOf(
-        "carBrand" to "Car Brand",
         "chassis" to "Chassis",
+        "carBrand" to "Car Brand",
         "carName" to "Car Name",
         "fuel" to "Fuel",
         "wd" to "WD",
         "shift" to "Shift",
         "grade" to "Grade",
         "cc" to "CC",
-        "door" to "Door"
+        "seat" to "Seat",
+        "door" to "Door",
+        "vehicleType" to "Vehicle type",
+        "rank" to "Rank",
+        "color" to "Color",
+        "driveType" to "Drive Type"
     )
     
     val cardsHTML = StringBuilder()
@@ -3004,7 +3601,15 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         val shift = (mapping.shift ?: "").toString()
         val grade = (mapping.grade ?: "").toString()
         val cc = (mapping.cc ?: "").toString()
+        val seat = (mapping.seat ?: "").toString()
         val door = (mapping.door ?: "").toString()
+        val vehicleType = (mapping.vehicleType ?: "").toString()
+        val rankVal = (mapping.rank ?: "").toString()
+        val colorVal = (mapping.color ?: "").toString()
+        val driveTypeVal = (mapping.driveType ?: "").toString()
+
+        val rowDataJs =
+            "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}'};"
         
         // Build card content based on selected columns
         val cardFields = StringBuilder()
@@ -3019,7 +3624,12 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
                 "shift" -> shift
                 "grade" -> grade
                 "cc" -> cc
+                "seat" -> seat
                 "door" -> door
+                "vehicleType" -> vehicleType
+                "rank" -> rankVal
+                "color" -> colorVal
+                "driveType" -> driveTypeVal
                 else -> ""
             }
             
@@ -3036,12 +3646,19 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         cardsHTML.append("""
             <div class="car-brand-card">
                 <div class="card-header">
-                    <button class="card-edit-btn" onclick="window.editMasterCarBrand($id)" aria-label="Edit" title="Edit">
+                    <div style="display:flex; gap:6px; align-items:center;">
+                    <button class="card-edit-btn" onclick="$rowDataJs window.editMasterCarBrand($id)" aria-label="Edit" title="Edit">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                             <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
                         </svg>
                     </button>
+                        <button class="card-edit-btn" onclick="$rowDataJs window.duplicateMasterCarBrand($id)" aria-label="Duplicate" title="Duplicate" style="background-color:#3b82f6;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
+                            </svg>
+                        </button>
+                    </div>
                     <div class="card-title">${if (carBrand.isNotEmpty()) carBrand else "Car Brand #$id"}</div>
                 </div>
                 <div class="card-body">
@@ -3069,7 +3686,7 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
     } else {
         cardsHTML.append("""
             <div style="padding: 16px; text-align: center; color: #6b7280; font-size: 14px;">
-                Total: ${filteredMappings.size} car brand${if (filteredMappings.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}
+                Total: ${filteredMappings.size} chassis group${if (filteredMappings.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}
             </div>
         """)
     }
@@ -3107,7 +3724,7 @@ fun showCarBrandColumnFilterModal() {
     
     // Get current device type and limits
     val deviceType = getDeviceType()
-    val maxColumns = getMaxColumnsForDevice(deviceType)
+    val maxColumns = getMaxCarBrandMapColumnsForDevice(deviceType)
     val deviceDisplayName = when (deviceType) {
         "mobile" -> "Mobile View"
         "tablet" -> "Tablet View"
@@ -3118,7 +3735,7 @@ fun showCarBrandColumnFilterModal() {
     val selectedColumns = selectedColumnsList.toSet()
     
     modal.innerHTML = """
-        <div style="background: white; border-radius: 8px; padding: 24px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+        <div style="background: white; border-radius: 8px; padding: 24px; max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; position: relative;">
                 <h3 style="margin: 0; color: #333; flex: 1;">Select Columns to Display</h3>
                 <button id="closeCarBrandColumnFilter" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 4px 8px; line-height: 1; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">&times;</button>
@@ -3141,15 +3758,20 @@ fun showCarBrandColumnFilterModal() {
     
     // Populate column checkboxes
     val columnLabels = mapOf(
-        "carBrand" to "Car Brand",
         "chassis" to "Chassis",
+        "carBrand" to "Car Brand",
         "carName" to "Car Name",
         "fuel" to "Fuel",
         "wd" to "WD",
         "shift" to "Shift",
         "grade" to "Grade",
         "cc" to "CC",
-        "door" to "Door"
+        "seat" to "Seat",
+        "door" to "Door",
+        "vehicleType" to "Vehicle type",
+        "rank" to "Rank",
+        "color" to "Color",
+        "driveType" to "Drive Type"
     )
     
     val checkboxesDiv = document.getElementById("carBrandColumnCheckboxes")
@@ -3206,7 +3828,7 @@ fun showCarBrandColumnFilterModal() {
 
 fun updateCarBrandColumnSelection() {
     val deviceType = getDeviceType()
-    val maxColumns = getMaxColumnsForDevice(deviceType)
+    val maxColumns = getMaxCarBrandMapColumnsForDevice(deviceType)
     val checkboxes = document.querySelectorAll("#carBrandColumnCheckboxes input[type='checkbox']")
     var selectedCount = 0
     
@@ -3264,9 +3886,14 @@ fun showAddCarBrandModal() {
     showCarBrandModal(null)
 }
 
-fun showCarBrandModal(mappingId: Long?) {
-    val isEdit = mappingId != null
-    val title = if (isEdit) "Edit Car Brand" else "Add New Car Brand"
+fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
+    val isDuplicate = duplicateFromId != null
+    val isEdit = mappingId != null && !isDuplicate
+    val title = when {
+        isDuplicate -> "Duplicate Car Brand"
+        isEdit -> "Edit Car Brand"
+        else -> "Add New Car Brand"
+    }
     
     val modalHtml = """
         <div id="carBrandModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;">
@@ -3280,71 +3907,76 @@ fun showCarBrandModal(mappingId: Long?) {
                 <div style="padding: 24px;">
                     <form id="carBrandForm">
                         <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Chassis <span style="color: #ef4444;">*</span></label>
+                            <input type="text" id="carBrandChassis" required style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                        </div>
+                        <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Car Brand <span style="color: #ef4444;">*</span></label>
-                            <input type="text" id="carBrandBrand" required style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                            ${createChipMultiSelectCombobox("carBrandBrand", "Select Car Brand")}
                         </div>
                         <div class="car-brand-modal-grid">
                             <div>
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Chassis</label>
-                                <input type="text" id="carBrandChassis" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Car Name</label>
+                                ${createChipInput("carBrandCarName", "Type Car Name")}
                             </div>
                             <div>
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Car Name</label>
-                                <input type="text" id="carBrandCarName" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Vehicle type</label>
+                                ${createChipMultiSelectCombobox("carBrandVehicleType", "Select Vehicle type")}
                             </div>
                         </div>
                         <div class="car-brand-modal-grid">
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Fuel</label>
-                                <div style="position: relative; width: 100%;">
-                                    <input type="text" id="carBrandFuelInput" placeholder="Select or type Fuel" style="width: 100%; padding: 10px 40px 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;" autocomplete="off" onfocus="this.select();">
-                                    <select id="carBrandFuel" style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #d1d5db; background: #f5f5f5; border-radius: 0 6px 6px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 1; font-weight: bold; color: #666; opacity: 0; pointer-events: none;" aria-hidden="true" onchange="if (typeof syncComboboxInput === 'function') syncComboboxInput('carBrandFuel');">
-                                        <option value="">▼</option>
-                                        <option value="GASOLINE">GASOLINE</option>
-                                        <option value="DIESEL">DIESEL</option>
-                                        <option value="HYBRID">HYBRID</option>
-                                        <option value="CNG">CNG</option>
-                                        <option value="EV">EV</option>
-                                        <option value="HYDROGEN">HYDROGEN</option>
-                                        <option value="PHEV">PHEV</option>
-                                    </select>
-                                    <div id="carBrandFuelDropdownBtn" role="button" tabindex="0" aria-label="Open fuel list" style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #d1d5db; background: #f5f5f5; cursor: pointer; border-radius: 0 6px 6px 0; z-index: 3; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;" onmousedown="event.preventDefault(); event.stopPropagation(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandFuel');" onclick="event.preventDefault(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandFuel');" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandFuel'); }">▼</div>
-                                </div>
+                                ${createChipMultiSelectCombobox("carBrandFuel", "Select Fuel")}
                             </div>
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">WD</label>
-                                <input type="number" id="carBrandWd" min="0" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                ${createChipMultiSelectCombobox("carBrandWd", "Select WD")}
                             </div>
                         </div>
                         <div class="car-brand-modal-grid">
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Shift</label>
-                                <div style="position: relative; width: 100%;">
-                                    <input type="text" id="carBrandShiftInput" placeholder="Select or type Shift" style="width: 100%; padding: 10px 40px 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;" autocomplete="off" onfocus="this.select();">
-                                    <select id="carBrandShift" style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #d1d5db; background: #f5f5f5; border-radius: 0 6px 6px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 1; font-weight: bold; color: #666; opacity: 0; pointer-events: none;" aria-hidden="true" onchange="if (typeof syncComboboxInput === 'function') syncComboboxInput('carBrandShift');">
-                                        <option value="">▼</option>
-                                        <option value="AT">AT</option>
-                                        <option value="MT">MT</option>
-                                        <option value="6F">6F</option>
-                                        <option value="5F">5F</option>
-                                    </select>
-                                    <div id="carBrandShiftDropdownBtn" role="button" tabindex="0" aria-label="Open shift list" style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #d1d5db; background: #f5f5f5; cursor: pointer; border-radius: 0 6px 6px 0; z-index: 3; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;" onmousedown="event.preventDefault(); event.stopPropagation(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandShift');" onclick="event.preventDefault(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandShift');" onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); if (typeof openComboboxDropdown === 'function') openComboboxDropdown('carBrandShift'); }">▼</div>
-                                </div>
+                                ${createChipMultiSelectCombobox("carBrandShift", "Select Shift")}
                             </div>
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Grade</label>
-                                <input type="text" id="carBrandGrade" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                ${createChipMultiSelectCombobox("carBrandGrade", "Select Grade")}
                             </div>
                         </div>
                         <div class="car-brand-modal-grid">
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">CC</label>
-                                <input type="number" id="carBrandCc" min="0" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                ${createChipInput("carBrandCc", "Type CC")}
                             </div>
                             <div>
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Door</label>
-                                <input type="number" id="carBrandDoor" min="0" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Seat</label>
+                                ${createChipInput("carBrandSeat", "Type Seat")}
                             </div>
+                        </div>
+                        <div class="car-brand-modal-grid">
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Door</label>
+                                ${createChipInput("carBrandDoor", "Type Door")}
+                            </div>
+                            <div style="visibility:hidden;"></div>
+                        </div>
+                        <div class="car-brand-modal-grid">
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Rank</label>
+                                ${createChipInput("carBrandRank", "Type Rank")}
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Color</label>
+                                ${createChipInput("carBrandColor", "Type Color")}
+                            </div>
+                        </div>
+                        <div class="car-brand-modal-grid">
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Drive Type (LHD/RHD)</label>
+                                ${createChipMultiSelectCombobox("carBrandDriveType", "Select Drive Type")}
+                            </div>
+                            <div style="visibility:hidden;"></div>
                         </div>
                         <div class="car-brand-modal-actions">
                             <button type="button" id="cancelCarBrandBtn" class="car-brand-modal-btn car-brand-modal-btn-cancel">Cancel</button>
@@ -3360,10 +3992,28 @@ fun showCarBrandModal(mappingId: Long?) {
     """
     
     document.body?.insertAdjacentHTML("beforeend", modalHtml)
+    ensureSupplierChipJs()
+    populateCarBrandModalComboboxes()
+
+    if (!isEdit && !isDuplicate) {
+        js("window.__carBrandRowData = null")
+    }
     
-    // Load data if editing
-    if (isEdit && mappingId != null) {
-        loadCarBrandDataForEdit(mappingId)
+    // Load data if editing or duplicating (grouped row prefill matches table; else fetch single mapping)
+    if (isDuplicate && duplicateFromId != null) {
+        val hasGrouped = js("window.__carBrandRowData != null") as Boolean
+        if (hasGrouped) {
+            tryPrefillCarBrandModalFromGroupedRow()
+        } else {
+            loadCarBrandDataForEdit(duplicateFromId)
+        }
+    } else if (isEdit && mappingId != null) {
+        val hasGrouped = js("window.__carBrandRowData != null") as Boolean
+        if (hasGrouped) {
+            tryPrefillCarBrandModalFromGroupedRow()
+        } else {
+            loadCarBrandDataForEdit(mappingId)
+        }
     }
     
     // Event listeners
@@ -3386,7 +4036,9 @@ fun showCarBrandModal(mappingId: Long?) {
     
     document.getElementById("carBrandForm")?.addEventListener("submit", { event: Event ->
         event.preventDefault()
-        saveCarBrand(mappingId)
+        // Duplicate always creates a new row (POST); edit updates existing (PUT)
+        val saveId = if (isDuplicate) null else mappingId
+        saveCarBrand(saveId)
     })
     
     // Close on background click
@@ -3411,19 +4063,20 @@ fun loadCarBrandDataForEdit(mappingId: Long) {
             val success = result.success as? Boolean ?: false
             if (success) {
                 val data = result.data ?: js("{}")
-                (document.getElementById("carBrandBrand") as? HTMLInputElement)?.value = (data.carBrand ?: "").toString()
                 (document.getElementById("carBrandChassis") as? HTMLInputElement)?.value = (data.chassis ?: "").toString()
-                (document.getElementById("carBrandCarName") as? HTMLInputElement)?.value = (data.carName ?: "").toString()
-                val fuelVal = (data.fuel ?: "").toString()
-                (document.getElementById("carBrandFuelInput") as? HTMLInputElement)?.value = fuelVal
-                (document.getElementById("carBrandFuel") as? HTMLSelectElement)?.value = fuelVal
-                (document.getElementById("carBrandWd") as? HTMLInputElement)?.value = (data.wd ?: "").toString()
-                val shiftVal = (data.shift ?: "").toString()
-                (document.getElementById("carBrandShiftInput") as? HTMLInputElement)?.value = shiftVal
-                (document.getElementById("carBrandShift") as? HTMLSelectElement)?.value = shiftVal
-                (document.getElementById("carBrandCc") as? HTMLInputElement)?.value = (data.cc ?: "").toString()
-                (document.getElementById("carBrandDoor") as? HTMLInputElement)?.value = (data.door ?: "").toString()
-                (document.getElementById("carBrandGrade") as? HTMLInputElement)?.value = (data.grade ?: "").toString()
+                setChipFieldValue("carBrandBrand", (data.carBrand ?: "").toString())
+                setChipFieldValue("carBrandCarName", (data.carName ?: "").toString())
+                setChipFieldValue("carBrandFuel", (data.fuel ?: "").toString())
+                setChipFieldValue("carBrandWd", (data.wd ?: "").toString())
+                setChipFieldValue("carBrandShift", (data.shift ?: "").toString())
+                setChipFieldValue("carBrandCc", (data.cc ?: "").toString())
+                setChipFieldValue("carBrandSeat", (data.seat ?: "").toString())
+                setChipFieldValue("carBrandDoor", (data.door ?: "").toString())
+                setChipFieldValue("carBrandGrade", (data.grade ?: "").toString())
+                setChipFieldValue("carBrandVehicleType", (data.vehicleType ?: "").toString())
+                setChipFieldValue("carBrandRank", (data.rank ?: "").toString())
+                setChipFieldValue("carBrandColor", (data.color ?: "").toString())
+                setChipFieldValue("carBrandDriveType", (data.driveType ?: "").toString())
             } else {
                 throw js("Error(result.message || 'Failed to load car brand data')")
             }
@@ -3435,16 +4088,22 @@ fun loadCarBrandDataForEdit(mappingId: Long) {
 }
 
 fun saveCarBrand(mappingId: Long?) {
-    val carBrand = (document.getElementById("carBrandBrand") as? HTMLInputElement)?.value?.trim() ?: ""
+    val chassis = (document.getElementById("carBrandChassis") as? HTMLInputElement)?.value?.trim() ?: ""
+    val carBrand = getChipFieldValue("carBrandBrand")
+
+    if (chassis.isEmpty()) {
+        showMessage("Chassis is required", "error")
+        return
+    }
     
     if (carBrand.isEmpty()) {
         showMessage("Car Brand is required", "error")
         return
     }
     
-    val fuel = (document.getElementById("carBrandFuelInput") as? HTMLInputElement)?.value?.trim() ?: ""
-    val shift = (document.getElementById("carBrandShiftInput") as? HTMLInputElement)?.value?.trim() ?: ""
-    val grade = (document.getElementById("carBrandGrade") as? HTMLInputElement)?.value?.trim() ?: ""
+    val fuel = getChipFieldValue("carBrandFuel")
+    val shift = getChipFieldValue("carBrandShift")
+    val grade = getChipFieldValue("carBrandGrade")
     
     val saveButton = document.getElementById("saveCarBrandBtn") as? HTMLButtonElement
     saveButton?.disabled = true
@@ -3498,23 +4157,35 @@ fun validateCarBrandMasterFields(
             
             val missingFields = mutableListOf<Pair<String, String>>()
             
-            // Check car brand (required)
-            if (carBrand.isNotEmpty() && !carBrandList.any { it.equals(carBrand, ignoreCase = true) }) {
+            // Check car brand chips (required)
+            val carBrandTokens = splitDistinctTokens(carBrand)
+            if (carBrandTokens.isNotEmpty() && carBrandTokens.any { token ->
+                    !carBrandList.any { it.equals(token, ignoreCase = true) }
+                }) {
                 missingFields.add(Pair("Car Brand", "Car Brands"))
             }
             
-            // Check fuel (optional, only validate if provided)
-            if (fuel.isNotEmpty() && !fuelList.any { it.equals(fuel, ignoreCase = true) }) {
+            // Check fuel chips (optional, only validate if provided)
+            val fuelTokens = splitDistinctTokens(fuel)
+            if (fuelTokens.any { token ->
+                    !fuelList.any { it.equals(token, ignoreCase = true) }
+                }) {
                 missingFields.add(Pair("Fuel", "Fuel"))
             }
             
-            // Check grade (optional, only validate if provided)
-            if (grade.isNotEmpty() && !gradeList.any { it.equals(grade, ignoreCase = true) }) {
+            // Check grade chips (optional, only validate if provided)
+            val gradeTokens = splitDistinctTokens(grade)
+            if (gradeTokens.any { token ->
+                    !gradeList.any { it.equals(token, ignoreCase = true) }
+                }) {
                 missingFields.add(Pair("Grade", "Car Grade"))
             }
             
-            // Check shift (optional, only validate if provided)
-            if (shift.isNotEmpty() && !shiftList.any { it.equals(shift, ignoreCase = true) }) {
+            // Check shift chips (optional, only validate if provided)
+            val shiftTokens = splitDistinctTokens(shift)
+            if (shiftTokens.any { token ->
+                    !shiftList.any { it.equals(token, ignoreCase = true) }
+                }) {
                 missingFields.add(Pair("Shift", "Car Shift"))
             }
             
@@ -3562,18 +4233,23 @@ fun showCarBrandMasterFieldsErrorModal(missingFields: List<Pair<String, String>>
 }
 
 fun performCarBrandSave(mappingId: Long?) {
-    val carBrand = (document.getElementById("carBrandBrand") as? HTMLInputElement)?.value?.trim() ?: ""
+    val carBrand = parseFirstToken(getChipFieldValue("carBrandBrand"))
     
     val carBrandData = js("{}")
     carBrandData.carBrand = carBrand
     carBrandData.chassis = (document.getElementById("carBrandChassis") as? HTMLInputElement)?.value?.trim() ?: null
-    carBrandData.carName = (document.getElementById("carBrandCarName") as? HTMLInputElement)?.value?.trim() ?: null
-    carBrandData.fuel = (document.getElementById("carBrandFuelInput") as? HTMLInputElement)?.value?.trim()?.takeIf { it.isNotEmpty() } ?: null
-    carBrandData.wd = (document.getElementById("carBrandWd") as? HTMLInputElement)?.value?.trim()?.takeIf { it.isNotEmpty() } ?: null
-    carBrandData.shift = (document.getElementById("carBrandShiftInput") as? HTMLInputElement)?.value?.trim()?.takeIf { it.isNotEmpty() } ?: null
-    carBrandData.grade = (document.getElementById("carBrandGrade") as? HTMLInputElement)?.value?.trim() ?: null
-    carBrandData.cc = (document.getElementById("carBrandCc") as? HTMLInputElement)?.value?.toIntOrNull()
-    carBrandData.door = (document.getElementById("carBrandDoor") as? HTMLInputElement)?.value?.toIntOrNull()
+    carBrandData.carName = getChipFieldValue("carBrandCarName").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.fuel = getChipFieldValue("carBrandFuel").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.wd = getChipFieldValue("carBrandWd").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.shift = getChipFieldValue("carBrandShift").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.grade = getChipFieldValue("carBrandGrade").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.cc = parseIntFirstToken(getChipFieldValue("carBrandCc"))
+    carBrandData.seat = parseIntFirstToken(getChipFieldValue("carBrandSeat"))
+    carBrandData.door = parseIntFirstToken(getChipFieldValue("carBrandDoor"))
+    carBrandData.vehicleType = getChipFieldValue("carBrandVehicleType").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.rank = getChipFieldValue("carBrandRank").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.color = getChipFieldValue("carBrandColor").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.driveType = getChipFieldValue("carBrandDriveType").takeIf { it.isNotEmpty() } ?: null
     
     val saveButton = document.getElementById("saveCarBrandBtn") as? HTMLButtonElement
     saveButton?.disabled = true
@@ -3720,6 +4396,13 @@ fun editMasterCarBrand(id: dynamic) {
     val mappingId = (id as? Number)?.toLong() ?: id.toString().toLongOrNull()
     if (mappingId != null) {
         showCarBrandModal(mappingId)
+    }
+}
+
+fun duplicateMasterCarBrand(id: dynamic) {
+    val sourceId = (id as? Number)?.toLong() ?: id.toString().toLongOrNull()
+    if (sourceId != null) {
+        showCarBrandModal(mappingId = null, duplicateFromId = sourceId)
     }
 }
 
@@ -4145,7 +4828,7 @@ fun showEditCountryModal(originalName: String) {
     })
 }
 
-/** Supplier page: shows Supplier Map button and a supplier master list (from master_menu). */
+/** Supplier page: shows a supplier master list (from master_menu). */
 fun showSupplierPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -4158,10 +4841,6 @@ fun showSupplierPage() {
                         <span>Add Supplier</span>
                     </button>
                 </div>
-            </div>
-
-            <div style="margin-bottom: 16px;">
-                <button id="supplierMapBtn" class="client-btn client-btn-primary" style="padding: 10px 20px; font-size: 14px;">Supplier Map</button>
             </div>
 
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -4180,10 +4859,6 @@ fun showSupplierPage() {
         </div>
     """
     loadSupplierMasterList()
-
-    document.getElementById("supplierMapBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/supplier-map"
-    })
 
     document.getElementById("supplierMasterFilter")?.addEventListener("input", { _: Event ->
         loadSupplierMasterList()
@@ -4519,7 +5194,6 @@ fun showSupplierMapPage() {
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Supplier Map</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="backToSupplierPageBtn" style="padding: 8px 16px; background-color: #6b7280; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">Back to Supplier Page</button>
                     <button id="supplierColumnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
@@ -4563,10 +5237,6 @@ fun showSupplierMapPage() {
     loadMasterSuppliers()
     
     // Event listeners
-    document.getElementById("backToSupplierPageBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/supplier"
-    })
-    
     document.getElementById("addSupplierBtn")?.addEventListener("click", { _: Event ->
         showAddSupplierModal()
     })
@@ -4720,14 +5390,17 @@ fun loadMasterSuppliersWithCards() {
             } else {
                 sortedPrices
             }
-            
-            // Store all filtered prices for pagination
-            allSuppliers = filteredPrices
+
+            // View-only grouping by Supplier Name (auctionHouse)
+            val groupedPrices = groupSupplierPricesForView(filteredPrices)
+
+            // Store all grouped prices for pagination
+            allSuppliers = groupedPrices
             if (supplierFilter.isNotEmpty()) {
                 suppliersCurrentPage = 1
             }
-            
-            displaySuppliersAsCards(filteredPrices, supplierFilter)
+
+            displaySuppliersAsCards(groupedPrices, supplierFilter)
         }
         .catch { error: dynamic ->
             Logger.error("Error loading suppliers: ${error.toString()}")
@@ -4770,8 +5443,7 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
         "stockLocation" to "Stock Location",
         "rixoCompany" to "Rixo Company",
         "venueId" to "Venue ID",
-        "rixoPrice" to "Rixo Price",
-        "typeOfVehicle" to "Vehicle type"
+        "pol" to "POL"
     )
     
     val cardsHTML = StringBuilder()
@@ -4783,8 +5455,9 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
         val stockLocation = (price.stockLocation ?: "").toString()
         val rixoCompany = (price.rixoCompany ?: "").toString()
         val venueId = (price.venueId ?: "").toString()
-        val rixoPrice = (price.rixoPrice ?: "").toString()
-        val typeOfVehicle = (price.shipmentSize ?: "").toString()
+        val pol = (price.pol ?: "").toString()
+
+        val rowDataJs = "window.__supplierRowData={supplierName:'${escapeJsString(supplierName)}',stockLocation:'${escapeJsString(stockLocation)}',rixoCompany:'${escapeJsString(rixoCompany)}',venueId:'${escapeJsString(venueId)}',pol:'${escapeJsString(pol)}'};"
         
         // Build card content based on selected columns
         val cardFields = StringBuilder()
@@ -4795,8 +5468,7 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
                 "stockLocation" -> stockLocation
                 "rixoCompany" -> rixoCompany
                 "venueId" -> venueId
-                "rixoPrice" -> rixoPrice
-                "typeOfVehicle" -> typeOfVehicle
+                "pol" -> pol
                 else -> ""
             }
             
@@ -4813,12 +5485,19 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
         cardsHTML.append("""
             <div class="supplier-card">
                 <div class="card-header">
-                    <button class="card-edit-btn" onclick="window.editMasterSupplier($id)" aria-label="Edit" title="Edit">
+                    <div style="display:flex; gap:6px; align-items:center;">
+                    <button class="card-edit-btn" onclick="$rowDataJs window.editMasterSupplier($id)" aria-label="Edit" title="Edit">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                             <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
                         </svg>
                     </button>
+                        <button class="card-edit-btn" onclick="$rowDataJs window.duplicateMasterSupplier($id)" aria-label="Duplicate" title="Duplicate" style="background-color:#3b82f6;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
+                            </svg>
+                        </button>
+                    </div>
                     <div class="card-title">${if (supplierName.isNotEmpty()) supplierName else "Supplier #$id"}</div>
                 </div>
                 <div class="card-body">
@@ -4926,14 +5605,17 @@ fun loadMasterSuppliersWithTable() {
             } else {
                 sortedPrices
             }
-            
-            // Store all filtered prices for pagination
-            allSuppliers = filteredPrices
+
+            // View-only grouping by Supplier Name (auctionHouse)
+            val groupedPrices = groupSupplierPricesForView(filteredPrices)
+
+            // Store all grouped prices for pagination
+            allSuppliers = groupedPrices
             if (supplierFilter.isNotEmpty()) {
                 suppliersCurrentPage = 1 // Reset to first page when filter changes
             }
-            
-            if (filteredPrices.isEmpty()) {
+
+            if (groupedPrices.isEmpty()) {
                 val message = if (supplierFilter.isNotEmpty()) {
                     "No supplier data found for: $supplierFilter"
                 } else {
@@ -4949,10 +5631,10 @@ fun loadMasterSuppliersWithTable() {
             }
             
             // Calculate pagination
-            val totalPages = kotlin.math.ceil(filteredPrices.size.toDouble() / suppliersItemsPerPage).toInt()
+            val totalPages = kotlin.math.ceil(groupedPrices.size.toDouble() / suppliersItemsPerPage).toInt()
             val startIndex = (suppliersCurrentPage - 1) * suppliersItemsPerPage
-            val endIndex = kotlin.math.min(startIndex + suppliersItemsPerPage, filteredPrices.size)
-            val paginatedPrices = filteredPrices.subList(startIndex, endIndex)
+            val endIndex = kotlin.math.min(startIndex + suppliersItemsPerPage, groupedPrices.size)
+            val paginatedPrices = groupedPrices.subList(startIndex, endIndex)
             
             // Get selected columns
             val selectedColumns = getSelectedSupplierColumns()
@@ -4961,8 +5643,7 @@ fun loadMasterSuppliersWithTable() {
                 "stockLocation" to "Stock Location",
                 "rixoCompany" to "Rixo Company",
                 "venueId" to "Venue ID",
-                "rixoPrice" to "Rixo Price",
-                "typeOfVehicle" to "Vehicle type"
+                "pol" to "POL"
             )
             
             var html = """
@@ -4991,19 +5672,28 @@ fun loadMasterSuppliersWithTable() {
                 val stockLocation = (price.stockLocation ?: "").toString()
                 val rixoCompany = (price.rixoCompany ?: "").toString()
                 val venueId = (price.venueId ?: "").toString()
-                val rixoPrice = (price.rixoPrice ?: "").toString()
-                val typeOfVehicle = (price.shipmentSize ?: "").toString()
+                val pol = (price.pol ?: "").toString()
+
+                val rowDataJs = "window.__supplierRowData={supplierName:'${escapeJsString(supplierName)}',stockLocation:'${escapeJsString(stockLocation)}',rixoCompany:'${escapeJsString(rixoCompany)}',venueId:'${escapeJsString(venueId)}',pol:'${escapeJsString(pol)}'};"
                 
                 html += """
                     <tr style="border-bottom: 1px solid #e5e7eb; transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#f9fafb'" onmouseout="this.style.backgroundColor='white'">
                         <td style="padding: 8px 12px;">
-                            <button onclick="window.editMasterSupplier($id)" aria-label="Edit" title="Edit"
+                            <div style="display:flex; gap:6px; align-items:center;">
+                            <button onclick="$rowDataJs window.editMasterSupplier($id)" aria-label="Edit" title="Edit"
                                     style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(76,201,255,0.30);">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                                     <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
                                 </svg>
                             </button>
+                                <button onclick="$rowDataJs window.duplicateMasterSupplier($id)" aria-label="Duplicate" title="Duplicate"
+                                        style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#3b82f6; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(59,130,246,0.30);">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </td>
                 """
                 
@@ -5014,12 +5704,11 @@ fun loadMasterSuppliersWithTable() {
                         "stockLocation" -> stockLocation.toString()
                         "rixoCompany" -> rixoCompany.toString()
                         "venueId" -> venueId.toString()
-                        "rixoPrice" -> rixoPrice.toString()
-                        "typeOfVehicle" -> typeOfVehicle.toString()
+                        "pol" -> pol.toString()
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
-                        "venueId", "rixoPrice", "typeOfVehicle" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
+                        "venueId", "pol" -> "padding: 14px 16px; color: #6b7280; font-size: 14px;"
                         "supplierName" -> "padding: 14px 16px; color: #111827; font-size: 14px; font-weight: 500;"
                         else -> "padding: 14px 16px; color: #111827; font-size: 14px;"
                     }
@@ -5040,7 +5729,7 @@ fun loadMasterSuppliersWithTable() {
                 html += """
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
                         <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
-                            Showing ${startIndex + 1} to $endIndex of ${filteredPrices.size} supplier${if (filteredPrices.size != 1) "s" else ""}${if (supplierFilter.isNotEmpty()) " (filtered)" else ""}
+                            Showing ${startIndex + 1} to $endIndex of ${groupedPrices.size} supplier${if (groupedPrices.size != 1) "s" else ""}${if (supplierFilter.isNotEmpty()) " (filtered)" else ""}
                         </div>
                         <div class="supplier-pagination-controls">
                             <button id="suppliersPrevPage" class="supplier-pagination-btn" ${if (suppliersCurrentPage == 1) "disabled" else ""}>
@@ -5056,7 +5745,7 @@ fun loadMasterSuppliersWithTable() {
             } else {
                 html += """
                     <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-                        Total: ${filteredPrices.size} supplier${if (filteredPrices.size != 1) "s" else ""}${if (supplierFilter.isNotEmpty()) " (filtered)" else ""}
+                        Total: ${groupedPrices.size} supplier${if (groupedPrices.size != 1) "s" else ""}${if (supplierFilter.isNotEmpty()) " (filtered)" else ""}
                     </div>
                 """
             }
@@ -5142,8 +5831,7 @@ fun showSupplierColumnFilterModal() {
         "stockLocation" to "Stock Location",
         "rixoCompany" to "Rixo Company",
         "venueId" to "Venue ID",
-        "rixoPrice" to "Rixo Price",
-        "typeOfVehicle" to "Vehicle type"
+        "pol" to "POL"
     )
     
     val checkboxesDiv = document.getElementById("supplierColumnCheckboxes")
@@ -5281,37 +5969,32 @@ fun showSupplierModal(priceId: Long?) {
                     <form id="supplierForm">
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Supplier Name <span style="color: #ef4444;">*</span></label>
-                            <input type="text" id="supplierAuctionHouse" required style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                            ${createEditableCombobox("supplierAuctionHouse", "Select Supplier Name", required = true)}
                         </div>
                         <div class="supplier-modal-grid">
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Stock Location</label>
-                                <input type="text" id="supplierStockLocation" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                ${createChipMultiSelectCombobox("supplierStockLocation", "Select Stock Location")}
                             </div>
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Rixo Company</label>
-                                <input type="text" id="supplierRixoCompany" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                ${createChipMultiSelectCombobox("supplierRixoCompany", "Select Rixo Company")}
                             </div>
                         </div>
                         <div class="supplier-modal-grid">
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Venue ID</label>
-                                <input type="text" id="supplierVenueId" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                ${createChipMultiSelectCombobox("supplierVenueId", "Select Venue ID")}
                             </div>
                             <div>
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Rixo Price</label>
-                                <input type="text" id="supplierRixoPrice" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">POL</label>
+                                ${createChipMultiSelectCombobox("supplierPol", "Select POL")}
                             </div>
-                        </div>
-                        <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Vehicle type</label>
-                            <input type="text" id="supplierTypeOfVehicle" placeholder="e.g., CAR, TRUCK" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
                         </div>
                         <div class="supplier-modal-actions">
                             <button type="button" id="cancelSupplierBtn" class="supplier-modal-btn supplier-modal-btn-cancel">Cancel</button>
                             ${if (isEdit) """
                             <button type="button" id="deleteSupplierBtn" class="supplier-modal-btn supplier-modal-btn-delete">Delete</button>
-                            <button type="button" id="duplicateSupplierBtn" class="supplier-modal-btn supplier-modal-btn-duplicate">Duplicate</button>
                             """ else ""}
                             <button type="submit" id="saveSupplierBtn" class="supplier-modal-btn supplier-modal-btn-save">${if (isEdit) "Update" else "Save"}</button>
                         </div>
@@ -5322,10 +6005,22 @@ fun showSupplierModal(priceId: Long?) {
     """
     
     document.body?.insertAdjacentHTML("beforeend", modalHtml)
+
+    ensureSupplierChipJs()
+    enforceSupplierModalDropdownOnly(prefix = "supplier")
+
+    // Populate modal dropdowns from master_menu (view-only; allows typing too)
+    populateSupplierMapModalComboboxes(isDuplicate = false)
     
     // Load data if editing
     if (isEdit && priceId != null) {
-        loadSupplierDataForEdit(priceId)
+        // If opened from grouped table row, prefill from grouped values (includes ';' lists)
+        val hasGrouped = js("window.__supplierRowData != null") as Boolean
+        if (hasGrouped) {
+            tryPrefillSupplierModalFromGroupedRow(prefix = "supplier")
+        } else {
+            loadSupplierDataForEdit(priceId)
+        }
     }
     
     // Event listeners
@@ -5344,10 +6039,6 @@ fun showSupplierModal(priceId: Long?) {
                 deleteMasterSupplier(priceId)
             }
         })
-        // Duplicate button (only shown in edit mode) - create new supplier with same data
-        document.getElementById("duplicateSupplierBtn")?.addEventListener("click", { _: Event ->
-            saveSupplier(null, isDuplicate = true)
-        })
     }
     
     document.getElementById("supplierForm")?.addEventListener("submit", { event: Event ->
@@ -5358,6 +6049,174 @@ fun showSupplierModal(priceId: Long?) {
 
 fun closeSupplierModal() {
     document.getElementById("supplierModal")?.remove()
+}
+
+fun closeDuplicateSupplierModal() {
+    document.getElementById("duplicateSupplierModal")?.remove()
+}
+
+fun showDuplicateSupplierModal(priceId: Long) {
+    val modalHtml = """
+        <div id="duplicateSupplierModal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;">
+            <div style="background: white; border-radius: 12px; width: 90%; max-width: 700px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);">
+                <div style="padding: 24px; border-bottom: 1px solid #e5e7eb;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h2 style="margin: 0; font-size: 24px; font-weight: 700; color: #111827;">Duplicate Supplier</h2>
+                        <button id="closeDuplicateSupplierModal" style="background: none; border: none; font-size: 24px; color: #6b7280; cursor: pointer; padding: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 6px;">×</button>
+                    </div>
+                </div>
+                <div style="padding: 24px;">
+                    <form id="duplicateSupplierForm">
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Supplier Name <span style="color: #ef4444;">*</span></label>
+                            ${createEditableCombobox("dupSupplierAuctionHouse", "Select Supplier Name", required = true)}
+                        </div>
+                        <div class="supplier-modal-grid">
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Stock Location</label>
+                                ${createChipMultiSelectCombobox("dupSupplierStockLocation", "Select Stock Location")}
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Rixo Company</label>
+                                ${createChipMultiSelectCombobox("dupSupplierRixoCompany", "Select Rixo Company")}
+                            </div>
+                        </div>
+                        <div class="supplier-modal-grid">
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Venue ID</label>
+                                ${createChipMultiSelectCombobox("dupSupplierVenueId", "Select Venue ID")}
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">POL</label>
+                                ${createChipMultiSelectCombobox("dupSupplierPol", "Select POL")}
+                            </div>
+                        </div>
+                        <div class="supplier-modal-actions">
+                            <button type="button" id="cancelDuplicateSupplierBtn" class="supplier-modal-btn supplier-modal-btn-cancel">Cancel</button>
+                            <button type="submit" id="saveDuplicateSupplierBtn" class="supplier-modal-btn supplier-modal-btn-save">Save</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.insertAdjacentHTML("beforeend", modalHtml)
+
+    ensureSupplierChipJs()
+    enforceSupplierModalDropdownOnly(prefix = "dupSupplier")
+
+    // Populate modal dropdowns from master_menu
+    populateSupplierMapModalComboboxes(isDuplicate = true)
+
+    // Prefill from grouped row data if available; otherwise load by id
+    val hasGrouped = js("window.__supplierRowData != null") as Boolean
+    if (hasGrouped) {
+        tryPrefillSupplierModalFromGroupedRow(prefix = "dupSupplier")
+    } else {
+        // Load row data and fill form
+        window.fetch(apiUrl("rixo/prices"))
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Failed to load supplier data')")
+            }
+            .then { result: dynamic ->
+                val success = result.success as? Boolean ?: false
+                if (!success) {
+                    val msg = (result.message as? String) ?: "Failed to load supplier data"
+                    throw Exception(msg)
+                }
+                val prices = result.data ?: js("[]")
+                val pricesArray = js("Array.isArray(prices) ? prices : []") as Array<dynamic>
+                val price = pricesArray.find { it.id == priceId }
+                if (price != null) {
+                    setEditableComboboxValue("dupSupplierAuctionHouse", (price.auctionHouse ?: "").toString())
+                    setChipFieldValue("dupSupplierStockLocation", (price.stockLocation ?: "").toString())
+                    setChipFieldValue("dupSupplierRixoCompany", (price.rixoCompany ?: "").toString())
+                    setChipFieldValue("dupSupplierVenueId", (price.venueId ?: "").toString())
+                    setChipFieldValue("dupSupplierPol", (price.pol ?: "").toString())
+                } else {
+                    closeDuplicateSupplierModal()
+                    showMessage("Supplier not found", "error")
+                }
+            }
+            .catch { error: dynamic ->
+                closeDuplicateSupplierModal()
+                Logger.error("Error loading supplier for duplicate: ${error.toString()}")
+                showMessage("Failed to load supplier data", "error")
+            }
+    }
+
+    document.getElementById("closeDuplicateSupplierModal")?.addEventListener("click", { _: Event ->
+        closeDuplicateSupplierModal()
+    })
+    document.getElementById("cancelDuplicateSupplierBtn")?.addEventListener("click", { _: Event ->
+        closeDuplicateSupplierModal()
+    })
+    document.getElementById("duplicateSupplierForm")?.addEventListener("submit", { event: Event ->
+        event.preventDefault()
+        saveDuplicateSupplier()
+    })
+}
+
+fun saveDuplicateSupplier() {
+    val auctionHouse = getEditableComboboxValue("dupSupplierAuctionHouse")
+    if (auctionHouse.isEmpty()) {
+        showMessage("Supplier Name is required", "error")
+        return
+    }
+    val stockLocation = getChipFieldValue("dupSupplierStockLocation")
+    val rixoCompany = getChipFieldValue("dupSupplierRixoCompany")
+    val venueId = getChipFieldValue("dupSupplierVenueId")
+    val pol = getChipFieldValue("dupSupplierPol")
+    validateSupplierMasterFields(auctionHouse, stockLocation, rixoCompany, venueId, pol) { missingFields ->
+        if (missingFields.isNotEmpty()) {
+            closeDuplicateSupplierModal()
+            showSupplierMasterFieldsErrorModal(missingFields)
+        } else {
+            performDuplicateSupplierSave()
+        }
+    }
+}
+
+fun performDuplicateSupplierSave() {
+    val auctionHouse = getEditableComboboxValue("dupSupplierAuctionHouse")
+    val stockLocation = getChipFieldValue("dupSupplierStockLocation")
+    val rixoCompany = getChipFieldValue("dupSupplierRixoCompany")
+    val venueId = getChipFieldValue("dupSupplierVenueId")
+    val pol = getChipFieldValue("dupSupplierPol")
+    val requestData = js("{}")
+    requestData.auctionHouse = auctionHouse
+    requestData.stockLocation = stockLocation
+    requestData.rixoCompany = rixoCompany
+    requestData.venueId = venueId
+    requestData.pol = pol
+    window.fetch(apiUrl("rixo/mappings/add"), js("""
+        {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestData)
+        }
+    """))
+        .then { response: dynamic ->
+            response.json().then { result: dynamic ->
+                if (response.ok && (result.success as? Boolean == true)) {
+                    closeDuplicateSupplierModal()
+                    loadMasterSuppliers()
+                    try {
+                        val timestamp = js("Date.now()").toString()
+                        safeLocalStorageSet("supplierUpdated", timestamp)
+                        window.dispatchEvent(js("new CustomEvent('supplierUpdated', { detail: { timestamp: timestamp } })"))
+                    } catch (e: dynamic) {}
+                    showMessage("Supplier duplicated successfully", "success")
+                } else {
+                    val msg = result.message as? String ?: "Failed to save"
+                    showMessage("Error: $msg", "error")
+                }
+            }
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error saving duplicate supplier: ${error.toString()}")
+            showMessage("Failed to save duplicate supplier", "error")
+        }
 }
 
 fun loadSupplierDataForEdit(priceId: Long) {
@@ -5377,12 +6236,11 @@ fun loadSupplierDataForEdit(priceId: Long) {
             val price = pricesArray.find { it.id == priceId }
             
             if (price != null) {
-                (document.getElementById("supplierAuctionHouse") as? HTMLInputElement)?.value = (price.auctionHouse ?: "").toString()
-                (document.getElementById("supplierStockLocation") as? HTMLInputElement)?.value = (price.stockLocation ?: "").toString()
-                (document.getElementById("supplierRixoCompany") as? HTMLInputElement)?.value = (price.rixoCompany ?: "").toString()
-                (document.getElementById("supplierVenueId") as? HTMLInputElement)?.value = (price.venueId ?: "").toString()
-                (document.getElementById("supplierRixoPrice") as? HTMLInputElement)?.value = (price.rixoPrice ?: "").toString()
-                (document.getElementById("supplierTypeOfVehicle") as? HTMLInputElement)?.value = (price.shipmentSize ?: "").toString()
+                setEditableComboboxValue("supplierAuctionHouse", (price.auctionHouse ?: "").toString())
+                setChipFieldValue("supplierStockLocation", (price.stockLocation ?: "").toString())
+                setChipFieldValue("supplierRixoCompany", (price.rixoCompany ?: "").toString())
+                setChipFieldValue("supplierVenueId", (price.venueId ?: "").toString())
+                setChipFieldValue("supplierPol", (price.pol ?: "").toString())
             } else {
                 throw js("Error('Supplier not found')")
             }
@@ -5394,19 +6252,20 @@ fun loadSupplierDataForEdit(priceId: Long) {
 }
 
 fun saveSupplier(priceId: Long?, isDuplicate: Boolean = false) {
-    val auctionHouse = (document.getElementById("supplierAuctionHouse") as? HTMLInputElement)?.value?.trim() ?: ""
+    val auctionHouse = getEditableComboboxValue("supplierAuctionHouse")
     
     if (auctionHouse.isEmpty()) {
         showMessage("Supplier Name is required", "error")
         return
     }
     
-    val stockLocation = (document.getElementById("supplierStockLocation") as? HTMLInputElement)?.value?.trim() ?: ""
-    val rixoCompany = (document.getElementById("supplierRixoCompany") as? HTMLInputElement)?.value?.trim() ?: ""
-    val venueId = (document.getElementById("supplierVenueId") as? HTMLInputElement)?.value?.trim() ?: ""
+    val stockLocation = getChipFieldValue("supplierStockLocation")
+    val rixoCompany = getChipFieldValue("supplierRixoCompany")
+    val venueId = getChipFieldValue("supplierVenueId")
+    val pol = getChipFieldValue("supplierPol")
     
     // Validate all fields against master lists before saving
-    validateSupplierMasterFields(auctionHouse, stockLocation, rixoCompany, venueId) { missingFields ->
+    validateSupplierMasterFields(auctionHouse, stockLocation, rixoCompany, venueId, pol) { missingFields ->
         if (missingFields.isNotEmpty()) {
             // Close supplier modal and show error modal
             closeSupplierModal()
@@ -5423,6 +6282,7 @@ fun validateSupplierMasterFields(
     stockLocation: String,
     rixoCompany: String,
     venueId: String,
+    pol: String,
     callback: (List<Pair<String, String>>) -> Unit
 ) {
     // Fetch all master lists in parallel
@@ -5431,11 +6291,12 @@ fun validateSupplierMasterFields(
     masterListPromises.push(window.fetch(apiUrl("master-menu/stock_location")))
     masterListPromises.push(window.fetch(apiUrl("master-menu/rixo_company")))
     masterListPromises.push(window.fetch(apiUrl("master-menu/venue_id")))
+    masterListPromises.push(window.fetch(apiUrl("master-menu/pol")))
     
     js("Promise.all")(masterListPromises)
         .then { responses: dynamic ->
             val jsonPromises = js("[]")
-            for (i in 0 until 4) {
+            for (i in 0 until 5) {
                 val resp = responses[i]
                 if (resp.ok) {
                     jsonPromises.push(resp.json())
@@ -5450,8 +6311,18 @@ fun validateSupplierMasterFields(
             val stockLocationList = parseMasterListArray(results[1])
             val rixoCompanyList = parseMasterListArray(results[2])
             val venueIdList = parseMasterListArray(results[3])
+            val polList = parseMasterListArray(results[4])
             
             val missingFields = mutableListOf<Pair<String, String>>()
+
+            fun tokens(value: String): List<String> =
+                value.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+
+            fun allTokensExist(value: String, list: List<String>): Boolean {
+                val t = tokens(value)
+                if (t.isEmpty()) return true
+                return t.all { token -> list.any { it.equals(token, ignoreCase = true) } }
+            }
             
             // Check supplier name (required)
             if (supplierName.isNotEmpty() && !supplierList.any { it.equals(supplierName, ignoreCase = true) }) {
@@ -5459,18 +6330,23 @@ fun validateSupplierMasterFields(
             }
             
             // Check stock location (optional, only validate if provided)
-            if (stockLocation.isNotEmpty() && !stockLocationList.any { it.equals(stockLocation, ignoreCase = true) }) {
+            if (!allTokensExist(stockLocation, stockLocationList)) {
                 missingFields.add(Pair("Stock Location", "Stock Location"))
             }
             
             // Check rixo company (optional, only validate if provided)
-            if (rixoCompany.isNotEmpty() && !rixoCompanyList.any { it.equals(rixoCompany, ignoreCase = true) }) {
+            if (!allTokensExist(rixoCompany, rixoCompanyList)) {
                 missingFields.add(Pair("Rixo Company", "Rixo Company"))
             }
             
             // Check venue ID (optional, only validate if provided)
-            if (venueId.isNotEmpty() && !venueIdList.any { it.equals(venueId, ignoreCase = true) }) {
+            if (!allTokensExist(venueId, venueIdList)) {
                 missingFields.add(Pair("Venue ID", "Venue ID"))
+            }
+
+            // Check POL (optional, only validate if provided)
+            if (!allTokensExist(pol, polList)) {
+                missingFields.add(Pair("POL", "POL"))
             }
             
             callback(missingFields)
@@ -5517,20 +6393,18 @@ fun showSupplierMasterFieldsErrorModal(missingFields: List<Pair<String, String>>
 }
 
 fun performSupplierSave(priceId: Long?, isDuplicate: Boolean = false) {
-    val auctionHouse = (document.getElementById("supplierAuctionHouse") as? HTMLInputElement)?.value?.trim() ?: ""
-    val stockLocation = (document.getElementById("supplierStockLocation") as? HTMLInputElement)?.value?.trim() ?: ""
-    val rixoCompany = (document.getElementById("supplierRixoCompany") as? HTMLInputElement)?.value?.trim() ?: ""
-    val venueId = (document.getElementById("supplierVenueId") as? HTMLInputElement)?.value?.trim() ?: ""
-    val rixoPrice = (document.getElementById("supplierRixoPrice") as? HTMLInputElement)?.value?.trim() ?: ""
-    val typeOfVehicle = (document.getElementById("supplierTypeOfVehicle") as? HTMLInputElement)?.value?.trim() ?: ""
+    val auctionHouse = getEditableComboboxValue("supplierAuctionHouse")
+    val stockLocation = getChipFieldValue("supplierStockLocation")
+    val rixoCompany = getChipFieldValue("supplierRixoCompany")
+    val venueId = getChipFieldValue("supplierVenueId")
+    val pol = getChipFieldValue("supplierPol")
     
     val requestData = js("{}")
     requestData.auctionHouse = auctionHouse
     requestData.stockLocation = stockLocation
     requestData.rixoCompany = rixoCompany
     requestData.venueId = venueId
-    requestData.rixoPrice = rixoPrice
-    requestData.vehicleType = typeOfVehicle
+    requestData.pol = pol
     
     val url = if (priceId != null) {
         apiUrl("rixo/mappings/$priceId")
@@ -5590,6 +6464,32 @@ fun performSupplierSave(priceId: Long?, isDuplicate: Boolean = false) {
 
 fun editMasterSupplier(priceId: Long) {
     showSupplierModal(priceId)
+}
+
+fun duplicateMasterSupplier(priceId: Long) {
+    showDuplicateSupplierModal(priceId)
+}
+
+private fun tryPrefillSupplierModalFromGroupedRow(prefix: String) {
+    // Reads grouped row values that were attached just before opening the modal.
+    // This ensures Edit/Duplicate show ALL semicolon-joined values (same as table view).
+    val rowAny = js("window.__supplierRowData") as Any?
+    if (rowAny == null) return
+    val row = rowAny.asDynamic()
+
+    val supplierName = (row.supplierName ?: "").toString()
+    val stockLocation = (row.stockLocation ?: "").toString()
+    val rixoCompany = (row.rixoCompany ?: "").toString()
+    val venueId = (row.venueId ?: "").toString()
+    val pol = (row.pol ?: "").toString()
+
+    if (supplierName.isNotBlank()) setEditableComboboxValue("${prefix}AuctionHouse", supplierName)
+    setChipFieldValue("${prefix}StockLocation", stockLocation)
+    setChipFieldValue("${prefix}RixoCompany", rixoCompany)
+    setChipFieldValue("${prefix}VenueId", venueId)
+    setChipFieldValue("${prefix}Pol", pol)
+
+    js("window.__supplierRowData = null")
 }
 
 fun deleteMasterSupplier(priceId: Long) {
@@ -7701,6 +8601,94 @@ fun loadMasterTypeOfVehicles() { loadSimpleMaster("master-menu/type_of_vehicle",
 fun showAddTypeOfVehiclesModal() { addSimpleMasterModal("master-menu/type_of_vehicle", "Type of Vehicles", "typeOfVehiclesEditModal", "typeOfVehiclesModalInput", "typeOfVehiclesModalCancelBtn", "typeOfVehiclesModalAddBtn", { typeOfVehiclesCurrentPage = 1; loadMasterTypeOfVehicles() }) }
 fun showEditTypeOfVehiclesModal(originalName: String) { editSimpleMasterModal("master-menu/type_of_vehicle", "Type of Vehicles", originalName, "typeOfVehiclesEditModal", "typeOfVehiclesModalInput", "typeOfVehiclesModalCancelBtn", "typeOfVehiclesModalUpdateBtn", "typeOfVehiclesModalDeleteBtn", { loadMasterTypeOfVehicles() }, { typeOfVehiclesCurrentPage = 1; loadMasterTypeOfVehicles() }) }
 
+fun showDynamicMasterSetPage(fieldName: String) {
+    val normalizedField = fieldName.trim().lowercase()
+    if (normalizedField.isEmpty()) {
+        showMessage("Invalid master set", "error")
+        return
+    }
+    val title = normalizedField
+        .split("_")
+        .filter { it.isNotBlank() }
+        .joinToString(" ") { it.replaceFirstChar { ch -> ch.uppercaseChar() } }
+    val key = normalizedField.replace(Regex("[^a-z0-9]"), "")
+    val listId = "dynamicMasterList$key"
+    val filterId = "dynamicMasterFilter$key"
+    val tableId = "dynamicMasterTable$key"
+    val addBtnId = "dynamicMasterAddBtn$key"
+    val modalId = "dynamicMasterModal$key"
+    val inputId = "dynamicMasterInput$key"
+    val cancelBtnId = "dynamicMasterCancel$key"
+    val addModalBtnId = "dynamicMasterAddConfirm$key"
+    val updateBtnId = "dynamicMasterUpdate$key"
+    val deleteBtnId = "dynamicMasterDelete$key"
+    val prevBtnId = "dynamicMasterPrev$key"
+    val nextBtnId = "dynamicMasterNext$key"
+    val editBtnClass = "dynamic-master-edit-btn-$key"
+    val dataAttr = "data-dynamic-master-$key"
+    val apiPath = "master-menu/$normalizedField"
+
+    fun loadDynamic() {
+        loadSimpleMaster(
+            apiPath = apiPath,
+            filterId = filterId,
+            tableId = tableId,
+            title = title,
+            currentPage = dynamicMasterSetCurrentPage[normalizedField] ?: 1,
+            itemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE,
+            allList = dynamicMasterSetAllValues[normalizedField] ?: emptyList(),
+            setPage = { dynamicMasterSetCurrentPage[normalizedField] = it },
+            setList = { dynamicMasterSetAllValues[normalizedField] = it },
+            editModalFn = { originalName ->
+                editSimpleMasterModal(
+                    apiPath = apiPath,
+                    title = title,
+                    originalName = originalName,
+                    modalId = modalId,
+                    inputId = inputId,
+                    cancelBtnId = cancelBtnId,
+                    updateBtnId = updateBtnId,
+                    deleteBtnId = deleteBtnId,
+                    onUpdateSuccess = { loadDynamic() },
+                    onDeleteSuccess = {
+                        dynamicMasterSetCurrentPage[normalizedField] = 1
+                        loadDynamic()
+                    },
+                )
+            },
+            editBtnClass = editBtnClass,
+            dataAttr = dataAttr,
+            prevBtnId = prevBtnId,
+            nextBtnId = nextBtnId,
+            loadFn = { loadDynamic() },
+        )
+    }
+
+    renderSimpleMasterPage(
+        apiPath = normalizedField,
+        title = title,
+        listId = listId,
+        filterId = filterId,
+        tableId = tableId,
+        addBtnId = addBtnId,
+        loadFn = { loadDynamic() },
+        addModalFn = {
+            addSimpleMasterModal(
+                apiPath = apiPath,
+                title = title,
+                modalId = modalId,
+                inputId = inputId,
+                cancelBtnId = cancelBtnId,
+                addBtnId = addModalBtnId,
+                onSuccess = {
+                    dynamicMasterSetCurrentPage[normalizedField] = 1
+                    loadDynamic()
+                },
+            )
+        },
+    )
+}
+
 private fun renderSimpleMasterPage(apiPath: String, title: String, listId: String, filterId: String, tableId: String, addBtnId: String, loadFn: () -> Unit, addModalFn: () -> Unit) {
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -7733,23 +8721,32 @@ private fun loadSimpleMaster(apiPath: String, filterId: String, tableId: String,
                 (0 until a.size).map { (a[it]?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.distinct().reversed()
             } else emptyList()
             val filtered = if (searchFilter.isNotEmpty()) list.filter { it.uppercase().contains(searchFilter) } else list
-            setList(filtered)
+            val sortOrder = dynamicMasterSetSortOrder[apiPath] ?: "desc"
+            val sorted = if (sortOrder == "asc") filtered.sortedBy { it.lowercase() } else filtered.sortedByDescending { it.lowercase() }
+            setList(sorted)
             if (searchFilter.isNotEmpty()) setPage(1)
             val page = if (searchFilter.isNotEmpty()) 1 else currentPage
-            if (filtered.isEmpty()) {
+            if (sorted.isEmpty()) {
                 tableDiv.innerHTML = "<div style=\"text-align: center; color: #6b7280; padding: 60px 20px;\">No $title found.</div>"
                 return@then
             }
-            val totalPages = kotlin.math.ceil(filtered.size.toDouble() / itemsPerPage).toInt()
-            val startIndex = ((page - 1) * itemsPerPage).coerceIn(0, filtered.size)
-            val endIndex = kotlin.math.min(startIndex + itemsPerPage, filtered.size)
-            val pageItems = filtered.subList(startIndex, endIndex)
+            val totalPages = kotlin.math.ceil(sorted.size.toDouble() / itemsPerPage).toInt()
+            val startIndex = ((page - 1) * itemsPerPage).coerceIn(0, sorted.size)
+            val endIndex = kotlin.math.min(startIndex + itemsPerPage, sorted.size)
+            val pageItems = sorted.subList(startIndex, endIndex)
+            val sortArrow = "↕"
+            val sortTooltip = if (sortOrder == "asc") "Sorted A-Z (click to sort Z-A)" else "Sorted Z-A (click to sort A-Z)"
+            val sortBtnId = "${tableId}SortBtn"
             var html = """
                 <div style="overflow-x: auto;">
                     <table style="width: 100%; border-collapse: collapse;">
                         <thead><tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
                             <th style="padding: 14px 16px; text-align: left; font-weight: 600;">ID</th>
-                            <th style="padding: 14px 16px; text-align: left; font-weight: 600;">$title</th>
+                            <th style="padding: 14px 16px; text-align: left; font-weight: 600;">
+                                <button id="$sortBtnId" title="$sortTooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
+                                    <span>$title</span><span style="font-size: 14px;">$sortArrow</span>
+                                </button>
+                            </th>
                         </tr></thead><tbody>
             """
             for ((idx, name) in pageItems.withIndex()) {
@@ -7771,7 +8768,7 @@ private fun loadSimpleMaster(apiPath: String, filterId: String, tableId: String,
             }
             html += "</tbody></table></div>"
             if (totalPages > 1) html += "<div style=\"padding: 16px; background-color: #f9fafb;\"><button id=\"$prevBtnId\" ${if (page == 1) "disabled" else ""}>Previous</button> Page $page of $totalPages <button id=\"$nextBtnId\" ${if (page >= totalPages) "disabled" else ""}>Next</button></div>"
-            else html += "<div style=\"padding: 16px; background-color: #f9fafb;\">Total: ${filtered.size} $title</div>"
+            else html += "<div style=\"padding: 16px; background-color: #f9fafb;\">Total: ${sorted.size} $title</div>"
             tableDiv.innerHTML = html
             val editButtons = document.querySelectorAll(".$editBtnClass")
             for (i in 0 until editButtons.length) {
@@ -7780,6 +8777,12 @@ private fun loadSimpleMaster(apiPath: String, filterId: String, tableId: String,
             }
             document.getElementById(prevBtnId)?.addEventListener("click", { _: Event -> if (page > 1) { setPage(page - 1); loadFn() } })
             document.getElementById(nextBtnId)?.addEventListener("click", { _: Event -> if (page < totalPages) { setPage(page + 1); loadFn() } })
+            document.getElementById(sortBtnId)?.addEventListener("click", { _: Event ->
+                val current = dynamicMasterSetSortOrder[apiPath] ?: "desc"
+                dynamicMasterSetSortOrder[apiPath] = if (current == "asc") "desc" else "asc"
+                setPage(1)
+                loadFn()
+            })
         }
         .catch { error: dynamic -> tableDiv.innerHTML = "<div style=\"text-align: center; color: #ef4444; padding: 60px 20px;\">Error loading $title</div>" }
 }

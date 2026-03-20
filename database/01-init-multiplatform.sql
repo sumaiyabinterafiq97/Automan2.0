@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS purchases (
     country VARCHAR(100),
     price VARCHAR(50),
     auction_fee VARCHAR(50),
+    auction_penalty_fee VARCHAR(50),
     recycle_fee VARCHAR(50),
     road_tax VARCHAR(50),
     tax_total VARCHAR(50),
@@ -193,13 +194,49 @@ CREATE TABLE IF NOT EXISTS car_brand_mapping (
     shift VARCHAR(50),
     cc INT,
     door INT,
+    seat INT,
     grade VARCHAR(50),
+    vehicle_type VARCHAR(100) NULL,
+    `rank` VARCHAR(50) NULL,
+    color VARCHAR(100) NULL,
+    drive_type VARCHAR(20) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_car_brand (car_brand),
     INDEX idx_chassis (chassis),
     INDEX idx_car_name (car_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Add seat column for existing installations (if car_brand_mapping table already exists)
+-- MySQL doesn't support "ADD COLUMN IF NOT EXISTS", so we check information_schema first.
+SET @__seat_col_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'car_brand_mapping'
+      AND column_name = 'seat'
+);
+SET @__seat_alter_sql := IF(@__seat_col_exists = 0, 'ALTER TABLE car_brand_mapping ADD COLUMN seat INT', 'SELECT 1');
+PREPARE seat_stmt FROM @__seat_alter_sql;
+EXECUTE seat_stmt;
+DEALLOCATE PREPARE seat_stmt;
+
+-- Add vehicle_type, rank, color, drive_type for car_brand_mapping (existing installations)
+SET @__vt_col := (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'car_brand_mapping' AND column_name = 'vehicle_type');
+SET @__vt_sql := IF(@__vt_col = 0, 'ALTER TABLE car_brand_mapping ADD COLUMN vehicle_type VARCHAR(100) NULL', 'SELECT 1');
+PREPARE vt_stmt FROM @__vt_sql; EXECUTE vt_stmt; DEALLOCATE PREPARE vt_stmt;
+
+SET @__rk_col := (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'car_brand_mapping' AND column_name = 'rank');
+SET @__rk_sql := IF(@__rk_col = 0, 'ALTER TABLE car_brand_mapping ADD COLUMN `rank` VARCHAR(50) NULL', 'SELECT 1');
+PREPARE rk_stmt FROM @__rk_sql; EXECUTE rk_stmt; DEALLOCATE PREPARE rk_stmt;
+
+SET @__clr_col := (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'car_brand_mapping' AND column_name = 'color');
+SET @__clr_sql := IF(@__clr_col = 0, 'ALTER TABLE car_brand_mapping ADD COLUMN color VARCHAR(100) NULL', 'SELECT 1');
+PREPARE clr_stmt FROM @__clr_sql; EXECUTE clr_stmt; DEALLOCATE PREPARE clr_stmt;
+
+SET @__dt_col := (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'car_brand_mapping' AND column_name = 'drive_type');
+SET @__dt_sql := IF(@__dt_col = 0, 'ALTER TABLE car_brand_mapping ADD COLUMN drive_type VARCHAR(20) NULL', 'SELECT 1');
+PREPARE dt_stmt FROM @__dt_sql; EXECUTE dt_stmt; DEALLOCATE PREPARE dt_stmt;
 
 -- Booking mappings table: Country/client to consignee/POD/POL mappings
 CREATE TABLE IF NOT EXISTS booking_mappings (
@@ -226,6 +263,7 @@ CREATE TABLE IF NOT EXISTS rixo_prices (
     rixo_company VARCHAR(255) NOT NULL,
     venue_id VARCHAR(255),
     rixo_price VARCHAR(255),
+    pol VARCHAR(255) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -743,6 +781,216 @@ INSERT INTO rixo_prices (auction_name, type_of_vehicle, stock_location, rixo_com
 ('USS KYUSHU', 'Truck', 'GLOBAL HAKATA', 'Y''S', 'E0483', '4620'),
 ('HAA KOBE', 'Car', 'KLC', 'KLC', 'E0483', '5500'),
 ('HAA KOBE', 'Truck', 'ECL KOBE', 'KLC', 'E0483', '4500');
+
+-- POL: populate from stock_location mapping (see mapping table: GLOBAL KAWASAKI->YOKOHAMA, AQUA LOGISTICS->YOKOHAMA, GLOBAL NAGOYA->NAGOYA, FLASHRISE->NAGOYA, KLC->OSAKA, GLOBAL HAKATA->HAKATA, BARAKI PARKING->---, LOCAL->---)
+UPDATE rixo_prices SET pol = CASE
+    WHEN stock_location LIKE 'GLOBAL KAWASAKI%' THEN 'YOKOHAMA'
+    WHEN stock_location = 'AQUA LOGISTICS' THEN 'YOKOHAMA'
+    WHEN stock_location LIKE 'GLOBAL NAGOYA%' THEN 'NAGOYA'
+    WHEN stock_location = 'FLASHRISE' THEN 'NAGOYA'
+    WHEN stock_location = 'KLC' THEN 'OSAKA'
+    WHEN stock_location LIKE 'GLOBAL HAKATA%' THEN 'HAKATA'
+    WHEN stock_location = 'BARAKI PARKING' THEN '---'
+    WHEN stock_location = 'LOCAL' THEN '---'
+    ELSE NULL
+END
+WHERE pol IS NULL OR pol = '';
+
+-- For existing databases created before POL column existed, run once:
+-- ALTER TABLE rixo_prices ADD COLUMN pol VARCHAR(255) NULL AFTER rixo_price;
+-- Then run the UPDATE above to backfill POL from stock_location.
+
+-- ---------------------------------------------
+-- RIXO_MAPPING: exact values from RIXO_mapping.csv
+-- ---------------------------------------------
+CREATE TABLE IF NOT EXISTS rixo_mapping (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rixo_company VARCHAR(255) NOT NULL,
+    stock_location VARCHAR(255) NOT NULL,
+    supported_vehicle_type VARCHAR(255) NULL,
+    rixo_price VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DELETE FROM rixo_mapping;
+
+INSERT INTO rixo_mapping (rixo_company, stock_location, supported_vehicle_type, rixo_price) VALUES
+('LOGICO', 'GLOBAL HAKATA', NULL, '¥6,200'),
+('LOGICO', 'GLOBAL HAKATA', NULL, '¥30,600'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥33,600'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥9,600'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥19,800'),
+('LOGICO', 'GLOBAL NAGOYA', NULL, '¥6,000'),
+('LOGICO', 'GLOBAL NAGOYA', NULL, '¥19,200'),
+('LOGICO', 'KLC', NULL, '¥6,500'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥10,000'),
+('Y''S', 'GLOBAL HAKATA', NULL, NULL),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥19,800'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥13,200'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, NULL),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥7,000'),
+('KLC', 'KLC', NULL, '¥3,800'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', NULL, '¥6,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥6,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', NULL, '¥7,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥7,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥6,000'),
+('Y''S', 'GLOBAL HAKATA', 'CAR', '¥4,200'),
+('LOGICO', 'GLOBAL KAWASAKI', '-', '¥19,800'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'CAR', '¥3,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'CAR', '¥3,500'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'CAR', '¥10,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'HIACE', '¥12,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'TRUCK', '¥18,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', 'CAR', '¥3,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', 'CAR', '¥10,000'),
+('KLC', 'KLC', 'CAR / BIG CAR', '¥5,000'),
+('KLC', 'KLC', NULL, '¥3,800'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥10,000'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥3,900'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', NULL, '¥6,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥8,000'),
+('KLC', 'KLC', NULL, '¥5,500'),
+('Y''S', 'GLOBAL HAKATA', NULL, NULL),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥22,200'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥7,500'),
+('-', '-', NULL, NULL),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥34,600'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', NULL, '¥7,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥8,000'),
+('Y''S', 'GLOBAL HAKATA', NULL, NULL),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥34,600'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥12,000'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥4,620'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥15,400'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥34,600'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥12,000'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥18,000'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥19,800'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'CAR', '¥6,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'BIG CAR/TRUCK', '¥8,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', NULL, '¥8,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', NULL, '¥3,500'),
+('TAA', 'GLOBAL KAWASAKI', NULL, '¥12,000'),
+('TAA', 'GLOBAL KAWASAKI', NULL, '¥9,900'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥6,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥7,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥9,000'),
+('LOGICO', 'GLOBAL NAGOYA', NULL, '¥16,600'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥5,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥18,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥13,000'),
+('KLC', 'KLC', NULL, '¥5,500'),
+('KLC', 'KLC', NULL, '¥9,500'),
+('KLC', 'KLC', NULL, '¥18,000'),
+('KLC', 'KLC', NULL, '¥15,000'),
+('TAA', 'KLC', NULL, '¥20,000'),
+('HIDA', 'GLOBAL NAGOYA', NULL, '¥15,000'),
+('LOGICO', 'GLOBAL NAGOYA', NULL, '¥16,600'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥19,400'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥12,100'),
+('Y''S', 'GLOBAL HAKATA', NULL, NULL),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥14,300'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥13,200'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥26,400'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥14,400'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥18,000'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥12,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, NULL),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, NULL),
+('STYLISH AUTO', 'GLOBAL KAWASAKI', NULL, '¥24,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥4,000'),
+('-', '-', NULL, NULL),
+('KLC', 'KLC', NULL, '¥9,500'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥52,400'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥21,600'),
+('KLC', 'KLC', NULL, NULL),
+('LOGICO', 'GLOBAL NAGOYA', NULL, '¥18,100'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, NULL),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥12,000'),
+('LOGICO', 'AQUA LOGISTICS', NULL, '¥19,600'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥10,800'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥6,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', 'hiace commuter/ taller height', '¥9,000'),
+('KLC', 'KLC', NULL, '¥6,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥15,000'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥6,820'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥33,600'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥19,800'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥8,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥5,000'),
+('KLC', 'KLC', NULL, '¥5,500'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥3,900'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'CAR', '¥3,500'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', 'CAR', '¥4,000'),
+('HIDA', 'GLOBAL NAGOYA', NULL, '¥15,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥7,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥28,000'),
+('KLC', 'KLC', NULL, '¥5,500'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥3,900'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥8,900'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥13,200'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥19,800'),
+('KLC', 'KLC', NULL, '¥5,500'),
+('KLC', 'KLC', NULL, '¥10,800'),
+('KLC', 'KLC', NULL, '¥15,000'),
+('-', '-', NULL, NULL),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥4400 | ¥7700'),
+('Y''S', 'GLOBAL HAKATA', NULL, NULL),
+('SHAHBAZ', 'GLOBAL KAWASAKI', NULL, NULL),
+('YAMAZAKI', 'GLOBAL KAWASAKI', 'CAR', '¥8,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', 'CAR', '¥8,000'),
+('KLC', 'KLC', NULL, '¥14,000'),
+('KLC', 'KLC', NULL, '¥28,000'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥7,200'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥33,600'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥19,800'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥8,900'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥7,000'),
+('KLC', 'KLC', NULL, NULL),
+('KLC', 'ECL KOBE', NULL, '¥4,500'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥4,620'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥4,620'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥13,200'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥22,200'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥34,600'),
+('LOGICO', 'GLOBAL KAWASAKI', NULL, '¥19,400'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'CAR', '¥7,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'G CLASS/ LAND CRUISER/', '¥10,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'TRUCKS', '¥15,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', NULL, '¥3,500'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'TRUCKS BUS ', '¥8,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥8,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', 'CAR', '¥7,000'),
+('YAMAZAKI', 'GLOBAL KAWASAKI', NULL, '¥4,000'),
+('LOGICO', 'GLOBAL NAGOYA', NULL, '¥19,800'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥11,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥18,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '￥5500 / ￥5000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥5,500'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', NULL, '¥13,000'),
+('KLC', 'KLC', NULL, '¥5,500'),
+('KLC', 'KLC', NULL, '¥5,500'),
+('KLC', 'KLC', NULL, '¥10,800'),
+('KLC', 'KLC', NULL, '¥5,500'),
+('LOGICO', 'KLC', NULL, '¥6,500'),
+('LOGICO', 'KLC', NULL, '¥12,500'),
+('STYLISH AUTO', 'KLC', NULL, '¥6,000'),
+('STYLISH AUTO', 'KLC', NULL, '¥33,000'),
+('STYLISH AUTO', 'KLC', NULL, '¥12,000'),
+('LOGICO', 'GLOBAL KAWASAKI', 'BUS(ROSA)', 'AROUND 130,000YEN'),
+('STYLISH AUTO', 'KLC', NULL, '¥8,000'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥3,900'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥14,300'),
+('Y''S', 'GLOBAL HAKATA', NULL, '¥10,200'),
+('KLC', 'KLC', NULL, '¥9,500'),
+('LOGICO', 'GLOBAL KAWASAKI', 'CAR / BIG CAR', '¥36,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'CAR / BIG CAR', '¥7,000'),
+('SHAHBAZ', 'GLOBAL KAWASAKI', 'TRUCK', NULL),
+('YAMAZAKI', 'GLOBAL KAWASAKI', 'CAR / BIG CAR', '¥6,000'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', 'CAR / BIG CAR', '¥6,500'),
+('STYLISH AUTO', 'GLOBAL NAGOYA', 'CAR / BIG CAR', '¥7,500'),
+('KLC', 'KLC', NULL, '¥5,500');
 
 -- ===========================================
 -- END OF INITIALIZATION SCRIPT

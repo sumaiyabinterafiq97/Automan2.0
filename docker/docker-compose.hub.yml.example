@@ -8,7 +8,8 @@ services:
     ports:
       - "8083:8083"
     environment:
-      SPRING_PROFILES_ACTIVE: docker
+      # docker,prod = no schema changes or init SQL on startup (keeps existing data safe)
+      SPRING_PROFILES_ACTIVE: docker,prod
       SPRING_DATASOURCE_URL: jdbc:mysql://${RDS_ENDPOINT}:3306/automan_car_purchase?useSSL=true&requireSSL=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: ${RDS_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${RDS_PASSWORD}

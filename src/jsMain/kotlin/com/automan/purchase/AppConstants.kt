@@ -68,5 +68,5 @@ object AppConstants {
     // Column limits per device
     const val MOBILE_MAX_COLUMNS = 4
     const val TABLET_MAX_COLUMNS = 6
-    const val DESKTOP_MAX_COLUMNS = 9
+    const val DESKTOP_MAX_COLUMNS = 10
 }

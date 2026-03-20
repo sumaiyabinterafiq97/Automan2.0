@@ -11,6 +11,34 @@ import org.springframework.transaction.annotation.Transactional
 class MasterMenuService(
     private val masterMenuRepository: MasterMenuRepository,
 ) {
+    fun getAllFieldNames(): List<String> {
+        return masterMenuRepository.findAll()
+            .map { it.fieldName.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .sortedBy { it.lowercase() }
+    }
+
+    fun addField(fieldName: String): List<String> {
+        val normalized = normalizeFieldName(fieldName) ?: return getAllFieldNames()
+        if (masterMenuRepository.existsByFieldNameIgnoreCase(normalized)) {
+            return getAllFieldNames()
+        }
+        masterMenuRepository.save(MasterMenu(fieldName = normalized, fieldValues = ""))
+        Logger.debug("MasterMenuService.addField: created field='%s'", normalized)
+        return getAllFieldNames()
+    }
+
+    fun deleteField(fieldName: String): List<String> {
+        val normalized = normalizeFieldName(fieldName) ?: return getAllFieldNames()
+        if (!masterMenuRepository.existsByFieldNameIgnoreCase(normalized)) {
+            return getAllFieldNames()
+        }
+        masterMenuRepository.deleteByFieldNameIgnoreCase(normalized)
+        Logger.debug("MasterMenuService.deleteField: deleted field='%s'", normalized)
+        return getAllFieldNames()
+    }
+
 
     private fun getDelimiter(fieldName: String): Char {
         return if (fieldName.equals("bank_accounts", ignoreCase = true)) ';' else ','
@@ -71,6 +99,13 @@ class MasterMenuService(
         }
         Logger.debug("MasterMenuService.saveValues: field='%s', values=%s", fieldName, csv)
         return getValues(fieldName)
+    }
+
+    private fun normalizeFieldName(fieldName: String): String? {
+        val trimmed = fieldName.trim()
+        if (trimmed.isEmpty()) return null
+        val normalized = trimmed.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+        return normalized.ifEmpty { null }
     }
 }
 

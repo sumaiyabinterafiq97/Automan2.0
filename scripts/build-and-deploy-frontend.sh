@@ -58,13 +58,17 @@ echo ""
 # Step 4: Recreate frontend container
 echo "🔄 Step 4: Recreating frontend container..."
 
-# Use compose so frontend joins same network as backend (nginx needs to resolve "backend" at startup)
 COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.multiplatform.yml"
-# Use -p docker to match backend's network (docker_automan_network)
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-automan_local}"
+
+# IMPORTANT:
+# - This script must NOT attempt to recreate backend/mysql/phpmyadmin.
+# - We only force-recreate the frontend service/container.
+# - Use --no-deps to avoid touching dependent services (prevents container name conflicts).
+# - If an old container exists from a different Compose project, remove it first.
 docker stop automan_frontend_multiplatform 2>/dev/null || true
 docker rm -f automan_frontend_multiplatform 2>/dev/null || true
-docker compose -p docker -f "$COMPOSE_FILE" create frontend
-docker start automan_frontend_multiplatform
+docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d --no-deps --force-recreate frontend
 
 if [ $? -ne 0 ]; then
     echo "❌ Container start failed!"

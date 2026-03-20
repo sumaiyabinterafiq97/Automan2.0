@@ -31,6 +31,9 @@ data class RixoPrice(
     @Column(name = "rixo_price")
     val rixoPrice: String? = null,
     
+    @Column(name = "pol")
+    val pol: String? = null,
+    
     @Column(name = "created_at")
     @JsonIgnore
     val createdAt: LocalDateTime = LocalDateTime.now()
@@ -49,16 +52,17 @@ data class RixoPrice(
             stockLocation: String,
             rixoCompany: String,
             rixoPrice: String? = null,
-            venueId: String? = null
+            venueId: String? = null,
+            pol: String? = null
         ): RixoPrice {
             return RixoPrice(
                 auctionHouse = auctionHouse,
-                // auctionHouseDb is a generated column, automatically set from auction_name
                 shipmentSize = shipmentSize,
                 stockLocation = stockLocation,
                 rixoCompany = rixoCompany,
                 rixoPrice = rixoPrice,
-                venueId = venueId
+                venueId = venueId,
+                pol = pol
             )
         }
     }

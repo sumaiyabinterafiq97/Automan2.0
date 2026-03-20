@@ -32,7 +32,8 @@ class CarBrandMappingService(
                     "shift" to emptyList<String>(),
                     "cc" to emptyList<String>(),
                     "door" to emptyList<String>(),
-                    "grade" to emptyList<String>()
+                "grade" to emptyList<String>(),
+                "seats" to emptyList<String>()
                 )
             )
         }
@@ -45,7 +46,12 @@ class CarBrandMappingService(
             "shift" to (firstRow.shift ?: ""),
             "cc" to (firstRow.cc ?: 0),
             "door" to (firstRow.door ?: 0),
-            "grade" to (firstRow.grade ?: "")
+            "grade" to (firstRow.grade ?: ""),
+            "seat" to (firstRow.seat ?: 0),
+            "vehicleType" to (firstRow.vehicleType ?: ""),
+            "rank" to (firstRow.rank ?: ""),
+            "color" to (firstRow.color ?: ""),
+            "driveType" to (firstRow.driveType ?: "")
         )
         val chassisList = carBrandMappingRepository.findDistinctChassisByCarBrand(brandName)
         val carNameList = carBrandMappingRepository.findDistinctCarNameByCarBrand(brandName)
@@ -55,6 +61,7 @@ class CarBrandMappingService(
         val ccList = carBrandMappingRepository.findDistinctCcByCarBrand(brandName)
         val doorList = carBrandMappingRepository.findDistinctDoorByCarBrand(brandName)
         val gradeList = carBrandMappingRepository.findDistinctGradeByCarBrand(brandName)
+        val seatList = mappings.mapNotNull { it.seat }.distinct().sorted()
         return mapOf(
             "mappings" to mappings.map { toMap(it) },
             "firstRow" to firstRowData,
@@ -66,7 +73,8 @@ class CarBrandMappingService(
                 "shift" to shiftList,
                 "cc" to ccList.map { it.toString() },
                 "door" to doorList.map { it.toString() },
-                "grade" to gradeList
+                "grade" to gradeList,
+                "seats" to seatList.map { it.toString() }
             )
         )
     }
@@ -89,7 +97,12 @@ class CarBrandMappingService(
             "shift" to (firstMatch.shift ?: ""),
             "cc" to (firstMatch.cc?.toString() ?: ""),
             "door" to (firstMatch.door?.toString() ?: ""),
-            "grade" to (firstMatch.grade ?: "")
+            "grade" to (firstMatch.grade ?: ""),
+            "seat" to (firstMatch.seat?.toString() ?: ""),
+            "vehicleType" to (firstMatch.vehicleType ?: ""),
+            "rank" to (firstMatch.rank ?: ""),
+            "color" to (firstMatch.color ?: ""),
+            "driveType" to (firstMatch.driveType ?: "")
         )
         return mapOf("found" to true, "data" to data)
     }
@@ -112,7 +125,12 @@ class CarBrandMappingService(
             "shift" to (firstRow.shift ?: ""),
             "cc" to (firstRow.cc?.toString() ?: ""),
             "door" to (firstRow.door?.toString() ?: ""),
-            "grade" to (firstRow.grade ?: "")
+            "grade" to (firstRow.grade ?: ""),
+            "seat" to (firstRow.seat?.toString() ?: ""),
+            "vehicleType" to (firstRow.vehicleType ?: ""),
+            "rank" to (firstRow.rank ?: ""),
+            "color" to (firstRow.color ?: ""),
+            "driveType" to (firstRow.driveType ?: "")
         )
         return mapOf("found" to true, "chassisList" to chassisList, "firstRow" to firstRowData)
     }
@@ -140,7 +158,12 @@ class CarBrandMappingService(
                     "shifts" to emptyList<String>(),
                     "ccs" to emptyList<String>(),
                     "doors" to emptyList<String>(),
-                    "grades" to emptyList<String>()
+                    "grades" to emptyList<String>(),
+                    "seats" to emptyList<String>(),
+                    "vehicleTypes" to emptyList<String>(),
+                    "ranks" to emptyList<String>(),
+                    "colors" to emptyList<String>(),
+                    "driveTypes" to emptyList<String>()
                 )
             )
         }
@@ -155,7 +178,12 @@ class CarBrandMappingService(
             "shift" to (firstMatch.shift ?: ""),
             "cc" to (firstMatch.cc?.toString() ?: ""),
             "door" to (firstMatch.door?.toString() ?: ""),
-            "grade" to (firstMatch.grade ?: "")
+            "grade" to (firstMatch.grade ?: ""),
+            "seat" to (firstMatch.seat?.toString() ?: ""),
+            "vehicleType" to (firstMatch.vehicleType ?: ""),
+            "rank" to (firstMatch.rank ?: ""),
+            "color" to (firstMatch.color ?: ""),
+            "driveType" to (firstMatch.driveType ?: "")
         )
         val allRows = mappings.map { m -> toMapWithBrand(m) }
         val uniqueValues = mapOf(
@@ -166,7 +194,12 @@ class CarBrandMappingService(
             "shifts" to mappings.mapNotNull { it.shift }.distinct().sorted(),
             "ccs" to mappings.mapNotNull { it.cc?.toString() }.distinct().sorted(),
             "doors" to mappings.mapNotNull { it.door?.toString() }.distinct().sorted(),
-            "grades" to mappings.mapNotNull { it.grade }.distinct().sorted()
+            "grades" to mappings.mapNotNull { it.grade }.distinct().sorted(),
+            "seats" to mappings.mapNotNull { it.seat?.toString() }.distinct().sorted(),
+            "vehicleTypes" to mappings.mapNotNull { it.vehicleType }.distinct().sorted(),
+            "ranks" to mappings.mapNotNull { it.rank }.distinct().sorted(),
+            "colors" to mappings.mapNotNull { it.color }.distinct().sorted(),
+            "driveTypes" to mappings.mapNotNull { it.driveType }.distinct().sorted()
         )
         return mapOf(
             "found" to true,
@@ -178,6 +211,10 @@ class CarBrandMappingService(
             "cc" to (firstMatch.cc?.toString() ?: ""),
             "door" to (firstMatch.door?.toString() ?: ""),
             "grade" to (firstMatch.grade ?: ""),
+            "vehicleType" to (firstMatch.vehicleType ?: ""),
+            "rank" to (firstMatch.rank ?: ""),
+            "color" to (firstMatch.color ?: ""),
+            "driveType" to (firstMatch.driveType ?: ""),
             "firstRow" to firstRowData,
             "allRows" to allRows,
             "uniqueValues" to uniqueValues,
@@ -219,7 +256,12 @@ class CarBrandMappingService(
             "shift" to (row.shift ?: ""),
             "cc" to (row.cc?.toString() ?: ""),
             "door" to (row.door?.toString() ?: ""),
-            "grade" to (row.grade ?: "")
+            "grade" to (row.grade ?: ""),
+            "seat" to (row.seat?.toString() ?: ""),
+            "vehicleType" to (row.vehicleType ?: ""),
+            "rank" to (row.rank ?: ""),
+            "color" to (row.color ?: ""),
+            "driveType" to (row.driveType ?: "")
         )
         return mapOf("found" to true, "match" to matchData, "isFallback" to (match == null))
     }
@@ -253,6 +295,7 @@ class CarBrandMappingService(
         val gradeStr = request["grade"]?.toString()
         val ccValue = parseCcOrDoor(request["cc"])
         val doorValue = parseCcOrDoor(request["door"])
+        val seatValue = parseCcOrDoor(request["seat"])
         val mapping = CarBrandMapping(
             carBrand = carBrand,
             chassis = chassisStr?.takeIf { it.isNotBlank() },
@@ -262,6 +305,7 @@ class CarBrandMappingService(
             shift = shiftStr?.takeIf { it.isNotBlank() },
             cc = ccValue,
             door = doorValue,
+            seat = seatValue,
             grade = gradeStr?.takeIf { it.isNotBlank() }
         )
         val saved = carBrandMappingRepository.save(mapping)
@@ -277,7 +321,12 @@ class CarBrandMappingService(
                 "shift" to (saved.shift ?: ""),
                 "cc" to (saved.cc ?: 0),
                 "door" to (saved.door ?: 0),
-                "grade" to (saved.grade ?: "")
+                "seat" to (saved.seat ?: 0),
+                "grade" to (saved.grade ?: ""),
+                "vehicleType" to (saved.vehicleType ?: ""),
+                "rank" to (saved.rank ?: ""),
+                "color" to (saved.color ?: ""),
+                "driveType" to (saved.driveType ?: "")
             )
         )
     }
@@ -302,8 +351,13 @@ class CarBrandMappingService(
         val wdValue = if (request.containsKey("wd")) getStringValue("wd") else existing.wd
         val shiftValue = if (request.containsKey("shift")) getStringValue("shift") else existing.shift
         val gradeValue = if (request.containsKey("grade")) getStringValue("grade") else existing.grade
+        val vehicleTypeValue = if (request.containsKey("vehicleType")) getStringValue("vehicleType") else existing.vehicleType
+        val rankValue = if (request.containsKey("rank")) getStringValue("rank") else existing.rank
+        val colorValue = if (request.containsKey("color")) getStringValue("color") else existing.color
+        val driveTypeValue = if (request.containsKey("driveType")) getStringValue("driveType") else existing.driveType
         val ccValue = if (request.containsKey("cc")) parseCcOrDoor(request["cc"]) else existing.cc
         val doorValue = if (request.containsKey("door")) parseCcOrDoor(request["door"]) else existing.door
+        val seatValue = if (request.containsKey("seat")) parseCcOrDoor(request["seat"]) else existing.seat
         val createdAtValue = existing.createdAt ?: LocalDateTime.now()
         val updated = existing.copy(
             id = existing.id,
@@ -315,7 +369,12 @@ class CarBrandMappingService(
             shift = shiftValue,
             cc = ccValue,
             door = doorValue,
+            seat = seatValue,
             grade = gradeValue,
+            vehicleType = vehicleTypeValue,
+            rank = rankValue,
+            color = colorValue,
+            driveType = driveTypeValue,
             createdAt = createdAtValue,
             updatedAt = LocalDateTime.now()
         )
@@ -334,7 +393,12 @@ class CarBrandMappingService(
                 "shift" to (merged.shift ?: ""),
                 "cc" to (merged.cc ?: 0),
                 "door" to (merged.door ?: 0),
-                "grade" to (merged.grade ?: "")
+                "seat" to (merged.seat ?: 0),
+                "grade" to (merged.grade ?: ""),
+                "vehicleType" to (merged.vehicleType ?: ""),
+                "rank" to (merged.rank ?: ""),
+                "color" to (merged.color ?: ""),
+                "driveType" to (merged.driveType ?: "")
             )
         )
     }
@@ -353,7 +417,12 @@ class CarBrandMappingService(
                 "shift" to (mapping.shift ?: ""),
                 "cc" to (mapping.cc ?: 0),
                 "door" to (mapping.door ?: 0),
-                "grade" to (mapping.grade ?: "")
+                "seat" to (mapping.seat ?: 0),
+                "grade" to (mapping.grade ?: ""),
+                "vehicleType" to (mapping.vehicleType ?: ""),
+                "rank" to (mapping.rank ?: ""),
+                "color" to (mapping.color ?: ""),
+                "driveType" to (mapping.driveType ?: "")
             )
         )
     }
@@ -374,7 +443,12 @@ class CarBrandMappingService(
         "shift" to (m.shift ?: ""),
         "cc" to (m.cc ?: 0),
         "door" to (m.door ?: 0),
-        "grade" to (m.grade ?: "")
+        "seat" to (m.seat ?: 0),
+        "grade" to (m.grade ?: ""),
+        "vehicleType" to (m.vehicleType ?: ""),
+        "rank" to (m.rank ?: ""),
+        "color" to (m.color ?: ""),
+        "driveType" to (m.driveType ?: "")
     )
 
     private fun toMapWithBrand(m: CarBrandMapping): Map<String, Any> = mapOf(
@@ -387,7 +461,12 @@ class CarBrandMappingService(
         "shift" to (m.shift ?: ""),
         "cc" to (m.cc?.toString() ?: ""),
         "door" to (m.door?.toString() ?: ""),
-        "grade" to (m.grade ?: "")
+        "grade" to (m.grade ?: ""),
+        "seat" to (m.seat?.toString() ?: ""),
+        "vehicleType" to (m.vehicleType ?: ""),
+        "rank" to (m.rank ?: ""),
+        "color" to (m.color ?: ""),
+        "driveType" to (m.driveType ?: "")
     )
 
     private fun parseString(value: Any?): String? = when {

@@ -10,6 +10,10 @@ data class MasterMenuValueRequest(
     val originalValue: String? = null,
 )
 
+data class MasterMenuFieldRequest(
+    val fieldName: String,
+)
+
 @RestController
 @RequestMapping(value = ["/master-menu", "/api/master-menu"])
 @CrossOrigin(
@@ -27,6 +31,27 @@ data class MasterMenuValueRequest(
 class MasterMenuController(
     private val masterMenuService: MasterMenuService,
 ) {
+    @GetMapping("/fields")
+    fun getFields(): ResponseEntity<List<String>> {
+        return ResponseEntity.ok(masterMenuService.getAllFieldNames())
+    }
+
+    @PostMapping("/fields")
+    fun addField(
+        @RequestBody request: MasterMenuFieldRequest,
+    ): ResponseEntity<List<String>> {
+        Logger.debug("MasterMenuController.addField field='%s'", request.fieldName)
+        return ResponseEntity.ok(masterMenuService.addField(request.fieldName))
+    }
+
+    @DeleteMapping("/fields/{fieldName}")
+    fun deleteField(
+        @PathVariable fieldName: String,
+    ): ResponseEntity<List<String>> {
+        Logger.debug("MasterMenuController.deleteField field='%s'", fieldName)
+        return ResponseEntity.ok(masterMenuService.deleteField(fieldName))
+    }
+
 
     @GetMapping("/{fieldName}")
     fun getValues(@PathVariable fieldName: String): ResponseEntity<List<String>> {

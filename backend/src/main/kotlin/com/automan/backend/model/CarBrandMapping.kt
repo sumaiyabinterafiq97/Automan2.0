@@ -34,8 +34,23 @@ data class CarBrandMapping(
     @Column(name = "door")
     val door: Int? = null,
 
+    @Column(name = "seat")
+    val seat: Int? = null,
+
     @Column(name = "grade", length = 50)
     val grade: String? = null,
+
+    @Column(name = "vehicle_type", length = 100)
+    val vehicleType: String? = null,
+
+    @Column(name = "`rank`", length = 50)
+    val rank: String? = null,
+
+    @Column(name = "color", length = 100)
+    val color: String? = null,
+
+    @Column(name = "drive_type", length = 20)
+    val driveType: String? = null,
 
     @Column(name = "created_at")
     val createdAt: LocalDateTime = LocalDateTime.now(),

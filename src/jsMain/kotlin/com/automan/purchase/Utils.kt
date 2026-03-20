@@ -114,6 +114,16 @@ fun getMaxColumnsForDevice(deviceType: String? = null): Int {
     }
 }
 
+/** Car Brands Map table: allow more columns on desktop (incl. vehicle type, rank, color, drive type). */
+fun getMaxCarBrandMapColumnsForDevice(deviceType: String? = null): Int {
+    val device = deviceType ?: getDeviceType()
+    return when (device) {
+        "mobile" -> AppConstants.MOBILE_MAX_COLUMNS
+        "tablet" -> AppConstants.TABLET_MAX_COLUMNS
+        else -> 14
+    }
+}
+
 /**
  * Get default columns for a specific device type
  * @param deviceType Device type ("mobile", "tablet", or "desktop")
@@ -442,15 +452,19 @@ fun parseDateForSorting(dateStr: String): Long? {
             window.parseDateForSorting = function(dateStr) {
                 if (!dateStr || dateStr.trim() === '') return null;
                 
+                // If date is formatted like: "March 11, 2026(Wednesday)",
+                // strip the "(Weekday)" part so `new Date(...)` can parse it.
+                var cleaned = dateStr.replace(/\s*\(.*?\)\s*$/, '').trim();
+                
                 // Try direct Date parsing
-                var date = new Date(dateStr);
+                var date = new Date(cleaned);
                 var timestamp = date.getTime();
                 if (!isNaN(timestamp) && timestamp > 0) {
                     return timestamp;
                 }
                 
                 // Try yyyy-MM-dd format
-                var isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                var isoMatch = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})/);
                 if (isoMatch) {
                     var year = parseInt(isoMatch[1]);
                     var month = parseInt(isoMatch[2]) - 1;
@@ -463,7 +477,7 @@ fun parseDateForSorting(dateStr: String): Long? {
                 }
                 
                 // Try MM/dd/yyyy format
-                var usMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                var usMatch = cleaned.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
                 if (usMatch) {
                     var month = parseInt(usMatch[1]) - 1;
                     var day = parseInt(usMatch[2]);

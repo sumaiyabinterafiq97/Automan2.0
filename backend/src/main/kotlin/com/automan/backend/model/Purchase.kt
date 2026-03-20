@@ -103,6 +103,9 @@ data class Purchase(
     @Column(name = "auction_fee")
     val auctionFee: String? = null,
     
+    @Column(name = "auction_penalty_fee")
+    val auctionPenaltyFee: String? = null,
+    
     @Column(name = "recycle_fee")
     val recycleFee: String? = null,
     

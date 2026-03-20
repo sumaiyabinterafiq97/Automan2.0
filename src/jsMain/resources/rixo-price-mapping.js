@@ -2235,6 +2235,19 @@ window.getUniqueValues = function(arr) {
     return [...new Set(arr.filter(val => val && val.trim() !== ''))];
 };
 
+// Case-insensitive unique values (first occurrence wins) for master-set dropdowns with "See More"
+window.getUniqueValuesCaseInsensitive = function(arr) {
+    if (!arr || !Array.isArray(arr)) return [];
+    const seen = new Set();
+    return arr.filter(val => {
+        if (!val || typeof val !== 'string' || val.trim() === '') return false;
+        const lower = val.trim().toLowerCase();
+        if (seen.has(lower)) return false;
+        seen.add(lower);
+        return true;
+    }).map(val => val.trim());
+};
+
 // Helper function to get filtered options based on previous selections
 window.getFilteredOptions = function(auctionName, typeOfVehicle, stockLocation, rixoCompany) {
     if (!auctionName || !window.rixoPriceMapping[auctionName]) {
@@ -2486,11 +2499,7 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
         updateDropdown('venueId', 'editVenueId', venueIds);
         updateDropdown('rixoCompany', 'rixoCompany', rixoCompanies);
         updateDropdown('rixoCompany', 'editRixoCompany', rixoCompanies);
-        updateDropdown('typeOfVehicle', 'typeOfVehicle', shipmentSizes);
-        updateDropdown('typeOfVehicle', 'editTypeOfVehicle', shipmentSizes);
-        updateDropdown('shipmentSize', 'editShipmentSize', shipmentSizes);
-        updateDropdown('rixoPrice', 'rixoPrice', rixoPrices);
-        updateDropdown('rixoPrice', 'editRixoPrice', rixoPrices);
+        // Intentionally do NOT update Vehicle type or Rixo Price from mapping.
         
         // THEN auto-select values after dropdowns are populated
         // Use setTimeout to ensure dropdowns are fully populated first
@@ -2513,48 +2522,6 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
         if (rixoCompanies.length > 0) {
             setFieldValue('rixoCompany', 'editRixoCompany', rixoCompanies[0]);
         }
-        
-            // Shipment Size - use first available option, or default to "CAR" if none available
-        if (shipmentSizes.length > 0) {
-            setFieldValue('typeOfVehicle', 'editTypeOfVehicle', shipmentSizes[0]);
-            setFieldValue('shipmentSize', 'editShipmentSize', shipmentSizes[0]);
-        } else {
-            // No shipment size mapping found, default to "CAR"
-            console.log('No shipment size mapping found, defaulting to "CAR"');
-            // First, add "CAR" to the dropdown options
-            updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
-            updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
-            updateDropdown('shipmentSize', 'editShipmentSize', ['CAR']);
-            // Then set the value
-                setTimeout(function() {
-            setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
-            setFieldValue('shipmentSize', 'editShipmentSize', 'CAR');
-                }, 50);
-        }
-        
-            // Rixo Price - always select first value if available
-        if (rixoPrices.length > 0) {
-                // Parse the raw value from database - remove all symbols and words, keep only numbers
-                var rawPrice = window.parseRixoPrice ? window.parseRixoPrice(rixoPrices[0]) : rixoPrices[0];
-                
-                // For number input fields, set the numeric value (not formatted)
-                const priceInput = document.getElementById('rixoPriceInput');
-                if (priceInput) {
-                    priceInput.value = rawPrice;
-                    console.log('✅ Set Rixo Price (numeric):', rawPrice);
-                    // Trigger change event to ensure UI updates
-                    priceInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    priceInput.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-                const editPriceInput = document.getElementById('editRixoPriceInput');
-                if (editPriceInput) {
-                    editPriceInput.value = rawPrice;
-                    console.log('✅ Set Edit Rixo Price (numeric):', rawPrice);
-                    // Trigger change event to ensure UI updates
-                    editPriceInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    editPriceInput.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-            }
         }, 100);
         
     } else if (changedField === 'rixoCompany') {
@@ -2562,55 +2529,7 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
         const companyMappings = mappings.filter(m => m.rixoCompany === changedValue);
         
         if (companyMappings.length > 0) {
-            // Get unique values for filtered options
-            const availableTypes = [...new Set(companyMappings.map(m => m.typeOfVehicle).filter(t => t && t.trim() !== ''))];
-            const availablePrices = [...new Set(companyMappings.map(m => m.rixoPrice).filter(p => p && p.trim() !== ''))];
-            
-            console.log('Filtered options for company', changedValue, ':', {
-                types: availableTypes,
-                prices: availablePrices
-            });
-            
-            // Update dropdowns directly for both add and edit forms
-            updateDropdown('typeOfVehicle', 'typeOfVehicle', availableTypes);
-            updateDropdown('typeOfVehicle', 'editTypeOfVehicle', availableTypes);
-            updateDropdown('shipmentSize', 'editShipmentSize', availableTypes);
-            updateDropdown('rixoPrice', 'rixoPrice', availablePrices);
-            updateDropdown('rixoPrice', 'editRixoPrice', availablePrices);
-            
-            // Auto-select shipment size: always select first option if available
-            // Prefer "CAR / BIG CAR" or "CAR" over "TRUCK" if both are available
-            if (availableTypes.length > 0) {
-                // Sort to prefer "CAR / BIG CAR" or "CAR" first
-                const sortedTypes = [...availableTypes].sort((a, b) => {
-                    const aLower = String(a).toLowerCase();
-                    const bLower = String(b).toLowerCase();
-                    // Prefer "CAR / BIG CAR" or anything with "CAR" first
-                    if (aLower.includes('car') && !bLower.includes('car')) return -1;
-                    if (!aLower.includes('car') && bLower.includes('car')) return 1;
-                    return 0;
-                });
-                const selectedType = sortedTypes[0];
-                console.log('Auto-selecting shipment size:', selectedType, 'from options:', availableTypes);
-                setFieldValue('typeOfVehicle', 'typeOfVehicle', selectedType);
-                setFieldValue('typeOfVehicle', 'editTypeOfVehicle', selectedType);
-                setFieldValue('shipmentSize', 'editShipmentSize', selectedType);
-            } else {
-                // No shipment size mapping found for this company, default to "CAR"
-                console.log('No shipment size mapping found for company, defaulting to "CAR"');
-                // First, add "CAR" to the dropdown options
-                updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
-                updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
-                updateDropdown('shipmentSize', 'editShipmentSize', ['CAR']);
-                // Then set the value
-                setFieldValue('typeOfVehicle', 'typeOfVehicle', 'CAR');
-                setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
-                setFieldValue('shipmentSize', 'editShipmentSize', 'CAR');
-            }
-            if (availablePrices.length === 1) {
-                setFieldValue('rixoPrice', 'rixoPrice', availablePrices[0]);
-                setFieldValue('rixoPrice', 'editRixoPrice', availablePrices[0]);
-            }
+            // Intentionally no-op for Vehicle type + Rixo Price mapping.
         }
     } else if (changedField === 'typeOfVehicle') {
         // When typeOfVehicle is selected, find matching mappings
@@ -2619,39 +2538,23 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
         if (typeMappings.length > 0) {
             // Get unique values for filtered options
             const availableCompanies = [...new Set(typeMappings.map(m => m.rixoCompany).filter(c => c && c.trim() !== ''))];
-            const availablePrices = [...new Set(typeMappings.map(m => m.rixoPrice).filter(p => p && p.trim() !== ''))];
             
             console.log('Filtered options for typeOfVehicle', changedValue, ':', {
                 companies: availableCompanies,
-                prices: availablePrices
+                prices: []
             });
             
              // Update dropdowns directly for both add and edit forms
             updateDropdown('rixoCompany', 'rixoCompany', availableCompanies);
             updateDropdown('rixoCompany', 'editRixoCompany', availableCompanies);
-            updateDropdown('rixoPrice', 'rixoPrice', availablePrices);
-            updateDropdown('rixoPrice', 'editRixoPrice', availablePrices);
             
             // Auto-select if only one option for both add and edit forms
             if (availableCompanies.length === 1) {
                 setFieldValue('rixoCompany', 'rixoCompany', availableCompanies[0]);
                 setFieldValue('rixoCompany', 'editRixoCompany', availableCompanies[0]);
             }
-            if (availablePrices.length === 1) {
-                setFieldValue('rixoPrice', 'rixoPrice', availablePrices[0]);
-                setFieldValue('rixoPrice', 'editRixoPrice', availablePrices[0]);
-            }
         } else {
-            // No mappings found for this typeOfVehicle, default to "CAR" for shipment size
-            console.log('No mappings found for typeOfVehicle, defaulting to "CAR"');
-            // First, add "CAR" to the dropdown options
-            updateDropdown('typeOfVehicle', 'typeOfVehicle', ['CAR']);
-            updateDropdown('typeOfVehicle', 'editTypeOfVehicle', ['CAR']);
-            updateDropdown('shipmentSize', 'editShipmentSize', ['CAR']);
-            // Then set the value
-            setFieldValue('typeOfVehicle', 'typeOfVehicle', 'CAR');
-            setFieldValue('typeOfVehicle', 'editTypeOfVehicle', 'CAR');
-            setFieldValue('shipmentSize', 'editShipmentSize', 'CAR');
+            // No mappings found; do not overwrite the user-selected Vehicle type.
         }
     }
     } finally {
@@ -2674,13 +2577,7 @@ window.updateDropdownOptions = function(auctionName, typeOfVehicle, stockLocatio
     
     console.log('Filtered options:', filteredOptions);
     
-    // Update Type of Vehicle dropdown
-    updateDropdown('typeOfVehicle', 'editTypeOfVehicle', filteredOptions.typeOfVehicle);
-    // Update Shipment Size dropdown (same as typeOfVehicle)
-    updateDropdown('shipmentSize', 'editShipmentSize', filteredOptions.typeOfVehicle);
-    
-    // Update Rixo Price dropdown
-    updateDropdown('rixoPrice', 'editRixoPrice', filteredOptions.rixoPrice);
+    // Intentionally do NOT update Vehicle type or Rixo Price dropdowns.
     
     // Update Venue ID dropdown
     updateDropdown('venueId', 'editVenueId', filteredOptions.venueId);
@@ -2690,6 +2587,21 @@ window.updateDropdownOptions = function(auctionName, typeOfVehicle, stockLocatio
     updateDropdown('stockLocation', 'editStockLocation', auctionData.stockLocation);
     updateDropdown('rixoCompany', 'editRixoCompany', auctionData.rixoCompany);
 };
+
+// Master-set field IDs that get case-insensitive dedupe and "See More" as last option
+var MASTER_FIELD_IDS = {
+    venueId: true, editVenueId: true,
+    typeOfVehicle: true, editTypeOfVehicle: true,
+    shipmentSize: true, editShipmentSize: true,
+    rixoCompany: true, editRixoCompany: true,
+    stockLocation: true, editStockLocation: true,
+    pol: true, editPol: true
+};
+var SEE_MORE_VALUE = '__SEE_MORE__';
+
+function uniqueOptionsForMasterField(options) {
+    return window.getUniqueValuesCaseInsensitive ? window.getUniqueValuesCaseInsensitive(options) : window.getUniqueValues(options);
+}
 
 // Helper function to update a specific dropdown
 window.updateDropdown = function(elementId, editElementId, options) {
@@ -2733,20 +2645,29 @@ window.updateDropdown = function(elementId, editElementId, options) {
         var defaultLabel = elementId.replace(/([A-Z])/g, ' $1').trim();
         var editDefaultLabel = editElementId.replace(/([A-Z])/g, ' $1').trim();
         
+        var isMasterField = MASTER_FIELD_IDS[elementId];
+        var uniqueOptions = isMasterField ? uniqueOptionsForMasterField(options) : window.getUniqueValues(options);
+        
         if (dropdown) {
             dropdown.innerHTML = '<option value="">Select ' + defaultLabel + '</option>';
-            var uniqueOptions = window.getUniqueValues(options);
             uniqueOptions.forEach(function(option) {
                 dropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
             });
+            if (isMasterField) {
+                dropdown.innerHTML += '<option value="' + SEE_MORE_VALUE + '">See More</option>';
+            }
         }
         
         if (editDropdown) {
+            var isEditMasterField = MASTER_FIELD_IDS[editElementId];
+            var editUniqueOptions = isEditMasterField ? uniqueOptionsForMasterField(options) : window.getUniqueValues(options);
             editDropdown.innerHTML = '<option value="">Select ' + editDefaultLabel + '</option>';
-            var uniqueOptions = window.getUniqueValues(options);
-            uniqueOptions.forEach(function(option) {
+            editUniqueOptions.forEach(function(option) {
                 editDropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
             });
+            if (isEditMasterField) {
+                editDropdown.innerHTML += '<option value="' + SEE_MORE_VALUE + '">See More</option>';
+            }
         }
         
         // Update input placeholders for comboboxes

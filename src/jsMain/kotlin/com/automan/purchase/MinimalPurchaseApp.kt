@@ -233,8 +233,10 @@ fun initializeAppSetup() {
     window.asDynamic().deleteMasterConsignee = ::deleteMasterConsignee
     window.asDynamic().editMasterCountry = ::editMasterCountry
     window.asDynamic().editMasterCarBrand = ::editMasterCarBrand
+    window.asDynamic().duplicateMasterCarBrand = ::duplicateMasterCarBrand
     window.asDynamic().deleteMasterCarBrand = ::deleteMasterCarBrand
     window.asDynamic().editMasterSupplier = ::editMasterSupplier
+    window.asDynamic().duplicateMasterSupplier = ::duplicateMasterSupplier
     window.asDynamic().editClient = ::editClient
     window.asDynamic().editClientFromList = ::editClientFromList
     window.asDynamic().addClientTransaction = ::addClientTransaction
@@ -299,6 +301,20 @@ fun initializeAppSetup() {
     // Expose fetchMappingByChassisOnly function for chassis-first flow in Edit Purchase
     window.asDynamic().fetchMappingByChassisOnly = { chassis: String, isEditForm: Boolean ->
         fetchMappingByChassisOnly(chassis, isEditForm)
+    }
+    // Expose Brand "See More" handler (loads master car_brands into dropdown)
+    window.asDynamic().handleBrandSeeMoreClick = { selectId: String ->
+        handleBrandSeeMoreClick(selectId)
+    }
+    // Expose master-field "See More" (Venue ID, Vehicle type, Rixo Company, Stock Location, POL)
+    window.asDynamic().handleMasterFieldSeeMoreClick = { selectId: String ->
+        getMasterFieldApiPath(selectId)?.let { handleMasterFieldSeeMoreClick(selectId, it) }
+    }
+    window.asDynamic().getMasterFieldApiPath = { selectId: String ->
+        getMasterFieldApiPath(selectId)
+    }
+    window.asDynamic().handleSeeLessClick = { selectId: String ->
+        handleSeeLessClick(selectId)
     }
     
     Logger.debug("Functions exposed to global scope successfully")
@@ -401,6 +417,28 @@ fun createEditableComboboxWithOptions(id: String, placeholder: String, options: 
                 $optionsHTML
             </select>
             <div id="${id}Button" onclick="openComboboxDropdown('$id')" 
+                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                ▼
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+// Create multi-select combobox for Grade field - appends selected value with semicolon separator
+fun createMultiSelectCombobox(id: String, placeholder: String, initialValue: String = ""): String {
+    return """
+        <div style="position: relative; width: 100%;">
+            <input type="text" id="${id}Input" placeholder="$placeholder" ${if (initialValue.isNotEmpty()) "value=\"${initialValue.replace("\"", "&quot;")}\"" else ""}
+                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                   autocomplete="off"
+                   onfocus="this.select();">
+            <select id="$id" 
+                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                    onmousedown="event.preventDefault(); event.stopPropagation(); openMultiSelectComboboxDropdown('$id');"
+                    onchange="appendMultiSelectValue('$id')">
+                <option value="">▼</option>
+            </select>
+            <div id="${id}Button" onclick="openMultiSelectComboboxDropdown('$id')" 
                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                 ▼
             </div>
@@ -541,17 +579,64 @@ fun ensureBaseComboboxOptionsForAddEdit() {
     
     val baseFuelOptions = listOf("GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV")
     val baseShiftOptions = listOf("AT", "MT", "6F", "5F")
-    val baseGradeOptions = listOf("G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI")
     
     // Add base options for add form
     addBaseOptions("fuel", baseFuelOptions)
     addBaseOptions("shift", baseShiftOptions)
-    addBaseOptions("grade", baseGradeOptions)
     
     // Add base options for edit form
     addBaseOptions("editFuel", baseFuelOptions)
     addBaseOptions("editShift", baseShiftOptions)
-    addBaseOptions("editGrade", baseGradeOptions)
+}
+
+/** Populate Grade, Fuel, Shift, Country, Client Name, Repair Company comboboxes from master_menu API. */
+fun populateMasterMenuComboboxesForPurchaseForm() {
+    val fieldToSelectIds = listOf(
+        "car_grade" to listOf("grade", "editGrade"),
+        "fuel" to listOf("fuel", "editFuel"),
+        "shift" to listOf("shift", "editShift"),
+        "country" to listOf("country", "editCountry"),
+        "clients" to listOf("clientName", "editClientName"),
+        "repair_company" to listOf("repairCompany", "editRepairCompany")
+    )
+    fieldToSelectIds.forEach { (apiField, selectIds) ->
+        window.fetch(apiUrl("master-menu/$apiField"))
+            .then { response: dynamic ->
+                if (response.ok) {
+                    response.json()
+                } else {
+                    throw RuntimeException("Failed to load master-menu/$apiField")
+                }
+            }
+            .then { raw: dynamic ->
+                val values = parsePurchaseMasterListArray(raw)
+                selectIds.forEach { selectId ->
+                    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return@forEach
+                    val currentValue = select.value
+                    select.innerHTML = ""
+                    val defaultOpt = document.createElement("option") as HTMLOptionElement
+                    defaultOpt.value = ""
+                    defaultOpt.textContent = ""
+                    select.appendChild(defaultOpt)
+                    values.forEach { v ->
+                        if (v.isNotBlank()) {
+                            val opt = document.createElement("option") as HTMLOptionElement
+                            opt.value = v
+                            opt.textContent = v
+                            select.appendChild(opt)
+                        }
+                    }
+                    if (currentValue.isNotEmpty() && values.any { it.equals(currentValue, ignoreCase = true) }) {
+                        select.value = currentValue
+                    }
+                    val input = document.getElementById("${selectId}Input") as? HTMLInputElement
+                    if (input != null && select.value.isNotEmpty()) input.value = select.value
+                }
+            }
+            .catch { _: dynamic ->
+                console.error("Failed to load master-menu/$apiField")
+            }
+    }
 }
 
 // JavaScript function to sync combobox input and select
@@ -586,6 +671,212 @@ fun setupEditableComboboxHandlers() {
             }
         };
         
+        // Multi-select combobox: append selected value with semicolon separator (for Grade field)
+        window.appendMultiSelectValue = function(selectId) {
+            var select = document.getElementById(selectId);
+            var inputId = selectId + 'Input';
+            var input = document.getElementById(inputId);
+            if (select && input && select.value) {
+                var currentValue = input.value.trim();
+                var newValue = select.value.trim();
+                
+                if (currentValue === '') {
+                    input.value = newValue;
+                } else {
+                    // Check if value already exists (avoid duplicates)
+                    var existingValues = currentValue.split(';').map(function(v) { return v.trim(); });
+                    if (existingValues.indexOf(newValue) === -1) {
+                        input.value = currentValue + '; ' + newValue;
+                    }
+                }
+                
+                // Clear the select value to allow re-selection
+                select.value = '';
+                
+                // Trigger change event on input for any listeners
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        };
+        
+        // Function to open multi-select combobox dropdown (similar to regular combobox but appends values)
+        window.openMultiSelectComboboxDropdown = function(selectId) {
+            // Ensure base options for Fuel/Shift before opening (Grade options come from master_menu)
+            if (typeof window.ensureBaseComboboxOptionsForAddEdit === 'function') {
+                window.ensureBaseComboboxOptionsForAddEdit();
+            }
+            
+            // ALWAYS close all other dropdowns first to prevent conflicts
+            var allDropdowns = document.querySelectorAll('[id$="_dropdown"]');
+            allDropdowns.forEach(function(dropdown) {
+                var otherSelectId = dropdown.id.replace('_dropdown', '');
+                if (otherSelectId !== selectId) {
+                    dropdown.remove();
+                }
+            });
+            
+            // Prevent recursion: if dropdown already exists for this selectId, just update it
+            var existingDropdown = document.getElementById(selectId + '_dropdown');
+            if (existingDropdown) {
+                var inputId = selectId + 'Input';
+                var input = document.getElementById(inputId);
+                var select = document.getElementById(selectId);
+                if (input && select) {
+                    window.filterMultiSelectComboboxDropdown(selectId, '');
+                }
+                window.ensureScrollingRestored();
+                return;
+            }
+            
+            var select = document.getElementById(selectId);
+            if (!select) return;
+            
+            // Grade options come from master_menu/car_grade (no hardcoded injections here)
+            
+            var inputId = selectId + 'Input';
+            var input = document.getElementById(inputId);
+            if (!input) return;
+            
+            var options = Array.from(select.options).slice(1).map(function(opt) {
+                return { value: opt.value, text: opt.text };
+            });
+            
+            // Create dropdown overlay
+            var dropdown = document.createElement('div');
+            dropdown.id = selectId + '_dropdown';
+            dropdown.style.position = 'fixed';
+            dropdown.style.backgroundColor = '#f5f5f5';
+            dropdown.style.border = '1px solid #ddd';
+            dropdown.style.borderTop = 'none';
+            dropdown.style.borderRadius = '0 0 4px 4px';
+            dropdown.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+            dropdown.style.maxHeight = '300px';
+            dropdown.style.overflowY = 'auto';
+            dropdown.style.zIndex = '10001';
+            
+            // Position dropdown below the input
+            var rect = input.getBoundingClientRect();
+            dropdown.style.top = rect.bottom + 'px';
+            dropdown.style.left = rect.left + 'px';
+            dropdown.style.width = rect.width + 'px';
+            
+            // Add options to dropdown
+            options.forEach(function(opt) {
+                var div = document.createElement('div');
+                div.textContent = opt.text;
+                div.style.padding = '10px 12px';
+                div.style.cursor = 'pointer';
+                div.style.color = '#333';
+                div.style.borderBottom = '1px solid #e0e0e0';
+                div.onmouseover = function() { div.style.backgroundColor = '#e0e0e0'; };
+                div.onmouseout = function() { div.style.backgroundColor = 'transparent'; };
+                div.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    // Append the selected value
+                    var currentValue = input.value.trim();
+                    var newValue = opt.value.trim();
+                    
+                    if (currentValue === '') {
+                        input.value = newValue;
+                    } else {
+                        // Check if value already exists (avoid duplicates)
+                        var existingValues = currentValue.split(';').map(function(v) { return v.trim(); });
+                        if (existingValues.indexOf(newValue) === -1) {
+                            input.value = currentValue + '; ' + newValue;
+                        }
+                    }
+                    
+                    // Trigger change event on input
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // Close dropdown
+                    dropdown.remove();
+                    window.ensureScrollingRestored();
+                };
+                dropdown.appendChild(div);
+            });
+            
+            document.body.appendChild(dropdown);
+            
+            // Setup input filtering
+            input.oninput = function() {
+                window.filterMultiSelectComboboxDropdown(selectId, input.value);
+            };
+            
+            // Close dropdown when clicking outside
+            setTimeout(function() {
+                document.addEventListener('click', function closeDropdown(e) {
+                    if (!dropdown.contains(e.target) && e.target !== input && e.target.id !== selectId + 'Button') {
+                        dropdown.remove();
+                        document.removeEventListener('click', closeDropdown);
+                        window.ensureScrollingRestored();
+                    }
+                });
+            }, 100);
+        };
+        
+        // Filter multi-select combobox dropdown options
+        window.filterMultiSelectComboboxDropdown = function(selectId, searchText) {
+            var dropdown = document.getElementById(selectId + '_dropdown');
+            var select = document.getElementById(selectId);
+            var input = document.getElementById(selectId + 'Input');
+            if (!dropdown || !select) return;
+            
+            var options = Array.from(select.options).slice(1).map(function(opt) {
+                return { value: opt.value, text: opt.text };
+            });
+            
+            // Filter options based on search text (only filter by the last part after semicolon)
+            var lastPart = searchText.split(';').pop().trim().toLowerCase();
+            var filtered = options.filter(function(opt) {
+                return opt.text.toLowerCase().indexOf(lastPart) !== -1;
+            });
+            
+            // Clear and repopulate dropdown
+            dropdown.innerHTML = '';
+            filtered.forEach(function(opt) {
+                var div = document.createElement('div');
+                div.textContent = opt.text;
+                div.style.padding = '10px 12px';
+                div.style.cursor = 'pointer';
+                div.style.color = '#333';
+                div.style.borderBottom = '1px solid #e0e0e0';
+                div.onmouseover = function() { div.style.backgroundColor = '#e0e0e0'; };
+                div.onmouseout = function() { div.style.backgroundColor = 'transparent'; };
+                div.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    // Append the selected value
+                    var currentValue = input.value.trim();
+                    var newValue = opt.value.trim();
+                    
+                    // If user was typing in the last part, replace it; otherwise append
+                    var parts = currentValue.split(';').map(function(v) { return v.trim(); }).filter(function(v) { return v !== ''; });
+                    var lastTypedPart = parts.length > 0 ? parts[parts.length - 1] : '';
+                    
+                    // Check if the last typed part matches the beginning of the new value (user was typing)
+                    if (lastTypedPart !== '' && newValue.toLowerCase().indexOf(lastTypedPart.toLowerCase()) === 0) {
+                        // Replace the last part with the selected value
+                        parts[parts.length - 1] = newValue;
+                    } else if (parts.indexOf(newValue) === -1) {
+                        // Append if not already exists
+                        parts.push(newValue);
+                    }
+                    
+                    input.value = parts.join('; ');
+                    
+                    // Trigger change event on input
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    
+                    // Close dropdown
+                    dropdown.remove();
+                    window.ensureScrollingRestored();
+                };
+                dropdown.appendChild(div);
+            });
+        };
         
         // Helper function to get combobox value (reads from input, falls back to select)
         window.getComboboxValue = function(fieldId) {
@@ -856,16 +1147,14 @@ fun setupEditableComboboxHandlers() {
                 return { value: opt.value, text: opt.text };
             });
             
-            // Ensure base options for fuel/shift/grade (add + edit) are always present when filtering
+            // Ensure base options for fuel/shift are always present when filtering
             var baseOptionsMap = {
                 fuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 editFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 carBrandFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 shift: ["AT", "MT", "6F", "5F"],
                 editShift: ["AT", "MT", "6F", "5F"],
-                carBrandShift: ["AT", "MT", "6F", "5F"],
-                grade: ["G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI"],
-                editGrade: ["G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI"]
+                carBrandShift: ["AT", "MT", "6F", "5F"]
             };
             if (baseOptionsMap[selectId]) {
                 var existingValuesSet = new Set(allOptions.map(function(o) { return o.value; }));
@@ -921,16 +1210,24 @@ fun setupEditableComboboxHandlers() {
                 return false;
             }
             
+            // Never treat "See More" as selected; for Brand and master fields (Venue ID, Vehicle type, Rixo Company, Stock Location, POL) use case-insensitive match
+            var isMasterOrBrandField = (selectId === 'brand' || selectId === 'editBrand' || (typeof isMasterFieldWithSeeMore === 'function' && isMasterFieldWithSeeMore(selectId)));
+            function optionMatchesSelected(opt) {
+                if (opt.value === '__SEE_MORE__' || opt.value === '__SEE_LESS__') return false;
+                if (!currentSelectedValue) return false;
+                if (opt.value === currentSelectedValue || (opt.text || '') === currentSelectedValue) return true;
+                if (isChassisField) return chassisOptionMatchesSelected(opt);
+                if (isMasterOrBrandField) return (opt.value || '').toLowerCase() === currentLower || (opt.text || '').toLowerCase() === currentLower;
+                return false; // other fields: exact match only (already checked above)
+            }
+            
             // Separate selected value from other options
             var selectedOption = null;
             var otherOptions = [];
             
             // First, try to find selected option in filtered options
             filteredOptions.forEach(function(opt) {
-                var isMatch = currentSelectedValue && (opt.value === currentSelectedValue || opt.text === currentSelectedValue);
-                if (isChassisField && currentSelectedValue && !isMatch) {
-                    isMatch = chassisOptionMatchesSelected(opt);
-                }
+                var isMatch = optionMatchesSelected(opt);
                 if (isMatch) {
                     selectedOption = opt;
                 } else {
@@ -941,11 +1238,7 @@ fun setupEditableComboboxHandlers() {
             // If selected value not found in filtered options, check all options
             if (!selectedOption && currentSelectedValue) {
                 allOptions.forEach(function(opt) {
-                    var isMatch = opt.value === currentSelectedValue || opt.text === currentSelectedValue;
-                    if (isChassisField && !isMatch) {
-                        isMatch = chassisOptionMatchesSelected(opt);
-                    }
-                    if (isMatch) selectedOption = opt;
+                    if (optionMatchesSelected(opt)) selectedOption = opt;
                 });
             }
             
@@ -1007,8 +1300,8 @@ fun setupEditableComboboxHandlers() {
                     optionDiv.style.transition = 'background-color 0.15s ease';
                     optionDiv.textContent = opt.text || opt.value;
                     
-                    // Check if this is the selected value (for chassis use prefix/case-insensitive match)
-                    var isSelected = currentSelectedValue && (opt.value === currentSelectedValue || (isChassisField && chassisOptionMatchesSelected(opt)));
+                    // Check if this is the selected value (never highlight See More; case-insensitive for Brand and master fields)
+                    var isSelected = optionMatchesSelected(opt);
                     
                     // Highlight selected value with blue background (like image 4)
                     if (isSelected) {
@@ -1041,6 +1334,20 @@ fun setupEditableComboboxHandlers() {
                     
                     optionDiv.onclick = function(e) {
                         e.stopPropagation();
+                        // "See More": Brand uses car_brands; Venue ID, Vehicle type, Rixo Company, Stock Location, POL use generic master handler
+                        if (opt.value === '__SEE_MORE__') {
+                            if (selectId === 'brand' || selectId === 'editBrand') {
+                                if (typeof window.handleBrandSeeMoreClick === 'function') window.handleBrandSeeMoreClick(selectId);
+                            } else if (typeof window.getMasterFieldApiPath === 'function' && window.getMasterFieldApiPath(selectId)) {
+                                if (typeof window.handleMasterFieldSeeMoreClick === 'function') window.handleMasterFieldSeeMoreClick(selectId);
+                            }
+                            return;
+                        }
+                        // "See Less": restore dropdown to state before See More was clicked
+                        if (opt.value === '__SEE_LESS__') {
+                            if (typeof window.handleSeeLessClick === 'function') window.handleSeeLessClick(selectId);
+                            return;
+                        }
                         // For chassis: preserve part after hyphen if user already typed it (e.g. B43W-t6yg)
                         var valueToSet = opt.value;
                         var preserveChassisSuffix = false;
@@ -1183,9 +1490,7 @@ fun setupEditableComboboxHandlers() {
                 carBrandFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 shift: ["AT", "MT", "6F", "5F"],
                 editShift: ["AT", "MT", "6F", "5F"],
-                carBrandShift: ["AT", "MT", "6F", "5F"],
-                grade: ["G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI"],
-                editGrade: ["G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI"]
+                carBrandShift: ["AT", "MT", "6F", "5F"]
             };
             if (baseOptionsMap[selectId]) {
                 var existingValues = new Set();
@@ -1522,7 +1827,7 @@ fun setupEditableComboboxHandlers() {
                         }
                     }
                     
-                    // Car Brand modal (Fuel/Transmission): always cap to modal boundary and force scroll
+                    // Car Brand modal (Fuel/Shift): always cap to modal boundary and force scroll
                     if (selectId === 'carBrandFuel' || selectId === 'carBrandShift') {
                         var modalContent = document.getElementById('carBrandModalContent');
                         if (modalContent) {
@@ -1903,6 +2208,201 @@ var currentSortOrder: String = "desc" // desc = newest first for date, Z-A for t
 // Multi-select state
 var selectedPurchases = mutableSetOf<Long>()
 
+data class MasterSetNavItem(
+    val fieldName: String,
+    val label: String,
+    val route: String,
+)
+
+private val masterSetDisplayOverrides = mapOf(
+    "clients" to "Client",
+    "consignee" to "Consignee",
+    "country" to "Country",
+    "supplier" to "Supplier",
+    "rixo_company" to "Rixo Company",
+    "stock_location" to "Stock Location",
+    "repair_company" to "Repair Company",
+    "car_brands" to "Car Brands",
+    "bank_accounts" to "Bank Accounts",
+    "venue_id" to "Venue ID List",
+    "pol" to "POL",
+    "pod" to "POD",
+    "fuel" to "Fuel",
+    "car_grade" to "Car Grade",
+    "shift" to "Car Shift",
+    "type_of_vehicle" to "Type of Vehicles",
+)
+
+private fun toMasterSetLabel(fieldName: String): String {
+    return masterSetDisplayOverrides[fieldName]
+        ?: fieldName.split("_")
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { token -> token.lowercase().replaceFirstChar { c -> c.uppercaseChar() } }
+}
+
+private fun masterSetRouteForField(fieldName: String): String {
+    return "#/master/set/${js("encodeURIComponent(fieldName)") as String}"
+}
+
+private fun fetchMasterSetFields(onSuccess: (List<String>) -> Unit) {
+    window.fetch(apiUrl("master-menu/fields"))
+        .then { response: dynamic -> if (response.ok) response.json() else throw js("Error('Failed to load master sets')") }
+        .then { raw: dynamic ->
+            val fields = if (raw != null && js("Array.isArray(raw)")) {
+                val arr = raw.unsafeCast<Array<*>>()
+                (0 until arr.size).mapNotNull { idx ->
+                    val value = arr[idx]?.toString()?.trim() ?: ""
+                    if (value.isEmpty()) null else value.lowercase()
+                }.distinct()
+            } else {
+                emptyList()
+            }
+            onSuccess(fields)
+        }
+        .catch { error: dynamic ->
+            Logger.error("Failed to fetch master sets: ${error?.toString()}")
+            onSuccess(emptyList())
+        }
+}
+
+private fun renderMasterSetSidebarButtons() {
+    val container = document.getElementById("masterSetDynamicButtons") ?: return
+    fetchMasterSetFields { fields ->
+        val items = fields.map { field ->
+            MasterSetNavItem(field, toMasterSetLabel(field), masterSetRouteForField(field))
+        }.sortedBy { it.label.lowercase() }
+
+        container.innerHTML = items.joinToString("") { item ->
+            val safeLabel = item.label.replace("<", "&lt;").replace(">", "&gt;")
+            val safeField = item.fieldName.replace("\"", "&quot;")
+            val safeRoute = item.route.replace("\"", "&quot;")
+            """<button class="master-list-item dynamic-master-set-btn" data-field-name="$safeField" data-route="$safeRoute" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">$safeLabel</button>"""
+        }
+    }
+}
+
+private fun openAddMasterSetModal() {
+    document.getElementById("addMasterSetModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "addMasterSetModal"
+    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%;">
+            <h3 style="margin-top: 0;">Add Master Set</h3>
+            <label>Master Set</label>
+            <input type="text" id="addMasterSetInput" placeholder="Enter master set field name" style="width: 100%; padding: 10px 12px; margin: 8px 0; box-sizing: border-box;">
+            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 16px;">
+                <button id="addMasterSetCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
+                <button id="addMasterSetSubmitBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #16a34a; color:white; cursor: pointer;">Add</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("addMasterSetCancelBtn")?.addEventListener("click", { _: Event -> modal.remove() })
+    document.getElementById("addMasterSetSubmitBtn")?.addEventListener("click", { _: Event ->
+        val fieldName = (document.getElementById("addMasterSetInput") as? HTMLInputElement)?.value?.trim() ?: ""
+        if (fieldName.isBlank()) {
+            showMessage("Master Set is required", "error")
+            return@addEventListener
+        }
+        val body = js("{}")
+        body.fieldName = fieldName
+        val req = js("{}")
+        req.method = "POST"
+        req.headers = js("{\"Content-Type\": \"application/json\"}")
+        req.body = JSON.stringify(body)
+        window.fetch(apiUrl("master-menu/fields"), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to add master set')") }
+            .then { _: dynamic ->
+                val normalized = fieldName.lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+                showMessage("Master Set added successfully", "success")
+                modal.remove()
+                renderMasterSetSidebarButtons()
+                closeSidebar()
+                window.location.hash = masterSetRouteForField(normalized)
+            }
+            .catch { e: dynamic -> showMessage("Error: ${e?.message ?: "Failed to add master set"}", "error") }
+    })
+}
+
+private fun openDeleteMasterSetModal() {
+    document.getElementById("deleteMasterSetModal")?.remove()
+    val modal = document.createElement("div")
+    modal.id = "deleteMasterSetModal"
+    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%;">
+            <h3 style="margin-top: 0;">Delete Master Set</h3>
+            <label>Master Set</label>
+            <select id="deleteMasterSetSelect" style="width: 100%; padding: 10px 12px; margin: 8px 0; box-sizing: border-box;"></select>
+            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 16px;">
+                <button id="deleteMasterSetConfirmBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #dc2626; color:white; cursor: pointer;">Delete</button>
+                <button id="deleteMasterSetCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    fetchMasterSetFields { fields ->
+        val select = document.getElementById("deleteMasterSetSelect") as? HTMLSelectElement ?: return@fetchMasterSetFields
+        select.innerHTML = fields.sorted().joinToString("") { field ->
+            val label = toMasterSetLabel(field).replace("<", "&lt;").replace(">", "&gt;")
+            """<option value="$field">$label</option>"""
+        }
+    }
+
+    document.getElementById("deleteMasterSetCancelBtn")?.addEventListener("click", { _: Event -> modal.remove() })
+    document.getElementById("deleteMasterSetConfirmBtn")?.addEventListener("click", { _: Event ->
+        val fieldName = (document.getElementById("deleteMasterSetSelect") as? HTMLSelectElement)?.value?.trim() ?: ""
+        if (fieldName.isBlank()) {
+            showMessage("Please select a Master Set", "error")
+            return@addEventListener
+        }
+        if (!window.confirm("Delete master set '${toMasterSetLabel(fieldName)}'?")) return@addEventListener
+        val req = js("{}")
+        req.method = "DELETE"
+        val encoded = js("encodeURIComponent(fieldName)") as String
+        window.fetch(apiUrl("master-menu/fields/$encoded"), req)
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete master set')") }
+            .then { _: dynamic ->
+                showMessage("Master Set deleted successfully", "success")
+                modal.remove()
+                renderMasterSetSidebarButtons()
+                if (window.location.hash.contains("#/master")) {
+                    window.location.hash = "#/purchase"
+                }
+            }
+            .catch { e: dynamic -> showMessage("Error: ${e?.message ?: "Failed to delete master set"}", "error") }
+    })
+}
+
+private fun setupDynamicMasterSetListeners() {
+    val addBtn = document.getElementById("addMasterSetBtn")
+    if (addBtn != null && !addBtn.hasAttribute("data-listener-attached")) {
+        addBtn.setAttribute("data-listener-attached", "true")
+        addBtn.addEventListener("click", { _: Event -> openAddMasterSetModal() })
+    }
+
+    val deleteBtn = document.getElementById("deleteMasterSetBtn")
+    if (deleteBtn != null && !deleteBtn.hasAttribute("data-listener-attached")) {
+        deleteBtn.setAttribute("data-listener-attached", "true")
+        deleteBtn.addEventListener("click", { _: Event -> openDeleteMasterSetModal() })
+    }
+
+    val container = document.getElementById("masterSetDynamicButtons")
+    if (container != null && !container.hasAttribute("data-listener-attached")) {
+        container.setAttribute("data-listener-attached", "true")
+        container.addEventListener("click", { event: Event ->
+            val target = event.target as? HTMLElement ?: return@addEventListener
+            val btn = target.closest(".dynamic-master-set-btn") as? HTMLElement ?: return@addEventListener
+            val route = btn.getAttribute("data-route") ?: return@addEventListener
+            closeSidebar()
+            window.location.hash = route
+        })
+    }
+}
+
 fun createApp(root: Element) {
     root.innerHTML = """
         <div style="padding: 20px; font-family: Arial, sans-serif;">
@@ -1946,6 +2446,7 @@ fun createApp(root: Element) {
                         <button id="rixoRequestBtn" style="padding: 12px 20px; background-color: #8e44ad; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Rixo Note</button>
                         <button id="carBookingBtn" style="padding: 12px 20px; background-color: #17a2b8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Car Booking</button>
                         <button id="anInvoiceBtn" style="padding: 12px 20px; background-color: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Invoice</button>
+                        <button id="clientTransactionsSidebarBtn" style="padding: 12px 20px; background-color: #2980b9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Client Transactions</button>
                         <button id="vehicleDetailsBtn" style="padding: 12px 20px; background-color: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Vehicle Details</button>
                         
                         <!-- Shipment Section -->
@@ -2020,32 +2521,35 @@ fun createApp(root: Element) {
                         
                         <button id="userManagementBtn" style="padding: 12px 20px; background-color: #9b59b6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Manage Users</button>
                         
-                        <!-- Master List Section -->
+                        <!-- Master List Section (Master Set) -->
                         <div id="masterListSection" style="margin-top: 10px;">
                             <div id="masterListHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleMasterList()">
                                 <div style="display: flex; align-items: center; gap: 10px;">
                                     <span style="font-size: 16px;">📋</span>
-                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Master</h3>
+                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Master Set</h3>
                                 </div>
                                 <span id="masterListArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▲</span>
                             </div>
                             <div id="masterListItems" style="display: flex; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="masterClientsBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client</button>
-                                <button id="masterConsigneeBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee</button>
-                                <button id="masterCountryBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Country</button>
-                                <button id="masterSupplierBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier</button>
-                                <button id="masterRixoCompanyBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Company</button>
-                                <button id="masterStockLocationBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Stock Location</button>
-                                <button id="masterRepairCompanyBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Repair Company</button>
-                                <button id="masterCarBrandsBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Brands</button>
-                                <button id="masterBankAccountsBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Bank Accounts</button>
-                                <button id="masterVenueIdBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Venue ID List</button>
-                                <button id="masterPolBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">POL</button>
-                                <button id="masterPodBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">POD</button>
-                                <button id="masterFuelBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Fuel</button>
-                                <button id="masterCarGradeBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Grade</button>
-                                <button id="masterCarShiftBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Shift</button>
-                                <button id="masterTypeOfVehiclesBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(102, 126, 234, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Type of Vehicles</button>
+                                <button id="addMasterSetBtn" style="padding: 10px 15px; background-color: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left;">+ Add Set</button>
+                                <div id="masterSetDynamicButtons" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                                <button id="deleteMasterSetBtn" style="padding: 10px 15px; background-color: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left;">Delete Set</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Master Map Section -->
+                        <div id="masterMapSection" style="margin-top: 10px;">
+                            <div id="masterMapHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #4b6cb7 0%, #182848 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleMasterMapList()">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-size: 16px;">🗺️</span>
+                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Master Map</h3>
+                                </div>
+                                <span id="masterMapArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
+                            </div>
+                            <div id="masterMapItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
+                                <button id="masterSupplierMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
+                                <button id="masterCarBrandsMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Brands Map</button>
+                                <button id="masterConsigneeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee Map</button>
                             </div>
                         </div>
                         
@@ -2072,7 +2576,9 @@ fun createApp(root: Element) {
             <style>
                 /* Force-hide only the Rixo Transport button */
                 #rixoTransportBtn { display: none !important; }
-                .sort-menu { display: none; }
+                /* Note: do not globally hide `.sort-menu` here.
+                   The purchase-table sorting dropdown relies on toggling `style.display`
+                   from JS, and a global CSS rule can prevent it from ever showing. */
                 /* Ensure hamburger button stays fixed during scroll */
                 #hamburgerBtn { 
                     position: fixed !important; 
@@ -2174,6 +2680,13 @@ fun createApp(root: Element) {
         window.location.hash = "#/invoice"
     })
     
+    document.getElementById("clientTransactionsSidebarBtn")?.addEventListener("click", { _: Event ->
+        // Client Transactions should behave like master client-transactions route
+        clearCarBookingStates()
+        closeSidebar()
+        window.location.hash = "#/master/client-transactions"
+    })
+    
     document.getElementById("rixoTransportBtn")?.addEventListener("click", { _: Event ->
         handleRixoTransportPdfGeneration()
     })
@@ -2210,12 +2723,30 @@ fun createApp(root: Element) {
     
     // Update user info in sidebar
     updateUserInfoInSidebar()
+    setupDynamicMasterSetListeners()
+    renderMasterSetSidebarButtons()
     
     // Master List toggle functionality
     js("""
         window.toggleMasterList = function() {
             var items = document.getElementById('masterListItems');
             var arrow = document.getElementById('masterListArrow');
+            if (items && arrow) {
+                if (items.style.display === 'none') {
+                    items.style.display = 'flex';
+                    arrow.textContent = '▲';
+                    arrow.style.transform = 'rotate(0deg)';
+                } else {
+                    items.style.display = 'none';
+                    arrow.textContent = '▼';
+                    arrow.style.transform = 'rotate(180deg)';
+                }
+            }
+        };
+        
+        window.toggleMasterMapList = function() {
+            var items = document.getElementById('masterMapItems');
+            var arrow = document.getElementById('masterMapArrow');
             if (items && arrow) {
                 if (items.style.display === 'none') {
                     items.style.display = 'flex';
@@ -2315,13 +2846,21 @@ fun createApp(root: Element) {
         };
         // Initialize all collapsible sections as closed by default
         function initCollapsibleSections() {
-            // Master List
+            // Master List (Master Set)
             var masterItems = document.getElementById('masterListItems');
             var masterArrow = document.getElementById('masterListArrow');
             if (masterItems && masterArrow) {
                 masterItems.style.display = 'none';
                 masterArrow.textContent = '▼';
                 masterArrow.style.transform = 'rotate(180deg)';
+            }
+            // Master Map
+            var masterMapItems = document.getElementById('masterMapItems');
+            var masterMapArrow = document.getElementById('masterMapArrow');
+            if (masterMapItems && masterMapArrow) {
+                masterMapItems.style.display = 'none';
+                masterMapArrow.textContent = '▼';
+                masterMapArrow.style.transform = 'rotate(180deg)';
             }
             // Shipment
             var shipmentItems = document.getElementById('shipmentItems');
@@ -2369,6 +2908,9 @@ fun createApp(root: Element) {
         }
     """)
     
+    setupDynamicMasterSetListeners()
+    renderMasterSetSidebarButtons()
+
     // Master List event listeners
     document.getElementById("masterClientsBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
@@ -2433,6 +2975,20 @@ fun createApp(root: Element) {
     document.getElementById("masterTypeOfVehiclesBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
         showMasterTypeOfVehiclesPage()
+    })
+    
+    // Master Map event listeners
+    document.getElementById("masterSupplierMapBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        window.location.hash = "#/master/supplier-map"
+    })
+    document.getElementById("masterCarBrandsMapBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        window.location.hash = "#/master/car-brands-map"
+    })
+    document.getElementById("masterConsigneeMapBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        window.location.hash = "#/master/consignee-map"
     })
     
     // Load initial data only if we're on the purchase list page
@@ -2566,13 +3122,14 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/client-transactions") -> {
-            showMasterClientsPage()
+            // Client Transactions view (accounts + alerts + list)
+            showClientAccountsPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/client") -> {
-            showClientPage()
+            showDynamicMasterSetPage("clients")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -2584,13 +3141,13 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/consignee") -> {
-            showConsigneePage()
+            showDynamicMasterSetPage("consignee")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/country") -> {
-            showMasterCountriesPage()
+            showDynamicMasterSetPage("country")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -2602,25 +3159,25 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/supplier") -> {
-            showSupplierPage()
+            showDynamicMasterSetPage("supplier")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/rixo-company") -> {
-            showMasterRixoCompanyPage()
+            showDynamicMasterSetPage("rixo_company")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/stock-location") -> {
-            showMasterStockLocationsPage()
+            showDynamicMasterSetPage("stock_location")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/repair-company") -> {
-            showMasterRepairCompaniesPage()
+            showDynamicMasterSetPage("repair_company")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -2632,55 +3189,63 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/car-brands") -> {
-            showCarBrandsPage()
+            showDynamicMasterSetPage("car_brands")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/bank-accounts") -> {
-            showMasterBankAccountsPage()
+            showDynamicMasterSetPage("bank_accounts")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/venue-id") -> {
-            showMasterVenueIdsPage()
+            showDynamicMasterSetPage("venue_id")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/pol") -> {
-            showMasterPolPage()
+            showDynamicMasterSetPage("pol")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/pod") -> {
-            showMasterPodPage()
+            showDynamicMasterSetPage("pod")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/fuel") -> {
-            showMasterFuelPage()
+            showDynamicMasterSetPage("fuel")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/car-grade") -> {
-            showMasterCarGradePage()
+            showDynamicMasterSetPage("car_grade")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/car-shift") -> {
-            showMasterCarShiftPage()
+            showDynamicMasterSetPage("shift")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/master/type-of-vehicles") -> {
-            showMasterTypeOfVehiclesPage()
+            showDynamicMasterSetPage("type_of_vehicle")
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/set/") -> {
+            val encoded = hash.removePrefix("#/master/set/")
+            val fieldName = js("decodeURIComponent(encoded)") as String
+            showDynamicMasterSetPage(fieldName)
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -4218,10 +4783,10 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Production Date</label>
                         <input type="month" id="carModelYear" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                </div>
+                    </div>
                     <div>
                         <label>Grade</label>
-                        <input type="text" id="grade" placeholder="e.g., G" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("grade", "Select Grade", additionalAttrs = "oninput=\"this.value = this.value.split(';')[0].trim();\"")}
                     </div>
                     <div>
                         <label>Auction No</label>
@@ -4297,14 +4862,23 @@ fun createAddFormHTML(): String {
                                onblur="if(this.value && !this.value.endsWith('CC')) { this.value = this.value + 'CC'; }">
                     </div>
                     <div>
-                        <label>Transmission</label>
-                        ${createEditableCombobox("shift", "Select Transmission")}
-                </div>
+                        <label>Shift</label>
+                        ${createEditableCombobox("shift", "Select Shift")}
+                    </div>
                     <div>
                         <label>WD</label>
-                        <input type="text" id="wd" placeholder="e.g., 2" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
-                               oninput="this.value = this.value.replace(/[^0-9]/g, '')" 
-                               onblur="if(this.value && !this.value.endsWith('WD')) { this.value = this.value + 'WD'; }">
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="wd" value="2WD">
+                                <span class="checkmark"></span>
+                                2WD
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="wd" value="4WD">
+                                <span class="checkmark"></span>
+                                4WD
+                            </label>
+                        </div>
                     </div>
                     <div>
                         <label>Drive Type</label>
@@ -4321,6 +4895,10 @@ fun createAddFormHTML(): String {
                             </label>
                         </div>
                     </div>
+                    <div>
+                        <label>Vehicle type</label>
+                        ${createEditableCombobox("shipmentSize", "Select Vehicle type")}
+                    </div>
                     <div style="grid-column: 1 / -1; margin-bottom: 20px;">
                         <label>Options</label>
                         <div class="options-buttons-grid">
@@ -4330,15 +4908,16 @@ fun createAddFormHTML(): String {
                             <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
                             <button type="button" class="option-btn" data-option="Power Window">Power Window</button>
                             <button type="button" class="option-btn" data-option="Sunroof">Sunroof</button>
-                            <button type="button" class="option-btn" data-option="Navigation">Navigation</button>
-                            <button type="button" class="option-btn" data-option="TV">TV</button>
+                            <button type="button" class="option-btn" data-option="Navigation/TV">Navigation/TV</button>
                             <button type="button" class="option-btn" data-option="Leather Seats">Leather Seats</button>
                             <button type="button" class="option-btn" data-option="Spare Key">Spare Key</button>
-                            <button type="button" class="option-btn" data-option="4WD">4WD</button>
                             <button type="button" class="option-btn" data-option="AC">AC</button>
                         </div>
                         <input type="hidden" id="optionsPredefined" value="">
-                        <input type="text" id="options" placeholder="Type custom option and press Enter..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button type="button" class="option-btn option-btn-basic" data-option="Basic" title="Select ABS, Power Window, Power Steering, AC">Basic</button>
+                            <input type="text" id="options" placeholder="Type custom option and press Enter..." style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
                     </div>
                 </div>
                 
@@ -4359,10 +4938,6 @@ fun createAddFormHTML(): String {
                         <label>Venue ID</label>
                         ${createEditableCombobox("venueId", "Select Venue ID")}
                     </div>
-                    <div>
-                        <label>Vehicle type</label>
-                        ${createEditableCombobox("shipmentSize", "Select Vehicle type")}
-                    </div>
                 </div>
                 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('rixo')"><h3 class="form-section-header" data-section="rixo">Rixo Information</h3></div>
@@ -4376,32 +4951,18 @@ fun createAddFormHTML(): String {
                         ${createEditableCombobox("stockLocation", "Select Stock Location")}
                     </div>
                     <div>
-                        <label>POL</label>
-                        ${createEditableCombobox("pol", "Select POL")}
-                    </div>
-                    <div>
                         <label>Rixo Price</label>
-                        <div style="position: relative; width: 100%;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="rixoPriceInput" placeholder="0" min="0" step="0.01" 
-                                   style="width: 100%; padding: 8px 40px 8px 20px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
-                                   autocomplete="off"
-                                   onfocus="this.select();">
-                            <input type="text" id="rixoPrice" placeholder="Enter or select Rixo Price" style="display: none;">
-                            <select id="rixoPriceDropdown" 
-                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
-                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('rixoPriceDropdown');"
-                                    onchange="var input = document.getElementById('rixoPriceInput'); if (input && this.value) { var numValue = typeof window.parseRixoPrice === 'function' ? window.parseRixoPrice(this.value) : this.value.replace(/[¥,\\s]/g, ''); input.value = numValue; input.dispatchEvent(new Event('change', { bubbles: true })); } selectRixoPrice(this.value);">
-                                <option value="">▼</option>
-                            </select>
-                            <div id="rixoPriceDropdownButton" onclick="openComboboxDropdown('rixoPriceDropdown')" 
-                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
-                                ▼
+                        <div class="currency-input" style="display:flex; gap:10px; align-items:center;">
+                            <span class="currency-symbol">¥</span>
+                            <input type="text" inputmode="decimal" id="rixoPriceInput" class="money-input" placeholder="0"
+                                   autocomplete="off" onfocus="this.select();">
+                            <button type="button" id="calculateRixoPriceBtn"
+                                    style="padding: 8px 12px; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; white-space:nowrap; min-height:44px;"
+                                    onclick="window.calculateRixoPriceFromMapping(false)">
+                                Calculate
+                            </button>
                         </div>
                     </div>
-                    </div>
-                    </div>
-                <div class="form-section-content form-grid-2col" data-section="rixo">
                     <div>
                         <label>Rixo Requested</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
@@ -4432,7 +4993,7 @@ fun createAddFormHTML(): String {
                             </label>
                         </div>
                     </div>
-                        </div>
+                </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="pricing">
@@ -4440,28 +5001,35 @@ fun createAddFormHTML(): String {
                         <label>Car Price</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="price" min="0" step="0.01" placeholder="0">
-                </div>
+                            <input type="text" inputmode="decimal" id="price" class="money-input" placeholder="0">
+                        </div>
                     </div>
                     <div>
                         <label>Auction Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="auctionFee" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="auctionFee" class="money-input" placeholder="0">
+                        </div>
+                    </div>
+                    <div>
+                        <label>Auction Penalty Fee</label>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="text" inputmode="decimal" id="auctionPenaltyFee" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Recycle Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="recycleFee" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="recycleFee" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Road Tax</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="roadTax" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="roadTax" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
@@ -4469,26 +5037,30 @@ fun createAddFormHTML(): String {
                         <div style="position:relative;">
                             <input type="date" id="paymentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="paymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                        </div>
                     </div>
-                </div>
                 </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="shipment">
                     <div>
                         <label>Client Name</label>
-                        ${createClientNameField("clientName", "")}
+                        ${createEditableCombobox("clientName", "Select Client Name")}
                     </div>
                     <div>
                         <label>Target Country</label>
-                        <input type="text" id="country" placeholder="Select Country" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("country", "Select Country")}
+                    </div>
+                    <div>
+                        <label>POL</label>
+                        ${createEditableCombobox("pol", "Select POL")}
                     </div>
                     <div>
                         <label>Shipment Date</label>
                         <div style="position:relative;">
                             <input type="date" id="shipmentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="shipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
-                    </div>
+                        </div>
                     </div>
                     <div>
                         <label>B/L No.</label>
@@ -4502,53 +5074,68 @@ fun createAddFormHTML(): String {
                         <label>Shipment Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="shipmentCharges" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="shipmentCharges" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Freight</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="freight" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="freight" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Storage Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="storageCharges" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="storageCharges" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Repair Company</label>
-                        <input type="text" id="repairCompany" placeholder="Select Repair Company" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("repairCompany", "Select Repair Company")}
                     </div>
                     <div>
                         <label>Repair Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="repairCharges" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="repairCharges" class="money-input" placeholder="0">
+                        </div>
                     </div>
-                </div>
+                    <div>
+                        <label>Shipping Confirmed</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="shippingConfirmed" value="TRUE">
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="shippingConfirmed" value="FALSE" checked>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
+                        </div>
+                    </div>
                     <div>
                         <label>Misc. Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="miscCharges" min="0" step="0.01" placeholder="0">
-                    </div>
+                            <input type="text" inputmode="decimal" id="miscCharges" class="money-input" placeholder="0">
+                        </div>
                     </div>
                     <div>
                         <label>Inspection Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="inspectionFee" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="inspectionFee" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Commission</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="commission" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="commission" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
@@ -4560,10 +5147,10 @@ fun createAddFormHTML(): String {
                         <div style="display: flex; gap: 8px; align-items: stretch;">
                             <div class="currency-input" style="flex: 1;">
                                 <span class="currency-symbol">¥</span>
-                                <input type="number" id="taxTotal" min="0" step="0.01" placeholder="0">
-                    </div>
+                                <input type="text" inputmode="decimal" id="taxTotal" class="money-input" placeholder="0">
+                            </div>
                             <button type="button" id="calculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; min-height: 44px; align-self: stretch;">10% Tax</button>
-                </div>
+                        </div>
                     </div>
                     <div>
                         <label>Total Cost (After Tax 10%)</label>
@@ -4577,6 +5164,7 @@ fun createAddFormHTML(): String {
                 </div>
                 <div class="form-actions">
                     <button type="button" id="addSaveBtn" class="btn-primary">Save</button>
+                    <button type="button" id="addSaveAndMoreBtn" class="btn-primary" style="margin-left: 10px;">Save and Add More</button>
                     <button type="button" id="cancelBtn" class="btn-secondary">Cancel</button>
                 </div>
             </form>
@@ -4668,19 +5256,46 @@ fun setupRixoDropdowns() {
             clearDropdown('editRixoCompany');
             clearDropdown('rixoPrice');
             clearDropdown('editRixoPrice');
+
+            // Always populate Vehicle type from master_menu/type_of_vehicle.
+            // Mapping may suggest values, but base options must come from master data.
+            window.fetch(apiUrl("master-menu/type_of_vehicle"))
+                .then(function(resp) {
+                    return resp && resp.ok ? resp.json() : [];
+                })
+                .then(function(raw) {
+                    var values = [];
+                    if (Array.isArray(raw)) {
+                        values = raw
+                            .map(function(v) { return (v || '').toString().trim(); })
+                            .filter(function(v) { return v.length > 0; });
+                    }
+                    updateDropdown('shipmentSize', 'editShipmentSize', values);
+                })
+                .catch(function(err) {
+                    console.warn('Failed to load type_of_vehicle master data:', err);
+                });
         }
         
         function clearDropdown(elementId) {
             var select = document.getElementById(elementId);
             if (select) {
                 select.innerHTML = '<option value="">Select ' + getFieldLabel(elementId) + '</option>';
+                if (isMasterFieldWithSeeMore(elementId)) {
+                    select.innerHTML += '<option value="__SEE_MORE__">See More</option>';
+                }
             }
         }
         
         function getFieldLabel(elementId) {
             switch(elementId) {
+                case 'venueId':
+                case 'editVenueId':
+                    return 'Venue ID';
                 case 'typeOfVehicle':
                 case 'editTypeOfVehicle':
+                case 'shipmentSize':
+                case 'editShipmentSize':
                     return 'Vehicle type';
                 case 'stockLocation':
                 case 'editStockLocation':
@@ -4696,6 +5311,38 @@ fun setupRixoDropdowns() {
                     return 'Rixo Price';
                 default:
                     return 'Option';
+            }
+        }
+        
+        function isMasterFieldWithSeeMore(elementId) {
+            return elementId === 'venueId' || elementId === 'editVenueId' ||
+                elementId === 'shipmentSize' || elementId === 'editShipmentSize' ||
+                elementId === 'typeOfVehicle' || elementId === 'editTypeOfVehicle' ||
+                elementId === 'rixoCompany' || elementId === 'editRixoCompany' ||
+                elementId === 'stockLocation' || elementId === 'editStockLocation' ||
+                elementId === 'pol' || elementId === 'editPol';
+        }
+        
+        // Ensure saved value exists as an option so validation passes (Edit form: dropdown may have fewer options than saved value)
+        function ensureComboboxOptionExists(selectId, value) {
+            if (!value || String(value).trim() === '' || value === '__SEE_MORE__' || value === '__SEE_LESS__') return;
+            var select = document.getElementById(selectId);
+            if (!select) return;
+            var val = String(value).trim();
+            var valLower = val.toLowerCase();
+            for (var i = 0; i < select.options.length; i++) {
+                var opt = select.options[i];
+                if (opt.value === '__SEE_MORE__') continue;
+                if ((opt.value || '').toLowerCase() === valLower || (opt.text || '').toLowerCase() === valLower) return;
+            }
+            var newOpt = document.createElement('option');
+            newOpt.value = val;
+            newOpt.textContent = val;
+            var last = select.options[select.options.length - 1];
+            if (last && last.value === '__SEE_MORE__') {
+                select.insertBefore(newOpt, last);
+            } else {
+                select.appendChild(newOpt);
             }
         }
         
@@ -4915,6 +5562,86 @@ fun setupRixoDropdowns() {
         window.updateDropdownOptions = updateDropdownOptions;
         window.selectRixoPrice = selectRixoPrice;
         window.selectEditRixoPrice = selectEditRixoPrice;
+
+        // Fill Rixo Price using rixo_mapping (stock_location + rixo_company + supported_vehicle_type)
+        window.calculateRixoPriceFromMapping = function(isEditForm) {
+            var stockLocationId = isEditForm ? 'editStockLocation' : 'stockLocation';
+            var rixoCompanyId = isEditForm ? 'editRixoCompany' : 'rixoCompany';
+            var vehicleTypeId = isEditForm ? 'editShipmentSize' : 'shipmentSize';
+            var rixoPriceInputId = isEditForm ? 'editRixoPriceInput' : 'rixoPriceInput';
+
+            var stockLocation = window.getComboboxValue ? window.getComboboxValue(stockLocationId) : '';
+            var rixoCompany = window.getComboboxValue ? window.getComboboxValue(rixoCompanyId) : '';
+            var vehicleType = window.getComboboxValue ? window.getComboboxValue(vehicleTypeId) : '';
+
+            stockLocation = (stockLocation || '').toString().trim();
+            rixoCompany = (rixoCompany || '').toString().trim();
+            vehicleType = (vehicleType || '').toString().trim();
+
+            var input = document.getElementById(rixoPriceInputId);
+            if (!input) return;
+
+            if (!stockLocation || !rixoCompany || !vehicleType) {
+                if (typeof window.showMessage === 'function') {
+                    window.showMessage('Please select Stock Location, Rixo Company, and Vehicle type before calculating Rixo Price.', 'error');
+                }
+                return;
+            }
+
+            input.disabled = true;
+            input.value = input.value || '';
+
+            var url = apiUrl('rixo-mapping/lookup?' +
+                'stockLocation=' + encodeURIComponent(stockLocation) + '&' +
+                'rixoCompany=' + encodeURIComponent(rixoCompany) + '&' +
+                'supportedVehicleType=' + encodeURIComponent(vehicleType)
+            );
+
+            window.fetch(url)
+                .then(function(resp) { return resp && resp.ok ? resp.json() : null; })
+                .then(function(result) {
+                    if (!result || result.success !== true) {
+                        var msg = (result && result.message) ? result.message : 'No rixo mapping found for these values.';
+                        if (typeof window.showMessage === 'function') window.showMessage(msg, 'error');
+                        return;
+                    }
+
+                    var rixoPrice = result.data ? result.data.rixoPrice : null;
+                    if (!rixoPrice) {
+                        if (typeof window.showMessage === 'function') window.showMessage('Rixo price not found in mapping result.', 'error');
+                        return;
+                    }
+
+                    // Convert "¥x,xxx" -> "xxxx" for money-input fields
+                    var numericValue = (typeof window.parseRixoPrice === 'function') ? window.parseRixoPrice(rixoPrice) : String(rixoPrice);
+                    if (!numericValue) numericValue = String(rixoPrice).replace(/[¥,\s]/g, '').replace(/[^0-9.]/g, '');
+
+                    input.value = numericValue;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                })
+                .catch(function(err) {
+                    console.error('calculateRixoPriceFromMapping error:', err);
+                    if (typeof window.showMessage === 'function') window.showMessage('Failed to calculate Rixo Price. Please try again.', 'error');
+                })
+                .finally(function() {
+                    input.disabled = false;
+                });
+        };
+
+        // Wire calculate buttons (both Add and Edit)
+        var _calcBtn = document.getElementById('calculateRixoPriceBtn');
+        if (_calcBtn) {
+            _calcBtn.addEventListener('click', function() {
+                window.calculateRixoPriceFromMapping(false);
+            });
+        }
+        var _calcEditBtn = document.getElementById('calculateEditRixoPriceBtn');
+        if (_calcEditBtn) {
+            _calcEditBtn.addEventListener('click', function() {
+                window.calculateRixoPriceFromMapping(true);
+            });
+        }
         
         // Handle car picture upload
         function handleCarPictureUpload(input) {
@@ -5192,6 +5919,15 @@ fun setupRixoDropdowns() {
         function setFormValuesAfterChassisLoad(purchaseData) {
             // Set other values
             setTimeout(function() {
+                // Ensure saved values exist as options so combobox validation passes (dropdown may have fewer options than saved)
+                ensureComboboxOptionExists('editStockLocation', purchaseData.stockLocation);
+                ensureComboboxOptionExists('editPol', purchaseData.pol);
+                ensureComboboxOptionExists('editRixoCompany', purchaseData.rixoCompany);
+                ensureComboboxOptionExists('editBrand', purchaseData.brand || purchaseData.carBrand);
+                ensureComboboxOptionExists('editVenueId', purchaseData.venueId);
+                ensureComboboxOptionExists('editShipmentSize', purchaseData.shipmentSize || purchaseData.vehicleType);
+                ensureComboboxOptionExists('editTypeOfVehicle', purchaseData.shipmentSize || purchaseData.vehicleType);
+                
                 // Set Stock Location
                 var editStockSelect = document.getElementById('editStockLocation');
                 if (editStockSelect && purchaseData.stockLocation) {
@@ -5210,7 +5946,13 @@ fun setupRixoDropdowns() {
                 }
                 // Populate POL dropdown from booking_mappings for current stock location (do not overwrite value)
                 if (purchaseData.stockLocation && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                    window.fetchPolsByStockLocationAndUpdate(purchaseData.stockLocation, false);
+                    window.fetchPolsByStockLocationAndUpdate(purchaseData.stockLocation, false).then(function() {
+                        ensureComboboxOptionExists('editPol', purchaseData.pol);
+                        var editPolSelect = document.getElementById('editPol');
+                        var editPolInput = document.getElementById('editPolInput');
+                        if (editPolSelect && purchaseData.pol) { editPolSelect.value = purchaseData.pol; }
+                        if (editPolInput && purchaseData.pol) { editPolInput.value = purchaseData.pol; }
+                    }).catch(function() {});
                 }
                 
                 // Set Rixo Company
@@ -5219,6 +5961,21 @@ fun setupRixoDropdowns() {
                     editRixoSelect.value = purchaseData.rixoCompany;
                     console.log('Set edit rixo company:', purchaseData.rixoCompany);
                 }
+                var editRixoInput = document.getElementById('editRixoCompanyInput');
+                if (editRixoInput && purchaseData.rixoCompany) { editRixoInput.value = purchaseData.rixoCompany; }
+                
+                // Set Venue ID
+                var editVenueSelect = document.getElementById('editVenueId');
+                var editVenueInput = document.getElementById('editVenueIdInput');
+                if (editVenueSelect && purchaseData.venueId) { editVenueSelect.value = purchaseData.venueId; }
+                if (editVenueInput && purchaseData.venueId) { editVenueInput.value = purchaseData.venueId; }
+                
+                // Set Vehicle type (editShipmentSize is the combobox on Edit form)
+                var editShipmentSelect = document.getElementById('editShipmentSize');
+                var editShipmentInput = document.getElementById('editShipmentSizeInput');
+                var shipmentValue = purchaseData.shipmentSize || purchaseData.vehicleType;
+                if (editShipmentSelect && shipmentValue) { editShipmentSelect.value = shipmentValue; }
+                if (editShipmentInput && shipmentValue) { editShipmentInput.value = shipmentValue; }
                 
                 // Set Rixo Price - extract numeric value only (input is type="number")
                 // Always set from database if value exists (HTML template may not have set it yet due to timing)
@@ -5260,11 +6017,14 @@ fun setupRixoDropdowns() {
                     console.log('Set edit shipment size:', shipmentValue);
                 }
                 
-                // Set Grade (now text input)
-                var editGrade = document.getElementById('editGrade');
-                if (editGrade && purchaseData.grade) {
-                    editGrade.value = purchaseData.grade;
-                    console.log('Set edit grade:', purchaseData.grade);
+                // Set Grade (single value; normalize any existing ';' separated data)
+                var editGradeInput = document.getElementById('editGradeInput');
+                if (editGradeInput && purchaseData.grade) {
+                    var g = (purchaseData.grade || '').toString().split(';')[0].trim();
+                    editGradeInput.value = g;
+                    var editGradeSelect = document.getElementById('editGrade');
+                    if (editGradeSelect) { editGradeSelect.value = g; }
+                    console.log('Set edit grade:', g);
                 }
                 
                 // Set Door (now number input)
@@ -5343,7 +6103,8 @@ fun setupRixoDropdowns() {
                 }
                 
                 // Set Options: predefined go to hidden + button highlight; custom go to text box only
-                var PREDEFINED_OPTIONS = ['ABS', 'Air Bag', 'Aluminum Wheels', 'Power Steering', 'Power Window', 'Sunroof', 'Navigation', 'TV', 'Leather Seats', 'Spare Key', '4WD', 'AC'];
+                var PREDEFINED_OPTIONS = ['ABS', 'Air Bag', 'Aluminum Wheels', 'Power Steering', 'Power Window', 'Sunroof', 'Navigation/TV', 'Leather Seats', 'Spare Key', 'AC'];
+                var OPTIONS_NORMALIZE = { 'Navigation': 'Navigation/TV', 'TV': 'Navigation/TV' };
                 var editOptions = document.getElementById('editOptions');
                 var editOptionsPredefined = document.getElementById('editOptionsPredefined');
                 if (editOptions && editOptionsPredefined) {
@@ -5352,15 +6113,17 @@ fun setupRixoDropdowns() {
                         var predefined = [];
                         var custom = [];
                         optionsArray.forEach(function(opt) {
-                            if (PREDEFINED_OPTIONS.indexOf(opt) > -1) {
-                                predefined.push(opt);
+                            var normalized = OPTIONS_NORMALIZE[opt] || opt;
+                            if (PREDEFINED_OPTIONS.indexOf(normalized) > -1) {
+                                predefined.push(normalized);
                             } else {
                                 custom.push(opt);
                             }
                         });
                         editOptionsPredefined.value = predefined.join(', ');
                         editOptions.value = custom.join(', ');
-                        var optionButtons = document.querySelectorAll('.option-btn');
+                        var editForm = document.getElementById('editForm');
+                        var optionButtons = editForm ? editForm.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn');
                         optionButtons.forEach(function(btn) {
                             var optionValue = btn.getAttribute('data-option');
                             if (predefined.indexOf(optionValue) > -1) {
@@ -5369,10 +6132,21 @@ fun setupRixoDropdowns() {
                                 btn.classList.remove('selected');
                             }
                         });
+                        // Keep Basic in sync with ABS/PW/PS/AC in Edit form after loading saved options
+                        if (editForm) {
+                            var basicBtn = editForm.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
+                            var required = ['ABS', 'Power Window', 'Power Steering', 'AC'];
+                            var allSelected = required.every(function(opt) {
+                                var b = editForm.querySelector('.options-buttons-grid .option-btn[data-option="' + opt + '"]');
+                                return !!(b && b.classList.contains('selected'));
+                            });
+                            if (basicBtn) basicBtn.classList.toggle('selected', allSelected);
+                        }
                     } else {
                         editOptionsPredefined.value = '';
                         editOptions.value = '';
-                        document.querySelectorAll('.option-btn').forEach(function(btn) { btn.classList.remove('selected'); });
+                        var ef = document.getElementById('editForm');
+                        (ef ? ef.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn')).forEach(function(btn) { btn.classList.remove('selected'); });
                     }
                 }
                 
@@ -5484,7 +6258,8 @@ fun setupRixoDropdowns() {
                     // Set brand value if not already set by chassis mapping
                     var editBrandSelect = document.getElementById('editBrand');
                     var editBrandInput = document.getElementById('editBrandInput');
-                    if (editBrandSelect && brandName && !editBrandSelect.value) {
+                    if (editBrandSelect && brandName) {
+                        ensureComboboxOptionExists('editBrand', brandName);
                         editBrandSelect.value = brandName;
                         if (editBrandInput) {
                             editBrandInput.value = brandName;
@@ -5524,6 +6299,30 @@ fun setupRixoDropdowns() {
                         }
                     }
                 }, 500); // Wait for chassis mapping to complete
+                
+                // Fallback: re-ensure saved values exist as options after any async dropdown population (e.g. refreshRixoDropdowns)
+                setTimeout(function() {
+                    ensureComboboxOptionExists('editStockLocation', purchaseData.stockLocation);
+                    ensureComboboxOptionExists('editPol', purchaseData.pol);
+                    ensureComboboxOptionExists('editRixoCompany', purchaseData.rixoCompany);
+                    ensureComboboxOptionExists('editBrand', purchaseData.brand || purchaseData.carBrand);
+                    ensureComboboxOptionExists('editVenueId', purchaseData.venueId);
+                    ensureComboboxOptionExists('editShipmentSize', purchaseData.shipmentSize || purchaseData.vehicleType);
+                    ensureComboboxOptionExists('editCountry', purchaseData.country);
+                    ensureComboboxOptionExists('editClientName', purchaseData.clientName);
+                    ensureComboboxOptionExists('editRepairCompany', purchaseData.repairCompany);
+                    var sv = purchaseData.shipmentSize || purchaseData.vehicleType;
+                    if (purchaseData.stockLocation) { var s = document.getElementById('editStockLocation'); var i = document.getElementById('editStockLocationInput'); if (s) s.value = purchaseData.stockLocation; if (i) i.value = purchaseData.stockLocation; }
+                    if (purchaseData.pol) { var s = document.getElementById('editPol'); var i = document.getElementById('editPolInput'); if (s) s.value = purchaseData.pol; if (i) i.value = purchaseData.pol; }
+                    if (purchaseData.rixoCompany) { var s = document.getElementById('editRixoCompany'); var i = document.getElementById('editRixoCompanyInput'); if (s) s.value = purchaseData.rixoCompany; if (i) i.value = purchaseData.rixoCompany; }
+                    if (purchaseData.brand || purchaseData.carBrand) { var s = document.getElementById('editBrand'); var i = document.getElementById('editBrandInput'); if (s) s.value = purchaseData.brand || purchaseData.carBrand; if (i) i.value = purchaseData.brand || purchaseData.carBrand; }
+                    if (purchaseData.venueId) { var s = document.getElementById('editVenueId'); var i = document.getElementById('editVenueIdInput'); if (s) s.value = purchaseData.venueId; if (i) i.value = purchaseData.venueId; }
+                    if (sv) { var s = document.getElementById('editShipmentSize'); var i = document.getElementById('editShipmentSizeInput'); if (s) s.value = sv; if (i) i.value = sv; }
+                    if (purchaseData.grade) { var el = document.getElementById('editGradeInput'); var s = document.getElementById('editGrade'); var g = (purchaseData.grade || '').toString().split(';')[0].trim(); if (s) s.value = g; if (el) el.value = g; }
+                    if (purchaseData.country) { var s = document.getElementById('editCountry'); var i = document.getElementById('editCountryInput'); if (s) s.value = purchaseData.country; if (i) i.value = purchaseData.country; }
+                    if (purchaseData.clientName) { var s = document.getElementById('editClientName'); var i = document.getElementById('editClientNameInput'); if (s) s.value = purchaseData.clientName; if (i) i.value = purchaseData.clientName; }
+                    if (purchaseData.repairCompany) { var s = document.getElementById('editRepairCompany'); var i = document.getElementById('editRepairCompanyInput'); if (s) s.value = purchaseData.repairCompany; if (i) i.value = purchaseData.repairCompany; }
+                }, 700);
             }, 100);
         }
         
@@ -5539,10 +6338,12 @@ fun setupRixoDropdowns() {
             } else if (typeof setupOptionButtons === 'function') {
                 setupOptionButtons();
             } else {
-                // Fallback: option buttons only update highlight + hidden predefined; text box is custom only
-                var optionButtons = document.querySelectorAll('.option-btn');
+                // Fallback for edit page when global setupOptionButtons isn't available yet
+                var editForm = document.getElementById('editForm');
+                var optionButtons = editForm ? editForm.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn');
                 var editOptionsPredefined = document.getElementById('editOptionsPredefined');
                 var editOptionsInput = document.getElementById('editOptions');
+                var BASIC_OPTIONS = ['ABS', 'Power Window', 'Power Steering', 'AC'];
                 function updatePredefined(option, add) {
                     if (!editOptionsPredefined) return;
                     var current = editOptionsPredefined.value.trim();
@@ -5552,9 +6353,33 @@ fun setupRixoDropdowns() {
                     if (!add && idx > -1) opts.splice(idx, 1);
                     editOptionsPredefined.value = opts.join(', ');
                 }
+                function syncBasicFromFour() {
+                    if (!editForm) return;
+                    var basicBtn = editForm.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
+                    var grid = editForm.querySelector('.options-buttons-grid');
+                    if (!basicBtn || !grid) return;
+                    var allSelected = BASIC_OPTIONS.every(function(opt) {
+                        var b = grid.querySelector('.option-btn[data-option="' + opt + '"]');
+                        return !!(b && b.classList.contains('selected'));
+                    });
+                    basicBtn.classList.toggle('selected', allSelected);
+                }
                 optionButtons.forEach(function(btn) {
                     btn.addEventListener('click', function() {
                         var option = this.getAttribute('data-option');
+                        var grid = editForm ? editForm.querySelector('.options-buttons-grid') : null;
+                        if (option === 'Basic') {
+                            var willSelect = !this.classList.contains('selected');
+                            this.classList.toggle('selected', willSelect);
+                            BASIC_OPTIONS.forEach(function(opt) {
+                                updatePredefined(opt, willSelect);
+                                if (grid) {
+                                    var ob = grid.querySelector('.option-btn[data-option="' + opt + '"]');
+                                    if (ob) ob.classList.toggle('selected', willSelect);
+                                }
+                            });
+                            return;
+                        }
                         if (this.classList.contains('selected')) {
                             this.classList.remove('selected');
                             updatePredefined(option, false);
@@ -5562,8 +6387,10 @@ fun setupRixoDropdowns() {
                             this.classList.add('selected');
                             updatePredefined(option, true);
                         }
+                        syncBasicFromFour();
                     });
                 });
+                syncBasicFromFour();
                 if (editOptionsInput) {
                     editOptionsInput.addEventListener('keypress', function(e) {
                         if (e.key === 'Enter') {
@@ -5643,6 +6470,8 @@ fun setupAddFormListeners() {
     setupBrandAutoRefresh(isEditForm = false)
     // Ensure base options exist for fuel/shift/grade (add form)
     ensureBaseComboboxOptionsForAddEdit()
+    // Populate Grade, Fuel, Shift, Country, Client Name, Repair Company from master_menu
+    populateMasterMenuComboboxesForPurchaseForm()
     
     // Load all chassis from car_brand_mapping table (chassis-first flow support)
     loadAllChassisDropdown(isEditForm = false)
@@ -5652,9 +6481,6 @@ fun setupAddFormListeners() {
     // Setup auto-refresh for supplier dropdown when tab regains focus or supplier added/edited in master tab
     setupSupplierAutoRefresh(isEditForm = false)
 
-    // Client name suggestions (Add form)
-    setupClientNameSuggestions("clientName")
-    
     // Setup Rixo dropdowns
     setupRixoDropdowns()
     
@@ -5725,12 +6551,38 @@ fun setupAddFormListeners() {
     // Try to attach immediately, then retry if needed
     console.log("🔍 [NEW] About to call attachSaveButtonListener()")
     attachSaveButtonListener()
+
+    fun attachSaveAndMoreButtonListener() {
+        console.log("🔍 [NEW] attachSaveAndMoreButtonListener() called")
+        val saveButton = document.getElementById("addSaveAndMoreBtn") as? HTMLButtonElement
+        if (saveButton != null) {
+            console.log("✅ [NEW] Save and Add More button found, attaching click listener")
+            saveButton.addEventListener("click", { event: Event ->
+                console.log("💾 [NEW] Save and Add More clicked - EVENT LISTENER")
+                event.preventDefault()
+                event.stopPropagation()
+                try {
+                    saveNewPurchaseAndAddMore()
+                } catch (e: dynamic) {
+                    console.error("❌ [NEW] Error in saveNewPurchaseAndAddMore():", e)
+                    showMessage("Error saving purchase: ${e.message}", "error")
+                }
+            })
+            console.log("✅ [NEW] Save and Add More listener attached successfully")
+        } else {
+            console.warn("⚠️ [NEW] Save and Add More button not found, retrying in 100ms...")
+            window.setTimeout({ attachSaveAndMoreButtonListener() }, 100)
+        }
+    }
+
+    console.log("🔍 [NEW] About to call attachSaveAndMoreButtonListener()")
+    attachSaveAndMoreButtonListener()
     
     // Setup responsive form sections (collapsible on mobile)
     setupResponsiveFormSections()
     
     // Add event listeners for real-time calculation of Total Cost (Before Tax)
-    listOf("price", "auctionFee", "recycleFee", "roadTax", "freight", "shipmentCharges", "storageCharges", "repairCharges", "miscCharges", "inspectionFee", "commission", "rixoPriceInput").forEach { fieldId ->
+    listOf("price", "auctionFee", "auctionPenaltyFee", "recycleFee", "roadTax", "freight", "shipmentCharges", "storageCharges", "repairCharges", "miscCharges", "inspectionFee", "commission", "rixoPriceInput").forEach { fieldId ->
         document.getElementById(fieldId)?.addEventListener("input", { _: Event ->
             calculateTotalCostBeforeTax()
         })
@@ -5804,6 +6656,88 @@ fun setupAddFormListeners() {
     // Option buttons: highlight selected only; text box is for custom options only (no predefined in text box)
     // Use event delegation so Add and Edit forms both work (form can be rendered after initial load)
     js("""
+        // Money inputs: add comma formatting on blur; store comma-less
+        function _moneySanitize(raw) {
+            if (raw == null) return '';
+            var s = String(raw).trim();
+            if (!s) return '';
+            // keep digits and dot only
+            s = s.replace(/[^0-9.]/g, '');
+            // remove extra dots
+            var parts = s.split('.');
+            if (parts.length > 2) {
+                s = parts[0] + '.' + parts.slice(1).join('');
+                parts = s.split('.');
+            }
+            // trim leading zeros safely
+            if (parts[0]) {
+                parts[0] = parts[0].replace(/^0+(?=\\d)/, '');
+            }
+            if (parts.length === 1) return parts[0] || '';
+            return (parts[0] || '0') + '.' + (parts[1] || '');
+        }
+
+        function _moneyFormat(raw) {
+            var s = _moneySanitize(raw);
+            if (!s) return '';
+            var parts = s.split('.');
+            var intPart = parts[0] || '0';
+            var decPart = parts.length > 1 ? parts[1] : '';
+            // format int with commas
+            intPart = intPart.replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+            return decPart ? (intPart + '.' + decPart) : intPart;
+        }
+
+        function _bindMoneyDelegation() {
+            if (window.__moneyDelegationBound) return;
+            window.__moneyDelegationBound = true;
+
+            // On focus: show raw (no commas) for easier editing
+            document.addEventListener('focusin', function(e) {
+                var el = e.target;
+                if (!el || !el.classList || !el.classList.contains('money-input')) return;
+                el.value = _moneySanitize(el.value);
+            }, true);
+
+            // On blur: format with commas
+            document.addEventListener('focusout', function(e) {
+                var el = e.target;
+                if (!el || !el.classList || !el.classList.contains('money-input')) return;
+                el.value = _moneyFormat(el.value);
+            }, true);
+        }
+
+        function _formatAllMoneyInputsNow() {
+            document.querySelectorAll('input.money-input').forEach(function(el) {
+                el.value = _moneyFormat(el.value);
+            });
+        }
+
+        window.getMoneyRawValue = function(id) {
+            var el = document.getElementById(id);
+            if (!el) return '';
+            return _moneySanitize(el.value);
+        };
+
+        _bindMoneyDelegation();
+        // Format existing values after DOM renders
+        setTimeout(_formatAllMoneyInputsNow, 0);
+
+        // Some fields are auto-filled later by JS (e.g., chassis selection).
+        // Those assignments don't always trigger focusout/blur, so we
+        // re-format money inputs periodically while NOT focused.
+        if (!window.__moneyAutoFormatIntervalStarted) {
+            window.__moneyAutoFormatIntervalStarted = true;
+            window.__moneyAutoFormatInterval = window.setInterval(function() {
+                document.querySelectorAll('input.money-input').forEach(function(el) {
+                    if (!el) return;
+                    if (document.activeElement === el) return; // don't interrupt typing
+                    var formatted = _moneyFormat(el.value);
+                    if (el.value !== formatted) el.value = formatted;
+                });
+            }, 350);
+        }
+
         function updatePredefinedInput(predefinedInput, option, add) {
             if (!predefinedInput) return;
             var current = predefinedInput.value.trim();
@@ -5813,15 +6747,40 @@ fun setupAddFormListeners() {
             if (!add && idx > -1) { opts.splice(idx, 1); }
             predefinedInput.value = opts.join(', ');
         }
+        var BASIC_OPTIONS = ['ABS', 'Power Window', 'Power Steering', 'AC'];
+        function syncBasicButtonState(form) {
+            if (!form) return;
+            var basicBtn = form.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
+            if (!basicBtn) return;
+            var grid = form.querySelector('.options-buttons-grid');
+            if (!grid) return;
+            var allSelected = BASIC_OPTIONS.every(function(opt) {
+                var b = grid.querySelector('.option-btn[data-option="' + opt + '"]');
+                return !!(b && b.classList.contains('selected'));
+            });
+            basicBtn.classList.toggle('selected', allSelected);
+        }
         function onOptionButtonClick(e) {
             var btn = e.target;
             if (!btn || !btn.classList || !btn.classList.contains('option-btn')) return;
             var option = btn.getAttribute('data-option');
-            var grid = btn.closest('.options-buttons-grid');
-            if (!grid) return;
-            var predefinedInput = grid.nextElementSibling;
+            var form = btn.closest('form');
+            var grid = btn.closest('.options-buttons-grid') || (form ? form.querySelector('.options-buttons-grid') : null);
+            var predefinedInput = form ? form.querySelector('input[type="hidden"][id$="Predefined"]') : null;
             if (!predefinedInput || predefinedInput.type !== 'hidden') return;
             e.preventDefault();
+            if (option === 'Basic') {
+                var willSelect = !btn.classList.contains('selected');
+                btn.classList.toggle('selected', willSelect);
+                BASIC_OPTIONS.forEach(function(opt) {
+                    updatePredefinedInput(predefinedInput, opt, willSelect);
+                    if (grid) {
+                        var otherBtn = grid.querySelector('.option-btn[data-option="' + opt + '"]');
+                        if (otherBtn) otherBtn.classList.toggle('selected', willSelect);
+                    }
+                });
+                return;
+            }
             if (btn.classList.contains('selected')) {
                 btn.classList.remove('selected');
                 updatePredefinedInput(predefinedInput, option, false);
@@ -5829,8 +6788,12 @@ fun setupAddFormListeners() {
                 btn.classList.add('selected');
                 updatePredefinedInput(predefinedInput, option, true);
             }
+            syncBasicButtonState(form);
         }
-        document.addEventListener('click', onOptionButtonClick, true);
+        if (!window.__optionButtonClickBound) {
+            window.__optionButtonClickBound = true;
+            document.addEventListener('click', onOptionButtonClick, true);
+        }
         function setupOptionButtons() {
             var optionsInput = document.getElementById('options');
             var editOptionsInput = document.getElementById('editOptions');
@@ -5856,6 +6819,11 @@ fun setupAddFormListeners() {
                     }
                 });
             }
+            // Keep Basic button state in sync when forms load with preselected options.
+            var addForm = document.getElementById('addForm');
+            var editForm = document.getElementById('editForm');
+            syncBasicButtonState(addForm);
+            syncBasicButtonState(editForm);
         }
         window.setupOptionButtons = setupOptionButtons;
         if (document.readyState === 'loading') {
@@ -6047,12 +7015,18 @@ fun setupAddFormListeners() {
     }
 }
 
-// Top-level helper function to extract numeric value from string
+// Top-level helper function to extract numeric value from string (save comma-less in DB)
 fun extractNumericValue(value: String): Double {
     if (value.isBlank()) return 0.0
     // Remove currency symbols, commas, spaces and extract only numbers and decimal point
     val cleaned = value.replace(Regex("[^0-9.-]"), "")
     return cleaned.toDoubleOrNull() ?: 0.0
+}
+
+// Format number with commas for display (e.g. 8000 -> "8,000")
+fun formatNumberWithComma(n: Double): String {
+    val intPart = n.toInt()
+    return intPart.toString().replace(Regex("(\\d)(?=(\\d{3})+(?!\\d))"), "$1,")
 }
 
 // Top-level function: Calculate Total Cost (Before Tax) for Add Purchase
@@ -6061,6 +7035,7 @@ fun calculateTotalCostBeforeTax() {
         // Get values from all form fields
         val priceValue = (document.getElementById("price") as? HTMLInputElement)?.value?.trim() ?: ""
         val auctionFeeValue = (document.getElementById("auctionFee") as? HTMLInputElement)?.value?.trim() ?: ""
+        val auctionPenaltyFeeValue = (document.getElementById("auctionPenaltyFee") as? HTMLInputElement)?.value?.trim() ?: ""
         val recycleFeeValue = (document.getElementById("recycleFee") as? HTMLInputElement)?.value?.trim() ?: ""
         val roadTaxValue = (document.getElementById("roadTax") as? HTMLInputElement)?.value?.trim() ?: ""
         val freightValue = (document.getElementById("freight") as? HTMLInputElement)?.value?.trim() ?: ""
@@ -6075,6 +7050,7 @@ fun calculateTotalCostBeforeTax() {
         // Extract numeric values
         val price = extractNumericValue(priceValue)
         val auctionFee = extractNumericValue(auctionFeeValue)
+        val auctionPenaltyFee = extractNumericValue(auctionPenaltyFeeValue)
         val recycleFee = extractNumericValue(recycleFeeValue)
         val roadTax = extractNumericValue(roadTaxValue)
         val freight = extractNumericValue(freightValue)
@@ -6086,11 +7062,11 @@ fun calculateTotalCostBeforeTax() {
         val commission = extractNumericValue(commissionValue)
         val rixoPrice = extractNumericValue(rixoPriceValue)
         
-        // Calculate total: Sum of all fields (including Rixo Price)
-        val total = price + auctionFee + recycleFee + roadTax + freight + shipmentCharges + storageCharges + repairCharges + miscCharges + inspectionFee + commission + rixoPrice
+        // Calculate total: Sum of all fields (including Rixo Price and Auction Penalty Fee)
+        val total = price + auctionFee + auctionPenaltyFee + recycleFee + roadTax + freight + shipmentCharges + storageCharges + repairCharges + miscCharges + inspectionFee + commission + rixoPrice
         
-        // Format the result with currency symbol
-        val formattedTotal = if (total > 0) "¥${total.toInt()}" else "¥0"
+        // Format the result with currency symbol and comma for display
+        val formattedTotal = if (total > 0) "¥${formatNumberWithComma(total)}" else "¥0"
         
         // Set the calculated value in the Total Cost (Before Tax) field
         (document.getElementById("totalCostBeforeTax") as? HTMLInputElement)?.value = formattedTotal
@@ -6112,8 +7088,8 @@ fun calculateTotalCostAfterTax() {
         // Calculate total: Before Tax + Tax Total
         val total = beforeTax + taxTotal
         
-        // Format the result with currency symbol
-        val formattedTotal = if (total > 0) "¥${total.toInt()}" else "¥0"
+        // Format the result with currency symbol and comma for display
+        val formattedTotal = if (total > 0) "¥${formatNumberWithComma(total)}" else "¥0"
         
         // Set the calculated value in the Total Cost (After Tax 10%) field
         (document.getElementById("totalCostAfterTax") as? HTMLInputElement)?.value = formattedTotal
@@ -6129,6 +7105,7 @@ fun calculateEditTotalCostBeforeTax() {
         // Get values from all form fields
         val priceValue = (document.getElementById("editPrice") as? HTMLInputElement)?.value?.trim() ?: ""
         val auctionFeeValue = (document.getElementById("editAuctionFee") as? HTMLInputElement)?.value?.trim() ?: ""
+        val auctionPenaltyFeeValue = (document.getElementById("editAuctionPenaltyFee") as? HTMLInputElement)?.value?.trim() ?: ""
         val recycleFeeValue = (document.getElementById("editRecycleFee") as? HTMLInputElement)?.value?.trim() ?: ""
         val roadTaxValue = (document.getElementById("editRoadTax") as? HTMLInputElement)?.value?.trim() ?: ""
         val freightValue = (document.getElementById("editFreight") as? HTMLInputElement)?.value?.trim() ?: ""
@@ -6143,6 +7120,7 @@ fun calculateEditTotalCostBeforeTax() {
         // Extract numeric values
         val price = extractNumericValue(priceValue)
         val auctionFee = extractNumericValue(auctionFeeValue)
+        val auctionPenaltyFee = extractNumericValue(auctionPenaltyFeeValue)
         val recycleFee = extractNumericValue(recycleFeeValue)
         val roadTax = extractNumericValue(roadTaxValue)
         val freight = extractNumericValue(freightValue)
@@ -6154,11 +7132,11 @@ fun calculateEditTotalCostBeforeTax() {
         val commission = extractNumericValue(commissionValue)
         val rixoPrice = extractNumericValue(rixoPriceValue)
         
-        // Calculate total: Sum of all fields (including Rixo Price)
-        val total = price + auctionFee + recycleFee + roadTax + freight + shipmentCharges + storageCharges + repairCharges + miscCharges + inspectionFee + commission + rixoPrice
+        // Calculate total: Sum of all fields (including Rixo Price and Auction Penalty Fee)
+        val total = price + auctionFee + auctionPenaltyFee + recycleFee + roadTax + freight + shipmentCharges + storageCharges + repairCharges + miscCharges + inspectionFee + commission + rixoPrice
         
-        // Format the result with currency symbol
-        val formattedTotal = if (total > 0) "¥${total.toInt()}" else "¥0"
+        // Format the result with currency symbol and comma for display
+        val formattedTotal = if (total > 0) "¥${formatNumberWithComma(total)}" else "¥0"
         
         // Set the calculated value in the Total Cost (Before Tax) field
         (document.getElementById("editTotalCostBeforeTax") as? HTMLInputElement)?.value = formattedTotal
@@ -6183,8 +7161,8 @@ fun calculateEditTotalCostAfterTax() {
         // Calculate total: Before Tax + Tax Total
         val total = beforeTax + taxTotal
         
-        // Format the result with currency symbol
-        val formattedTotal = if (total > 0) "¥${total.toInt()}" else "¥0"
+        // Format the result with currency symbol and comma for display
+        val formattedTotal = if (total > 0) "¥${formatNumberWithComma(total)}" else "¥0"
         
         // Set the calculated value in the Total Cost (After Tax 10%) field
         (document.getElementById("editTotalCostAfterTax") as? HTMLInputElement)?.value = formattedTotal
@@ -6408,9 +7386,9 @@ fun populateBrandOptions(brandSelectId: String) {
                 }
             }
             
+            val seenLower = mutableSetOf<String>()
             if (brandsArray.isEmpty()) {
                 console.warn("⚠️ No brands found in API response, using fallback list")
-                // Fallback to hardcoded list if API returns empty
                 val fallbackBrands = listOf(
                     "Toyota", "Nissan", "Subaru", "Honda", "Suzuki", "Isuzu", "Daihatsu", "Mitsuoka", "Hino",
                     "Mitsubishi Fuso", "Mitsubishi", "Lexus", "Mazda", "Nissan Diesel", "Cadillac", "Chevrolet", "GMC",
@@ -6421,26 +7399,40 @@ fun populateBrandOptions(brandSelectId: String) {
                     "Volvo", "Hyundai", "Kia", "BYD", "TOMMYKAIRA"
                 )
                 fallbackBrands.forEach { brand ->
-                    val option = js("new Option(brand, brand)")
-                    brandSelect.add(option)
-                }
-            } else {
-                brandsArray.forEach { brand ->
-                    if (brand.isNotBlank()) {
+                    if (brand.isNotBlank() && !seenLower.contains(brand.lowercase())) {
+                        seenLower.add(brand.lowercase())
                         val option = js("new Option(brand, brand)")
                         brandSelect.add(option)
                     }
                 }
-                console.log("✅ Populated brand dropdown with ${brandsArray.size} brands from API")
+            } else {
+                brandsArray.forEach { brand ->
+                    if (brand.isNotBlank() && !seenLower.contains(brand.lowercase())) {
+                        seenLower.add(brand.lowercase())
+                        val option = js("new Option(brand, brand)")
+                        brandSelect.add(option)
+                    }
+                }
+                console.log("✅ Populated brand dropdown with ${seenLower.size} unique brands from API")
             }
+            // Last row: See More (loads master_menu car_brands on click)
+            val seeMoreOpt = document.createElement("option") as HTMLOptionElement
+            seeMoreOpt.value = BRAND_SEE_MORE_VALUE
+            seeMoreOpt.textContent = "See More"
+            brandSelect.appendChild(seeMoreOpt)
             
-            // Restore previous value if it still exists
+            // Restore previous value if it still exists in the (deduped) options
             if (currentValue.isNotBlank()) {
-                val optionExists = brandsArray.any { it.equals(currentValue, ignoreCase = true) }
-                if (optionExists) {
-                    brandSelect.value = currentValue
-                    val brandInput = document.getElementById("${brandSelectId}Input") as? HTMLInputElement
-                    brandInput?.value = currentValue
+                var optionExists = false
+                for (i in 0 until brandSelect.options.length) {
+                    val opt = brandSelect.options.item(i) as? HTMLOptionElement ?: continue
+                    if (opt.value != BRAND_SEE_MORE_VALUE && opt.value.equals(currentValue, ignoreCase = true)) {
+                        optionExists = true
+                        brandSelect.value = opt.value
+                        val brandInput = document.getElementById("${brandSelectId}Input") as? HTMLInputElement
+                        brandInput?.value = opt.value
+                        break
+                    }
                 }
             }
         }
@@ -6460,7 +7452,164 @@ fun populateBrandOptions(brandSelectId: String) {
                 val option = js("new Option(brand, brand)")
                 brandSelect.add(option)
             }
+            val seeMoreOptErr = document.createElement("option") as HTMLOptionElement
+            seeMoreOptErr.value = BRAND_SEE_MORE_VALUE
+            seeMoreOptErr.textContent = "See More"
+            brandSelect.appendChild(seeMoreOptErr)
         }
+}
+
+/** Special value for Brand dropdown "See More" option; clicking it loads master car_brands below mapping brands. */
+const val BRAND_SEE_MORE_VALUE = "__SEE_MORE__"
+
+/** Value for "See Less" option; clicking it restores dropdown to pre–See More state. */
+const val SEE_LESS_VALUE = "__SEE_LESS__"
+
+/** Called when user clicks "See More" in Brand dropdown. Fetches master_menu car_brands and appends them below existing options. */
+fun handleBrandSeeMoreClick(selectId: String) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    val input = document.getElementById("${selectId}Input") as? HTMLInputElement
+    // Case-insensitive set so we only add unique brands (TOYOTA vs Toyota = one entry)
+    val existingLower = mutableSetOf<String>()
+    for (i in 0 until select.options.length) {
+        val opt = select.options.item(i) as? HTMLOptionElement ?: continue
+        val v = (opt.value ?: "").trim()
+        if (v.isNotEmpty() && v != BRAND_SEE_MORE_VALUE && v != SEE_LESS_VALUE) existingLower.add(v.lowercase())
+    }
+    window.fetch(apiUrl("master-menu/car_brands"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load car brands')")
+        }
+        .then { raw: dynamic ->
+            val masterList = parsePurchaseMasterListArray(raw)
+            var seeMoreOption: HTMLOptionElement? = null
+            for (i in 0 until select.options.length) {
+                val opt = select.options.item(i) as? HTMLOptionElement
+                if (opt != null && opt.value == BRAND_SEE_MORE_VALUE) {
+                    seeMoreOption = opt
+                    break
+                }
+            }
+            val originalCount = select.options.length - 1 // number of options before See More
+            seeMoreOption?.remove()
+            // Append master brands that are not already present (case-insensitive); do not re-add See More
+            masterList.forEach { brandName ->
+                if (brandName.isNotBlank() && !existingLower.contains(brandName.lowercase())) {
+                    existingLower.add(brandName.lowercase())
+                    val option = document.createElement("option") as HTMLOptionElement
+                    option.value = brandName
+                    option.textContent = brandName
+                    select.appendChild(option)
+                }
+            }
+            val seeLessOpt = document.createElement("option") as HTMLOptionElement
+            seeLessOpt.value = SEE_LESS_VALUE
+            seeLessOpt.textContent = "See Less"
+            select.appendChild(seeLessOpt)
+            window.asDynamic().__seeMoreOriginalCountSelectId = selectId
+            window.asDynamic().__seeMoreOriginalCountValue = originalCount
+            js("window.__seeMoreOriginalCount = window.__seeMoreOriginalCount || {}; window.__seeMoreOriginalCount[window.__seeMoreOriginalCountSelectId] = window.__seeMoreOriginalCountValue;")
+            val inputVal = input?.value ?: ""
+            window.asDynamic().__brandSeeMoreSelectId = selectId
+            window.asDynamic().__brandSeeMoreInputVal = inputVal
+            js("if (typeof window.filterComboboxDropdown === 'function') { window.filterComboboxDropdown(window.__brandSeeMoreSelectId, window.__brandSeeMoreInputVal); }")
+            // Close and re-open dropdown so it expands correctly (fixes truncated list after See More)
+            js("if (typeof window.closeComboboxDropdown === 'function') { window.closeComboboxDropdown(window.__brandSeeMoreSelectId); }")
+            js("setTimeout(function() { if (typeof window.openComboboxDropdown === 'function' && window.__brandSeeMoreSelectId) { window.openComboboxDropdown(window.__brandSeeMoreSelectId); } }, 50);")
+        }
+        .catch { _: dynamic ->
+            console.error("Failed to load master car brands for See More")
+        }
+}
+
+/** Master API path for "See More" on Venue ID, Vehicle type, Rixo Company, Stock Location, POL. */
+private fun getMasterFieldApiPath(selectId: String): String? = when (selectId) {
+    "venueId", "editVenueId" -> "master-menu/venue_id"
+    "shipmentSize", "editShipmentSize", "typeOfVehicle", "editTypeOfVehicle" -> "master-menu/type_of_vehicle"
+    "rixoCompany", "editRixoCompany" -> "master-menu/rixo_company"
+    "stockLocation", "editStockLocation" -> "master-menu/stock_location"
+    "pol", "editPol" -> "master-menu/pol"
+    else -> null
+}
+
+/** Called when user clicks "See More" in Venue ID, Vehicle type, Rixo Company, Stock Location, or POL dropdown. */
+fun handleMasterFieldSeeMoreClick(selectId: String, masterApiPath: String) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    val input = document.getElementById("${selectId}Input") as? HTMLInputElement
+    val existingLower = mutableSetOf<String>()
+    for (i in 0 until select.options.length) {
+        val opt = select.options.item(i) as? HTMLOptionElement ?: continue
+        val v = (opt.value ?: "").trim()
+        if (v.isNotEmpty() && v != BRAND_SEE_MORE_VALUE && v != SEE_LESS_VALUE) existingLower.add(v.lowercase())
+    }
+    window.fetch(apiUrl(masterApiPath))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load master list')")
+        }
+        .then { raw: dynamic ->
+            val masterList = parsePurchaseMasterListArray(raw)
+            var seeMoreOption: HTMLOptionElement? = null
+            for (i in 0 until select.options.length) {
+                val opt = select.options.item(i) as? HTMLOptionElement
+                if (opt != null && opt.value == BRAND_SEE_MORE_VALUE) {
+                    seeMoreOption = opt
+                    break
+                }
+            }
+            val originalCount = select.options.length - 1
+            seeMoreOption?.remove()
+            masterList.forEach { item ->
+                if (item.isNotBlank() && !existingLower.contains(item.lowercase())) {
+                    existingLower.add(item.lowercase())
+                    val option = document.createElement("option") as HTMLOptionElement
+                    option.value = item
+                    option.textContent = item
+                    select.appendChild(option)
+                }
+            }
+            val seeLessOpt = document.createElement("option") as HTMLOptionElement
+            seeLessOpt.value = SEE_LESS_VALUE
+            seeLessOpt.textContent = "See Less"
+            select.appendChild(seeLessOpt)
+            window.asDynamic().__seeMoreOriginalCountSelectId = selectId
+            window.asDynamic().__seeMoreOriginalCountValue = originalCount
+            js("window.__seeMoreOriginalCount = window.__seeMoreOriginalCount || {}; window.__seeMoreOriginalCount[window.__seeMoreOriginalCountSelectId] = window.__seeMoreOriginalCountValue;")
+            val inputVal = input?.value ?: ""
+            window.asDynamic().__masterFieldSeeMoreSelectId = selectId
+            window.asDynamic().__masterFieldSeeMoreInputVal = inputVal
+            js("if (typeof window.filterComboboxDropdown === 'function') { window.filterComboboxDropdown(window.__masterFieldSeeMoreSelectId, window.__masterFieldSeeMoreInputVal); }")
+            js("if (typeof window.closeComboboxDropdown === 'function') { window.closeComboboxDropdown(window.__masterFieldSeeMoreSelectId); }")
+            js("setTimeout(function() { if (typeof window.openComboboxDropdown === 'function' && window.__masterFieldSeeMoreSelectId) { window.openComboboxDropdown(window.__masterFieldSeeMoreSelectId); } }, 50);")
+        }
+        .catch { _: dynamic ->
+            console.error("Failed to load master list for See More: $masterApiPath")
+        }
+}
+
+/** Called when user clicks "See Less". Restores dropdown to state before "See More" was clicked (removes expanded options, re-adds "See More"). */
+fun handleSeeLessClick(selectId: String) {
+    window.asDynamic().__seeLessSelectId = selectId
+    js("""
+        (function() {
+            var selectId = window.__seeLessSelectId;
+            var c = window.__seeMoreOriginalCount;
+            if (!c || !selectId) return;
+            var originalCount = c[selectId];
+            if (originalCount == null) return;
+            var select = document.getElementById(selectId);
+            if (!select) return;
+            while (select.options.length > originalCount) select.removeChild(select.options[select.options.length - 1]);
+            var opt = document.createElement('option');
+            opt.value = '__SEE_MORE__';
+            opt.textContent = 'See More';
+            select.appendChild(opt);
+            delete c[selectId];
+            var inputVal = (document.getElementById(selectId + 'Input') && document.getElementById(selectId + 'Input').value) || '';
+            if (typeof window.filterComboboxDropdown === 'function') window.filterComboboxDropdown(selectId, inputVal);
+            if (typeof window.closeComboboxDropdown === 'function') window.closeComboboxDropdown(selectId);
+            setTimeout(function() { if (typeof window.openComboboxDropdown === 'function') window.openComboboxDropdown(selectId); }, 50);
+        })();
+    """)
 }
 
 // Function to populate dropdowns for chassis-first flow (does NOT filter chassis dropdown)
@@ -6614,11 +7763,7 @@ fun populateBrandDropdownsForChassisFlow(
     val doorList = js("dropdowns.door") as? Array<String> ?: emptyArray()
     populateDropdown(fieldId("Door"), doorList, "Select Door", door)
     
-    // Ensure Grade dropdown always includes base options
-    val baseGradeOptions = listOf("G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI")
-    val gradeList = (js("dropdowns.grade") as? Array<String> ?: emptyArray()).toMutableList()
-    baseGradeOptions.forEach { opt -> if (!gradeList.contains(opt)) gradeList.add(opt) }
-    populateDropdown(fieldId("Grade"), gradeList.toTypedArray(), "Select Grade", grade)
+    // Grade dropdown options come from master_menu/car_grade; chassis mapping only auto-fills Grade value
     
     // Ensure base options remain available after mapping population
     ensureBaseComboboxOptionsForAddEdit()
@@ -6713,11 +7858,7 @@ fun populateBrandDropdowns(dropdowns: dynamic, isEditForm: Boolean) {
     val doorList = js("dropdowns.door") as? Array<String> ?: emptyArray()
     populateDropdown(fieldId("Door"), doorList, "Select Door")
     
-    // Ensure Grade dropdown always includes base options
-    val baseGradeOptions = listOf("G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI")
-    val gradeList = (js("dropdowns.grade") as? Array<String> ?: emptyArray()).toMutableList()
-    baseGradeOptions.forEach { opt -> if (!gradeList.contains(opt)) gradeList.add(opt) }
-    populateDropdown(fieldId("Grade"), gradeList.toTypedArray(), "Select Grade")
+    // Grade dropdown options come from master_menu/car_grade; chassis mapping only auto-fills Grade value
     
     // Ensure base options remain available after brand dropdown population
     ensureBaseComboboxOptionsForAddEdit()
@@ -6751,6 +7892,12 @@ fun autoFillBrandFields(firstRow: dynamic, isEditForm: Boolean) {
     // Helper function to set field value (always set when brand is selected)
     // For comboboxes, sets both input and select fields
     fun setFieldValue(fieldId: String, value: String) {
+        if (fieldId == "wd" || fieldId == "editWd") {
+            val radioVal = if (value.contains("4")) "4WD" else "2WD"
+            val radio = document.querySelector("input[name=\"$fieldId\"][value=\"$radioVal\"]") as? HTMLInputElement
+            radio?.checked = true
+            return
+        }
         // Try to set both input and select (for comboboxes)
         val inputElement = document.getElementById("${fieldId}Input") as? HTMLInputElement
         val selectElement = document.getElementById(fieldId) as? HTMLSelectElement
@@ -6971,17 +8118,25 @@ fun fetchMappingsByCarName(brandName: String, carName: String, isEditForm: Boole
             val shift = js("firstRow.shift")?.toString() ?: ""
             val ccRaw = js("firstRow.cc")?.toString() ?: ""
             val doorRaw = js("firstRow.door")?.toString() ?: ""
+            val seatRaw = js("firstRow.seat")?.toString() ?: ""
             val grade = js("firstRow.grade")?.toString() ?: ""
             
             // Convert "0" to empty string for select dropdowns (NULL values)
             val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
             val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
+            val seat = if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw
             
-            console.log("Auto-filling fields from first row: chassis=$chassis, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, grade=$grade")
+            console.log("Auto-filling fields from first row: chassis=$chassis, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, seat=$seat, grade=$grade")
             
             // Helper function to set field value (always set, even if empty)
             // For comboboxes, sets both input and select fields
             fun setFieldValue(fieldId: String, value: String) {
+                if (fieldId == "wd" || fieldId == "editWd") {
+                    val radioVal = if (value.contains("4")) "4WD" else "2WD"
+                    val radio = document.querySelector("input[name=\"$fieldId\"][value=\"$radioVal\"]") as? HTMLInputElement
+                    radio?.checked = true
+                    return
+                }
                 val inputElement = document.getElementById("${fieldId}Input") as? HTMLInputElement
                 val selectElement = document.getElementById(fieldId) as? HTMLSelectElement
                 
@@ -7011,15 +8166,16 @@ fun fetchMappingsByCarName(brandName: String, carName: String, isEditForm: Boole
                     setFieldValue("editChassis", chassis)
                 }
                 setFieldValue("editFuel", fuel)
-                // WD and CC are now number inputs - extract numeric value
-                val wdNum = wd.replace(Regex("[^0-9]"), "")
-                val editWdInput = document.getElementById("editWd") as? HTMLInputElement
-                editWdInput?.value = wdNum
+                // WD is 2WD/4WD radio: normalize mapping value to 2WD or 4WD
+                val wdRadioVal = if (wd.contains("4")) "4WD" else "2WD"
+                val editWdRadio = document.querySelector("input[name=\"editWd\"][value=\"$wdRadioVal\"]") as? HTMLInputElement
+                editWdRadio?.checked = true
                 setFieldValue("editShift", shift)
                 val ccNum = cc.replace(Regex("[^0-9]"), "")
                 val editCcInput = document.getElementById("editCc") as? HTMLInputElement
                 editCcInput?.value = ccNum
                 setFieldValue("editDoor", door)
+                setFieldValue("editSeat", seat)
                 setFieldValue("editGrade", grade)
             } else {
                 // Set chassis (select first chassis from filtered list)
@@ -7276,7 +8432,17 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
             val shift = ((firstRow?.shift as? String) ?: (data.shift as? String) ?: "").trim()
             val ccRaw = ((firstRow?.cc as? Number)?.toString() ?: (data.cc as? String) ?: "").trim()
             val doorRaw = ((firstRow?.door as? Number)?.toString() ?: (data.door as? String) ?: "").trim()
+            // Backend returns `firstRow.seat` as a String (via `toString()`), not a Number.
+            // Keep this robust to both Number/String just in case.
+            val seatRaw = ((firstRow?.seat as? Number)?.toString()
+                ?: (firstRow?.seat as? String)?.toString()
+                ?: "").trim()
             val grade = ((firstRow?.grade as? String) ?: (data.grade as? String) ?: "").trim()
+            val frDyn = firstRow.unsafeCast<dynamic>()
+            val vehicleType = ((frDyn.vehicleType as? String) ?: (data.vehicleType as? String) ?: "").trim()
+            val rank = ((frDyn.rank as? String) ?: (data.rank as? String) ?: "").trim()
+            val color = ((frDyn.color as? String) ?: (data.color as? String) ?: "").trim()
+            val driveType = ((frDyn.driveType as? String) ?: (data.driveType as? String) ?: "").trim()
             
             // Store all rows for this chassis in global variable for matching logic
             // Backend returns 'allRows' or 'mappings' (for backward compatibility)
@@ -7323,6 +8489,10 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
             val ccs = mutableSetOf<String>()
             val doors = mutableSetOf<String>()
             val grades = mutableSetOf<String>()
+            val vehicleTypes = mutableSetOf<String>()
+            val ranks = mutableSetOf<String>()
+            val colors = mutableSetOf<String>()
+            val driveTypes = mutableSetOf<String>()
             
             allRows.forEach { row ->
                 val rowDynamic = row.unsafeCast<dynamic>()
@@ -7340,6 +8510,10 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                     doors.add(doorValue.toString())
                 }
                 (rowDynamic.grade as? String)?.takeIf { it.isNotBlank() }?.let { grades.add(it) }
+                (rowDynamic.vehicleType as? String)?.takeIf { it.isNotBlank() }?.let { vehicleTypes.add(it) }
+                (rowDynamic.rank as? String)?.takeIf { it.isNotBlank() }?.let { ranks.add(it) }
+                (rowDynamic.color as? String)?.takeIf { it.isNotBlank() }?.let { colors.add(it) }
+                (rowDynamic.driveType as? String)?.takeIf { it.isNotBlank() }?.let { driveTypes.add(it) }
             }
             
             // Use backend uniqueValues if available, otherwise use calculated values
@@ -7407,8 +8581,9 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
             // Convert "0" to empty string for cc and door
             val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
             val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
+            val seat = if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw
             
-            console.log("✅ Found mapping for chassis $chassis: brand=$brand, carName=$carName, fuel=$fuel, wd=$wd, cc=$cc, door=$door, grade=$grade")
+            console.log("✅ Found mapping for chassis $chassis: brand=$brand, carName=$carName, fuel=$fuel, wd=$wd, cc=$cc, door=$door, seat=$seat, grade=$grade")
             
             // Auto-fill Brand field first (using combobox helper)
             val brandFieldId = if (isEditForm) "editBrand" else "brand"
@@ -7449,7 +8624,12 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
             window.asDynamic().__tempShift = if (shift.isNotBlank()) shift else null
             window.asDynamic().__tempCc = if (cc.isNotBlank()) cc else null
             window.asDynamic().__tempDoor = if (door.isNotBlank()) door else null
+            window.asDynamic().__tempSeat = if (seat.isNotBlank()) seat else null
             window.asDynamic().__tempGrade = if (grade.isNotBlank()) grade else null
+            window.asDynamic().__tempVehicleType = if (vehicleType.isNotBlank()) vehicleType else null
+            window.asDynamic().__tempRank = if (rank.isNotBlank()) rank else null
+            window.asDynamic().__tempColor = if (color.isNotBlank()) color else null
+            window.asDynamic().__tempDriveType = if (driveType.isNotBlank()) driveType else null
             window.asDynamic().__tempPrefix = prefix
             
             // Store unique values in global variable for dropdown population (create object from arrays)
@@ -7479,6 +8659,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                         "Wd" -> "wd"
                         "Cc" -> "cc"
                         "Door" -> "door"
+                        "Seat" -> "seat"
                         "Grade" -> "grade"
                         "Shift" -> "shift"
                         else -> base.lowercase()
@@ -7501,28 +8682,40 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                 console.log("✅ Populated carName dropdown with ${uniqueCarNames.size} unique values")
             }
             
-            // Brand dropdown - populate with unique brands (but preserve the value that was just set)
+            // Brand dropdown - auto-filled brand first, then other mapping brands, then "See More" (loads master set on click)
             val brandId = if (isEditForm) "editBrand" else "brand"
             val brandSelectForDropdown = document.getElementById(brandId) as? HTMLSelectElement
             if (brandSelectForDropdown != null) {
-                // Store current value (which was just set from first row)
-                val currentBrandValue = brandSelectForDropdown.value
                 brandSelectForDropdown.innerHTML = "<option value=\"\">Add Brand</option>"
-                uniqueBrands.forEach { brandName ->
-                    val option = js("new Option(brandName, brandName)")
-                    brandSelectForDropdown.add(option)
+                // Case-insensitive unique: auto-filled brand first, then other mapping brands (no duplicates)
+                val trimmedBrand = brand.trim()
+                val seenLower = mutableSetOf<String>()
+                if (trimmedBrand.isNotBlank()) {
+                    seenLower.add(trimmedBrand.lowercase())
+                    val optFirst = document.createElement("option") as HTMLOptionElement
+                    optFirst.value = trimmedBrand
+                    optFirst.textContent = trimmedBrand
+                    brandSelectForDropdown.appendChild(optFirst)
                 }
-                // Restore the brand value from first row (or current value if it exists)
-                if (brand.isNotBlank() && uniqueBrands.contains(brand)) {
-                    brandSelectForDropdown.value = brand
+                uniqueBrands.filter { it.isNotBlank() && !seenLower.contains(it.lowercase()) }.forEach { brandName ->
+                    seenLower.add(brandName.lowercase())
+                    val option = document.createElement("option") as HTMLOptionElement
+                    option.value = brandName
+                    option.textContent = brandName
+                    brandSelectForDropdown.appendChild(option)
+                }
+                // Last row: See More (loads master_menu car_brands on click)
+                val seeMoreOption = document.createElement("option") as HTMLOptionElement
+                seeMoreOption.value = BRAND_SEE_MORE_VALUE
+                seeMoreOption.textContent = "See More"
+                brandSelectForDropdown.appendChild(seeMoreOption)
+                // Set value to auto-filled brand
+                if (trimmedBrand.isNotBlank()) {
+                    brandSelectForDropdown.value = trimmedBrand
                     val brandInputForDropdown = document.getElementById("${brandId}Input") as? HTMLInputElement
-                    if (brandInputForDropdown != null) {
-                        brandInputForDropdown.value = brand
-                    }
-                } else if (currentBrandValue.isNotBlank() && uniqueBrands.contains(currentBrandValue)) {
-                    brandSelectForDropdown.value = currentBrandValue
+                    brandInputForDropdown?.value = trimmedBrand
                 }
-                console.log("✅ Populated brand dropdown with ${uniqueBrands.size} unique values, set to: ${brandSelectForDropdown.value}")
+                console.log("✅ Populated brand dropdown: auto-filled first, unique mapping brands, See More last; set to: ${brandSelectForDropdown.value}")
             }
             
             // Fuel dropdown
@@ -7585,17 +8778,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                 console.log("✅ Populated door dropdown with ${uniqueDoors.size} unique values")
             }
             
-            // Grade dropdown
-            val gradeId = getFieldId("Grade")
-            val gradeSelect = document.getElementById(gradeId) as? HTMLSelectElement
-            if (gradeSelect != null) {
-                gradeSelect.innerHTML = "<option value=\"\">Select Grade</option>"
-                uniqueGrades.forEach { gradeValue ->
-                    val option = js("new Option(gradeValue, gradeValue)")
-                    gradeSelect.add(option)
-                }
-                console.log("✅ Populated grade dropdown with ${uniqueGrades.size} unique values")
-            }
+            // Grade dropdown options come from master_menu/car_grade (do not populate from car_brand_mapping)
             
             // Now auto-fill form fields with first row values
             // Store current chassis for matching logic
@@ -7612,11 +8795,12 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                     val shiftValue = (js("window.__tempShift")?.toString() ?: "").trim()
                     val ccValue = (js("window.__tempCc")?.toString() ?: "").trim()
                     val doorValue = (js("window.__tempDoor")?.toString() ?: "").trim()
+                    val seatValue = (js("window.__tempSeat")?.toString() ?: "").trim()
                     val gradeValue = (js("window.__tempGrade")?.toString() ?: "").trim()
                     val prefixValue = (js("window.__tempPrefix")?.toString() ?: "").trim()
                     
                     console.log("✅ Dropdowns populated, now setting field values")
-                    console.log("🔍 Mapping values from chassis: carName=$carNameValue, fuel=$fuelValue, wd=$wdValue, cc=$ccValue, door=$doorValue, grade=$gradeValue")
+                    console.log("🔍 Mapping values from chassis: carName=$carNameValue, fuel=$fuelValue, wd=$wdValue, cc=$ccValue, door=$doorValue, seat=$seatValue, grade=$gradeValue")
                     
                     // Helper function to get correct field ID based on form type (add vs edit)
                     fun getFieldId(base: String): String {
@@ -7629,6 +8813,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                                 "Wd" -> "wd"
                                 "Cc" -> "cc"
                                 "Door" -> "door"
+                                "Seat" -> "seat"
                                 "Grade" -> "grade"
                                 "Shift" -> "shift"
                                 else -> base.lowercase()
@@ -7655,6 +8840,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                     val finalWd = wdValue
                     val finalCc = ccValue
                     val finalDoor = doorValue
+                    val finalSeat = seatValue
                     val finalGrade = gradeValue
                     
                     // Car Name - use correct field ID based on form type
@@ -7704,26 +8890,21 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                         ""
                     }
                     
-                    // WD - use correct field ID based on form type (now number input)
-                    val wdId = getFieldId("Wd")
-                    val wdInput = document.getElementById(wdId) as? HTMLInputElement
-                    val finalWdValue = if (wdInput != null) {
-                        if (wdValue.isNotBlank()) {
-                            // Extract numeric value and append WD suffix
-                            val numValue = wdValue.replace(Regex("[^0-9]"), "")
-                            val wdValueWithSuffix = if (numValue.isNotEmpty()) "${numValue}WD" else ""
-                            wdInput.value = numValue
-                            console.log("✅ Set wd from mapping: $numValue (will append WD suffix) (field ID: $wdId)")
-                            wdValueWithSuffix
+                    // WD - radio buttons (2WD/4WD). Auto-select based on mapping value.
+                    val normalizedWd = if (wdValue.contains("4")) "4WD" else if (wdValue.contains("2")) "2WD" else ""
+                    val wdRadioName = if (isEditForm) "editWd" else "wd"
+                    if (normalizedWd.isNotBlank()) {
+                        val wdRadio = document.querySelector("input[name=\"$wdRadioName\"][value=\"$normalizedWd\"]") as? HTMLInputElement
+                        if (wdRadio != null) {
+                            wdRadio.checked = true
+                            console.log("✅ Set WD from mapping: $normalizedWd (radio name: $wdRadioName)")
                         } else {
-                            wdInput.value = ""
-                            console.log("✅ Cleared wd (mapping had no value)")
-                            ""
+                            console.warn("⚠️ WD radio not found for name=$wdRadioName value=$normalizedWd")
                         }
                     } else {
-                        console.warn("⚠️ WD input element not found: $wdId")
-                        ""
+                        console.log("⏭️ WD mapping empty/unknown; leaving current selection unchanged")
                     }
+                    val finalWdValue = normalizedWd
                     
                     // Shift - use correct field ID based on form type
                     // Always use mapping value, even if empty (clear field if mapping is empty)
@@ -7796,29 +8977,94 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                         ""
                     }
                     
-                    // Grade - use correct field ID based on form type
-                    // Grade is a text input, NOT a combobox/select
+                    // Seat - use correct field ID based on form type
+                    // Seat is a number input, NOT a combobox/select
                     // Always use mapping value, even if empty (clear field if mapping is empty)
+                    val seatId = getFieldId("Seat")
+                    val seatInput = document.getElementById(seatId) as? HTMLInputElement
+                    val finalSeatValue = if (seatInput != null) {
+                        if (seatValue.isNotBlank()) {
+                            seatInput.value = seatValue
+                            console.log("✅ Set seat from mapping: $seatValue (field ID: $seatId)")
+                            seatValue
+                        } else {
+                            seatInput.value = ""
+                            console.log("✅ Cleared seat (mapping had no value)")
+                            ""
+                        }
+                    } else {
+                        console.warn("⚠️ Seat input element not found: $seatId")
+                        ""
+                    }
+                    
+                    // Grade - multi-select combobox input (semicolon-separated)
+                    // Auto-fill from mapping as the first value; user can append more via dropdown
                     val gradeId = getFieldId("Grade")
-                    val gradeInput = document.getElementById(gradeId) as? HTMLInputElement
+                    val gradeInput = document.getElementById("${gradeId}Input") as? HTMLInputElement
+                    val gradeSelect = document.getElementById(gradeId) as? HTMLSelectElement
                     val finalGradeValue = if (gradeInput != null) {
                         if (gradeValue.isNotBlank()) {
                             gradeInput.value = gradeValue
-                            console.log("✅ Set grade from mapping: $gradeValue (field ID: $gradeId)")
+                            if (gradeSelect != null) gradeSelect.value = gradeValue
+                            console.log("✅ Set grade from mapping: $gradeValue (field ID: ${gradeId}Input)")
                             gradeValue
                         } else {
                             // Mapping is empty - clear the field
                             gradeInput.value = ""
+                            if (gradeSelect != null) gradeSelect.value = ""
                             console.log("✅ Cleared grade (mapping had no value)")
                             ""
                         }
                     } else {
-                        console.warn("⚠️ Grade input element not found: $gradeId")
+                        console.warn("⚠️ Grade input element not found: ${gradeId}Input")
                         ""
                     }
                     
+                    // Vehicle type (shipmentSize combobox), Rank, Color, Drive type — from car_brand_mapping
+                    val vehicleTypeValue = (js("window.__tempVehicleType")?.toString() ?: "").trim()
+                    val rankValue = (js("window.__tempRank")?.toString() ?: "").trim()
+                    val colorValue = (js("window.__tempColor")?.toString() ?: "").trim()
+                    val driveTypeValue = (js("window.__tempDriveType")?.toString() ?: "").trim().uppercase()
+                    
+                    val shipFieldId = if (isEditForm) "editShipmentSize" else "shipmentSize"
+                    if (vehicleTypeValue.isNotBlank()) {
+                        window.asDynamic().__ensureShipId = shipFieldId
+                        window.asDynamic().__ensureVt = vehicleTypeValue
+                        js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists(window.__ensureShipId, window.__ensureVt)")
+                        val shipSelect = document.getElementById(shipFieldId) as? HTMLSelectElement
+                        val shipInput = document.getElementById("${shipFieldId}Input") as? HTMLInputElement
+                        shipSelect?.value = vehicleTypeValue
+                        shipInput?.value = vehicleTypeValue
+                        window.asDynamic().__syncShipField = shipFieldId
+                        js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(window.__syncShipField)")
+                        console.log("✅ Set vehicle type from mapping: $vehicleTypeValue ($shipFieldId)")
+                    }
+                    
+                    val rankFieldId = if (isEditForm) "editRank" else "rank"
+                    val rankInputEl = document.getElementById(rankFieldId) as? HTMLInputElement
+                    if (rankInputEl != null) {
+                        rankInputEl.value = if (rankValue.isNotBlank()) rankValue else ""
+                        console.log("✅ Set rank from mapping: $rankValue")
+                    }
+                    
+                    val colorFieldId = if (isEditForm) "editColor" else "color"
+                    val colorInputEl = document.getElementById(colorFieldId) as? HTMLInputElement
+                    if (colorInputEl != null) {
+                        colorInputEl.value = if (colorValue.isNotBlank()) colorValue else ""
+                        console.log("✅ Set color from mapping: $colorValue")
+                    }
+                    
+                    val driveRadioName = if (isEditForm) "editDriveType" else "driveType"
+                    if (driveTypeValue == "LHD" || driveTypeValue == "RHD") {
+                        val dtRadio = document.querySelector("input[name=\"$driveRadioName\"][value=\"$driveTypeValue\"]") as? HTMLInputElement
+                        if (dtRadio != null) {
+                            dtRadio.checked = true
+                            console.log("✅ Set drive type from mapping: $driveTypeValue")
+                        }
+                    }
+                    
                     // Log final values that were actually set (after preservation logic)
-                    console.log("✅ Final field values set: carName=$finalCarName, fuel=$finalFuelValue, wd=$finalWdValue, shift=$finalShiftValue, cc=$finalCcValue, door=$finalDoorValue, grade=$finalGradeValue")
+                    console.log("✅ Final field values set: carName=$finalCarName, fuel=$finalFuelValue, wd=$finalWdValue, shift=$finalShiftValue, cc=$finalCcValue, door=$finalDoorValue, seat=$finalSeatValue, grade=$finalGradeValue, vehicleType=$vehicleTypeValue, rank=$rankValue, color=$colorValue, driveType=$driveTypeValue")
                     console.log("✅ Auto-filled all fields from chassis mapping")
                     
                     // CRITICAL FIX: Force-inject base options into select elements immediately after mapping
@@ -7866,9 +9112,8 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                             
                             ensureOptions(fuelSelect, baseFuel);
                             ensureOptions(shiftSelect, baseShift);
-                            ensureOptions(gradeSelect, baseGrade);
                             
-                            console.log('✅ Force-injected base options into Fuel/Shift/Grade selects after chassis mapping');
+                            console.log('✅ Force-injected base options into Fuel/Shift selects after chassis mapping');
                         })();
                     """)
                 }
@@ -7913,6 +9158,7 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
             "shift" -> (rowDynamic.shift as? String ?: "").trim()
             "cc" -> (rowDynamic.cc as? String ?: "").trim()
             "door" -> (rowDynamic.door as? String ?: "").trim()
+                "seat" -> (rowDynamic.seat as? String ?: "").trim()
             "grade" -> (rowDynamic.grade as? String ?: "").trim()
             else -> ""
         }
@@ -7933,9 +9179,14 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
     val matchedShift = (matchDynamic.shift as? String ?: "").trim()
     val matchedCc = (matchDynamic.cc as? String ?: "").trim()
     val matchedDoor = (matchDynamic.door as? String ?: "").trim()
+    val matchedSeat = (matchDynamic.seat as? String ?: "").trim()
     val matchedGrade = (matchDynamic.grade as? String ?: "").trim()
+    val matchedVehicleType = (matchDynamic.vehicleType as? String ?: "").trim()
+    val matchedRank = (matchDynamic.rank as? String ?: "").trim()
+    val matchedColor = (matchDynamic.color as? String ?: "").trim()
+    val matchedDriveType = (matchDynamic.driveType as? String ?: "").trim().uppercase()
     
-    console.log("✅ Found matching row: brand=$matchedBrand, carName=$matchedCarName, fuel=$matchedFuel, wd=$matchedWd, shift=$matchedShift, cc=$matchedCc, door=$matchedDoor, grade=$matchedGrade")
+    console.log("✅ Found matching row: brand=$matchedBrand, carName=$matchedCarName, fuel=$matchedFuel, wd=$matchedWd, shift=$matchedShift, cc=$matchedCc, door=$matchedDoor, seat=$matchedSeat, grade=$matchedGrade, vehicleType=$matchedVehicleType, rank=$matchedRank, color=$matchedColor, driveType=$matchedDriveType")
     
     // Helper function to get correct field ID
     fun getFieldId(base: String): String {
@@ -8019,18 +9270,16 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
         }
     }
     
-    // WD
+    // WD (2WD/4WD radios)
     if (changedField.lowercase() != "wd") {
-        val wdId = getFieldId("Wd")
-        val wdSelect = document.getElementById(wdId) as? HTMLSelectElement
-        val wdInput = document.getElementById("${wdId}Input") as? HTMLInputElement
-        if (wdSelect != null) {
-            wdSelect.value = matchedWd
-            if (wdInput != null) {
-                wdInput.value = matchedWd
+        val normalizedWd = if (matchedWd.contains("4")) "4WD" else if (matchedWd.contains("2")) "2WD" else ""
+        val wdRadioName = if (isEditForm) "editWd" else "wd"
+        if (normalizedWd.isNotBlank()) {
+            val wdRadio = document.querySelector("input[name=\"$wdRadioName\"][value=\"$normalizedWd\"]") as? HTMLInputElement
+            if (wdRadio != null) {
+                wdRadio.checked = true
+                console.log("✅ Auto-filled wd from match: $normalizedWd")
             }
-            syncComboboxField("Wd", matchedWd)
-            console.log("✅ Auto-filled wd from match: $matchedWd")
         }
     }
     
@@ -8048,49 +9297,73 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
         }
     }
     
-    // CC
+    // CC (numeric text input on purchase forms)
     if (changedField.lowercase() != "cc") {
         val ccId = getFieldId("Cc")
-        val ccSelect = document.getElementById(ccId) as? HTMLSelectElement
-        val ccInput = document.getElementById("${ccId}Input") as? HTMLInputElement
-        if (ccSelect != null) {
-            ccSelect.value = matchedCc
-            if (ccInput != null) {
-                ccInput.value = matchedCc
-            }
-            syncComboboxField("Cc", matchedCc)
-            console.log("✅ Auto-filled cc from match: $matchedCc")
+        val ccInput = document.getElementById(ccId) as? HTMLInputElement
+        if (ccInput != null) {
+            val num = matchedCc.replace(Regex("[^0-9]"), "")
+            ccInput.value = num
+            console.log("✅ Auto-filled cc from match: $num")
         }
     }
     
-    // Door
+    // Door (number input)
     if (changedField.lowercase() != "door") {
         val doorId = getFieldId("Door")
-        val doorSelect = document.getElementById(doorId) as? HTMLSelectElement
-        val doorInput = document.getElementById("${doorId}Input") as? HTMLInputElement
-        if (doorSelect != null) {
-            doorSelect.value = matchedDoor
-            if (doorInput != null) {
-                doorInput.value = matchedDoor
-            }
-            syncComboboxField("Door", matchedDoor)
+        val doorInput = document.getElementById(doorId) as? HTMLInputElement
+        if (doorInput != null) {
+            doorInput.value = matchedDoor
             console.log("✅ Auto-filled door from match: $matchedDoor")
         }
     }
     
-    // Grade
+    // Grade (multi-select combobox)
     if (changedField.lowercase() != "grade") {
         val gradeId = getFieldId("Grade")
         val gradeSelect = document.getElementById(gradeId) as? HTMLSelectElement
         val gradeInput = document.getElementById("${gradeId}Input") as? HTMLInputElement
-        if (gradeSelect != null) {
-            gradeSelect.value = matchedGrade
-            if (gradeInput != null) {
-                gradeInput.value = matchedGrade
-            }
-            syncComboboxField("Grade", matchedGrade)
+        if (gradeInput != null) {
+            gradeInput.value = matchedGrade
+            if (gradeSelect != null) gradeSelect.value = matchedGrade
             console.log("✅ Auto-filled grade from match: $matchedGrade")
         }
+    }
+    
+    // Vehicle type (shipmentSize combobox)
+    if (changedField.lowercase() != "vehicletype" && matchedVehicleType.isNotBlank()) {
+        val shipId = if (isEditForm) "editShipmentSize" else "shipmentSize"
+        window.asDynamic().__vtMatchRow = matchedVehicleType
+        window.asDynamic().__vtMatchRowId = shipId
+        js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists(window.__vtMatchRowId, window.__vtMatchRow)")
+        val shipSel = document.getElementById(shipId) as? HTMLSelectElement
+        val shipInp = document.getElementById("${shipId}Input") as? HTMLInputElement
+        shipSel?.value = matchedVehicleType
+        shipInp?.value = matchedVehicleType
+        window.asDynamic().__syncShipMatch = shipId
+        js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(window.__syncShipMatch)")
+        console.log("✅ Auto-filled vehicle type from match: $matchedVehicleType")
+    }
+    
+    if (changedField.lowercase() != "rank") {
+        val rankId = if (isEditForm) "editRank" else "rank"
+        (document.getElementById(rankId) as? HTMLInputElement)?.value = matchedRank
+    }
+    if (changedField.lowercase() != "color") {
+        val colorId = if (isEditForm) "editColor" else "color"
+        (document.getElementById(colorId) as? HTMLInputElement)?.value = matchedColor
+    }
+    if (changedField.lowercase() != "drivetype" && (matchedDriveType == "LHD" || matchedDriveType == "RHD")) {
+        val dtName = if (isEditForm) "editDriveType" else "driveType"
+        val dtRadio = document.querySelector("input[name=\"$dtName\"][value=\"$matchedDriveType\"]") as? HTMLInputElement
+        dtRadio?.checked = true
+    }
+
+    // Seat (numeric input, not a dropdown)
+    if (changedField.lowercase() != "seat" && matchedSeat.isNotBlank()) {
+        val seatId = if (isEditForm) "editSeat" else "seat"
+        val seatInput = document.getElementById(seatId) as? HTMLInputElement
+        seatInput?.value = matchedSeat
     }
     
     // Clear flag after a delay
@@ -8149,17 +9422,29 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
             val shift = js("mappingData.shift")?.toString() ?: ""
             val ccRaw = js("mappingData.cc")?.toString() ?: ""
             val doorRaw = js("mappingData.door")?.toString() ?: ""
+            val seatRaw = js("mappingData.seat")?.toString() ?: ""
             val grade = js("mappingData.grade")?.toString() ?: ""
+            val vehicleType = js("mappingData.vehicleType")?.toString()?.trim() ?: ""
+            val rank = js("mappingData.rank")?.toString()?.trim() ?: ""
+            val color = js("mappingData.color")?.toString()?.trim() ?: ""
+            val driveType = js("mappingData.driveType")?.toString()?.trim()?.uppercase() ?: ""
             
             // Convert "0" to empty string for select dropdowns (NULL values)
             val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
             val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
+            val seat = if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw
             
-            console.log("Auto-filling fields from mapping: carName=$carName, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, grade=$grade")
+            console.log("Auto-filling fields from mapping: carName=$carName, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, seat=$seat, grade=$grade, vehicleType=$vehicleType, rank=$rank, color=$color, driveType=$driveType")
             
             // Helper function to set field value (always set, even if empty)
             // For comboboxes, sets both input and select fields
             fun setFieldValue(fieldId: String, value: String) {
+                if (fieldId == "wd" || fieldId == "editWd") {
+                    val radioVal = if (value.contains("4")) "4WD" else "2WD"
+                    val radio = document.querySelector("input[name=\"$fieldId\"][value=\"$radioVal\"]") as? HTMLInputElement
+                    radio?.checked = true
+                    return
+                }
                 val inputElement = document.getElementById("${fieldId}Input") as? HTMLInputElement
                 val selectElement = document.getElementById(fieldId) as? HTMLSelectElement
                 
@@ -8204,7 +9489,19 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                 setFieldValue("editShift", shift)
                 setFieldValue("editCc", cc)
                 setFieldValue("editDoor", door)
+                setFieldValue("editSeat", seat)
                 setFieldValue("editGrade", grade)
+                if (vehicleType.isNotBlank()) {
+                    window.asDynamic().__vtMatch = vehicleType
+                    js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists('editShipmentSize', window.__vtMatch)")
+                    setFieldValue("editShipmentSize", vehicleType)
+                }
+                (document.getElementById("editRank") as? HTMLInputElement)?.value = rank
+                (document.getElementById("editColor") as? HTMLInputElement)?.value = color
+                if (driveType == "LHD" || driveType == "RHD") {
+                    val r = document.querySelector("input[name=\"editDriveType\"][value=\"$driveType\"]") as? HTMLInputElement
+                    r?.checked = true
+                }
             } else {
                 // Populate car name field (for combobox, set both input and select)
                 if (carName.isNotBlank()) {
@@ -8221,16 +9518,28 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                     }
                 }
                 setFieldValue("fuel", fuel)
-                // WD and CC are now number inputs - extract numeric value
-                val wdNum = wd.replace(Regex("[^0-9]"), "")
-                val wdInput = document.getElementById("wd") as? HTMLInputElement
-                wdInput?.value = wdNum
+                // WD is 2WD/4WD radio: normalize mapping value to 2WD or 4WD
+                val wdRadioVal = if (wd.contains("4")) "4WD" else "2WD"
+                val wdRadio = document.querySelector("input[name=\"wd\"][value=\"$wdRadioVal\"]") as? HTMLInputElement
+                wdRadio?.checked = true
                 setFieldValue("shift", shift)
                 val ccNum = cc.replace(Regex("[^0-9]"), "")
                 val ccInput = document.getElementById("cc") as? HTMLInputElement
                 ccInput?.value = ccNum
                 setFieldValue("door", door)
+                setFieldValue("seat", seat)
                 setFieldValue("grade", grade)
+                if (vehicleType.isNotBlank()) {
+                    window.asDynamic().__vtMatchAdd = vehicleType
+                    js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists('shipmentSize', window.__vtMatchAdd)")
+                    setFieldValue("shipmentSize", vehicleType)
+                }
+                (document.getElementById("rank") as? HTMLInputElement)?.value = rank
+                (document.getElementById("color") as? HTMLInputElement)?.value = color
+                if (driveType == "LHD" || driveType == "RHD") {
+                    val r = document.querySelector("input[name=\"driveType\"][value=\"$driveType\"]") as? HTMLInputElement
+                    r?.checked = true
+                }
             }
         }
         .catch { error ->
@@ -8563,9 +9872,9 @@ fun calculateTax(priceFieldId: String, auctionFeeFieldId: String, roadTaxFieldId
             if (taxTotalField.type == "number") {
                 taxTotalField.value = taxAmount.toString()
             } else {
-                // For text inputs, format with currency symbol
-        val formattedTax = "¥${taxAmount.toInt()}"
-                taxTotalField.value = formattedTax
+                // For currency text inputs, the UI already shows a `¥` via a separate span.
+                // Do NOT inject another `¥` into the input value.
+                taxTotalField.value = taxAmount.toInt().toString()
             }
         }
         
@@ -8707,9 +10016,12 @@ fun validatePurchaseMasterFields(
                 missingFields.add(Pair("Brand", "Car Brands"))
             }
             
-            // Check grade
-            if (grade.isNotEmpty() && !gradeList.any { it.equals(grade, ignoreCase = true) }) {
-                missingFields.add(Pair("Grade", "Car Grade"))
+            // Check grade - single value (some existing data may still contain ';' separated tokens)
+            if (grade.isNotEmpty()) {
+                val normalizedGrade = grade.split(";").map { it.trim() }.filter { it.isNotEmpty() }.firstOrNull() ?: ""
+                if (normalizedGrade.isNotBlank() && !gradeList.any { it.equals(normalizedGrade, ignoreCase = true) }) {
+                    missingFields.add(Pair("Grade", "Car Grade"))
+                }
             }
             
             // Check fuel
@@ -8874,7 +10186,7 @@ fun saveNewPurchase() {
     
     // Extract field values for master list validation
     val valBrand = js("getComboboxValue('brand')").unsafeCast<String>()
-    val valGrade = (document.getElementById("grade") as? HTMLInputElement)?.value ?: ""
+    val valGrade = (document.getElementById("gradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
     val valFuel = js("getComboboxValue('fuel')").unsafeCast<String>()
     val valShift = js("getComboboxValue('shift')").unsafeCast<String>()
     val valSupplierName = js("getComboboxValue('auctionName')").unsafeCast<String>()
@@ -8882,9 +10194,9 @@ fun saveNewPurchase() {
     val valVehicleType = js("getComboboxValue('typeOfVehicle')").unsafeCast<String>()
     val valRixoCompany = js("getComboboxValue('rixoCompany')").unsafeCast<String>()
     val valStockLocation = js("getComboboxValue('stockLocation')").unsafeCast<String>()
-    val valClientName = (document.getElementById("clientName") as? HTMLInputElement)?.value ?: ""
-    val valTargetCountry = (document.getElementById("country") as? HTMLInputElement)?.value ?: ""
-    val valRepairCompany = (document.getElementById("repairCompany") as? HTMLInputElement)?.value ?: ""
+    val valClientName = getComboboxValueSafe("clientName")
+    val valTargetCountry = getComboboxValueSafe("country")
+    val valRepairCompany = getComboboxValueSafe("repairCompany")
     
     // Validate against master list before saving (POL not checked in Add mode - empty string)
     validatePurchaseMasterFields(
@@ -8916,6 +10228,107 @@ fun saveNewPurchase() {
     }
 }
 
+// NEW: Save function for adding new purchase, then reloading Add page for another entry
+fun saveNewPurchaseAndAddMore() {
+    console.log("💾 [NEW] saveNewPurchaseAndAddMore() called")
+
+    // Prevent double submission
+    val saveButton = document.getElementById("addSaveAndMoreBtn") as? HTMLButtonElement
+    if (saveButton?.disabled == true) {
+        console.log("⚠️ [NEW] Save and Add More already in progress, ignoring duplicate call")
+        return
+    }
+
+    // Disable button to prevent double submission
+    saveButton?.disabled = true
+    val originalText = saveButton?.textContent ?: "Save and Add More"
+
+    // CHASSIS VALIDATION: Two-part chassis logic
+    val chassisInput = document.getElementById("chassisInput") as? HTMLInputElement
+    val chassis = chassisInput?.value?.trim() ?: ""
+
+    if (chassis.isBlank()) {
+        saveButton?.disabled = false
+        saveButton?.textContent = originalText
+        showErrorModal("Validation Error", "Chassis is required. Please select or enter a chassis number.")
+        return
+    }
+
+    if (!validateChassisPart1(chassis, isEditForm = false)) {
+        saveButton?.disabled = false
+        saveButton?.textContent = originalText
+        showErrorModal("Invalid Chassis", "Please select chassis from dropdown. The first part cannot be edited manually.")
+        return
+    }
+
+    val carModelYearValue = (document.getElementById("carModelYear") as? HTMLInputElement)?.value ?: ""
+    val (isValidYear, yearErrorMsg) = validateProductionDateYear(carModelYearValue)
+    if (!isValidYear) {
+        saveButton?.disabled = false
+        saveButton?.textContent = originalText
+        showErrorModal("Invalid Production Date", yearErrorMsg)
+        return
+    }
+
+    val valBrand = js("getComboboxValue('brand')").unsafeCast<String>()
+    val valGrade = (document.getElementById("gradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    val valFuel = js("getComboboxValue('fuel')").unsafeCast<String>()
+    val valShift = js("getComboboxValue('shift')").unsafeCast<String>()
+    val valSupplierName = js("getComboboxValue('auctionName')").unsafeCast<String>()
+    val valVenueId = js("getComboboxValue('venueId')").unsafeCast<String>()
+    val valVehicleType = js("getComboboxValue('typeOfVehicle')").unsafeCast<String>()
+    val valRixoCompany = js("getComboboxValue('rixoCompany')").unsafeCast<String>()
+    val valStockLocation = js("getComboboxValue('stockLocation')").unsafeCast<String>()
+    val valClientName = getComboboxValueSafe("clientName")
+    val valTargetCountry = getComboboxValueSafe("country")
+    val valRepairCompany = getComboboxValueSafe("repairCompany")
+
+    validatePurchaseMasterFields(
+        brand = valBrand,
+        grade = valGrade,
+        fuel = valFuel,
+        shift = valShift,
+        supplierName = valSupplierName,
+        venueId = valVenueId,
+        vehicleType = valVehicleType,
+        rixoCompany = valRixoCompany,
+        stockLocation = valStockLocation,
+        pol = "", // POL validation only in Edit mode
+        clientName = valClientName,
+        targetCountry = valTargetCountry,
+        repairCompany = valRepairCompany,
+        isEditMode = false
+    ) { missingFields ->
+        if (missingFields.isNotEmpty()) {
+            saveButton?.disabled = false
+            saveButton?.textContent = originalText
+            showPurchaseMasterFieldsErrorModal(missingFields)
+            return@validatePurchaseMasterFields
+        }
+
+        proceedWithNewPurchaseSave(chassis, saveButton, originalText)
+    }
+}
+
+// Reload Add purchase page after saving so we get an empty form immediately.
+// Must not rely on hash navigation because we may already be on "#/add".
+fun reloadAddPurchaseForm() {
+    js("if (typeof window.ensureScrollingRestored === 'function') { window.ensureScrollingRestored(); }")
+    val content = document.getElementById("content") ?: return
+    content.innerHTML = createAddFormHTML()
+    try {
+        setupAddFormListeners()
+        setupResponsiveFormSections()
+        js("if (typeof window.setupOptionButtons === 'function') window.setupOptionButtons();")
+    } catch (e: dynamic) {
+        console.error("❌ [NEW] Failed to reload Add Purchase form:", e)
+    }
+    ensureSidebarPresent()
+    // Hide PDF buttons on add page
+    (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+    (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+}
+
 // Extracted function to perform the actual new purchase save after validation
 fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, originalText: String) {
     // Collect all form values (empty strings for empty fields)
@@ -8930,7 +10343,7 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     purchaseData.carName = js("getComboboxValue('carName')").unsafeCast<String>()
     purchaseData.vehicleType = js("getComboboxValue('typeOfVehicle')").unsafeCast<String>()
     purchaseData.shipmentSize = purchaseData.vehicleType
-    purchaseData.grade = (document.getElementById("grade") as? HTMLInputElement)?.value ?: ""
+    purchaseData.grade = (document.getElementById("gradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
     purchaseData.rank = (document.getElementById("rank") as? HTMLInputElement)?.value ?: ""
     purchaseData.color = (document.getElementById("color") as? HTMLInputElement)?.value ?: ""
     purchaseData.fuel = js("getComboboxValue('fuel')").unsafeCast<String>()
@@ -8948,12 +10361,8 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
         numValue.toIntOrNull()  // Send as Integer, not string with "CC"
     } else null
     purchaseData.shift = js("getComboboxValue('shift')").unsafeCast<String>()
-    val wdValue = (document.getElementById("wd") as? HTMLInputElement)?.value ?: ""
-    // Backend expects String? for wd field, so send with "WD" suffix
-    purchaseData.wd = if (wdValue.isNotEmpty()) {
-        val numValue = wdValue.replace(Regex("[^0-9]"), "")
-        if (numValue.isNotEmpty()) "${numValue}WD" else ""
-    } else ""
+    val wdChecked = document.querySelector("input[name=\"wd\"]:checked") as? HTMLInputElement
+    purchaseData.wd = wdChecked?.value ?: ""
     purchaseData.auctionNo = (document.getElementById("auctionNo") as? HTMLInputElement)?.value ?: ""
     
     // Supplier Information
@@ -8965,26 +10374,26 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     
     // Rixo Information
     purchaseData.rixoCompany = js("getComboboxValue('rixoCompany')").unsafeCast<String>()
-    purchaseData.clientName = (document.getElementById("clientName") as? HTMLInputElement)?.value ?: ""
-    purchaseData.country = (document.getElementById("country") as? HTMLInputElement)?.value ?: ""
-    val rixoPriceRaw = (document.getElementById("rixoPriceInput") as? HTMLInputElement)?.value ?: ""
-    purchaseData.rixoPrice = if (rixoPriceRaw.isNotEmpty()) {
-        "¥$rixoPriceRaw"
-    } else ""
+    purchaseData.clientName = getComboboxValueSafe("clientName")
+    purchaseData.country = getComboboxValueSafe("country")
+    val rixoPriceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('rixoPriceInput') : ''").unsafeCast<String>().trim()
+    purchaseData.rixoPrice = if (rixoPriceRaw.isNotBlank()) "¥$rixoPriceRaw" else ""
     purchaseData.rixoRequested = (document.querySelector("input[name=\"rixoRequested\"]:checked") as? HTMLInputElement)?.value ?: ""
     purchaseData.rixoConfirmed = (document.querySelector("input[name=\"rixoConfirmed\"]:checked") as? HTMLInputElement)?.value ?: ""
     
     // Pricing Information
-    val priceValue = (document.getElementById("price") as? HTMLInputElement)?.value ?: ""
-    purchaseData.price = if (priceValue.isNotEmpty()) "¥$priceValue" else ""
-    val auctionFeeValue = (document.getElementById("auctionFee") as? HTMLInputElement)?.value ?: ""
-    purchaseData.auctionFee = if (auctionFeeValue.isNotEmpty()) "¥$auctionFeeValue" else ""
-    val recycleFeeValue = (document.getElementById("recycleFee") as? HTMLInputElement)?.value ?: ""
-    purchaseData.recycleFee = if (recycleFeeValue.isNotEmpty()) "¥$recycleFeeValue" else ""
-    val roadTaxValue = (document.getElementById("roadTax") as? HTMLInputElement)?.value ?: ""
-    purchaseData.roadTax = if (roadTaxValue.isNotEmpty()) "¥$roadTaxValue" else ""
-    val taxTotalValue = (document.getElementById("taxTotal") as? HTMLInputElement)?.value ?: ""
-    purchaseData.taxTotal = if (taxTotalValue.isNotEmpty()) "¥$taxTotalValue" else ""
+    val priceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('price') : ''").unsafeCast<String>().trim()
+    purchaseData.price = if (priceValue.isNotBlank()) "¥$priceValue" else ""
+    val auctionFeeValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('auctionFee') : ''").unsafeCast<String>().trim()
+    purchaseData.auctionFee = if (auctionFeeValue.isNotBlank()) "¥$auctionFeeValue" else ""
+    val auctionPenaltyFeeValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('auctionPenaltyFee') : ''").unsafeCast<String>().trim()
+    purchaseData.auctionPenaltyFee = if (auctionPenaltyFeeValue.isNotBlank()) "¥$auctionPenaltyFeeValue" else ""
+    val recycleFeeValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('recycleFee') : ''").unsafeCast<String>().trim()
+    purchaseData.recycleFee = if (recycleFeeValue.isNotBlank()) "¥$recycleFeeValue" else ""
+    val roadTaxValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('roadTax') : ''").unsafeCast<String>().trim()
+    purchaseData.roadTax = if (roadTaxValue.isNotBlank()) "¥$roadTaxValue" else ""
+    val taxTotalValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('taxTotal') : ''").unsafeCast<String>().trim()
+    purchaseData.taxTotal = if (taxTotalValue.isNotBlank()) "¥$taxTotalValue" else ""
     purchaseData.totalPrice = (document.getElementById("totalCostAfterTax") as? HTMLInputElement)?.value ?: ""
     val paymentDateIso = (document.getElementById("paymentDate") as? HTMLInputElement)?.value ?: ""
     purchaseData.paymentDate = if (paymentDateIso.isNotBlank()) formatWithWeekday(paymentDateIso) else ""
@@ -8995,21 +10404,23 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     purchaseData.blNo = (document.getElementById("blNo") as? HTMLInputElement)?.value ?: ""
     purchaseData.vesselNo = (document.getElementById("vesselNo") as? HTMLInputElement)?.value ?: ""
     purchaseData.destination = (document.getElementById("destination") as? HTMLInputElement)?.value ?: ""
-    val shipmentChargesValue = (document.getElementById("shipmentCharges") as? HTMLInputElement)?.value ?: ""
-    purchaseData.shipmentCharges = if (shipmentChargesValue.isNotEmpty()) "¥$shipmentChargesValue" else ""
-    val freightValue = (document.getElementById("freight") as? HTMLInputElement)?.value ?: ""
-    purchaseData.freight = if (freightValue.isNotEmpty()) "¥$freightValue" else ""
-    val storageChargesValue = (document.getElementById("storageCharges") as? HTMLInputElement)?.value ?: ""
-    purchaseData.storageCharges = if (storageChargesValue.isNotEmpty()) "¥$storageChargesValue" else ""
-    val miscChargesValue = (document.getElementById("miscCharges") as? HTMLInputElement)?.value ?: ""
-    purchaseData.miscCharges = if (miscChargesValue.isNotEmpty()) "¥$miscChargesValue" else ""
-    val inspectionFeeValue = (document.getElementById("inspectionFee") as? HTMLInputElement)?.value ?: ""
-    purchaseData.inspectionFee = if (inspectionFeeValue.isNotEmpty()) "¥$inspectionFeeValue" else ""
-    val commissionValue = (document.getElementById("commission") as? HTMLInputElement)?.value ?: ""
-    purchaseData.commission = if (commissionValue.isNotEmpty()) "¥$commissionValue" else ""
-    purchaseData.repairCompany = (document.getElementById("repairCompany") as? HTMLInputElement)?.value ?: ""
-    val repairChargesValue = (document.getElementById("repairCharges") as? HTMLInputElement)?.value ?: ""
-    purchaseData.repairCharges = if (repairChargesValue.isNotEmpty()) "¥$repairChargesValue" else ""
+    val shipmentChargesValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('shipmentCharges') : ''").unsafeCast<String>().trim()
+    purchaseData.shipmentCharges = if (shipmentChargesValue.isNotBlank()) "¥$shipmentChargesValue" else ""
+    val freightValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('freight') : ''").unsafeCast<String>().trim()
+    purchaseData.freight = if (freightValue.isNotBlank()) "¥$freightValue" else ""
+    val storageChargesValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('storageCharges') : ''").unsafeCast<String>().trim()
+    purchaseData.storageCharges = if (storageChargesValue.isNotBlank()) "¥$storageChargesValue" else ""
+    val miscChargesValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('miscCharges') : ''").unsafeCast<String>().trim()
+    purchaseData.miscCharges = if (miscChargesValue.isNotBlank()) "¥$miscChargesValue" else ""
+    val inspectionFeeValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('inspectionFee') : ''").unsafeCast<String>().trim()
+    purchaseData.inspectionFee = if (inspectionFeeValue.isNotBlank()) "¥$inspectionFeeValue" else ""
+    val commissionValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('commission') : ''").unsafeCast<String>().trim()
+    purchaseData.commission = if (commissionValue.isNotBlank()) "¥$commissionValue" else ""
+    purchaseData.repairCompany = getComboboxValueSafe("repairCompany")
+    val repairChargesValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('repairCharges') : ''").unsafeCast<String>().trim()
+    purchaseData.repairCharges = if (repairChargesValue.isNotBlank()) "¥$repairChargesValue" else ""
+    val shippingConfirmedValue = (document.querySelector("input[name=\"shippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
+    purchaseData.shipped = (shippingConfirmedValue == "TRUE")
     
     // Other Fields
     purchaseData.shaken = (document.getElementById("shakenCheckbox") as? HTMLInputElement)?.checked ?: false
@@ -9032,7 +10443,13 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
         if (response.ok) {
             console.log("✅ [NEW] Purchase created successfully!")
             showMessage("Purchase created successfully!", "success")
-            showPurchaseList()
+            if (saveButton?.id == "addSaveAndMoreBtn") {
+                // Reload Add page with empty form for a new entry immediately.
+                // Avoid hash navigation because we may already be on "#/add".
+                reloadAddPurchaseForm()
+            } else {
+                showPurchaseList()
+            }
             // Button will be re-enabled when page reloads, no need to re-enable here
         } else {
             response.text().then { errorText ->
@@ -9161,12 +10578,17 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <div id="editCarNameButton" onclick="openComboboxDropdown('editCarName')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                                 ▼
-                    </div>
-                </div>
+                            </div>
+                        </div>
                     </div>
                     <div>
                         <label>Grade</label>
-                        <input type="text" id="editGrade" value="${purchaseData.grade ?: ""}" placeholder="e.g., G" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox(
+                            "editGrade",
+                            "Select Grade",
+                            additionalAttrs = "oninput=\"this.value = this.value.split(';')[0].trim();\"",
+                            initialValue = purchaseData.grade?.toString()?.split(";")?.firstOrNull()?.trim()?.replace("\"", "&quot;") ?: ""
+                        )}
                     </div>
                     <div>
                         <label>Production Date</label>
@@ -9265,9 +10687,9 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                onblur="if(this.value && !this.value.endsWith('CC')) { this.value = this.value + 'CC'; }">
                     </div>
                     <div>
-                        <label>Transmission</label>
+                        <label>Shift</label>
                         <div style="position: relative; width: 100%;">
-                            <input type="text" id="editShiftInput" value="${purchaseData.shift ?: ""}" placeholder="Select Transmission" 
+                            <input type="text" id="editShiftInput" value="${purchaseData.shift ?: ""}" placeholder="Select Shift" 
                                    style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
                                    autocomplete="off"
                                    onfocus="this.select();">
@@ -9283,14 +10705,23 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <div id="editShiftButton" onclick="openComboboxDropdown('editShift')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                                 ▼
-                </div>
+                            </div>
                         </div>
                     </div>
                     <div>
                         <label>WD</label>
-                        <input type="text" id="editWd" value="${extractNumericFromSuffixedValue(purchaseData.wd)}" placeholder="e.g., 2" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
-                               oninput="this.value = this.value.replace(/[^0-9]/g, '')" 
-                               onblur="if(this.value && !this.value.endsWith('WD')) { this.value = this.value + 'WD'; }">
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="editWd" value="2WD" ${if (purchaseData.wd != "4WD") "checked" else ""}>
+                                <span class="checkmark"></span>
+                                2WD
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="editWd" value="4WD" ${if (purchaseData.wd == "4WD") "checked" else ""}>
+                                <span class="checkmark"></span>
+                                4WD
+                            </label>
+                        </div>
                     </div>
                     <div>
                         <label>Drive Type</label>
@@ -9307,6 +10738,10 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             </label>
                         </div>
                     </div>
+                    <div>
+                        <label>Vehicle type</label>
+                        ${createEditableCombobox("editShipmentSize", "Select Vehicle type", initialValue = (purchaseData.shipmentSize ?: purchaseData.vehicleType ?: ""))}
+                    </div>
                     <div style="grid-column: 1 / -1; margin-bottom: 20px;">
                         <label>Options</label>
                         <div class="options-buttons-grid">
@@ -9316,15 +10751,16 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
                             <button type="button" class="option-btn" data-option="Power Window">Power Window</button>
                             <button type="button" class="option-btn" data-option="Sunroof">Sunroof</button>
-                            <button type="button" class="option-btn" data-option="Navigation">Navigation</button>
-                            <button type="button" class="option-btn" data-option="TV">TV</button>
+                            <button type="button" class="option-btn" data-option="Navigation/TV">Navigation/TV</button>
                             <button type="button" class="option-btn" data-option="Leather Seats">Leather Seats</button>
                             <button type="button" class="option-btn" data-option="Spare Key">Spare Key</button>
-                            <button type="button" class="option-btn" data-option="4WD">4WD</button>
                             <button type="button" class="option-btn" data-option="AC">AC</button>
                         </div>
                         <input type="hidden" id="editOptionsPredefined" value="">
-                        <input type="text" id="editOptions" placeholder="Type custom option and press Enter..." style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="display: flex; gap: 10px; align-items: center;">
+                            <button type="button" class="option-btn option-btn-basic" data-option="Basic" title="Select ABS, Power Window, Power Steering, AC">Basic</button>
+                            <input type="text" id="editOptions" placeholder="Type custom option and press Enter..." style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
                     </div>
                 </div>
                 
@@ -9361,10 +10797,6 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             </div>
                         </div>
                     </div>
-                    <div>
-                        <label>Vehicle type</label>
-                        ${createEditableCombobox("editShipmentSize", "Select Vehicle type", initialValue = (purchaseData.shipmentSize ?: purchaseData.vehicleType ?: ""))}
-                    </div>
                 </div>
                 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('rixo')"><h3 class="form-section-header" data-section="rixo">Rixo Information</h3></div>
@@ -9393,47 +10825,18 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         </div>
                     </div>
                     <div>
-                        <label>POL</label>
-                        <div style="position: relative; width: 100%;">
-                            <input type="text" id="editPolInput" value="${purchaseData.pol ?: ""}" placeholder="Select POL"
-                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
-                                   autocomplete="off"
-                                   onfocus="this.select();">
-                            <select id="editPol"
-                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
-                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editPol');"
-                                    onchange="syncComboboxInput('editPol')">
-                                <option value="">▼</option>
-                            </select>
-                            <div id="editPolButton" onclick="openComboboxDropdown('editPol')"
-                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
-                                ▼
-                            </div>
-                        </div>
-                    </div>
-                    <div>
                         <label>Rixo Price</label>
-                        <div style="position: relative; width: 100%;">
-                            <span style="position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #666; z-index: 1; pointer-events: none;">¥</span>
-                            <input type="number" id="editRixoPriceInput" value="${extractNumericFromDbValue(purchaseData.rixoPrice)}" placeholder="0" min="0" step="0.01" 
-                                   style="width: 100%; padding: 8px 40px 8px 20px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
-                                   autocomplete="off"
-                                   onfocus="this.select();">
-                            <input type="text" id="editRixoPrice" placeholder="Enter or select Rixo Price" style="display: none;">
-                            <select id="editRixoPriceDropdown" 
-                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
-                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editRixoPriceDropdown');"
-                                    onchange="var input = document.getElementById('editRixoPriceInput'); if (input && this.value) { var numValue = typeof window.parseRixoPrice === 'function' ? window.parseRixoPrice(this.value) : this.value.replace(/[¥,\\s]/g, ''); input.value = numValue; input.dispatchEvent(new Event('change', { bubbles: true })); } selectEditRixoPrice(this.value);">
-                                <option value="">▼</option>
-                            </select>
-                            <div id="editRixoPriceDropdownButton" onclick="openComboboxDropdown('editRixoPriceDropdown')" 
-                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
-                                ▼
+                        <div class="currency-input" style="display:flex; gap:10px; align-items:center;">
+                            <span class="currency-symbol">¥</span>
+                            <input type="text" inputmode="decimal" id="editRixoPriceInput" class="money-input" value="${extractNumericFromDbValue(purchaseData.rixoPrice)}" placeholder="0"
+                                   autocomplete="off" onfocus="this.select();">
+                            <button type="button" id="calculateEditRixoPriceBtn"
+                                    style="padding: 8px 12px; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; white-space:nowrap; min-height:44px;"
+                                    onclick="window.calculateRixoPriceFromMapping(true)">
+                                Calculate
+                            </button>
                         </div>
                     </div>
-                    </div>
-                    </div>
-                <div class="form-section-content form-grid-2col" data-section="rixo">
                     <div>
                         <label>Rixo Requested</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
@@ -9464,7 +10867,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             </label>
                         </div>
                     </div>
-                        </div>
+                </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="pricing">
@@ -9472,28 +10875,35 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>Car Price</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editPrice" value="${extractNumericFromDbValue(purchaseData.price)}" min="0" step="0.01" placeholder="0">
-                </div>
+                            <input type="text" inputmode="decimal" id="editPrice" class="money-input" value="${extractNumericFromDbValue(purchaseData.price)}" placeholder="0">
+                        </div>
                     </div>
                     <div>
                         <label>Auction Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editAuctionFee" value="${extractNumericFromDbValue(purchaseData.auctionFee)}" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="editAuctionFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.auctionFee)}" placeholder="0">
+                        </div>
+                    </div>
+                    <div>
+                        <label>Auction Penalty Fee</label>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="text" inputmode="decimal" id="editAuctionPenaltyFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.auctionPenaltyFee)}" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Recycle Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editRecycleFee" value="${extractNumericFromDbValue(purchaseData.recycleFee)}" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="editRecycleFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.recycleFee)}" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Road Tax</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editRoadTax" value="${extractNumericFromDbValue(purchaseData.roadTax)}" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="editRoadTax" class="money-input" value="${extractNumericFromDbValue(purchaseData.roadTax)}" placeholder="0">
                         </div>
                     </div>
                     <div>
@@ -9501,26 +10911,30 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <div style="position:relative;">
                             <input type="date" id="editPaymentDate" value="${toIsoFromLabel(purchaseData.paymentDate ?: purchaseData.payment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.paymentDate ?: purchaseData.payment_date) ?: ""}">
                             <span id="editPaymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                        </div>
                     </div>
-                </div>
                 </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="shipment">
                     <div>
                         <label>Client Name</label>
-                        ${createClientNameField("editClientName", purchaseData.clientName?.toString() ?: "")}
+                        ${createEditableCombobox("editClientName", "Select Client Name", initialValue = purchaseData.clientName?.toString() ?: "")}
                     </div>
                     <div>
                         <label>Target Country</label>
-                        <input type="text" id="editCountry" value="${purchaseData.country ?: ""}" placeholder="Select Country" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("editCountry", "Select Country", initialValue = purchaseData.country?.toString() ?: "")}
+                    </div>
+                    <div>
+                        <label>POL</label>
+                        ${createEditableCombobox("editPol", "Select POL", initialValue = purchaseData.pol?.toString() ?: "")}
                     </div>
                     <div>
                         <label>Shipment Date</label>
                         <div style="position:relative;">
                             <input type="date" id="editShipmentDate" value="${toIsoFromLabel(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date) ?: ""}">
                             <span id="editShipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
-                    </div>
+                        </div>
                     </div>
                     <div>
                         <label>B/L No.</label>
@@ -9534,34 +10948,34 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>Shipment Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editShipmentCharges" value="${extractNumericFromDbValue(purchaseData.shipmentCharges)}" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="editShipmentCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.shipmentCharges)}" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Freight</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editFreight" value="${extractNumericFromDbValue(purchaseData.freight)}" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="editFreight" class="money-input" value="${extractNumericFromDbValue(purchaseData.freight)}" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Storage Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editStorageCharges" value="${extractNumericFromDbValue(purchaseData.storageCharges)}" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="editStorageCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.storageCharges)}" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Repair Company</label>
-                        <input type="text" id="editRepairCompany" value="${purchaseData.repairCompany ?: ""}" placeholder="Select Repair Company" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("editRepairCompany", "Select Repair Company", initialValue = purchaseData.repairCompany?.toString() ?: "")}
                     </div>
                     <div>
                         <label>Repair Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editRepairCharges" value="${extractNumericFromDbValue(purchaseData.repairCharges)}" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="editRepairCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.repairCharges)}" placeholder="0">
+                        </div>
                     </div>
-                </div>
                     <div>
                         <label>Shipping Confirmed</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
@@ -9581,21 +10995,21 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>Misc. Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editMiscCharges" value="${extractNumericFromDbValue(purchaseData.miscCharges)}" min="0" step="0.01" placeholder="0">
-                    </div>
+                            <input type="text" inputmode="decimal" id="editMiscCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.miscCharges)}" placeholder="0">
+                        </div>
                     </div>
                     <div>
                         <label>Inspection Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editInspectionFee" value="${extractNumericFromDbValue(purchaseData.inspectionFee)}" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="editInspectionFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.inspectionFee)}" placeholder="0">
                         </div>
                     </div>
                     <div>
                         <label>Commission</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
-                            <input type="number" id="editCommission" value="${extractNumericFromDbValue(purchaseData.commission)}" min="0" step="0.01" placeholder="0">
+                            <input type="text" inputmode="decimal" id="editCommission" class="money-input" value="${extractNumericFromDbValue(purchaseData.commission)}" placeholder="0">
                         </div>
                     </div>
                     <div>
@@ -9607,10 +11021,10 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <div style="display: flex; gap: 8px; align-items: stretch;">
                             <div class="currency-input" style="flex: 1;">
                                 <span class="currency-symbol">¥</span>
-                                <input type="number" id="editTaxTotal" value="${extractNumericFromDbValue(purchaseData.taxTotal)}" min="0" step="0.01" placeholder="0">
-                    </div>
+                                <input type="text" inputmode="decimal" id="editTaxTotal" class="money-input" value="${extractNumericFromDbValue(purchaseData.taxTotal)}" placeholder="0">
+                            </div>
                             <button type="button" id="editCalculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; min-height: 44px; align-self: stretch;">10% Tax</button>
-                </div>
+                        </div>
                     </div>
                     <div>
                         <label>Total Cost (After Tax 10%)</label>
@@ -9694,10 +11108,100 @@ fun showEditFormWithData(purchaseData: dynamic) {
     // Ensure base options exist for fuel/shift/grade (edit form)
     ensureBaseComboboxOptionsForAddEdit()
     
+    // Money formatting (commas on display, comma-less values for saving).
+    // This is needed on Edit pages too (Add page-only binding caused commas not to appear).
+    js("""
+        (function(){
+            // Do not early-return: edit form values are populated async.
+            // Even if Add-page binding already happened, we still need to re-run
+            // formatting after Edit values are injected.
+            window.__moneyDelegationBound = true;
+
+            function _moneySanitize(raw) {
+                if (raw == null) return '';
+                var s = String(raw).trim();
+                if (!s) return '';
+                // keep digits and dot only
+                s = s.replace(/[^0-9.]/g, '');
+                // remove extra dots
+                var parts = s.split('.');
+                if (parts.length > 2) {
+                    s = parts[0] + '.' + parts.slice(1).join('');
+                    parts = s.split('.');
+                }
+                // trim leading zeros safely
+                if (parts[0]) {
+                    parts[0] = parts[0].replace(/^0+(?=\\d)/, '');
+                }
+                if (parts.length === 1) return parts[0] || '';
+                return (parts[0] || '0') + '.' + (parts[1] || '');
+            }
+
+            function _moneyFormat(raw) {
+                var s = _moneySanitize(raw);
+                if (!s) return '';
+                var parts = s.split('.');
+                var intPart = parts[0] || '0';
+                var decPart = parts.length > 1 ? parts[1] : '';
+                intPart = intPart.replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+                return decPart ? (intPart + '.' + decPart) : intPart;
+            }
+
+            function _bindMoneyDelegation() {
+                // On focus: show raw (no commas)
+                document.addEventListener('focusin', function(e) {
+                    var el = e.target;
+                    if (!el || !el.classList || !el.classList.contains('money-input')) return;
+                    el.value = _moneySanitize(el.value);
+                }, true);
+
+                // On blur: format with commas
+                document.addEventListener('focusout', function(e) {
+                    var el = e.target;
+                    if (!el || !el.classList || !el.classList.contains('money-input')) return;
+                    el.value = _moneyFormat(el.value);
+                }, true);
+            }
+
+            function _formatAllMoneyInputsNow() {
+                document.querySelectorAll('input.money-input').forEach(function(el) {
+                    el.value = _moneyFormat(el.value);
+                });
+            }
+
+            // Exposed helper for save flows (comma-less numeric)
+            window.getMoneyRawValue = function(id) {
+                var el = document.getElementById(id);
+                if (!el) return '';
+                return _moneySanitize(el.value);
+            };
+
+            _bindMoneyDelegation();
+            // Initial format pass + a few delayed passes for values injected later
+            setTimeout(_formatAllMoneyInputsNow, 0);
+            setTimeout(_formatAllMoneyInputsNow, 300);
+            setTimeout(_formatAllMoneyInputsNow, 800);
+            setTimeout(_formatAllMoneyInputsNow, 1500);
+
+            // Periodic re-format to catch auto-filled values that don't trigger blur
+            if (!window.__moneyAutoFormatIntervalStarted) {
+                window.__moneyAutoFormatIntervalStarted = true;
+                window.__moneyAutoFormatInterval = window.setInterval(function() {
+                    document.querySelectorAll('input.money-input').forEach(function(el) {
+                        if (!el) return;
+                        if (document.activeElement === el) return;
+                        var formatted = _moneyFormat(el.value);
+                        if (el.value !== formatted) el.value = formatted;
+                    });
+                }, 350);
+            }
+        })();
+    """)
+    
     setupEditFormListeners()
     
-    // Client name suggestions (Edit form)
-    setupClientNameSuggestions("editClientName")
+    // Populate Grade, Country, Client Name, Repair Company from master_menu for edit form
+    populateMasterMenuComboboxesForPurchaseForm()
     
     // Setup Rixo dropdowns and set values
     setupRixoDropdowns()
@@ -10030,7 +11534,7 @@ fun setupEditFormListeners() {
     }
     
     // Add event listeners for real-time calculation of Total Cost (Before Tax) in Edit form
-    listOf("editPrice", "editAuctionFee", "editRecycleFee", "editRoadTax", "editFreight", "editShipmentCharges", "editStorageCharges", "editRepairCharges", "editMiscCharges", "editInspectionFee", "editCommission", "editRixoPriceInput").forEach { fieldId ->
+    listOf("editPrice", "editAuctionFee", "editAuctionPenaltyFee", "editRecycleFee", "editRoadTax", "editFreight", "editShipmentCharges", "editStorageCharges", "editRepairCharges", "editMiscCharges", "editInspectionFee", "editCommission", "editRixoPriceInput").forEach { fieldId ->
         document.getElementById(fieldId)?.addEventListener("input", { _: Event ->
             calculateEditTotalCostBeforeTax()
         })
@@ -10348,7 +11852,7 @@ fun collectCurrentEditFormData(): dynamic {
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
     val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
-    val grade = (document.getElementById("editGrade") as? HTMLInputElement)?.value ?: ""
+    val grade = (document.getElementById("editGradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
     val rank = (document.getElementById("editRank") as? HTMLInputElement)?.value ?: ""
     val color = (document.getElementById("editColor") as? HTMLInputElement)?.value ?: ""
     val fuel = getComboboxValueSafe("editFuel")
@@ -10366,37 +11870,44 @@ fun collectCurrentEditFormData(): dynamic {
         numValue.toIntOrNull()  // Send as Integer, not string with "CC"
     } else null
     val shift = getComboboxValueSafe("editShift")
-    val wdValue = (document.getElementById("editWd") as? HTMLInputElement)?.value ?: ""
-    val wd = if (wdValue.isNotEmpty()) {
-        val numValue = wdValue.replace(Regex("[^0-9]"), "")
-        if (numValue.isNotEmpty()) "${numValue}WD" else ""
-    } else ""
+    val wdChecked = document.querySelector("input[name=\"editWd\"]:checked") as? HTMLInputElement
+    val wd = wdChecked?.value ?: ""
     val auctionNo = (document.getElementById("editAuctionNo") as? HTMLInputElement)?.value ?: ""
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
     val pol = getComboboxValueSafe("editPol")
     val rixoCompany = getComboboxValueSafe("editRixoCompany")
-    val clientName = (document.getElementById("editClientName") as? HTMLInputElement)?.value ?: ""
-    val country = (document.getElementById("editCountry") as? HTMLInputElement)?.value ?: ""
+    val clientName = getComboboxValueSafe("editClientName")
+    val country = getComboboxValueSafe("editCountry")
     val venueId = getComboboxValueSafe("editVenueId")
     val shipmentSize = getComboboxValueSafe("editShipmentSize")
-    val priceValue = (document.getElementById("editPrice") as? HTMLInputElement)?.value ?: ""
-    val price = if (priceValue.isNotEmpty()) "¥$priceValue" else ""
-    val auctionFeeValue = (document.getElementById("editAuctionFee") as? HTMLInputElement)?.value ?: ""
-    val auctionFee = if (auctionFeeValue.isNotEmpty()) "¥$auctionFeeValue" else ""
-    val recycleFeeValue = (document.getElementById("editRecycleFee") as? HTMLInputElement)?.value ?: ""
-    val recycleFee = if (recycleFeeValue.isNotEmpty()) "¥$recycleFeeValue" else ""
-    val roadTaxValue = (document.getElementById("editRoadTax") as? HTMLInputElement)?.value ?: ""
-    val roadTax = if (roadTaxValue.isNotEmpty()) "¥$roadTaxValue" else ""
-    val taxTotalValue = (document.getElementById("editTaxTotal") as? HTMLInputElement)?.value ?: ""
-    val taxTotal = if (taxTotalValue.isNotEmpty()) "¥$taxTotalValue" else ""
+    // IMPORTANT:
+    // Confirm-changes modal must compare against the *same* values used by the real save flow.
+    // The save flow reads money inputs directly from their `.value`.
+    val priceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editPrice') : ''").unsafeCast<String>().trim()
+    val price = if (priceRaw.isNotBlank()) "¥$priceRaw" else ""
+
+    val auctionFeeRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editAuctionFee') : ''").unsafeCast<String>().trim()
+    val auctionFee = if (auctionFeeRaw.isNotBlank()) "¥$auctionFeeRaw" else ""
+
+    val auctionPenaltyFeeRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editAuctionPenaltyFee') : ''").unsafeCast<String>().trim()
+    val auctionPenaltyFee = if (auctionPenaltyFeeRaw.isNotBlank()) "¥$auctionPenaltyFeeRaw" else ""
+
+    val recycleFeeRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRecycleFee') : ''").unsafeCast<String>().trim()
+    val recycleFee = if (recycleFeeRaw.isNotBlank()) "¥$recycleFeeRaw" else ""
+
+    val roadTaxRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRoadTax') : ''").unsafeCast<String>().trim()
+    val roadTax = if (roadTaxRaw.isNotBlank()) "¥$roadTaxRaw" else ""
+
+    val taxTotalRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editTaxTotal') : ''").unsafeCast<String>().trim()
+    val taxTotal = if (taxTotalRaw.isNotBlank()) "¥$taxTotalRaw" else ""
     val totalPrice = (document.getElementById("editTotalCostAfterTax") as? HTMLInputElement)?.value ?: ""
     val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
     val shippingConfirmed = (document.querySelector("input[name=\"editShippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
-    val rixoPriceRaw = (document.getElementById("editRixoPriceInput") as? HTMLInputElement)?.value ?: ""
-    val rixoPrice = if (rixoPriceRaw.isNotEmpty()) "¥$rixoPriceRaw" else ""
+    val rixoPriceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRixoPriceInput') : ''").unsafeCast<String>().trim()
+    val rixoPrice = if (rixoPriceRaw.isNotBlank()) "¥$rixoPriceRaw" else ""
     val numberCutString = (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value ?: ""
     val shipmentDate = formatWithWeekday((document.getElementById("editShipmentDate") as? HTMLInputElement)?.value ?: "")
     val blNo = (document.getElementById("editBlNo") as? HTMLInputElement)?.value ?: ""
@@ -10404,21 +11915,26 @@ fun collectCurrentEditFormData(): dynamic {
     val destination = (document.getElementById("editDestination") as? HTMLInputElement)?.value ?: ""
     val bookingIdStr = (document.getElementById("editBookingId") as? HTMLInputElement)?.value?.trim() ?: ""
     val bookingId = if (bookingIdStr.isNotEmpty()) bookingIdStr.toLongOrNull() else null
-    val shipmentChargesValue = (document.getElementById("editShipmentCharges") as? HTMLInputElement)?.value ?: ""
-    val shipmentCharges = if (shipmentChargesValue.isNotEmpty()) "¥$shipmentChargesValue" else ""
-    val freightValue = (document.getElementById("editFreight") as? HTMLInputElement)?.value ?: ""
-    val freight = if (freightValue.isNotEmpty()) "¥$freightValue" else ""
-    val storageChargesValue = (document.getElementById("editStorageCharges") as? HTMLInputElement)?.value ?: ""
-    val storageCharges = if (storageChargesValue.isNotEmpty()) "¥$storageChargesValue" else ""
-    val miscChargesValue = (document.getElementById("editMiscCharges") as? HTMLInputElement)?.value ?: ""
-    val miscCharges = if (miscChargesValue.isNotEmpty()) "¥$miscChargesValue" else ""
-    val inspectionFeeValue = (document.getElementById("editInspectionFee") as? HTMLInputElement)?.value ?: ""
-    val inspectionFee = if (inspectionFeeValue.isNotEmpty()) "¥$inspectionFeeValue" else ""
-    val commissionValue = (document.getElementById("editCommission") as? HTMLInputElement)?.value ?: ""
-    val commission = if (commissionValue.isNotEmpty()) "¥$commissionValue" else ""
-    val repairCompany = (document.getElementById("editRepairCompany") as? HTMLInputElement)?.value ?: ""
-    val repairChargesValue = (document.getElementById("editRepairCharges") as? HTMLInputElement)?.value ?: ""
-    val repairCharges = if (repairChargesValue.isNotEmpty()) "¥$repairChargesValue" else ""
+    val shipmentChargesRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editShipmentCharges') : ''").unsafeCast<String>().trim()
+    val shipmentCharges = if (shipmentChargesRaw.isNotBlank()) "¥$shipmentChargesRaw" else ""
+
+    val freightRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editFreight') : ''").unsafeCast<String>().trim()
+    val freight = if (freightRaw.isNotBlank()) "¥$freightRaw" else ""
+
+    val storageChargesRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editStorageCharges') : ''").unsafeCast<String>().trim()
+    val storageCharges = if (storageChargesRaw.isNotBlank()) "¥$storageChargesRaw" else ""
+
+    val miscChargesRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editMiscCharges') : ''").unsafeCast<String>().trim()
+    val miscCharges = if (miscChargesRaw.isNotBlank()) "¥$miscChargesRaw" else ""
+
+    val inspectionFeeRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editInspectionFee') : ''").unsafeCast<String>().trim()
+    val inspectionFee = if (inspectionFeeRaw.isNotBlank()) "¥$inspectionFeeRaw" else ""
+
+    val commissionRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editCommission') : ''").unsafeCast<String>().trim()
+    val commission = if (commissionRaw.isNotBlank()) "¥$commissionRaw" else ""
+    val repairCompany = getComboboxValueSafe("editRepairCompany")
+    val repairChargesRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRepairCharges') : ''").unsafeCast<String>().trim()
+    val repairCharges = if (repairChargesRaw.isNotBlank()) "¥$repairChargesRaw" else ""
     val notes = (document.getElementById("editNotes") as? HTMLTextAreaElement)?.value ?: ""
     val shaken = (document.getElementById("editShakenCheckbox") as? HTMLInputElement)?.checked ?: false
     
@@ -10454,6 +11970,7 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.venueId = venueId
     purchaseData.price = price
     purchaseData.auctionFee = auctionFee
+    purchaseData.auctionPenaltyFee = auctionPenaltyFee
     purchaseData.recycleFee = recycleFee
     purchaseData.roadTax = roadTax
     purchaseData.taxTotal = taxTotal
@@ -10500,11 +12017,46 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
         "date", "chassis", "carModelYear", "brand", "carName", "vehicleType", "shipmentSize",
         "grade", "rank", "color", "fuel", "seat", "door", "distance", "options", "cc",
         "shift", "wd", "driveType", "auctionNo", "auctionHouse", "stockLocation",
-        "rixoCompany", "clientName", "country", "venueId", "price", "auctionFee", "recycleFee",
+        "rixoCompany", "clientName", "country", "venueId", "price", "auctionFee", "auctionPenaltyFee", "recycleFee",
         "roadTax", "taxTotal", "totalPrice", "paymentDate", "rixoRequested", "rixoConfirmed",
         "rixoPrice", "shipmentDate", "blNo", "vesselNo", "destination", "shipmentCharges",
         "freight", "storageCharges", "miscCharges", "inspectionFee", "commission", "repairCompany",
         "repairCharges", "shaken", "numberCut", "notes", "bookingId", "shipped"
+    )
+
+    // Compare money values by numeric content only (ignore `¥`, commas, formatting, etc.)
+    fun normalizeMoneyForCompare(v: dynamic): String {
+        if (v == null || v == js("undefined")) return ""
+        if (v is Boolean) return v.toString()
+        val s = v.toString().trim()
+        if (s.isEmpty()) return ""
+
+        // Keep digits and dot only
+        var cleaned = s.replace(Regex("[^0-9.]"), "")
+        if (cleaned.isEmpty()) return ""
+
+        // Collapse multiple dots (keep first dot)
+        val parts = cleaned.split(".")
+        cleaned = if (parts.size <= 1) parts[0] else parts[0] + "." + parts.drop(1).joinToString("")
+        return cleaned
+    }
+
+    val moneyFields = setOf(
+        "price",
+        "auctionFee",
+        "auctionPenaltyFee",
+        "recycleFee",
+        "roadTax",
+        "taxTotal",
+        "totalPrice",
+        "rixoPrice",
+        "shipmentCharges",
+        "freight",
+        "storageCharges",
+        "miscCharges",
+        "inspectionFee",
+        "commission",
+        "repairCharges"
     )
     
     Logger.debug("[COMPARE] Comparing ${fieldsToCompare.size} fields...")
@@ -10528,11 +12080,13 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
         
         // Normalize values for comparison (treat empty string and null as same)
         val origNormalized = when {
+            fieldName in moneyFields -> normalizeMoneyForCompare(originalValue)
             originalValue == null || originalValue == js("undefined") -> ""
             originalValue is Boolean -> originalValue.toString()
             else -> originalValue.toString().trim()
         }
         val currNormalized = when {
+            fieldName in moneyFields -> normalizeMoneyForCompare(currentValue)
             currentValue == null || currentValue == js("undefined") -> ""
             currentValue is Boolean -> currentValue.toString()
             else -> currentValue.toString().trim()
@@ -10714,11 +12268,12 @@ fun handleEditPurchase() {
     val chassis = getComboboxValueSafe("editChassis")
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
-    val grade = (document.getElementById("editGrade") as? HTMLInputElement)?.value ?: ""
+    val grade = (document.getElementById("editGradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
     val fuel = getComboboxValueSafe("editFuel")
     val door = (document.getElementById("editDoor") as? HTMLInputElement)?.value ?: ""
     val shift = getComboboxValueSafe("editShift")
-    val wd = getComboboxValueSafe("editWd")
+    val wdRadio = document.querySelector("input[name=\"editWd\"]:checked") as? HTMLInputElement
+    val wd = wdRadio?.value ?: ""
     val cc = getComboboxValueSafe("editCc")
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
@@ -10753,78 +12308,11 @@ fun handleEditPurchase() {
         return
     }
     
-    // Validate all combobox values to ensure they exist in dropdown lists
-    console.log("🔍 [TEST] Starting combobox validation...")
-    val invalidFields = mutableListOf<String>()
-    
-    // Validate combobox fields (grade and door are now text/number inputs, not comboboxes)
-    val comboboxFields = mapOf(
-        "editChassis" to chassis,
-        "editBrand" to brand,
-        "editCarName" to carName,
-        "editFuel" to fuel,
-        "editShift" to shift,
-        "editWd" to wd,
-        "editCc" to cc,
-        "editAuctionName" to auctionName,
-        "editStockLocation" to stockLocation,
-        "editPol" to pol,
-        "editVenueId" to venueId,
-        "editRixoCompany" to rixoCompany,
-        "editTypeOfVehicle" to vehicleType
-    )
-    
-    console.log("🔍 [TEST] Validating ${comboboxFields.size} combobox fields...")
-    var validatedCount = 0
-    var skippedCount = 0
-    
-    comboboxFields.forEach { (fieldId, value) ->
-        if (value.isNotBlank()) {
-            validatedCount++
-            // Clear any previous invalid markers for this field
-            clearInvalidFieldMarkerDirect(fieldId)
-            
-            // Special handling for chassis fields: extract Part 1 for validation
-            val valueToValidate = if (fieldId == "editChassis" || fieldId == "chassis") {
-                // Extract Part 1 (everything before "-" or full value if no "-")
-                if (value.contains("-")) {
-                    value.substringBefore("-")
-                } else {
-                    value
-                }
-            } else {
-                value
-            }
-            
-            // Validate using direct DOM access
-            val isValid = validateComboboxValueDirect(fieldId, valueToValidate)
-            if (!isValid) {
-                console.warn("⚠️ [TEST] Invalid combobox value for $fieldId: '$value'")
-                invalidFields.add(fieldId)
-            } else {
-                console.log("✅ [TEST] Valid combobox value for $fieldId: '$value'")
-            }
-        } else {
-            skippedCount++
-            console.log("⏭️ [TEST] Skipping validation for empty field: $fieldId")
-        }
-    }
-    
-    console.log("📊 [TEST] Validation summary: $validatedCount validated, $skippedCount skipped (empty)")
-    
-    // If there are invalid fields, mark them and return (don't show modal)
-    if (invalidFields.isNotEmpty()) {
-        console.log("❌ [TEST] VALIDATION FAILED: Found ${invalidFields.size} invalid combobox field(s): $invalidFields")
-        console.log("🛑 [TEST] BLOCKING SUBMISSION - Form will stay on page")
-        invalidFields.forEach { fieldId ->
-            console.log("🔴 [TEST] Marking field as invalid: $fieldId")
-            markFieldAsInvalidDirect(fieldId)
-        }
-        // Show error message
-        showMessage("Please select valid values from the dropdown for all combobox fields.", "error")
-        console.log("🛑 [TEST] Returning early - submission blocked")
-        return // Stay on the same page, form values preserved except invalid fields
-    }
+    // NOTE:
+    // There used to be a brittle "direct DOM dropdown validation" here that blocks saving if a select
+    // element temporarily doesn't contain the current input value (common during async dropdown loading).
+    // This caused the repeated error message you reported. We skip this DOM-level blocking validation and
+    // rely on the existing master-menu validation + backend checks instead.
     
     // Validate chassis Part 1 is from dropdown (two-part chassis logic)
     if (chassis.isNotBlank() && !validateChassisPart1(chassis, isEditForm = true)) {
@@ -10874,7 +12362,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     
     // Extract field values for master list validation first
     val valBrand = getComboboxValueSafe("editBrand")
-    val valGrade = (document.getElementById("editGrade") as? HTMLInputElement)?.value ?: ""
+    val valGrade = (document.getElementById("editGradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
     val valFuel = getComboboxValueSafe("editFuel")
     val valShift = getComboboxValueSafe("editShift")
     val valSupplierName = getComboboxValueSafe("editAuctionName")
@@ -10883,9 +12371,9 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     val valRixoCompany = getComboboxValueSafe("editRixoCompany")
     val valStockLocation = getComboboxValueSafe("editStockLocation")
     val valPol = getComboboxValueSafe("editPol")
-    val valClientName = (document.getElementById("editClientName") as? HTMLInputElement)?.value ?: ""
-    val valTargetCountry = (document.getElementById("editCountry") as? HTMLInputElement)?.value ?: ""
-    val valRepairCompany = (document.getElementById("editRepairCompany") as? HTMLInputElement)?.value ?: ""
+    val valClientName = getComboboxValueSafe("editClientName")
+    val valTargetCountry = getComboboxValueSafe("editCountry")
+    val valRepairCompany = getComboboxValueSafe("editRepairCompany")
     
     // Validate against master list before proceeding (including POL for Edit mode)
     validatePurchaseMasterFields(
@@ -10929,7 +12417,7 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
     val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
-    val grade = (document.getElementById("editGrade") as? HTMLInputElement)?.value ?: ""
+    val grade = (document.getElementById("editGradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
     val rank = (document.getElementById("editRank") as? HTMLInputElement)?.value ?: ""
     val color = (document.getElementById("editColor") as? HTMLInputElement)?.value ?: ""
     val fuel = getComboboxValueSafe("editFuel")
@@ -10947,38 +12435,38 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
         numValue.toIntOrNull()  // Send as Integer, not string with "CC"
     } else null
     val shift = getComboboxValueSafe("editShift")
-    val wdValue = (document.getElementById("editWd") as? HTMLInputElement)?.value ?: ""
-    val wd = if (wdValue.isNotEmpty()) {
-        val numValue = wdValue.replace(Regex("[^0-9]"), "")
-        if (numValue.isNotEmpty()) "${numValue}WD" else ""
-    } else ""
+    val wdChecked = document.querySelector("input[name=\"editWd\"]:checked") as? HTMLInputElement
+    val wd = wdChecked?.value ?: ""
     val auctionNo = (document.getElementById("editAuctionNo") as? HTMLInputElement)?.value ?: ""
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
     val pol = getComboboxValueSafe("editPol")
     val rixoCompany = getComboboxValueSafe("editRixoCompany")
-    val clientName = (document.getElementById("editClientName") as? HTMLInputElement)?.value ?: ""
-    val country = (document.getElementById("editCountry") as? HTMLInputElement)?.value ?: ""
+    val clientName = getComboboxValueSafe("editClientName")
+    val country = getComboboxValueSafe("editCountry")
     val venueId = getComboboxValueSafe("editVenueId")
     val shipmentSize = getComboboxValueSafe("editShipmentSize")
-    val priceValue = (document.getElementById("editPrice") as? HTMLInputElement)?.value ?: ""
-    val price = if (priceValue.isNotEmpty()) "¥$priceValue" else ""
-    val auctionFeeValue = (document.getElementById("editAuctionFee") as? HTMLInputElement)?.value ?: ""
-    val auctionFee = if (auctionFeeValue.isNotEmpty()) "¥$auctionFeeValue" else ""
-    val recycleFeeValue = (document.getElementById("editRecycleFee") as? HTMLInputElement)?.value ?: ""
-    val recycleFee = if (recycleFeeValue.isNotEmpty()) "¥$recycleFeeValue" else ""
-    val roadTaxValue = (document.getElementById("editRoadTax") as? HTMLInputElement)?.value ?: ""
-    val roadTax = if (roadTaxValue.isNotEmpty()) "¥$roadTaxValue" else ""
-    val taxTotalValue = (document.getElementById("editTaxTotal") as? HTMLInputElement)?.value ?: ""
-    val taxTotal = if (taxTotalValue.isNotEmpty()) "¥$taxTotalValue" else ""
+    // Money fields: display may contain commas; save comma-less using getMoneyRawValue.
+    val priceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editPrice') : ''").unsafeCast<String>().trim()
+    val price = if (priceRaw.isNotBlank()) "¥$priceRaw" else ""
+    val auctionFeeRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editAuctionFee') : ''").unsafeCast<String>().trim()
+    val auctionFee = if (auctionFeeRaw.isNotBlank()) "¥$auctionFeeRaw" else ""
+    val auctionPenaltyFeeRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editAuctionPenaltyFee') : ''").unsafeCast<String>().trim()
+    val auctionPenaltyFee = if (auctionPenaltyFeeRaw.isNotBlank()) "¥$auctionPenaltyFeeRaw" else ""
+    val recycleFeeRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRecycleFee') : ''").unsafeCast<String>().trim()
+    val recycleFee = if (recycleFeeRaw.isNotBlank()) "¥$recycleFeeRaw" else ""
+    val roadTaxRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRoadTax') : ''").unsafeCast<String>().trim()
+    val roadTax = if (roadTaxRaw.isNotBlank()) "¥$roadTaxRaw" else ""
+    val taxTotalRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editTaxTotal') : ''").unsafeCast<String>().trim()
+    val taxTotal = if (taxTotalRaw.isNotBlank()) "¥$taxTotalRaw" else ""
     val totalPrice = (document.getElementById("editTotalCostAfterTax") as? HTMLInputElement)?.value ?: ""
     val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
     val shippingConfirmed = (document.querySelector("input[name=\"editShippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
     // Parse rixo price - add ¥ symbol before saving
-    val rixoPriceRaw = (document.getElementById("editRixoPriceInput") as? HTMLInputElement)?.value ?: ""
-    val rixoPrice = if (rixoPriceRaw.isNotEmpty()) "¥$rixoPriceRaw" else ""
+    val rixoPriceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRixoPriceInput') : ''").unsafeCast<String>().trim()
+    val rixoPrice = if (rixoPriceRaw.isNotBlank()) "¥$rixoPriceRaw" else ""
     val numberCutString = (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value ?: ""
     val shipmentDate = formatWithWeekday((document.getElementById("editShipmentDate") as? HTMLInputElement)?.value ?: "")
     val blNo = (document.getElementById("editBlNo") as? HTMLInputElement)?.value ?: ""
@@ -10988,21 +12476,21 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     // If field is empty, set to null to allow clearing the value
     // If field has value, convert to Long
     val bookingId = if (bookingIdStr.isNotEmpty()) bookingIdStr.toLongOrNull() else null
-    val shipmentChargesValue = (document.getElementById("editShipmentCharges") as? HTMLInputElement)?.value ?: ""
-    val shipmentCharges = if (shipmentChargesValue.isNotEmpty()) "¥$shipmentChargesValue" else ""
-    val freightValue = (document.getElementById("editFreight") as? HTMLInputElement)?.value ?: ""
-    val freight = if (freightValue.isNotEmpty()) "¥$freightValue" else ""
-    val storageChargesValue = (document.getElementById("editStorageCharges") as? HTMLInputElement)?.value ?: ""
-    val storageCharges = if (storageChargesValue.isNotEmpty()) "¥$storageChargesValue" else ""
-    val miscChargesValue = (document.getElementById("editMiscCharges") as? HTMLInputElement)?.value ?: ""
-    val miscCharges = if (miscChargesValue.isNotEmpty()) "¥$miscChargesValue" else ""
-    val inspectionFeeValue = (document.getElementById("editInspectionFee") as? HTMLInputElement)?.value ?: ""
-    val inspectionFee = if (inspectionFeeValue.isNotEmpty()) "¥$inspectionFeeValue" else ""
-    val commissionValue = (document.getElementById("editCommission") as? HTMLInputElement)?.value ?: ""
-    val commission = if (commissionValue.isNotEmpty()) "¥$commissionValue" else ""
-    val repairCompany = (document.getElementById("editRepairCompany") as? HTMLInputElement)?.value ?: ""
-    val repairChargesValue = (document.getElementById("editRepairCharges") as? HTMLInputElement)?.value ?: ""
-    val repairCharges = if (repairChargesValue.isNotEmpty()) "¥$repairChargesValue" else ""
+    val shipmentChargesRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editShipmentCharges') : ''").unsafeCast<String>().trim()
+    val shipmentCharges = if (shipmentChargesRaw.isNotBlank()) "¥$shipmentChargesRaw" else ""
+    val freightRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editFreight') : ''").unsafeCast<String>().trim()
+    val freight = if (freightRaw.isNotBlank()) "¥$freightRaw" else ""
+    val storageChargesRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editStorageCharges') : ''").unsafeCast<String>().trim()
+    val storageCharges = if (storageChargesRaw.isNotBlank()) "¥$storageChargesRaw" else ""
+    val miscChargesRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editMiscCharges') : ''").unsafeCast<String>().trim()
+    val miscCharges = if (miscChargesRaw.isNotBlank()) "¥$miscChargesRaw" else ""
+    val inspectionFeeRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editInspectionFee') : ''").unsafeCast<String>().trim()
+    val inspectionFee = if (inspectionFeeRaw.isNotBlank()) "¥$inspectionFeeRaw" else ""
+    val commissionRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editCommission') : ''").unsafeCast<String>().trim()
+    val commission = if (commissionRaw.isNotBlank()) "¥$commissionRaw" else ""
+    val repairCompany = getComboboxValueSafe("editRepairCompany")
+    val repairChargesRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRepairCharges') : ''").unsafeCast<String>().trim()
+    val repairCharges = if (repairChargesRaw.isNotBlank()) "¥$repairChargesRaw" else ""
     val notes = (document.getElementById("editNotes") as? HTMLTextAreaElement)?.value ?: ""
     val shaken = (document.getElementById("editShakenCheckbox") as? HTMLInputElement)?.checked ?: false
     
@@ -11039,6 +12527,7 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.venueId = venueId
     purchaseData.price = price
     purchaseData.auctionFee = auctionFee
+    purchaseData.auctionPenaltyFee = auctionPenaltyFee
     purchaseData.recycleFee = recycleFee
     purchaseData.roadTax = roadTax
     purchaseData.taxTotal = taxTotal
@@ -12350,15 +13839,19 @@ fun setupSortableHeaders() {
                 for (j in 0 until allMenus.length) {
                     val menuItem = allMenus.item(j) as? HTMLElement
                     if (menuItem != null && menuItem != menu) {
-                        menuItem.style.display = "none"
+                        menuItem.style.setProperty("display", "none", "important")
+                        menuItem.style.setProperty("pointer-events", "none")
                     }
                 }
                 
                 // Toggle current menu
                 if (menu.style.display == "none" || menu.style.display.isEmpty()) {
-                    menu.style.display = "block"
+                    menu.style.setProperty("display", "block", "important")
+                    menu.style.zIndex = "20000"
+                    menu.style.setProperty("pointer-events", "auto")
                 } else {
-                    menu.style.display = "none"
+                    menu.style.setProperty("display", "none", "important")
+                    menu.style.setProperty("pointer-events", "none")
                 }
             }
         })
@@ -12382,7 +13875,7 @@ fun setupSortableHeaders() {
             for (j in 0 until allMenus.length) {
                 val menuItem = allMenus.item(j) as? HTMLElement
                 if (menuItem != null) {
-                    menuItem.style.display = "none"
+                    menuItem.style.setProperty("display", "none", "important")
                 }
             }
             
@@ -12400,7 +13893,8 @@ fun setupSortableHeaders() {
             for (i in 0 until allMenus.length) {
                 val menu = allMenus.item(i) as? HTMLElement
                 if (menu != null) {
-                    menu.style.display = "none"
+                    menu.style.setProperty("display", "none", "important")
+                    menu.style.setProperty("pointer-events", "none")
                 }
             }
         }
@@ -12427,7 +13921,8 @@ fun setupDateFilter() {
                 for (j in 0 until allMenus.length) {
                     val menuItem = allMenus.item(j) as? HTMLElement
                     if (menuItem != null && menuItem != menu) {
-                        menuItem.style.display = "none"
+                        menuItem.style.setProperty("display", "none", "important")
+                        menuItem.style.setProperty("pointer-events", "none")
                     }
                 }
                 
@@ -12435,10 +13930,13 @@ fun setupDateFilter() {
                 val currentDisplay = menu.style.display
                 console.log("Current menu display: '$currentDisplay'")
                 if (currentDisplay == "none" || currentDisplay.isEmpty()) {
-                    menu.style.display = "block"
+                    menu.style.setProperty("display", "block", "important")
+                    menu.style.zIndex = "20000"
+                    menu.style.setProperty("pointer-events", "auto")
                     console.log("Menu set to block")
                 } else {
-                    menu.style.display = "none"
+                    menu.style.setProperty("display", "none", "important")
+                    menu.style.setProperty("pointer-events", "none")
                     console.log("Menu set to none")
                 }
             }
@@ -12471,7 +13969,8 @@ fun setupDateFilter() {
             val allMenus = document.querySelectorAll(".date-filter-menu")
             for (j in 0 until allMenus.length) {
                 val menuItem = allMenus.item(j) as? HTMLElement
-                menuItem?.style?.setProperty("display", "none")
+                menuItem?.style?.setProperty("display", "none", "important")
+                menuItem?.style?.setProperty("pointer-events", "none")
             }
         })
         
@@ -12554,7 +14053,8 @@ fun applyDateFilter(selectedDate: String) {
                 val allMenus = document.querySelectorAll(".date-filter-menu")
                 for (j in 0 until allMenus.length) {
                     val menuItem = allMenus.item(j) as? HTMLElement
-                    menuItem?.style?.setProperty("display", "none")
+                    menuItem?.style?.setProperty("display", "none", "important")
+                    menuItem?.style?.setProperty("pointer-events", "none")
                 }
                 
                 showMessage("Showing purchases for $formattedDate", "success")
@@ -12575,7 +14075,8 @@ fun clearDateFilter() {
     val allMenus = document.querySelectorAll(".date-filter-menu")
     for (j in 0 until allMenus.length) {
         val menuItem = allMenus.item(j) as? HTMLElement
-        menuItem?.style?.setProperty("display", "none")
+        menuItem?.style?.setProperty("display", "none", "important")
+        menuItem?.style?.setProperty("pointer-events", "none")
     }
     
     // Reload all purchases
@@ -17557,7 +19058,7 @@ fun saveCarCostDetailsAndNavigate() {
 
 // ========== Car Brands Master List Functions ==========
 
-// Car brand functions moved to MasterList.kt: showAddCarBrandModal, showCarBrandModal, closeCarBrandModal, loadCarBrandDataForEdit, saveCarBrand, editMasterCarBrand, deleteMasterCarBrand
+// Car brand functions moved to MasterList.kt: showAddCarBrandModal, showCarBrandModal, closeCarBrandModal, loadCarBrandDataForEdit, saveCarBrand, editMasterCarBrand, duplicateMasterCarBrand, deleteMasterCarBrand
 
 // Consignee helper functions moved to MasterList.kt: closeConsigneeModal, editMasterConsignee, deleteMasterConsignee
 // All showAdd*Modal functions moved to MasterList.kt:

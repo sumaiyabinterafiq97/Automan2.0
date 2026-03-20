@@ -1,0 +1,15 @@
+# Production overrides: keep existing data safe when deploying new code.
+# Activate with: SPRING_PROFILES_ACTIVE=docker,prod (e.g. in .env.prod on EC2).
+#
+# - ddl-auto: validate = Hibernate will NOT alter the database (no new columns,
+#   no drops). If your new code expects schema changes, run migrations manually
+#   first. This prevents accidental data loss from entity changes.
+# - sql.init.mode: never = Spring will NOT run schema.sql/data.sql on startup.
+#   We do not use these files, but setting "never" avoids any future mistake.
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  sql:
+    init:
+      mode: never

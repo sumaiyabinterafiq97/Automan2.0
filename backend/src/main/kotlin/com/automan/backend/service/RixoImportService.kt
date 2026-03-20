@@ -2,6 +2,7 @@ package com.automan.backend.service
 
 import com.automan.backend.model.RixoPrice
 import com.automan.backend.repository.RixoPriceRepository
+import com.automan.backend.util.Logger
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.web.multipart.MultipartFile
@@ -36,13 +37,15 @@ class RixoImportService(
                 try {
                     val values = parseCsvLine(line)
                     if (values.size >= 6) {
+                        val stockLoc = values[2].trim()
                         val rixoPrice = RixoPrice(
                             auctionHouse = values[0].trim(),
                             shipmentSize = values[1].trim().takeIf { it.isNotEmpty() },
-                            stockLocation = values[2].trim(),
+                            stockLocation = stockLoc,
                             rixoCompany = values[3].trim(),
                             venueId = values[4].trim().takeIf { it.isNotEmpty() },
-                            rixoPrice = values[5].trim().takeIf { it.isNotEmpty() }
+                            rixoPrice = values[5].trim().takeIf { it.isNotEmpty() },
+                            pol = if (values.size >= 7) values[6].trim().takeIf { it.isNotEmpty() } else polFromStockLocation(stockLoc)
                         )
                         
                         rixoPriceRepository.save(rixoPrice)
@@ -135,13 +138,18 @@ class RixoImportService(
     
     // New CRUD methods for inline mapping management
     fun saveRixoPrice(rixoPrice: RixoPrice): RixoPrice {
-        // Set auction_house = auction_name (both columns need to be set)
-        // Use native query to set auction_house since it's marked as insertable=false in the model
         val saved = rixoPriceRepository.save(rixoPrice)
-        // Update auction_house to match auction_name using native query
         if (saved.id > 0) {
-            rixoPriceRepository.updateAuctionHouse(saved.id, saved.auctionHouse)
-            return rixoPriceRepository.findById(saved.id).orElse(saved)
+            try {
+                // Try to update auction_house to match auction_name using native query.
+                // On older schemas (e.g., some AWS environments) where auction_house might not exist,
+                // this native update can fail with "Unknown column" – in that case we just log and continue.
+                rixoPriceRepository.updateAuctionHouse(saved.id, saved.auctionHouse)
+                return rixoPriceRepository.findById(saved.id).orElse(saved)
+            } catch (e: Exception) {
+                Logger.warn("RIXO saveRixoPrice: failed to update auction_house column for id=${saved.id}: ${e.message}")
+                return saved
+            }
         }
         return saved
     }
@@ -150,6 +158,7 @@ class RixoImportService(
      * Saves a rixo mapping. Tries INSERT with auction_house first (for schemas that have it);
      * on failure (e.g. AWS with older schema without auction_house), retries in a new transaction
      * without auction_house so the outer flow is not marked rollback-only.
+     * POL is derived from stock_location when not provided.
      */
     fun saveRixoPriceWithAuctionHouse(
         auctionHouse: String,
@@ -157,17 +166,18 @@ class RixoImportService(
         stockLocation: String,
         rixoCompany: String,
         rixoPrice: String?,
-        venueId: String?
+        venueId: String?,
+        pol: String? = null
     ): RixoPrice {
         val id = try {
             rixoMappingInsertService.insertWithAuctionHouse(
-                auctionHouse, shipmentSize, stockLocation, rixoCompany, rixoPrice, venueId
+                auctionHouse, shipmentSize, stockLocation, rixoCompany, rixoPrice, venueId, pol
             )
         } catch (e: Exception) {
             // First insert failed (e.g. Unknown column 'auction_house', or schema differs on AWS).
             // Retry without auction_house in a new transaction so we don't mark any transaction rollback-only.
             rixoMappingInsertService.insertWithoutAuctionHouse(
-                auctionHouse, shipmentSize, stockLocation, rixoCompany, rixoPrice, venueId
+                auctionHouse, shipmentSize, stockLocation, rixoCompany, rixoPrice, venueId, pol
             )
         }
         return rixoPriceRepository.findById(id).orElseThrow {
@@ -181,6 +191,22 @@ class RixoImportService(
     
     fun deleteRixoPrice(id: Long) {
         rixoPriceRepository.deleteById(id)
+    }
+
+    /** POL from stock_location mapping (same as RixoMappingInsertService). */
+    private fun polFromStockLocation(stockLocation: String): String? {
+        val s = stockLocation.trim()
+        return when {
+            s.startsWith("GLOBAL KAWASAKI", ignoreCase = true) -> "YOKOHAMA"
+            s.equals("AQUA LOGISTICS", ignoreCase = true) -> "YOKOHAMA"
+            s.startsWith("GLOBAL NAGOYA", ignoreCase = true) -> "NAGOYA"
+            s.equals("FLASHRISE", ignoreCase = true) -> "NAGOYA"
+            s.equals("KLC", ignoreCase = true) -> "OSAKA"
+            s.startsWith("GLOBAL HAKATA", ignoreCase = true) -> "HAKATA"
+            s.equals("BARAKI PARKING", ignoreCase = true) -> "---"
+            s.equals("LOCAL", ignoreCase = true) -> "---"
+            else -> null
+        }
     }
 }
 

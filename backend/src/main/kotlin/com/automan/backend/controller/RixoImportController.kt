@@ -78,7 +78,8 @@ class RixoImportController(
                     "stockLocation" to price.stockLocation,
                     "rixoCompany" to price.rixoCompany,
                     "venueId" to price.venueId,
-                    "rixoPrice" to price.rixoPrice
+                    "rixoPrice" to price.rixoPrice,
+                    "pol" to price.pol
                 )
             }
             
@@ -198,25 +199,12 @@ class RixoImportController(
             val rixoCompany = (request["rixoCompany"] as? String)?.trim()
             val rixoPrice = (request["rixoPrice"] as? String)?.trim()
             val venueId = (request["venueId"] as? String)?.trim()
+            val pol = (request["pol"] as? String)?.trim()
             
             if (auctionHouse.isNullOrBlank()) {
                 return ResponseEntity.badRequest().body(mapOf(
                     "success" to false,
                     "message" to "auctionHouse is required"
-                ))
-            }
-            
-            // Validate: at least one of the 5 fields must be filled
-            val hasVehicleType = !vehicleType.isNullOrBlank()
-            val hasStockLocation = !stockLocation.isNullOrBlank()
-            val hasRixoCompany = !rixoCompany.isNullOrBlank()
-            val hasRixoPrice = !rixoPrice.isNullOrBlank()
-            val hasVenueId = !venueId.isNullOrBlank()
-            
-            if (!hasVehicleType && !hasStockLocation && !hasRixoCompany && !hasRixoPrice && !hasVenueId) {
-                return ResponseEntity.badRequest().body(mapOf(
-                    "success" to false,
-                    "message" to "At least one field (Vehicle Type, Stock Location, Rixo Company, Price, or Venue ID) must be filled"
                 ))
             }
             
@@ -232,7 +220,8 @@ class RixoImportController(
                 stockLocation = finalStockLocation,
                 rixoCompany = finalRixoCompany,
                 rixoPrice = rixoPrice?.takeIf { it.isNotBlank() },
-                venueId = venueId?.takeIf { it.isNotBlank() }
+                venueId = venueId?.takeIf { it.isNotBlank() },
+                pol = pol?.takeIf { it.isNotBlank() }
             )
             
             ResponseEntity.ok(mapOf(
@@ -272,6 +261,7 @@ class RixoImportController(
                 rixoCompany = request["rixoCompany"] as? String ?: existingMapping.rixoCompany,
                 rixoPrice = request["rixoPrice"] as? String ?: existingMapping.rixoPrice,
                 venueId = request["venueId"] as? String ?: existingMapping.venueId,
+                pol = request["pol"] as? String ?: existingMapping.pol,
                 createdAt = createdAtValue // Preserve createdAt (never null)
             )
             

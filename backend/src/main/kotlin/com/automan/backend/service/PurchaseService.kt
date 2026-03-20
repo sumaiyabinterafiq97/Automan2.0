@@ -111,6 +111,7 @@ class PurchaseService(
                 country = purchase.country ?: existingPurchase.country,
                 price = purchase.price ?: existingPurchase.price,
                 auctionFee = purchase.auctionFee ?: existingPurchase.auctionFee,
+                auctionPenaltyFee = purchase.auctionPenaltyFee ?: existingPurchase.auctionPenaltyFee,
                 recycleFee = purchase.recycleFee ?: existingPurchase.recycleFee,
                 roadTax = purchase.roadTax ?: existingPurchase.roadTax,
                 taxTotal = purchase.taxTotal ?: existingPurchase.taxTotal,
@@ -246,6 +247,7 @@ class PurchaseService(
                 country = updateData["country"] as? String ?: existingPurchase.country,
                 price = updateData["price"] as? String ?: existingPurchase.price,
                 auctionFee = updateData["auctionFee"] as? String ?: existingPurchase.auctionFee,
+                auctionPenaltyFee = updateData["auctionPenaltyFee"] as? String ?: existingPurchase.auctionPenaltyFee,
                 recycleFee = updateData["recycleFee"] as? String ?: existingPurchase.recycleFee,
                 roadTax = updateData["roadTax"] as? String ?: existingPurchase.roadTax,
                 taxTotal = updateData["taxTotal"] as? String ?: existingPurchase.taxTotal,
@@ -538,11 +540,15 @@ class PurchaseService(
         val allPurchases = getAllPurchases()
         return when (field) {
             "date" -> if (order == "asc") allPurchases.sortedBy { it.date } else allPurchases.sortedByDescending { it.date }
+            "chassis" -> if (order == "asc") allPurchases.sortedBy { it.chassis } else allPurchases.sortedByDescending { it.chassis }
             "carName" -> if (order == "asc") allPurchases.sortedBy { it.carName } else allPurchases.sortedByDescending { it.carName }
             "auctionHouse" -> if (order == "asc") allPurchases.sortedBy { it.auctionHouse } else allPurchases.sortedByDescending { it.auctionHouse }
             "stockLocation" -> if (order == "asc") allPurchases.sortedBy { it.stockLocation } else allPurchases.sortedByDescending { it.stockLocation }
             "rixoCompany" -> if (order == "asc") allPurchases.sortedBy { it.rixoCompany } else allPurchases.sortedByDescending { it.rixoCompany }
             "clientName" -> if (order == "asc") allPurchases.sortedBy { it.clientName } else allPurchases.sortedByDescending { it.clientName }
+            "country" -> if (order == "asc") allPurchases.sortedBy { it.country } else allPurchases.sortedByDescending { it.country }
+            "brand" -> if (order == "asc") allPurchases.sortedBy { it.brand } else allPurchases.sortedByDescending { it.brand }
+            "repairCompany" -> if (order == "asc") allPurchases.sortedBy { it.repairCompany } else allPurchases.sortedByDescending { it.repairCompany }
             else -> allPurchases
         }
     }
@@ -666,8 +672,23 @@ class PurchaseService(
                 
                 for (purchase in purchases) {
                     try {
-                        // Try to save the purchase directly - let the database handle unique constraint violations
-                        val savedPurchase = purchaseRepository.save(purchase)
+                        // Upsert behavior:
+                        // If this chassis already exists, update only the key fields that are often missing in imports:
+                        // - date (from "Purchase Date")
+                        // - auctionHouse (from "Supplier Name" / "AUCTION HOUSE")
+                        // - country (from "Target Country")
+                        // This prevents "re-import" from leaving those columns blank.
+                        val existing = purchaseRepository.findByChassis(purchase.chassis).firstOrNull()
+                        val savedPurchase = if (existing != null) {
+                            val updated = existing.copy(
+                                date = if (!purchase.date.isNullOrBlank()) purchase.date else existing.date,
+                                auctionHouse = if (!purchase.auctionHouse.isNullOrBlank()) purchase.auctionHouse else existing.auctionHouse,
+                                country = if (!purchase.country.isNullOrBlank()) purchase.country else existing.country
+                            )
+                            purchaseRepository.save(updated)
+                        } else {
+                            purchaseRepository.save(purchase)
+                        }
                         savedPurchases.add(savedPurchase)
                         Logger.debug("✅ Saved: ${purchase.carName} (Chassis: ${purchase.chassis})")
                     } catch (e: Exception) {
@@ -761,9 +782,15 @@ class PurchaseService(
             
             // Look for common header patterns with more variations
             val hasChassis = headers.contains("CHASSIS") || headers.contains("CHASIS")
-            val hasDate = headers.contains("DATE")
+            val hasDate = headers.contains("DATE") ||
+                headers.contains("PURCHASE DATE") ||
+                headers.contains("PURCHASE_DATE") ||
+                headers.contains("PURCHASEDATE")
             val hasCarName = headers.contains("CAR NAME") || headers.contains("CARNAME")
-            val hasAuction = headers.contains("AUCTION HOUSE") || headers.contains("AUCTION NAME") || headers.contains("AUCTION")
+            val hasAuction = headers.contains("AUCTION HOUSE") ||
+                headers.contains("AUCTION NAME") ||
+                headers.contains("AUCTION") ||
+                headers.contains("SUPPLIER NAME")
             
             // Check if this looks like a header row
             if (hasChassis || hasDate || (hasCarName && hasAuction)) {
@@ -796,11 +823,16 @@ class PurchaseService(
                 when (cleanHeader) {
                     "CHASIS" -> mapping["CHASSIS"] = index
                     "AUCTION NAME" -> mapping["AUCTION HOUSE"] = index
+                    "SUPPLIER NAME" -> mapping["AUCTION HOUSE"] = index
                     "RXO CONFIRMED" -> mapping["RIXO CONFIRMED"] = index
                     "RIXO CHARGES" -> mapping["RIXO PRICE"] = index
                     "B/L NO" -> mapping["B/L NO."] = index
                     "VESSEL NO" -> mapping["VESSEL NO."] = index
                     "AUCTION NO" -> mapping["AUCTION NO."] = index
+                    "TARGET COUNTRY" -> mapping["COUNTRY"] = index
+                    "TARGET_COUNTRY" -> mapping["COUNTRY"] = index
+                    "PURCHASE DATE" -> mapping["DATE"] = index
+                    "PURCHASE_DATE" -> mapping["DATE"] = index
                 }
             }
         }
@@ -842,7 +874,14 @@ class PurchaseService(
         
         return Purchase(
             id = null,
-            date = getColumnValue(values, columnMapping, "DATE")?.let { convertJapaneseDateToEnglish(it) }?.take(255) ?: "",
+            date = getColumnValue(
+                values,
+                columnMapping,
+                "DATE",
+                "PURCHASE DATE",
+                "PURCHASE_DATE",
+                "PURCHASEDATE"
+            )?.let { convertJapaneseDateToEnglish(it) }?.take(255) ?: "",
             chassis = chassis.take(255),
             carModelYear = getColumnValue(values, columnMapping, "YEAR")?.take(50) ?: "",
             brand = getColumnValue(values, columnMapping, "BRAND")?.take(20) ?: "",
@@ -856,14 +895,25 @@ class PurchaseService(
             distance = getColumnValue(values, columnMapping, "DISTANCE")?.take(20) ?: "",
             options = getColumnValue(values, columnMapping, "OPTIONS")?.take(20) ?: "",
             auctionNo = getColumnValue(values, columnMapping, "AUCTION NO", "AUCTION NO.", "AUCTION")?.take(10) ?: "",
-            auctionHouse = getColumnValue(values, columnMapping, "AUCTION HOUSE", "AUCTION NAME", "AUCTION")?.take(255) ?: "",
+            // Your UI calls this column "Supplier Name", but the DB column is `auction_house`.
+            auctionHouse = getColumnValue(
+                values,
+                columnMapping,
+                "AUCTION HOUSE",
+                "AUCTION NAME",
+                "AUCTION",
+                "SUPPLIER NAME",
+                "SUPPLIER"
+            )?.take(255) ?: "",
             stockLocation = getColumnValue(values, columnMapping, "STOCK LOCATION")?.take(255) ?: "",
             pol = getColumnValue(values, columnMapping, "POL")?.take(255) ?: null,
             rixoCompany = getColumnValue(values, columnMapping, "RIXO COMPANY")?.take(255) ?: "",
             clientName = getColumnValue(values, columnMapping, "CLIENT NAME")?.take(255) ?: "",
-            country = getColumnValue(values, columnMapping, "COUNTRY")?.take(50) ?: "",
+            // Your UI calls this column "Target Country", but the DB column is `country`.
+            country = getColumnValue(values, columnMapping, "COUNTRY", "TARGET COUNTRY", "TARGET_COUNTRY")?.take(50) ?: "",
             price = getColumnValue(values, columnMapping, "PRICE")?.take(50) ?: "",
             auctionFee = getColumnValue(values, columnMapping, "AUCTION FEE")?.take(10) ?: "",
+            auctionPenaltyFee = getColumnValue(values, columnMapping, "AUCTION PENALTY FEE")?.take(10) ?: null,
             recycleFee = getColumnValue(values, columnMapping, "RECYCLE FEE")?.take(10) ?: "",
             roadTax = getColumnValue(values, columnMapping, "ROAD TAX")?.take(10) ?: "",
             totalPrice = getColumnValue(values, columnMapping, "TOTAL PRICE")?.take(10) ?: "",

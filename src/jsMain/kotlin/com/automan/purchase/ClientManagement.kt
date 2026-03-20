@@ -58,7 +58,6 @@ fun showClientAccountsPage() {
                 <div class="client-page-header">
                     <h2>$pageTitle</h2>
                     <div class="client-action-buttons">
-                        <button id="backToClientPageBtn" class="client-btn client-btn-secondary">Back to Client Page</button>
                         <button id="addClientBtn" class="client-btn client-btn-primary">Add New Client</button>
                         <button id="clientAlertsBtn" class="client-btn client-btn-warning">View Alerts</button>
                         <button id="exportClientsBtn" class="client-btn client-btn-info">Export Data</button>
@@ -92,10 +91,6 @@ fun showClientAccountsPage() {
     """
     
     // Add event listeners
-    document.getElementById("backToClientPageBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/client"
-    })
-    
     document.getElementById("addClientBtn")?.addEventListener("click", { _: Event ->
         showAddClientForm()
     })
