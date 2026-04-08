@@ -13,6 +13,30 @@ class PurchaseService(
     private val purchaseRepository: PurchaseRepository,
     private val pdfService: PdfService
 ) {
+    /** POL from stock_location mapping (same mapping used in Rixo import). */
+    private fun polFromStockLocation(stockLocation: String?): String? {
+        val s = stockLocation?.trim() ?: return null
+        return when {
+            s.startsWith("GLOBAL KAWASAKI", ignoreCase = true) -> "YOKOHAMA"
+            s.equals("AQUA LOGISTICS", ignoreCase = true) -> "YOKOHAMA"
+            s.startsWith("GLOBAL NAGOYA", ignoreCase = true) -> "NAGOYA"
+            s.equals("FLASHRISE", ignoreCase = true) -> "NAGOYA"
+            s.equals("KLC", ignoreCase = true) -> "OSAKA"
+            s.startsWith("GLOBAL HAKATA", ignoreCase = true) -> "HAKATA"
+            s.equals("BARAKI PARKING", ignoreCase = true) -> "---"
+            s.equals("LOCAL", ignoreCase = true) -> "---"
+            else -> null
+        }
+    }
+
+    private fun effectivePol(pol: String?, stockLocation: String?): String? {
+        val rawPol = pol?.trim().orEmpty()
+        if (rawPol.isNotBlank()) return rawPol
+        val derived = polFromStockLocation(stockLocation)
+        val d = derived?.trim().orEmpty()
+        if (d.isBlank() || d == "---") return null
+        return d
+    }
     
     /**
      * Validates Production Date (carModelYear): 4-digit year only, no range check.
@@ -123,7 +147,6 @@ class PurchaseService(
                 shipmentDate = purchase.shipmentDate ?: existingPurchase.shipmentDate,
                 blNo = purchase.blNo ?: existingPurchase.blNo,
                 vesselNo = purchase.vesselNo ?: existingPurchase.vesselNo,
-                destination = purchase.destination ?: existingPurchase.destination,
                 shipmentCharges = purchase.shipmentCharges ?: existingPurchase.shipmentCharges,
                 freight = purchase.freight ?: existingPurchase.freight,
                 storageCharges = purchase.storageCharges ?: existingPurchase.storageCharges,
@@ -149,6 +172,7 @@ class PurchaseService(
                 },
                 repairCompany = purchase.repairCompany ?: existingPurchase.repairCompany,
                 repairCharges = purchase.repairCharges ?: existingPurchase.repairCharges,
+                totalFobPrice = purchase.totalFobPrice ?: existingPurchase.totalFobPrice,
                 updatedAt = java.time.LocalDateTime.now()
             )
             
@@ -259,7 +283,6 @@ class PurchaseService(
                 shipmentDate = updateData["shipmentDate"] as? String ?: existingPurchase.shipmentDate,
                 blNo = updateData["blNo"] as? String ?: existingPurchase.blNo,
                 vesselNo = updateData["vesselNo"] as? String ?: existingPurchase.vesselNo,
-                destination = updateData["destination"] as? String ?: existingPurchase.destination,
                 shipmentCharges = updateData["shipmentCharges"] as? String ?: existingPurchase.shipmentCharges,
                 freight = updateData["freight"] as? String ?: existingPurchase.freight,
                 storageCharges = updateData["storageCharges"] as? String ?: existingPurchase.storageCharges,
@@ -445,6 +468,15 @@ class PurchaseService(
                     }
                     Logger.debug("FINAL totalCnfPrice value to save: $result")
                     result
+                },
+                totalFobPrice = run {
+                    val v = updateData["totalFobPrice"]
+                    when {
+                        v == null -> existingPurchase.totalFobPrice
+                        v is Number -> java.math.BigDecimal(v.toDouble())
+                        v is String -> v.toDoubleOrNull()?.let { java.math.BigDecimal(it) } ?: existingPurchase.totalFobPrice
+                        else -> existingPurchase.totalFobPrice
+                    }
                 },
                 updatedAt = java.time.LocalDateTime.now()
             )
@@ -924,7 +956,6 @@ class PurchaseService(
             shipmentDate = getColumnValue(values, columnMapping, "SHIPMENT DATE")?.take(10) ?: "",
             blNo = getColumnValue(values, columnMapping, "B/L NO", "B/L NO.", "BL NO")?.take(10) ?: "",
             vesselNo = getColumnValue(values, columnMapping, "VESSEL NO", "VESSEL NO.", "VESSEL")?.take(10) ?: "",
-            destination = getColumnValue(values, columnMapping, "DESTINATION")?.take(10) ?: "",
             shipmentCharges = getColumnValue(values, columnMapping, "SHIPMENT CHARGES")?.take(10) ?: "",
             freight = getColumnValue(values, columnMapping, "FREIGHT")?.take(10) ?: "",
             storageCharges = getColumnValue(values, columnMapping, "STORAGE CHARGES")?.take(10) ?: "",
@@ -933,7 +964,15 @@ class PurchaseService(
             commission = getColumnValue(values, columnMapping, "COMMISSION")?.take(10) ?: "",
             repairCompany = getColumnValue(values, columnMapping, "REPAIR COMPANY")?.take(10) ?: "",
             repairCharges = getColumnValue(values, columnMapping, "REPAIR CHARGES")?.take(10) ?: "",
-            notes = getColumnValue(values, columnMapping, "NOTES")?.let { convertJapaneseNotesToEnglish(it) }?.take(1000) ?: ""
+            notes = run {
+                val n = getColumnValue(values, columnMapping, "NOTES")?.let { convertJapaneseNotesToEnglish(it) }?.take(1000) ?: ""
+                val dest = getColumnValue(values, columnMapping, "DESTINATION")?.trim()?.take(500) ?: ""
+                when {
+                    dest.isNotEmpty() && n.isNotEmpty() -> "$n | POD: $dest"
+                    dest.isNotEmpty() -> "POD: $dest"
+                    else -> n
+                }
+            }
         )
     }
 
@@ -1273,7 +1312,11 @@ class PurchaseService(
     }
     
     fun getPolByCountry(country: String): List<String> {
-        return purchaseRepository.findDistinctPolByCountry(country)
+        val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
+        return purchases
+            .mapNotNull { effectivePol(it.pol, it.stockLocation) }
+            .distinct()
+            .sorted()
     }
     
     fun getUniqueRixoCompanies(): List<String> {
@@ -1290,14 +1333,34 @@ class PurchaseService(
     
     @Transactional(readOnly = true)
     fun getFilteredChassis(country: String, polPort: String): List<String> {
-        // Use optimized database query instead of loading all purchases into memory
-        // This is much more efficient, especially with large datasets
-        return purchaseRepository.findFilteredChassis(country, polPort)
+        val desiredPol = polPort.trim()
+        if (desiredPol.isBlank()) return emptyList()
+
+        val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
+        return purchases
+            .asSequence()
+            .mapNotNull { p ->
+                val resolved = effectivePol(p.pol, p.stockLocation)
+                if (resolved != null && resolved.equals(desiredPol, ignoreCase = true)) p.chassis else null
+            }
+            .filter { !it.isNullOrBlank() }
+            .distinct()
+            .sorted()
+            .toList()
     }
 
     @Transactional(readOnly = true)
     fun getFilteredPurchasesByCountryAndPol(country: String, polPort: String): List<Purchase> {
-        return purchaseRepository.findFilteredPurchasesByCountryAndPol(country, polPort)
+        val desiredPol = polPort.trim()
+        if (desiredPol.isBlank()) return emptyList()
+
+        val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
+        return purchases
+            .filter { p ->
+                effectivePol(p.pol, p.stockLocation)?.equals(desiredPol, ignoreCase = true) == true
+            }
+            // keep deterministic order for the UI
+            .sortedBy { it.chassis }
     }
     
     fun getUnshippedChassisByPolPort(polPort: String): List<String> {
@@ -1386,6 +1449,25 @@ class PurchaseService(
         Logger.debug("Updated total C&F price for ${purchases.size} purchase(s): $totalCnfPrice")
     }
 
+    fun saveTotalFobPriceByPurchaseIds(
+        purchaseIds: List<Long>,
+        totalFobPrice: Double
+    ) {
+        val purchases = purchaseRepository.findAllById(purchaseIds)
+        if (purchases.isEmpty()) {
+            throw RuntimeException("No purchases found for IDs: $purchaseIds")
+        }
+
+        purchases.forEach { purchase ->
+            val updatedPurchase = purchase.copy(
+                totalFobPrice = java.math.BigDecimal(totalFobPrice),
+                updatedAt = java.time.LocalDateTime.now()
+            )
+            purchaseRepository.save(updatedPurchase)
+        }
+
+        Logger.debug("Updated total FOB price for ${purchases.size} purchase(s): $totalFobPrice")
+    }
 
     fun saveFobCarCostDetails(
         chassis: String,

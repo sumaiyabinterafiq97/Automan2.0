@@ -73,13 +73,8 @@ class CarSearchControllerIntegrationTest {
     @Test
     fun `GET /api/cars/search should filter cars by port of loading`() {
         // Given - Create test cars with different ports
-        val tokyoCar = createTestCar("CHASSIS001", "Toyota Camry", "2020", "Japan", null)
-        tokyoCar.destination = "Tokyo"
-        purchaseRepository.save(tokyoCar)
-
-        val osakaCar = createTestCar("CHASSIS002", "Honda Civic", "2019", "Japan", null)
-        osakaCar.destination = "Osaka"
-        purchaseRepository.save(osakaCar)
+        createTestCar("CHASSIS001", "Toyota Camry", "2020", "Japan", null, pol = "Tokyo")
+        createTestCar("CHASSIS002", "Honda Civic", "2019", "Japan", null, pol = "Osaka")
 
         // When & Then
         mockMvc.perform(get("/api/cars/search?pol=Tokyo&unshipped=true"))
@@ -126,17 +121,9 @@ class CarSearchControllerIntegrationTest {
     @Test
     fun `GET /api/cars/search should combine multiple filters`() {
         // Given - Create test cars with different attributes
-        val japanTokyoCar = createTestCar("CHASSIS001", "Toyota Camry", "2020", "Japan", null)
-        japanTokyoCar.destination = "Tokyo"
-        purchaseRepository.save(japanTokyoCar)
-
-        val japanOsakaCar = createTestCar("CHASSIS002", "Honda Civic", "2019", "Japan", null)
-        japanOsakaCar.destination = "Osaka"
-        purchaseRepository.save(japanOsakaCar)
-
-        val koreaSeoulCar = createTestCar("CHASSIS003", "Hyundai Sonata", "2021", "Korea", null)
-        koreaSeoulCar.destination = "Seoul"
-        purchaseRepository.save(koreaSeoulCar)
+        createTestCar("CHASSIS001", "Toyota Camry", "2020", "Japan", null, pol = "Tokyo")
+        createTestCar("CHASSIS002", "Honda Civic", "2019", "Japan", null, pol = "Osaka")
+        createTestCar("CHASSIS003", "Hyundai Sonata", "2021", "Korea", null, pol = "Seoul")
 
         // When & Then
         mockMvc.perform(get("/api/cars/search?consignee=Japan&pol=Tokyo&unshipped=true"))
@@ -182,13 +169,7 @@ class CarSearchControllerIntegrationTest {
     @Test
     fun `GET /api/cars/search should return cars with correct structure`() {
         // Given - Create test car
-        val car = createTestCar("CHASSIS001", "Toyota Camry", "2020", "Japan", null)
-        car.carName = "Toyota Camry"
-        car.carModelYear = "2020"
-        car.brand = "Toyota"
-        car.color = "White"
-        car.fuel = "Gasoline"
-        purchaseRepository.save(car)
+        createTestCar("CHASSIS001", "Toyota Camry", "2020", "Japan", null)
 
         // When & Then
         mockMvc.perform(get("/api/cars/search?unshipped=true"))
@@ -237,14 +218,17 @@ class CarSearchControllerIntegrationTest {
         carName: String,
         carModelYear: String,
         country: String,
-        bookingId: Long?
+        bookingId: Long?,
+        pol: String? = null
     ): Purchase {
         val car = Purchase(
             chassis = chassis,
             carName = carName,
             carModelYear = carModelYear,
-            brand = "Test Brand",
+            brand = "Toyota",
             country = country,
+            color = "White",
+            fuel = "Gasoline",
             price = "10000.00",
             auctionFee = "500.00",
             recycleFee = "200.00",
@@ -254,9 +238,9 @@ class CarSearchControllerIntegrationTest {
             rixoRequested = "0",
             rixoConfirmed = "0",
             rixoPrice = "0.00",
-            shippmentDate = LocalDate.now().toString(),
+            shipmentDate = LocalDate.now().toString(),
             vesselNo = "VESSEL001",
-            destination = "Test Port",
+            pol = pol,
             shipmentCharges = "1000.00",
             freight = "800.00",
             storageCharges = "200.00",

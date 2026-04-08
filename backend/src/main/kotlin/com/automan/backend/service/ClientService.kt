@@ -54,8 +54,6 @@ class ClientService(
         // Create updated client with new data
         val updatedClient = existingClient.copy(
             clientName = updateData["clientName"] as? String ?: existingClient.clientName,
-            address = updateData["address"] as? String ?: existingClient.address,
-            phone = updateData["phone"] as? String ?: existingClient.phone,
             currentBalance = anyToDoubleOrNull(updateData["currentBalance"]) ?: existingClient.currentBalance,
             creditLimit = anyToDoubleOrNull(updateData["creditLimit"]) ?: existingClient.creditLimit,
             alertThreshold = anyToDoubleOrNull(updateData["alertThreshold"]) ?: existingClient.alertThreshold,
@@ -166,8 +164,6 @@ class ClientService(
                     if (updateExisting) {
                         val updatedClient = existingClient.copy(
                             clientName = clientName,
-                            address = clientData["address"] as? String,
-                            phone = clientData["phone"] as? String,
                             currentBalance = (clientData["currentBalance"] as? Number)?.toDouble() ?: existingClient.currentBalance,
                             creditLimit = (clientData["creditLimit"] as? Number)?.toDouble(),
                             alertThreshold = (clientData["alertThreshold"] as? Number)?.toDouble(),
@@ -184,8 +180,6 @@ class ClientService(
                     val newClient = Client(
                         clientNumber = clientNumber,
                         clientName = clientName,
-                        address = clientData["address"] as? String,
-                        phone = clientData["phone"] as? String,
                         currentBalance = (clientData["currentBalance"] as? Number)?.toDouble() ?: 0.0,
                         creditLimit = (clientData["creditLimit"] as? Number)?.toDouble(),
                         alertThreshold = (clientData["alertThreshold"] as? Number)?.toDouble(),

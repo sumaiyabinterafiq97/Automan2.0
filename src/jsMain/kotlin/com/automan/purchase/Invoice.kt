@@ -67,7 +67,7 @@ fun showInvoicePage() {
                         
                         <div class="invoice-field">
                             <label for="invoiceShippingDate">SHIPPING DATE:</label>
-                            <input type="date" id="invoiceShippingDate" class="invoice-input" placeholder="Select shipping date" />
+                            <input type="date" id="invoiceShippingDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" class="invoice-input" placeholder="Select shipping date" />
                         </div>
                         
                         <div class="invoice-field">

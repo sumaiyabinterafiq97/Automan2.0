@@ -285,7 +285,9 @@ fun checkAndAdjustColumnsForDeviceChange() {
         
         // Auto-adjust if needed
         if (savedColumns != null) {
-            val adjustedColumns = autoAdjustColumnsForDevice(savedColumns, currentDeviceType)
+            val adjustedColumns = prioritizePurchaseListDateAndChassis(
+                autoAdjustColumnsForDevice(savedColumns, currentDeviceType)
+            )
             
             // Save adjusted columns if they changed
             if (adjustedColumns != savedColumns) {
@@ -410,35 +412,14 @@ fun displayPurchasesWithPagination() {
     if (allPurchases.isEmpty()) {
         // Show table headers even when no data, so users can access filters
         val selectedColumns = getSelectedColumns()
-        val sortableFields = setOf("chassis", "carName", "auctionHouse", "stockLocation", "rixoCompany", "country", "clientName", "brand", "repairCompany")
-        val columnLabels = mapOf(
-            "date" to "Purchase Date",
-            "chassis" to "Chassis",
-            "carName" to "Car Name",
-            "auctionHouse" to "Supplier Name",
-            "stockLocation" to "Stock Location",
-            "clientName" to "Client Name",
-            "rixoCompany" to "Rixo Company",
-            "price" to "Car Price",
-            "carModelYear" to "Production Date",
-            "brand" to "Brand",
-            "grade" to "Grade",
-            "rank" to "Rank",
-            "color" to "Color",
-            "fuel" to "Fuel",
-            "seat" to "Seat",
-            "door" to "Door",
-            "distance" to "Distance",
-            "options" to "Options",
-            "auctionNo" to "Auction No",
-            "rixoPrice" to "Rixo Price",
-            "venueId" to "Venue ID",
-            "shipmentSize" to "Vehicle type",
-            "totalPrice" to "Total Price"
-    )
+        val sortableFields = setOf(
+            "chassis", "carName", "auctionHouse", "stockLocation", "rixoCompany", "country", "clientName", "brand", "repairCompany",
+            "pol", "clientId", "bookingId", "date", "auctionNo"
+        )
+        val columnLabels = purchaseListColumnLabels()
     
     val tableHTML = StringBuilder()
-        tableHTML.append("<table class='table table-striped'>")
+        tableHTML.append("""<div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);"><table class="purchase-list-table" style="width: 100%; border-collapse: collapse;">""")
         tableHTML.append("<thead><tr>")
         
         for (columnKey in selectedColumns) {
@@ -462,7 +443,7 @@ fun displayPurchasesWithPagination() {
                             </div>
                             <div style="border-top:1px solid #eee; padding-top:8px; margin:0;">
                                 <label style="display:block; margin-bottom:6px; font-size:12px; color:#666;">Choose date</label>
-                                <input type="date" id="purchaseDateQuickFilterInput" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:3px; font-size:12px; margin-bottom:8px;">
+                                <input type="date" id="purchaseDateQuickFilterInput" onkeydown="return false;" onpaste="return false;" ondrop="return false;" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:3px; font-size:12px; margin-bottom:8px;">
                             </div>
                         </div>
                     </th>
@@ -491,7 +472,7 @@ fun displayPurchasesWithPagination() {
         
         tableHTML.append("</tr></thead>")
         tableHTML.append("<tbody><tr><td colspan=\"${selectedColumns.size + 2}\" style=\"text-align: center; padding: 40px; color: #666;\">No purchases found.</td></tr></tbody>")
-        tableHTML.append("</table>")
+        tableHTML.append("</table></div>")
         
         table.innerHTML = tableHTML.toString()
         
@@ -594,60 +575,16 @@ fun displayPurchasesWithPagination() {
     
     // Build table HTML
     val selectedColumns = getSelectedColumns()
-    val sortableFields = setOf("chassis", "carName", "auctionHouse", "stockLocation", "rixoCompany", "country", "clientName", "brand", "repairCompany")
-    val columnLabels = mapOf(
-        "date" to "Purchase Date",
-        "chassis" to "Chassis",
-        "carName" to "Car Name",
-        "auctionHouse" to "Supplier Name",
-        "stockLocation" to "Stock Location",
-        "clientName" to "Client Name",
-        "rixoCompany" to "Rixo Company",
-        "price" to "Car Price",
-        "carModelYear" to "Production Date",
-        "brand" to "Brand",
-        "grade" to "Grade",
-        "rank" to "Rank",
-        "color" to "Color",
-        "fuel" to "Fuel",
-        "seat" to "Seat",
-        "door" to "Door",
-        "distance" to "Distance",
-        "options" to "Options",
-        "auctionNo" to "Auction No",
-        "country" to "Target Country",
-        "auctionFee" to "Auction Fee",
-        "recycleFee" to "Recycle Fee",
-        "roadTax" to "Road Tax",
-        "totalPrice" to "Total Price",
-        "paymentDate" to "Payment Date",
-        "rixoRequested" to "Rixo Requested",
-        "rixoConfirmed" to "Rixo Confirmed",
-        "rixoPrice" to "Rixo Price",
-        "shipmentDate" to "Shipment Date",
-        "blNo" to "BL No",
-        "vesselNo" to "Vessel No",
-        "destination" to "Destination",
-        "shipmentCharges" to "Shipment Charges",
-        "freight" to "Freight",
-        "storageCharges" to "Storage Charges",
-        "miscCharges" to "Misc Charges",
-        "inspectionFee" to "Inspection Fee",
-        "commission" to "Commission",
-        "repairCompany" to "Repair Company",
-        "repairCharges" to "Repair Charges",
-        "venueId" to "Venue ID",
-        "shipmentSize" to "Vehicle type",
-        "numberCut" to "Number Cut",
-        "taxTotal" to "Tax Total",
-        "profit" to "Profit",
-        "bookingId" to "Booking ID",
-        "notes" to "Notes"
+    val sortableFields = setOf(
+        "chassis", "carName", "auctionHouse", "stockLocation", "rixoCompany", "country", "clientName", "brand", "repairCompany",
+        "pol", "clientId", "bookingId", "date", "auctionNo"
     )
+    val columnLabels = purchaseListColumnLabels()
     
     val tableHTML = StringBuilder()
     tableHTML.append("""
-        <table style="width: 100%; border-collapse: collapse;">
+        <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+        <table class="purchase-list-table" style="width: 100%; border-collapse: collapse;">
             <thead>
                 <tr style="background-color: #f8f9fa;">
                     <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; width: 44px;"></th>
@@ -674,7 +611,7 @@ fun displayPurchasesWithPagination() {
                         </div>
                         <div style="border-top:1px solid #eee; padding-top:8px; margin:0;">
                             <label style="display:block; margin-bottom:6px; font-size:12px; color:#666;">Choose date</label>
-                            <input type="date" id="purchaseDateQuickFilterInput" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:3px; font-size:12px; margin-bottom:8px;">
+                            <input type="date" id="purchaseDateQuickFilterInput" onkeydown="return false;" onpaste="return false;" ondrop="return false;" style="width:100%; padding:6px; border:1px solid #ddd; border-radius:3px; font-size:12px; margin-bottom:8px;">
                         </div>
                     </div>
                 </th>
@@ -708,40 +645,10 @@ fun displayPurchasesWithPagination() {
     """)
     
     for (purchase in paginatedPurchases) {
-        val id = purchase.id ?: ""
         val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
-        // Safely handle date - could be null, empty string, or other types
-        val dateValue = try {
-            val dateStr = (purchase.date?.toString() ?: "").toString()
-            if (dateStr.isEmpty() || dateStr.trim().isEmpty()) "" else formatWithWeekday(dateStr)
-        } catch (e: dynamic) {
-            ""
-        }
-        val date = dateValue
-        val chassis = (purchase.chassis ?: "").toString()
-        val carName = (purchase.carName ?: "").toString()
-        val auctionHouse = (purchase.auctionHouse ?: "").toString()
-        val stockLocation = (purchase.stockLocation ?: "").toString()
-        val clientName = (purchase.clientName ?: "").toString()
-        val rixoCompany = (purchase.rixoCompany ?: "").toString()
-        val priceStr = (purchase.price as? String) ?: ""
-        val carModelYear = purchase.carModelYear ?: ""
-        val brand = purchase.brand ?: ""
-        val grade = purchase.grade ?: ""
-        val rank = purchase.rank ?: ""
-        val color = purchase.color ?: ""
-        val fuel = purchase.fuel ?: ""
-        val seat = purchase.seat ?: ""
-        val door = purchase.door ?: ""
-        val distance = purchase.distance ?: ""
-        val options = purchase.options ?: ""
-        val auctionNo = purchase.auctionNo ?: ""
-        val rixoPriceRaw = purchase.rixoPrice
-        val venueId = purchase.venueId ?: ""
-        val shipmentSize = purchase.shipmentSize ?: ""
         
         tableHTML.append("""
-            <tr style="border-bottom: 1px solid #f0f0f0;">
+            <tr>
                 <td style="padding: 8px 12px;">
                     ${if (isEditor() && purchaseId > 0L) """
                     <button class="edit-btn" data-id="${purchaseId}" aria-label="Edit" title="Edit"
@@ -759,71 +666,10 @@ fun displayPurchasesWithPagination() {
         """)
         
         for (columnKey in selectedColumns) {
-            val cellValue = when (columnKey) {
-                "date" -> date
-                "chassis" -> chassis
-                "carName" -> carName
-                "auctionHouse" -> auctionHouse
-                "stockLocation" -> stockLocation
-                "clientName" -> clientName
-                "rixoCompany" -> rixoCompany
-                "price" -> {
-                    val priceValue = parseCurrency(priceStr)
-                    if (priceValue > 0.0) formatCurrency(priceValue) else ""
-                }
-                "carModelYear" -> carModelYear.toString()
-                "brand" -> brand
-                "grade" -> grade
-                "rank" -> rank
-                "color" -> color
-                "fuel" -> fuel
-                "seat" -> seat
-                "door" -> door
-                "distance" -> distance
-                "options" -> options
-                "auctionNo" -> auctionNo
-                "country" -> (purchase.country as? String) ?: ""
-                "totalPrice" -> {
-                    val raw = purchase.totalPrice as? String ?: ""
-                    if (raw.isEmpty()) "" else (if (raw.startsWith("¥")) raw else "¥$raw")
-                }
-                "auctionFee" -> (purchase.auctionFee as? String) ?: ""
-                "recycleFee" -> (purchase.recycleFee as? String) ?: ""
-                "roadTax" -> (purchase.roadTax as? String) ?: ""
-                "paymentDate" -> (purchase.paymentDate as? String) ?: ""
-                "rixoRequested" -> (purchase.rixoRequested as? String) ?: ""
-                "rixoConfirmed" -> (purchase.rixoConfirmed as? String) ?: ""
-                "rixoPrice" -> {
-                    val num = when (rixoPriceRaw) {
-                        null -> 0.0
-                        is Number -> (rixoPriceRaw as Number).toDouble()
-                        else -> parseCurrency(rixoPriceRaw.toString())
-                    }
-                    if (num > 0.0) "¥" + formatCurrency(num) else "¥0"
-                }
-                "shipmentDate" -> (purchase.shipmentDate as? String) ?: ""
-                "blNo" -> (purchase.blNo as? String) ?: ""
-                "vesselNo" -> (purchase.vesselNo as? String) ?: ""
-                "destination" -> (purchase.destination as? String) ?: ""
-                "shipmentCharges" -> (purchase.shipmentCharges as? String) ?: ""
-                "freight" -> (purchase.freight as? String) ?: ""
-                "storageCharges" -> (purchase.storageCharges as? String) ?: ""
-                "miscCharges" -> (purchase.miscCharges as? String) ?: ""
-                "inspectionFee" -> (purchase.inspectionFee as? String) ?: ""
-                "commission" -> (purchase.commission as? String) ?: ""
-                "repairCompany" -> (purchase.repairCompany as? String) ?: ""
-                "repairCharges" -> (purchase.repairCharges as? String) ?: ""
-                "venueId" -> venueId
-                "shipmentSize" -> shipmentSize
-                "numberCut" -> (purchase.numberCut as? String) ?: ""
-                "taxTotal" -> (purchase.taxTotal as? String) ?: ""
-                "profit" -> (purchase.profit as? String) ?: ""
-                "bookingId" -> (purchase.bookingId as? String) ?: ""
-                "notes" -> (purchase.notes as? String) ?: ""
-                else -> ""
-            }
+            val cellValue = purchaseTableCellValue(purchase, columnKey)
             
-            tableHTML.append("""<td style="padding: 12px;">$cellValue</td>""")
+            val cellHtml = escapeHtml(cellValue.toString())
+            tableHTML.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
         }
         
         tableHTML.append("""</tr>""")
@@ -832,6 +678,7 @@ fun displayPurchasesWithPagination() {
     tableHTML.append("""
             </tbody>
         </table>
+        </div>
     """)
     
     // Add pagination controls
@@ -998,116 +845,31 @@ fun displayPurchasesAsCards() {
     val paginatedPurchases = allPurchases.sliceArray(startIndex until endIndex)
     
     val selectedColumns = getSelectedColumns()
-    val columnLabels = mapOf(
-        "date" to "Purchase Date",
-        "chassis" to "Chassis",
-        "carName" to "Car Name",
-        "auctionHouse" to "Supplier Name",
-        "stockLocation" to "Stock Location",
-        "clientName" to "Client Name",
-        "rixoCompany" to "Rixo Company",
-        "price" to "Car Price",
-        "carModelYear" to "Production Date",
-        "brand" to "Brand",
-        "grade" to "Grade",
-        "rank" to "Rank",
-        "color" to "Color",
-        "fuel" to "Fuel",
-        "seat" to "Seat",
-        "door" to "Door",
-        "distance" to "Distance",
-        "options" to "Options",
-        "auctionNo" to "Auction No",
-        "country" to "Target Country",
-        "auctionFee" to "Auction Fee",
-        "recycleFee" to "Recycle Fee",
-        "roadTax" to "Road Tax",
-        "totalPrice" to "Total Price",
-        "paymentDate" to "Payment Date",
-        "rixoRequested" to "Rixo Requested",
-        "rixoConfirmed" to "Rixo Confirmed",
-        "rixoPrice" to "Rixo Price",
-        "shipmentDate" to "Shipment Date",
-        "blNo" to "BL No",
-        "vesselNo" to "Vessel No",
-        "destination" to "Destination",
-        "shipmentCharges" to "Shipment Charges",
-        "freight" to "Freight",
-        "storageCharges" to "Storage Charges",
-        "miscCharges" to "Misc Charges",
-        "inspectionFee" to "Inspection Fee",
-        "commission" to "Commission",
-        "repairCompany" to "Repair Company",
-        "repairCharges" to "Repair Charges",
-        "venueId" to "Venue ID",
-        "shipmentSize" to "Vehicle type",
-        "numberCut" to "Number Cut",
-        "taxTotal" to "Tax Total",
-        "profit" to "Profit",
-        "bookingId" to "Booking ID",
-        "notes" to "Notes"
-    )
+    val columnLabels = purchaseListColumnLabels()
     
     val cardsHTML = StringBuilder()
     cardsHTML.append("""<div class="purchase-cards-container">""")
     
     for (purchase in paginatedPurchases) {
         val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
-        
-        // Safely handle date
-        val dateValue = try {
-            val dateStr = (purchase.date?.toString() ?: "").toString()
-            if (dateStr.isEmpty() || dateStr.trim().isEmpty()) "" else formatWithWeekday(dateStr)
-        } catch (e: dynamic) {
-            ""
-        }
-        val date = dateValue
         val chassis = purchase.chassis ?: ""
-        val carName = purchase.carName ?: ""
-        val auctionHouse = purchase.auctionHouse ?: ""
-        val stockLocation = purchase.stockLocation ?: ""
-        val clientName = purchase.clientName ?: ""
-        val rixoCompany = purchase.rixoCompany ?: ""
-        val priceStr = (purchase.price as? String) ?: ""
-        val brand = purchase.brand ?: ""
-        val country = (purchase.country as? String) ?: ""
         
         // Build card content based on selected columns
         val cardFields = StringBuilder()
         for (columnKey in selectedColumns) {
             val label = columnLabels[columnKey] ?: columnKey
-            val value = when (columnKey) {
-                "date" -> date
-                "chassis" -> chassis
-                "carName" -> carName
-                "auctionHouse" -> auctionHouse
-                "stockLocation" -> stockLocation
-                "clientName" -> clientName
-                "rixoCompany" -> rixoCompany
-                "price" -> {
-                    val priceValue = parseCurrency(priceStr)
-                    if (priceValue > 0.0) formatCurrency(priceValue) else ""
-                }
-                "brand" -> brand
-                "country" -> country
-                else -> {
-                    val purchaseValue = purchase.asDynamic()[columnKey]
-                    when {
-                        purchaseValue != null && purchaseValue != js("undefined") -> purchaseValue.toString()
-                        else -> ""
-                    }
-                }
-            }
+            val value = purchaseTableCellValue(purchase, columnKey)
             
             // Convert to string and check if not blank (safe for JS strings)
             val valueStr = value.toString()
             val isValueNotEmpty = valueStr.isNotEmpty() && valueStr.trim().isNotEmpty()
             
             if (isValueNotEmpty) {
+                val cellDisplay = escapeHtml(valueStr)
                 cardFields.append("""
                     <div class="card-field">
                         <span class="card-label">$label:</span>
-                        <span class="card-value">$valueStr</span>
+                        <div class="card-value">$cellDisplay</div>
                     </div>
                 """)
             }
@@ -1219,7 +981,6 @@ fun deletePurchase(id: Long) {
 fun getSelectedColumns(): List<String> {
     // Get current device type
     val deviceType = getDeviceType()
-    val maxColumns = getMaxColumnsForDevice(deviceType)
     val defaultColumns = getDefaultColumnsForDevice(deviceType)
     
     // Try to get saved columns from localStorage
@@ -1237,14 +998,17 @@ fun getSelectedColumns(): List<String> {
     
     // If no saved columns, return device defaults
     if (savedColumns == null || savedColumns.isEmpty()) {
-        return defaultColumns
+        return prioritizePurchaseListDateAndChassis(defaultColumns)
     }
     
-    // Filter out removed columns (displacement, packagePrice)
-    val validColumns = savedColumns.filter { it != "displacement" && it != "packagePrice" }
+    // Filter out removed columns (displacement, packagePrice, id/audit fields)
+    val validColumns = savedColumns.filter {
+        it != "displacement" && it != "packagePrice" &&
+            it != "id" && it != "createdAt" && it != "updatedAt"
+    }
     
-    // Auto-adjust if saved columns exceed device limit
-    return autoAdjustColumnsForDevice(validColumns, deviceType)
+    // Auto-adjust if saved columns exceed device limit, then pin date/chassis to the left
+    return prioritizePurchaseListDateAndChassis(autoAdjustColumnsForDevice(validColumns, deviceType))
 }
 
 fun setupColumnSorting() {
@@ -1278,7 +1042,7 @@ fun showColumnFilterModal() {
     
     // Get current device type and limits
     val deviceType = getDeviceType()
-    val maxColumns = getMaxColumnsForDevice(deviceType)
+    val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
     val deviceDisplayName = when (deviceType) {
         "mobile" -> "Mobile View"
         "tablet" -> "Tablet View"

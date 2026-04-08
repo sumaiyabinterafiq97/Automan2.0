@@ -1,0 +1,5 @@
+# Integration tests use @ActiveProfiles("test"). Disable Flyway so V1 is not applied
+# against the shared dev MySQL (avoids duplicate CREATE errors).
+spring:
+  flyway:
+    enabled: false

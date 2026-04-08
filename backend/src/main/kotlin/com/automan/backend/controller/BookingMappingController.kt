@@ -2,11 +2,19 @@ package com.automan.backend.controller
 
 import com.automan.backend.model.BookingMapping
 import com.automan.backend.repository.BookingMappingRepository
+import com.automan.backend.service.BookingMappingService
+import com.automan.backend.service.MasterMenuService
 import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
-data class ApiResponse<T>(val success: Boolean, val data: T? = null, val message: String? = null)
+data class ApiResponse<T>(
+    val success: Boolean,
+    val data: T? = null,
+    val message: String? = null,
+    /** True when new values were merged into an existing row (same consignee name). */
+    val merged: Boolean? = null,
+)
 
 @RestController
 @RequestMapping(value = ["/booking/mappings", "/api/booking/mappings"])
@@ -21,7 +29,9 @@ data class ApiResponse<T>(val success: Boolean, val data: T? = null, val message
     "http://localhost:9090"
 ])
 class BookingMappingController(
-    private val repo: BookingMappingRepository
+    private val repo: BookingMappingRepository,
+    private val bookingMappingService: BookingMappingService,
+    private val masterMenuService: MasterMenuService
 ) {
     @GetMapping
     fun getAll(): ResponseEntity<ApiResponse<List<BookingMapping>>> {
@@ -41,8 +51,19 @@ class BookingMappingController(
     fun byCountry(@PathVariable country: String): ResponseEntity<ApiResponse<List<BookingMapping>>> {
         return try {
             Logger.debug("BookingMappingController.byCountry called with country: $country")
-            val items = repo.findByCountryIgnoreCase(country)
-            Logger.debug("Found ${items.size} mappings for country: $country")
+            val token = country.trim()
+            // booking_mappings.country / pod can be stored as comma-separated or semicolon-separated token lists.
+            // We need to match the requested country token against any of the stored tokens.
+            val items = repo.findAll().filter { m ->
+                val raw = (m.country ?: "").trim()
+                if (raw.isEmpty()) return@filter false
+                val tokens = raw.split(',', ';')
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+
+                tokens.any { it.equals(token, ignoreCase = true) }
+            }
+            Logger.debug("Found ${items.size} mappings for country token: '$token'")
             ResponseEntity.ok(ApiResponse(true, items))
         } catch (e: Exception) {
             Logger.error("Error in BookingMappingController.byCountry: ${e.message}")
@@ -51,18 +72,15 @@ class BookingMappingController(
         }
     }
 
-    /** Returns list of POL (Port of Loading) strings for a stock location from booking_mappings. Uses any row that has this stock_location (canonical STOCK_LOCATION_POL or client-specific rows). Comma-separated pols are split into separate items. */
+    /** POL list from master_menu (`pol` field); booking_mappings no longer stores per-stock POL rows. */
     @GetMapping("/pols-by-stock-location")
     fun polsByStockLocation(@RequestParam stockLocation: String): ResponseEntity<ApiResponse<List<String>>> {
         return try {
             if (stockLocation.isBlank()) {
                 return ResponseEntity.ok(ApiResponse(true, emptyList()))
             }
-            val mappings = repo.findByStockLocationIgnoreCase(stockLocation.trim())
-            val pols = mappings
-                .flatMap { m -> (m.pols?.split(',') ?: emptyList()).map { it.trim() }.filter { it.isNotEmpty() } }
-                .distinct()
-            Logger.debug("POLs for stock location '$stockLocation': $pols")
+            val pols = masterMenuService.getValues("pol")
+            Logger.debug("POLs (master_menu) for request stock location '$stockLocation': $pols")
             ResponseEntity.ok(ApiResponse(true, pols))
         } catch (e: Exception) {
             Logger.error("Error in polsByStockLocation: ${e.message}")
@@ -72,16 +90,44 @@ class BookingMappingController(
 
     @PostMapping("/add")
     fun add(@RequestBody payload: BookingMapping): ResponseEntity<ApiResponse<BookingMapping>> {
-        val saved = repo.save(payload.copy(id = 0))
-        return ResponseEntity.ok(ApiResponse(true, saved))
+        return try {
+            val result = bookingMappingService.add(payload)
+            val msg =
+                if (result.mergedIntoExisting) "Values merged into existing consignee"
+                else "Created"
+            ResponseEntity.ok(
+                ApiResponse(
+                    success = true,
+                    data = result.mapping,
+                    message = msg,
+                    merged = result.mergedIntoExisting,
+                ),
+            )
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(ApiResponse(false, message = e.message))
+        }
     }
 
     @PutMapping("/{id}")
     fun update(@PathVariable id: Long, @RequestBody payload: BookingMapping): ResponseEntity<ApiResponse<BookingMapping>> {
-        val existing = repo.findById(id)
-        if (existing.isEmpty) return ResponseEntity.ok(ApiResponse(false, message = "Not found"))
-        val saved = repo.save(payload.copy(id = id))
-        return ResponseEntity.ok(ApiResponse(true, saved))
+        return try {
+            val result = bookingMappingService.update(id, payload)
+            val msg =
+                if (result.mergedIntoExisting) "Merged into existing consignee; duplicate row removed"
+                else "Updated"
+            ResponseEntity.ok(
+                ApiResponse(
+                    success = true,
+                    data = result.mapping,
+                    message = msg,
+                    merged = result.mergedIntoExisting,
+                ),
+            )
+        } catch (e: NoSuchElementException) {
+            ResponseEntity.ok(ApiResponse(false, message = "Not found"))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(ApiResponse(false, message = e.message))
+        }
     }
 
     @DeleteMapping("/{id}")

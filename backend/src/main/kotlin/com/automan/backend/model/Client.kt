@@ -23,12 +23,6 @@ data class Client(
     @Column(name = "client_name", nullable = false)
     val clientName: String,
     
-    @Column(name = "address")
-    val address: String? = null,
-    
-    @Column(name = "phone")
-    val phone: String? = null,
-    
     @Column(name = "current_balance")
     val currentBalance: Double = 0.0,
     

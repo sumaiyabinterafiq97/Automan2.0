@@ -497,9 +497,9 @@ class EventService(
     
     fun exportAllClientsData(): String {
         val clients = clientRepository.findAll()
-        val csvHeader = "CLIENT_ID,CLIENT_NUMBER,CLIENT_NAME,ADDRESS,PHONE,CURRENT_BALANCE,CREDIT_LIMIT,ALERT_THRESHOLD,CURRENCY,STATUS,CREATED_AT\n"
+        val csvHeader = "CLIENT_ID,CLIENT_NUMBER,CLIENT_NAME,CURRENT_BALANCE,CREDIT_LIMIT,ALERT_THRESHOLD,CURRENCY,STATUS,CREATED_AT\n"
         val csvRows = clients.joinToString("\n") { client ->
-            "${client.id},${client.clientNumber},${client.clientName},${client.address ?: ""},${client.phone ?: ""},${client.currentBalance},${client.creditLimit ?: ""},${client.alertThreshold ?: ""},${client.currency},${client.status},${client.createdAt}"
+            "${client.id},${client.clientNumber},${client.clientName},${client.currentBalance},${client.creditLimit ?: ""},${client.alertThreshold ?: ""},${client.currency},${client.status},${client.createdAt}"
         }
         
         return csvHeader + csvRows
@@ -514,8 +514,6 @@ class EventService(
                 "id" to client.id,
                 "clientNumber" to client.clientNumber,
                 "clientName" to client.clientName,
-                "address" to client.address,
-                "phone" to client.phone,
                 "currentBalance" to client.currentBalance,
                 "creditLimit" to client.creditLimit,
                 "alertThreshold" to client.alertThreshold,

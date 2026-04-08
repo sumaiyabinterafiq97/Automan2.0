@@ -12,9 +12,7 @@ interface ClientRepository : JpaRepository<Client, Long> {
     
     @Query("SELECT c FROM Client c WHERE " +
            "LOWER(c.clientNumber) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-           "LOWER(c.clientName) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-           "LOWER(c.address) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-           "LOWER(c.phone) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
+           "LOWER(c.clientName) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
     fun searchClients(@Param("searchTerm") searchTerm: String): List<Client>
     
     fun findByClientNumberContainingIgnoreCase(clientNumber: String): List<Client>

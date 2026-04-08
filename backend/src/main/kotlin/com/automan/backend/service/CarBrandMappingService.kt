@@ -3,7 +3,6 @@ package com.automan.backend.service
 import com.automan.backend.model.CarBrandMapping
 import com.automan.backend.repository.CarBrandMappingRepository
 import com.automan.backend.util.Logger
-import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -14,8 +13,7 @@ import java.time.LocalDateTime
  */
 @Service
 class CarBrandMappingService(
-    private val carBrandMappingRepository: CarBrandMappingRepository,
-    private val entityManager: EntityManager
+    private val carBrandMappingRepository: CarBrandMappingRepository
 ) {
 
     fun getMappingsByBrand(brandName: String): Map<String, Any?> {
@@ -44,10 +42,10 @@ class CarBrandMappingService(
             "fuel" to (firstRow.fuel ?: ""),
             "wd" to (firstRow.wd ?: ""),
             "shift" to (firstRow.shift ?: ""),
-            "cc" to (firstRow.cc ?: 0),
-            "door" to (firstRow.door ?: 0),
+            "cc" to (firstRow.cc ?: ""),
+            "door" to (firstRow.door ?: ""),
             "grade" to (firstRow.grade ?: ""),
-            "seat" to (firstRow.seat ?: 0),
+            "seat" to (firstRow.seat ?: ""),
             "vehicleType" to (firstRow.vehicleType ?: ""),
             "rank" to (firstRow.rank ?: ""),
             "color" to (firstRow.color ?: ""),
@@ -61,7 +59,7 @@ class CarBrandMappingService(
         val ccList = carBrandMappingRepository.findDistinctCcByCarBrand(brandName)
         val doorList = carBrandMappingRepository.findDistinctDoorByCarBrand(brandName)
         val gradeList = carBrandMappingRepository.findDistinctGradeByCarBrand(brandName)
-        val seatList = mappings.mapNotNull { it.seat }.distinct().sorted()
+        val seatList = mappings.mapNotNull { it.seat?.takeIf { s -> s.isNotBlank() } }.distinct().sorted()
         return mapOf(
             "mappings" to mappings.map { toMap(it) },
             "firstRow" to firstRowData,
@@ -71,10 +69,10 @@ class CarBrandMappingService(
                 "fuel" to fuelList,
                 "wd" to wdList,
                 "shift" to shiftList,
-                "cc" to ccList.map { it.toString() },
-                "door" to doorList.map { it.toString() },
+                "cc" to ccList,
+                "door" to doorList,
                 "grade" to gradeList,
-                "seats" to seatList.map { it.toString() }
+                "seats" to seatList
             )
         )
     }
@@ -95,10 +93,10 @@ class CarBrandMappingService(
             "fuel" to (firstMatch.fuel ?: ""),
             "wd" to (firstMatch.wd ?: ""),
             "shift" to (firstMatch.shift ?: ""),
-            "cc" to (firstMatch.cc?.toString() ?: ""),
-            "door" to (firstMatch.door?.toString() ?: ""),
+            "cc" to (firstMatch.cc ?: ""),
+            "door" to (firstMatch.door ?: ""),
             "grade" to (firstMatch.grade ?: ""),
-            "seat" to (firstMatch.seat?.toString() ?: ""),
+            "seat" to (firstMatch.seat ?: ""),
             "vehicleType" to (firstMatch.vehicleType ?: ""),
             "rank" to (firstMatch.rank ?: ""),
             "color" to (firstMatch.color ?: ""),
@@ -123,10 +121,10 @@ class CarBrandMappingService(
             "fuel" to (firstRow.fuel ?: ""),
             "wd" to (firstRow.wd ?: ""),
             "shift" to (firstRow.shift ?: ""),
-            "cc" to (firstRow.cc?.toString() ?: ""),
-            "door" to (firstRow.door?.toString() ?: ""),
+            "cc" to (firstRow.cc ?: ""),
+            "door" to (firstRow.door ?: ""),
             "grade" to (firstRow.grade ?: ""),
-            "seat" to (firstRow.seat?.toString() ?: ""),
+            "seat" to (firstRow.seat ?: ""),
             "vehicleType" to (firstRow.vehicleType ?: ""),
             "rank" to (firstRow.rank ?: ""),
             "color" to (firstRow.color ?: ""),
@@ -176,10 +174,10 @@ class CarBrandMappingService(
             "fuel" to (firstMatch.fuel ?: ""),
             "wd" to (firstMatch.wd ?: ""),
             "shift" to (firstMatch.shift ?: ""),
-            "cc" to (firstMatch.cc?.toString() ?: ""),
-            "door" to (firstMatch.door?.toString() ?: ""),
+            "cc" to (firstMatch.cc ?: ""),
+            "door" to (firstMatch.door ?: ""),
             "grade" to (firstMatch.grade ?: ""),
-            "seat" to (firstMatch.seat?.toString() ?: ""),
+            "seat" to (firstMatch.seat ?: ""),
             "vehicleType" to (firstMatch.vehicleType ?: ""),
             "rank" to (firstMatch.rank ?: ""),
             "color" to (firstMatch.color ?: ""),
@@ -192,10 +190,10 @@ class CarBrandMappingService(
             "fuels" to mappings.mapNotNull { it.fuel }.distinct().sorted(),
             "wds" to mappings.mapNotNull { it.wd }.distinct().sorted(),
             "shifts" to mappings.mapNotNull { it.shift }.distinct().sorted(),
-            "ccs" to mappings.mapNotNull { it.cc?.toString() }.distinct().sorted(),
-            "doors" to mappings.mapNotNull { it.door?.toString() }.distinct().sorted(),
+            "ccs" to mappings.mapNotNull { it.cc?.takeIf { s -> s.isNotBlank() } }.distinct().sorted(),
+            "doors" to mappings.mapNotNull { it.door?.takeIf { s -> s.isNotBlank() } }.distinct().sorted(),
             "grades" to mappings.mapNotNull { it.grade }.distinct().sorted(),
-            "seats" to mappings.mapNotNull { it.seat?.toString() }.distinct().sorted(),
+            "seats" to mappings.mapNotNull { it.seat?.takeIf { s -> s.isNotBlank() } }.distinct().sorted(),
             "vehicleTypes" to mappings.mapNotNull { it.vehicleType }.distinct().sorted(),
             "ranks" to mappings.mapNotNull { it.rank }.distinct().sorted(),
             "colors" to mappings.mapNotNull { it.color }.distinct().sorted(),
@@ -208,8 +206,8 @@ class CarBrandMappingService(
             "fuel" to (firstMatch.fuel ?: ""),
             "wd" to (firstMatch.wd ?: ""),
             "shift" to (firstMatch.shift ?: ""),
-            "cc" to (firstMatch.cc?.toString() ?: ""),
-            "door" to (firstMatch.door?.toString() ?: ""),
+            "cc" to (firstMatch.cc ?: ""),
+            "door" to (firstMatch.door ?: ""),
             "grade" to (firstMatch.grade ?: ""),
             "vehicleType" to (firstMatch.vehicleType ?: ""),
             "rank" to (firstMatch.rank ?: ""),
@@ -241,8 +239,8 @@ class CarBrandMappingService(
             (fuel == null || m.fuel?.equals(fuel, ignoreCase = true) == true) &&
             (wd == null || m.wd?.equals(wd, ignoreCase = true) == true) &&
             (shift == null || m.shift?.equals(shift, ignoreCase = true) == true) &&
-            (cc == null || m.cc?.toString() == cc) &&
-            (door == null || m.door?.toString() == door) &&
+            (cc == null || semicolonTokenMatches(m.cc, cc)) &&
+            (door == null || semicolonTokenMatches(m.door, door)) &&
             (grade == null || m.grade?.equals(grade, ignoreCase = true) == true)
         }
         val row = match ?: allMappings.first()
@@ -254,10 +252,10 @@ class CarBrandMappingService(
             "fuel" to (row.fuel ?: ""),
             "wd" to (row.wd ?: ""),
             "shift" to (row.shift ?: ""),
-            "cc" to (row.cc?.toString() ?: ""),
-            "door" to (row.door?.toString() ?: ""),
+            "cc" to (row.cc ?: ""),
+            "door" to (row.door ?: ""),
             "grade" to (row.grade ?: ""),
-            "seat" to (row.seat?.toString() ?: ""),
+            "seat" to (row.seat ?: ""),
             "vehicleType" to (row.vehicleType ?: ""),
             "rank" to (row.rank ?: ""),
             "color" to (row.color ?: ""),
@@ -285,30 +283,28 @@ class CarBrandMappingService(
 
     @Transactional
     fun createMapping(request: Map<String, Any?>): Map<String, Any> {
-        val carBrand = parseString(request["carBrand"])
-            ?: throw IllegalArgumentException("carBrand is required")
-        val chassisStr = request["chassis"]?.toString()
-        val carNameStr = request["carName"]?.toString()
-        val fuelStr = request["fuel"]?.toString()
-        val wdStr = request["wd"]?.toString()
-        val shiftStr = request["shift"]?.toString()
-        val gradeStr = request["grade"]?.toString()
-        val ccValue = parseCcOrDoor(request["cc"])
-        val doorValue = parseCcOrDoor(request["door"])
-        val seatValue = parseCcOrDoor(request["seat"])
-        val mapping = CarBrandMapping(
-            carBrand = carBrand,
-            chassis = chassisStr?.takeIf { it.isNotBlank() },
-            carName = carNameStr?.takeIf { it.isNotBlank() },
-            fuel = fuelStr?.takeIf { it.isNotBlank() },
-            wd = wdStr?.takeIf { it.isNotBlank() },
-            shift = shiftStr?.takeIf { it.isNotBlank() },
-            cc = ccValue,
-            door = doorValue,
-            seat = seatValue,
-            grade = gradeStr?.takeIf { it.isNotBlank() }
+        val chassis = parseString(request["chassis"])
+            ?: throw IllegalArgumentException("Chassis is required")
+        val replaceExistingValues = parseBoolean(request["replaceExistingValues"])
+        val sameChassisRows = carBrandMappingRepository.findByChassis(chassis)
+        val mergedFromRequest = mergeIntoBase(
+            base = sameChassisRows.firstOrNull(),
+            request = request,
+            chassis = chassis,
+            replaceExistingValues = replaceExistingValues
         )
-        val saved = carBrandMappingRepository.save(mapping)
+
+        val saved = if (sameChassisRows.isEmpty()) {
+            carBrandMappingRepository.save(mergedFromRequest)
+        } else {
+            val canonical = mergedFromRequest.copy(id = sameChassisRows.first().id)
+            val persisted = carBrandMappingRepository.save(canonical)
+            val duplicateIds = sameChassisRows.drop(1).mapNotNull { it.id }
+            if (duplicateIds.isNotEmpty()) {
+                carBrandMappingRepository.deleteAllById(duplicateIds)
+            }
+            persisted
+        }
         return mapOf(
             "success" to true,
             "message" to "Mapping created successfully",
@@ -319,9 +315,9 @@ class CarBrandMappingService(
                 "fuel" to (saved.fuel ?: ""),
                 "wd" to (saved.wd ?: ""),
                 "shift" to (saved.shift ?: ""),
-                "cc" to (saved.cc ?: 0),
-                "door" to (saved.door ?: 0),
-                "seat" to (saved.seat ?: 0),
+                "cc" to (saved.cc ?: ""),
+                "door" to (saved.door ?: ""),
+                "seat" to (saved.seat ?: ""),
                 "grade" to (saved.grade ?: ""),
                 "vehicleType" to (saved.vehicleType ?: ""),
                 "rank" to (saved.rank ?: ""),
@@ -335,51 +331,27 @@ class CarBrandMappingService(
     fun updateMapping(id: Long, request: Map<String, Any?>): Map<String, Any> {
         val existing = carBrandMappingRepository.findById(id).orElse(null)
             ?: throw NoSuchElementException("Mapping not found: $id")
-        fun getStringValue(key: String): String? {
-            val value = request[key]
-            return when {
-                value == null -> null
-                value is String -> if (value.isBlank()) null else value
-                else -> value.toString().takeIf { it.isNotBlank() }
-            }
+        val requestedChassis = if (request.containsKey("chassis")) parseString(request["chassis"]) else existing.chassis
+        val finalChassis = requestedChassis ?: throw IllegalArgumentException("Chassis is required")
+
+        val sameChassisRows = carBrandMappingRepository.findByChassis(finalChassis)
+        val baseRow = sameChassisRows.firstOrNull { it.id == id } ?: sameChassisRows.firstOrNull() ?: existing
+        val mergedData = mergeIntoBase(
+            base = baseRow,
+            request = request,
+            chassis = finalChassis,
+            replaceExistingValues = true
+        ).copy(id = baseRow.id)
+        val merged = carBrandMappingRepository.save(mergedData)
+
+        val duplicateIds = (sameChassisRows.mapNotNull { it.id } + existing.id)
+            .filterNotNull()
+            .distinct()
+            .filter { it != merged.id }
+        if (duplicateIds.isNotEmpty()) {
+            carBrandMappingRepository.deleteAllById(duplicateIds)
         }
-        val carBrandValue = if (request.containsKey("carBrand")) getStringValue("carBrand") ?: existing.carBrand else existing.carBrand
-        if (carBrandValue.isNullOrBlank()) throw IllegalArgumentException("Car Brand is required")
-        val chassisValue = if (request.containsKey("chassis")) getStringValue("chassis") else existing.chassis
-        val carNameValue = if (request.containsKey("carName")) getStringValue("carName") else existing.carName
-        val fuelValue = if (request.containsKey("fuel")) getStringValue("fuel") else existing.fuel
-        val wdValue = if (request.containsKey("wd")) getStringValue("wd") else existing.wd
-        val shiftValue = if (request.containsKey("shift")) getStringValue("shift") else existing.shift
-        val gradeValue = if (request.containsKey("grade")) getStringValue("grade") else existing.grade
-        val vehicleTypeValue = if (request.containsKey("vehicleType")) getStringValue("vehicleType") else existing.vehicleType
-        val rankValue = if (request.containsKey("rank")) getStringValue("rank") else existing.rank
-        val colorValue = if (request.containsKey("color")) getStringValue("color") else existing.color
-        val driveTypeValue = if (request.containsKey("driveType")) getStringValue("driveType") else existing.driveType
-        val ccValue = if (request.containsKey("cc")) parseCcOrDoor(request["cc"]) else existing.cc
-        val doorValue = if (request.containsKey("door")) parseCcOrDoor(request["door"]) else existing.door
-        val seatValue = if (request.containsKey("seat")) parseCcOrDoor(request["seat"]) else existing.seat
-        val createdAtValue = existing.createdAt ?: LocalDateTime.now()
-        val updated = existing.copy(
-            id = existing.id,
-            carBrand = carBrandValue,
-            chassis = chassisValue,
-            carName = carNameValue,
-            fuel = fuelValue,
-            wd = wdValue,
-            shift = shiftValue,
-            cc = ccValue,
-            door = doorValue,
-            seat = seatValue,
-            grade = gradeValue,
-            vehicleType = vehicleTypeValue,
-            rank = rankValue,
-            color = colorValue,
-            driveType = driveTypeValue,
-            createdAt = createdAtValue,
-            updatedAt = LocalDateTime.now()
-        )
-        val merged = entityManager.merge(updated) as CarBrandMapping
-        entityManager.flush()
+
         return mapOf(
             "success" to true,
             "message" to "Mapping updated successfully",
@@ -391,9 +363,9 @@ class CarBrandMappingService(
                 "fuel" to (merged.fuel ?: ""),
                 "wd" to (merged.wd ?: ""),
                 "shift" to (merged.shift ?: ""),
-                "cc" to (merged.cc ?: 0),
-                "door" to (merged.door ?: 0),
-                "seat" to (merged.seat ?: 0),
+                "cc" to (merged.cc ?: ""),
+                "door" to (merged.door ?: ""),
+                "seat" to (merged.seat ?: ""),
                 "grade" to (merged.grade ?: ""),
                 "vehicleType" to (merged.vehicleType ?: ""),
                 "rank" to (merged.rank ?: ""),
@@ -415,9 +387,9 @@ class CarBrandMappingService(
                 "fuel" to (mapping.fuel ?: ""),
                 "wd" to (mapping.wd ?: ""),
                 "shift" to (mapping.shift ?: ""),
-                "cc" to (mapping.cc ?: 0),
-                "door" to (mapping.door ?: 0),
-                "seat" to (mapping.seat ?: 0),
+                "cc" to (mapping.cc ?: ""),
+                "door" to (mapping.door ?: ""),
+                "seat" to (mapping.seat ?: ""),
                 "grade" to (mapping.grade ?: ""),
                 "vehicleType" to (mapping.vehicleType ?: ""),
                 "rank" to (mapping.rank ?: ""),
@@ -441,9 +413,9 @@ class CarBrandMappingService(
         "fuel" to (m.fuel ?: ""),
         "wd" to (m.wd ?: ""),
         "shift" to (m.shift ?: ""),
-        "cc" to (m.cc ?: 0),
-        "door" to (m.door ?: 0),
-        "seat" to (m.seat ?: 0),
+        "cc" to (m.cc ?: ""),
+        "door" to (m.door ?: ""),
+        "seat" to (m.seat ?: ""),
         "grade" to (m.grade ?: ""),
         "vehicleType" to (m.vehicleType ?: ""),
         "rank" to (m.rank ?: ""),
@@ -459,10 +431,10 @@ class CarBrandMappingService(
         "fuel" to (m.fuel ?: ""),
         "wd" to (m.wd ?: ""),
         "shift" to (m.shift ?: ""),
-        "cc" to (m.cc?.toString() ?: ""),
-        "door" to (m.door?.toString() ?: ""),
+        "cc" to (m.cc ?: ""),
+        "door" to (m.door ?: ""),
         "grade" to (m.grade ?: ""),
-        "seat" to (m.seat?.toString() ?: ""),
+        "seat" to (m.seat ?: ""),
         "vehicleType" to (m.vehicleType ?: ""),
         "rank" to (m.rank ?: ""),
         "color" to (m.color ?: ""),
@@ -475,10 +447,95 @@ class CarBrandMappingService(
         else -> value.toString().takeIf { it.isNotBlank() }
     }
 
-    private fun parseCcOrDoor(value: Any?): Int? = when (value) {
-        null -> null
-        is Number -> value.toInt().takeIf { it > 0 }
-        is String -> if (value.isBlank()) null else value.toIntOrNull()
-        else -> null
+    private fun mergeIntoBase(
+        base: CarBrandMapping?,
+        request: Map<String, Any?>,
+        chassis: String,
+        replaceExistingValues: Boolean
+    ): CarBrandMapping {
+        val now = LocalDateTime.now()
+
+        val requestBrand = parseString(request["carBrand"])
+        val requestCarName = parseString(request["carName"])
+        val requestFuel = parseString(request["fuel"])
+        val requestWd = parseString(request["wd"])
+        val requestShift = parseString(request["shift"])
+        val requestGrade = parseString(request["grade"])
+        val requestVehicleType = parseString(request["vehicleType"])
+        val requestRank = parseString(request["rank"])
+        val requestColor = parseString(request["color"])
+        val requestDriveType = parseString(request["driveType"])
+        val requestCc = if (request.containsKey("cc")) parseString(request["cc"]) else null
+        val requestDoor = if (request.containsKey("door")) parseString(request["door"]) else null
+        val requestSeat = if (request.containsKey("seat")) parseString(request["seat"]) else null
+
+        val carBrand = mergeField(base?.carBrand, requestBrand, replaceExistingValues, request.containsKey("carBrand"))
+            ?: throw IllegalArgumentException("carBrand is required")
+
+        return CarBrandMapping(
+            id = base?.id,
+            carBrand = carBrand,
+            chassis = chassis,
+            carName = mergeField(base?.carName, requestCarName, replaceExistingValues, request.containsKey("carName")),
+            fuel = mergeField(base?.fuel, requestFuel, replaceExistingValues, request.containsKey("fuel")),
+            wd = mergeField(base?.wd, requestWd, replaceExistingValues, request.containsKey("wd")),
+            shift = mergeField(base?.shift, requestShift, replaceExistingValues, request.containsKey("shift")),
+            cc = mergeField(base?.cc, requestCc, replaceExistingValues, request.containsKey("cc")),
+            door = mergeField(base?.door, requestDoor, replaceExistingValues, request.containsKey("door")),
+            seat = mergeField(base?.seat, requestSeat, replaceExistingValues, request.containsKey("seat")),
+            grade = mergeField(base?.grade, requestGrade, replaceExistingValues, request.containsKey("grade")),
+            vehicleType = mergeField(base?.vehicleType, requestVehicleType, replaceExistingValues, request.containsKey("vehicleType")),
+            rank = mergeField(base?.rank, requestRank, replaceExistingValues, request.containsKey("rank")),
+            color = mergeField(base?.color, requestColor, replaceExistingValues, request.containsKey("color")),
+            driveType = mergeField(base?.driveType, requestDriveType, replaceExistingValues, request.containsKey("driveType")),
+            createdAt = base?.createdAt ?: now,
+            updatedAt = now
+        )
+    }
+
+    private fun mergeField(existing: String?, incoming: String?, replaceMode: Boolean, incomingProvided: Boolean): String? {
+        if (replaceMode && incomingProvided) return normalizeSemicolon(incoming)
+        return mergeSemicolon(existing, incoming)
+    }
+
+    private fun mergeSemicolon(existing: String?, incoming: String?): String? {
+        val tokens = linkedSetOf<String>()
+        tokenizeSemicolon(existing).forEach { token ->
+            if (tokens.none { it.equals(token, ignoreCase = true) }) tokens.add(token)
+        }
+        tokenizeSemicolon(incoming).forEach { token ->
+            if (tokens.none { it.equals(token, ignoreCase = true) }) tokens.add(token)
+        }
+        return tokens.joinToString(";").takeIf { it.isNotBlank() }
+    }
+
+    private fun normalizeSemicolon(value: String?): String? {
+        val tokens = linkedSetOf<String>()
+        tokenizeSemicolon(value).forEach { token ->
+            if (tokens.none { it.equals(token, ignoreCase = true) }) tokens.add(token)
+        }
+        return tokens.joinToString(";").takeIf { it.isNotBlank() }
+    }
+
+    private fun tokenizeSemicolon(value: String?): List<String> =
+        value
+            ?.split(";")
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+
+    /** True if [selected] matches the full stored value or a single semicolon token in [stored]. */
+    private fun semicolonTokenMatches(stored: String?, selected: String?): Boolean {
+        if (selected.isNullOrBlank()) return true
+        if (stored.isNullOrBlank()) return false
+        if (stored.equals(selected, ignoreCase = true)) return true
+        return tokenizeSemicolon(stored).any { it.equals(selected, ignoreCase = true) }
+    }
+
+    private fun parseBoolean(value: Any?): Boolean = when (value) {
+        is Boolean -> value
+        is String -> value.equals("true", ignoreCase = true)
+        is Number -> value.toInt() != 0
+        else -> false
     }
 }

@@ -53,7 +53,7 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                     </div>
 """
     val freightField = if (isFobMode) "" else """
-                            <div class="cnf-cost-field">
+                            <div class="cnf-cost-field" id="cnfFreightFieldWrap" style="display: none;">
                                 <label>FREIGHT (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
@@ -195,7 +195,6 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                             </svg>
                             DOWNLOAD PDF
                         </button>
-                        <button id="confirmCarCostsBtn" class="cnf-btn cnf-btn-finish">FINISH</button>
                     </div>
                 </div>
             </div>
@@ -203,16 +202,45 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
     """
 }
 
+/** Show FREIGHT (¥) only after user completes Calculate Freight (values in [globalFreightValues]). */
+fun updateCnfFreightFieldVisibility() {
+    if (cnfPageIsFobMode) return
+    val wrap = document.getElementById("cnfFreightFieldWrap") as? HTMLElement
+    if (wrap == null) return
+    val show = globalFreightValues.isNotEmpty()
+    wrap.style.display = if (show) "" else "none"
+    if (!show) {
+        val freightInput = document.getElementById("freight") as? HTMLInputElement
+        if (freightInput != null) freightInput.value = "0"
+    }
+}
+
 fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: List<dynamic>? = null, isFobMode: Boolean = false) {
     console.log("🔧 Setting up C&F calculation listeners...")
     
-    // Back to booking button
+    // Back to booking — refresh purchases like former FINISH, sync LIST price column from freight
     document.getElementById("backToBookingBtn")?.addEventListener("click", { _: Event ->
-        // Save C&F form state before navigating back
         js("if (window.saveCnfFormState) window.saveCnfFormState()")
-        // Save state before navigating back to Car Booking page
         js("if (window.saveCarBookingState) window.saveCarBookingState()")
-        showCarBookingPage()
+        val mode = if (globalFreightValues.isNotEmpty()) "C&F" else "FOB"
+        lastCalculationMode = mode
+        js("window.lastCalculationMode = mode")
+        console.log("💾 Back to booking: lastCalculationMode = $mode (freight map size: ${globalFreightValues.size})")
+        val purchaseIdsToRefresh = if (cnfPageSelectedPurchaseIds.isNotEmpty()) {
+            cnfPageSelectedPurchaseIds
+        } else {
+            cnfPageSelectedCars.mapNotNull { car ->
+                val purchaseId = js("(car.purchaseId != null && car.purchaseId !== undefined) ? car.purchaseId : car.id")
+                if (purchaseId != null && purchaseId != js("undefined")) {
+                    (purchaseId as? Number)?.toLong()
+                } else null
+            }
+        }
+        if (purchaseIdsToRefresh.isNotEmpty()) {
+            refreshPurchasesByIds(purchaseIdsToRefresh)
+        } else {
+            showCarBookingPage()
+        }
     })
     
     // Load chassis dropdown with available cars
@@ -334,9 +362,11 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
                     console.log("🚢 Auto-populated freight field from globalFreightValues: ¥${freightValue.toDouble().toInt()}")
                     // Recalculate total with freight
                     calculateCnfTotal()
+                    updateCnfFreightFieldVisibility()
                 }
             } else if (currentChassis.isNotEmpty()) {
                 console.log("🚢 No freight value found in globalFreightValues for chassis $currentChassis")
+                updateCnfFreightFieldVisibility()
             }
         }, 800) // Delay to ensure fields are loaded
     }
@@ -345,6 +375,8 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
     // Then restore edited values on top of database values
     window.setTimeout({
         js("if (window.restoreCnfFormState) window.restoreCnfFormState()")
+        updateCnfFreightFieldVisibility()
+        calculateCnfTotal()
     }, 1500) // Increased delay to ensure loadCarCostDetails completes first
     
     // Save button - save calculated Total C&F Price (as per documentation: only saves total price, not cost details)
@@ -354,14 +386,10 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
         saveTotalCnfPrice()
     })
     
-    // Calculate Freight button (only in C&F mode) - save state before navigating
-    document.getElementById("calculateFreightBtn")?.addEventListener("click", { _: Event ->
-        js("if (window.saveCnfFormState) window.saveCnfFormState()")
-    })
-    
-    // Calculate Freight button (only in C&F mode)
+    // Calculate Freight (C&F page only): save state then open freight allocation UI
     if (!isFobMode) {
         document.getElementById("calculateFreightBtn")?.addEventListener("click", { _: Event ->
+            js("if (window.saveCnfFormState) window.saveCnfFormState()")
             showCalculateFreightPage()
         })
     }
@@ -389,57 +417,7 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
         generateShippingSchedulePdf()
     })
     
-    // Confirm/FINISH button (as per documentation: should NOT save total price, should refresh data and return)
-    document.getElementById("confirmCarCostsBtn")?.addEventListener("click", { _: Event ->
-        // Per documentation (Line 995-1016):
-        // 1. Set lastCalculationMode
-        // 2. Save C&F form state
-        // 3. Call refreshPurchasesByIds() to get updated prices from API
-        // 4. Update carBookingDisplayedCars with fresh data
-        // 5. Return to Car Booking page
-        // NOTE: Does NOT save total price (individual SAVE buttons handle that)
-        
-        // Set calculation mode for LIST table column header
-        // Note: lastCalculationMode is a global variable in MinimalPurchaseApp.kt (same package)
-        val mode = if (isFobMode) "FOB" else "C&F"
-        // Access global variable - since it's in same package, we can reference it directly
-        // But we need to use js() to set it on window for compatibility
-        js("window.lastCalculationMode = mode")
-        console.log("💾 Set lastCalculationMode: $mode")
-        
-        // Save C&F form state
-        js("if (window.saveCnfFormState) window.saveCnfFormState()")
-        
-        // Save Car Booking state (selected rows from cnfPageSelectedCars) before navigating
-        js("if (window.saveCarBookingState) window.saveCarBookingState()")
-        
-        // Get purchase IDs to refresh (use stored IDs from navigation)
-        val purchaseIdsToRefresh = if (cnfPageSelectedPurchaseIds.isNotEmpty()) {
-            cnfPageSelectedPurchaseIds
-        } else {
-            console.warn("⚠️ No purchase IDs stored in cnfPageSelectedPurchaseIds, trying fallback...")
-            // Fallback: try to get from selected cars (use js() - car may be plain JS object)
-            cnfPageSelectedCars.mapNotNull { car ->
-                val purchaseId = js("(car.purchaseId != null && car.purchaseId !== undefined) ? car.purchaseId : car.id")
-                if (purchaseId != null && purchaseId != js("undefined")) {
-                    (purchaseId as? Number)?.toLong()
-                } else {
-                    null
-                }
-            }
-        }
-        
-        if (purchaseIdsToRefresh.isEmpty()) {
-            console.warn("⚠️ No purchase IDs found for refresh, navigating directly to Car Booking page")
-            showCarBookingPage()
-            return@addEventListener
-        }
-        
-        console.log("🔄 FINISH button: Refreshing ${purchaseIdsToRefresh.size} purchases before navigation...")
-        
-        // Refresh purchases from API and then navigate (refreshPurchasesByIds handles navigation)
-        refreshPurchasesByIds(purchaseIdsToRefresh)
-    })
+    updateCnfFreightFieldVisibility()
 }
 
 fun loadChassisDropdownForCnf(selectedCars: List<dynamic>? = null) {
@@ -602,6 +580,7 @@ fun loadCarCostDetails() {
                 
                 // Recalculate total after loading
                 calculateCnfTotal()
+                updateCnfFreightFieldVisibility()
             } else {
                 // Fallback to search endpoint
                 console.log("⚠️ costs-by-chassis returned null, trying search endpoint fallback")
@@ -737,6 +716,7 @@ fun processPurchaseCostData(purchase: dynamic, chassis: String) {
     
     // Recalculate total after loading
     calculateCnfTotal()
+    updateCnfFreightFieldVisibility()
 }
 
 fun loadCarCostDetailsFromSelectedCars(chassis: String) {
@@ -795,6 +775,7 @@ fun loadCarCostDetailsFromSelectedCars(chassis: String) {
         }
         
         calculateCnfTotal()
+        updateCnfFreightFieldVisibility()
         console.log("✅ Populated cost fields from selected cars")
     } else {
         console.log("⚠️ Purchase not found in selected cars either, clearing fields")
@@ -1082,15 +1063,24 @@ fun saveTotalCnfPrice() {
     // Extract numeric value from "¥476900" format
     val totalCnfPrice = totalCnfPriceText.replace("¥", "").replace(",", "").toDoubleOrNull() ?: 0.0
     
-    console.log("📊 Total C&F Price to save: $totalCnfPrice for purchase ID: $purchaseId")
+    val saveAsCnf = lastCalculationMode == "C&F"
+    console.log("📊 Total price to save (${if (saveAsCnf) "C&F" else "FOB"}): $totalCnfPrice for purchase ID: $purchaseId (lastCalculationMode=$lastCalculationMode)")
     
-    // Per documentation: Use POST /api/purchases/save-total-cnf-by-ids with purchaseIds array
     val requestData = js("{}")
-    // Convert purchase ID to JS number array (backend expects array of numbers)
     requestData.purchaseIds = arrayOf(purchaseId.toDouble())
-    requestData.totalCnfPrice = totalCnfPrice
+    if (saveAsCnf) {
+        requestData.totalCnfPrice = totalCnfPrice
+    } else {
+        requestData.totalFobPrice = totalCnfPrice
+    }
     
-    console.log("📤 Sending save request:", "purchaseIds=[$purchaseId]", "totalCnfPrice=$totalCnfPrice")
+    val saveUrl = if (saveAsCnf) {
+        apiUrl("purchases/save-total-cnf-by-ids")
+    } else {
+        apiUrl("purchases/save-total-fob-by-ids")
+    }
+    
+    console.log("📤 Sending save request to $saveUrl:", JSON.stringify(requestData))
     
     val requestInit = js("{}")
     requestInit.method = "POST"
@@ -1099,10 +1089,7 @@ fun saveTotalCnfPrice() {
     requestInit.headers = headers
     requestInit.body = JSON.stringify(requestData)
     
-    console.log("📤 Request body:", JSON.stringify(requestData))
-    console.log("📤 Request URL:", apiUrl("purchases/save-total-cnf-by-ids"))
-    
-    window.fetch(apiUrl("purchases/save-total-cnf-by-ids"), requestInit)
+    window.fetch(saveUrl, requestInit)
         .then { response: dynamic ->
             console.log("📥 Response status:", response.status)
             if (response.ok) {
@@ -1115,8 +1102,8 @@ fun saveTotalCnfPrice() {
             }
         }
         .then { result: dynamic ->
-            console.log("✅ Total ${if (cnfPageIsFobMode) "FOB" else "C&F"} Price saved successfully:", result)
-            val message = if (cnfPageIsFobMode) "Total FOB price saved successfully" else "Total C&F price saved successfully"
+            console.log("✅ Total ${if (saveAsCnf) "C&F" else "FOB"} price saved successfully:", result)
+            val message = if (saveAsCnf) "Total C&F price saved successfully" else "Total FOB price saved successfully"
             showMessage(message, "success")
         }
         .catch { error: dynamic ->

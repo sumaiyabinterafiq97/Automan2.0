@@ -240,13 +240,22 @@ window.rixoPriceMapping = {
                 rixoCompany: 'KLC',
                 rixoPrice: '¥5,500',
                 venueId: 'E0483',
-                stockLocation: 'KLC'
+                stockLocation: 'KLC',
+                pol: 'OSAKA;SENBOKU;KOBE'
             },
             {
                 rixoCompany: 'KLC',
                 rixoPrice: '¥4,500',
                 venueId: 'E0483',
-                stockLocation: 'KLC'
+                stockLocation: 'KLC',
+                pol: 'OSAKA;SENBOKU;KOBE'
+            },
+            {
+                rixoCompany: 'KLC',
+                rixoPrice: '¥5,500',
+                venueId: 'E0483',
+                stockLocation: 'ECL KOBE',
+                pol: 'OSAKA;SENBOKU;KOBE'
             },
         ]
     },
@@ -2227,25 +2236,69 @@ window.rixoPriceMapping = {
 };
 
 
+/**
+ * Split supplier / master fields that store multiple values in one cell (e.g. "A;B;C").
+ * Also normalizes Unicode semicolons (Excel/Sheets) so they split like ASCII ';'.
+ */
+window.splitMasterListTokens = function(val) {
+    if (val == null || val === undefined) return [];
+    let s = String(val).trim();
+    if (!s) return [];
+    s = s.replace(/\uFF1B/g, ';').replace(/\uFE55/g, ';');
+    return s.split(';').map(function(x) { return x.trim(); }).filter(function(x) { return x.length > 0; });
+};
+
+/**
+ * Expand any array entries that are still joined with ';' into separate dropdown options
+ * (same semantics as Supplier Map table — ';' separates values, not part of one label).
+ */
+window.flattenSemicolonValues = function(arr) {
+    if (!arr || !Array.isArray(arr)) return [];
+    const out = [];
+    const seen = new Set();
+    for (let i = 0; i < arr.length; i++) {
+        const v = arr[i];
+        if (v == null || v === undefined) continue;
+        const s = String(v).trim();
+        if (!s) continue;
+        const parts = window.splitMasterListTokens(s);
+        for (let j = 0; j < parts.length; j++) {
+            const p = parts[j];
+            const key = p.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            out.push(p);
+        }
+    }
+    return out;
+};
+
 // Helper function to get unique values from arrays
 window.getUniqueValues = function(arr) {
     if (!arr || !Array.isArray(arr)) {
         return [];
     }
-    return [...new Set(arr.filter(val => val && val.trim() !== ''))];
+    const filtered = arr
+        .filter(val => val != null && String(val).trim() !== '')
+        .map(val => String(val).trim());
+    const flattened = window.flattenSemicolonValues ? window.flattenSemicolonValues(filtered) : filtered;
+    return [...new Set(flattened)];
 };
 
 // Case-insensitive unique values (first occurrence wins) for master-set dropdowns with "See More"
 window.getUniqueValuesCaseInsensitive = function(arr) {
     if (!arr || !Array.isArray(arr)) return [];
+    const filtered = arr
+        .filter(val => val != null && String(val).trim() !== '')
+        .map(val => String(val).trim());
+    const flattened = window.flattenSemicolonValues ? window.flattenSemicolonValues(filtered) : filtered;
     const seen = new Set();
-    return arr.filter(val => {
-        if (!val || typeof val !== 'string' || val.trim() === '') return false;
-        const lower = val.trim().toLowerCase();
+    return flattened.filter(val => {
+        const lower = val.toLowerCase();
         if (seen.has(lower)) return false;
         seen.add(lower);
         return true;
-    }).map(val => val.trim());
+    });
 };
 
 // Helper function to get filtered options based on previous selections
@@ -2387,29 +2440,107 @@ window.parseRixoPrice = function(value) {
     return cleaned;
 };
 
-// Fetch POLs for a stock location from booking_mappings and update POL dropdowns; optionally set first value.
-window.fetchPolsByStockLocationAndUpdate = function(stockLocation, setFirstValue) {
+// POL tokens from Supplier Map rows: split "OSAKA;SENBOKU;KOBE" and dedupe (case-insensitive, preserve order).
+window.flattenPolTokensFromMappings = function(mappings) {
+    var seen = {};
+    var out = [];
+    (mappings || []).forEach(function(m) {
+        var raw = (m && m.pol != null) ? String(m.pol) : '';
+        if (!raw || !String(raw).trim()) return;
+        raw.split(';').forEach(function(t) {
+            var v = String(t).trim();
+            if (!v) return;
+            var k = v.toLowerCase();
+            if (seen[k]) return;
+            seen[k] = true;
+            out.push(v);
+        });
+    });
+    return out;
+};
+
+window.getPolTokensFromRixoMappingForSupplier = function(auctionName) {
+    if (!auctionName || !window.rixoPriceMapping) return [];
+    var keys = Object.keys(window.rixoPriceMapping);
+    var lower = String(auctionName).toLowerCase();
+    var match = keys.find(function(k) { return k.toLowerCase() === lower; });
+    var key = match || auctionName;
+    var data = window.rixoPriceMapping[key];
+    if (!data || !Array.isArray(data.mappings)) return [];
+    return window.flattenPolTokensFromMappings(data.mappings);
+};
+
+function mergePolMappingAndApiLists(mappingPolTokens, apiList) {
+    var seen = {};
+    var out = [];
+    (mappingPolTokens || []).forEach(function(p) {
+        var v = String(p).trim();
+        if (!v) return;
+        var k = v.toUpperCase();
+        if (seen[k]) return;
+        seen[k] = true;
+        out.push(v);
+    });
+    (apiList || []).forEach(function(p) {
+        var v = String(p).trim();
+        if (!v) return;
+        var k = v.toUpperCase();
+        if (seen[k]) return;
+        seen[k] = true;
+        out.push(v);
+    });
+    return out;
+}
+
+// When stock location changes: pass supplier combobox id ('stockLocation' | 'editStockLocation').
+window.fetchPolsAfterStockChange = function(stockFieldId) {
+    if (!stockFieldId) return;
+    var ah = (stockFieldId === 'editStockLocation')
+        ? (typeof window.getComboboxValue === 'function' ? window.getComboboxValue('editAuctionName') : '')
+        : (typeof window.getComboboxValue === 'function' ? window.getComboboxValue('auctionName') : '');
+    var st = typeof window.getComboboxValue === 'function' ? window.getComboboxValue(stockFieldId) : '';
+    var mp = (typeof window.getPolTokensFromRixoMappingForSupplier === 'function')
+        ? window.getPolTokensFromRixoMappingForSupplier(ah)
+        : null;
+    if (typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+        window.fetchPolsByStockLocationAndUpdate(ah, st, true, mp);
+    }
+};
+
+// Fetch POLs for a stock location from rixo_prices and update POL dropdowns; optionally set first value.
+// mappingPolTokens: optional POL list from Supplier Map (shown first, then API extras, then master list).
+// auctionHouse is required so we don't accidentally pull POLs belonging to a different supplier.
+window.fetchPolsByStockLocationAndUpdate = function(auctionHouse, stockLocation, setFirstValue, mappingPolTokens) {
     if (setFirstValue === undefined) setFirstValue = true;
     var polSelect = document.getElementById('pol');
     var editPolSelect = document.getElementById('editPol');
     if (!stockLocation || String(stockLocation).trim() === '') {
         console.log('[POL] Clearing POL (empty stock location)');
         if (typeof window.updateDropdown === 'function') {
-            window.updateDropdown('pol', 'editPol', []);
+            window.updateDropdown('pol', 'editPol', [], true);
         }
         if (polSelect) { polSelect.value = ''; var inp = document.getElementById('polInput'); if (inp) inp.value = ''; }
         if (editPolSelect) { editPolSelect.value = ''; var inp = document.getElementById('editPolInput'); if (inp) inp.value = ''; }
         return Promise.resolve();
     }
-    // Use same API base as rest of app (window.apiUrl from Kotlin or booking-mapping.js)
-    var url = (typeof window.apiUrl === 'function')
-        ? window.apiUrl('booking/mappings/pols-by-stock-location?stockLocation=' + encodeURIComponent(stockLocation))
-        : (typeof apiUrl !== 'undefined' ? apiUrl('booking/mappings/pols-by-stock-location?stockLocation=' + encodeURIComponent(stockLocation)) : '');
-    if (!url) {
-        console.warn('[POL] No apiUrl available, skipping POL fetch for:', stockLocation);
+    if (!auctionHouse || String(auctionHouse).trim() === '') {
+        console.warn('[POL] Missing auctionHouse; cannot fetch POLs from rixo_prices.'); // Keep POL empty
+        if (typeof window.updateDropdown === 'function') {
+            window.updateDropdown('pol', 'editPol', [], true);
+        }
         return Promise.resolve();
     }
-    console.log('[POL] Fetching POLs for stock location:', stockLocation, '->', url);
+
+    // Fetch from rixo_prices: /api/rixo/prices/by-auction-house/{auctionHouse}
+    var url = (typeof window.apiUrl === 'function')
+        ? window.apiUrl('rixo/prices/by-auction-house/' + encodeURIComponent(auctionHouse))
+        : (typeof apiUrl !== 'undefined' ? apiUrl('rixo/prices/by-auction-house/' + encodeURIComponent(auctionHouse)) : '');
+
+    if (!url) {
+        console.warn('[POL] No apiUrl available, skipping POL fetch for:', auctionHouse, stockLocation);
+        return Promise.resolve();
+    }
+    console.log('[POL] Fetching POLs from rixo_prices for auctionHouse:', auctionHouse, 'stockLocation:', stockLocation, '->', url);
     return fetch(url)
         .then(function(r) {
             if (!r.ok) {
@@ -2418,22 +2549,111 @@ window.fetchPolsByStockLocationAndUpdate = function(stockLocation, setFirstValue
             return r.json();
         })
         .then(function(res) {
-            var list = (res && res.data && Array.isArray(res.data)) ? res.data : [];
-            console.log('[POL] POLs received for', stockLocation, ':', list, '(success:', res && res.success, ')');
+            var prices = (res && res.data && Array.isArray(res.data)) ? res.data : [];
+            // Filter by stockLocation then extract distinct non-empty POLs
+            var list = [];
+            var seen = {};
+            prices.forEach(function(p) {
+                var sl = (p && p.stockLocation != null) ? String(p.stockLocation).trim() : '';
+                if (sl !== String(stockLocation).trim()) return;
+                var pol = (p && p.pol != null) ? String(p.pol).trim() : '';
+                if (!pol) return;
+                var key = pol.toUpperCase();
+                if (!seen[key]) { seen[key] = true; list.push(pol); }
+            });
+
+            var mapTok = (mappingPolTokens && mappingPolTokens.length) ? mappingPolTokens : window.getPolTokensFromRixoMappingForSupplier(auctionHouse);
+            var merged = mergePolMappingAndApiLists(mapTok, list);
+
+            console.log('[POL] POLs for', auctionHouse, stockLocation, 'api:', list, 'mapping:', mapTok, 'merged:', merged, '(success:', res && res.success, ')');
             if (typeof window.updateDropdown === 'function') {
-                window.updateDropdown('pol', 'editPol', list);
+                window.updateDropdown('pol', 'editPol', merged, true);
             }
-            if (setFirstValue && list.length > 0 && typeof window.setFieldValue === 'function') {
-                window.setFieldValue('pol', 'editPol', list[0]);
+            if (setFirstValue && merged.length > 0 && typeof window.setFieldValue === 'function') {
+                window.setFieldValue('pol', 'editPol', merged[0]);
             }
         })
         .catch(function(err) {
-            console.warn('[POL] fetchPolsByStockLocationAndUpdate failed for', stockLocation, ':', err);
+            console.warn('[POL] fetchPolsByStockLocationAndUpdate failed for', auctionHouse, stockLocation, ':', err);
+            var fallback = (mappingPolTokens && mappingPolTokens.length)
+                ? mappingPolTokens
+                : window.getPolTokensFromRixoMappingForSupplier(auctionHouse);
             if (typeof window.updateDropdown === 'function') {
-                window.updateDropdown('pol', 'editPol', []);
+                window.updateDropdown('pol', 'editPol', fallback || [], true);
+            }
+            if (setFirstValue && fallback && fallback.length > 0 && typeof window.setFieldValue === 'function') {
+                window.setFieldValue('pol', 'editPol', fallback[0]);
             }
         });
 };
+
+/** True if trimmed value matches some entry in list (case-insensitive). */
+function __listContainsTokenCaseInsensitive(list, raw) {
+    if (!list || !list.length || raw == null) return false;
+    var v = String(raw).trim();
+    if (!v) return false;
+    var u = v.toUpperCase();
+    for (var i = 0; i < list.length; i++) {
+        if (String(list[i] == null ? '' : list[i]).trim().toUpperCase() === u) return true;
+    }
+    return false;
+}
+
+/** Prefer current selection when it is still valid for this supplier; otherwise first list entry. */
+function __pickPreservedOrFirst(list, currentRaw) {
+    if (!list || list.length === 0) return null;
+    if (__listContainsTokenCaseInsensitive(list, currentRaw)) {
+        var u = String(currentRaw).trim().toUpperCase();
+        for (var j = 0; j < list.length; j++) {
+            if (String(list[j] == null ? '' : list[j]).trim().toUpperCase() === u) return list[j];
+        }
+    }
+    return list[0];
+}
+
+/** Read stock / venue / rixo / POL from the active form (edit purchase vs add). */
+function __getCurrentSupplierFieldValues() {
+    var g = typeof window.getComboboxValue === 'function'
+        ? function(id) { return (window.getComboboxValue(id) || '').trim(); }
+        : function(id) {
+            var inp = document.getElementById(id + 'Input');
+            var sel = document.getElementById(id);
+            var v = (inp && inp.value) ? inp.value : ((sel && sel.value) ? sel.value : '');
+            return (v || '').trim();
+        };
+    var vals;
+    if (document.getElementById('editAuctionName')) {
+        vals = {
+            stock: g('editStockLocation'),
+            venue: g('editVenueId'),
+            rixo: g('editRixoCompany'),
+            pol: g('editPol')
+        };
+    } else {
+        vals = {
+            stock: g('stockLocation'),
+            venue: g('venueId'),
+            rixo: g('rixoCompany'),
+            pol: g('pol')
+        };
+    }
+    // After refreshRixoDropdowns → populateDropdownOptions(), clears wipe the DOM; merge snapshot taken before clear
+    var snap = window.__rixoSupplierPreserveSnapshot;
+    if (snap && typeof snap === 'object') {
+        function mer(x, y) {
+            var a = (x != null && String(x).trim() !== '') ? String(x).trim() : '';
+            var b = (y != null && String(y).trim() !== '') ? String(y).trim() : '';
+            return a || b || '';
+        }
+        return {
+            stock: mer(vals.stock, snap.stock),
+            venue: mer(vals.venue, snap.venue),
+            rixo: mer(vals.rixo, snap.rixo),
+            pol: mer(vals.pol, snap.pol)
+        };
+    }
+    return vals;
+}
 
 // Helper function to auto-select related fields
 window.autoSelectRelatedFields = function(auctionName, changedField, changedValue) {
@@ -2478,50 +2698,72 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
     
     if (changedField === 'auctionHouse') {
         // When auction house is selected, auto-select stockLocation and venueId if they're consistent
-        const stockLocations = [...new Set(mappings.map(m => m.stockLocation).filter(s => s && s.trim() !== ''))];
-        const venueIds = [...new Set(mappings.map(m => m.venueId).filter(v => v && v.trim() !== ''))];
-         const rixoCompanies = [...new Set(mappings.map(m => m.rixoCompany).filter(c => c && c.trim() !== ''))];
-        const shipmentSizes = [...new Set(mappings.map(m => m.typeOfVehicle).filter(t => t && t.trim() !== ''))];
-        const rixoPrices = [...new Set(mappings.map(m => m.rixoPrice).filter(p => p && p.trim() !== ''))];
-        
+        const stockLocations = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.stockLocation).filter(s => s && String(s).trim() !== ''));
+        const venueIds = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.venueId).filter(v => v && String(v).trim() !== ''));
+        const rixoCompanies = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.rixoCompany).filter(c => c && String(c).trim() !== ''));
+        const shipmentSizes = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.typeOfVehicle).filter(t => t && String(t).trim() !== ''));
+        const rixoPrices = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.rixoPrice).filter(p => p && String(p).trim() !== ''));
+        const polTokensFromMapping = window.flattenPolTokensFromMappings ? window.flattenPolTokensFromMappings(mappings) : [];
+
         console.log('Auto-selecting for auction house:', {
             stockLocations: stockLocations,
             venueIds: venueIds,
             rixoCompanies: rixoCompanies,
             shipmentSizes: shipmentSizes,
-            rixoPrices: rixoPrices
+            rixoPrices: rixoPrices,
+            polTokensFromMapping: polTokensFromMapping
         });
         
-        // Update dropdowns with all available options for both add and edit forms FIRST
-        updateDropdown('stockLocation', 'stockLocation', stockLocations);
-        updateDropdown('stockLocation', 'editStockLocation', stockLocations);
-        updateDropdown('venueId', 'venueId', venueIds);
-        updateDropdown('venueId', 'editVenueId', venueIds);
-        updateDropdown('rixoCompany', 'rixoCompany', rixoCompanies);
-        updateDropdown('rixoCompany', 'editRixoCompany', rixoCompanies);
+        // Update dropdowns with all available options for both add and edit forms FIRST (supplier rows | sep | master)
+        updateDropdown('stockLocation', 'editStockLocation', stockLocations, true);
+        updateDropdown('venueId', 'editVenueId', venueIds, true);
+        updateDropdown('rixoCompany', 'editRixoCompany', rixoCompanies, true);
+        // POL: same pattern as Stock Location — mapping POL tokens first (then async merge with rixo_prices + master)
+        if (polTokensFromMapping.length > 0) {
+            updateDropdown('pol', 'editPol', polTokensFromMapping, true);
+        } else {
+            updateDropdown('pol', 'editPol', [], true);
+        }
         // Intentionally do NOT update Vehicle type or Rixo Price from mapping.
         
         // THEN auto-select values after dropdowns are populated
         // Use setTimeout to ensure dropdowns are fully populated first
+        // Preserve current combobox values when still valid for this supplier (fixes edit form snapping back to [0] after refresh or remapping).
         setTimeout(function() {
-            // Stock Location - always select first value if available
-            if (stockLocations.length > 0) {
-            setFieldValue('stockLocation', 'editStockLocation', stockLocations[0]);
-                // Fetch POLs for this stock location and update POL dropdown; pre-fill first POL
-                if (typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                    window.fetchPolsByStockLocationAndUpdate(stockLocations[0], true);
+            var cur = __getCurrentSupplierFieldValues();
+            var stockPick = stockLocations.length > 0 ? __pickPreservedOrFirst(stockLocations, cur.stock) : null;
+            var venuePick = venueIds.length > 0 ? __pickPreservedOrFirst(venueIds, cur.venue) : null;
+            var rixoPick = rixoCompanies.length > 0 ? __pickPreservedOrFirst(rixoCompanies, cur.rixo) : null;
+            var polPick = polTokensFromMapping.length > 0 ? __pickPreservedOrFirst(polTokensFromMapping, cur.pol) : null;
+
+            if (stockLocations.length > 0 && stockPick) {
+                setFieldValue('stockLocation', 'editStockLocation', stockPick);
+                if (polTokensFromMapping.length > 0 && typeof window.setFieldValue === 'function') {
+                    var polToSet = polPick || polTokensFromMapping[0];
+                    window.setFieldValue('pol', 'editPol', polToSet);
                 }
-        }
-            
-            // Venue ID - always select first value if available
-            if (venueIds.length > 0) {
-            setFieldValue('venueId', 'editVenueId', venueIds[0]);
-        }
-        
-            // Rixo Company - always select first value if available
-        if (rixoCompanies.length > 0) {
-            setFieldValue('rixoCompany', 'editRixoCompany', rixoCompanies[0]);
-        }
+                // Third arg false => do not overwrite POL with merged[0] after rixo_prices fetch when current POL is still valid in supplier map
+                var keepPolAfterFetch = !!(cur.pol && __listContainsTokenCaseInsensitive(polTokensFromMapping, cur.pol));
+                if (typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+                    window.fetchPolsByStockLocationAndUpdate(normalizedAuctionName, stockPick, !keepPolAfterFetch, polTokensFromMapping);
+                }
+            } else if (polTokensFromMapping.length > 0) {
+                var polOne = polPick || polTokensFromMapping[0];
+                if (typeof window.setFieldValue === 'function') {
+                    window.setFieldValue('pol', 'editPol', polOne);
+                }
+            }
+
+            if (venueIds.length > 0 && venuePick) {
+                setFieldValue('venueId', 'editVenueId', venuePick);
+            }
+
+            if (rixoCompanies.length > 0 && rixoPick) {
+                setFieldValue('rixoCompany', 'editRixoCompany', rixoPick);
+            }
+            if (window.__rixoSupplierPreserveSnapshot) {
+                window.__rixoSupplierPreserveSnapshot = null;
+            }
         }, 100);
         
     } else if (changedField === 'rixoCompany') {
@@ -2545,8 +2787,7 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
             });
             
              // Update dropdowns directly for both add and edit forms
-            updateDropdown('rixoCompany', 'rixoCompany', availableCompanies);
-            updateDropdown('rixoCompany', 'editRixoCompany', availableCompanies);
+            updateDropdown('rixoCompany', 'editRixoCompany', availableCompanies, true);
             
             // Auto-select if only one option for both add and edit forms
             if (availableCompanies.length === 1) {
@@ -2580,12 +2821,12 @@ window.updateDropdownOptions = function(auctionName, typeOfVehicle, stockLocatio
     // Intentionally do NOT update Vehicle type or Rixo Price dropdowns.
     
     // Update Venue ID dropdown
-    updateDropdown('venueId', 'editVenueId', filteredOptions.venueId);
+    updateDropdown('venueId', 'editVenueId', filteredOptions.venueId, true);
     
     // Stock Location and Rixo Company remain unchanged (they don't get filtered)
     const auctionData = window.rixoPriceMapping[auctionName];
-    updateDropdown('stockLocation', 'editStockLocation', auctionData.stockLocation);
-    updateDropdown('rixoCompany', 'editRixoCompany', auctionData.rixoCompany);
+    updateDropdown('stockLocation', 'editStockLocation', auctionData.stockLocation, true);
+    updateDropdown('rixoCompany', 'editRixoCompany', auctionData.rixoCompany, true);
 };
 
 // Master-set field IDs that get case-insensitive dedupe and "See More" as last option
@@ -2598,14 +2839,104 @@ var MASTER_FIELD_IDS = {
     pol: true, editPol: true
 };
 var SEE_MORE_VALUE = '__SEE_MORE__';
+/** Same value as Kotlin CHASSIS_MASTER_SEP_VALUE — overlay draws a rule; not selectable. */
+var SUPPLIER_MASTER_SEP_VALUE = '__CHASSIS_MASTER_SEP__';
+
+function registerSupplierMasterComboId(selectId) {
+    window.__supplierMasterComboIds = window.__supplierMasterComboIds || [];
+    if (window.__supplierMasterComboIds.indexOf(selectId) < 0) {
+        window.__supplierMasterComboIds.push(selectId);
+    }
+}
+
+function masterApiPathForSupplierField(selectId) {
+    var map = {
+        'venueId': 'master-menu/venue_id', 'editVenueId': 'master-menu/venue_id',
+        'typeOfVehicle': 'master-menu/type_of_vehicle', 'editTypeOfVehicle': 'master-menu/type_of_vehicle',
+        'shipmentSize': 'master-menu/type_of_vehicle', 'editShipmentSize': 'master-menu/type_of_vehicle',
+        'stockLocation': 'master-menu/stock_location', 'editStockLocation': 'master-menu/stock_location',
+        'rixoCompany': 'master-menu/rixo_company', 'editRixoCompany': 'master-menu/rixo_company',
+        'pol': 'master-menu/pol', 'editPol': 'master-menu/pol'
+    };
+    return map[selectId] || null;
+}
+
+function appendMasterAfterSeparatorForSupplierField(selectId) {
+    var path = masterApiPathForSupplierField(selectId);
+    if (!path) return;
+    var url = (typeof window.apiUrl === 'function') ? window.apiUrl(path) : (typeof apiUrl !== 'undefined' ? apiUrl(path) : '');
+    if (!url) return;
+    fetch(url)
+        .then(function(r) { return r && r.ok ? r.json() : []; })
+        .then(function(raw) {
+            var list = Array.isArray(raw) ? raw : [];
+            var sel = document.getElementById(selectId);
+            if (!sel) return;
+            var seen = {};
+            for (var i = 0; i < sel.options.length; i++) {
+                var v = (sel.options[i].value || '').trim();
+                if (v && v !== SUPPLIER_MASTER_SEP_VALUE && v !== SEE_MORE_VALUE && v !== '__SEE_LESS__') {
+                    seen[v.toLowerCase()] = true;
+                }
+            }
+            list.forEach(function(item) {
+                var it = String(item).trim();
+                if (!it) return;
+                if (seen[it.toLowerCase()]) return;
+                seen[it.toLowerCase()] = true;
+                var opt = document.createElement('option');
+                opt.value = it;
+                opt.textContent = it;
+                sel.appendChild(opt);
+            });
+            if (typeof window.syncComboboxInput === 'function') {
+                window.syncComboboxInput(selectId);
+            }
+        })
+        .catch(function(err) {
+            console.warn('[supplier+master] Failed to load master for', selectId, err);
+        });
+}
+
+function buildSupplierMappingPlusMasterSelect(selectId, supplierOptions, placeholderLabel) {
+    var sel = document.getElementById(selectId);
+    if (!sel) return;
+    registerSupplierMasterComboId(selectId);
+    var seen = {};
+    sel.innerHTML = '';
+    var def = document.createElement('option');
+    def.value = '';
+    def.textContent = placeholderLabel || 'Select';
+    sel.appendChild(def);
+    (supplierOptions || []).forEach(function(opt) {
+        var v = String(opt).trim();
+        if (!v) return;
+        var k = v.toLowerCase();
+        if (seen[k]) return;
+        seen[k] = true;
+        var o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        sel.appendChild(o);
+    });
+    var sep = document.createElement('option');
+    sep.value = SUPPLIER_MASTER_SEP_VALUE;
+    sep.textContent = 'Other Options \u2195';
+    sep.disabled = true;
+    sel.appendChild(sep);
+    if (typeof window.syncComboboxInput === 'function') {
+        window.syncComboboxInput(selectId);
+    }
+    appendMasterAfterSeparatorForSupplierField(selectId);
+}
 
 function uniqueOptionsForMasterField(options) {
     return window.getUniqueValuesCaseInsensitive ? window.getUniqueValuesCaseInsensitive(options) : window.getUniqueValues(options);
 }
 
-// Helper function to update a specific dropdown
-window.updateDropdown = function(elementId, editElementId, options) {
-    console.log('updateDropdown called:', elementId, editElementId, options);
+// Master fields: mapping values first, horizontal rule, then full master_menu list (same pattern as Venue ID — no See More).
+window.updateDropdown = function(elementId, editElementId, options, mergeSupplierThenMaster) {
+    console.log('updateDropdown called:', elementId, editElementId, options, 'mergeSupplierThenMaster=', mergeSupplierThenMaster);
     
     if (elementId === 'rixoPrice' || elementId === 'editRixoPrice') {
         // Handle Rixo Price dropdown (special case)
@@ -2649,24 +2980,26 @@ window.updateDropdown = function(elementId, editElementId, options) {
         var uniqueOptions = isMasterField ? uniqueOptionsForMasterField(options) : window.getUniqueValues(options);
         
         if (dropdown) {
-            dropdown.innerHTML = '<option value="">Select ' + defaultLabel + '</option>';
-            uniqueOptions.forEach(function(option) {
-                dropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
-            });
             if (isMasterField) {
-                dropdown.innerHTML += '<option value="' + SEE_MORE_VALUE + '">See More</option>';
+                buildSupplierMappingPlusMasterSelect(elementId, uniqueOptions, 'Select ' + defaultLabel);
+            } else {
+                dropdown.innerHTML = '<option value="">Select ' + defaultLabel + '</option>';
+                uniqueOptions.forEach(function(option) {
+                    dropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
+                });
             }
         }
         
         if (editDropdown) {
             var isEditMasterField = MASTER_FIELD_IDS[editElementId];
             var editUniqueOptions = isEditMasterField ? uniqueOptionsForMasterField(options) : window.getUniqueValues(options);
-            editDropdown.innerHTML = '<option value="">Select ' + editDefaultLabel + '</option>';
-            editUniqueOptions.forEach(function(option) {
-                editDropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
-            });
             if (isEditMasterField) {
-                editDropdown.innerHTML += '<option value="' + SEE_MORE_VALUE + '">See More</option>';
+                buildSupplierMappingPlusMasterSelect(editElementId, editUniqueOptions, 'Select ' + editDefaultLabel);
+            } else {
+                editDropdown.innerHTML = '<option value="">Select ' + editDefaultLabel + '</option>';
+                editUniqueOptions.forEach(function(option) {
+                    editDropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
+                });
             }
         }
         
@@ -3838,6 +4171,7 @@ window.closeMappingModal = function() {
 
 // Refresh Rixo dropdowns after changes
 window.refreshRixoDropdowns = function() {
+    window.__rixoSupplierPreserveSnapshot = null;
     // Reload the mapping data from backend
     fetch(apiUrl('rixo/prices'))
         .then(response => {
@@ -3846,9 +4180,29 @@ window.refreshRixoDropdowns = function() {
                 // If API fails, use the static mapping data that's already loaded
                 if (typeof window.rixoPriceMapping !== 'undefined' && Object.keys(window.rixoPriceMapping).length > 0) {
                     console.log('Using existing static Rixo mapping data');
+                    var preserveSnapFail = document.getElementById('editAuctionName') ? __getCurrentSupplierFieldValues() : null;
+                    window.__rixoSupplierPreserveSnapshot = preserveSnapFail;
                     if (typeof window.populateDropdownOptions === 'function') {
                         window.populateDropdownOptions();
                     }
+                    const auctionNameSelectF = document.getElementById('auctionName');
+                    const editAuctionNameSelectF = document.getElementById('editAuctionName');
+                    let selectedAuctionNameF = null;
+                    if (auctionNameSelectF && auctionNameSelectF.value && auctionNameSelectF.value !== '__add_new_supplier__') {
+                        selectedAuctionNameF = auctionNameSelectF.value;
+                    } else if (editAuctionNameSelectF && editAuctionNameSelectF.value && editAuctionNameSelectF.value !== '__add_new_supplier__') {
+                        selectedAuctionNameF = editAuctionNameSelectF.value;
+                    }
+                    if (selectedAuctionNameF && window.autoSelectRelatedFields) {
+                        setTimeout(function() {
+                            window.autoSelectRelatedFields(selectedAuctionNameF, 'auctionHouse', selectedAuctionNameF);
+                        }, 100);
+                    }
+                    setTimeout(function() {
+                        if (window.__rixoSupplierPreserveSnapshot) {
+                            window.__rixoSupplierPreserveSnapshot = null;
+                        }
+                    }, 500);
                 } else {
                     console.error('No Rixo mapping data available');
                 }
@@ -3858,6 +4212,9 @@ window.refreshRixoDropdowns = function() {
         })
         .then(data => {
             if (data && data.success) {
+                // Snapshot edit form supplier fields BEFORE populateDropdownOptions clears innerHTML (stock/venue/rixo/pol)
+                var preserveSnap = document.getElementById('editAuctionName') ? __getCurrentSupplierFieldValues() : null;
+                window.__rixoSupplierPreserveSnapshot = preserveSnap;
                 // Rebuild the mapping object
                 rebuildRixoMapping(data.data);
                 // Repopulate dropdowns
@@ -3885,6 +4242,12 @@ window.refreshRixoDropdowns = function() {
                         window.autoSelectRelatedFields(selectedAuctionName, 'auctionHouse', selectedAuctionName);
                     }, 100);
                 }
+                // Safety: clear snapshot if autoSelect exited early (no mapping rows) or after async chain
+                setTimeout(function() {
+                    if (window.__rixoSupplierPreserveSnapshot) {
+                        window.__rixoSupplierPreserveSnapshot = null;
+                    }
+                }, 500);
                 
                 // Trigger auto-selection if needed
                 window.toggleManageButtons();
@@ -3898,12 +4261,93 @@ window.refreshRixoDropdowns = function() {
             // Fallback to static data if available
             if (typeof window.rixoPriceMapping !== 'undefined' && Object.keys(window.rixoPriceMapping).length > 0) {
                 console.log('Using existing static Rixo mapping data as fallback');
+                var preserveSnapCatch = document.getElementById('editAuctionName') ? __getCurrentSupplierFieldValues() : null;
+                window.__rixoSupplierPreserveSnapshot = preserveSnapCatch;
                 if (typeof window.populateDropdownOptions === 'function') {
                     window.populateDropdownOptions();
                 }
+                const auctionNameSelectC = document.getElementById('auctionName');
+                const editAuctionNameSelectC = document.getElementById('editAuctionName');
+                let selectedAuctionNameC = null;
+                if (auctionNameSelectC && auctionNameSelectC.value && auctionNameSelectC.value !== '__add_new_supplier__') {
+                    selectedAuctionNameC = auctionNameSelectC.value;
+                } else if (editAuctionNameSelectC && editAuctionNameSelectC.value && editAuctionNameSelectC.value !== '__add_new_supplier__') {
+                    selectedAuctionNameC = editAuctionNameSelectC.value;
+                }
+                if (selectedAuctionNameC && window.autoSelectRelatedFields) {
+                    setTimeout(function() {
+                        window.autoSelectRelatedFields(selectedAuctionNameC, 'auctionHouse', selectedAuctionNameC);
+                    }, 100);
+                }
+                setTimeout(function() {
+                    if (window.__rixoSupplierPreserveSnapshot) {
+                        window.__rixoSupplierPreserveSnapshot = null;
+                    }
+                }, 500);
             }
         });
 };
+
+/* splitMasterListTokens / flattenSemicolonValues: defined near top of file (after static mapping). */
+
+/**
+ * Expand one supplier_price row into atomic mapping rows so each dropdown option is a single value
+ * (not "YAMAZAKI;KLC;LOGICO"). Cartesian product across split dimensions; same rixo price/venue repeated.
+ */
+function expandSupplierPriceRowToMappings(price) {
+    let types = window.splitMasterListTokens(price.shipmentSize);
+    let stocks = window.splitMasterListTokens(price.stockLocation);
+    let companies = window.splitMasterListTokens(price.rixoCompany);
+    let venues = window.splitMasterListTokens(price.venueId);
+    let priceTokens = window.splitMasterListTokens(price.rixoPrice);
+    let pols = window.splitMasterListTokens(price.pol);
+
+    function orSingleton(tokens, fallback) {
+        if (tokens.length > 0) return tokens;
+        const f = fallback != null ? String(fallback).trim() : '';
+        return f ? [f] : [''];
+    }
+
+    types = orSingleton(types, price.shipmentSize);
+    stocks = orSingleton(stocks, price.stockLocation);
+    companies = orSingleton(companies, price.rixoCompany);
+    venues = orSingleton(venues, price.venueId);
+    pols = orSingleton(pols, price.pol);
+    if (priceTokens.length === 0) {
+        const rp = price.rixoPrice != null ? String(price.rixoPrice).trim() : '';
+        priceTokens = rp ? [rp] : [''];
+    }
+
+    const out = [];
+    for (let ti = 0; ti < types.length; ti++) {
+        for (let si = 0; si < stocks.length; si++) {
+            for (let ci = 0; ci < companies.length; ci++) {
+                for (let vi = 0; vi < venues.length; vi++) {
+                    for (let pi = 0; pi < priceTokens.length; pi++) {
+                        for (let poli = 0; poli < pols.length; poli++) {
+                            const t = (types[ti] || '').trim();
+                            const s = (stocks[si] || '').trim();
+                            const c = (companies[ci] || '').trim();
+                            const v = (venues[vi] || '').trim();
+                            const p = (priceTokens[pi] || '').trim();
+                            const polVal = (pols[poli] || '').trim();
+                            if (!t && !s && !c && !v && !p) continue;
+                            out.push({
+                                typeOfVehicle: t,
+                                stockLocation: s,
+                                rixoCompany: c,
+                                rixoPrice: p,
+                                venueId: v,
+                                pol: polVal
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return out;
+}
 
 // Rebuild Rixo mapping object from backend data
 window.rebuildRixoMapping = function(rixoPrices) {
@@ -3922,26 +4366,21 @@ window.rebuildRixoMapping = function(rixoPrices) {
                 mappings: []
             };
         }
-        
-        const mapping = {
-            typeOfVehicle: price.shipmentSize,
-            stockLocation: price.stockLocation,
-            rixoCompany: price.rixoCompany,
-            rixoPrice: price.rixoPrice,
-            venueId: price.venueId
-        };
-        
-        window.rixoPriceMapping[auctionName].mappings.push(mapping);
+
+        const expanded = expandSupplierPriceRowToMappings(price);
+        expanded.forEach(function(mapping) {
+            window.rixoPriceMapping[auctionName].mappings.push(mapping);
+        });
     });
     
-    // Update arrays
+    // Update arrays (flatten ';'-joined cells so dropdowns match Supplier Map semantics)
     Object.keys(window.rixoPriceMapping).forEach(auctionName => {
         const auction = window.rixoPriceMapping[auctionName];
-        auction.typeOfVehicle = [...new Set(auction.mappings.map(m => m.typeOfVehicle).filter(t => t))];
-        auction.stockLocation = [...new Set(auction.mappings.map(m => m.stockLocation).filter(s => s))];
-        auction.rixoCompany = [...new Set(auction.mappings.map(m => m.rixoCompany).filter(c => c))];
-        auction.rixoPrice = [...new Set(auction.mappings.map(m => m.rixoPrice).filter(p => p))];
-        auction.venueId = [...new Set(auction.mappings.map(m => m.venueId).filter(v => v))];
+        auction.typeOfVehicle = window.getUniqueValuesCaseInsensitive(auction.mappings.map(m => m.typeOfVehicle).filter(t => t && String(t).trim() !== ''));
+        auction.stockLocation = window.getUniqueValuesCaseInsensitive(auction.mappings.map(m => m.stockLocation).filter(s => s && String(s).trim() !== ''));
+        auction.rixoCompany = window.getUniqueValuesCaseInsensitive(auction.mappings.map(m => m.rixoCompany).filter(c => c && String(c).trim() !== ''));
+        auction.rixoPrice = window.getUniqueValuesCaseInsensitive(auction.mappings.map(m => m.rixoPrice).filter(p => p && String(p).trim() !== ''));
+        auction.venueId = window.getUniqueValuesCaseInsensitive(auction.mappings.map(m => m.venueId).filter(v => v && String(v).trim() !== ''));
     });
 };
 

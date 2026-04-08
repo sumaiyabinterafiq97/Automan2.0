@@ -32,7 +32,30 @@ window.fetchBookingMappingsByCountry = async function(country) {
     const result = await response.json();
     const mappings = result.success ? result.data : [];
     
-    // Cache the results
+    // Fallback: in case `booking_mappings.country` is stored as a comma/semicolon-separated list
+    // (e.g. "DURBAN, UGANDA, KENYA, MAPUTO"), the backend by-country endpoint may return [].
+    if (mappings.length === 0) {
+      const normalizedWanted = (country || '').trim().toLowerCase();
+      if (normalizedWanted) {
+        const allResp = await fetch(window.apiUrl('booking/mappings'));
+        const allResult = await allResp.json();
+        if (allResult.success && Array.isArray(allResult.data)) {
+          const wantedMappings = allResult.data.filter(m => {
+            const rawCountry = (m && m.country) ? m.country : '';
+            const tokens = rawCountry
+              .toString()
+              .split(/[;,]/)
+              .map(s => s.trim())
+              .filter(Boolean);
+            return tokens.some(t => t.toLowerCase() === normalizedWanted);
+          });
+          window.bookingMappingsCache[country] = wantedMappings;
+          return wantedMappings;
+        }
+      }
+    }
+
+    // Cache the results (including the non-empty happy path)
     window.bookingMappingsCache[country] = mappings;
     return mappings;
   } catch (error) {
@@ -46,9 +69,11 @@ window.fetchBookingMappingsByCountry = async function(country) {
  */
 function getUniquePODs(mappings) {
   const pods = mappings
-    .map(m => m.pod)
-    .filter(pod => pod && pod.trim().length > 0)
-    .map(pod => pod.trim());
+    .flatMap(m => {
+      const raw = (m.pod || '').toString();
+      // Support comma-separated or semicolon-separated pod lists.
+      return raw.split(/[;,]/).map(s => s.trim()).filter(Boolean);
+    });
   
   // Remove duplicates
   return [...new Set(pods)];
@@ -139,6 +164,8 @@ function populatePODDropdown(mappings) {
       podSelect.value = currentValue;
       console.log('✅ Preserved POD value (custom):', currentValue);
     }
+    // Ensure listeners (LIST refresh, etc.) run after we set the value.
+    podSelect.dispatchEvent(new Event('change', { bubbles: true }));
   } else if (pods.length > 0 && !podSelect.value) {
     // Only auto-select first POD if no value was preserved
     podSelect.value = pods[0];
@@ -148,7 +175,7 @@ function populatePODDropdown(mappings) {
 }
 
 /**
- * Populate CONSIGNEE field and dropdown
+ * Populate CONSIGNEE field and dropdown (name only — address is not shown in the UI)
  */
 function populateConsigneeField(mappings) {
   const consigneeInput = document.getElementById('consigneeName');
@@ -159,7 +186,6 @@ function populateConsigneeField(mappings) {
   // Create dropdown container if it doesn't exist
   let consigneeContainer = document.getElementById('consigneeContainer');
   let consigneeSelect = document.getElementById('consigneeSelect');
-  let consigneeDisplay = document.getElementById('consigneeDisplay');
   
   if (!consigneeContainer) {
     // Create container div
@@ -170,55 +196,32 @@ function populateConsigneeField(mappings) {
     // Create select dropdown for consignee selection
     consigneeSelect = document.createElement('select');
     consigneeSelect.id = 'consigneeSelect';
-    consigneeSelect.style.cssText = 'width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; margin-bottom: 8px; background-color: white;';
+    consigneeSelect.style.cssText = 'width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; background-color: white;';
     
     // Insert dropdown before the input
     consigneeInput.parentNode.insertBefore(consigneeContainer, consigneeInput);
     consigneeContainer.appendChild(consigneeSelect);
     
-    // Create display div for formatted consignee info (replaces the input visually)
-    consigneeDisplay = document.createElement('div');
-    consigneeDisplay.id = 'consigneeDisplay';
-    consigneeDisplay.contentEditable = 'true';
-    consigneeDisplay.style.cssText = consigneeInput.style.cssText + '; min-height: 60px; line-height: 1.6; padding: 10px;';
-    consigneeDisplay.setAttribute('placeholder', '(CONSIGNEE NAME)');
+    // Remove legacy address preview block if it exists (older sessions)
+    const legacyDisplay = document.getElementById('consigneeDisplay');
+    if (legacyDisplay) {
+      legacyDisplay.remove();
+    }
     
-    // Insert display div after the select
-    consigneeContainer.appendChild(consigneeDisplay);
-    
-    // Hide original input but keep it for form submission
+    // Hide original input but keep it for form submission (value = consignee name only)
     consigneeInput.style.display = 'none';
     
-    // Sync display to hidden input when content changes
-    // Extract only text content, removing HTML tags and extra whitespace
-    consigneeDisplay.addEventListener('blur', function() {
-      // Get text content and clean it up
-      const textContent = (this.innerText || this.textContent || '').trim();
-      // Split by newline to separate name and address
-      const lines = textContent.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-      
-      if (lines.length >= 2) {
-        // Name is first line, address is rest
-        consigneeInput.value = lines[0] + '\n' + lines.slice(1).join(' ');
-      } else if (lines.length === 1) {
-        // Only name, no address
-        consigneeInput.value = lines[0];
-      } else {
-        consigneeInput.value = '';
-      }
-    });
-    
-    // Sync select dropdown to display
+    // Sync select dropdown to hidden input (name only; use option text so list refreshes stay correct)
     consigneeSelect.addEventListener('change', function() {
-      const selectedIndex = this.selectedIndex - 1; // -1 for "Select Consignee" option
-      if (selectedIndex >= 0 && selectedIndex < consignees.length) {
-        const selected = consignees[selectedIndex];
-        updateConsigneeDisplay(selected.name, selected.address);
+      const sel = this.options[this.selectedIndex];
+      if (!sel || sel.value === '') {
+        applyConsigneeNameOnly('');
+        return;
       }
+      applyConsigneeNameOnly(sel.textContent || '');
     });
   } else {
     consigneeSelect = document.getElementById('consigneeSelect');
-    consigneeDisplay = document.getElementById('consigneeDisplay');
   }
   
   // Populate select dropdown
@@ -233,58 +236,34 @@ function populateConsigneeField(mappings) {
   // Auto-fill with first consignee if available
   if (consignees.length > 0) {
     const firstConsignee = consignees[0];
-    updateConsigneeDisplay(firstConsignee.name, firstConsignee.address);
+    applyConsigneeNameOnly(firstConsignee.name);
     if (consigneeSelect.options.length > 1) {
-      consigneeSelect.selectedIndex = 1; // Select first actual option
+      consigneeSelect.selectedIndex = 1;
     }
   } else {
-    if (consigneeDisplay) {
-      consigneeDisplay.innerHTML = '';
-    }
     consigneeInput.value = '';
   }
 }
 
 /**
- * Update consignee display with formatted text (name in bold, address below)
+ * Store consignee name only (no address block in UI)
+ */
+function applyConsigneeNameOnly(consigneeName) {
+  const consigneeInput = document.getElementById('consigneeName');
+  if (consigneeInput) {
+    consigneeInput.value = (consigneeName || '').trim();
+  }
+}
+
+/**
+ * @deprecated Use applyConsigneeNameOnly — kept for any inline callers; does not show address
  */
 function updateConsigneeDisplay(consigneeName, consigneeAddress) {
-  const consigneeDisplay = document.getElementById('consigneeDisplay');
-  const consigneeInput = document.getElementById('consigneeName');
-  
-  if (!consigneeDisplay) return;
-  
-  // Build HTML with formatted text
-  let html = '';
-  if (consigneeName) {
-    html += `<strong>${escapeHtml(consigneeName)}</strong>`;
-  }
-  if (consigneeAddress) {
-    if (html) html += '<br>';
-    html += escapeHtml(consigneeAddress);
-  }
-  
-  consigneeDisplay.innerHTML = html;
-  
-  // Also update hidden input for form submission
-  // Only store the exact name and address passed to this function, nothing else
-  if (consigneeInput) {
-    // Clean and join name and address with newline separator
-    const cleanName = (consigneeName || '').trim();
-    const cleanAddress = (consigneeAddress || '').trim();
-    
-    // Only join if both exist, otherwise use just the name
-    if (cleanName && cleanAddress) {
-      consigneeInput.value = cleanName + '\n' + cleanAddress;
-    } else if (cleanName) {
-      consigneeInput.value = cleanName;
-    } else {
-      consigneeInput.value = '';
-    }
-    
-    console.log('📋 updateConsigneeDisplay - Updated consigneeInput.value:', consigneeInput.value);
-    console.log('📋 updateConsigneeDisplay - Name:', cleanName);
-    console.log('📋 updateConsigneeDisplay - Address:', cleanAddress);
+  applyConsigneeNameOnly(consigneeName);
+  const legacy = document.getElementById('consigneeDisplay');
+  if (legacy) {
+    legacy.style.display = 'none';
+    legacy.innerHTML = '';
   }
 }
 
@@ -313,13 +292,14 @@ window.applyBookingMappingsByCountry = async function(country) {
     if (podSelect && podSelect.tagName === 'SELECT') {
       podSelect.innerHTML = '<option value="">Select POD</option>';
     }
-    const consigneeDisplay = document.getElementById('consigneeDisplay');
-    if (consigneeDisplay) {
-      consigneeDisplay.innerHTML = '';
-    }
     const consigneeInput = document.getElementById('consigneeName');
     if (consigneeInput) {
       consigneeInput.value = '';
+    }
+    const legacyDisplay = document.getElementById('consigneeDisplay');
+    if (legacyDisplay) {
+      legacyDisplay.innerHTML = '';
+      legacyDisplay.style.display = 'none';
     }
     return;
   }
@@ -350,9 +330,12 @@ window.applyBookingMappingsByCountry = async function(country) {
         podSelect.value = preservedPodValue;
       }
     }
-    const consigneeDisplay = document.getElementById('consigneeDisplay');
-    if (consigneeDisplay) {
-      consigneeDisplay.innerHTML = '';
+    const consigneeInputNm = document.getElementById('consigneeName');
+    if (consigneeInputNm) consigneeInputNm.value = '';
+    const legacyDisp = document.getElementById('consigneeDisplay');
+    if (legacyDisp) {
+      legacyDisp.innerHTML = '';
+      legacyDisp.style.display = 'none';
     }
     return;
   }
@@ -371,42 +354,29 @@ window.applyBookingMappingsByCountry = async function(country) {
  * Note: This is called from Kotlin code to avoid conflicts with existing listeners
  */
 window.initBookingMappingAutoFill = function() {
-  console.log('🔧 Initializing booking mapping auto-fill...');
   const countrySelect = document.getElementById('consigneeCountry');
-  
   if (!countrySelect) {
-    console.log('⚠️ consigneeCountry element not found');
     return;
   }
-  
-  console.log('✅ Found consigneeCountry element:', countrySelect);
   
   // Don't clone or replace - Kotlin code handles the listener
   // Just apply mappings if country is already selected
   if (countrySelect.value) {
-    console.log('🌍 Initial country value found:', countrySelect.value);
     setTimeout(() => {
       window.applyBookingMappingsByCountry(countrySelect.value);
     }, 500);
   }
-  
-  console.log('✅ Booking mapping auto-fill initialized');
 };
 
-// Auto-initialize multiple times to catch different load states
+// Auto-initialize when the booking form (consignee country) is present
 function initializeBookingMapping() {
-  console.log('🚀 Attempting to initialize booking mapping...');
+  if (!document.getElementById('consigneeCountry')) return;
   window.initBookingMappingAutoFill();
 }
 
-// Try immediately
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', function() {
-    console.log('📄 DOM loaded, initializing booking mapping...');
-    initializeBookingMapping();
-  });
+  document.addEventListener('DOMContentLoaded', initializeBookingMapping);
 } else {
-  console.log('📄 DOM already loaded, initializing booking mapping...');
   initializeBookingMapping();
 }
 
@@ -421,7 +391,6 @@ if (window.MutationObserver) {
   const observer = new MutationObserver(function(mutations) {
     const countrySelect = document.getElementById('consigneeCountry');
     if (countrySelect && !countrySelect.hasAttribute('data-booking-mapping-initialized')) {
-      console.log('🔄 Detected consigneeCountry element, initializing...');
       countrySelect.setAttribute('data-booking-mapping-initialized', 'true');
       initializeBookingMapping();
     }
@@ -431,6 +400,4 @@ if (window.MutationObserver) {
     childList: true,
     subtree: true
   });
-  
-  console.log('👀 MutationObserver set up to watch for consigneeCountry element');
 }

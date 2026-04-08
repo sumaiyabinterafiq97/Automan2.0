@@ -81,7 +81,7 @@ echo ""
 echo "🔍 Verifying..."
 sleep 2
 if docker ps --format '{{.Names}}' | grep -q 'automan_frontend_multiplatform'; then
-    DEPLOYED=$(docker exec automan_frontend_multiplatform cat /usr/share/nginx/html/index.html 2>/dev/null | grep -o 'v=[0-9]*' | head -1 || echo "v=?")
+    DEPLOYED=$(docker exec automan_frontend_multiplatform cat /usr/share/nginx/html/index.html 2>/dev/null | grep -oE 'v=[0-9]+' | head -1 || echo "v=?")
     echo "   Container: running"
     echo "   Deployed version: $DEPLOYED"
 else

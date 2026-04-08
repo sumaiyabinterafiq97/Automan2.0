@@ -1,5 +1,6 @@
 package com.automan.purchase
 
+import kotlin.js.asDynamic
 import kotlinx.browser.document
 import kotlinx.browser.window
 import org.w3c.dom.*
@@ -18,6 +19,13 @@ import kotlinx.coroutines.launch
 fun showCarBookingPage() {
     try {
         Logger.debug("showCarBookingPage() function called")
+
+        // Keep Kotlin var in sync with window (SPA: C&F/FOB flow sets both; avoid empty LIST price column)
+        val wm = window.asDynamic().lastCalculationMode
+        if (wm != null && js("typeof wm === 'string'") as Boolean) {
+            val s = (wm as String).trim()
+            if (s.isNotEmpty()) lastCalculationMode = s
+        }
         
         // Only clear displayed cars if we don't have saved state to restore
         // Check if we have saved state before clearing
@@ -85,7 +93,7 @@ fun showCarBookingPage() {
                         <!-- ETD -->
                         <div class="booking-form-group">
                             <label>ETD:</label>
-                            <input type="date" id="etdDate" placeholder="ESTIMATED SHIPPING DATE" style="color: #000000;">
+                            <input type="date" id="etdDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" placeholder="ESTIMATED SHIPPING DATE" style="color: #000000;">
                         </div>
                         
                         <!-- POD -->
@@ -106,18 +114,8 @@ fun showCarBookingPage() {
                             <input type="text" id="vesselSelect" placeholder="Enter Vessel">
                         </div>
                         
-                        <!-- Selection Options -->
+                        <!-- Selection Options: C&F vs FOB is automatic — C&F after Calculate Freight on the cost page; otherwise FOB -->
                         <div class="booking-selection-options">
-                            <div class="booking-checkbox-row">
-                                <label class="booking-checkbox-label">
-                                    <input type="checkbox" id="cnfCheckbox">
-                                    C&F
-                                </label>
-                                <label class="booking-checkbox-label">
-                                    <input type="checkbox" id="fobCheckbox">
-                                    FOB
-                                </label>
-                            </div>
                             <button id="calculateBtn" class="booking-calculate-btn">Calculate</button>
                         </div>
                         
@@ -236,74 +234,6 @@ fun setupCarBookingPageListeners() {
         js("if (window.restoreBookingSelectionState) window.restoreBookingSelectionState()")
     }, 200)
     
-    // Make C&F and FOB checkboxes mutually exclusive
-    // Use setTimeout to ensure DOM is ready
-    window.setTimeout({
-        val cnfCheckbox = document.getElementById("cnfCheckbox") as? HTMLInputElement
-        val fobCheckbox = document.getElementById("fobCheckbox") as? HTMLInputElement
-        
-        if (cnfCheckbox != null && fobCheckbox != null) {
-            cnfCheckbox.addEventListener("change", { event: Event ->
-                val target = event.target as? HTMLInputElement
-                if (target?.checked == true) {
-                    fobCheckbox.checked = false
-                    // Update saved state
-                    carBookingFormState.cnfChecked = true
-                    carBookingFormState.fobChecked = false
-                    Logger.debug("C&F checked, FOB unchecked")
-                } else {
-                    // Update saved state
-                    carBookingFormState.cnfChecked = false
-                    Logger.debug("C&F unchecked")
-                }
-            })
-            
-            fobCheckbox.addEventListener("change", { event: Event ->
-                val target = event.target as? HTMLInputElement
-                if (target?.checked == true) {
-                    cnfCheckbox.checked = false
-                    // Update saved state
-                    carBookingFormState.cnfChecked = false
-                    carBookingFormState.fobChecked = true
-                    Logger.debug("FOB checked, C&F unchecked")
-                } else {
-                    // Update saved state
-                    carBookingFormState.fobChecked = false
-                    Logger.debug("FOB unchecked")
-                }
-            })
-            Logger.debug("C&F and FOB checkbox mutual exclusivity listeners added")
-        } else {
-            Logger.warn("C&F or FOB checkbox not found, retrying...")
-            // Retry after a longer delay if checkboxes not found
-            window.setTimeout({
-                val retryCnf = document.getElementById("cnfCheckbox") as? HTMLInputElement
-                val retryFob = document.getElementById("fobCheckbox") as? HTMLInputElement
-                if (retryCnf != null && retryFob != null) {
-                    retryCnf.addEventListener("change", { event: Event ->
-                        if ((event.target as? HTMLInputElement)?.checked == true) {
-                            retryFob.checked = false
-                            carBookingFormState.cnfChecked = true
-                            carBookingFormState.fobChecked = false
-                        } else {
-                            carBookingFormState.cnfChecked = false
-                        }
-                    })
-                    retryFob.addEventListener("change", { event: Event ->
-                        if ((event.target as? HTMLInputElement)?.checked == true) {
-                            retryCnf.checked = false
-                            carBookingFormState.cnfChecked = false
-                            carBookingFormState.fobChecked = true
-                        } else {
-                            carBookingFormState.fobChecked = false
-                        }
-                    })
-                    Logger.debug("C&F and FOB checkbox mutual exclusivity listeners added (retry)")
-                }
-            }, 500)
-        }
-    }, 100)
-    
     // Select All checkbox for car selection table
     document.getElementById("selectAllCars")?.addEventListener("change", { event: Event ->
         val target = event.target as? HTMLInputElement
@@ -375,21 +305,17 @@ fun setupCarBookingPageListeners() {
         Logger.debug("Country selected: $selectedCountry")
         currentSelectedCountry = selectedCountry // Update the global variable
         
-        // Save POD value BEFORE booking mappings might clear it
+        // Ensure POD is auto-filled for the newly selected country:
+        // booking-mapping.js preserves current POD value if present, so clear it first.
         val podPortEl = document.getElementById("podPort")
-        val currentPodValue = if (podPortEl != null) {
+        if (podPortEl != null) {
             if (podPortEl.tagName == "SELECT") {
-                (podPortEl as HTMLSelectElement).value ?: ""
+                (podPortEl as HTMLSelectElement).value = ""
             } else {
-                (podPortEl as HTMLInputElement).value ?: ""
+                (podPortEl as HTMLInputElement).value = ""
             }
-        } else {
-            ""
         }
-        if (currentPodValue.isNotEmpty()) {
-            carBookingFormState.podPort = currentPodValue
-            Logger.debug("Saved POD to state before booking mappings: $currentPodValue")
-        }
+        carBookingFormState.podPort = ""
         
         // Show/hide Manage Mapping button based on country selection
         val manageBtn = document.getElementById("manageBookingMappingsBtn") as? HTMLElement
@@ -420,49 +346,21 @@ fun setupCarBookingPageListeners() {
         } catch (e: dynamic) {
             Logger.error("Error calling booking mappings: ${e.toString()}")
         }
-        
-        // Restore POD value AFTER booking mappings are applied (if it was preserved)
-        // Also re-attach POD change listener after element might have been replaced
-        if (currentPodValue.isNotEmpty()) {
-            window.setTimeout({
-                val podPortElAfter = document.getElementById("podPort")
-                if (podPortElAfter != null) {
-                    if (podPortElAfter.tagName == "SELECT") {
-                        val podSelect = podPortElAfter as HTMLSelectElement
-                        // Check if value exists in options, if not add it
-                        var optionExists = false
-                        for (i in 0 until podSelect.options.length) {
-                            val option = podSelect.options.item(i) as? HTMLOptionElement
-                            if (option != null && option.value == currentPodValue) {
-                                optionExists = true
-                                break
-                            }
-                        }
-                        if (!optionExists && currentPodValue.isNotEmpty()) {
-                            val option = document.createElement("option") as HTMLOptionElement
-                            option.value = currentPodValue
-                            option.textContent = currentPodValue
-                            podSelect.appendChild(option)
-                        }
-                        podSelect.value = currentPodValue
-                        Logger.debug("Restored POD value after booking mappings: $currentPodValue")
-                    } else {
-                        (podPortElAfter as HTMLInputElement).value = currentPodValue
-                        Logger.debug("Restored POD value after booking mappings: $currentPodValue")
-                    }
-                    // Re-attach POD change listener after element might have been replaced
-                    attachPodChangeListener(podPortElAfter as HTMLElement)
+
+        // booking-mapping.js may replace the POD input with a <select> element.
+        // Re-attach the POD change listener after that happens so the state is updated correctly.
+        window.setTimeout({
+            val podPortElAfter = document.getElementById("podPort") as? HTMLElement
+            if (podPortElAfter != null) {
+                attachPodChangeListener(podPortElAfter)
+                val podValue = if (podPortElAfter.tagName == "SELECT") {
+                    (podPortElAfter as HTMLSelectElement).value ?: ""
+                } else {
+                    (podPortElAfter as HTMLInputElement).value ?: ""
                 }
-            }, 100) // Small delay to ensure booking mappings have completed
-        } else {
-            // Even if POD value is empty, re-attach listener after booking mappings
-            window.setTimeout({
-                val podPortElAfter = document.getElementById("podPort") as? HTMLElement
-                if (podPortElAfter != null) {
-                    attachPodChangeListener(podPortElAfter)
-                }
-            }, 100)
-        }
+                if (podValue.isNotEmpty()) carBookingFormState.podPort = podValue
+            }
+        }, 250)
         
         Logger.debug("Country changed")
         
@@ -473,16 +371,7 @@ fun setupCarBookingPageListeners() {
         } else {
             Logger.debug("Country is empty, loading all stock locations")
             loadStockLocations()
-        }
-        
-        // Auto-load purchases into LIST table when both country and POL selected (chassis search is global, not filtered)
-        val polSelect = document.getElementById("polPort") as? HTMLSelectElement
-        if (polSelect != null && polSelect.value.isNotEmpty() && selectedCountry.isNotEmpty()) {
-            Logger.debug("Loading purchases into table after country change")
-            loadFilteredPurchasesIntoTable()
-        } else {
-            Logger.warn("Cannot reload - POL or Country is empty")
-            if (selectedCountry.isEmpty()) clearBookingListTable()
+            clearBookingListTable()
         }
     })
     
@@ -605,15 +494,10 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
     })
     window.asDynamic().handleChassisSearchChange = { }
     
-    // Calculate button click handler
+    // Calculate button → C&F cost page; list/PDF use FOB until freight is calculated (see FreightCalculation.confirmFreightCalculation)
     document.getElementById("calculateBtn")?.addEventListener("click", { _: Event ->
-        val cnfChecked = (document.getElementById("cnfCheckbox") as? HTMLInputElement)?.checked ?: false
-        val fobChecked = (document.getElementById("fobCheckbox") as? HTMLInputElement)?.checked ?: false
-        
-        if (!cnfChecked && !fobChecked) {
-            showMessage("Please select C&F or FOB", "error")
-            return@addEventListener
-        }
+        lastCalculationMode = "FOB"
+        js("window.lastCalculationMode = 'FOB'")
         
         val selectedIds = getSelectedPurchaseIds()
         if (selectedIds.isEmpty()) {
@@ -640,13 +524,7 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
             return@addEventListener
         }
         
-        // Save calculation mode
-        lastCalculationMode = if (cnfChecked) "C&F" else "FOB"
-        
-        // Save C&F/FOB checkbox state
-        carBookingFormState.cnfChecked = cnfChecked
-        carBookingFormState.fobChecked = fobChecked
-        Logger.debug("Saved C&F/FOB checkbox state: C&F=$cnfChecked, FOB=$fobChecked")
+        Logger.debug("Booking Calculate: lastCalculationMode starts as FOB until Calculate Freight is confirmed")
         
         // Store purchase IDs globally for FINISH button (as per documentation)
         cnfPageSelectedPurchaseIds = selectedIds
@@ -695,8 +573,7 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
                         js("car['destination']") as? String ?: ""
                     }
                     else -> {
-                        val carObj = car.asDynamic()
-                        carObj.destination as? String ?: ""
+                        car.destination as? String ?: ""
                     }
                 }
                 if (carDestination.isNotEmpty() && carDestination.trim().isNotEmpty()) {
@@ -718,8 +595,7 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
                         js("car['destination']") as? String ?: ""
                     }
                     else -> {
-                        val carObj = car.asDynamic()
-                        carObj.destination as? String ?: ""
+                        car.destination as? String ?: ""
                     }
                 }
                 if (carDestination.isNotEmpty() && carDestination.trim().isNotEmpty()) {
@@ -736,9 +612,8 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
             Logger.debug("Saved POD to state for preservation: $podPort")
         }
         
-        val consigneeName = (document.getElementById("consigneeName") as? HTMLInputElement)?.value ?: ""
-        val consigneeAddress = (document.getElementById("consigneeAddress") as? HTMLTextAreaElement)?.value ?: ""
-        val consignee = if (consigneeAddress.isNotEmpty()) consigneeAddress else consigneeName
+        val consigneeName = (document.getElementById("consigneeName") as? HTMLInputElement)?.value?.trim() ?: ""
+        val consignee = consigneeName
         
         console.log("📋 Booking form values:")
         console.log("   ETD: $etd")
@@ -764,13 +639,8 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
                 // Save booking state before navigation
                 saveCarBookingState()
                 
-                // Navigate to calculation page with selected cars and country
-                if (cnfChecked) {
-                    showCnfCalculationPage(selectedChassis = null, selectedCars = selectedCars, selectedCountry = selectedCountry, isFobMode = false)
-                } else {
-                    // FOB calculation
-                    showCnfCalculationPage(selectedChassis = null, selectedCars = selectedCars, selectedCountry = selectedCountry, isFobMode = true)
-                }
+                // Always open C&F-style page (freight field + Calculate Freight). Mode FOB/C&F follows freight calculation.
+                showCnfCalculationPage(selectedChassis = null, selectedCars = selectedCars, selectedCountry = selectedCountry, isFobMode = false)
             }
         )
     })
@@ -890,18 +760,39 @@ fun loadStockLocations(country: String? = null) {
                 console.log("POL data received:", pols)
                 val polSelect = document.getElementById("polPort") as HTMLSelectElement?
                 if (polSelect != null) {
+                    val currentPolValue = (polSelect.value ?: "").toString().trim()
+                    val statePolValue = (carBookingFormState.polPort as? String ?: "").trim()
+                    val preservedPolValue = if (currentPolValue.isNotEmpty()) currentPolValue else statePolValue
+
                     // Clear existing options except the first one
                     polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
                     
                     // Add POL values from API
                     val polsArray = pols as Array<dynamic>
-                    polsArray.forEach { pol ->
-                        val option = document.createElement("option")
-                        option.setAttribute("value", pol as String)
-                        option.textContent = pol as String
+                    val normalizedPols = polsArray.map { (it?.toString() ?: "").trim() }.filter { it.isNotEmpty() }
+                    normalizedPols.forEach { pol ->
+                        val option = document.createElement("option") as HTMLOptionElement
+                        option.setAttribute("value", pol)
+                        option.textContent = pol
                         polSelect.appendChild(option)
                     }
-                    console.log("✅ POL values loaded: ${polsArray.size} POLs for country: $countryParam")
+
+                    // Auto-fill POL based on selected country:
+                    // - keep preservedPolValue if it still exists in this country's options
+                    // - otherwise select the first available POL
+                    val preservedExists = preservedPolValue.isNotEmpty() && normalizedPols.any { it == preservedPolValue }
+                    val desiredPol = if (preservedExists) preservedPolValue else normalizedPols.firstOrNull() ?: ""
+
+                    if (desiredPol.isNotEmpty()) {
+                        polSelect.value = desiredPol
+                        carBookingFormState.polPort = desiredPol
+                        val changeEvent = js("new Event('change', { bubbles: true })")
+                        polSelect.dispatchEvent(changeEvent.unsafeCast<Event>())
+                    } else {
+                        carBookingFormState.polPort = ""
+                    }
+
+                    console.log("✅ POL values loaded: ${normalizedPols.size} POLs for country: $countryParam (selected: '${polSelect.value}')")
                 }
             }
             .catch { error: dynamic ->
@@ -932,17 +823,35 @@ fun loadStockLocations(country: String? = null) {
                 console.log("All POL data extracted:", polsSet)
                 val polSelect = document.getElementById("polPort") as HTMLSelectElement?
                 if (polSelect != null) {
+                    val currentPolValue = (polSelect.value ?: "").toString().trim()
+                    val statePolValue = (carBookingFormState.polPort as? String ?: "").trim()
+                    val preservedPolValue = if (currentPolValue.isNotEmpty()) currentPolValue else statePolValue
+
                     // Clear existing options except the first one
                     polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
                     
                     // Add POL values
-                    polsSet.sorted().forEach { pol ->
-                        val option = document.createElement("option")
+                    val normalizedPols = polsSet.map { it.trim() }.filter { it.isNotEmpty() }.sorted()
+                    normalizedPols.forEach { pol ->
+                        val option = document.createElement("option") as HTMLOptionElement
                         option.setAttribute("value", pol)
                         option.textContent = pol
                         polSelect.appendChild(option)
                     }
-                    console.log("POL values loaded from purchases: ${polsSet.size} POLs")
+
+                    // Auto-fill POL (preserve if possible, else first option)
+                    val preservedExists = preservedPolValue.isNotEmpty() && normalizedPols.any { it == preservedPolValue }
+                    val desiredPol = if (preservedExists) preservedPolValue else normalizedPols.firstOrNull() ?: ""
+                    if (desiredPol.isNotEmpty()) {
+                        polSelect.value = desiredPol
+                        carBookingFormState.polPort = desiredPol
+                        val changeEvent = js("new Event('change', { bubbles: true })")
+                        polSelect.dispatchEvent(changeEvent.unsafeCast<Event>())
+                    } else {
+                        carBookingFormState.polPort = ""
+                    }
+
+                    console.log("POL values loaded from purchases: ${normalizedPols.size} POLs (selected: '${polSelect.value}')")
                 }
             }
             .catch { error: dynamic ->
@@ -1178,6 +1087,108 @@ fun searchCarsByChassis(chassis: String) {
     }
 }
 
+/**
+ * Read total C&F or FOB from API/JS purchase (Jackson: camelCase; snake_case fallback).
+ * Returns null when both fields are absent/null (do not treat as 0).
+ */
+private fun readPurchaseTotalNullable(purchase: dynamic, mode: String): Double? {
+    if (purchase == null) return null
+    // Do NOT call .asDynamic() on a `dynamic` receiver — JS looks up .asDynamic on the object (plain JSON has no such method).
+    val p = purchase
+    val a: dynamic
+    val b: dynamic
+    when (mode) {
+        "C&F" -> {
+            a = p.totalCnfPrice
+            b = p.total_cnf_price
+        }
+        "FOB" -> {
+            a = p.totalFobPrice
+            b = p.total_fob_price
+        }
+        else -> return null
+    }
+    val candidate = firstDefinedNumeric(a, b) ?: return null
+    return dynamicToDouble(candidate)
+}
+
+/** Convert JSON number/string to Double; null if not parseable. */
+private fun dynamicToDouble(v: dynamic): Double? {
+    if (v == null) return null
+    if (js("v === undefined") as Boolean) return null
+    if (js("typeof v === 'number'") as Boolean) {
+        return if (js("isNaN(v)") as Boolean) null else (v as Number).toDouble()
+    }
+    val n = js("parseFloat(String(v))")
+    return if (n != null && !(js("isNaN(n)") as Boolean)) (n as Number).toDouble() else null
+}
+
+private fun firstDefinedNumeric(a: dynamic, b: dynamic): dynamic? {
+    if (isDefinedNumeric(a)) return a
+    if (isDefinedNumeric(b)) return b
+    return null
+}
+
+private fun isDefinedNumeric(v: dynamic): Boolean {
+    if (v == null) return false
+    if (js("v === undefined") as Boolean) return false
+    if (js("typeof v === 'number'") as Boolean) return !(js("isNaN(v)") as Boolean)
+    if (js("typeof v === 'string'") as Boolean) {
+        val t = js("String(v).trim()") as String
+        if (t.isEmpty()) return false
+        val n = js("parseFloat(t)")
+        return !(js("isNaN(n)") as Boolean)
+    }
+    return false
+}
+
+private fun readPurchaseTotalForList(purchase: dynamic, mode: String): Double {
+    return readPurchaseTotalNullable(purchase, mode) ?: 0.0
+}
+
+/** Replace or append one purchase in [carBookingDisplayedCars] (used when refresh returns updated totals). */
+private fun mergePurchaseIntoDisplayedCars(purchase: dynamic) {
+    val chassis = (purchase.chassis as? String)?.trim() ?: return
+    if (chassis.isEmpty()) return
+    val out = mutableListOf<dynamic>()
+    var replaced = false
+    for (i in 0 until carBookingDisplayedCars.size) {
+        val c = carBookingDisplayedCars[i]
+        val ch = (c.chassis as? String)?.trim() ?: ""
+        if (ch == chassis) {
+            out.add(purchase)
+            replaced = true
+        } else {
+            out.add(c)
+        }
+    }
+    if (!replaced) out.add(purchase)
+    carBookingDisplayedCars = out.toTypedArray()
+}
+
+/** Update the FOB/C&F column (6th td when price mode is active) for an existing chassis row. */
+private fun updateBookingTablePriceCellForChassis(chassisNumber: String, purchase: dynamic) {
+    if (lastCalculationMode.isEmpty()) return
+    val tbody = document.getElementById("carSelectionTableBody") ?: return
+    val rows = tbody.querySelectorAll("tr")
+    for (i in 0 until rows.length) {
+        val row = rows.item(i) as HTMLElement
+        val chassisCell = row.querySelector("td:nth-child(3)") ?: continue
+        if (chassisCell.textContent?.trim() != chassisNumber) continue
+        val total = readPurchaseTotalNullable(purchase, lastCalculationMode)
+        val priceText = if (total != null) formatCurrency(total) else ""
+        var priceCell = row.querySelector("td:nth-child(6)") as? HTMLElement
+        if (priceCell == null) {
+            val td = document.createElement("td") as HTMLElement
+            td.setAttribute("style", "padding: 12px; border-bottom: 1px solid #e5e7eb;")
+            row.appendChild(td)
+            priceCell = td
+        }
+        priceCell.textContent = priceText
+        break
+    }
+}
+
 fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
     Logger.debug("Displaying purchases as cars, calculation mode: $lastCalculationMode")
     
@@ -1236,20 +1247,13 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
         }
         
         if (carAlreadyExists) {
+            mergePurchaseIntoDisplayedCars(purchase)
+            updateBookingTablePriceCellForChassis(chassisNumber, purchase)
             continue
         }
         
-        // Get price based on calculation mode
-        val price = when (lastCalculationMode) {
-            "C&F" -> purchase.totalCnfPrice ?: 0.0
-            "FOB" -> purchase.totalFobPrice ?: 0.0
-            else -> 0.0
-        }
-        val priceText = if (price != null && (price as Number).toDouble() > 0.0) {
-            formatCurrency((price as Number).toDouble())
-        } else {
-            ""
-        }
+        val total = readPurchaseTotalNullable(purchase, lastCalculationMode)
+        val priceText = if (total != null) formatCurrency(total) else ""
         
         val rowNumber = currentRowCount + index + 1
         val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L

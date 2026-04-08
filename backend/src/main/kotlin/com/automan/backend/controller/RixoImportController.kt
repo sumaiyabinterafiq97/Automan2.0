@@ -1,6 +1,7 @@
 package com.automan.backend.controller
 
 import com.automan.backend.service.RixoImportService
+import com.automan.backend.util.RixoPolFromStockLocation
 import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -66,27 +67,13 @@ class RixoImportController(
     fun getAllRixoPrices(): ResponseEntity<Map<String, Any>> {
         return try {
             Logger.debug("getAllRixoPrices endpoint called")
-            val prices = rixoImportService.getAllRixoPrices()
-            Logger.debug("Found ${prices.size} prices")
-            
-            // Convert to map to avoid serialization issues
-            val priceData = prices.map { price ->
-                mapOf(
-                    "id" to price.id,
-                    "auctionHouse" to price.auctionHouse,
-                    "shipmentSize" to price.shipmentSize,
-                    "stockLocation" to price.stockLocation,
-                    "rixoCompany" to price.rixoCompany,
-                    "venueId" to price.venueId,
-                    "rixoPrice" to price.rixoPrice,
-                    "pol" to price.pol
-                )
-            }
-            
+            val priceData = rixoImportService.getAllRixoPricesAsMaps()
+            Logger.debug("Found ${priceData.size} prices (jdbc)")
+
             ResponseEntity.ok(mapOf(
                 "success" to true,
                 "data" to priceData,
-                "count" to prices.size
+                "count" to priceData.size
             ))
         } catch (e: Exception) {
             Logger.error("ERROR in getAllRixoPrices: ${e.message}")
@@ -194,13 +181,10 @@ class RixoImportController(
         return try {
             // Validate required fields
             val auctionHouse = request["auctionHouse"] as? String
-            val vehicleType = (request["vehicleType"] as? String)?.trim()
             val stockLocation = (request["stockLocation"] as? String)?.trim()
             val rixoCompany = (request["rixoCompany"] as? String)?.trim()
-            val rixoPrice = (request["rixoPrice"] as? String)?.trim()
             val venueId = (request["venueId"] as? String)?.trim()
-            val pol = (request["pol"] as? String)?.trim()
-            
+
             if (auctionHouse.isNullOrBlank()) {
                 return ResponseEntity.badRequest().body(mapOf(
                     "success" to false,
@@ -214,20 +198,24 @@ class RixoImportController(
             
             // Use service method that handles auction_house properly
             // Convert empty strings to null for nullable fields to avoid database constraint issues
-            val savedMapping = rixoImportService.saveRixoPriceWithAuctionHouse(
+            val result = rixoImportService.saveRixoPriceWithAuctionHouse(
                 auctionHouse = auctionHouse.trim(),
-                shipmentSize = vehicleType?.takeIf { it.isNotBlank() },
                 stockLocation = finalStockLocation,
                 rixoCompany = finalRixoCompany,
-                rixoPrice = rixoPrice?.takeIf { it.isNotBlank() },
-                venueId = venueId?.takeIf { it.isNotBlank() },
-                pol = pol?.takeIf { it.isNotBlank() }
+                venueId = venueId?.takeIf { it.isNotBlank() }
             )
-            
+
+            val message = if (result.merged) {
+                "Merged into existing supplier (values combined with ;)"
+            } else {
+                "Mapping added successfully"
+            }
+
             ResponseEntity.ok(mapOf(
                 "success" to true,
-                "message" to "Mapping added successfully",
-                "data" to savedMapping
+                "message" to message,
+                "merged" to result.merged,
+                "data" to result.price
             ))
         } catch (e: Exception) {
             e.printStackTrace()
@@ -254,14 +242,14 @@ class RixoImportController(
             // Preserve createdAt when copying - ensure it's never null
             val createdAtValue = existingMapping.createdAt ?: java.time.LocalDateTime.now()
             
+            val newStock = (request["stockLocation"] as? String)?.trim() ?: existingMapping.stockLocation
             val updatedMapping = existingMapping.copy(
                 id = existingMapping.id, // CRITICAL: Explicitly preserve ID
-                shipmentSize = request["vehicleType"] as? String ?: existingMapping.shipmentSize,
-                stockLocation = request["stockLocation"] as? String ?: existingMapping.stockLocation,
+                auctionHouse = request["auctionHouse"] as? String ?: existingMapping.auctionHouse,
+                stockLocation = newStock,
                 rixoCompany = request["rixoCompany"] as? String ?: existingMapping.rixoCompany,
-                rixoPrice = request["rixoPrice"] as? String ?: existingMapping.rixoPrice,
                 venueId = request["venueId"] as? String ?: existingMapping.venueId,
-                pol = request["pol"] as? String ?: existingMapping.pol,
+                pol = RixoPolFromStockLocation.derivePol(newStock),
                 createdAt = createdAtValue // Preserve createdAt (never null)
             )
             

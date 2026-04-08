@@ -102,31 +102,4 @@ class UserController(
         userRepository.deleteById(id)
         return ResponseEntity.ok().build()
     }
-    
-    // Temporary role request endpoint
-    @PostMapping("/{userId}/role-request")
-    fun createRoleRequest(@PathVariable userId: Long, @RequestBody body: Map<String, Any>): ResponseEntity<Map<String, Any>> {
-        return try {
-            val requestedRole = body["requestedRole"] as? String ?: return ResponseEntity.badRequest().body(mapOf("success" to false, "message" to "Missing requestedRole"))
-            val reason = body["reason"] as? String ?: return ResponseEntity.badRequest().body(mapOf("success" to false, "message" to "Missing reason"))
-            val adminId = body["adminId"] as? Number ?: return ResponseEntity.badRequest().body(mapOf("success" to false, "message" to "Missing adminId"))
-            
-            // For now, just return success - we can implement the actual logic later
-            ResponseEntity.ok(mapOf(
-                "success" to true,
-                "message" to "Role request submitted successfully",
-                "data" to mapOf(
-                    "userId" to userId,
-                    "requestedRole" to requestedRole,
-                    "reason" to reason,
-                    "adminId" to adminId.toLong()
-                )
-            ))
-        } catch (e: Exception) {
-            ResponseEntity.badRequest().body(mapOf(
-                "success" to false,
-                "message" to (e.message ?: "Unknown error")
-            ))
-        }
-    }
 }

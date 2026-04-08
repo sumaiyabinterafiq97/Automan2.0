@@ -1,8 +1,18 @@
+# Fixed project name so manual `docker compose -f ... up/down` matches scripts
+# (`-p automan_local`) and avoids stale "No such container" state from wrong project IDs.
+name: automan_local
+
 services:
   mysql:
     image: mysql:8.0
     container_name: automan_mysql_multiplatform
     restart: always
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-prootpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: automan_car_purchase
@@ -24,7 +34,14 @@ services:
     ports:
       - "8083:8083"
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/api/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
     environment:
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
@@ -45,7 +62,8 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - automan_network
 
@@ -61,7 +79,8 @@ services:
       PMA_USER: automan_user
       PMA_PASSWORD: automan_password
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     networks:
       - automan_network
 

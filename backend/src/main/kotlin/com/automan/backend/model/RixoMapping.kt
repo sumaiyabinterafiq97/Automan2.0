@@ -13,6 +13,10 @@ data class RixoMapping(
     @Column(name = "rixo_company", nullable = false)
     val rixoCompany: String,
 
+    /** Supplier / auction house name from the price sheet (e.g. LUM FUKUOKA, USS TOKYO). */
+    @Column(name = "auction_name", nullable = true)
+    val auctionName: String? = null,
+
     @Column(name = "stock_location", nullable = false)
     val stockLocation: String,
 

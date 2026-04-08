@@ -15,10 +15,6 @@ data class RixoPrice(
     @com.fasterxml.jackson.annotation.JsonAlias("auctionName")
     val auctionHouse: String,
     
-    @Column(name = "type_of_vehicle")
-    @com.fasterxml.jackson.annotation.JsonAlias("typeOfVehicle")
-    val shipmentSize: String? = null,
-    
     @Column(name = "stock_location", nullable = false)
     val stockLocation: String,
     
@@ -27,43 +23,11 @@ data class RixoPrice(
     
     @Column(name = "venue_id")
     val venueId: String? = null,
-    
-    @Column(name = "rixo_price")
-    val rixoPrice: String? = null,
-    
+
     @Column(name = "pol")
     val pol: String? = null,
     
     @Column(name = "created_at")
     @JsonIgnore
     val createdAt: LocalDateTime = LocalDateTime.now()
-) {
-    @PrePersist
-    fun prePersist() {
-        // createdAt is set in the constructor with default value
-        // auction_house needs to be set from auctionHouse
-        // Since this is a data class, we'll handle this in the service layer
-    }
-    
-    companion object {
-        fun create(
-            auctionHouse: String,
-            shipmentSize: String? = null,
-            stockLocation: String,
-            rixoCompany: String,
-            rixoPrice: String? = null,
-            venueId: String? = null,
-            pol: String? = null
-        ): RixoPrice {
-            return RixoPrice(
-                auctionHouse = auctionHouse,
-                shipmentSize = shipmentSize,
-                stockLocation = stockLocation,
-                rixoCompany = rixoCompany,
-                rixoPrice = rixoPrice,
-                venueId = venueId,
-                pol = pol
-            )
-        }
-    }
-}
+)

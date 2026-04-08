@@ -18,6 +18,197 @@ fun escapeHtml(text: String?): String {
         .replace("/", "&#x2F;")
 }
 
+/** Split on ';' with dedup by case-insensitive key (e.g. car brand chip fields joined with ';'). */
+fun splitSemicolonDistinctTokens(raw: String): List<String> {
+    val out = mutableListOf<String>()
+    val seen = HashSet<String>()
+    raw.split(';').map { it.trim() }.filter { it.isNotEmpty() }.forEach { t ->
+        val key = t.uppercase()
+        if (seen.add(key)) out.add(t)
+    }
+    return out
+}
+
+/**
+ * Split master-map / list cell text for chip display.
+ * Matches stored consignee/supplier lists: DB may use commas, semicolons, or newlines (see normalizeStoredListForChips).
+ */
+fun splitMultiValueDisplayTokens(raw: String): List<String> {
+    val out = mutableListOf<String>()
+    val seen = HashSet<String>()
+    if (raw.isBlank()) return out
+    raw.replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .split(Regex("""[,;\n]+"""))
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .forEach { t ->
+            val key = t.uppercase()
+            if (seen.add(key)) out.add(t)
+        }
+    return out
+}
+
+/**
+ * Bank account strings often contain commas (e.g. `CO., LTD. - SWIFT`).
+ * Do not use [normalizeStoredListForChips] here — it splits on commas and creates false extra chips.
+ */
+fun normalizeBankInfoForChips(raw: String): String {
+    if (raw.isBlank()) return ""
+    return raw.replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .split(Regex("""[;\n]+"""))
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .joinToString(";")
+}
+
+/** Prepare stored address text for chip UI: join distinct lines split only by `;` or newlines (commas stay inside one address). */
+fun normalizeMultilineSemicolonListForChips(raw: String): String {
+    if (raw.isBlank()) return ""
+    val seen = HashSet<String>()
+    val out = mutableListOf<String>()
+    raw.replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .split(Regex("""[;\n]+"""))
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .forEach { t ->
+            val key = t.uppercase()
+            if (seen.add(key)) out.add(t)
+        }
+    return out.joinToString(";")
+}
+
+/** Split for display when values may contain commas (e.g. street, city in one line). Only `;` and newlines separate entries. */
+fun splitSemicolonOnlyDisplayTokens(raw: String): List<String> {
+    val out = mutableListOf<String>()
+    val seen = HashSet<String>()
+    if (raw.isBlank()) return out
+    raw.replace("\r\n", "\n")
+        .replace('\r', '\n')
+        .split(Regex("""[;\n]+"""))
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .forEach { t ->
+            val key = t.uppercase()
+            if (seen.add(key)) out.add(t)
+        }
+    return out
+}
+
+/** Same chip styling as [formatMultiValueChipCellHtml] but splits only on `;`/newlines (for client map addresses). */
+fun formatMultiValueChipCellHtmlSemicolonOnly(raw: String): String {
+    val tokens = splitSemicolonOnlyDisplayTokens(raw)
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) return escapeHtml(tokens[0])
+    val palettes = listOf(
+        "#eff6ff" to "#1e40af",
+        "#fff7ed" to "#c2410c",
+        "#f5f3ff" to "#6d28d9",
+        "#ecfdf5" to "#047857",
+        "#fdf2f8" to "#be185d",
+        "#fef3c7" to "#b45309"
+    )
+    val inner = tokens.mapIndexed { i, t ->
+        val (bg, fg) = palettes[i % palettes.size]
+        """<span style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:$bg;color:$fg;line-height:1.35;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t)}</span>"""
+    }.joinToString("")
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+}
+
+/** Client Map Bank Info column: wrap long bank strings; stack multiple entries vertically so the column stays narrow. */
+fun formatClientMapBankInfoCellHtml(raw: String): String {
+    val tokens = splitSemicolonOnlyDisplayTokens(raw)
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) {
+        return """<div class="client-map-bank-text">${escapeHtml(tokens[0])}</div>"""
+    }
+    val palettes = listOf(
+        "#eff6ff" to "#1e40af",
+        "#fff7ed" to "#c2410c",
+        "#f5f3ff" to "#6d28d9",
+        "#ecfdf5" to "#047857",
+        "#fdf2f8" to "#be185d",
+        "#fef3c7" to "#b45309"
+    )
+    val inner = tokens.mapIndexed { i, t ->
+        val (bg, fg) = palettes[i % palettes.size]
+        """<span class="client-map-bank-chip" style="background:$bg;color:$fg;">${escapeHtml(t)}</span>"""
+    }.joinToString("")
+    return """<div class="client-map-bank-chips">$inner</div>"""
+}
+
+/**
+ * Client Map Consignee column: same token rules as [formatMultiValueChipCellHtml] but chips wrap
+ * inside fixed table cells (avoids overflow into adjacent columns).
+ */
+fun formatClientMapConsigneeChipCellHtml(raw: String): String {
+    val tokens = splitMultiValueDisplayTokens(raw)
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) {
+        return """<div class="client-map-consignee-plain">${escapeHtml(tokens[0])}</div>"""
+    }
+    val palettes = listOf(
+        "#eff6ff" to "#1e40af",
+        "#fff7ed" to "#c2410c",
+        "#f5f3ff" to "#6d28d9",
+        "#ecfdf5" to "#047857",
+        "#fdf2f8" to "#be185d",
+        "#fef3c7" to "#b45309"
+    )
+    val inner = tokens.mapIndexed { i, t ->
+        val (bg, fg) = palettes[i % palettes.size]
+        """<span class="client-map-chip-wrap" style="background:$bg;color:$fg;">${escapeHtml(t)}</span>"""
+    }.joinToString("")
+    return """<span class="client-map-chip-row">$inner</span>"""
+}
+
+/**
+ * Client Map Debit Limit column — display only (DB unchanged).
+ * Shows yen prefix and thousands separators, e.g. `40000` → `¥40,000`.
+ */
+fun formatClientMapDebitLimitCellHtml(raw: String): String {
+    if (raw.isBlank()) return ""
+    val cleaned = raw.replace(",", "").trim()
+    val n = cleaned.toDoubleOrNull()
+        ?: return """<span class="client-map-debit-limit">${escapeHtml(raw)}</span>"""
+    val negative = n < 0.0
+    val abs = kotlin.math.abs(n)
+    val intPart = kotlin.math.floor(abs + 1e-9).toLong()
+    val frac = abs - intPart
+    val intGrouped = intPart.toString().reversed().chunked(3).joinToString(",").reversed()
+    val body = (if (negative) "-" else "") + "¥" + intGrouped
+    val formatted = if (kotlin.math.abs(frac) < 1e-6) {
+        body
+    } else {
+        val cents = kotlin.math.round(frac * 100.0).toInt().coerceIn(0, 99)
+        val fracStr = if (cents < 10) "0$cents" else cents.toString()
+        "$body.$fracStr"
+    }
+    return """<span class="client-map-debit-limit">$formatted</span>"""
+}
+
+/** Multiple values → pastel pill chips; single value → plain escaped text. */
+fun formatMultiValueChipCellHtml(raw: String): String {
+    val tokens = splitMultiValueDisplayTokens(raw)
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) return escapeHtml(tokens[0])
+    val palettes = listOf(
+        "#eff6ff" to "#1e40af",
+        "#fff7ed" to "#c2410c",
+        "#f5f3ff" to "#6d28d9",
+        "#ecfdf5" to "#047857",
+        "#fdf2f8" to "#be185d",
+        "#fef3c7" to "#b45309"
+    )
+    val inner = tokens.mapIndexed { i, t ->
+        val (bg, fg) = palettes[i % palettes.size]
+        """<span style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:$bg;color:$fg;line-height:1.35;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t)}</span>"""
+    }.joinToString("")
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+}
+
 /**
  * Safe localStorage wrapper with error handling
  */
@@ -114,15 +305,14 @@ fun getMaxColumnsForDevice(deviceType: String? = null): Int {
     }
 }
 
-/** Car Brands Map table: allow more columns on desktop (incl. vehicle type, rank, color, drive type). */
-fun getMaxCarBrandMapColumnsForDevice(deviceType: String? = null): Int {
-    val device = deviceType ?: getDeviceType()
-    return when (device) {
-        "mobile" -> AppConstants.MOBILE_MAX_COLUMNS
-        "tablet" -> AppConstants.TABLET_MAX_COLUMNS
-        else -> 14
-    }
-}
+/** Car Brands Map: at most 6 data columns (plus actions) in table and column picker. */
+fun getMaxCarBrandMapColumnsForDevice(deviceType: String? = null): Int = 6
+
+/** Consignee Map & Supplier Map: max 6 data columns (plus actions). */
+fun getMaxConsigneeSupplierMapColumnsForDevice(deviceType: String? = null): Int = 6
+
+/** Purchase List table: max 6 data columns (plus actions). */
+fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int = 6
 
 /**
  * Get default columns for a specific device type
@@ -134,8 +324,8 @@ fun getDefaultColumnsForDevice(deviceType: String? = null): List<String> {
     return when (device) {
         "mobile" -> listOf("date", "chassis", "carName", "price")
         "tablet" -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "price")
-        "desktop" -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany", "price", "brand")
-        else -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "clientName", "rixoCompany", "price")
+        "desktop" -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "price")
+        else -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "price")
     }
 }
 
@@ -146,7 +336,7 @@ fun getDefaultColumnsForDevice(deviceType: String? = null): List<String> {
  */
 fun autoAdjustColumnsForDevice(savedColumns: List<String>, deviceType: String? = null): List<String> {
     val device = deviceType ?: getDeviceType()
-    val maxColumns = getMaxColumnsForDevice(device)
+    val maxColumns = getMaxPurchaseListColumnsForDevice(device)
     val defaultColumns = getDefaultColumnsForDevice(device)
     
     return if (savedColumns.size > maxColumns) {
@@ -155,6 +345,225 @@ fun autoAdjustColumnsForDevice(savedColumns: List<String>, deviceType: String? =
     } else {
         // If within limit, keep user's selection (but ensure it's valid)
         savedColumns.filter { it.isNotBlank() }.take(maxColumns)
+    }
+}
+
+/**
+ * Purchase list: when "date" and/or "chassis" are selected, keep them as the leftmost data columns
+ * (after the row action column). If both are selected: Purchase Date first, then Chassis; other
+ * columns keep their relative order.
+ */
+fun prioritizePurchaseListDateAndChassis(columns: List<String>): List<String> {
+    val hasDate = columns.contains("date")
+    val hasChassis = columns.contains("chassis")
+    val rest = columns.filter { it != "date" && it != "chassis" }
+    return buildList {
+        if (hasDate) add("date")
+        if (hasChassis) add("chassis")
+        addAll(rest)
+    }
+}
+
+/**
+ * All purchase list column keys and display labels (matches [com.automan.backend.model.Purchase] / `purchases` table).
+ * Used by column filter modal and table/card headers.
+ */
+fun purchaseListColumnLabels(): Map<String, String> {
+    return linkedMapOf(
+        "date" to "Purchase Date",
+        "chassis" to "Chassis",
+        "carModelYear" to "Production Date",
+        "brand" to "Brand",
+        "carName" to "Car Name",
+        "shipmentSize" to "Vehicle type",
+        "grade" to "Grade",
+        "rank" to "Rank",
+        "color" to "Color",
+        "fuel" to "Fuel",
+        "seat" to "Seat",
+        "door" to "Door",
+        "distance" to "Distance",
+        "options" to "Options",
+        "cc" to "CC",
+        "shift" to "Shift",
+        "wd" to "WD",
+        "driveType" to "Drive Type",
+        "auctionNo" to "Auction No",
+        "auctionHouse" to "Supplier Name",
+        "stockLocation" to "Stock Location",
+        "pol" to "POL",
+        "rixoCompany" to "Rixo Company",
+        "venueId" to "Venue ID",
+        "clientName" to "Client Name",
+        "consignee" to "Consignee",
+        "clientId" to "Client ID",
+        "country" to "Target Country",
+        "price" to "Car Price",
+        "auctionFee" to "Auction Fee",
+        "auctionPenaltyFee" to "Auction Penalty Fee",
+        "recycleFee" to "Recycle Fee",
+        "roadTax" to "Road Tax",
+        "taxTotal" to "Tax Total",
+        "totalPrice" to "Total Price",
+        "paymentDate" to "Payment Date",
+        "rixoRequested" to "Rixo Requested",
+        "rixoConfirmed" to "Rixo Confirmed",
+        "rixoPrice" to "Rixo Price",
+        "notes" to "Notes",
+        "shipmentDate" to "Shipment Date",
+        "blNo" to "BL No",
+        "vesselNo" to "Vessel No",
+        "vessel" to "Vessel",
+        "shipped" to "Shipped",
+        "shipmentCharges" to "Shipment Charges",
+        "freight" to "Freight",
+        "storageCharges" to "Storage Charges",
+        "miscCharges" to "Misc Charges",
+        "inspectionFee" to "Inspection Fee",
+        "commission" to "Commission",
+        "numberCut" to "Number Cut",
+        "shaken" to "SHAKEN",
+        "repairCompany" to "Repair Company",
+        "repairCharges" to "Repair Charges",
+        "profit" to "Profit",
+        "isPackageMode" to "Package Mode",
+        "totalCnfPrice" to "Total CNF Price",
+        "totalFobPrice" to "Total FOB Price",
+        "bookingId" to "Booking ID",
+        "carPictures" to "Car Pictures",
+        // Legacy UI field (not a DB column); kept for older saved column prefs
+        "destination" to "Destination"
+    )
+}
+
+/** Display string for one purchase list cell; keys align with [purchaseListColumnLabels]. */
+fun purchaseTableCellValue(purchase: dynamic, columnKey: String): String {
+    // Do not call .asDynamic() here: JSON/plain JS objects from the API are already dynamic at
+    // runtime and do not expose Kotlin's asDynamic() extension (throws in the browser).
+    if (purchase == null || purchase == js("undefined")) return ""
+    val p: dynamic = purchase
+    fun field(key: String): String {
+        val v = p[key]
+        if (v == null || v == js("undefined")) return ""
+        return when {
+            v is Boolean -> if (v as Boolean) "Yes" else "No"
+            v is Number -> {
+                val d = (v as Number).toDouble()
+                if (d == d.toLong().toDouble()) d.toLong().toString() else d.toString()
+            }
+            else -> v.toString()
+        }
+    }
+    fun moneyWithYenIfMissing(raw: dynamic): String {
+        val s = when (raw) {
+            null -> ""
+            is String -> raw
+            is Number -> raw.toString()
+            else -> raw.toString()
+        }
+        if (s.isEmpty()) return ""
+        return if (s.startsWith("¥")) s else "¥$s"
+    }
+    return when (columnKey) {
+        "date" -> try {
+            val dateStr = (p.date?.toString() ?: "").toString()
+            if (dateStr.isBlank()) "" else formatWithWeekday(dateStr)
+        } catch (e: dynamic) {
+            ""
+        }
+        "id" -> {
+            val v = p.id
+            when {
+                v == null || v == js("undefined") -> ""
+                v is Number -> (v as Number).toLong().toString()
+                else -> v.toString()
+            }
+        }
+        "chassis" -> field("chassis")
+        "carName" -> field("carName")
+        "auctionHouse" -> field("auctionHouse")
+        "stockLocation" -> field("stockLocation")
+        "clientName" -> field("clientName")
+        "rixoCompany" -> field("rixoCompany")
+        "price" -> {
+            val priceStr = (p.price as? String) ?: field("price")
+            val priceValue = parseCurrency(priceStr)
+            if (priceValue > 0.0) formatCurrency(priceValue) else ""
+        }
+        "carModelYear" -> field("carModelYear")
+        "brand" -> field("brand")
+        "grade" -> field("grade")
+        "rank" -> field("rank")
+        "color" -> field("color")
+        "fuel" -> field("fuel")
+        "seat" -> field("seat")
+        "door" -> field("door")
+        "distance" -> field("distance")
+        "options" -> field("options")
+        "cc" -> field("cc")
+        "shift" -> field("shift")
+        "wd" -> field("wd")
+        "driveType" -> field("driveType")
+        "auctionNo" -> field("auctionNo")
+        "pol" -> field("pol")
+        "venueId" -> field("venueId")
+        "shipmentSize" -> field("shipmentSize")
+        "consignee" -> field("consignee")
+        "clientId" -> field("clientId")
+        "country" -> field("country")
+        "totalPrice" -> {
+            val raw = (p.totalPrice as? String) ?: field("totalPrice")
+            if (raw.isEmpty()) "" else moneyWithYenIfMissing(raw)
+        }
+        "auctionFee" -> (p.auctionFee as? String) ?: field("auctionFee")
+        "auctionPenaltyFee" -> (p.auctionPenaltyFee as? String) ?: field("auctionPenaltyFee")
+        "recycleFee" -> (p.recycleFee as? String) ?: field("recycleFee")
+        "roadTax" -> (p.roadTax as? String) ?: field("roadTax")
+        "taxTotal" -> (p.taxTotal as? String) ?: field("taxTotal")
+        "paymentDate" -> (p.paymentDate as? String) ?: field("paymentDate")
+        "rixoRequested" -> (p.rixoRequested as? String) ?: field("rixoRequested")
+        "rixoConfirmed" -> (p.rixoConfirmed as? String) ?: field("rixoConfirmed")
+        "rixoPrice" -> {
+            val rixoPriceRaw = p.rixoPrice
+            val num = when (rixoPriceRaw) {
+                null -> 0.0
+                is Number -> (rixoPriceRaw as Number).toDouble()
+                else -> parseCurrency(rixoPriceRaw.toString())
+            }
+            if (num > 0.0) "¥" + formatCurrency(num) else "¥0"
+        }
+        "notes" -> field("notes")
+        "shipmentDate" -> (p.shipmentDate as? String) ?: field("shipmentDate")
+        "blNo" -> (p.blNo as? String) ?: field("blNo")
+        "vesselNo" -> (p.vesselNo as? String) ?: field("vesselNo")
+        "vessel" -> field("vessel")
+        "destination" -> (p.destination as? String) ?: field("destination")
+        "shipped" -> field("shipped")
+        "shipmentCharges" -> (p.shipmentCharges as? String) ?: field("shipmentCharges")
+        "freight" -> (p.freight as? String) ?: field("freight")
+        "storageCharges" -> (p.storageCharges as? String) ?: field("storageCharges")
+        "miscCharges" -> (p.miscCharges as? String) ?: field("miscCharges")
+        "inspectionFee" -> (p.inspectionFee as? String) ?: field("inspectionFee")
+        "commission" -> (p.commission as? String) ?: field("commission")
+        "numberCut" -> (p.numberCut as? String) ?: field("numberCut")
+        "shaken" -> field("shaken")
+        "repairCompany" -> (p.repairCompany as? String) ?: field("repairCompany")
+        "repairCharges" -> (p.repairCharges as? String) ?: field("repairCharges")
+        "profit" -> (p.profit as? String) ?: field("profit")
+        "isPackageMode" -> field("isPackageMode")
+        "totalCnfPrice" -> moneyWithYenIfMissing(p.totalCnfPrice)
+        "totalFobPrice" -> moneyWithYenIfMissing(p.totalFobPrice)
+        "bookingId" -> field("bookingId")
+        "carPictures" -> field("carPictures")
+        "createdAt" -> field("createdAt")
+        "updatedAt" -> field("updatedAt")
+        else -> {
+            val v = p[columnKey]
+            if (v == null || v == js("undefined")) "" else when {
+                v is Boolean -> if (v as Boolean) "Yes" else "No"
+                else -> v.toString()
+            }
+        }
     }
 }
 
@@ -335,6 +744,23 @@ fun normalizeDateForComparison(dateStr: String?): String {
     } catch (e: dynamic) {
         return dateStr
     }
+}
+
+/** Local calendar date as yyyy-MM-dd for `<input type="date">` (not UTC midnight). */
+fun todayIsoLocalDate(): String {
+    val d = js("new Date()").unsafeCast<dynamic>()
+    val y = d.getFullYear() as Int
+    val m = (d.getMonth() as Int) + 1
+    val day = d.getDate() as Int
+    return y.toString() + "-" + m.toString().padStart(2, '0') + "-" + day.toString().padStart(2, '0')
+}
+
+/** Local calendar year-month as yyyy-MM for `<input type="month">` (not UTC). */
+fun todayIsoLocalYearMonth(): String {
+    val d = js("new Date()").unsafeCast<dynamic>()
+    val y = d.getFullYear() as Int
+    val m = (d.getMonth() as Int) + 1
+    return y.toString() + "-" + m.toString().padStart(2, '0')
 }
 
 // Converts a stored date label like "June3, 2025(Tuesday)" to ISO yyyy-MM-dd for <input type="date">

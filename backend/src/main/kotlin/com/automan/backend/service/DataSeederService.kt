@@ -64,8 +64,6 @@ class DataSeederService(
         val client = Client(
             clientNumber = "CL001",
             clientName = "CROWN EAGLE",
-            phone = "+1-555-0123",
-            address = "123 Business Ave, Tokyo, Japan",
             status = ClientStatus.ACTIVE,
             currentBalance = 50000.0
         )
@@ -82,24 +80,18 @@ class DataSeederService(
                 auctionHouse = "AUCNETVAA (SAKURA)",
                 stockLocation = "GLOBAL KAWASAKI",
                 rixoCompany = "YAMAZAKI",
-                rixoPrice = "138000",
-                shipmentSize = "20ft",
                 venueId = "V001"
             ),
             RixoPrice(
                 auctionHouse = "USS YOKOHAMA",
                 stockLocation = "KLC",
                 rixoCompany = "KLC",
-                rixoPrice = "460000",
-                shipmentSize = "40ft",
                 venueId = "V002"
             ),
             RixoPrice(
                 auctionHouse = "TAA KINKI",
                 stockLocation = "GLOBAL HAKATA",
                 rixoCompany = "LOGICO",
-                rixoPrice = "1516000",
-                shipmentSize = "20ft",
                 venueId = "V001"
             )
         )
@@ -135,10 +127,9 @@ class DataSeederService(
                 door = "4",
                 seat = "5",
                 country = "Japan",
-                destination = "Tokyo",
                 distance = "50000km",
                 options = "AC, Power Steering",
-                notes = "Good condition, minor scratches",
+                notes = "Good condition, minor scratches | POD: Tokyo",
                 clientId = client.id,
                 isPackageMode = false
             ),
@@ -160,10 +151,9 @@ class DataSeederService(
                 door = "5",
                 seat = "7",
                 country = "Japan",
-                destination = "Osaka",
                 distance = "30000km",
                 options = "AC, Power Steering, Navigation",
-                notes = "Excellent condition, low mileage",
+                notes = "Excellent condition, low mileage | POD: Osaka",
                 clientId = client.id,
                 isPackageMode = false
             ),
@@ -185,10 +175,9 @@ class DataSeederService(
                 door = "5",
                 seat = "5",
                 country = "Japan",
-                destination = "Fukuoka",
                 distance = "25000km",
                 options = "AC, Power Steering, Navigation, Sunroof",
-                notes = "Premium model, excellent condition",
+                notes = "Premium model, excellent condition | POD: Fukuoka",
                 clientId = client.id,
                 isPackageMode = false
             )

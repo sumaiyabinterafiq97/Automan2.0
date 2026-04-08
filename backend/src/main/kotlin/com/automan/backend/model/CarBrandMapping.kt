@@ -28,14 +28,14 @@ data class CarBrandMapping(
     @Column(name = "shift", length = 50)
     val shift: String? = null,
 
-    @Column(name = "cc")
-    val cc: Int? = null,
+    @Column(name = "cc", length = 100)
+    val cc: String? = null,
 
-    @Column(name = "door")
-    val door: Int? = null,
+    @Column(name = "door", length = 100)
+    val door: String? = null,
 
-    @Column(name = "seat")
-    val seat: Int? = null,
+    @Column(name = "seat", length = 100)
+    val seat: String? = null,
 
     @Column(name = "grade", length = 50)
     val grade: String? = null,

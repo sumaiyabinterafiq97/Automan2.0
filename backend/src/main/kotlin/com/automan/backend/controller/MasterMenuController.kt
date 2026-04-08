@@ -44,15 +44,6 @@ class MasterMenuController(
         return ResponseEntity.ok(masterMenuService.addField(request.fieldName))
     }
 
-    @DeleteMapping("/fields/{fieldName}")
-    fun deleteField(
-        @PathVariable fieldName: String,
-    ): ResponseEntity<List<String>> {
-        Logger.debug("MasterMenuController.deleteField field='%s'", fieldName)
-        return ResponseEntity.ok(masterMenuService.deleteField(fieldName))
-    }
-
-
     @GetMapping("/{fieldName}")
     fun getValues(@PathVariable fieldName: String): ResponseEntity<List<String>> {
         val values = masterMenuService.getValues(fieldName)

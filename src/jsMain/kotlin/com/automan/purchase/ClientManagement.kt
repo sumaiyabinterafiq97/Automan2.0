@@ -8,10 +8,6 @@ import com.automan.purchase.Logger
 import com.automan.purchase.ErrorHandler
 import com.automan.purchase.models.ClientResponse
 import com.automan.purchase.models.TransactionResponse
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.MainScope
-import kotlinx.coroutines.launch
-
 // Client Management Functions
 
 fun showClientDetailsPage(clientId: Long) {
@@ -171,15 +167,6 @@ fun displayClients(clients: dynamic) {
         """
         <div class="client-item" style="$alertStyle">
             <div class="client-item-content">
-                <!-- Edit Button -->
-                <button onclick="event.stopPropagation(); window.editClientFromList(${client.id})" 
-                        class="client-edit-btn"
-                        title="Edit Client">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
-                        <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
-                    </svg>
-                </button>
-                
                 <!-- Client Info (clickable for details) -->
                 <div class="client-info" onclick="window.location.hash='#/client/${client.id}'">
                     <div class="client-info-row">
@@ -203,23 +190,6 @@ fun displayClients(clients: dynamic) {
 
 fun selectClient(clientId: Long) {
     window.location.hash = "#/client/$clientId"
-}
-
-// Function to edit client from the client list
-fun editClientFromList(clientId: Long) {
-    // Load client details and open edit modal
-    val scope = MainScope()
-    scope.launch {
-        val result = ApiClient.get<dynamic>("clients/$clientId")
-        result.fold(
-            onSuccess = { client ->
-                showEditClientForm(client)
-            },
-            onError = { message, _ ->
-                ErrorHandler.showError("Failed to load client details: $message")
-            }
-        )
-    }
 }
 
 fun loadClientDetails(clientId: Long) {
@@ -265,7 +235,6 @@ fun displayClientDetails(client: ClientResponse) {
             <div class="client-info-grid">
                 <div class="client-info-item"><strong>Client #:</strong> ${client.clientNumber}</div>
                 <div class="client-info-item"><strong>Status:</strong> ${client.status ?: "N/A"}</div>
-                <div class="client-info-item"><strong>Phone:</strong> ${client.phone ?: "N/A"}</div>
                 <div class="client-info-item"><strong>Currency:</strong> ${client.currency ?: "JPY"}</div>
             </div>
             <div class="client-balance-card">
@@ -455,21 +424,8 @@ fun showAddClientForm() {
                         </div>
                         <div class="client-form-field">
                             <label for="clientName" class="client-form-label">Client Name *</label>
-                            <input type="text" id="clientName" name="clientName" required 
-                                   class="client-form-input" placeholder="e.g., ABC COMPANY">
+                            ${createEditableCombobox("clientName", "Select Client Name", required = true)}
                         </div>
-                    </div>
-                    
-                    <div class="client-form-field">
-                        <label for="address" class="client-form-label">Address *</label>
-                        <input type="text" id="address" name="address" required 
-                               class="client-form-input" placeholder="e.g., Tokyo, Japan">
-                    </div>
-                    
-                    <div class="client-form-field">
-                        <label for="phone" class="client-form-label">Phone *</label>
-                        <input type="text" id="phone" name="phone" required 
-                               class="client-form-input" placeholder="e.g., +81-3-1234-5678">
                     </div>
                     
                     <div class="client-form-row-3">
@@ -543,6 +499,9 @@ fun showAddClientForm() {
     document.getElementById("cancelAddClientBtn")?.addEventListener("click", { _: Event ->
         closeAddClientModal()
     })
+
+    // Load combobox options from master_menu
+    populateClientNameOptions("clientName", null)
 }
 
 fun handleAddClientSubmit() {
@@ -551,9 +510,7 @@ fun handleAddClientSubmit() {
     
     val clientData = js("{}")
     clientData["clientNumber"] = (document.getElementById("clientNumber") as? HTMLInputElement)?.value ?: ""
-    clientData["clientName"] = (document.getElementById("clientName") as? HTMLInputElement)?.value ?: ""
-    clientData["address"] = (document.getElementById("address") as? HTMLInputElement)?.value ?: ""
-    clientData["phone"] = (document.getElementById("phone") as? HTMLInputElement)?.value ?: ""
+    clientData["clientName"] = getClientModalComboboxValue("clientName")
     clientData["currentBalance"] = (document.getElementById("currentBalance") as? HTMLInputElement)?.value?.toDoubleOrNull() ?: 0.0
     clientData["creditLimit"] = (document.getElementById("creditLimit") as? HTMLInputElement)?.value?.toDoubleOrNull()
     clientData["alertThreshold"] = (document.getElementById("alertThreshold") as? HTMLInputElement)?.value?.toDoubleOrNull()
@@ -561,7 +518,7 @@ fun handleAddClientSubmit() {
     clientData["status"] = (document.getElementById("status") as? HTMLSelectElement)?.value ?: "ACTIVE"
     
     // Validate required fields
-    if (clientData["clientNumber"] == "" || clientData["clientName"] == "" || clientData["address"] == "" || clientData["phone"] == "") {
+    if (clientData["clientNumber"] == "" || clientData["clientName"] == "") {
         showMessage("Please fill in all required fields", "error")
         return
     }
@@ -570,63 +527,30 @@ fun handleAddClientSubmit() {
     val submitBtn = document.querySelector("#addClientForm button[type='submit']") as? HTMLButtonElement
     submitBtn?.let {
         it.disabled = true
-        it.textContent = "Validating..."
+        it.textContent = "Adding..."
     }
-    
-    val clientName = clientData["clientName"] as String
-    
-    // First, validate that client name exists in master list
-    window.fetch(apiUrl("master-menu/clients"))
-        .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load master client list')")
-        }
-        .then { raw: dynamic ->
-            val masterList: List<String> = if (raw != null && js("Array.isArray(raw)")) {
-                val a = raw.unsafeCast<Array<*>>()
-                (0 until a.size).map { (a[it]?.toString() ?: "").trim().uppercase() }.filter { it.isNotEmpty() }
-            } else emptyList()
-            
-            // Check if client name exists in master list (case-insensitive)
-            if (!masterList.contains(clientName.uppercase())) {
-                // Client name not in master list - show error modal
+
+    val requestOptions = js("{}")
+    requestOptions["method"] = "POST"
+    requestOptions["headers"] = js("{\"Content-Type\": \"application/json\"}")
+    requestOptions["body"] = JSON.stringify(clientData)
+
+    window.fetch(apiUrl("clients"), requestOptions)
+        .then { response ->
+            if (response.ok) {
+                showMessage("Client added successfully!", "success")
                 closeAddClientModal()
-                showClientNameNotInMasterListModal()
-                return@then
+                showClientAccountsPage()
+            } else {
+                response.text().then { errorText ->
+                    showMessage("Failed to add client: $errorText", "error")
+                }
             }
-            
-            // Client name exists, proceed with adding
-            submitBtn?.textContent = "Adding..."
-            
-            val requestOptions = js("{}")
-            requestOptions["method"] = "POST"
-            requestOptions["headers"] = js("{\"Content-Type\": \"application/json\"}")
-            requestOptions["body"] = JSON.stringify(clientData)
-            
-            window.fetch(apiUrl("clients"), requestOptions)
-                .then { response ->
-                    if (response.ok) {
-                        showMessage("Client added successfully!", "success")
-                        closeAddClientModal()
-                        showClientAccountsPage()
-                    } else {
-                        response.text().then { errorText ->
-                            showMessage("Failed to add client: $errorText", "error")
-                        }
-                    }
-                }
-                .catch { error ->
-                    showMessage("Error adding client: $error", "error")
-                }
-                .finally {
-                    submitBtn?.let {
-                        it.disabled = false
-                        it.textContent = "Add Client"
-                    }
-                }
         }
-        .catch { error: dynamic ->
-            Logger.error("Error validating client name: ${error.toString()}")
-            showMessage("Error validating client name", "error")
+        .catch { error ->
+            showMessage("Error adding client: $error", "error")
+        }
+        .finally {
             submitBtn?.let {
                 it.disabled = false
                 it.textContent = "Add Client"
@@ -634,343 +558,73 @@ fun handleAddClientSubmit() {
         }
 }
 
-fun showClientNameNotInMasterListModal() {
-    document.getElementById("clientNameErrorModal")?.remove()
-    val modal = document.createElement("div")
-    modal.id = "clientNameErrorModal"
-    modal.asDynamic().style.cssText = """
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background-color: rgba(0,0,0,0.5); z-index: 10001;
-        display: flex; align-items: center; justify-content: center;
-    """
-    modal.innerHTML = """
-        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%; box-shadow: 0 10px 30px rgba(0,0,0,0.25);">
-            <h3 style="margin-top: 0; margin-bottom: 16px; font-size: 20px; font-weight: 700; color: #ef4444;">Client Name Not Found</h3>
-            <p style="margin-bottom: 20px; color: #374151; font-size: 14px; line-height: 1.6;">
-                Client Name does not exist in Master List. Go to the Client page and Add New Client.
-            </p>
-            <div style="display: flex; justify-content: flex-end;">
-                <button id="closeClientNameErrorModalBtn" style="padding: 10px 24px; border-radius: 6px; border: none; background: #3b82f6; color: white; cursor: pointer; font-size: 14px; font-weight: 500;">
-                    Close
-                </button>
-            </div>
-        </div>
-    """
-    document.body?.appendChild(modal)
-    
-    document.getElementById("closeClientNameErrorModalBtn")?.addEventListener("click", { _: Event ->
-        modal.remove()
-    })
-}
-
 @JsName("closeAddClientModalFromClientManagement")
 fun closeAddClientModal() {
     document.getElementById("addClientModal")?.remove()
 }
 
-fun editClient(clientId: Long) {
-    window.fetch(apiUrl("clients/$clientId"))
-        .then { response ->
-            if (response.ok) {
-                response.json().then { client ->
-                    showEditClientForm(client)
-                }
-            } else {
-                showMessage("Failed to load client data", "error")
-            }
-        }
-        .catch { error ->
-            showMessage("Error loading client: $error", "error")
-        }
+private fun parseMasterClientNameList(raw: dynamic): List<String> {
+    val arr: dynamic = when {
+        raw != null && js("Array.isArray(raw)") as Boolean -> raw
+        raw != null && raw.data != null && (js("Array.isArray(raw.data)") as Boolean) -> raw.data
+        else -> null
+    }
+    if (arr == null) return emptyList()
+    val a = arr.unsafeCast<Array<*>>()
+    return (0 until a.size)
+        .map { (a[it]?.toString() ?: "").trim() }
+        .filter { it.isNotEmpty() }
+        .distinctBy { it.uppercase() }
+        .sortedBy { it.uppercase() }
 }
 
-fun showEditClientForm(client: dynamic) {
-    val clientId = (client.id as Number).toLong()
-    val originalBalance = (client.currentBalance as Number).toDouble()
-    val creditLimit = (client.creditLimit as Number?)?.toDouble()
-    val alertThreshold = (client.alertThreshold as Number?)?.toDouble()
-    
-    val modalHTML = """
-        <div id="editClientModal" class="client-modal">
-            <div class="client-modal-content">
-                <div class="client-modal-header">
-                    <h2>Edit Client</h2>
-                    <button id="closeEditClientModalBtn" class="client-modal-close">&times;</button>
-                </div>
-                <form id="editClientForm" class="client-form">
-                    <div class="client-form-row">
-                        <div class="client-form-field">
-                            <label for="editClientNumber" class="client-form-label">Client Number *</label>
-                            <input type="text" id="editClientNumber" name="editClientNumber" required 
-                                   class="client-form-input" value="${client.clientNumber}">
-                        </div>
-                        <div class="client-form-field">
-                            <label for="editClientName" class="client-form-label">Client Name *</label>
-                            <input type="text" id="editClientName" name="editClientName" required 
-                                   class="client-form-input" value="${client.clientName}">
-                        </div>
-                    </div>
-                    
-                    <div class="client-form-field">
-                        <label for="editAddress" class="client-form-label">Address *</label>
-                        <input type="text" id="editAddress" name="editAddress" required 
-                               class="client-form-input" value="${client.address ?: ""}">
-                    </div>
-                    
-                    <div class="client-form-field">
-                        <label for="editPhone" class="client-form-label">Phone *</label>
-                        <input type="text" id="editPhone" name="editPhone" required 
-                               class="client-form-input" value="${client.phone ?: ""}">
-                    </div>
-                    
-                    <div class="client-form-row-3">
-                        <div class="client-form-field">
-                            <label for="editCurrentBalance" class="client-form-label">Current Balance</label>
-                            <input type="number" id="editCurrentBalance" name="editCurrentBalance" step="0.01"
-                                   class="client-form-input" value="$originalBalance"
-                                   data-original-balance="$originalBalance">
-                        </div>
-                        <div class="client-form-field">
-                            <label for="editCreditLimit" class="client-form-label">Credit Limit</label>
-                            <input type="number" id="editCreditLimit" name="editCreditLimit" step="0.01"
-                                   class="client-form-input" value="${creditLimit ?: ""}">
-                        </div>
-                        <div class="client-form-field">
-                            <label for="editAlertThreshold" class="client-form-label">Alert Threshold</label>
-                            <input type="number" id="editAlertThreshold" name="editAlertThreshold" step="0.01"
-                                   class="client-form-input" value="${alertThreshold ?: ""}">
-                        </div>
-                    </div>
-                    
-                    <div class="client-form-row">
-                        <div class="client-form-field">
-                            <label for="editCurrency" class="client-form-label">Currency</label>
-                            <select id="editCurrency" name="editCurrency" class="client-form-select">
-                                <option value="JPY" ${if (client.currency == "JPY") "selected" else ""}>JPY (Japanese Yen)</option>
-                                <option value="USD" ${if (client.currency == "USD") "selected" else ""}>USD (US Dollar)</option>
-                                <option value="EUR" ${if (client.currency == "EUR") "selected" else ""}>EUR (Euro)</option>
-                            </select>
-                        </div>
-                        <div class="client-form-field">
-                            <label for="editStatus" class="client-form-label">Status</label>
-                            <select id="editStatus" name="editStatus" class="client-form-select">
-                                <option value="ACTIVE" ${if (client.status == "ACTIVE") "selected" else ""}>Active</option>
-                                <option value="SUSPENDED" ${if (client.status == "SUSPENDED") "selected" else ""}>Suspended</option>
-                                <option value="CLOSED" ${if (client.status == "CLOSED") "selected" else ""}>Closed</option>
-                            </select>
-                        </div>
-                    </div>
-                    
-                    <div class="client-modal-actions-split">
-                        <button type="button" id="deleteClientBtn" class="client-btn client-btn-danger">
-                            Delete
-                        </button>
-                        <div class="client-modal-actions-right">
-                            <button type="button" id="cancelEditClientBtn" class="client-btn client-btn-secondary">
-                                Cancel
-                            </button>
-                            <button type="submit" class="client-btn client-btn-primary">
-                                Update Client
-                            </button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        </div>
-    """
-    
-    // Remove existing modal if any
-    document.getElementById("editClientModal")?.remove()
-    
-    // Add modal to body
-    document.body?.insertAdjacentHTML("beforeend", modalHTML)
-    
-    // Add form submission handler
-    document.getElementById("editClientForm")?.addEventListener("submit", { event ->
-        event.preventDefault()
-        handleEditClientSubmit(clientId)
-    })
-    
-    // Add delete button handler
-    document.getElementById("deleteClientBtn")?.addEventListener("click", { _: Event ->
-        deleteClientFromModal(clientId)
-    })
-    
-    // Add cancel button handler
-    document.getElementById("cancelEditClientBtn")?.addEventListener("click", { _: Event ->
-        closeEditClientModal()
-    })
-    
-    // Add close button (X) handler
-    document.getElementById("closeEditClientModalBtn")?.addEventListener("click", { _: Event ->
-        closeEditClientModal()
-    })
+private fun getClientModalComboboxValue(fieldId: String): String {
+    val inputValue = (document.getElementById("${fieldId}Input") as? HTMLInputElement)?.value?.trim()
+    if (!inputValue.isNullOrBlank()) return inputValue
+    return (document.getElementById(fieldId) as? HTMLSelectElement)?.value?.trim().orEmpty()
 }
 
-fun handleEditClientSubmit(clientId: Long) {
-    val form = document.getElementById("editClientForm") as? HTMLFormElement
-    if (form == null) return
-    
-    val balanceInput = document.getElementById("editCurrentBalance") as? HTMLInputElement
-    val originalBalance = balanceInput?.getAttribute("data-original-balance")?.toDoubleOrNull() ?: 0.0
-    val newBalance = balanceInput?.value?.toDoubleOrNull() ?: 0.0
-    val balanceChanged = kotlin.math.abs(originalBalance - newBalance) > 0.01
-    
-    val clientData = js("{}")
-    clientData["clientNumber"] = (document.getElementById("editClientNumber") as? HTMLInputElement)?.value ?: ""
-    clientData["clientName"] = (document.getElementById("editClientName") as? HTMLInputElement)?.value ?: ""
-    clientData["address"] = (document.getElementById("editAddress") as? HTMLInputElement)?.value ?: ""
-    clientData["phone"] = (document.getElementById("editPhone") as? HTMLInputElement)?.value ?: ""
-    clientData["creditLimit"] = (document.getElementById("editCreditLimit") as? HTMLInputElement)?.value?.toDoubleOrNull()
-    clientData["alertThreshold"] = (document.getElementById("editAlertThreshold") as? HTMLInputElement)?.value?.toDoubleOrNull()
-    clientData["currency"] = (document.getElementById("editCurrency") as? HTMLSelectElement)?.value ?: "JPY"
-    clientData["status"] = (document.getElementById("editStatus") as? HTMLSelectElement)?.value ?: "ACTIVE"
-    
-    // Validate required fields
-    if (clientData["clientNumber"] == "" || clientData["clientName"] == "" || clientData["address"] == "" || clientData["phone"] == "") {
-        showMessage("Please fill in all required fields", "error")
-        return
+private fun setClientModalComboboxValue(fieldId: String, value: String?) {
+    val v = value?.trim().orEmpty()
+    val select = document.getElementById(fieldId) as? HTMLSelectElement
+    val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+    if (v.isNotEmpty()) {
+        val exists = (0 until (select?.options?.length ?: 0)).any { idx ->
+            (select?.options?.item(idx) as? HTMLOptionElement)?.value?.equals(v, ignoreCase = true) == true
+        }
+        if (!exists && select != null) {
+            val fallback = document.createElement("option") as HTMLOptionElement
+            fallback.value = v
+            fallback.text = v
+            select.add(fallback)
+        }
     }
-    
-    // Show loading state
-    val submitBtn = document.querySelector("#editClientForm button[type='submit']") as? HTMLButtonElement
-    submitBtn?.let {
-        it.disabled = true
-        it.textContent = "Validating..."
-    }
-    
-    val clientName = clientData["clientName"] as String
-    
-    // First, validate that client name exists in master list
+    if (select != null) select.value = v
+    if (input != null) input.value = v
+    js("window.__tmpClientComboboxId = fieldId")
+    js("if (typeof window.syncComboboxInput === 'function') { window.syncComboboxInput(window.__tmpClientComboboxId); }")
+}
+
+private fun populateClientNameOptions(selectId: String, selectedValue: String?) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    select.innerHTML = """<option value="">▼</option>"""
     window.fetch(apiUrl("master-menu/clients"))
         .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load master client list')")
+            if (response.ok) response.json() else throw js("Error('Failed to load client list')")
         }
         .then { raw: dynamic ->
-            val masterList: List<String> = if (raw != null && js("Array.isArray(raw)")) {
-                val a = raw.unsafeCast<Array<*>>()
-                (0 until a.size).map { (a[it]?.toString() ?: "").trim().uppercase() }.filter { it.isNotEmpty() }
-            } else emptyList()
-            
-            // Check if client name exists in master list (case-insensitive)
-            if (!masterList.contains(clientName.uppercase())) {
-                // Client name not in master list - show error modal
-                closeEditClientModal()
-                showClientNameNotInMasterListModal()
-                return@then
+            val clients = parseMasterClientNameList(raw)
+            clients.forEach { name ->
+                val option = document.createElement("option") as HTMLOptionElement
+                option.value = name
+                option.text = name
+                select.add(option)
             }
-            
-            // Client name exists, proceed with updating
-            submitBtn?.textContent = "Updating..."
-            
-            val requestOptions = js("({})")
-            requestOptions["method"] = "PUT"
-            val headers = js("({})")
-            headers["Content-Type"] = "application/json"
-            requestOptions["headers"] = headers
-            requestOptions["body"] = JSON.stringify(clientData)
-            
-            window.fetch(apiUrl("clients/$clientId"), requestOptions)
-                .then { response ->
-                    if (response.ok) {
-                        // If balance changed, update balance separately
-                        if (balanceChanged) {
-                            val balanceRequest = js("({})")
-                            balanceRequest["method"] = "PUT"
-                            val balanceHeaders = js("({})")
-                            balanceHeaders["Content-Type"] = "application/json"
-                            balanceRequest["headers"] = balanceHeaders
-                            val balanceBody = js("({})")
-                            balanceBody["balance"] = newBalance
-                            balanceRequest["body"] = JSON.stringify(balanceBody)
-                            
-                            window.fetch(apiUrl("clients/$clientId/balance"), balanceRequest)
-                                .then { balanceResponse ->
-                                    if (balanceResponse.ok) {
-                                        showMessage("Client updated successfully!", "success")
-                                        closeEditClientModal()
-                                        showClientAccountsPage()
-                                    } else {
-                                        balanceResponse.text().then { errorText ->
-                                            showMessage("Failed to update balance: $errorText", "error")
-                                        }
-                                    }
-                                }
-                                .catch { error ->
-                                    showMessage("Error updating balance: $error", "error")
-                                }
-                                .finally {
-                                    submitBtn?.let {
-                                        it.disabled = false
-                                        it.textContent = "Update Client"
-                                    }
-                                }
-                        } else {
-                            showMessage("Client updated successfully!", "success")
-                            closeEditClientModal()
-                            showClientAccountsPage()
-                            submitBtn?.let {
-                                it.disabled = false
-                                it.textContent = "Update Client"
-                            }
-                        }
-                    } else {
-                        response.text().then { errorText ->
-                            showMessage("Failed to update client: $errorText", "error")
-                        }
-                        submitBtn?.let {
-                            it.disabled = false
-                            it.textContent = "Update Client"
-                        }
-                    }
-                }
-                .catch { error ->
-                    showMessage("Error updating client: $error", "error")
-                    submitBtn?.let {
-                        it.disabled = false
-                        it.textContent = "Update Client"
-                    }
-                }
+            setClientModalComboboxValue(selectId, selectedValue)
         }
         .catch { error: dynamic ->
-            Logger.error("Error validating client name: ${error.toString()}")
-            showMessage("Error validating client name", "error")
-            submitBtn?.let {
-                it.disabled = false
-                it.textContent = "Update Client"
-            }
+            Logger.error("Failed to populate client-name options: ${error.toString()}")
         }
-}
-
-@JsName("closeEditClientModalFromClientManagement")
-fun closeEditClientModal() {
-    document.getElementById("editClientModal")?.remove()
-}
-
-@JsName("deleteClientFromModalFromClientManagement")
-fun deleteClientFromModal(clientId: Long) {
-    if (!window.confirm("Are you sure you want to delete this client? This action cannot be undone.")) {
-        return
-    }
-    
-    val requestOptions = js("({})")
-    requestOptions["method"] = "DELETE"
-    
-    window.fetch(apiUrl("clients/$clientId"), requestOptions)
-    .then { response ->
-        if (response.ok) {
-            showMessage("Client deleted successfully!", "success")
-            closeEditClientModal()
-            showClientAccountsPage() // Refresh the client list
-        } else {
-            response.text().then { errorText ->
-                showMessage("Failed to delete client: $errorText", "error")
-            }
-        }
-    }
-    .catch { error ->
-        showMessage("Error deleting client: $error", "error")
-    }
 }
 
 fun addClientTransaction(clientId: Long) {
@@ -989,7 +643,7 @@ fun openAddTransactionModal(clientId: Long) {
                     <div class="client-form-row">
                         <div class="client-form-field">
                             <label for="txDate" class="client-form-label">DATE *</label>
-                            <input type="date" id="txDate" name="txDate" required class="client-form-input">
+                            <input type="date" id="txDate" name="txDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" required class="client-form-input">
                         </div>
                         <div class="client-form-field">
                             <label for="txEvent" class="client-form-label">Event *</label>
@@ -1546,7 +1200,7 @@ fun exportClientsToCSV(clients: dynamic) {
     val clientsArray = clients as Array<dynamic>
     
     // CSV headers
-    val headers = listOf("clientNumber", "clientName", "address", "phone", "currentBalance", "creditLimit", "alertThreshold", "currency", "status")
+    val headers = listOf("clientNumber", "clientName", "currentBalance", "creditLimit", "alertThreshold", "currency", "status")
     val csvRows = mutableListOf<String>()
     
     // Add header row
@@ -1558,8 +1212,6 @@ fun exportClientsToCSV(clients: dynamic) {
             val value = when (header) {
                 "clientNumber" -> client.clientNumber?.toString() ?: ""
                 "clientName" -> client.clientName?.toString() ?: ""
-                "address" -> client.address?.toString() ?: ""
-                "phone" -> client.phone?.toString() ?: ""
                 "currentBalance" -> ((client.currentBalance as? Number)?.toDouble() ?: 0.0).toString()
                 "creditLimit" -> ((client.creditLimit as? Number?)?.toDouble() ?: null)?.toString() ?: ""
                 "alertThreshold" -> ((client.alertThreshold as? Number?)?.toDouble() ?: null)?.toString() ?: ""

@@ -40,11 +40,18 @@ object ApiClient {
             Logger.debug("API request: $method ${apiUrl(endpoint)}")
             
             val response = window.fetch(apiUrl(endpoint), requestInit).await()
-            
+
             if (response.ok) {
-                val data = response.json().await()
+                val text = response.text().await()
+                val trimmed = text.trim()
+                val data: T = if (trimmed.isEmpty()) {
+                    js("null").unsafeCast<T>()
+                } else {
+                    val parsed: dynamic = JSON.parse(trimmed)
+                    parsed.unsafeCast<T>()
+                }
                 Logger.debug("API success: $endpoint")
-                ApiResult.Success(data.unsafeCast<T>())
+                ApiResult.Success(data)
             } else {
                 val errorText = response.text().await()
                 val errorMessage = ErrorHandler.extractErrorMessage(errorText)

@@ -142,9 +142,6 @@ data class Purchase(
     @Column(name = "vessel")
     val vessel: String? = null,
     
-    @Column(name = "destination")
-    val destination: String? = null,
-    
     @Column(name = "shipped")
     val shipped: Boolean? = null,
     
@@ -194,6 +191,9 @@ data class Purchase(
     
     @Column(name = "total_cnf_price")
     val totalCnfPrice: java.math.BigDecimal? = null,
+    
+    @Column(name = "total_fob_price")
+    val totalFobPrice: java.math.BigDecimal? = null,
     
     @Column(name = "booking_id")
     val bookingId: Long? = null,

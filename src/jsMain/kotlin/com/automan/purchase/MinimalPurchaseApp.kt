@@ -16,6 +16,19 @@ import kotlinx.coroutines.launch
 
 private val minimalPurchaseScope = MainScope()
 
+/** Lowercased client_name -> primary country (first token) from `client_map` for Target Country autofill. */
+private var purchaseClientNameToCountryMap: Map<String, String>? = null
+
+/** Lowercased client_name -> all country tokens (`;`-separated in DB) for Target Country dropdown top section. */
+private var purchaseClientNameToCountryTokens: Map<String, List<String>>? = null
+
+/** Master-menu country list; combined with client_map tokens + separator in Target Country comboboxes. */
+private var purchaseMasterCountryList: List<String> = emptyList()
+
+// If user selects Client Name before /api/clients map finishes loading,
+// queue a retry and apply as soon as the map is ready.
+private val purchaseCountryAutofillPendingClientSelectIds: MutableSet<String> = mutableSetOf()
+
 // API functions moved to Utils.kt
 
 // Global mutable list to store cars that have been confirmed (saved) on the C&F page
@@ -230,22 +243,22 @@ fun initializeAppSetup() {
     window.asDynamic().handleRixoPdfGeneration = ::handleRixoPdfGeneration
     window.asDynamic().handleGenerateInvoice = ::handleGenerateInvoice
     window.asDynamic().editMasterConsignee = ::editMasterConsignee
+    window.asDynamic().duplicateMasterConsignee = ::duplicateMasterConsignee
     window.asDynamic().deleteMasterConsignee = ::deleteMasterConsignee
     window.asDynamic().editMasterCountry = ::editMasterCountry
     window.asDynamic().editMasterCarBrand = ::editMasterCarBrand
     window.asDynamic().duplicateMasterCarBrand = ::duplicateMasterCarBrand
     window.asDynamic().deleteMasterCarBrand = ::deleteMasterCarBrand
+    window.asDynamic().editMasterClientMap = ::editMasterClientMap
+    window.asDynamic().duplicateMasterClientMap = ::duplicateMasterClientMap
     window.asDynamic().editMasterSupplier = ::editMasterSupplier
     window.asDynamic().duplicateMasterSupplier = ::duplicateMasterSupplier
-    window.asDynamic().editClient = ::editClient
-    window.asDynamic().editClientFromList = ::editClientFromList
     window.asDynamic().addClientTransaction = ::addClientTransaction
-    window.asDynamic().closeEditClientModal = ::closeEditClientModal
-    window.asDynamic().deleteClientFromModal = js("window.deleteClientFromModalFromClientManagement")
     
     // Expose date conversion functions for edit form
     window.asDynamic().toIsoFromLabel = ::toIsoFromLabel
     window.asDynamic().isoToWeekdayLabel = ::isoToWeekdayLabelTopLevel
+    window.asDynamic().todayIsoLocalDate = ::todayIsoLocalDate
     
     // Expose state persistence functions to global scope
     window.asDynamic().saveCarBookingState = ::saveCarBookingState
@@ -298,9 +311,14 @@ fun initializeAppSetup() {
         loadAllChassisDropdown(isEditForm)
     }
     
-    // Expose fetchMappingByChassisOnly function for chassis-first flow in Edit Purchase
-    window.asDynamic().fetchMappingByChassisOnly = { chassis: String, isEditForm: Boolean ->
-        fetchMappingByChassisOnly(chassis, isEditForm)
+    // Expose fetchMappingByChassisOnly function for chassis-first flow in Edit Purchase (optional purchase snapshot for edit merge)
+    window.asDynamic().fetchMappingByChassisOnly = { chassis: String, isEditForm: Boolean, purchaseData: dynamic ->
+        val merge = if (js("typeof purchaseData === 'undefined' || purchaseData === null").unsafeCast<Boolean>()) {
+            null
+        } else {
+            purchaseData
+        }
+        fetchMappingByChassisOnly(chassis, isEditForm, merge)
     }
     // Expose Brand "See More" handler (loads master car_brands into dropdown)
     window.asDynamic().handleBrandSeeMoreClick = { selectId: String ->
@@ -320,7 +338,6 @@ fun initializeAppSetup() {
     Logger.debug("Functions exposed to global scope successfully")
     Logger.debug("closeAddClientModal available: ${window.asDynamic().closeAddClientModal != null}")
     Logger.debug("selectClient available: ${window.asDynamic().selectClient != null}")
-    Logger.debug("editClient available: ${window.asDynamic().editClient != null}")
 }
 
 fun main() {
@@ -330,7 +347,10 @@ fun main() {
     
     // Initialize app setup (always run, regardless of root element)
     initializeAppSetup()
-    
+    // Must run once at startup (not only when #/add loads). Otherwise opening Edit before Add
+    // skipped money listeners entirely, and edit-form code used to set flags that blocked install.
+    setupMoneyInputFormattingOnce()
+
     val root = document.getElementById("root")
     if (root == null) {
         Logger.error("Root element not found! Waiting for DOM to load...")
@@ -370,6 +390,9 @@ fun main() {
     
     // Setup editable combobox handlers
     setupEditableComboboxHandlers()
+    // Date validation (global) and refresh popup bridge for inline JS handlers.
+    setupGlobalDateValidation()
+    window.asDynamic().showMasterDataRefreshPopup = { showMasterDataRefreshPopup() }
 }
 
 // Helper function to create editable combobox HTML
@@ -384,12 +407,38 @@ fun createEditableCombobox(id: String, placeholder: String, required: Boolean = 
             <select id="$id" $requiredAttr 
                     style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
                     onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('$id');"
-                    onchange="syncComboboxInput('$id'); if (typeof handleRixoCompanyChange === 'function' && '$id' === 'rixoCompany') { handleRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleEditRixoCompanyChange === 'function' && '$id' === 'editRixoCompany') { handleEditRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleChassisSearchChange === 'function' && '$id' === 'chassisSearch') { handleChassisSearchChange(); } if (typeof window.fetchPolsByStockLocationAndUpdate === 'function' && ('$id' === 'stockLocation' || '$id' === 'editStockLocation')) { window.fetchPolsByStockLocationAndUpdate(window.getComboboxValue('$id')); }">
+                    onchange="syncComboboxInput('$id'); if (typeof handleRixoCompanyChange === 'function' && '$id' === 'rixoCompany') { handleRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleEditRixoCompanyChange === 'function' && '$id' === 'editRixoCompany') { handleEditRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleChassisSearchChange === 'function' && '$id' === 'chassisSearch') { handleChassisSearchChange(); } if (typeof window.fetchPolsAfterStockChange === 'function' && ('$id' === 'stockLocation' || '$id' === 'editStockLocation')) { window.fetchPolsAfterStockChange('$id'); }">
                 <option value="">▼</option>
             </select>
             <div id="${id}Button" onclick="openComboboxDropdown('$id')" 
                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                 ▼
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+/**
+ * Rixo Request Generator only: speed-dial–style picker (options fly down). Keeps
+ * `#rixoCompany` + `#rixoCompanyInput` so [getComboboxValue] and [loadRixoCompaniesForDate] stay compatible.
+ */
+fun createRixoCompanyFabCombobox(): String {
+    return """
+        <div class="rixo-company-fab-wrap" id="rixoCompanyFabWrap">
+            <input type="hidden" id="rixoCompanyInput" value="" />
+            <select id="rixoCompany" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
+                <option value="">▼</option>
+            </select>
+            <div class="rixo-company-fab" id="rixoCompanyFabRoot">
+                <button type="button" id="rixoCompanyFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="rixoCompanyFabActions">
+                    <span class="rixo-fab-trigger-circle" id="rixoCompanyFabLetter" aria-hidden="true">R</span>
+                    <span class="rixo-fab-trigger-text-wrap">
+                        <span class="rixo-fab-trigger-label" id="rixoCompanyFabLabel">Select Rixo Company</span>
+                        <span class="rixo-fab-trigger-hint">Tap to choose company</span>
+                    </span>
+                    <span class="rixo-fab-trigger-chevron" aria-hidden="true">▼</span>
+                </button>
+                <div id="rixoCompanyFabActions" class="rixo-fab-actions" role="listbox" style="display: none;" aria-label="Rixo companies"></div>
             </div>
         </div>
     """.trimIndent()
@@ -589,13 +638,289 @@ fun ensureBaseComboboxOptionsForAddEdit() {
     addBaseOptions("editShift", baseShiftOptions)
 }
 
-/** Populate Grade, Fuel, Shift, Country, Client Name, Repair Company comboboxes from master_menu API. */
+/** Loads client_map rows; maps normalized client name -> country for Target Country autofill on purchase forms. */
+fun refreshPurchaseClientNameToCountryMap() {
+    console.log("🔄 refreshPurchaseClientNameToCountryMap: starting client-map/mappings fetch")
+    window.fetch(apiUrl("client-map/mappings"))
+        .then { response -> if (response.ok) response.json() else js("null") }
+        .then { payload: dynamic ->
+            val map = mutableMapOf<String, String>()
+            val tokensAcc = mutableMapOf<String, MutableList<String>>()
+            val data: dynamic = when {
+                payload != null && payload.data != null && (js("Array.isArray(payload.data)") as Boolean) -> payload.data
+                payload != null && (js("Array.isArray(payload)") as Boolean) -> payload
+                else -> null
+            }
+            if (data != null) {
+                for (row in data.unsafeCast<Array<Any>>()) {
+                    val d = asDynamicRow(row)
+                    val name = (d.clientName as? String)?.trim()
+                        ?: (d.client_name as? String)?.trim()
+                        ?: ""
+                    if (name.isEmpty()) continue
+                    val countryRaw = (d.country as? String)?.trim() ?: ""
+                    if (countryRaw.isEmpty()) continue
+                    val tokens = splitSemicolonTokens(countryRaw).map { it.trim() }.filter { it.isNotEmpty() }
+                    if (tokens.isEmpty()) continue
+                    val key = normalizeClientNameKey(name)
+                    if (!map.containsKey(key)) {
+                        map[key] = tokens.first()
+                    }
+                    val list = tokensAcc.getOrPut(key) { mutableListOf() }
+                    for (t in tokens) {
+                        if (list.none { it.equals(t, ignoreCase = true) }) list.add(t)
+                    }
+                }
+            }
+            purchaseClientNameToCountryMap = map
+            purchaseClientNameToCountryTokens = tokensAcc.mapValues { it.value.toList() }
+            console.log("✅ refreshPurchaseClientNameToCountryMap: map ready. size=", map.size)
+            // Apply immediately (handles current selection) and again for any queued retries.
+            // Use a timeout to allow combobox selection/input synchronization to finish.
+            window.setTimeout({
+                applyPurchaseCountryFromClientName("clientName", clearCountryWhenNameEmpty = false)
+                applyPurchaseCountryFromClientName("editClientName", clearCountryWhenNameEmpty = false)
+                if (purchaseCountryAutofillPendingClientSelectIds.isNotEmpty()) {
+                    for (sid in purchaseCountryAutofillPendingClientSelectIds) {
+                        applyPurchaseCountryFromClientName(sid, clearCountryWhenNameEmpty = false)
+                    }
+                    purchaseCountryAutofillPendingClientSelectIds.clear()
+                }
+            }, 0)
+        }
+        .catch { err: dynamic ->
+            console.warn("refreshPurchaseClientNameToCountryMap failed:", err)
+        }
+}
+
+private fun normalizeClientNameKey(input: String): String {
+    // Normalize whitespace/casing so small formatting differences don't break matching.
+    return input.trim()
+        .replace(Regex("\\s+"), " ")
+        .lowercase()
+}
+
+/** JSON array rows from fetch are plain JS objects; [asDynamic] on loop vars can throw — use [unsafeCast]. */
+private fun asDynamicRow(row: Any?): dynamic = row.unsafeCast<dynamic>()
+
+/** When the prefetch map is missing or has no match, resolve Target Country from `client_map`. */
+private fun fetchClientMapCountryForClientName(clientName: String, countrySelectId: String) {
+    window.fetch(apiUrl("client-map/mappings"))
+        .then { r: dynamic -> if (r.ok) r.json() else js("null") }
+        .then { payload: dynamic ->
+            val data: dynamic = when {
+                payload != null && payload.data != null && (js("Array.isArray(payload.data)") as Boolean) -> payload.data
+                payload != null && (js("Array.isArray(payload)") as Boolean) -> payload
+                else -> null
+            }
+            if (data == null) return@then
+            val want = normalizeClientNameKey(clientName)
+            for (row in data.unsafeCast<Array<Any>>()) {
+                val d = asDynamicRow(row)
+                val n = (d.clientName as? String)?.trim() ?: (d.client_name as? String)?.trim() ?: ""
+                if (normalizeClientNameKey(n) != want) continue
+                val raw = (d.country as? String)?.trim() ?: ""
+                val tokens = splitSemicolonTokens(raw).map { it.trim() }.filter { it.isNotEmpty() }
+                if (tokens.isEmpty()) return@then
+                val curMap = purchaseClientNameToCountryMap?.toMutableMap() ?: mutableMapOf()
+                if (!curMap.containsKey(want)) curMap[want] = tokens.first()
+                purchaseClientNameToCountryMap = curMap
+                val curTok = purchaseClientNameToCountryTokens?.toMutableMap() ?: mutableMapOf()
+                val merged = (curTok[want] ?: emptyList()).toMutableList()
+                for (t in tokens) {
+                    if (merged.none { it.equals(t, ignoreCase = true) }) merged.add(t)
+                }
+                curTok[want] = merged
+                purchaseClientNameToCountryTokens = curTok
+                rebuildPurchaseTargetCountryDropdown(countrySelectId, clientName)
+                setPurchaseComboboxValue(countrySelectId, tokens.first())
+                return@then
+            }
+        }
+        .catch { err: dynamic ->
+            console.warn("client-map lookup for Target Country failed:", err)
+        }
+}
+
+private fun ensureComboboxOptionExistsForPurchase(selectId: String, value: String) {
+    val v = firstSemicolonToken(value.trim())
+    if (v.isEmpty() || v == "__SEE_MORE__" || v == "__SEE_LESS__" || v == CHASSIS_MASTER_SEP_VALUE) return
+    val sel = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    val valLower = v.lowercase()
+    for (i in 0 until sel.options.length) {
+        val opt = sel.options[i] as? HTMLOptionElement ?: continue
+        if (opt.value == "__SEE_MORE__") continue
+        if (opt.value.lowercase() == valLower || opt.text.lowercase() == valLower) return
+    }
+    val newOpt = document.createElement("option") as HTMLOptionElement
+    newOpt.value = v
+    newOpt.textContent = v
+    sel.appendChild(newOpt)
+}
+
+/**
+ * Target Country: options from `client_map` for the current client (all `;` tokens), then a rule, then master_menu countries.
+ * Same overlay behavior as Stock Location (registerSupplierMasterComboId + __CHASSIS_MASTER_SEP__).
+ */
+private fun rebuildPurchaseTargetCountryDropdown(countrySelectId: String, clientName: String) {
+    val key = normalizeClientNameKey(clientName.trim())
+    val clientCountries = if (key.isEmpty()) {
+        emptyList()
+    } else {
+        purchaseClientNameToCountryTokens?.get(key) ?: emptyList()
+    }
+    if (purchaseMasterCountryList.isEmpty()) {
+        if (clientCountries.isEmpty()) return
+        val selectOnly = document.getElementById(countrySelectId) as? HTMLSelectElement ?: return
+        val inputOnly = document.getElementById("${countrySelectId}Input") as? HTMLInputElement
+        val preservedOnly = purchaseComboboxDisplayedValue(countrySelectId).trim()
+        selectOnly.innerHTML = ""
+        val defaultOptOnly = document.createElement("option") as HTMLOptionElement
+        defaultOptOnly.value = ""
+        defaultOptOnly.textContent = ""
+        selectOnly.appendChild(defaultOptOnly)
+        for (c in clientCountries) {
+            val opt = document.createElement("option") as HTMLOptionElement
+            opt.value = c
+            opt.textContent = c
+            selectOnly.appendChild(opt)
+        }
+        window.asDynamic().__purchaseCountryComboRegId = countrySelectId
+        js("if (typeof registerSupplierMasterComboId === 'function') registerSupplierMasterComboId(window.__purchaseCountryComboRegId)")
+        if (preservedOnly.isNotEmpty()) {
+            ensureComboboxOptionExistsForPurchase(countrySelectId, preservedOnly)
+            selectOnly.value = preservedOnly
+            if (inputOnly != null) inputOnly.value = preservedOnly
+        } else {
+            selectOnly.value = ""
+            if (inputOnly != null) inputOnly.value = ""
+        }
+        return
+    }
+    val clientLower = clientCountries.map { it.lowercase() }.toSet()
+    val rest = purchaseMasterCountryList.filter { it.isNotBlank() && !clientLower.contains(it.trim().lowercase()) }
+    val select = document.getElementById(countrySelectId) as? HTMLSelectElement ?: return
+    val input = document.getElementById("${countrySelectId}Input") as? HTMLInputElement
+    val preserved = purchaseComboboxDisplayedValue(countrySelectId).trim()
+    select.innerHTML = ""
+    val defaultOpt = document.createElement("option") as HTMLOptionElement
+    defaultOpt.value = ""
+    defaultOpt.textContent = ""
+    select.appendChild(defaultOpt)
+    for (c in clientCountries) {
+        val opt = document.createElement("option") as HTMLOptionElement
+        opt.value = c
+        opt.textContent = c
+        select.appendChild(opt)
+    }
+    if (clientCountries.isNotEmpty() && rest.isNotEmpty()) {
+        val sep = document.createElement("option") as HTMLOptionElement
+        sep.value = "__CHASSIS_MASTER_SEP__"
+        sep.textContent = SUPPLIER_MASTER_SEP_OPTION_LABEL
+        sep.disabled = true
+        select.appendChild(sep)
+    }
+    for (r in rest) {
+        val opt = document.createElement("option") as HTMLOptionElement
+        opt.value = r
+        opt.textContent = r
+        select.appendChild(opt)
+    }
+    window.asDynamic().__purchaseCountryComboRegId = countrySelectId
+    js("if (typeof registerSupplierMasterComboId === 'function') registerSupplierMasterComboId(window.__purchaseCountryComboRegId)")
+    if (preserved.isNotEmpty()) {
+        ensureComboboxOptionExistsForPurchase(countrySelectId, preserved)
+        select.value = preserved
+        if (input != null) input.value = preserved
+    } else {
+        select.value = ""
+        if (input != null) input.value = ""
+    }
+}
+
+private fun rebuildPurchaseTargetCountryDropdownsFromState() {
+    rebuildPurchaseTargetCountryDropdown("country", purchaseComboboxDisplayedValue("clientName"))
+    rebuildPurchaseTargetCountryDropdown("editCountry", purchaseComboboxDisplayedValue("editClientName"))
+}
+
+fun setPurchaseComboboxValue(selectId: String, value: String) {
+    val sel = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    val inp = document.getElementById("${selectId}Input") as? HTMLInputElement ?: return
+    val v = value.trim()
+    if (v.isNotEmpty()) {
+        ensureComboboxOptionExistsForPurchase(selectId, v)
+    }
+    sel.value = v
+    inp.value = v
+    inp.asDynamic().dispatchEvent(js("new Event('change', { bubbles: true })"))
+}
+
+/** Same value resolution as combobox save logic (input overrides select). */
+fun purchaseComboboxDisplayedValue(fieldId: String): String {
+    val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+    val select = document.getElementById(fieldId) as? HTMLSelectElement
+    return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
+}
+
+/** Distance UI may include commas and `km` suffix; DB expects digits only. */
+private fun sanitizeDistanceUiToDb(value: String): String =
+    value.trim().replace(Regex("[^0-9]"), "")
+
+fun applyPurchaseCountryFromClientName(clientSelectId: String, clearCountryWhenNameEmpty: Boolean = true) {
+    rebuildPurchaseTargetCountryDropdownsFromState()
+    val countrySelectId = if (clientSelectId == "editClientName") "editCountry" else "country"
+    val name = purchaseComboboxDisplayedValue(clientSelectId).trim()
+    if (name.isEmpty()) {
+        if (clearCountryWhenNameEmpty) setPurchaseComboboxValue(countrySelectId, "")
+        return
+    }
+    val map = purchaseClientNameToCountryMap
+    if (map == null) {
+        console.warn("Target Country autofill: map not ready; queueing retry for", clientSelectId)
+        purchaseCountryAutofillPendingClientSelectIds.add(clientSelectId)
+        fetchClientMapCountryForClientName(name, countrySelectId)
+        return
+    }
+    if (map.isEmpty()) {
+        console.warn("Target Country autofill: client_map prefetch empty; trying live lookup")
+        fetchClientMapCountryForClientName(name, countrySelectId)
+        return
+    }
+    val key = normalizeClientNameKey(name)
+    if (!map.containsKey(key)) {
+        console.warn("Target Country autofill: no match", "clientName=", name, "key=", key, "mapSize=", map.size)
+        fetchClientMapCountryForClientName(name, countrySelectId)
+        return
+    }
+    val country = map[key] ?: ""
+    setPurchaseComboboxValue(countrySelectId, country)
+}
+
+/** Target Country: master_menu list + client_map tokens (top) and Stock Location–style separator; see [rebuildPurchaseTargetCountryDropdown]. */
+fun populateTargetCountryComboboxesForPurchaseForm() {
+    window.fetch(apiUrl("master-menu/country"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw RuntimeException("Failed to load master-menu/country")
+        }
+        .then { raw: dynamic ->
+            purchaseMasterCountryList = parsePurchaseMasterListArray(raw)
+            rebuildPurchaseTargetCountryDropdownsFromState()
+            applyPurchaseCountryFromClientName("clientName", clearCountryWhenNameEmpty = false)
+            applyPurchaseCountryFromClientName("editClientName", clearCountryWhenNameEmpty = false)
+        }
+        .catch { _: dynamic ->
+            console.error("Failed to load master-menu/country for Target Country dropdown")
+        }
+}
+
+/** Populate Grade, Fuel, Shift, Client Name, Repair Company comboboxes from master_menu API. Target Country: [populateTargetCountryComboboxesForPurchaseForm]. */
 fun populateMasterMenuComboboxesForPurchaseForm() {
+    refreshPurchaseClientNameToCountryMap()
+    populateTargetCountryComboboxesForPurchaseForm()
     val fieldToSelectIds = listOf(
         "car_grade" to listOf("grade", "editGrade"),
         "fuel" to listOf("fuel", "editFuel"),
         "shift" to listOf("shift", "editShift"),
-        "country" to listOf("country", "editCountry"),
         "clients" to listOf("clientName", "editClientName"),
         "repair_company" to listOf("repairCompany", "editRepairCompany")
     )
@@ -632,6 +957,7 @@ fun populateMasterMenuComboboxesForPurchaseForm() {
                     val input = document.getElementById("${selectId}Input") as? HTMLInputElement
                     if (input != null && select.value.isNotEmpty()) input.value = select.value
                 }
+
             }
             .catch { _: dynamic ->
                 console.error("Failed to load master-menu/$apiField")
@@ -668,6 +994,11 @@ fun setupEditableComboboxHandlers() {
                 // For chassis field, DO NOT dispatch change event on select here
                 // The change event is already dispatched by the option click handler
                 // Dispatching it here causes infinite recursion
+            }
+            if (selectId === 'clientName' || selectId === 'editClientName') {
+                if (typeof window.applyPurchaseCountryFromClientName === 'function') {
+                    window.applyPurchaseCountryFromClientName(selectId);
+                }
             }
         };
         
@@ -735,6 +1066,33 @@ fun setupEditableComboboxHandlers() {
             var inputId = selectId + 'Input';
             var input = document.getElementById(inputId);
             if (!input) return;
+            
+            // Rixo modals: anchor dropdowns to modal content (same in-panel behavior as Supplier modal)
+            var rixoModalHost = null;
+            if (/^rixo(Bulk|Edit)/.test(selectId)) {
+                var hostProbe = input;
+                while (hostProbe && hostProbe !== document.body) {
+                    if (hostProbe.classList && hostProbe.classList.contains('rixo-modal-content')) {
+                        rixoModalHost = hostProbe;
+                        break;
+                    }
+                    hostProbe = hostProbe.parentElement;
+                }
+            }
+            
+            // Rixo modals: anchor dropdowns to modal content (like Supplier modal behavior)
+            // to avoid viewport/fixed-position drift behind/under modal overlays.
+            var rixoModalHost = null;
+            if (/^rixo(Bulk|Edit)/.test(selectId)) {
+                var hostProbe = input;
+                while (hostProbe && hostProbe !== document.body) {
+                    if (hostProbe.classList && hostProbe.classList.contains('rixo-modal-content')) {
+                        rixoModalHost = hostProbe;
+                        break;
+                    }
+                    hostProbe = hostProbe.parentElement;
+                }
+            }
             
             var options = Array.from(select.options).slice(1).map(function(opt) {
                 return { value: opt.value, text: opt.text };
@@ -1143,17 +1501,16 @@ fun setupEditableComboboxHandlers() {
                 return;
             }
             
-            var allOptions = Array.from(select.options).slice(1).map(function(opt) {
-                return { value: opt.value, text: opt.text };
+            var allOptions = Array.from(select.options).slice(1).filter(function(opt) {
+                var v = (opt.value || '').trim();
+                return v !== '__SEE_MORE__' && v !== '__SEE_LESS__';
+            }).map(function(opt) {
+                return { value: opt.value, text: opt.text, disabled: opt.disabled };
             });
             
-            // Ensure base options for fuel/shift are always present when filtering
+            // Car Brand Map modal only: inject standard fuel/shift lists when filtering.
             var baseOptionsMap = {
-                fuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
-                editFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 carBrandFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
-                shift: ["AT", "MT", "6F", "5F"],
-                editShift: ["AT", "MT", "6F", "5F"],
                 carBrandShift: ["AT", "MT", "6F", "5F"]
             };
             if (baseOptionsMap[selectId]) {
@@ -1165,11 +1522,21 @@ fun setupEditableComboboxHandlers() {
                 });
             }
             
-            // Get current selected value (check both select and input to handle sync issues)
-            var currentSelectedValue = (select.value || input.value || '').trim();
-            
             // Filter options based on search text (case-insensitive)
             var searchLower = (searchText || '').toLowerCase().trim();
+            
+            var isRixoInlineTreeCombo = /^rixo-inline-path-/.test(selectId) || /^rixoLeafInline_/.test(selectId);
+            // Rixo tree inline: while user types in the input, that text is the filter — not the committed value.
+            // Use select.value as the pinned selection; only fall back to input when not filtering (initial open).
+            var currentSelectedValue;
+            if (isRixoInlineTreeCombo) {
+                currentSelectedValue = (select.value || '').trim();
+                if (!currentSelectedValue && !searchLower) {
+                    currentSelectedValue = (input.value || '').trim();
+                }
+            } else {
+                currentSelectedValue = (select.value || input.value || '').trim();
+            }
             
             // For chassis fields, extract prefix before "-" for searching
             // This allows users to type "B43W-123456" and it will search for "B43W" only
@@ -1179,7 +1546,11 @@ fun setupEditableComboboxHandlers() {
                 searchPrefix = searchLower.substring(0, searchLower.indexOf('-')).trim();
             }
             
+            var isMappingMasterCombo = (window.__chassisMasterComboIds && window.__chassisMasterComboIds.indexOf(selectId) !== -1) ||
+                (window.__supplierMasterComboIds && window.__supplierMasterComboIds.indexOf(selectId) !== -1);
+            
             var filteredOptions = allOptions.filter(function(opt) {
+                if (opt.value === '__CHASSIS_MASTER_SEP__') return false;
                 if (!searchLower) return true;
                 var optText = (opt.text || opt.value || '').toLowerCase();
                 // For chassis fields, match against prefix only
@@ -1211,9 +1582,10 @@ fun setupEditableComboboxHandlers() {
             }
             
             // Never treat "See More" as selected; for Brand and master fields (Venue ID, Vehicle type, Rixo Company, Stock Location, POL) use case-insensitive match
-            var isMasterOrBrandField = (selectId === 'brand' || selectId === 'editBrand' || (typeof isMasterFieldWithSeeMore === 'function' && isMasterFieldWithSeeMore(selectId)));
+            var isMasterOrBrandField = (selectId === 'brand' || selectId === 'editBrand' || (typeof isMasterFieldWithSeeMore === 'function' && isMasterFieldWithSeeMore(selectId)) || isRixoInlineTreeCombo);
             function optionMatchesSelected(opt) {
                 if (opt.value === '__SEE_MORE__' || opt.value === '__SEE_LESS__') return false;
+                if (opt.value === '__CHASSIS_MASTER_SEP__') return false;
                 if (!currentSelectedValue) return false;
                 if (opt.value === currentSelectedValue || (opt.text || '') === currentSelectedValue) return true;
                 if (isChassisField) return chassisOptionMatchesSelected(opt);
@@ -1221,6 +1593,51 @@ fun setupEditableComboboxHandlers() {
                 return false; // other fields: exact match only (already checked above)
             }
             
+            var orderedOptions;
+            if (isMappingMasterCombo) {
+                function sepPullToFront(arr, sel) {
+                    if (!sel || !arr || arr.length === 0) return arr.slice();
+                    var ix = -1;
+                    for (var j = 0; j < arr.length; j++) {
+                        if (arr[j].value === sel.value) { ix = j; break; }
+                    }
+                    if (ix <= 0) return arr.slice();
+                    var copy = arr.slice();
+                    var first = copy.splice(ix, 1)[0];
+                    return [first].concat(copy);
+                }
+                var sepIdx = -1;
+                for (var i = 0; i < allOptions.length; i++) {
+                    if (allOptions[i].value === '__CHASSIS_MASTER_SEP__') { sepIdx = i; break; }
+                }
+                var chassisPart = sepIdx >= 0 ? allOptions.slice(0, sepIdx) : allOptions.slice();
+                var masterPart = sepIdx >= 0 ? allOptions.slice(sepIdx + 1) : [];
+                function filterCm(arr) {
+                    if (!searchLower) return arr.slice();
+                    return arr.filter(function(opt) {
+                        var optText = (opt.text || opt.value || '').toLowerCase();
+                        return optText.indexOf(searchLower) !== -1;
+                    });
+                }
+                var chF = filterCm(chassisPart);
+                var mF = filterCm(masterPart);
+                var selectedOption = null;
+                if (currentSelectedValue) {
+                    allOptions.forEach(function(opt) {
+                        if (optionMatchesSelected(opt)) selectedOption = opt;
+                    });
+                }
+                if (selectedOption) {
+                    chF = sepPullToFront(chF, selectedOption);
+                    mF = sepPullToFront(mF, selectedOption);
+                }
+                orderedOptions = [];
+                chF.forEach(function(o) { orderedOptions.push(o); });
+                if (chF.length && mF.length && sepIdx >= 0) {
+                    orderedOptions.push({ value: '__CHASSIS_MASTER_SEP__', text: '', disabled: true });
+                }
+                mF.forEach(function(o) { orderedOptions.push(o); });
+            } else {
             // Separate selected value from other options
             var selectedOption = null;
             var otherOptions = [];
@@ -1243,7 +1660,7 @@ fun setupEditableComboboxHandlers() {
             }
             
             // Rebuild options array: selected first (if exists), then others
-            var orderedOptions = [];
+            orderedOptions = [];
             if (selectedOption) {
                 // For chassis: always show selected at top when it matches by prefix/case; for others use filter
                 var selectedMatchesFilter = !searchLower || 
@@ -1275,6 +1692,7 @@ fun setupEditableComboboxHandlers() {
                     orderedOptions.push(opt);
                 }
             });
+            }
             
             // Clear existing options
             dropdown.innerHTML = '';
@@ -1290,6 +1708,49 @@ fun setupEditableComboboxHandlers() {
                 dropdown.appendChild(noResults);
             } else {
                 orderedOptions.forEach(function(opt, index) {
+                    if (opt.value === '__CHASSIS_MASTER_SEP__') {
+                        var sepRow = document.createElement('div');
+                        sepRow.setAttribute('role', 'separator');
+                        sepRow.setAttribute('aria-label', 'Other Options');
+                        sepRow.style.display = 'flex';
+                        sepRow.style.alignItems = 'center';
+                        sepRow.style.margin = '8px 10px 10px';
+                        sepRow.style.gap = '10px';
+                        sepRow.style.pointerEvents = 'none';
+                        sepRow.style.flexShrink = '0';
+                        var lineL = document.createElement('div');
+                        lineL.style.flex = '1';
+                        lineL.style.minWidth = '12px';
+                        lineL.style.borderTop = '1px solid #E0E0E0';
+                        var labelWrap = document.createElement('div');
+                        labelWrap.style.display = 'flex';
+                        labelWrap.style.alignItems = 'center';
+                        labelWrap.style.gap = '5px';
+                        labelWrap.style.fontSize = '12px';
+                        labelWrap.style.fontWeight = '500';
+                        labelWrap.style.color = '#757575';
+                        labelWrap.style.letterSpacing = '0.01em';
+                        labelWrap.style.whiteSpace = 'nowrap';
+                        var sepTxt = document.createElement('span');
+                        sepTxt.textContent = 'Other Options';
+                        var sepIcon = document.createElement('span');
+                        sepIcon.setAttribute('aria-hidden', 'true');
+                        sepIcon.textContent = '\u2195';
+                        sepIcon.style.fontSize = '11px';
+                        sepIcon.style.lineHeight = '1';
+                        sepIcon.style.opacity = '0.95';
+                        labelWrap.appendChild(sepTxt);
+                        labelWrap.appendChild(sepIcon);
+                        var lineR = document.createElement('div');
+                        lineR.style.flex = '1';
+                        lineR.style.minWidth = '12px';
+                        lineR.style.borderTop = '1px solid #E0E0E0';
+                        sepRow.appendChild(lineL);
+                        sepRow.appendChild(labelWrap);
+                        sepRow.appendChild(lineR);
+                        dropdown.appendChild(sepRow);
+                        return;
+                    }
                     var optionDiv = document.createElement('div');
                     optionDiv.style.padding = '8px 12px';
                     optionDiv.style.cursor = 'pointer';
@@ -1407,9 +1868,12 @@ fun setupEditableComboboxHandlers() {
         
         // Function to open combobox dropdown - shows all options
         window.openComboboxDropdown = function(selectId) {
-            // Always re-ensure base options for Fuel/Shift/Grade before opening
+            // Re-ensure base options for Fuel/Shift/Grade before opening (skip when chassis merged mapping+master list)
             if (typeof window.ensureBaseComboboxOptionsForAddEdit === 'function') {
-                window.ensureBaseComboboxOptionsForAddEdit();
+                var skipChassisMaster = window.__chassisMasterComboIds && window.__chassisMasterComboIds.indexOf(selectId) !== -1;
+                if (!skipChassisMaster) {
+                    window.ensureBaseComboboxOptionsForAddEdit();
+                }
             }
             // Prevent infinite recursion for chassis dropdowns
             if (selectId === 'chassis' || selectId === 'editChassis') {
@@ -1482,14 +1946,9 @@ fun setupEditableComboboxHandlers() {
             var select = document.getElementById(selectId);
             if (!select) return;
             
-            // CRITICAL FIX: Ensure base options are in select element BEFORE reading from it
-            // This ensures dropdown buttons work even after chassis mapping reduces options
+            // Car Brand Map modal only: ensure base fuel/shift options exist before opening dropdown.
             var baseOptionsMap = {
-                fuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
-                editFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
                 carBrandFuel: ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"],
-                shift: ["AT", "MT", "6F", "5F"],
-                editShift: ["AT", "MT", "6F", "5F"],
                 carBrandShift: ["AT", "MT", "6F", "5F"]
             };
             if (baseOptionsMap[selectId]) {
@@ -1515,6 +1974,19 @@ fun setupEditableComboboxHandlers() {
             
             var input = document.getElementById(inputId);
             if (!input) return;
+            
+            // Rixo Add/Edit/Bulk and per-level Add modals: anchor dropdown to the field wrapper so it
+            // stacks above modal footers (same as bulk "Add Rixo Mapping" modal).
+            // Rixo tree inline-edit comboboxes (rixo-inline-path-*, rixoLeafInline_*) use body + fixed
+            // positioning like other fields — the tree root has overflow-x: auto, which clips absolutely
+            // positioned dropdowns inside the combobox and makes the ▼ appear "dead".
+            var rixoFieldHost = null;
+            if (/^rixo(Bulk|Edit)/.test(selectId) || /^rixoLevelAdd/.test(selectId)) {
+                rixoFieldHost = input.parentElement;
+                if (rixoFieldHost && window.getComputedStyle(rixoFieldHost).position === 'static') {
+                    rixoFieldHost.style.position = 'relative';
+                }
+            }
             
             // Get all options from the select (excluding the first empty option)
             // Check if select.options exists and is iterable
@@ -1549,7 +2021,8 @@ fun setupEditableComboboxHandlers() {
             }
             dropdown.style.overflowY = dropdown.style.overflowY || 'auto';
             dropdown.style.overflowX = dropdown.style.overflowX || 'hidden';
-            dropdown.style.zIndex = '10000';
+            // Keep combobox overlays above any modal/backdrop stacking context.
+            dropdown.style.zIndex = '2147483647';
             dropdown.style.fontSize = '14px';
             dropdown.style.fontFamily = 'Arial, sans-serif';
             dropdown.style.color = '#333333';
@@ -1568,7 +2041,11 @@ fun setupEditableComboboxHandlers() {
             }
             
             // Append dropdown to DOM FIRST so filterComboboxDropdown can find it
-            document.body.appendChild(dropdown);
+            if (rixoFieldHost) {
+                rixoFieldHost.appendChild(dropdown);
+            } else {
+                document.body.appendChild(dropdown);
+            }
             
             // When opening dropdown initially, show ALL options (not filtered)
             // Selected value will appear at top, then all other options below
@@ -1588,7 +2065,7 @@ fun setupEditableComboboxHandlers() {
                     dropdown.style.border = '1px solid #d1d5db';
                     dropdown.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
                     dropdown.style.position = 'fixed';
-                    dropdown.style.zIndex = '10002'; // Higher than modal (10001)
+                    dropdown.style.zIndex = '2147483647'; // Above modal/backdrop in all pages
                     dropdown.style.borderRadius = '6px';
                     // Car Brand modal: cap height to modal space so list scrolls inside boundary (never 300px)
                     if (selectId === 'carBrandFuel' || selectId === 'carBrandShift') {
@@ -1676,6 +2153,10 @@ fun setupEditableComboboxHandlers() {
                     var isTablet = viewportWidth > 767 && viewportWidth <= 1024;
                     var dropdownMaxHeight = isMobile ? 200 : (isTablet ? 250 : 300);
                     
+                    // Default horizontal geometry (must be defined before modal-bound checks)
+                    var leftPos = rect.left;
+                    var dropdownWidth = rect.width;
+                    
                     // Calculate available space - respect container boundaries
                     var spaceBelow, spaceAbove;
                     var boundingContainer = modalContainer || formContainer;
@@ -1733,7 +2214,6 @@ fun setupEditableComboboxHandlers() {
                     }
                     
                     // Default: show below input
-                    var leftPos = rect.left;
                     var topPos = rect.bottom;
                     var showAbove = false;
                     
@@ -1764,7 +2244,6 @@ fun setupEditableComboboxHandlers() {
                     }
                     
                     // Ensure dropdown doesn't extend beyond viewport width
-                    var dropdownWidth = rect.width;
                     if (leftPos + dropdownWidth > viewportWidth - 10) {
                         leftPos = Math.max(10, viewportWidth - dropdownWidth - 10);
                     }
@@ -1776,34 +2255,50 @@ fun setupEditableComboboxHandlers() {
                     }
                     
                     // Apply positioning - ensure it's exactly aligned with input
-                    // MOBILE FIX: On mobile, use simpler positioning that works reliably
-                    if (isMobile) {
-                        // For mobile: position dropdown directly below input using viewport-relative coords
-                        var inputRect = input.getBoundingClientRect();
-                        dropdownEl.style.left = '16px';
-                        dropdownEl.style.right = '16px';
-                        dropdownEl.style.width = 'auto';
-                        // Respect showAbove for mobile too
+                    if (rixoFieldHost) {
+                        dropdownEl.style.position = 'absolute';
+                        dropdownEl.style.left = '0px';
+                        dropdownEl.style.width = '100%';
+                        dropdownEl.style.minWidth = '100%';
+                        dropdownEl.style.maxWidth = '100%';
                         if (showAbove) {
-                            var dropdownHeight = Math.min(estimatedHeight, 200);
-                            dropdownEl.style.top = (inputRect.top - dropdownHeight - 4) + 'px';
-                            console.log('📱 Mobile dropdown positioned ABOVE at top: ' + (inputRect.top - dropdownHeight - 4) + 'px');
+                            var rixoAboveHeight = parseInt(dropdownEl.style.maxHeight || '220', 10) || 220;
+                            dropdownEl.style.top = (-rixoAboveHeight - 4) + 'px';
                         } else {
-                            dropdownEl.style.top = (inputRect.bottom + 4) + 'px';
-                            console.log('📱 Mobile dropdown positioned BELOW at top: ' + (inputRect.bottom + 4) + 'px');
+                            dropdownEl.style.top = 'calc(100% + 4px)';
                         }
-                    } else {
-                        dropdownEl.style.left = leftPos + 'px';
-                        dropdownEl.style.top = topPos + 'px';
-                        dropdownEl.style.width = dropdownWidth + 'px';
-                        dropdownEl.style.minWidth = dropdownWidth + 'px';
+                        dropdownEl.style.zIndex = '30000';
+                    }
+                    else {
+                        // MOBILE FIX: On mobile, use simpler positioning that works reliably
+                        if (isMobile) {
+                            // For mobile: position dropdown directly below input using viewport-relative coords
+                            var inputRect = input.getBoundingClientRect();
+                            dropdownEl.style.left = '16px';
+                            dropdownEl.style.right = '16px';
+                            dropdownEl.style.width = 'auto';
+                            // Respect showAbove for mobile too
+                            if (showAbove) {
+                                var dropdownHeight = Math.min(estimatedHeight, 200);
+                                dropdownEl.style.top = (inputRect.top - dropdownHeight - 4) + 'px';
+                                console.log('📱 Mobile dropdown positioned ABOVE at top: ' + (inputRect.top - dropdownHeight - 4) + 'px');
+                            } else {
+                                dropdownEl.style.top = (inputRect.bottom + 4) + 'px';
+                                console.log('📱 Mobile dropdown positioned BELOW at top: ' + (inputRect.bottom + 4) + 'px');
+                            }
+                        } else {
+                            dropdownEl.style.left = leftPos + 'px';
+                            dropdownEl.style.top = topPos + 'px';
+                            dropdownEl.style.width = dropdownWidth + 'px';
+                            dropdownEl.style.minWidth = dropdownWidth + 'px';
+                        }
                     }
                     
                     // Ensure styling is maintained
                     dropdownEl.style.backgroundColor = '#ffffff';
                     dropdownEl.style.color = '#333333';
-                    dropdownEl.style.position = 'fixed';
-                    dropdownEl.style.zIndex = '999999'; // Very high to ensure visibility
+                    dropdownEl.style.position = rixoFieldHost ? 'absolute' : 'fixed';
+                    dropdownEl.style.zIndex = rixoFieldHost ? '30000' : '2147483647'; // Field-hosted for Rixo, fixed elsewhere
                     dropdownEl.style.borderRadius = '6px';
                     dropdownEl.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
                     dropdownEl.style.border = '1px solid #d1d5db';
@@ -1989,6 +2484,10 @@ fun setupEditableComboboxHandlers() {
             // Add click outside handler - close dropdown only when clicking truly outside
             var closeHandler = function(e) {
                 var target = e.target;
+                // Clicks on ▼ text hit a Text node — normalize to parent so id/closest checks work
+                if (target && target.nodeType === 3 && target.parentElement) {
+                    target = target.parentElement;
+                }
                 // Don't close if clicking on:
                 // - The dropdown itself
                 // - The dropdown button
@@ -1999,7 +2498,7 @@ fun setupEditableComboboxHandlers() {
                     target.id === selectId + 'Button' || 
                     target.id === selectId ||
                     target.id === inputId ||
-                    target.closest && target.closest('#' + dropdown.id)) {
+                    (target.closest && target.closest('#' + dropdown.id))) {
                     return; // Don't close
                 }
                 // Clicked outside - close dropdown
@@ -2268,7 +2767,9 @@ private fun fetchMasterSetFields(onSuccess: (List<String>) -> Unit) {
 private fun renderMasterSetSidebarButtons() {
     val container = document.getElementById("masterSetDynamicButtons") ?: return
     fetchMasterSetFields { fields ->
-        val items = fields.map { field ->
+        val items = fields
+            .filterNot { it.equals("car_grade", ignoreCase = true) }
+            .map { field ->
             MasterSetNavItem(field, toMasterSetLabel(field), masterSetRouteForField(field))
         }.sortedBy { it.label.lowercase() }
 
@@ -2326,68 +2827,11 @@ private fun openAddMasterSetModal() {
     })
 }
 
-private fun openDeleteMasterSetModal() {
-    document.getElementById("deleteMasterSetModal")?.remove()
-    val modal = document.createElement("div")
-    modal.id = "deleteMasterSetModal"
-    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
-    modal.innerHTML = """
-        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%;">
-            <h3 style="margin-top: 0;">Delete Master Set</h3>
-            <label>Master Set</label>
-            <select id="deleteMasterSetSelect" style="width: 100%; padding: 10px 12px; margin: 8px 0; box-sizing: border-box;"></select>
-            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 16px;">
-                <button id="deleteMasterSetConfirmBtn" style="padding: 8px 16px; border-radius: 6px; border: none; background: #dc2626; color:white; cursor: pointer;">Delete</button>
-                <button id="deleteMasterSetCancelBtn" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
-            </div>
-        </div>
-    """
-    document.body?.appendChild(modal)
-
-    fetchMasterSetFields { fields ->
-        val select = document.getElementById("deleteMasterSetSelect") as? HTMLSelectElement ?: return@fetchMasterSetFields
-        select.innerHTML = fields.sorted().joinToString("") { field ->
-            val label = toMasterSetLabel(field).replace("<", "&lt;").replace(">", "&gt;")
-            """<option value="$field">$label</option>"""
-        }
-    }
-
-    document.getElementById("deleteMasterSetCancelBtn")?.addEventListener("click", { _: Event -> modal.remove() })
-    document.getElementById("deleteMasterSetConfirmBtn")?.addEventListener("click", { _: Event ->
-        val fieldName = (document.getElementById("deleteMasterSetSelect") as? HTMLSelectElement)?.value?.trim() ?: ""
-        if (fieldName.isBlank()) {
-            showMessage("Please select a Master Set", "error")
-            return@addEventListener
-        }
-        if (!window.confirm("Delete master set '${toMasterSetLabel(fieldName)}'?")) return@addEventListener
-        val req = js("{}")
-        req.method = "DELETE"
-        val encoded = js("encodeURIComponent(fieldName)") as String
-        window.fetch(apiUrl("master-menu/fields/$encoded"), req)
-            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete master set')") }
-            .then { _: dynamic ->
-                showMessage("Master Set deleted successfully", "success")
-                modal.remove()
-                renderMasterSetSidebarButtons()
-                if (window.location.hash.contains("#/master")) {
-                    window.location.hash = "#/purchase"
-                }
-            }
-            .catch { e: dynamic -> showMessage("Error: ${e?.message ?: "Failed to delete master set"}", "error") }
-    })
-}
-
 private fun setupDynamicMasterSetListeners() {
     val addBtn = document.getElementById("addMasterSetBtn")
     if (addBtn != null && !addBtn.hasAttribute("data-listener-attached")) {
         addBtn.setAttribute("data-listener-attached", "true")
         addBtn.addEventListener("click", { _: Event -> openAddMasterSetModal() })
-    }
-
-    val deleteBtn = document.getElementById("deleteMasterSetBtn")
-    if (deleteBtn != null && !deleteBtn.hasAttribute("data-listener-attached")) {
-        deleteBtn.setAttribute("data-listener-attached", "true")
-        deleteBtn.addEventListener("click", { _: Event -> openDeleteMasterSetModal() })
     }
 
     val container = document.getElementById("masterSetDynamicButtons")
@@ -2533,7 +2977,6 @@ fun createApp(root: Element) {
                             <div id="masterListItems" style="display: flex; flex-direction: column; gap: 8px; padding-left: 10px;">
                                 <button id="addMasterSetBtn" style="padding: 10px 15px; background-color: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left;">+ Add Set</button>
                                 <div id="masterSetDynamicButtons" style="display: flex; flex-direction: column; gap: 8px;"></div>
-                                <button id="deleteMasterSetBtn" style="padding: 10px 15px; background-color: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left;">Delete Set</button>
                             </div>
                         </div>
                         
@@ -2549,7 +2992,9 @@ fun createApp(root: Element) {
                             <div id="masterMapItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
                                 <button id="masterSupplierMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
                                 <button id="masterCarBrandsMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Brands Map</button>
+                                <button id="masterClientMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client Map</button>
                                 <button id="masterConsigneeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee Map</button>
+                                <button id="masterRixoMappingBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Price Mapping</button>
                             </div>
                         </div>
                         
@@ -2986,9 +3431,17 @@ fun createApp(root: Element) {
         closeSidebar()
         window.location.hash = "#/master/car-brands-map"
     })
+    document.getElementById("masterClientMapBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        window.location.hash = "#/master/client-map"
+    })
     document.getElementById("masterConsigneeMapBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
         window.location.hash = "#/master/consignee-map"
+    })
+    document.getElementById("masterRixoMappingBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        window.location.hash = "#/master/rixo-mapping"
     })
     
     // Load initial data only if we're on the purchase list page
@@ -3128,6 +3581,13 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        // Must be before #/master/client: "#/master/client-map".startsWith("#/master/client") is true
+        hash.startsWith("#/master/client-map") -> {
+            showClientMapPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
         hash.startsWith("#/master/client") -> {
             showDynamicMasterSetPage("clients")
             ensureSidebarPresent()
@@ -3154,6 +3614,12 @@ fun updateContent(root: Element) {
         }
         hash.startsWith("#/master/supplier-map") -> {
             showSupplierMapPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/rixo-mapping") -> {
+            showRixoMappingTreePage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -3220,12 +3686,6 @@ fun updateContent(root: Element) {
         }
         hash.startsWith("#/master/fuel") -> {
             showDynamicMasterSetPage("fuel")
-            ensureSidebarPresent()
-            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
-            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
-        }
-        hash.startsWith("#/master/car-grade") -> {
-            showDynamicMasterSetPage("car_grade")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -4755,7 +5215,7 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Purchase Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="date" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <input type="date" id="date" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${todayIsoLocalDate()}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="dateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
@@ -4782,11 +5242,14 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Production Date</label>
-                        <input type="month" id="carModelYear" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="position:relative;">
+                            <input type="month" id="carModelYear" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <span id="carModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">mm/yyyy</span>
+                        </div>
                     </div>
                     <div>
                         <label>Grade</label>
-                        ${createEditableCombobox("grade", "Select Grade", additionalAttrs = "oninput=\"this.value = this.value.split(';')[0].trim();\"")}
+                        ${createEditableCombobox("grade", "Select Grade")}
                     </div>
                     <div>
                         <label>Auction No</label>
@@ -4831,11 +5294,11 @@ fun createAddFormHTML(): String {
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label>Rank</label>
-                        <input type="text" id="rank" placeholder="e.g., S" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("rank", "Select Rank")}
                     </div>
                     <div>
                         <label>Color</label>
-                        <input type="text" id="color" placeholder="e.g., White" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("color", "Select Color")}
                     </div>
                     <div>
                         <label>Fuel</label>
@@ -4843,23 +5306,19 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Seat</label>
-                        <input type="number" id="seat" placeholder="e.g., 5" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("seat", "Select Seat")}
                     </div>
                     <div>
                         <label>Door</label>
-                        <input type="number" id="door" placeholder="e.g., 4" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("door", "Select Door")}
                     </div>
                     <div>
-                        <label>Mileage</label>
-                        <input type="text" id="distance" placeholder="e.g., 50000" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
-                               oninput="this.value = this.value.replace(/[^0-9]/g, '')" 
-                               onblur="if(this.value && !this.value.endsWith('km')) { this.value = this.value + 'km'; }">
+                        <label>Distance</label>
+                        <input type="text" id="distance" class="comma-int-input km-suffix-input" placeholder="e.g., 50,000 km" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label>CC</label>
-                        <input type="text" id="cc" placeholder="e.g., 2000" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
-                               oninput="this.value = this.value.replace(/[^0-9]/g, '')" 
-                               onblur="if(this.value && !this.value.endsWith('CC')) { this.value = this.value + 'CC'; }">
+                        ${createEditableCombobox("cc", "Select CC")}
                     </div>
                     <div>
                         <label>Shift</label>
@@ -5035,7 +5494,7 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Payment Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="paymentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <input type="date" id="paymentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="paymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
@@ -5058,7 +5517,7 @@ fun createAddFormHTML(): String {
                     <div>
                         <label>Shipment Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="shipmentDate" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <input type="date" id="shipmentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="shipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
@@ -5270,20 +5729,96 @@ fun setupRixoDropdowns() {
                             .map(function(v) { return (v || '').toString().trim(); })
                             .filter(function(v) { return v.length > 0; });
                     }
-                    updateDropdown('shipmentSize', 'editShipmentSize', values);
+                    if (typeof window.updateDropdown === 'function') {
+                        window.updateDropdown('shipmentSize', 'editShipmentSize', values, false);
+                    }
                 })
                 .catch(function(err) {
                     console.warn('Failed to load type_of_vehicle master data:', err);
                 });
+            // populateDropdownOptions clears edit Stock Location / POL / etc. When Rixo loads after the edit form
+            // is filled, those selects only have placeholders — re-apply mapping + saved values (fixes dropdown open / "not found in options").
+            setTimeout(function() {
+                try {
+                    var pd = window.__editPurchaseDataForRixo;
+                    if (!pd || !document.getElementById('editForm')) return;
+                    var auction = (pd.auctionHouse || '').toString().trim();
+                    if (!auction) return;
+                    if (typeof window.rixoPriceMapping === 'undefined' || !window.rixoPriceMapping[auction]) return;
+                    function fsd(v) {
+                        if (v == null || v === undefined) return '';
+                        var s = String(v).trim();
+                        if (!s) return '';
+                        var parts = s.split(';').map(function(x) { return x.trim(); }).filter(function(x) { return x.length > 0; });
+                        return parts.length ? parts[0] : s;
+                    }
+                    var eAuc = document.getElementById('editAuctionName');
+                    var eAucIn = document.getElementById('editAuctionNameInput');
+                    if (eAuc && auction) {
+                        var hasA = false;
+                        for (var ai = 0; ai < eAuc.options.length; ai++) {
+                            if (eAuc.options[ai].value === auction) { hasA = true; break; }
+                        }
+                        if (!hasA) {
+                            var ao = document.createElement('option');
+                            ao.value = auction;
+                            ao.textContent = auction;
+                            eAuc.appendChild(ao);
+                        }
+                        eAuc.value = auction;
+                        if (eAucIn) eAucIn.value = auction;
+                        if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('editAuctionName');
+                    }
+                    if (typeof window.updateDropdownOptions === 'function') {
+                        window.updateDropdownOptions(auction);
+                    }
+                    if (typeof ensureComboboxOptionExists !== 'function') return;
+                    if (pd.stockLocation) ensureComboboxOptionExists('editStockLocation', pd.stockLocation);
+                    if (pd.pol) ensureComboboxOptionExists('editPol', pd.pol);
+                    if (pd.rixoCompany) ensureComboboxOptionExists('editRixoCompany', pd.rixoCompany);
+                    if (pd.venueId) ensureComboboxOptionExists('editVenueId', pd.venueId);
+                    var sl = fsd(pd.stockLocation), pl = fsd(pd.pol), rc = fsd(pd.rixoCompany), vid = fsd(pd.venueId);
+                    var esl = document.getElementById('editStockLocation'), esli = document.getElementById('editStockLocationInput');
+                    if (esl && sl) { esl.value = sl; if (esli) esli.value = sl; }
+                    var epl = document.getElementById('editPol'), epli = document.getElementById('editPolInput');
+                    if (epl && pl) { epl.value = pl; if (epli) epli.value = pl; }
+                    var erc = document.getElementById('editRixoCompany'), erci = document.getElementById('editRixoCompanyInput');
+                    if (erc && rc) { erc.value = rc; if (erci) erci.value = rc; }
+                    var evn = document.getElementById('editVenueId'), evni = document.getElementById('editVenueIdInput');
+                    if (evn && vid) { evn.value = vid; if (evni) evni.value = vid; }
+                    if (typeof window.syncComboboxInput === 'function') {
+                        ['editStockLocation', 'editPol', 'editRixoCompany', 'editVenueId'].forEach(function(id) {
+                            if (document.getElementById(id)) window.syncComboboxInput(id);
+                        });
+                    }
+                    if (pd.stockLocation && pd.auctionHouse && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+                        var mp = (typeof window.getPolTokensFromRixoMappingForSupplier === 'function')
+                            ? window.getPolTokensFromRixoMappingForSupplier(pd.auctionHouse) : null;
+                        window.fetchPolsByStockLocationAndUpdate(pd.auctionHouse, fsd(pd.stockLocation), false, mp).then(function() {
+                            if (pd.pol && typeof ensureComboboxOptionExists === 'function') ensureComboboxOptionExists('editPol', pd.pol);
+                            var ep2 = document.getElementById('editPol'), epi2 = document.getElementById('editPolInput');
+                            if (ep2 && pd.pol) {
+                                var pv = fsd(pd.pol);
+                                ep2.value = pv;
+                                if (epi2) epi2.value = pv;
+                            }
+                            if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('editPol');
+                        }).catch(function() {});
+                    }
+                    console.log('✅ Re-applied edit supplier combobox options after populateDropdownOptions (Rixo init)');
+                } catch (e) {
+                    console.warn('reapply edit after populateDropdownOptions:', e);
+                }
+            }, 0);
         }
         
         function clearDropdown(elementId) {
+            if (window.__supplierMasterComboIds) {
+                window.__supplierMasterComboIds = window.__supplierMasterComboIds.filter(function(id) { return id !== elementId; });
+            }
             var select = document.getElementById(elementId);
             if (select) {
                 select.innerHTML = '<option value="">Select ' + getFieldLabel(elementId) + '</option>';
-                if (isMasterFieldWithSeeMore(elementId)) {
-                    select.innerHTML += '<option value="__SEE_MORE__">See More</option>';
-                }
             }
         }
         
@@ -5315,12 +5850,16 @@ fun setupRixoDropdowns() {
         }
         
         function isMasterFieldWithSeeMore(elementId) {
+            if (/^rixo-inline-path-/.test(elementId) || /^rixoLeafInline_/.test(elementId)) return true;
             return elementId === 'venueId' || elementId === 'editVenueId' ||
                 elementId === 'shipmentSize' || elementId === 'editShipmentSize' ||
                 elementId === 'typeOfVehicle' || elementId === 'editTypeOfVehicle' ||
+                elementId === 'fuel' || elementId === 'editFuel' ||
+                elementId === 'shift' || elementId === 'editShift' ||
                 elementId === 'rixoCompany' || elementId === 'editRixoCompany' ||
                 elementId === 'stockLocation' || elementId === 'editStockLocation' ||
-                elementId === 'pol' || elementId === 'editPol';
+                elementId === 'pol' || elementId === 'editPol' ||
+                elementId === 'country' || elementId === 'editCountry';
         }
         
         // Ensure saved value exists as an option so validation passes (Edit form: dropdown may have fewer options than saved value)
@@ -5329,21 +5868,21 @@ fun setupRixoDropdowns() {
             var select = document.getElementById(selectId);
             if (!select) return;
             var val = String(value).trim();
+            if (val.indexOf(';') >= 0) {
+                var parts = val.split(';').map(function(s) { return s.trim(); }).filter(function(x) { return x.length > 0; });
+                val = parts[0] || val;
+            }
+            if (val === '__CHASSIS_MASTER_SEP__') return;
             var valLower = val.toLowerCase();
             for (var i = 0; i < select.options.length; i++) {
                 var opt = select.options[i];
-                if (opt.value === '__SEE_MORE__') continue;
+                if (opt.value === '__SEE_MORE__' || opt.value === '__CHASSIS_MASTER_SEP__') continue;
                 if ((opt.value || '').toLowerCase() === valLower || (opt.text || '').toLowerCase() === valLower) return;
             }
             var newOpt = document.createElement('option');
             newOpt.value = val;
             newOpt.textContent = val;
-            var last = select.options[select.options.length - 1];
-            if (last && last.value === '__SEE_MORE__') {
-                select.insertBefore(newOpt, last);
-            } else {
-                select.appendChild(newOpt);
-            }
+            select.appendChild(newOpt);
         }
         
         function updateDropdownOptions(auctionName, typeOfVehicle, stockLocation, rixoCompany) {
@@ -5355,50 +5894,6 @@ fun setupRixoDropdowns() {
                 window.autoSelectRelatedFields(auctionName, 'auctionHouse', auctionName);
             } else {
                 console.log('❌ autoSelectRelatedFields not available - CACHE BUST 1736384000');
-            }
-        }
-        
-        function updateDropdown(elementId, editElementId, options) {
-            // Handle rixo price fields specially (they are input + dropdown)
-            if (elementId === 'rixoPrice' || elementId === 'editRixoPrice') {
-                var dropdown = document.getElementById(elementId + 'Dropdown');
-                var editDropdown = document.getElementById(editElementId + 'Dropdown');
-                
-                if (dropdown) {
-                    dropdown.innerHTML = '<option value="">▼</option>';
-                    var uniqueOptions = window.getUniqueValues(options);
-                    uniqueOptions.forEach(function(option) {
-                        dropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
-                    });
-                }
-                
-                if (editDropdown) {
-                    editDropdown.innerHTML = '<option value="">▼</option>';
-                    var uniqueOptions = window.getUniqueValues(options);
-                    uniqueOptions.forEach(function(option) {
-                        editDropdown.innerHTML += '<option value="' + option + '">' + option + '</option>';
-                    });
-                }
-            } else {
-                // Handle regular dropdowns
-                var select = document.getElementById(elementId);
-                var editSelect = document.getElementById(editElementId);
-                
-                if (select) {
-                    select.innerHTML = '<option value="">Select ' + getFieldLabel(elementId) + '</option>';
-                    var uniqueOptions = window.getUniqueValues(options);
-                    uniqueOptions.forEach(function(option) {
-                        select.innerHTML += '<option value="' + option + '">' + option + '</option>';
-                    });
-                }
-                
-                if (editSelect) {
-                    editSelect.innerHTML = '<option value="">Select ' + getFieldLabel(editElementId) + '</option>';
-                    var uniqueOptions = window.getUniqueValues(options);
-                    uniqueOptions.forEach(function(option) {
-                        editSelect.innerHTML += '<option value="' + option + '">' + option + '</option>';
-                    });
-                }
             }
         }
         
@@ -5467,7 +5962,11 @@ fun setupRixoDropdowns() {
         function handleAuctionNameChange(auctionName) {
             console.log('Auction name changed to:', auctionName);
             
-            if (!auctionName || typeof window.rixoPriceMapping === 'undefined') {
+            if (!auctionName || String(auctionName).trim() === '') {
+                window.__supplierMasterComboIds = [];
+                return;
+            }
+            if (typeof window.rixoPriceMapping === 'undefined') {
                 return;
             }
             
@@ -5749,6 +6248,15 @@ fun setupRixoDropdowns() {
         function setEditFormValues(purchaseData) {
             console.log('🔄 NEW setEditFormValues called - CACHE BUST 1762692001');
             if (!purchaseData) return;
+            window.__editPurchaseDataForRixo = purchaseData;
+            /** Show only first value when DB/chassis mapping stores "a;b;c" (matches Kotlin firstSemicolonToken). */
+            function firstSemicolonDisplay(v) {
+                if (v == null || v === undefined) return '';
+                var s = String(v).trim();
+                if (!s) return '';
+                var parts = s.split(';').map(function(x) { return x.trim(); }).filter(function(x) { return x.length > 0; });
+                return parts.length ? parts[0] : s;
+            }
             
             // DEBUG: Log all purchaseData keys and date-related fields
             console.log('🔍 DEBUG: purchaseData keys:', Object.keys(purchaseData));
@@ -5774,15 +6282,16 @@ fun setupRixoDropdowns() {
                 updateDropdownOptions(purchaseData.auctionHouse);
             }
             
-            // Set Drive Type IMMEDIATELY (before chassis flow) - radio buttons
+            // Set Drive Type IMMEDIATELY (before chassis flow) - radio buttons (first token if multi-value)
             if (purchaseData.driveType) {
                 setTimeout(function() {
-                    var driveTypeRadio = document.querySelector('input[name="editDriveType"][value="' + purchaseData.driveType + '"]');
+                    var dt = firstSemicolonDisplay(purchaseData.driveType);
+                    var driveTypeRadio = document.querySelector('input[name="editDriveType"][value="' + dt + '"]');
                     if (driveTypeRadio) {
                         driveTypeRadio.checked = true;
-                        console.log('✅ Set edit drive type IMMEDIATELY:', purchaseData.driveType);
+                        console.log('✅ Set edit drive type IMMEDIATELY:', dt);
                     } else {
-                        console.warn('⚠️ Drive Type radio button not found for value:', purchaseData.driveType);
+                        console.warn('⚠️ Drive Type radio button not found for value:', dt);
                     }
                 }, 50);
             }
@@ -5815,23 +6324,27 @@ fun setupRixoDropdowns() {
             
             // Helper function to set all three dates
             function setAllDates() {
-                // Set Purchase Date
-                if (purchaseDateValue) {
-                    var editDateInput = document.getElementById('editDate');
-                    if (editDateInput) {
+                // Set Purchase Date (saved value, else today — matches Add form default)
+                var editDateInput = document.getElementById('editDate');
+                if (editDateInput) {
+                    var isoDate = '';
+                    if (purchaseDateValue) {
                         if (typeof window.toIsoFromLabel === 'function') {
-                            var isoDate = window.toIsoFromLabel(purchaseDateValue);
-                            if (isoDate && isoDate !== '') {
-                                editDateInput.value = isoDate;
-                                console.log('✅ Set edit purchase date:', isoDate, 'from:', purchaseDateValue);
-                                var hint = document.getElementById('editDateDayHint');
-                                if (hint && typeof window.isoToWeekdayLabel === 'function') {
-                                    hint.textContent = window.isoToWeekdayLabel(isoDate);
-                                }
-                            } else if (purchaseDateValue.indexOf('-') !== -1 && purchaseDateValue.length === 10) {
-                                editDateInput.value = purchaseDateValue;
-                                console.log('✅ Set edit purchase date directly (already ISO):', purchaseDateValue);
-                            }
+                            isoDate = window.toIsoFromLabel(purchaseDateValue) || '';
+                        }
+                        if (!isoDate && purchaseDateValue.indexOf('-') !== -1 && purchaseDateValue.length === 10) {
+                            isoDate = purchaseDateValue;
+                        }
+                    }
+                    if (!isoDate && typeof window.todayIsoLocalDate === 'function') {
+                        isoDate = window.todayIsoLocalDate();
+                    }
+                    if (isoDate) {
+                        editDateInput.value = isoDate;
+                        console.log('✅ Set edit purchase date:', isoDate, purchaseDateValue ? ('from: ' + purchaseDateValue) : '(default today)');
+                        var hint = document.getElementById('editDateDayHint');
+                        if (hint && typeof window.isoToWeekdayLabel === 'function') {
+                            hint.textContent = window.isoToWeekdayLabel(isoDate);
                         }
                     }
                 }
@@ -5897,7 +6410,7 @@ fun setupRixoDropdowns() {
             if (chassis && typeof window.fetchMappingByChassisOnly === 'function') {
                 console.log('🔵 Chassis found in purchaseData:', chassis, '- using chassis-first flow to auto-fill fields');
                 // Use chassis-first flow: fetch mapping by chassis to auto-fill brand, car name, and other fields
-                window.fetchMappingByChassisOnly(chassis, true).then(function() {
+                window.fetchMappingByChassisOnly(chassis, true, purchaseData).then(function() {
                     console.log('✅ Chassis mapping loaded, now setting remaining form values');
                     // After chassis mapping auto-fills fields, set remaining values
                     setFormValuesAfterChassisLoad(purchaseData);
@@ -5919,11 +6432,25 @@ fun setupRixoDropdowns() {
         function setFormValuesAfterChassisLoad(purchaseData) {
             // Set other values
             setTimeout(function() {
+                /** First token for "a;b;c" cells (same as setEditFormValues firstSemicolonDisplay). */
+                function fsd(v) {
+                    if (v == null || v === undefined) return '';
+                    var s = String(v).trim();
+                    if (!s) return '';
+                    var parts = s.split(';').map(function(x) { return x.trim(); }).filter(function(x) { return x.length > 0; });
+                    return parts.length ? parts[0] : s;
+                }
+                function distanceDigitsToUi(raw) {
+                    if (raw == null || raw === undefined) return '';
+                    var num = String(raw).replace(/[^0-9]/g, '');
+                    if (!num) return '';
+                    return num.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                }
                 // Ensure saved values exist as options so combobox validation passes (dropdown may have fewer options than saved)
                 ensureComboboxOptionExists('editStockLocation', purchaseData.stockLocation);
                 ensureComboboxOptionExists('editPol', purchaseData.pol);
                 ensureComboboxOptionExists('editRixoCompany', purchaseData.rixoCompany);
-                ensureComboboxOptionExists('editBrand', purchaseData.brand || purchaseData.carBrand);
+                ensureComboboxOptionExists('editBrand', fsd(purchaseData.brand || purchaseData.carBrand || ''));
                 ensureComboboxOptionExists('editVenueId', purchaseData.venueId);
                 ensureComboboxOptionExists('editShipmentSize', purchaseData.shipmentSize || purchaseData.vehicleType);
                 ensureComboboxOptionExists('editTypeOfVehicle', purchaseData.shipmentSize || purchaseData.vehicleType);
@@ -5945,8 +6472,9 @@ fun setupRixoDropdowns() {
                     if (editPolInput) editPolInput.value = purchaseData.pol;
                 }
                 // Populate POL dropdown from booking_mappings for current stock location (do not overwrite value)
-                if (purchaseData.stockLocation && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                    window.fetchPolsByStockLocationAndUpdate(purchaseData.stockLocation, false).then(function() {
+                if (purchaseData.stockLocation && purchaseData.auctionHouse && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+                    var mp = (typeof window.getPolTokensFromRixoMappingForSupplier === 'function') ? window.getPolTokensFromRixoMappingForSupplier(purchaseData.auctionHouse) : null;
+                    window.fetchPolsByStockLocationAndUpdate(purchaseData.auctionHouse, purchaseData.stockLocation, false, mp).then(function() {
                         ensureComboboxOptionExists('editPol', purchaseData.pol);
                         var editPolSelect = document.getElementById('editPol');
                         var editPolInput = document.getElementById('editPolInput');
@@ -6027,28 +6555,96 @@ fun setupRixoDropdowns() {
                     console.log('Set edit grade:', g);
                 }
                 
-                // Set Door (now number input)
-                var editDoor = document.getElementById('editDoor');
-                if (editDoor && purchaseData.door) {
-                    editDoor.value = purchaseData.door;
-                    console.log('Set edit door:', purchaseData.door);
+                // Rank / color / fuel / shift / CC — restore from DB (mapping load must not leave these blank on edit)
+                var rnk = fsd(purchaseData.rank);
+                if (rnk) {
+                    ensureComboboxOptionExists('editRank', rnk);
+                    var editRankIn = document.getElementById('editRankInput');
+                    var editRankSel = document.getElementById('editRank');
+                    if (editRankIn) editRankIn.value = rnk;
+                    if (editRankSel) editRankSel.value = rnk;
+                    if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('editRank');
+                }
+                var col = fsd(purchaseData.color);
+                if (col) {
+                    ensureComboboxOptionExists('editColor', col);
+                    var editColorIn = document.getElementById('editColorInput');
+                    var editColorSel = document.getElementById('editColor');
+                    if (editColorIn) editColorIn.value = col;
+                    if (editColorSel) editColorSel.value = col;
+                    if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('editColor');
+                }
+                var fuelV = fsd(purchaseData.fuel);
+                if (fuelV) {
+                    ensureComboboxOptionExists('editFuel', fuelV);
+                    var editFuelIn = document.getElementById('editFuelInput');
+                    var editFuelSel = document.getElementById('editFuel');
+                    if (editFuelIn) editFuelIn.value = fuelV;
+                    if (editFuelSel) editFuelSel.value = fuelV;
+                    if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('editFuel');
+                }
+                var shiftV = fsd(purchaseData.shift);
+                if (shiftV) {
+                    ensureComboboxOptionExists('editShift', shiftV);
+                    var editShiftIn = document.getElementById('editShiftInput');
+                    var editShiftSel = document.getElementById('editShift');
+                    if (editShiftIn) editShiftIn.value = shiftV;
+                    if (editShiftSel) editShiftSel.value = shiftV;
+                    if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('editShift');
+                }
+                var ccV = fsd(purchaseData.cc);
+                if (ccV) {
+                    var ccNum = String(ccV).replace(/[^0-9]/g, '');
+                    if (ccNum) {
+                        ensureComboboxOptionExists('editCc', ccNum);
+                        var editCcIn = document.getElementById('editCcInput');
+                        var editCcSel = document.getElementById('editCc');
+                        if (editCcIn) editCcIn.value = ccNum;
+                        if (editCcSel) editCcSel.value = ccNum;
+                        if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('editCc');
+                    }
+                }
+                var wdStr = fsd(purchaseData.wd);
+                if (wdStr) {
+                    var nw = '';
+                    if (wdStr.indexOf('4') >= 0) nw = '4WD'; else if (wdStr.indexOf('2') >= 0) nw = '2WD';
+                    if (nw) {
+                        var wdRadio = document.querySelector('input[name="editWd"][value="' + nw + '"]');
+                        if (wdRadio) wdRadio.checked = true;
+                    }
+                }
+                var editDistEl = document.getElementById('editDistance');
+                if (editDistEl && purchaseData.distance != null && purchaseData.distance !== undefined && String(purchaseData.distance).trim() !== '') {
+                    editDistEl.value = distanceDigitsToUi(purchaseData.distance);
                 }
                 
-                // Set Seat (now number input)
-                var editSeat = document.getElementById('editSeat');
-                if (editSeat && purchaseData.seat) {
-                    editSeat.value = purchaseData.seat;
-                    console.log('Set edit seat:', purchaseData.seat);
+                // Set Door / Seat (combobox)
+                var editDoorIn = document.getElementById('editDoorInput');
+                var editDoorSel = document.getElementById('editDoor');
+                if (purchaseData.door) {
+                    var d = (purchaseData.door || '').toString().split(';')[0].trim();
+                    if (editDoorIn) editDoorIn.value = d;
+                    if (editDoorSel) editDoorSel.value = d;
+                    console.log('Set edit door:', d);
+                }
+                var editSeatIn = document.getElementById('editSeatInput');
+                var editSeatSel = document.getElementById('editSeat');
+                if (purchaseData.seat) {
+                    var s = (purchaseData.seat || '').toString().split(';')[0].trim();
+                    if (editSeatIn) editSeatIn.value = s;
+                    if (editSeatSel) editSeatSel.value = s;
+                    console.log('Set edit seat:', s);
                 }
                 
                 // Set Drive Type (radio buttons) - set again as backup (already set immediately above)
-                if (purchaseData.driveType) {
-                    var driveTypeRadio = document.querySelector('input[name="editDriveType"][value="' + purchaseData.driveType + '"]');
+                var dtTok = fsd(purchaseData.driveType);
+                if (dtTok) {
+                    var driveTypeRadio = document.querySelector('input[name="editDriveType"][value="' + dtTok + '"]');
                     if (driveTypeRadio) {
                         driveTypeRadio.checked = true;
-                        console.log('✅ Set edit drive type (backup after chassis load):', purchaseData.driveType);
+                        console.log('✅ Set edit drive type (backup after chassis load):', dtTok);
                     } else {
-                        console.warn('⚠️ Drive Type radio button not found for value:', purchaseData.driveType);
+                        console.warn('⚠️ Drive Type radio button not found for value:', dtTok);
                     }
                 }
                 
@@ -6103,13 +6699,22 @@ fun setupRixoDropdowns() {
                 }
                 
                 // Set Options: predefined go to hidden + button highlight; custom go to text box only
+                // API: GET /api/purchases/purchase/{id} returns Purchase as JSON; Jackson uses camelCase — canonical key is "options" (comma-separated string). Fallback keys are legacy/defensive.
+                function readPurchaseOptionsString(pd) {
+                    if (!pd) return '';
+                    var o = pd.options;
+                    if (o != null && String(o).trim() !== '') return String(o);
+                    o = pd.options_str || pd.carOptions;
+                    return (o != null && String(o).trim() !== '') ? String(o) : '';
+                }
                 var PREDEFINED_OPTIONS = ['ABS', 'Air Bag', 'Aluminum Wheels', 'Power Steering', 'Power Window', 'Sunroof', 'Navigation/TV', 'Leather Seats', 'Spare Key', 'AC'];
                 var OPTIONS_NORMALIZE = { 'Navigation': 'Navigation/TV', 'TV': 'Navigation/TV' };
                 var editOptions = document.getElementById('editOptions');
                 var editOptionsPredefined = document.getElementById('editOptionsPredefined');
                 if (editOptions && editOptionsPredefined) {
-                    if (purchaseData.options) {
-                        var optionsArray = purchaseData.options.split(',').map(function(o) { return o.trim(); }).filter(Boolean);
+                    var optionsRaw = readPurchaseOptionsString(purchaseData);
+                    if (optionsRaw) {
+                        var optionsArray = String(optionsRaw).split(',').map(function(o) { return o.trim(); }).filter(Boolean);
                         var predefined = [];
                         var custom = [];
                         optionsArray.forEach(function(opt) {
@@ -6251,9 +6856,9 @@ fun setupRixoDropdowns() {
                     }
                     
                     // Brand and car name should already be auto-filled by fetchMappingByChassisOnly
-                    // But ensure they're set if chassis mapping didn't work
-                    var brandName = purchaseData.brand || purchaseData.carBrand;
-                    var carName = purchaseData.carName;
+                    // But ensure they're set if chassis mapping didn't work (first token only for multi-value DB cells)
+                    var brandName = fsd(purchaseData.brand || purchaseData.carBrand || '');
+                    var carName = fsd(purchaseData.carName || '');
                     
                     // Set brand value if not already set by chassis mapping
                     var editBrandSelect = document.getElementById('editBrand');
@@ -6305,23 +6910,42 @@ fun setupRixoDropdowns() {
                     ensureComboboxOptionExists('editStockLocation', purchaseData.stockLocation);
                     ensureComboboxOptionExists('editPol', purchaseData.pol);
                     ensureComboboxOptionExists('editRixoCompany', purchaseData.rixoCompany);
-                    ensureComboboxOptionExists('editBrand', purchaseData.brand || purchaseData.carBrand);
+                    ensureComboboxOptionExists('editBrand', fsd(purchaseData.brand || purchaseData.carBrand || ''));
                     ensureComboboxOptionExists('editVenueId', purchaseData.venueId);
                     ensureComboboxOptionExists('editShipmentSize', purchaseData.shipmentSize || purchaseData.vehicleType);
                     ensureComboboxOptionExists('editCountry', purchaseData.country);
                     ensureComboboxOptionExists('editClientName', purchaseData.clientName);
                     ensureComboboxOptionExists('editRepairCompany', purchaseData.repairCompany);
+                    ensureComboboxOptionExists('editRank', fsd(purchaseData.rank));
+                    ensureComboboxOptionExists('editColor', fsd(purchaseData.color));
+                    ensureComboboxOptionExists('editFuel', fsd(purchaseData.fuel));
+                    ensureComboboxOptionExists('editShift', fsd(purchaseData.shift));
+                    var ccFb = fsd(purchaseData.cc);
+                    if (ccFb) { var ccNum = String(ccFb).replace(/[^0-9]/g, ''); if (ccNum) ensureComboboxOptionExists('editCc', ccNum); }
                     var sv = purchaseData.shipmentSize || purchaseData.vehicleType;
                     if (purchaseData.stockLocation) { var s = document.getElementById('editStockLocation'); var i = document.getElementById('editStockLocationInput'); if (s) s.value = purchaseData.stockLocation; if (i) i.value = purchaseData.stockLocation; }
                     if (purchaseData.pol) { var s = document.getElementById('editPol'); var i = document.getElementById('editPolInput'); if (s) s.value = purchaseData.pol; if (i) i.value = purchaseData.pol; }
                     if (purchaseData.rixoCompany) { var s = document.getElementById('editRixoCompany'); var i = document.getElementById('editRixoCompanyInput'); if (s) s.value = purchaseData.rixoCompany; if (i) i.value = purchaseData.rixoCompany; }
-                    if (purchaseData.brand || purchaseData.carBrand) { var s = document.getElementById('editBrand'); var i = document.getElementById('editBrandInput'); if (s) s.value = purchaseData.brand || purchaseData.carBrand; if (i) i.value = purchaseData.brand || purchaseData.carBrand; }
+                    if (purchaseData.brand || purchaseData.carBrand) { var b = fsd(purchaseData.brand || purchaseData.carBrand || ''); var s = document.getElementById('editBrand'); var i = document.getElementById('editBrandInput'); if (s) s.value = b; if (i) i.value = b; }
                     if (purchaseData.venueId) { var s = document.getElementById('editVenueId'); var i = document.getElementById('editVenueIdInput'); if (s) s.value = purchaseData.venueId; if (i) i.value = purchaseData.venueId; }
                     if (sv) { var s = document.getElementById('editShipmentSize'); var i = document.getElementById('editShipmentSizeInput'); if (s) s.value = sv; if (i) i.value = sv; }
                     if (purchaseData.grade) { var el = document.getElementById('editGradeInput'); var s = document.getElementById('editGrade'); var g = (purchaseData.grade || '').toString().split(';')[0].trim(); if (s) s.value = g; if (el) el.value = g; }
                     if (purchaseData.country) { var s = document.getElementById('editCountry'); var i = document.getElementById('editCountryInput'); if (s) s.value = purchaseData.country; if (i) i.value = purchaseData.country; }
                     if (purchaseData.clientName) { var s = document.getElementById('editClientName'); var i = document.getElementById('editClientNameInput'); if (s) s.value = purchaseData.clientName; if (i) i.value = purchaseData.clientName; }
                     if (purchaseData.repairCompany) { var s = document.getElementById('editRepairCompany'); var i = document.getElementById('editRepairCompanyInput'); if (s) s.value = purchaseData.repairCompany; if (i) i.value = purchaseData.repairCompany; }
+                    var rnkFb = fsd(purchaseData.rank);
+                    if (rnkFb) { var ri = document.getElementById('editRankInput'); var rs = document.getElementById('editRank'); if (ri) ri.value = rnkFb; if (rs) rs.value = rnkFb; }
+                    var colFb = fsd(purchaseData.color);
+                    if (colFb) { var ci = document.getElementById('editColorInput'); var cs = document.getElementById('editColor'); if (ci) ci.value = colFb; if (cs) cs.value = colFb; }
+                    var fuelFb = fsd(purchaseData.fuel);
+                    if (fuelFb) { var fi = document.getElementById('editFuelInput'); var fs = document.getElementById('editFuel'); if (fi) fi.value = fuelFb; if (fs) fs.value = fuelFb; }
+                    var shiftFb = fsd(purchaseData.shift);
+                    if (shiftFb) { var shi = document.getElementById('editShiftInput'); var shs = document.getElementById('editShift'); if (shi) shi.value = shiftFb; if (shs) shs.value = shiftFb; }
+                    var ccFb2 = fsd(purchaseData.cc);
+                    if (ccFb2) { var ccn = String(ccFb2).replace(/[^0-9]/g, ''); if (ccn) { var cci = document.getElementById('editCcInput'); var ccs = document.getElementById('editCc'); if (cci) cci.value = ccn; if (ccs) ccs.value = ccn; } }
+                    var wdFb = fsd(purchaseData.wd);
+                    if (wdFb) { var nww = (wdFb.indexOf('4') >= 0) ? '4WD' : ((wdFb.indexOf('2') >= 0) ? '2WD' : ''); if (nww) { var wrr = document.querySelector('input[name="editWd"][value="' + nww + '"]'); if (wrr) wrr.checked = true; } }
+                    if (purchaseData.distance != null && purchaseData.distance !== undefined && String(purchaseData.distance).trim() !== '') { var edd = document.getElementById('editDistance'); if (edd) edd.value = distanceDigitsToUi(purchaseData.distance); }
                 }, 700);
             }, 100);
         }
@@ -6427,6 +7051,226 @@ fun setupRixoDropdowns() {
         }
     """)
 }
+
+/** One-time: comma formatting + numeric-only for `.money-input` (Add + Edit). Call from [main]. */
+fun setupMoneyInputFormattingOnce() {
+    js("""
+        function _commaIntSanitize(raw) {
+            if (raw == null) return '';
+            var s = String(raw).trim();
+            if (!s) return '';
+            return s.replace(/[^0-9]/g, '');
+        }
+        function _stripKmSuffix(raw) {
+            if (raw == null) return '';
+            return String(raw).replace(/\s*km\s*$/i, '').trim();
+        }
+        function _commaIntFormat(raw) {
+            var s = _commaIntSanitize(raw);
+            if (!s) return '';
+            return s.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        }
+        function _commaIntFormatKm(raw) {
+            var s = _commaIntFormat(_stripKmSuffix(raw));
+            return s ? (s + ' km') : '';
+        }
+        function _moneySanitize(raw) {
+            if (raw == null) return '';
+            var s = String(raw).trim();
+            if (!s) return '';
+            s = s.replace(/[^0-9.]/g, '');
+            var parts = s.split('.');
+            if (parts.length > 2) {
+                s = parts[0] + '.' + parts.slice(1).join('');
+                parts = s.split('.');
+            }
+            if (parts[0]) {
+                parts[0] = parts[0].replace(/^0+(?=\\d)/, '');
+            }
+            if (parts.length === 1) return parts[0] || '';
+            return (parts[0] || '0') + '.' + (parts[1] || '');
+        }
+        function _moneyFormat(raw) {
+            var s = _moneySanitize(raw);
+            if (!s) return '';
+            var parts = s.split('.');
+            var intPart = parts[0] || '0';
+            var decPart = parts.length > 1 ? parts[1] : '';
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            return decPart ? (intPart + '.' + decPart) : intPart;
+        }
+        window._moneySanitize = function(raw) { return _moneySanitize(raw); };
+        window._moneyFormat = function(raw) { return _moneyFormat(raw); };
+        window._commaIntSanitize = function(raw) { return _commaIntSanitize(raw); };
+        window._commaIntFormat = function(raw) { return _commaIntFormat(raw); };
+        function _bindMoneyDelegation() {
+            if (window.__moneyInputListenersV2Installed) return;
+            window.__moneyInputListenersV2Installed = true;
+            var __moneyFormatting = false;
+            document.addEventListener('input', function(e) {
+                if (__moneyFormatting) return;
+                var el = e.target;
+                if (!el || !el.classList) return;
+
+                // Mileage/Distance: commas while typing, digits only (no decimals)
+                if (el.classList.contains('comma-int-input')) {
+                    var isKm = el.classList.contains('km-suffix-input');
+                    var oldValI = isKm ? _stripKmSuffix(el.value) : el.value;
+                    var selI = (el.selectionStart == null) ? oldValI.length : el.selectionStart;
+                    var beforeI = oldValI.substring(0, selI);
+                    var digitsBeforeI = beforeI.replace(/[^0-9]/g, '').length;
+                    var sanitizedI = _commaIntSanitize(oldValI);
+                    var formattedI = _commaIntFormat(sanitizedI);
+                    if (formattedI !== oldValI) {
+                        __moneyFormatting = true;
+                        try {
+                            el.value = formattedI;
+                            var newPosI = formattedI.length;
+                            if (digitsBeforeI <= 0) {
+                                newPosI = 0;
+                            } else {
+                                var dI = 0;
+                                newPosI = formattedI.length;
+                                for (var j = 0; j < formattedI.length; j++) {
+                                    if (/[0-9]/.test(formattedI[j])) {
+                                        dI++;
+                                        newPosI = j + 1;
+                                        if (dI >= digitsBeforeI) break;
+                                    }
+                                }
+                            }
+                            el.setSelectionRange(newPosI, newPosI);
+                        } catch (err) { }
+                        __moneyFormatting = false;
+                    }
+                    return;
+                }
+
+                if (!el.classList.contains('money-input')) return;
+                var oldVal = el.value;
+                var sel = (el.selectionStart == null) ? oldVal.length : el.selectionStart;
+                var before = oldVal.substring(0, sel);
+                var digitsBefore = before.replace(/[^0-9]/g, '').length;
+                var sanitized = _moneySanitize(oldVal);
+                var formatted = _moneyFormat(sanitized);
+                if (formatted === oldVal) return;
+                __moneyFormatting = true;
+                try {
+                    el.value = formatted;
+                    var newPos = formatted.length;
+                    if (digitsBefore <= 0) {
+                        newPos = 0;
+                    } else {
+                        var d = 0;
+                        newPos = formatted.length;
+                        for (var i = 0; i < formatted.length; i++) {
+                            if (/[0-9]/.test(formatted[i])) {
+                                d++;
+                                newPos = i + 1;
+                                if (d >= digitsBefore) break;
+                            }
+                        }
+                    }
+                    el.setSelectionRange(newPos, newPos);
+                } catch (err) { }
+                __moneyFormatting = false;
+            }, true);
+            document.addEventListener('keydown', function(e) {
+                var el = e.target;
+                if (!el || !el.classList) return;
+                if (!(el.classList.contains('money-input') || el.classList.contains('comma-int-input'))) return;
+                if (e.ctrlKey || e.metaKey || e.altKey) return;
+                var k = e.key;
+                if (k === 'Backspace' || k === 'Delete' || k === 'Tab' || k === 'Enter' || k === 'Escape') return;
+                if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown' || k === 'Home' || k === 'End') return;
+                // mileage wants digits only; money allows dot
+                if (el.classList.contains('comma-int-input')) {
+                    if (k.length === 1 && !/[0-9]/.test(k)) e.preventDefault();
+                    return;
+                }
+                if (k.length === 1 && !/[0-9.]/.test(k)) {
+                    e.preventDefault();
+                }
+            }, true);
+            document.addEventListener('focusin', function(e) {
+                var el = e.target;
+                if (!el || !el.classList) return;
+                if (el.classList.contains('km-suffix-input')) {
+                    el.value = _stripKmSuffix(el.value);
+                }
+            }, true);
+            document.addEventListener('focusout', function(e) {
+                var el = e.target;
+                if (!el || !el.classList) return;
+                if (el.classList.contains('comma-int-input')) {
+                    if (el.classList.contains('km-suffix-input')) {
+                        el.value = _commaIntFormatKm(el.value);
+                    } else {
+                        el.value = _commaIntFormat(el.value);
+                    }
+                    return;
+                }
+                if (!el.classList.contains('money-input')) return;
+                el.value = _moneyFormat(el.value);
+            }, true);
+        }
+        function _formatAllMoneyInputsNow() {
+            document.querySelectorAll('input.money-input').forEach(function(el) {
+                el.value = _moneyFormat(el.value);
+            });
+            document.querySelectorAll('input.comma-int-input').forEach(function(el) {
+                if (el.classList && el.classList.contains('km-suffix-input') && document.activeElement !== el) {
+                    el.value = _commaIntFormatKm(el.value);
+                } else {
+                    el.value = _commaIntFormat(el.value);
+                }
+            });
+        }
+        window.getMoneyRawValue = function(id) {
+            var el = document.getElementById(id);
+            if (!el) return '';
+            return _moneySanitize(el.value);
+        };
+        _bindMoneyDelegation();
+        setTimeout(_formatAllMoneyInputsNow, 0);
+        if (!window.__moneyAutoFormatIntervalStarted) {
+            window.__moneyAutoFormatIntervalStarted = true;
+            window.__moneyAutoFormatInterval = window.setInterval(function() {
+                document.querySelectorAll('input.money-input').forEach(function(el) {
+                    if (!el) return;
+                    if (document.activeElement === el) return;
+                    if (el.classList && el.classList.contains('comma-int-input')) {
+                        var fi = (el.classList.contains('km-suffix-input')) ? _commaIntFormatKm(el.value) : _commaIntFormat(el.value);
+                        if (el.value !== fi) el.value = fi;
+                        return;
+                    }
+                    if (el.classList && el.classList.contains('money-input')) {
+                        var formatted = _moneyFormat(el.value);
+                        if (el.value !== formatted) el.value = formatted;
+                    }
+                });
+            }, 350);
+        }
+    """)
+    window.asDynamic().applyPurchaseCountryFromClientName = { sid: String ->
+        applyPurchaseCountryFromClientName(sid)
+    }
+    document.addEventListener("focusout", { ev: Event ->
+        val t = ev.target as? HTMLElement ?: return@addEventListener
+        when (t.id) {
+            "clientNameInput" -> applyPurchaseCountryFromClientName("clientName")
+            "editClientNameInput" -> applyPurchaseCountryFromClientName("editClientName")
+        }
+    }, true)
+    document.addEventListener("change", { ev: Event ->
+        val t = ev.target as? HTMLElement ?: return@addEventListener
+        when (t.id) {
+            "clientNameInput" -> applyPurchaseCountryFromClientName("clientName")
+            "editClientNameInput" -> applyPurchaseCountryFromClientName("editClientName")
+        }
+    }, true)
+}
+
 fun setupAddFormListeners() {
     // Immediate log using js() to ensure it's not filtered
     js("console.log('SETUP_ADD_FORM_LISTENERS_CALLED')")
@@ -6619,11 +7463,26 @@ fun setupAddFormListeners() {
         }
     }
 
-    (document.getElementById("date") as HTMLInputElement?)?.addEventListener("change", { ev: Event ->
-        val v = (ev.target as HTMLInputElement).value
+    (document.getElementById("date") as HTMLInputElement?)?.let { dateEl ->
         val hint = document.getElementById("dateDayHint") as HTMLElement?
-        hint?.textContent = isoToWeekdayLabel(v)
-    })
+        if (dateEl.value.isNotBlank()) {
+            hint?.textContent = isoToWeekdayLabel(dateEl.value)
+        }
+        dateEl.addEventListener("change", { ev: Event ->
+            val v = (ev.target as HTMLInputElement).value
+            hint?.textContent = isoToWeekdayLabel(v)
+        })
+    }
+
+    // Initialize + keep day hints in sync for payment/shipment dates (no default on Add form)
+    (document.getElementById("paymentDate") as HTMLInputElement?)?.let { el ->
+        val hint = document.getElementById("paymentDateDayHint") as HTMLElement?
+        if (el.value.isNotBlank()) hint?.textContent = isoToWeekdayLabel(el.value)
+    }
+    (document.getElementById("shipmentDate") as HTMLInputElement?)?.let { el ->
+        val hint = document.getElementById("shipmentDateDayHint") as HTMLElement?
+        if (el.value.isNotBlank()) hint?.textContent = isoToWeekdayLabel(el.value)
+    }
 
     // Add SHAKEN checkbox listener
     document.getElementById("shakenCheckbox")?.addEventListener("change", { event: Event ->
@@ -6652,92 +7511,27 @@ fun setupAddFormListeners() {
         val hint = document.getElementById("shipmentDateDayHint") as HTMLElement?
         hint?.textContent = isoToWeekdayLabel(v)
     })
+    (document.getElementById("carModelYear") as HTMLInputElement?)?.let { monthEl ->
+        val hint = document.getElementById("carModelYearHint") as HTMLElement?
+        val updateHint = {
+            val isEmpty = monthEl.value.isBlank()
+            hint?.style?.display = if (isEmpty) "block" else "none"
+            if (isEmpty) {
+                monthEl.style.color = "transparent"
+                monthEl.style.setProperty("-webkit-text-fill-color", "transparent")
+            } else {
+                monthEl.style.color = ""
+                monthEl.style.setProperty("-webkit-text-fill-color", "")
+            }
+        }
+        updateHint()
+        monthEl.addEventListener("change", { _: Event -> updateHint() })
+        monthEl.addEventListener("input", { _: Event -> updateHint() })
+    }
     
     // Option buttons: highlight selected only; text box is for custom options only (no predefined in text box)
     // Use event delegation so Add and Edit forms both work (form can be rendered after initial load)
     js("""
-        // Money inputs: add comma formatting on blur; store comma-less
-        function _moneySanitize(raw) {
-            if (raw == null) return '';
-            var s = String(raw).trim();
-            if (!s) return '';
-            // keep digits and dot only
-            s = s.replace(/[^0-9.]/g, '');
-            // remove extra dots
-            var parts = s.split('.');
-            if (parts.length > 2) {
-                s = parts[0] + '.' + parts.slice(1).join('');
-                parts = s.split('.');
-            }
-            // trim leading zeros safely
-            if (parts[0]) {
-                parts[0] = parts[0].replace(/^0+(?=\\d)/, '');
-            }
-            if (parts.length === 1) return parts[0] || '';
-            return (parts[0] || '0') + '.' + (parts[1] || '');
-        }
-
-        function _moneyFormat(raw) {
-            var s = _moneySanitize(raw);
-            if (!s) return '';
-            var parts = s.split('.');
-            var intPart = parts[0] || '0';
-            var decPart = parts.length > 1 ? parts[1] : '';
-            // format int with commas
-            intPart = intPart.replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
-            return decPart ? (intPart + '.' + decPart) : intPart;
-        }
-
-        function _bindMoneyDelegation() {
-            if (window.__moneyDelegationBound) return;
-            window.__moneyDelegationBound = true;
-
-            // On focus: show raw (no commas) for easier editing
-            document.addEventListener('focusin', function(e) {
-                var el = e.target;
-                if (!el || !el.classList || !el.classList.contains('money-input')) return;
-                el.value = _moneySanitize(el.value);
-            }, true);
-
-            // On blur: format with commas
-            document.addEventListener('focusout', function(e) {
-                var el = e.target;
-                if (!el || !el.classList || !el.classList.contains('money-input')) return;
-                el.value = _moneyFormat(el.value);
-            }, true);
-        }
-
-        function _formatAllMoneyInputsNow() {
-            document.querySelectorAll('input.money-input').forEach(function(el) {
-                el.value = _moneyFormat(el.value);
-            });
-        }
-
-        window.getMoneyRawValue = function(id) {
-            var el = document.getElementById(id);
-            if (!el) return '';
-            return _moneySanitize(el.value);
-        };
-
-        _bindMoneyDelegation();
-        // Format existing values after DOM renders
-        setTimeout(_formatAllMoneyInputsNow, 0);
-
-        // Some fields are auto-filled later by JS (e.g., chassis selection).
-        // Those assignments don't always trigger focusout/blur, so we
-        // re-format money inputs periodically while NOT focused.
-        if (!window.__moneyAutoFormatIntervalStarted) {
-            window.__moneyAutoFormatIntervalStarted = true;
-            window.__moneyAutoFormatInterval = window.setInterval(function() {
-                document.querySelectorAll('input.money-input').forEach(function(el) {
-                    if (!el) return;
-                    if (document.activeElement === el) return; // don't interrupt typing
-                    var formatted = _moneyFormat(el.value);
-                    if (el.value !== formatted) el.value = formatted;
-                });
-            }, 350);
-        }
-
         function updatePredefinedInput(predefinedInput, option, add) {
             if (!predefinedInput) return;
             var current = predefinedInput.value.trim();
@@ -6860,7 +7654,7 @@ fun setupAddFormListeners() {
             event.stopImmediatePropagation()
             event.stopPropagation()
             val currentUrl = window.location.origin + window.location.pathname
-            val url = "$currentUrl#/master/supplier"
+            val url = "$currentUrl#/master/supplier-map"
             console.log("🟢 [SUPPLIER BUTTON] Opening URL in new tab:", url)
             window.setTimeout({
                 val newWindow = window.open(url, "_blank")
@@ -6868,6 +7662,7 @@ fun setupAddFormListeners() {
                     console.error("❌ [SUPPLIER BUTTON] Popup blocked!")
                 } else {
                     console.log("✅ [SUPPLIER BUTTON] New tab opened successfully")
+                    showMasterDataRefreshPopup()
                 }
             }, 10)
         }
@@ -6885,12 +7680,13 @@ fun setupAddFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/supplier';
+                    var url = window.location.origin + window.location.pathname + '#/master/supplier-map';
                     console.log('🟢 [SUPPLIER] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
                         if (newWin) {
                             console.log('✅ [SUPPLIER] New tab opened');
+                            if (window.showMasterDataRefreshPopup) window.showMasterDataRefreshPopup();
                         } else {
                             console.error('❌ [SUPPLIER] Popup blocked');
                         }
@@ -6927,7 +7723,7 @@ fun setupAddFormListeners() {
             event.stopImmediatePropagation()
             event.stopPropagation()
             val currentUrl = window.location.origin + window.location.pathname
-            val url = "$currentUrl#/master/car-brands"
+            val url = "$currentUrl#/master/car-brands-map"
             console.log("🔵 [CAR BRANDS BUTTON] Opening URL in new tab:", url)
             // Use setTimeout to ensure this happens after all other handlers
             window.setTimeout({
@@ -6936,6 +7732,7 @@ fun setupAddFormListeners() {
                     console.error("❌ [CAR BRANDS BUTTON] Popup blocked!")
                 } else {
                     console.log("✅ [CAR BRANDS BUTTON] New tab opened successfully")
+                    showMasterDataRefreshPopup()
                 }
             }, 10)
         }
@@ -6956,12 +7753,13 @@ fun setupAddFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/car-brands';
+                    var url = window.location.origin + window.location.pathname + '#/master/car-brands-map';
                     console.log('🔵 [CAR BRANDS] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
                         if (newWin) {
                             console.log('✅ [CAR BRANDS] New tab opened');
+                            if (window.showMasterDataRefreshPopup) window.showMasterDataRefreshPopup();
                         } else {
                             console.error('❌ [CAR BRANDS] Popup blocked');
                         }
@@ -6978,12 +7776,13 @@ fun setupAddFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/car-brands';
+                    var url = window.location.origin + window.location.pathname + '#/master/car-brands-map';
                     console.log('🔵 [CAR BRANDS] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
                         if (newWin) {
                             console.log('✅ [CAR BRANDS] New tab opened');
+                            if (window.showMasterDataRefreshPopup) window.showMasterDataRefreshPopup();
                         } else {
                             console.error('❌ [CAR BRANDS] Popup blocked');
                         }
@@ -7377,9 +8176,10 @@ fun populateBrandOptions(brandSelectId: String) {
                 // Fallback: extract from mappings if uniqueValues not available
                 val mappings = (data.data as? Array<*>) ?: (data.mappings as? Array<*>)
                 if (mappings != null) {
-                    mappings.mapNotNull { mapping ->
+                    mappings.flatMap { mapping ->
                         val map = mapping.unsafeCast<dynamic>()
-                        (map.brand as? String) ?: (map.carBrand as? String)
+                        val b = (map.brand as? String) ?: (map.carBrand as? String)
+                        splitSemicolonTokens(b)
                     }.distinct().sorted()
                 } else {
                     emptyList()
@@ -7406,39 +8206,22 @@ fun populateBrandOptions(brandSelectId: String) {
                     }
                 }
             } else {
-                brandsArray.forEach { brand ->
-                    if (brand.isNotBlank() && !seenLower.contains(brand.lowercase())) {
-                        seenLower.add(brand.lowercase())
-                        val option = js("new Option(brand, brand)")
-                        brandSelect.add(option)
+                brandsArray.forEach { brandRaw ->
+                    for (brand in splitSemicolonTokens(brandRaw)) {
+                        if (brand.isNotBlank() && seenLower.add(brand.lowercase())) {
+                            val option = js("new Option(brand, brand)")
+                            brandSelect.add(option)
+                        }
                     }
                 }
                 console.log("✅ Populated brand dropdown with ${seenLower.size} unique brands from API")
             }
-            // Last row: See More (loads master_menu car_brands on click)
-            val seeMoreOpt = document.createElement("option") as HTMLOptionElement
-            seeMoreOpt.value = BRAND_SEE_MORE_VALUE
-            seeMoreOpt.textContent = "See More"
-            brandSelect.appendChild(seeMoreOpt)
-            
-            // Restore previous value if it still exists in the (deduped) options
-            if (currentValue.isNotBlank()) {
-                var optionExists = false
-                for (i in 0 until brandSelect.options.length) {
-                    val opt = brandSelect.options.item(i) as? HTMLOptionElement ?: continue
-                    if (opt.value != BRAND_SEE_MORE_VALUE && opt.value.equals(currentValue, ignoreCase = true)) {
-                        optionExists = true
-                        brandSelect.value = opt.value
-                        val brandInput = document.getElementById("${brandSelectId}Input") as? HTMLInputElement
-                        brandInput?.value = opt.value
-                        break
-                    }
-                }
-            }
+            mergeMasterCarBrandsIntoBrandSelect(brandSelectId, seenLower, currentValue)
         }
         .catch { error: dynamic ->
             console.error("❌ Error fetching brands from API, using fallback list:", error)
-            // Fallback to hardcoded list on error
+            brandSelect.innerHTML = "<option value=\"\">▼</option>"
+            val seenLower = mutableSetOf<String>()
             val fallbackBrands = listOf(
                 "Toyota", "Nissan", "Subaru", "Honda", "Suzuki", "Isuzu", "Daihatsu", "Mitsuoka", "Hino",
                 "Mitsubishi Fuso", "Mitsubishi", "Lexus", "Mazda", "Nissan Diesel", "Cadillac", "Chevrolet", "GMC",
@@ -7449,13 +8232,11 @@ fun populateBrandOptions(brandSelectId: String) {
                 "Volvo", "Hyundai", "Kia", "BYD", "TOMMYKAIRA"
             )
             fallbackBrands.forEach { brand ->
-                val option = js("new Option(brand, brand)")
-                brandSelect.add(option)
+                if (brand.isNotBlank() && seenLower.add(brand.lowercase())) {
+                    brandSelect.add(js("new Option(brand, brand)"))
+                }
             }
-            val seeMoreOptErr = document.createElement("option") as HTMLOptionElement
-            seeMoreOptErr.value = BRAND_SEE_MORE_VALUE
-            seeMoreOptErr.textContent = "See More"
-            brandSelect.appendChild(seeMoreOptErr)
+            mergeMasterCarBrandsIntoBrandSelect(brandSelectId, seenLower, currentValue)
         }
 }
 
@@ -7464,6 +8245,279 @@ const val BRAND_SEE_MORE_VALUE = "__SEE_MORE__"
 
 /** Value for "See Less" option; clicking it restores dropdown to pre–See More state. */
 const val SEE_LESS_VALUE = "__SEE_LESS__"
+
+/** Disabled option between chassis mapping values and master list (Brand/Fuel/Shift/Vehicle type when chassis selected). */
+const val CHASSIS_MASTER_SEP_VALUE = "__CHASSIS_MASTER_SEP__"
+
+/** Native `<option>` label for the mapping/master divider (combobox overlay uses a styled rule with the same copy). */
+private const val SUPPLIER_MASTER_SEP_OPTION_LABEL = "Other Options \u2195"
+
+/** Append full `master_menu/car_brands` after mapping brands with a rule (Venue ID–style); no See More. */
+private fun mergeMasterCarBrandsIntoBrandSelect(brandSelectId: String, mappingLower: MutableSet<String>, restoreValue: String) {
+    window.fetch(apiUrl("master-menu/car_brands"))
+        .then { response ->
+            if (!response.ok) throw Exception("car_brands")
+            response.json()
+        }
+        .then { raw: dynamic ->
+            val masterList = parsePurchaseMasterListArray(raw)
+            val sel = document.getElementById(brandSelectId) as? HTMLSelectElement ?: return@then
+            val toAdd = masterList.filter { it.isNotBlank() && !mappingLower.contains(it.lowercase()) }
+            var hasMapping = false
+            for (i in 0 until sel.options.length) {
+                val v = ((sel.options[i] as? HTMLOptionElement)?.value ?: "").trim()
+                if (v.isNotEmpty() && v != CHASSIS_MASTER_SEP_VALUE) {
+                    hasMapping = true
+                    break
+                }
+            }
+            if (toAdd.isNotEmpty() && hasMapping) {
+                val sep = document.createElement("option") as HTMLOptionElement
+                sep.value = CHASSIS_MASTER_SEP_VALUE
+                sep.textContent = SUPPLIER_MASTER_SEP_OPTION_LABEL
+                sep.disabled = true
+                sel.appendChild(sep)
+            }
+            for (b in toAdd) {
+                mappingLower.add(b.lowercase())
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = b
+                opt.textContent = b
+                sel.appendChild(opt)
+            }
+            window.asDynamic().__regBrandM = brandSelectId
+            js("if (typeof registerSupplierMasterComboId === 'function') registerSupplierMasterComboId(window.__regBrandM)")
+            syncComboboxFromSelect(brandSelectId)
+            restoreBrandSelectValueIfPresent(brandSelectId, restoreValue)
+        }
+        .catch { _: dynamic ->
+            window.asDynamic().__regBrandM = brandSelectId
+            js("if (typeof registerSupplierMasterComboId === 'function') registerSupplierMasterComboId(window.__regBrandM)")
+            syncComboboxFromSelect(brandSelectId)
+            restoreBrandSelectValueIfPresent(brandSelectId, restoreValue)
+        }
+}
+
+private fun restoreBrandSelectValueIfPresent(brandSelectId: String, restoreValue: String) {
+    if (restoreValue.isBlank()) return
+    val sel = document.getElementById(brandSelectId) as? HTMLSelectElement ?: return
+    for (i in 0 until sel.options.length) {
+        val opt = sel.options.item(i) as? HTMLOptionElement ?: continue
+        val v = (opt.value).trim()
+        if (v.isEmpty() || v == CHASSIS_MASTER_SEP_VALUE) continue
+        if (opt.value.equals(restoreValue, ignoreCase = true)) {
+            sel.value = opt.value
+            (document.getElementById("${brandSelectId}Input") as? HTMLInputElement)?.value = opt.value
+            return
+        }
+    }
+}
+
+/** Split `car_brand_mapping` multi-value fields stored as `a;b;c`. */
+private fun splitSemicolonTokens(raw: String?): List<String> {
+    if (raw.isNullOrBlank()) return emptyList()
+    return raw.split(';').map { it.trim() }.filter { it.isNotBlank() }
+}
+
+private fun firstSemicolonToken(raw: String?): String =
+    splitSemicolonTokens(raw).firstOrNull() ?: raw?.trim() ?: ""
+
+/** First token for edit-form HTML defaults (`Any?` from purchase row / DB multi-value cells). */
+private fun firstDisplayToken(raw: Any?): String {
+    if (raw == null) return ""
+    val s = raw.toString().trim()
+    if (s.isEmpty()) return ""
+    return firstSemicolonToken(s)
+}
+
+private fun addSemicolonTokensToSet(target: MutableSet<String>, raw: String?) {
+    splitSemicolonTokens(raw).forEach { target.add(it) }
+}
+
+/** True if `selected` equals the full cell or one of its `;`-separated tokens (chassis row match). */
+private fun mappingCellMatchesSelected(rawCell: String?, selected: String): Boolean {
+    val s = selected.trim()
+    if (s.isEmpty()) return false
+    val raw = (rawCell ?: "").trim()
+    if (raw.isEmpty()) return false
+    if (raw.equals(s, ignoreCase = true)) return true
+    return splitSemicolonTokens(raw).any { it.equals(s, ignoreCase = true) }
+}
+
+/**
+ * Expands API/uniqueValues lists where a single row may be `a;b;c` into one option per token
+ * (case-insensitive dedupe, sorted). Use for Brand, Fuel, Shift, CC, Door, etc.
+ */
+private fun flattenSemicolonChoices(values: Iterable<String>): List<String> {
+    val seen = mutableSetOf<String>()
+    val out = mutableListOf<String>()
+    for (raw in values) {
+        for (t in splitSemicolonTokens(raw)) {
+            if (t.isNotBlank() && seen.add(t.lowercase())) {
+                out.add(t)
+            }
+        }
+    }
+    return out.sorted()
+}
+
+private fun syncComboboxFromSelect(selectId: String) {
+    window.asDynamic().__syncComboboxIdArg = selectId
+    js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(window.__syncComboboxIdArg)")
+}
+
+private fun resetChassisMasterComboIds() {
+    js("window.__chassisMasterComboIds = []")
+}
+
+private fun registerChassisMasterComboId(selectId: String) {
+    window.asDynamic().__regChassisMasterId = selectId
+    js("window.__chassisMasterComboIds = window.__chassisMasterComboIds || []")
+    js("if (window.__chassisMasterComboIds.indexOf(window.__regChassisMasterId) < 0) window.__chassisMasterComboIds.push(window.__regChassisMasterId)")
+}
+
+/**
+ * Chassis mapping tokens first, then [CHASSIS_MASTER_SEP_VALUE], then master list from API (deduped).
+ * Used for Brand, Fuel, Shift, Vehicle type when Part 1 chassis is selected (Add + Edit purchase).
+ */
+private fun populateChassisMappingWithMasterListAsync(
+    selectId: String,
+    defaultLabel: String,
+    chassisTokens: List<String>,
+    selectedValue: String,
+    masterApiPath: String
+) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    val input = document.getElementById("${selectId}Input") as? HTMLInputElement
+    registerChassisMasterComboId(selectId)
+    select.innerHTML = ""
+    val def = document.createElement("option") as HTMLOptionElement
+    def.value = ""
+    def.textContent = defaultLabel
+    select.appendChild(def)
+    val chassisLower = mutableSetOf<String>()
+    val seen = mutableSetOf<String>()
+    for (raw in chassisTokens) {
+        for (t in splitSemicolonTokens(raw)) {
+            if (t.isNotBlank() && seen.add(t.lowercase())) {
+                chassisLower.add(t.lowercase())
+                val option = document.createElement("option") as HTMLOptionElement
+                option.value = t
+                option.textContent = t
+                select.appendChild(option)
+            }
+        }
+    }
+    val sep = document.createElement("option") as HTMLOptionElement
+    sep.value = CHASSIS_MASTER_SEP_VALUE
+    sep.textContent = SUPPLIER_MASTER_SEP_OPTION_LABEL
+    sep.disabled = true
+    select.appendChild(sep)
+    val toSet = firstSemicolonToken(selectedValue.takeIf { it.isNotBlank() } ?: chassisTokens.firstOrNull() ?: "")
+    if (toSet.isNotBlank()) {
+        var found = false
+        for (i in 0 until select.options.length) {
+            val o = select.options.item(i) as? HTMLOptionElement
+            if (o != null && o.value == toSet) {
+                found = true
+                break
+            }
+        }
+        if (!found) {
+            val opt = document.createElement("option") as HTMLOptionElement
+            opt.value = toSet
+            opt.textContent = toSet
+            val sepEl = select.options.item(select.options.length - 1) as? HTMLOptionElement
+            if (sepEl != null && sepEl.value == CHASSIS_MASTER_SEP_VALUE) {
+                select.insertBefore(opt, sepEl)
+            } else {
+                select.appendChild(opt)
+            }
+        }
+        select.value = toSet
+        input?.value = toSet
+    } else {
+        select.value = ""
+        input?.value = ""
+    }
+    syncComboboxFromSelect(selectId)
+    val masterSeen = mutableSetOf<String>()
+    chassisLower.forEach { masterSeen.add(it) }
+    window.fetch(apiUrl(masterApiPath))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load master list')")
+        }
+        .then { raw: dynamic ->
+            val masterList = parsePurchaseMasterListArray(raw)
+            val sel = document.getElementById(selectId) as? HTMLSelectElement ?: return@then
+            val inp = document.getElementById("${selectId}Input") as? HTMLInputElement
+            for (item in masterList) {
+                val it = item.trim()
+                if (it.isNotBlank() && masterSeen.add(it.lowercase())) {
+                    val option = document.createElement("option") as HTMLOptionElement
+                    option.value = it
+                    option.textContent = it
+                    sel.appendChild(option)
+                }
+            }
+            val cur = firstSemicolonToken((inp?.value ?: sel.value ?: "").toString())
+            if (cur.isNotBlank()) {
+                sel.value = cur
+                inp?.value = cur
+            }
+            syncComboboxFromSelect(selectId)
+            console.log("✅ Merged master list for $selectId from $masterApiPath")
+        }
+        .catch { _: dynamic ->
+            console.error("Failed to load master list for chassis combo: $masterApiPath")
+        }
+}
+
+/** Populate a combobox `<select>` with label row + one option per token. */
+private fun populateComboboxTokensWithSeeMore(selectId: String, defaultLabel: String, tokens: List<String>, selectedValue: String, @Suppress("UNUSED_PARAMETER") addSeeMore: Boolean) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    val input = document.getElementById("${selectId}Input") as? HTMLInputElement
+    select.innerHTML = ""
+    val def = document.createElement("option") as HTMLOptionElement
+    def.value = ""
+    def.textContent = defaultLabel
+    def.defaultSelected = true
+    select.appendChild(def)
+    val seen = mutableSetOf<String>()
+    tokens.forEach { raw ->
+        for (t in splitSemicolonTokens(raw)) {
+            if (t.isNotBlank() && seen.add(t.lowercase())) {
+                val option = document.createElement("option") as HTMLOptionElement
+                option.value = t
+                option.textContent = t
+                select.appendChild(option)
+            }
+        }
+    }
+    val toSet = firstSemicolonToken(selectedValue.takeIf { it.isNotBlank() } ?: tokens.firstOrNull() ?: "")
+    if (toSet.isNotBlank()) {
+        var found = false
+        for (i in 0 until select.options.length) {
+            val o = select.options.item(i) as? HTMLOptionElement
+            if (o != null && o.value == toSet) {
+                found = true
+                break
+            }
+        }
+        if (!found) {
+            val opt = document.createElement("option") as HTMLOptionElement
+            opt.value = toSet
+            opt.textContent = toSet
+            select.appendChild(opt)
+        }
+        select.value = toSet
+        input?.value = toSet
+    } else {
+        select.value = ""
+        input?.value = ""
+    }
+    syncComboboxFromSelect(selectId)
+}
 
 /** Called when user clicks "See More" in Brand dropdown. Fetches master_menu car_brands and appends them below existing options. */
 fun handleBrandSeeMoreClick(selectId: String) {
@@ -7526,6 +8580,8 @@ fun handleBrandSeeMoreClick(selectId: String) {
 private fun getMasterFieldApiPath(selectId: String): String? = when (selectId) {
     "venueId", "editVenueId" -> "master-menu/venue_id"
     "shipmentSize", "editShipmentSize", "typeOfVehicle", "editTypeOfVehicle" -> "master-menu/type_of_vehicle"
+    "fuel", "editFuel" -> "master-menu/fuel"
+    "shift", "editShift" -> "master-menu/shift"
     "rixoCompany", "editRixoCompany" -> "master-menu/rixo_company"
     "stockLocation", "editStockLocation" -> "master-menu/stock_location"
     "pol", "editPol" -> "master-menu/pol"
@@ -7658,6 +8714,8 @@ fun populateBrandDropdownsForChassisFlow(
             return
         }
         
+        val flatValues = flattenSemicolonChoices(values.toList())
+        
         // For Fuel/Shift/Grade, merge with base options instead of clearing
         val isBaseOptionField = fieldId == "fuel" || fieldId == "editFuel" || 
                                 fieldId == "shift" || fieldId == "editShift" || 
@@ -7679,8 +8737,8 @@ fun populateBrandDropdownsForChassisFlow(
             
             // Add base options first
             baseOptions.forEach { allValuesSet.add(it) }
-            // Add values from mapping
-            values.forEach { if (it.isNotEmpty()) allValuesSet.add(it) }
+            // Add values from mapping (each token is its own row)
+            flatValues.forEach { allValuesSet.add(it) }
             
             // Clear and rebuild with merged options
             element.innerHTML = ""
@@ -7693,14 +8751,14 @@ fun populateBrandDropdownsForChassisFlow(
                 element.add(option)
             }
             
-            console.log("✅ Merged base options for $fieldId: ${allValuesSet.size} total options (${baseOptions.size} base + ${values.size} from mapping)")
+            console.log("✅ Merged base options for $fieldId: ${allValuesSet.size} total options (${baseOptions.size} base + mapping tokens from ${values.size} raw rows)")
         } else {
             // For other fields, clear and repopulate normally
             element.innerHTML = ""
             val defaultOption = js("new Option(defaultLabel, '', true, true)")
             element.add(defaultOption)
             
-            values.forEach { value ->
+            flatValues.forEach { value ->
                 if (value.isNotEmpty()) {
                     val option = js("new Option(value, value)")
                     element.add(option)
@@ -7742,19 +8800,21 @@ fun populateBrandDropdownsForChassisFlow(
     val carNameList = js("dropdowns.carName") as? Array<String> ?: emptyArray()
     populateDropdown(fieldId("CarName"), carNameList, "Select Car Name", carName)
     
-    // Ensure Fuel dropdown always includes base options
+    // Ensure Fuel dropdown always includes base options; split any `a;b;c` rows from API
     val baseFuelOptions = listOf("GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV")
-    val fuelList = (js("dropdowns.fuel") as? Array<String> ?: emptyArray()).toMutableList()
-    baseFuelOptions.forEach { opt -> if (!fuelList.contains(opt)) fuelList.add(opt) }
+    val fuelList = flattenSemicolonChoices(
+        baseFuelOptions + (js("dropdowns.fuel") as? Array<String> ?: emptyArray()).toList()
+    )
     populateDropdown(fieldId("Fuel"), fuelList.toTypedArray(), "Select Fuel", fuel)
     
     val wdList = js("dropdowns.wd") as? Array<String> ?: emptyArray()
     populateDropdown(fieldId("Wd"), wdList, "Select WD", wd)
     
-    // Ensure Shift dropdown always includes base options - use populateDropdown which now handles merging
+    // Ensure Shift dropdown always includes base options; split any `a;b;c` rows from API
     val baseShiftOptions = listOf("AT", "MT", "6F", "5F")
-    val shiftList = (js("dropdowns.shift") as? Array<String> ?: emptyArray()).toMutableList()
-    baseShiftOptions.forEach { opt -> if (!shiftList.contains(opt)) shiftList.add(opt) }
+    val shiftList = flattenSemicolonChoices(
+        baseShiftOptions + (js("dropdowns.shift") as? Array<String> ?: emptyArray()).toList()
+    )
     populateDropdown(fieldId("Shift"), shiftList.toTypedArray(), "Select Shift", shift)
     
     val ccList = js("dropdowns.cc") as? Array<String> ?: emptyArray()
@@ -7796,7 +8856,8 @@ fun populateBrandDropdowns(dropdowns: dynamic, isEditForm: Boolean) {
     
     // Helper function to populate a dropdown (and sync to input if it's a combobox)
     fun populateDropdown(fieldId: String, values: Array<String>, defaultLabel: String) {
-        console.log("populateBrandDropdowns: populating dropdown", fieldId, "with", values.size, "values, defaultLabel=", defaultLabel)
+        val flatValues = flattenSemicolonChoices(values.toList())
+        console.log("populateBrandDropdowns: populating dropdown", fieldId, "with", flatValues.size, "values (from ${values.size} raw), defaultLabel=", defaultLabel)
         val element = document.getElementById(fieldId) as? HTMLSelectElement
         
         if (element == null) {
@@ -7811,8 +8872,8 @@ fun populateBrandDropdowns(dropdowns: dynamic, isEditForm: Boolean) {
         val defaultOption = js("new Option(defaultLabel, '', true, true)")
         element.add(defaultOption)
         
-        // Add new options
-        values.forEach { value ->
+        // Add new options (one row per semicolon token)
+        flatValues.forEach { value ->
             if (value.isNotEmpty()) {
                 val option = js("new Option(value, value)")
                 element.add(option)
@@ -7828,19 +8889,19 @@ fun populateBrandDropdowns(dropdowns: dynamic, isEditForm: Boolean) {
     val carNameList = js("dropdowns.carName") as? Array<String> ?: emptyArray()
     populateDropdown(fieldId("CarName"), carNameList, "Select Car Name")
     
-    // Ensure Fuel dropdown always includes base options
     val baseFuelOptions = listOf("GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV")
-    val fuelList = (js("dropdowns.fuel") as? Array<String> ?: emptyArray()).toMutableList()
-    baseFuelOptions.forEach { opt -> if (!fuelList.contains(opt)) fuelList.add(opt) }
+    val fuelList = flattenSemicolonChoices(
+        baseFuelOptions + (js("dropdowns.fuel") as? Array<String> ?: emptyArray()).toList()
+    )
     populateDropdown(fieldId("Fuel"), fuelList.toTypedArray(), "Select Fuel")
     
     val wdList = js("dropdowns.wd") as? Array<String> ?: emptyArray()
     populateDropdown(fieldId("Wd"), wdList, "Select WD")
     
-    // Ensure Shift dropdown always includes base options
     val baseShiftOptions = listOf("AT", "MT", "6F", "5F")
-    val shiftList = (js("dropdowns.shift") as? Array<String> ?: emptyArray()).toMutableList()
-    baseShiftOptions.forEach { opt -> if (!shiftList.contains(opt)) shiftList.add(opt) }
+    val shiftList = flattenSemicolonChoices(
+        baseShiftOptions + (js("dropdowns.shift") as? Array<String> ?: emptyArray()).toList()
+    )
     val shiftElement = document.getElementById(fieldId("Shift")) as? HTMLSelectElement
     if (shiftElement != null) {
         shiftElement.innerHTML = "<option value=\"\">Select Shift</option>"
@@ -7893,7 +8954,13 @@ fun autoFillBrandFields(firstRow: dynamic, isEditForm: Boolean) {
     // For comboboxes, sets both input and select fields
     fun setFieldValue(fieldId: String, value: String) {
         if (fieldId == "wd" || fieldId == "editWd") {
-            val radioVal = if (value.contains("4")) "4WD" else "2WD"
+            val v = firstSemicolonToken(value)
+            val radioVal = when {
+                v.contains("4", ignoreCase = true) -> "4WD"
+                v.contains("2", ignoreCase = true) -> "2WD"
+                else -> ""
+            }
+            if (radioVal.isBlank()) return
             val radio = document.querySelector("input[name=\"$fieldId\"][value=\"$radioVal\"]") as? HTMLInputElement
             radio?.checked = true
             return
@@ -7927,17 +8994,16 @@ fun autoFillBrandFields(firstRow: dynamic, isEditForm: Boolean) {
     }
     
     val chassis = js("firstRow.chassis")?.toString() ?: ""
-    val carName = js("firstRow.carName")?.toString() ?: ""
-    val fuel = js("firstRow.fuel")?.toString() ?: ""
-    val wd = js("firstRow.wd")?.toString() ?: ""
-    val shift = js("firstRow.shift")?.toString() ?: ""
+    val carName = firstSemicolonToken(js("firstRow.carName")?.toString())
+    val fuel = firstSemicolonToken(js("firstRow.fuel")?.toString())
+    val wd = firstSemicolonToken(js("firstRow.wd")?.toString())
+    val shift = firstSemicolonToken(js("firstRow.shift")?.toString())
     val ccRaw = js("firstRow.cc")?.toString() ?: ""
     val doorRaw = js("firstRow.door")?.toString() ?: ""
-    val grade = js("firstRow.grade")?.toString() ?: ""
+    val grade = firstSemicolonToken(js("firstRow.grade")?.toString())
     
-    // Convert "0" to empty string for select dropdowns (NULL values)
-    val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
-    val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
+    val cc = firstSemicolonToken(if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw).replace(Regex("[^0-9]"), "")
+    val door = firstSemicolonToken(if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw)
     
     // Set chassis
     setFieldValue(fieldId("Chassis"), chassis)
@@ -8111,20 +9177,20 @@ fun fetchMappingsByCarName(brandName: String, carName: String, isEditForm: Boole
                 console.log("✅ Filtered chassis dropdown with ${chassisList.size} options for carName: $carName")
             }
             
-            // Auto-fill all fields from first row
+            // Auto-fill all fields from first row (first semicolon token for multi-value cells)
             val chassis = js("firstRow.chassis")?.toString() ?: ""
-            val fuel = js("firstRow.fuel")?.toString() ?: ""
-            val wd = js("firstRow.wd")?.toString() ?: ""
-            val shift = js("firstRow.shift")?.toString() ?: ""
+            val fuel = firstSemicolonToken(js("firstRow.fuel")?.toString() ?: "")
+            val wd = firstSemicolonToken(js("firstRow.wd")?.toString() ?: "")
+            val shift = firstSemicolonToken(js("firstRow.shift")?.toString() ?: "")
             val ccRaw = js("firstRow.cc")?.toString() ?: ""
             val doorRaw = js("firstRow.door")?.toString() ?: ""
             val seatRaw = js("firstRow.seat")?.toString() ?: ""
-            val grade = js("firstRow.grade")?.toString() ?: ""
+            val grade = firstSemicolonToken(js("firstRow.grade")?.toString() ?: "")
             
             // Convert "0" to empty string for select dropdowns (NULL values)
-            val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
-            val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
-            val seat = if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw
+            val cc = firstSemicolonToken(if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw)
+            val door = firstSemicolonToken(if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw)
+            val seat = firstSemicolonToken(if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw)
             
             console.log("Auto-filling fields from first row: chassis=$chassis, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, seat=$seat, grade=$grade")
             
@@ -8271,7 +9337,7 @@ fun setupChassisAutoRefresh(isEditForm: Boolean = false) {
     }
     
     // Create listener function
-    val refreshListener: (Event) -> Unit = { _: Event ->
+    val refreshListener: (Event) -> Unit = { e: Event ->
         // Check if we're on the add or edit purchase page (#/add or #/edit/... on 1st tab)
         val hash = window.location.hash
         val isAddPage = hash.startsWith("#/add")
@@ -8323,7 +9389,7 @@ fun setupBrandAutoRefresh(isEditForm: Boolean = false) {
     }
     
     // Create listener function
-    val refreshListener: (Event) -> Unit = { _: Event ->
+    val refreshListener: (Event) -> Unit = { e: Event ->
         // Check if we're on the add or edit purchase page (#/add or #/edit/... on 1st tab)
         val hash = window.location.hash
         val isAddPage = hash.startsWith("#/add")
@@ -8372,7 +9438,7 @@ fun setupSupplierAutoRefresh(isEditForm: Boolean = false) {
         window.removeEventListener("supplierUpdated", listenerFunc)
     }
 
-    val refreshListener: (Event) -> Unit = { _: Event ->
+    val refreshListener: (Event) -> Unit = { e: Event ->
         val hash = window.location.hash
         val isAddPage = hash.startsWith("#/add")
         val isEditPage = hash.startsWith("#/edit")
@@ -8393,8 +9459,185 @@ fun setupSupplierAutoRefresh(isEditForm: Boolean = false) {
     console.log("✅ Supplier auto-refresh listener set up (isEditForm: $isEditForm)")
 }
 
+fun showMasterDataRefreshPopup() {
+    document.getElementById("masterDataRefreshPopupOverlay")?.remove()
+    val html = """
+        <div id="masterDataRefreshPopupOverlay"
+             style="position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:2147483646; display:flex; align-items:center; justify-content:center; padding:16px;">
+            <div
+                style="background:#fff; border-radius:10px; width:min(92vw, 420px); box-shadow:0 16px 40px rgba(0,0,0,0.25); border:1px solid #e5e7eb; padding:20px 18px; text-align:left;">
+                <p style="margin:0; font-size:14px; line-height:1.45; color:#111827; font-weight:500;">New data is available. Refresh the page to load the latest content.</p>
+            </div>
+        </div>
+    """
+    document.body?.insertAdjacentHTML("beforeend", html)
+    val overlay = document.getElementById("masterDataRefreshPopupOverlay")
+    overlay?.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "masterDataRefreshPopupOverlay") {
+            document.getElementById("masterDataRefreshPopupOverlay")?.remove()
+        }
+    })
+}
+
+private fun isValidIsoDateStrict(iso: String): Boolean {
+    val m = Regex("""^(\d{4})-(\d{2})-(\d{2})$""").find(iso) ?: return false
+    val year = m.groupValues[1].toIntOrNull() ?: return false
+    val month = m.groupValues[2].toIntOrNull() ?: return false
+    val day = m.groupValues[3].toIntOrNull() ?: return false
+    if (year !in 1000..9999) return false
+    if (month !in 1..12) return false
+    val maxDay = when (month) {
+        1, 3, 5, 7, 8, 10, 12 -> 31
+        4, 6, 9, 11 -> 30
+        2 -> if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) 29 else 28
+        else -> 0
+    }
+    return day in 1..maxDay
+}
+
+private fun isValidMmDdYyyyStrict(v: String): Boolean {
+    val m = Regex("""^(0?[1-9]|1[0-2])/(0?[1-9]|[12]\d|3[01])/(\d{4})$""").find(v) ?: return false
+    val month = m.groupValues[1].toIntOrNull() ?: return false
+    val day = m.groupValues[2].toIntOrNull() ?: return false
+    val year = m.groupValues[3].toIntOrNull() ?: return false
+    if (year !in 1000..9999) return false
+    val maxDay = when (month) {
+        1, 3, 5, 7, 8, 10, 12 -> 31
+        4, 6, 9, 11 -> 30
+        2 -> if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) 29 else 28
+        else -> 0
+    }
+    return day in 1..maxDay
+}
+
+private fun isValidMmDdYyyyPartial(v: String): Boolean {
+    if (v.isEmpty()) return true
+    // Allow only digits and slash while typing.
+    if (!Regex("""^[0-9/]+$""").matches(v)) return false
+    if (v.length > 10) return false
+
+    val parts = v.split("/")
+    if (parts.size > 3) return false
+
+    val mm = parts.getOrNull(0).orEmpty()
+    val dd = parts.getOrNull(1).orEmpty()
+    val yyyy = parts.getOrNull(2).orEmpty()
+
+    if (mm.length > 2 || dd.length > 2 || yyyy.length > 4) return false
+
+    // Validate month segment progressively.
+    if (mm.isNotEmpty()) {
+        if (mm.length == 1) {
+            if (mm[0] !in '0'..'1' && mm[0] !in '2'..'9') return false
+        } else {
+            val m = mm.toIntOrNull() ?: return false
+            if (m !in 1..12) return false
+        }
+    }
+
+    // Validate day segment progressively.
+    if (dd.isNotEmpty()) {
+        if (dd.length == 1) {
+            if (dd[0] !in '0'..'3' && dd[0] !in '4'..'9') return false
+        } else {
+            val d = dd.toIntOrNull() ?: return false
+            if (d !in 1..31) return false
+        }
+    }
+
+    if (yyyy.length > 4) return false
+    return true
+}
+
+fun setupGlobalDateValidation() {
+    if ((window.asDynamic().__dateValidationBound as? Boolean) == true) return
+    window.asDynamic().__dateValidationBound = true
+
+    val validate: (Event) -> Unit = { ev ->
+        val input = ev.target as? HTMLInputElement
+        if (input != null) {
+            val raw = input.value.trim()
+            if (raw.isNotEmpty()) {
+                val type = (input.getAttribute("type") ?: "").lowercase()
+                val id = (input.id ?: "").lowercase()
+                val cls = (input.className ?: "").lowercase()
+                val isDateLikeText = (type == "text" || type.isEmpty()) && (id.contains("date") || cls.contains("date"))
+
+                if (type == "date") {
+                    if (!isValidIsoDateStrict(raw)) {
+                        input.value = ""
+                    }
+                } else if (isDateLikeText) {
+                    if (!isValidMmDdYyyyStrict(raw)) {
+                        input.value = ""
+                    }
+                }
+            }
+        }
+    }
+
+    val enforceInput: (Event) -> Unit = { ev ->
+        val input = ev.target as? HTMLInputElement
+        if (input != null) {
+            var raw = input.value
+            val type = (input.getAttribute("type") ?: "").lowercase()
+            val id = (input.id ?: "").lowercase()
+            val cls = (input.className ?: "").lowercase()
+            val isDateLikeText = (type == "text" || type.isEmpty()) && (id.contains("date") || cls.contains("date"))
+            val lastValid = input.dataset["lastValidValue"] ?: ""
+
+            if (type == "date") {
+                // Hard-block oversized year while typing (supports both ISO and locale-like typed text).
+                if (raw.contains("/")) {
+                    val slashMatch = Regex("""^(\d{1,2})/(\d{1,2})/(\d+)$""").find(raw)
+                    if (slashMatch != null) {
+                        val mm = slashMatch.groupValues[1]
+                        val dd = slashMatch.groupValues[2]
+                        val yyyy = slashMatch.groupValues[3]
+                        if (yyyy.length > 4) {
+                            input.value = "$mm/$dd/${yyyy.take(4)}"
+                            raw = input.value
+                        }
+                    }
+                } else if (raw.contains("-")) {
+                    val isoParts = raw.split("-")
+                    if (isoParts.size == 3 && isoParts[0].length > 4) {
+                        input.value = "${isoParts[0].take(4)}-${isoParts[1]}-${isoParts[2]}"
+                        raw = input.value
+                    }
+                }
+
+                // For native date input: keep only valid complete dates.
+                // Empty is allowed while editing.
+                if (raw.isEmpty()) {
+                    input.dataset["lastValidValue"] = ""
+                } else if (isValidIsoDateStrict(raw)) {
+                    input.dataset["lastValidValue"] = raw
+                } else {
+                    input.value = lastValid
+                }
+            } else if (isDateLikeText) {
+                if (isValidMmDdYyyyPartial(raw)) {
+                    // Update remembered valid value only when full strict date is valid.
+                    if (isValidMmDdYyyyStrict(raw)) {
+                        input.dataset["lastValidValue"] = raw
+                    }
+                } else {
+                    input.value = lastValid
+                }
+            }
+        }
+    }
+
+    window.asDynamic().__dateValidationHandler = validate
+    window.asDynamic().__dateInputEnforceHandler = enforceInput
+    document.addEventListener("change", validate)
+    document.addEventListener("blur", validate, true)
+    document.addEventListener("input", enforceInput, true)
+}
+
 // Function to fetch mapping by chassis only (chassis-first flow)
-fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
+fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForMerge: dynamic? = null): dynamic {
     if (chassis.isBlank()) {
         console.log("Chassis is blank, skipping chassis-only mapping")
         return js("Promise.resolve()")
@@ -8422,27 +9665,42 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
             // Debug: log the raw API response
             console.log("🔍 Raw API response for chassis $chassis:", data)
             
-            // Extract first row data for auto-fill
+            // Extract first row data for auto-fill (multi-value fields use `;` — first token is the default selection)
             val firstRowRaw = js("data.firstRow")
             val firstRow = firstRowRaw.unsafeCast<dynamic>()
-            val brand = ((firstRow?.brand as? String) ?: (data.brand as? String) ?: "").trim()
-            val carName = ((firstRow?.carName as? String) ?: (data.carName as? String) ?: "").trim()
-            val fuel = ((firstRow?.fuel as? String) ?: (data.fuel as? String) ?: "").trim()
-            val wd = ((firstRow?.wd as? String) ?: (data.wd as? String) ?: "").trim()
-            val shift = ((firstRow?.shift as? String) ?: (data.shift as? String) ?: "").trim()
-            val ccRaw = ((firstRow?.cc as? Number)?.toString() ?: (data.cc as? String) ?: "").trim()
-            val doorRaw = ((firstRow?.door as? Number)?.toString() ?: (data.door as? String) ?: "").trim()
-            // Backend returns `firstRow.seat` as a String (via `toString()`), not a Number.
-            // Keep this robust to both Number/String just in case.
-            val seatRaw = ((firstRow?.seat as? Number)?.toString()
-                ?: (firstRow?.seat as? String)?.toString()
-                ?: "").trim()
-            val grade = ((firstRow?.grade as? String) ?: (data.grade as? String) ?: "").trim()
             val frDyn = firstRow.unsafeCast<dynamic>()
-            val vehicleType = ((frDyn.vehicleType as? String) ?: (data.vehicleType as? String) ?: "").trim()
-            val rank = ((frDyn.rank as? String) ?: (data.rank as? String) ?: "").trim()
-            val color = ((frDyn.color as? String) ?: (data.color as? String) ?: "").trim()
-            val driveType = ((frDyn.driveType as? String) ?: (data.driveType as? String) ?: "").trim()
+            val brandRaw = ((firstRow?.brand as? String) ?: (data.brand as? String) ?: "").trim()
+            val carNameRaw = ((firstRow?.carName as? String) ?: (data.carName as? String) ?: "").trim()
+            val fuelRaw = ((firstRow?.fuel as? String) ?: (data.fuel as? String) ?: "").trim()
+            val wdRaw = ((firstRow?.wd as? String) ?: (data.wd as? String) ?: "").trim()
+            val shiftRaw = ((firstRow?.shift as? String) ?: (data.shift as? String) ?: "").trim()
+            val ccRaw = (frDyn.cc as? String)?.trim()
+                ?: (firstRow?.cc as? Number)?.toString()?.trim()
+                ?: (data.cc as? String)?.trim()
+                ?: ""
+            val doorRaw = (frDyn.door as? String)?.trim()
+                ?: (firstRow?.door as? Number)?.toString()?.trim()
+                ?: (data.door as? String)?.trim()
+                ?: ""
+            val seatRaw = (frDyn.seat as? String)?.trim()
+                ?: (firstRow?.seat as? Number)?.toString()?.trim()
+                ?: ""
+            val gradeRaw = ((firstRow?.grade as? String) ?: (data.grade as? String) ?: "").trim()
+            val vehicleTypeRaw = ((frDyn.vehicleType as? String) ?: (data.vehicleType as? String) ?: "").trim()
+            val rankRaw = ((frDyn.rank as? String) ?: (data.rank as? String) ?: "").trim()
+            val colorRaw = ((frDyn.color as? String) ?: (data.color as? String) ?: "").trim()
+            val driveTypeRaw = ((frDyn.driveType as? String) ?: (data.driveType as? String) ?: "").trim()
+
+            var brand = firstSemicolonToken(brandRaw)
+            var carName = firstSemicolonToken(carNameRaw)
+            var fuel = firstSemicolonToken(fuelRaw)
+            var wd = firstSemicolonToken(wdRaw)
+            var shift = firstSemicolonToken(shiftRaw)
+            var grade = firstSemicolonToken(gradeRaw)
+            var vehicleType = firstSemicolonToken(vehicleTypeRaw)
+            var rank = firstSemicolonToken(rankRaw)
+            var color = firstSemicolonToken(colorRaw)
+            var driveType = firstSemicolonToken(driveTypeRaw)
             
             // Store all rows for this chassis in global variable for matching logic
             // Backend returns 'allRows' or 'mappings' (for backward compatibility)
@@ -8493,27 +9751,23 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
             val ranks = mutableSetOf<String>()
             val colors = mutableSetOf<String>()
             val driveTypes = mutableSetOf<String>()
+            val seats = mutableSetOf<String>()
             
             allRows.forEach { row ->
                 val rowDynamic = row.unsafeCast<dynamic>()
-                (rowDynamic.brand as? String)?.takeIf { it.isNotBlank() }?.let { brands.add(it) }
-                (rowDynamic.carName as? String)?.takeIf { it.isNotBlank() }?.let { carNames.add(it) }
-                (rowDynamic.fuel as? String)?.takeIf { it.isNotBlank() }?.let { fuels.add(it) }
-                (rowDynamic.wd as? String)?.takeIf { it.isNotBlank() }?.let { wds.add(it) }
-                (rowDynamic.shift as? String)?.takeIf { it.isNotBlank() }?.let { shifts.add(it) }
-                val ccValue = rowDynamic.cc
-                if (ccValue != null && ccValue != 0 && ccValue != "0") {
-                    ccs.add(ccValue.toString())
-                }
-                val doorValue = rowDynamic.door
-                if (doorValue != null && doorValue != 0 && doorValue != "0") {
-                    doors.add(doorValue.toString())
-                }
-                (rowDynamic.grade as? String)?.takeIf { it.isNotBlank() }?.let { grades.add(it) }
-                (rowDynamic.vehicleType as? String)?.takeIf { it.isNotBlank() }?.let { vehicleTypes.add(it) }
-                (rowDynamic.rank as? String)?.takeIf { it.isNotBlank() }?.let { ranks.add(it) }
-                (rowDynamic.color as? String)?.takeIf { it.isNotBlank() }?.let { colors.add(it) }
-                (rowDynamic.driveType as? String)?.takeIf { it.isNotBlank() }?.let { driveTypes.add(it) }
+                addSemicolonTokensToSet(brands, rowDynamic.brand as? String)
+                addSemicolonTokensToSet(carNames, rowDynamic.carName as? String)
+                addSemicolonTokensToSet(fuels, rowDynamic.fuel as? String)
+                addSemicolonTokensToSet(wds, rowDynamic.wd as? String)
+                addSemicolonTokensToSet(shifts, rowDynamic.shift as? String)
+                addSemicolonTokensToSet(ccs, rowDynamic.cc?.toString())
+                addSemicolonTokensToSet(doors, rowDynamic.door?.toString())
+                addSemicolonTokensToSet(grades, rowDynamic.grade as? String)
+                addSemicolonTokensToSet(vehicleTypes, rowDynamic.vehicleType as? String)
+                addSemicolonTokensToSet(ranks, rowDynamic.rank as? String)
+                addSemicolonTokensToSet(colors, rowDynamic.color as? String)
+                addSemicolonTokensToSet(driveTypes, rowDynamic.driveType as? String)
+                addSemicolonTokensToSet(seats, rowDynamic.seat?.toString())
             }
             
             // Use backend uniqueValues if available, otherwise use calculated values
@@ -8573,15 +9827,94 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                 grades.sorted().toTypedArray()
             }
             
-            console.log("📊 Unique values for chassis $chassis:")
-            console.log("  - Brands: $uniqueBrands")
-            console.log("  - Car Names: $uniqueCarNames")
-            console.log("  - Fuels: $uniqueFuels")
+            val uniqueSeats = seats.sorted().toTypedArray()
             
-            // Convert "0" to empty string for cc and door
-            val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
-            val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
-            val seat = if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw
+            // Backend uniqueValues may include single entries like "DIESEL;GASOLINE;HYBRID" — expand to one row per token
+            val brandsForDropdown = flattenSemicolonChoices(uniqueBrands.toList())
+            val fuelsForDropdown = flattenSemicolonChoices(uniqueFuels.toList())
+            val shiftsForDropdown = flattenSemicolonChoices(uniqueShifts.toList())
+            val ccsForDropdown = flattenSemicolonChoices(uniqueCcs.toList())
+            val doorsForDropdown = flattenSemicolonChoices(uniqueDoors.toList())
+            
+            console.log("📊 Unique values for chassis $chassis:")
+            console.log("  - Brands: $uniqueBrands -> expanded: $brandsForDropdown")
+            console.log("  - Car Names: $uniqueCarNames")
+            console.log("  - Fuels: $uniqueFuels -> expanded: $fuelsForDropdown")
+            
+            // Convert "0" to empty; use first semicolon token for display
+            var cc = firstSemicolonToken(if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw)
+            var door = firstSemicolonToken(if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw)
+            var seat = firstSemicolonToken(if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw)
+            
+            // Edit purchase: when mapping row has blank cells, fill from saved purchase so dropdowns and fields match DB
+            if (isEditForm && purchaseForMerge != null && !js("purchaseForMerge === void 0").unsafeCast<Boolean>()) {
+                val pd = purchaseForMerge.unsafeCast<dynamic>()
+                fun pdStr(raw: dynamic?): String {
+                    if (raw == null || js("raw === void 0").unsafeCast<Boolean>()) return ""
+                    return when (raw) {
+                        is String -> raw.trim()
+                        is Number -> raw.toString().trim()
+                        else -> raw.toString().trim()
+                    }
+                }
+                fun pdCcDoorSeat(raw: dynamic?): String {
+                    val s = pdStr(raw)
+                    if (s.isBlank() || s == "0") return ""
+                    return firstSemicolonToken(s)
+                }
+                if (brand.isBlank()) {
+                    val s = pdStr(pd.brand).ifBlank { pdStr(pd.carBrand) }
+                    if (s.isNotBlank()) brand = firstSemicolonToken(s)
+                }
+                if (carName.isBlank()) {
+                    val s = pdStr(pd.carName)
+                    if (s.isNotBlank()) carName = firstSemicolonToken(s)
+                }
+                if (fuel.isBlank()) {
+                    val s = pdStr(pd.fuel)
+                    if (s.isNotBlank()) fuel = firstSemicolonToken(s)
+                }
+                if (wd.isBlank()) {
+                    val s = pdStr(pd.wd)
+                    if (s.isNotBlank()) wd = firstSemicolonToken(s)
+                }
+                if (shift.isBlank()) {
+                    val s = pdStr(pd.shift)
+                    if (s.isNotBlank()) shift = firstSemicolonToken(s)
+                }
+                if (grade.isBlank()) {
+                    val s = pdStr(pd.grade)
+                    if (s.isNotBlank()) grade = firstSemicolonToken(s)
+                }
+                if (vehicleType.isBlank()) {
+                    val s = pdStr(pd.shipmentSize).ifBlank { pdStr(pd.vehicleType) }
+                    if (s.isNotBlank()) vehicleType = firstSemicolonToken(s)
+                }
+                if (rank.isBlank()) {
+                    val s = pdStr(pd.rank)
+                    if (s.isNotBlank()) rank = firstSemicolonToken(s)
+                }
+                if (color.isBlank()) {
+                    val s = pdStr(pd.color)
+                    if (s.isNotBlank()) color = firstSemicolonToken(s)
+                }
+                if (driveType.isBlank()) {
+                    val s = pdStr(pd.driveType)
+                    if (s.isNotBlank()) driveType = firstSemicolonToken(s)
+                }
+                if (cc.isBlank()) {
+                    val t = pdCcDoorSeat(pd.cc)
+                    if (t.isNotBlank()) cc = t
+                }
+                if (door.isBlank()) {
+                    val t = pdCcDoorSeat(pd.door)
+                    if (t.isNotBlank()) door = t
+                }
+                if (seat.isBlank()) {
+                    val t = pdCcDoorSeat(pd.seat)
+                    if (t.isNotBlank()) seat = t
+                }
+            }
             
             console.log("✅ Found mapping for chassis $chassis: brand=$brand, carName=$carName, fuel=$fuel, wd=$wd, cc=$cc, door=$door, seat=$seat, grade=$grade")
             
@@ -8596,7 +9929,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                 // Set flag to indicate we're auto-filling (prevents change event from clearing autoFilledBrand)
                 window.asDynamic().isAutoFillingBrand = true
                 
-                // Store auto-filled brand BEFORE setting field values
+                // Store auto-filled brand BEFORE setting field values (first token only)
                 window.asDynamic().autoFilledBrand = trimmedBrand
                 console.log("💾 Stored autoFilledBrand BEFORE setting field: '$trimmedBrand'")
                 
@@ -8635,14 +9968,15 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
             // Store unique values in global variable for dropdown population (create object from arrays)
             val uniqueValuesKey = "__chassisUniqueValues_$chassis"
             val uniqueValuesObj = js("({})").unsafeCast<dynamic>()
-            uniqueValuesObj.brands = uniqueBrands
+            uniqueValuesObj.brands = brandsForDropdown.toTypedArray()
             uniqueValuesObj.carNames = uniqueCarNames
-            uniqueValuesObj.fuels = uniqueFuels
+            uniqueValuesObj.fuels = fuelsForDropdown.toTypedArray()
             uniqueValuesObj.wds = uniqueWds
-            uniqueValuesObj.shifts = uniqueShifts
-            uniqueValuesObj.ccs = uniqueCcs
-            uniqueValuesObj.doors = uniqueDoors
+            uniqueValuesObj.shifts = shiftsForDropdown.toTypedArray()
+            uniqueValuesObj.ccs = ccsForDropdown.toTypedArray()
+            uniqueValuesObj.doors = doorsForDropdown.toTypedArray()
             uniqueValuesObj.grades = uniqueGrades
+            uniqueValuesObj.seats = uniqueSeats
             window.asDynamic().__tempUniqueValuesKey = uniqueValuesKey
             window.asDynamic().__tempUniqueValues = uniqueValuesObj
             js("window[window.__tempUniqueValuesKey] = window.__tempUniqueValues")
@@ -8667,126 +10001,58 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                 }
             }
             
-            // Populate dropdowns with unique values (not filtered by brand)
-            console.log("🔄 Populating dropdowns with unique values from all rows for chassis $chassis")
+            // Populate dropdowns with per-token options (WD uses radio buttons — no &lt;select&gt;)
+            console.log("🔄 Populating dropdowns with expanded tokens for chassis $chassis")
             
-            // Car Name dropdown
+            resetChassisMasterComboIds()
+            
+            val carNameTokensList = splitSemicolonTokens(carNameRaw).ifEmpty { flattenSemicolonChoices(uniqueCarNames.toList()) }
             val carNameId = getFieldId("CarName")
-            val carNameSelect = document.getElementById(carNameId) as? HTMLSelectElement
-            if (carNameSelect != null) {
-                carNameSelect.innerHTML = "<option value=\"\">Select Car Name</option>"
-                uniqueCarNames.forEach { name ->
-                    val option = js("new Option(name, name)")
-                    carNameSelect.add(option)
-                }
-                console.log("✅ Populated carName dropdown with ${uniqueCarNames.size} unique values")
-            }
+            populateComboboxTokensWithSeeMore(carNameId, "Select Car Name", carNameTokensList, carName, false)
             
-            // Brand dropdown - auto-filled brand first, then other mapping brands, then "See More" (loads master set on click)
             val brandId = if (isEditForm) "editBrand" else "brand"
-            val brandSelectForDropdown = document.getElementById(brandId) as? HTMLSelectElement
-            if (brandSelectForDropdown != null) {
-                brandSelectForDropdown.innerHTML = "<option value=\"\">Add Brand</option>"
-                // Case-insensitive unique: auto-filled brand first, then other mapping brands (no duplicates)
-                val trimmedBrand = brand.trim()
-                val seenLower = mutableSetOf<String>()
-                if (trimmedBrand.isNotBlank()) {
-                    seenLower.add(trimmedBrand.lowercase())
-                    val optFirst = document.createElement("option") as HTMLOptionElement
-                    optFirst.value = trimmedBrand
-                    optFirst.textContent = trimmedBrand
-                    brandSelectForDropdown.appendChild(optFirst)
-                }
-                uniqueBrands.filter { it.isNotBlank() && !seenLower.contains(it.lowercase()) }.forEach { brandName ->
-                    seenLower.add(brandName.lowercase())
-                    val option = document.createElement("option") as HTMLOptionElement
-                    option.value = brandName
-                    option.textContent = brandName
-                    brandSelectForDropdown.appendChild(option)
-                }
-                // Last row: See More (loads master_menu car_brands on click)
-                val seeMoreOption = document.createElement("option") as HTMLOptionElement
-                seeMoreOption.value = BRAND_SEE_MORE_VALUE
-                seeMoreOption.textContent = "See More"
-                brandSelectForDropdown.appendChild(seeMoreOption)
-                // Set value to auto-filled brand
-                if (trimmedBrand.isNotBlank()) {
-                    brandSelectForDropdown.value = trimmedBrand
-                    val brandInputForDropdown = document.getElementById("${brandId}Input") as? HTMLInputElement
-                    brandInputForDropdown?.value = trimmedBrand
-                }
-                console.log("✅ Populated brand dropdown: auto-filled first, unique mapping brands, See More last; set to: ${brandSelectForDropdown.value}")
-            }
+            populateChassisMappingWithMasterListAsync(brandId, "Add Brand", brandsForDropdown, brand.trim(), "master-menu/car_brands")
             
-            // Fuel dropdown
             val fuelId = getFieldId("Fuel")
-            val fuelSelect = document.getElementById(fuelId) as? HTMLSelectElement
-            if (fuelSelect != null) {
-                fuelSelect.innerHTML = "<option value=\"\">Select Fuel</option>"
-                uniqueFuels.forEach { fuelName ->
-                    val option = js("new Option(fuelName, fuelName)")
-                    fuelSelect.add(option)
-                }
-                console.log("✅ Populated fuel dropdown with ${uniqueFuels.size} unique values")
-            }
+            populateChassisMappingWithMasterListAsync(fuelId, "Select Fuel", fuelsForDropdown, fuel, "master-menu/fuel")
             
-            // WD dropdown
-            val wdId = getFieldId("Wd")
-            val wdSelect = document.getElementById(wdId) as? HTMLSelectElement
-            if (wdSelect != null) {
-                wdSelect.innerHTML = "<option value=\"\">Select WD</option>"
-                uniqueWds.forEach { wdValue ->
-                    val option = js("new Option(wdValue, wdValue)")
-                    wdSelect.add(option)
-                }
-                console.log("✅ Populated wd dropdown with ${uniqueWds.size} unique values")
-            }
-            
-            // Shift dropdown
             val shiftId = getFieldId("Shift")
-            val shiftSelect = document.getElementById(shiftId) as? HTMLSelectElement
-            if (shiftSelect != null) {
-                shiftSelect.innerHTML = "<option value=\"\">Select Shift</option>"
-                uniqueShifts.forEach { shiftValue ->
-                    val option = js("new Option(shiftValue, shiftValue)")
-                    shiftSelect.add(option)
-                }
-                console.log("✅ Populated shift dropdown with ${uniqueShifts.size} unique values")
-            }
+            populateChassisMappingWithMasterListAsync(shiftId, "Select Shift", shiftsForDropdown, shift, "master-menu/shift")
             
-            // CC dropdown
+            val shipFieldId = if (isEditForm) "editShipmentSize" else "shipmentSize"
+            populateChassisMappingWithMasterListAsync(
+                shipFieldId,
+                "Select Vehicle type",
+                vehicleTypes.sorted().toList(),
+                vehicleType,
+                "master-menu/type_of_vehicle"
+            )
+            
+            val gradeId = getFieldId("Grade")
+            populateComboboxTokensWithSeeMore(gradeId, "Select Grade", grades.sorted().toList(), grade, false)
+            
+            val rankId = if (isEditForm) "editRank" else "rank"
+            populateComboboxTokensWithSeeMore(rankId, "Select Rank", ranks.sorted().toList(), rank, false)
+            
+            val colorId = if (isEditForm) "editColor" else "color"
+            populateComboboxTokensWithSeeMore(colorId, "Select Color", colors.sorted().toList(), color, false)
+            
             val ccId = getFieldId("Cc")
-            val ccSelect = document.getElementById(ccId) as? HTMLSelectElement
-            if (ccSelect != null) {
-                ccSelect.innerHTML = "<option value=\"\">Select CC</option>"
-                uniqueCcs.forEach { ccValue ->
-                    val option = js("new Option(ccValue, ccValue)")
-                    ccSelect.add(option)
-                }
-                console.log("✅ Populated cc dropdown with ${uniqueCcs.size} unique values")
-            }
+            populateComboboxTokensWithSeeMore(ccId, "Select CC", ccsForDropdown, cc, false)
             
-            // Door dropdown
             val doorId = getFieldId("Door")
-            val doorSelect = document.getElementById(doorId) as? HTMLSelectElement
-            if (doorSelect != null) {
-                doorSelect.innerHTML = "<option value=\"\">Select Door</option>"
-                uniqueDoors.forEach { doorValue ->
-                    val option = js("new Option(doorValue, doorValue)")
-                    doorSelect.add(option)
-                }
-                console.log("✅ Populated door dropdown with ${uniqueDoors.size} unique values")
-            }
+            populateComboboxTokensWithSeeMore(doorId, "Select Door", doorsForDropdown, door, false)
             
-            // Grade dropdown options come from master_menu/car_grade (do not populate from car_brand_mapping)
+            val seatId = getFieldId("Seat")
+            populateComboboxTokensWithSeeMore(seatId, "Select Seat", uniqueSeats.toList().sorted(), seat, false)
             
             // Now auto-fill form fields with first row values
             // Store current chassis for matching logic
             window.asDynamic().__currentChassis = chassis
             
             // Auto-fill fields with first row values (no need to fetch brand mappings anymore)
-            // Set field values directly
-            js("Promise.resolve()").then {
+            // Set field values directly (chain promise so callers run after this microtask)
+            val mappingFieldsApplied = js("Promise.resolve()").unsafeCast<dynamic>().then { _: dynamic ->
                     // After dropdowns are populated, set the field values
                     // Retrieve values from window object
                     val carNameValue = (js("window.__tempCarName")?.toString() ?: "").trim()
@@ -8876,13 +10142,14 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                             console.log("✅ Set fuel from mapping: $fuelValue (field ID: $fuelId)")
                             fuelValue
                         } else {
-                            // Mapping is empty - clear the field
-                            fuelSelect.value = ""
-                            if (fuelInput != null) {
-                                fuelInput.value = ""
+                            if (!isEditForm) {
+                                fuelSelect.value = ""
+                                if (fuelInput != null) {
+                                    fuelInput.value = ""
+                                }
+                                syncComboboxField("Fuel", "")
+                                console.log("✅ Cleared fuel (mapping had no value)")
                             }
-                            syncComboboxField("Fuel", "")
-                            console.log("✅ Cleared fuel (mapping had no value)")
                             ""
                         }
                     } else {
@@ -8921,13 +10188,14 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                             console.log("✅ Set shift from mapping: $shiftValue (field ID: $shiftId)")
                             shiftValue
                         } else {
-                            // Mapping is empty - clear the field
-                            shiftSelect.value = ""
-                            if (shiftInput != null) {
-                                shiftInput.value = ""
+                            if (!isEditForm) {
+                                shiftSelect.value = ""
+                                if (shiftInput != null) {
+                                    shiftInput.value = ""
+                                }
+                                syncComboboxField("Shift", "")
+                                console.log("✅ Cleared shift (mapping had no value)")
                             }
-                            syncComboboxField("Shift", "")
-                            console.log("✅ Cleared shift (mapping had no value)")
                             ""
                         }
                     } else {
@@ -8935,65 +10203,69 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                         ""
                     }
                     
-                    // CC - use correct field ID based on form type (now number input)
+                    // CC / Door / Seat — combobox (input id = fieldId + "Input")
                     val ccId = getFieldId("Cc")
-                    val ccInput = document.getElementById(ccId) as? HTMLInputElement
+                    val ccInput = document.getElementById("${ccId}Input") as? HTMLInputElement
+                    val ccSelect = document.getElementById(ccId) as? HTMLSelectElement
                     val finalCcValue = if (ccInput != null) {
                         if (ccValue.isNotBlank()) {
-                            // Extract numeric value and append CC suffix
                             val numValue = ccValue.replace(Regex("[^0-9]"), "")
-                            val ccValueWithSuffix = if (numValue.isNotEmpty()) "${numValue}CC" else ""
                             ccInput.value = numValue
-                            console.log("✅ Set cc from mapping: $numValue (will append CC suffix) (field ID: $ccId)")
-                            ccValueWithSuffix
+                            ccSelect?.value = numValue
+                            syncComboboxFromSelect(ccId)
+                            console.log("✅ Set cc from mapping: $numValue (field: $ccId)")
+                            numValue
                         } else {
-                            ccInput.value = ""
-                            console.log("✅ Cleared cc (mapping had no value)")
+                            if (!isEditForm) {
+                                ccInput.value = ""
+                                ccSelect?.value = ""
+                                syncComboboxFromSelect(ccId)
+                            }
                             ""
                         }
                     } else {
-                        console.warn("⚠️ CC input element not found: $ccId")
                         ""
                     }
                     
-                    // Door - use correct field ID based on form type
-                    // Door is a number input, NOT a combobox/select
-                    // Always use mapping value, even if empty (clear field if mapping is empty)
                     val doorId = getFieldId("Door")
-                    val doorInput = document.getElementById(doorId) as? HTMLInputElement
+                    val doorInput = document.getElementById("${doorId}Input") as? HTMLInputElement
+                    val doorSelect = document.getElementById(doorId) as? HTMLSelectElement
                     val finalDoorValue = if (doorInput != null) {
                         if (doorValue.isNotBlank()) {
                             doorInput.value = doorValue
-                            console.log("✅ Set door from mapping: $doorValue (field ID: $doorId)")
+                            doorSelect?.value = doorValue
+                            syncComboboxFromSelect(doorId)
                             doorValue
                         } else {
-                            // Mapping is empty - clear the field
-                            doorInput.value = ""
-                            console.log("✅ Cleared door (mapping had no value)")
+                            if (!isEditForm) {
+                                doorInput.value = ""
+                                doorSelect?.value = ""
+                                syncComboboxFromSelect(doorId)
+                            }
                             ""
                         }
                     } else {
-                        console.warn("⚠️ Door input element not found: $doorId")
                         ""
                     }
                     
-                    // Seat - use correct field ID based on form type
-                    // Seat is a number input, NOT a combobox/select
-                    // Always use mapping value, even if empty (clear field if mapping is empty)
                     val seatId = getFieldId("Seat")
-                    val seatInput = document.getElementById(seatId) as? HTMLInputElement
+                    val seatInput = document.getElementById("${seatId}Input") as? HTMLInputElement
+                    val seatSelect = document.getElementById(seatId) as? HTMLSelectElement
                     val finalSeatValue = if (seatInput != null) {
                         if (seatValue.isNotBlank()) {
                             seatInput.value = seatValue
-                            console.log("✅ Set seat from mapping: $seatValue (field ID: $seatId)")
+                            seatSelect?.value = seatValue
+                            syncComboboxFromSelect(seatId)
                             seatValue
                         } else {
-                            seatInput.value = ""
-                            console.log("✅ Cleared seat (mapping had no value)")
+                            if (!isEditForm) {
+                                seatInput.value = ""
+                                seatSelect?.value = ""
+                                syncComboboxFromSelect(seatId)
+                            }
                             ""
                         }
                     } else {
-                        console.warn("⚠️ Seat input element not found: $seatId")
                         ""
                     }
                     
@@ -9009,10 +10281,11 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                             console.log("✅ Set grade from mapping: $gradeValue (field ID: ${gradeId}Input)")
                             gradeValue
                         } else {
-                            // Mapping is empty - clear the field
-                            gradeInput.value = ""
-                            if (gradeSelect != null) gradeSelect.value = ""
-                            console.log("✅ Cleared grade (mapping had no value)")
+                            if (!isEditForm) {
+                                gradeInput.value = ""
+                                if (gradeSelect != null) gradeSelect.value = ""
+                                console.log("✅ Cleared grade (mapping had no value)")
+                            }
                             ""
                         }
                     } else {
@@ -9020,7 +10293,6 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                         ""
                     }
                     
-                    // Vehicle type (shipmentSize combobox), Rank, Color, Drive type — from car_brand_mapping
                     val vehicleTypeValue = (js("window.__tempVehicleType")?.toString() ?: "").trim()
                     val rankValue = (js("window.__tempRank")?.toString() ?: "").trim()
                     val colorValue = (js("window.__tempColor")?.toString() ?: "").trim()
@@ -9028,30 +10300,27 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                     
                     val shipFieldId = if (isEditForm) "editShipmentSize" else "shipmentSize"
                     if (vehicleTypeValue.isNotBlank()) {
-                        window.asDynamic().__ensureShipId = shipFieldId
-                        window.asDynamic().__ensureVt = vehicleTypeValue
-                        js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists(window.__ensureShipId, window.__ensureVt)")
-                        val shipSelect = document.getElementById(shipFieldId) as? HTMLSelectElement
-                        val shipInput = document.getElementById("${shipFieldId}Input") as? HTMLInputElement
-                        shipSelect?.value = vehicleTypeValue
-                        shipInput?.value = vehicleTypeValue
-                        window.asDynamic().__syncShipField = shipFieldId
-                        js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(window.__syncShipField)")
-                        console.log("✅ Set vehicle type from mapping: $vehicleTypeValue ($shipFieldId)")
+                        (document.getElementById(shipFieldId) as? HTMLSelectElement)?.value = vehicleTypeValue
+                        (document.getElementById("${shipFieldId}Input") as? HTMLInputElement)?.value = vehicleTypeValue
+                        syncComboboxFromSelect(shipFieldId)
                     }
                     
                     val rankFieldId = if (isEditForm) "editRank" else "rank"
-                    val rankInputEl = document.getElementById(rankFieldId) as? HTMLInputElement
-                    if (rankInputEl != null) {
-                        rankInputEl.value = if (rankValue.isNotBlank()) rankValue else ""
-                        console.log("✅ Set rank from mapping: $rankValue")
+                    if (!(isEditForm && rankValue.isBlank())) {
+                        (document.getElementById("${rankFieldId}Input") as? HTMLInputElement)?.let {
+                            it.value = rankValue
+                        }
+                        (document.getElementById(rankFieldId) as? HTMLSelectElement)?.value = rankValue
+                        syncComboboxFromSelect(rankFieldId)
                     }
                     
                     val colorFieldId = if (isEditForm) "editColor" else "color"
-                    val colorInputEl = document.getElementById(colorFieldId) as? HTMLInputElement
-                    if (colorInputEl != null) {
-                        colorInputEl.value = if (colorValue.isNotBlank()) colorValue else ""
-                        console.log("✅ Set color from mapping: $colorValue")
+                    if (!(isEditForm && colorValue.isBlank())) {
+                        (document.getElementById("${colorFieldId}Input") as? HTMLInputElement)?.let {
+                            it.value = colorValue
+                        }
+                        (document.getElementById(colorFieldId) as? HTMLSelectElement)?.value = colorValue
+                        syncComboboxFromSelect(colorFieldId)
                     }
                     
                     val driveRadioName = if (isEditForm) "editDriveType" else "driveType"
@@ -9066,60 +10335,10 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean): dynamic {
                     // Log final values that were actually set (after preservation logic)
                     console.log("✅ Final field values set: carName=$finalCarName, fuel=$finalFuelValue, wd=$finalWdValue, shift=$finalShiftValue, cc=$finalCcValue, door=$finalDoorValue, seat=$finalSeatValue, grade=$finalGradeValue, vehicleType=$vehicleTypeValue, rank=$rankValue, color=$colorValue, driveType=$driveTypeValue")
                     console.log("✅ Auto-filled all fields from chassis mapping")
-                    
-                    // CRITICAL FIX: Force-inject base options into select elements immediately after mapping
-                    // This ensures dropdown buttons remain clickable and show full option lists
-                    js("""
-                        (function() {
-                            var isEditForm = false;
-                            var fuelSelect = document.getElementById('fuel');
-                            var shiftSelect = document.getElementById('shift');
-                            var gradeSelect = document.getElementById('grade');
-                            
-                            if (!fuelSelect) {
-                                fuelSelect = document.getElementById('editFuel');
-                                isEditForm = true;
-                            }
-                            if (!shiftSelect) {
-                                shiftSelect = document.getElementById('editShift');
-                            }
-                            if (!gradeSelect) {
-                                gradeSelect = document.getElementById('editGrade');
-                            }
-                            
-                            // Base options
-                            var baseFuel = ["GASOLINE", "DIESEL", "HYBRID", "CNG", "EV", "HYDROGEN", "PHEV"];
-                            var baseShift = ["AT", "MT", "6F", "5F"];
-                            var baseGrade = ["G", "S", "S-T", "X", "Z", "OPEN DECK", "S X VER", "S KIRAMEKI"];
-                            
-                            // Helper to add options if missing
-                            function ensureOptions(select, baseOptions) {
-                                if (!select || !select.options) return;
-                                var existing = new Set();
-                                var optionsLength = select.options ? select.options.length : 0;
-                                for (var i = 0; i < optionsLength; i++) {
-                                    if (select.options[i]) {
-                                        existing.add(select.options[i].value);
-                                    }
-                                }
-                                baseOptions.forEach(function(opt) {
-                                    if (!existing.has(opt)) {
-                                        var option = new Option(opt, opt);
-                                        select.add(option);
-                                    }
-                                });
-                            }
-                            
-                            ensureOptions(fuelSelect, baseFuel);
-                            ensureOptions(shiftSelect, baseShift);
-                            
-                            console.log('✅ Force-injected base options into Fuel/Shift selects after chassis mapping');
-                        })();
-                    """)
+                    null
                 }
             
-            // Return data for promise chain
-            data
+            return@then mappingFieldsApplied.unsafeCast<dynamic>().then { _: dynamic -> data }
         }
         .catch { error: dynamic ->
             console.error("❌ Error fetching mapping by chassis:", error)
@@ -9147,10 +10366,10 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
     
     console.log("🔍 Finding matching row for chassis=$chassis, $changedField=$changedValue")
     
-    // Find matching row based on chassis + changed field value
+    // Find matching row based on chassis + changed field value (cell may be "a;b;c")
     val match = allRows.firstOrNull { row ->
         val rowDynamic = row.unsafeCast<dynamic>()
-        val rowValue = when (changedField.lowercase()) {
+        val rowRaw = when (changedField.lowercase()) {
             "brand" -> (rowDynamic.brand as? String ?: "").trim()
             "carname" -> (rowDynamic.carName as? String ?: "").trim()
             "fuel" -> (rowDynamic.fuel as? String ?: "").trim()
@@ -9158,11 +10377,11 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
             "shift" -> (rowDynamic.shift as? String ?: "").trim()
             "cc" -> (rowDynamic.cc as? String ?: "").trim()
             "door" -> (rowDynamic.door as? String ?: "").trim()
-                "seat" -> (rowDynamic.seat as? String ?: "").trim()
+            "seat" -> (rowDynamic.seat as? String ?: "").trim()
             "grade" -> (rowDynamic.grade as? String ?: "").trim()
             else -> ""
         }
-        rowValue.equals(changedValue, ignoreCase = true)
+        mappingCellMatchesSelected(rowRaw, changedValue)
     }
     
     if (match == null) {
@@ -9170,21 +10389,21 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
         return
     }
     
-    // Extract values from matched row
+    // Extract values from matched row (first semicolon token only for display)
     val matchDynamic = match.unsafeCast<dynamic>()
-    val matchedBrand = (matchDynamic.brand as? String ?: "").trim()
-    val matchedCarName = (matchDynamic.carName as? String ?: "").trim()
-    val matchedFuel = (matchDynamic.fuel as? String ?: "").trim()
-    val matchedWd = (matchDynamic.wd as? String ?: "").trim()
-    val matchedShift = (matchDynamic.shift as? String ?: "").trim()
-    val matchedCc = (matchDynamic.cc as? String ?: "").trim()
-    val matchedDoor = (matchDynamic.door as? String ?: "").trim()
-    val matchedSeat = (matchDynamic.seat as? String ?: "").trim()
-    val matchedGrade = (matchDynamic.grade as? String ?: "").trim()
-    val matchedVehicleType = (matchDynamic.vehicleType as? String ?: "").trim()
-    val matchedRank = (matchDynamic.rank as? String ?: "").trim()
-    val matchedColor = (matchDynamic.color as? String ?: "").trim()
-    val matchedDriveType = (matchDynamic.driveType as? String ?: "").trim().uppercase()
+    val matchedBrand = firstSemicolonToken((matchDynamic.brand as? String ?: "").trim())
+    val matchedCarName = firstSemicolonToken((matchDynamic.carName as? String ?: "").trim())
+    val matchedFuel = firstSemicolonToken((matchDynamic.fuel as? String ?: "").trim())
+    val matchedWd = firstSemicolonToken((matchDynamic.wd as? String ?: "").trim())
+    val matchedShift = firstSemicolonToken((matchDynamic.shift as? String ?: "").trim())
+    val matchedCc = firstSemicolonToken((matchDynamic.cc as? String ?: "").trim())
+    val matchedDoor = firstSemicolonToken((matchDynamic.door as? String ?: "").trim())
+    val matchedSeat = firstSemicolonToken((matchDynamic.seat as? String ?: "").trim())
+    val matchedGrade = firstSemicolonToken((matchDynamic.grade as? String ?: "").trim())
+    val matchedVehicleType = firstSemicolonToken((matchDynamic.vehicleType as? String ?: "").trim())
+    val matchedRank = firstSemicolonToken((matchDynamic.rank as? String ?: "").trim())
+    val matchedColor = firstSemicolonToken((matchDynamic.color as? String ?: "").trim())
+    val matchedDriveType = firstSemicolonToken((matchDynamic.driveType as? String ?: "").trim()).uppercase()
     
     console.log("✅ Found matching row: brand=$matchedBrand, carName=$matchedCarName, fuel=$matchedFuel, wd=$matchedWd, shift=$matchedShift, cc=$matchedCc, door=$matchedDoor, seat=$matchedSeat, grade=$matchedGrade, vehicleType=$matchedVehicleType, rank=$matchedRank, color=$matchedColor, driveType=$matchedDriveType")
     
@@ -9415,24 +10634,23 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                 return@then
             }
             
-            // Auto-fill fields (always overwrite, as user explicitly selected chassis/carName)
-            val carName = js("mappingData.carName")?.toString() ?: ""
-            val fuel = js("mappingData.fuel")?.toString() ?: ""
-            val wd = js("mappingData.wd")?.toString() ?: ""
-            val shift = js("mappingData.shift")?.toString() ?: ""
+            // Auto-fill fields (always overwrite) — first semicolon token is the default
+            val carName = firstSemicolonToken(js("mappingData.carName")?.toString())
+            val fuel = firstSemicolonToken(js("mappingData.fuel")?.toString())
+            val wd = firstSemicolonToken(js("mappingData.wd")?.toString())
+            val shift = firstSemicolonToken(js("mappingData.shift")?.toString())
             val ccRaw = js("mappingData.cc")?.toString() ?: ""
             val doorRaw = js("mappingData.door")?.toString() ?: ""
             val seatRaw = js("mappingData.seat")?.toString() ?: ""
-            val grade = js("mappingData.grade")?.toString() ?: ""
-            val vehicleType = js("mappingData.vehicleType")?.toString()?.trim() ?: ""
-            val rank = js("mappingData.rank")?.toString()?.trim() ?: ""
-            val color = js("mappingData.color")?.toString()?.trim() ?: ""
-            val driveType = js("mappingData.driveType")?.toString()?.trim()?.uppercase() ?: ""
+            val grade = firstSemicolonToken(js("mappingData.grade")?.toString())
+            val vehicleType = firstSemicolonToken(js("mappingData.vehicleType")?.toString()?.trim())
+            val rank = firstSemicolonToken(js("mappingData.rank")?.toString()?.trim())
+            val color = firstSemicolonToken(js("mappingData.color")?.toString()?.trim())
+            val driveType = firstSemicolonToken(js("mappingData.driveType")?.toString()?.trim()?.uppercase())
             
-            // Convert "0" to empty string for select dropdowns (NULL values)
-            val cc = if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw
-            val door = if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw
-            val seat = if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw
+            val cc = firstSemicolonToken(if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw).replace(Regex("[^0-9]"), "")
+            val door = firstSemicolonToken(if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw)
+            val seat = firstSemicolonToken(if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw)
             
             console.log("Auto-filling fields from mapping: carName=$carName, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, seat=$seat, grade=$grade, vehicleType=$vehicleType, rank=$rank, color=$color, driveType=$driveType")
             
@@ -9440,7 +10658,13 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
             // For comboboxes, sets both input and select fields
             fun setFieldValue(fieldId: String, value: String) {
                 if (fieldId == "wd" || fieldId == "editWd") {
-                    val radioVal = if (value.contains("4")) "4WD" else "2WD"
+                    val v = firstSemicolonToken(value)
+                    val radioVal = when {
+                        v.contains("4", ignoreCase = true) -> "4WD"
+                        v.contains("2", ignoreCase = true) -> "2WD"
+                        else -> ""
+                    }
+                    if (radioVal.isBlank()) return
                     val radio = document.querySelector("input[name=\"$fieldId\"][value=\"$radioVal\"]") as? HTMLInputElement
                     radio?.checked = true
                     return
@@ -9496,8 +10720,8 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                     js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists('editShipmentSize', window.__vtMatch)")
                     setFieldValue("editShipmentSize", vehicleType)
                 }
-                (document.getElementById("editRank") as? HTMLInputElement)?.value = rank
-                (document.getElementById("editColor") as? HTMLInputElement)?.value = color
+                setFieldValue("editRank", rank)
+                setFieldValue("editColor", color)
                 if (driveType == "LHD" || driveType == "RHD") {
                     val r = document.querySelector("input[name=\"editDriveType\"][value=\"$driveType\"]") as? HTMLInputElement
                     r?.checked = true
@@ -9518,14 +10742,17 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                     }
                 }
                 setFieldValue("fuel", fuel)
-                // WD is 2WD/4WD radio: normalize mapping value to 2WD or 4WD
-                val wdRadioVal = if (wd.contains("4")) "4WD" else "2WD"
-                val wdRadio = document.querySelector("input[name=\"wd\"][value=\"$wdRadioVal\"]") as? HTMLInputElement
-                wdRadio?.checked = true
+                val wdRadioVal = when {
+                    wd.contains("4", ignoreCase = true) -> "4WD"
+                    wd.contains("2", ignoreCase = true) -> "2WD"
+                    else -> ""
+                }
+                if (wdRadioVal.isNotBlank()) {
+                    val wdRadio = document.querySelector("input[name=\"wd\"][value=\"$wdRadioVal\"]") as? HTMLInputElement
+                    wdRadio?.checked = true
+                }
                 setFieldValue("shift", shift)
-                val ccNum = cc.replace(Regex("[^0-9]"), "")
-                val ccInput = document.getElementById("cc") as? HTMLInputElement
-                ccInput?.value = ccNum
+                setFieldValue("cc", cc)
                 setFieldValue("door", door)
                 setFieldValue("seat", seat)
                 setFieldValue("grade", grade)
@@ -9534,8 +10761,8 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                     js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists('shipmentSize', window.__vtMatchAdd)")
                     setFieldValue("shipmentSize", vehicleType)
                 }
-                (document.getElementById("rank") as? HTMLInputElement)?.value = rank
-                (document.getElementById("color") as? HTMLInputElement)?.value = color
+                setFieldValue("rank", rank)
+                setFieldValue("color", color)
                 if (driveType == "LHD" || driveType == "RHD") {
                     val r = document.querySelector("input[name=\"driveType\"][value=\"$driveType\"]") as? HTMLInputElement
                     r?.checked = true
@@ -9684,14 +10911,16 @@ fun setupBrandSelectionHandlers() {
                     js("setTimeout(function() { window.__syncingChassis = false; }, 100);")
                     
                     // Trigger auto-fill using Part 1 only
-                    fetchMappingByChassisOnly(part1, isEditForm)
+                    fetchMappingByChassisOnly(part1, isEditForm, null)
                 } else {
                     // Chassis cleared - clear input and auto-filled brand
                     if (chassisInput != null) {
                         chassisInput.value = ""
                     }
                     js("if (window.autoFilledBrand) { window.autoFilledBrand = null; }")
-                    // Reload all chassis dropdown
+                    js("window.__chassisMasterComboIds = []")
+                    populateBrandOptions(if (isEditForm) "editBrand" else "brand")
+                    ensureBaseComboboxOptionsForAddEdit()
                     loadAllChassisDropdown(isEditForm)
                 }
             }
@@ -9740,101 +10969,7 @@ fun setupBrandSelectionHandlers() {
     // Chassis input handler removed - now handled in change event listener above
     // User can type Part 2 after selecting Part 1 from dropdown
     // Auto-fill only triggers when Part 1 is selected from dropdown, not when typing
-    
-    // Manage Car Brands button click handlers - open Car Brands master list in new tab
-    fun attachCarBrandsButtonListeners() {
-        val manageBrandBtn = document.getElementById("manageBrandMappings")
-        val manageEditBrandBtn = document.getElementById("manageEditBrandMappings")
-        console.log("🔵 [CAR BRANDS] attachCarBrandsButtonListeners called - manageBrandBtn:", manageBrandBtn, "manageEditBrandBtn:", manageEditBrandBtn)
-        
-        val openCarBrandsPage: (Event) -> Unit = { event: Event ->
-            console.log("🔵 [CAR BRANDS BUTTON] Click detected - preventing navigation")
-            event.preventDefault()
-            event.stopImmediatePropagation()
-            event.stopPropagation()
-            val currentUrl = window.location.origin + window.location.pathname
-            val url = "$currentUrl#/master/car-brands"
-            console.log("🔵 [CAR BRANDS BUTTON] Opening URL in new tab:", url)
-            // Use setTimeout to ensure this happens after all other handlers
-            window.setTimeout({
-                val newWindow = window.open(url, "_blank")
-                if (newWindow == null) {
-                    console.error("❌ [CAR BRANDS BUTTON] Popup blocked!")
-                } else {
-                    console.log("✅ [CAR BRANDS BUTTON] New tab opened successfully")
-                }
-            }, 10)
-        }
-        
-        manageBrandBtn?.addEventListener("click", openCarBrandsPage, true)
-        manageEditBrandBtn?.addEventListener("click", openCarBrandsPage, true)
-        
-        // Also set onclick as fallback - this runs first and prevents everything
-        js("""
-            var btn1 = document.getElementById('manageBrandMappings');
-            var btn2 = document.getElementById('manageEditBrandMappings');
-            if (btn1) {
-                console.log('🔵 [CAR BRANDS] Setting onclick for manageBrandMappings');
-                btn1.onclick = function(e) {
-                    console.log('🔵 [CAR BRANDS] onclick handler fired');
-                    if (e) {
-                        e.preventDefault();
-                        e.stopImmediatePropagation();
-                        e.stopPropagation();
-                    }
-                    var url = window.location.origin + window.location.pathname + '#/master/car-brands';
-                    console.log('🔵 [CAR BRANDS] Opening URL:', url);
-                    setTimeout(function() {
-                        var newWin = window.open(url, '_blank');
-                        if (newWin) {
-                            console.log('✅ [CAR BRANDS] New tab opened');
-                        } else {
-                            console.error('❌ [CAR BRANDS] Popup blocked');
-                        }
-                    }, 10);
-                    return false;
-                };
-            }
-            if (btn2) {
-                console.log('🔵 [CAR BRANDS] Setting onclick for manageEditBrandMappings');
-                btn2.onclick = function(e) {
-                    console.log('🔵 [CAR BRANDS] onclick handler fired (edit)');
-                    if (e) {
-                        e.preventDefault();
-                        e.stopImmediatePropagation();
-                        e.stopPropagation();
-                    }
-                    var url = window.location.origin + window.location.pathname + '#/master/car-brands';
-                    console.log('🔵 [CAR BRANDS] Opening URL:', url);
-                    setTimeout(function() {
-                        var newWin = window.open(url, '_blank');
-                        if (newWin) {
-                            console.log('✅ [CAR BRANDS] New tab opened');
-                        } else {
-                            console.error('❌ [CAR BRANDS] Popup blocked');
-                        }
-                    }, 10);
-                    return false;
-                };
-            }
-        """)
-    }
-    
-    // Attach listeners immediately and retry if buttons don't exist yet
-    console.log("🔵 [CAR BRANDS] setupAddFormListeners - attempting to attach button listeners")
-    attachCarBrandsButtonListeners()
-    window.setTimeout({ 
-        console.log("🔵 [CAR BRANDS] Retry 1 - attaching button listeners")
-        attachCarBrandsButtonListeners() 
-    }, 100)
-    window.setTimeout({ 
-        console.log("🔵 [CAR BRANDS] Retry 2 - attaching button listeners")
-        attachCarBrandsButtonListeners() 
-    }, 500)
-    window.setTimeout({ 
-        console.log("🔵 [CAR BRANDS] Retry 3 - attaching button listeners")
-        attachCarBrandsButtonListeners() 
-    }, 1000)
+    // Car Brands master buttons (#manageBrandMappings) are wired in setupAddFormListeners() only (Add Purchase page).
 }
 
 // Note: Brand mapping modal functions have been removed. The gear button now navigates to Car Brands master list page.
@@ -9947,7 +11082,8 @@ fun validateProductionDateYear(value: String): Pair<Boolean, String> {
     return Pair(true, "")
 }
 
-// Validation function for Purchase fields against master_menu
+// Master-menu membership checks removed — purchases save without client-side master-list validation.
+@Suppress("UNUSED_PARAMETER")
 fun validatePurchaseMasterFields(
     brand: String,
     grade: String,
@@ -9965,127 +11101,7 @@ fun validatePurchaseMasterFields(
     isEditMode: Boolean,
     callback: (List<Pair<String, String>>) -> Unit
 ) {
-    // Fetch all master lists in parallel
-    val masterListPromises = js("[]")
-    masterListPromises.push(window.fetch(apiUrl("master-menu/car_brands")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/car_grade")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/fuel")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/shift")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/supplier")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/venue_id")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/type_of_vehicle")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/rixo_company")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/stock_location")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/pol")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/clients")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/country")))
-    masterListPromises.push(window.fetch(apiUrl("master-menu/repair_company")))
-    
-    js("Promise.all")(masterListPromises)
-        .then { responses: dynamic ->
-            val jsonPromises = js("[]")
-            for (i in 0 until 13) {
-                val resp = responses[i]
-                if (resp.ok) {
-                    jsonPromises.push(resp.json())
-                } else {
-                    jsonPromises.push(js("Promise.resolve([])"))
-                }
-            }
-            js("Promise.all")(jsonPromises)
-        }
-        .then { results: dynamic ->
-            val brandList = parsePurchaseMasterListArray(results[0])
-            val gradeList = parsePurchaseMasterListArray(results[1])
-            val fuelList = parsePurchaseMasterListArray(results[2])
-            val shiftList = parsePurchaseMasterListArray(results[3])
-            val supplierList = parsePurchaseMasterListArray(results[4])
-            val venueIdList = parsePurchaseMasterListArray(results[5])
-            val vehicleTypeList = parsePurchaseMasterListArray(results[6])
-            val rixoCompanyList = parsePurchaseMasterListArray(results[7])
-            val stockLocationList = parsePurchaseMasterListArray(results[8])
-            val polList = parsePurchaseMasterListArray(results[9])
-            val clientsList = parsePurchaseMasterListArray(results[10])
-            val countryList = parsePurchaseMasterListArray(results[11])
-            val repairCompanyList = parsePurchaseMasterListArray(results[12])
-            
-            val missingFields = mutableListOf<Pair<String, String>>()
-            
-            // Check brand
-            if (brand.isNotEmpty() && !brandList.any { it.equals(brand, ignoreCase = true) }) {
-                missingFields.add(Pair("Brand", "Car Brands"))
-            }
-            
-            // Check grade - single value (some existing data may still contain ';' separated tokens)
-            if (grade.isNotEmpty()) {
-                val normalizedGrade = grade.split(";").map { it.trim() }.filter { it.isNotEmpty() }.firstOrNull() ?: ""
-                if (normalizedGrade.isNotBlank() && !gradeList.any { it.equals(normalizedGrade, ignoreCase = true) }) {
-                    missingFields.add(Pair("Grade", "Car Grade"))
-                }
-            }
-            
-            // Check fuel
-            if (fuel.isNotEmpty() && !fuelList.any { it.equals(fuel, ignoreCase = true) }) {
-                missingFields.add(Pair("Fuel", "Fuel"))
-            }
-            
-            // Check shift
-            if (shift.isNotEmpty() && !shiftList.any { it.equals(shift, ignoreCase = true) }) {
-                missingFields.add(Pair("Shift", "Car Shift"))
-            }
-            
-            // Check supplier name
-            if (supplierName.isNotEmpty() && !supplierList.any { it.equals(supplierName, ignoreCase = true) }) {
-                missingFields.add(Pair("Supplier Name", "Supplier"))
-            }
-            
-            // Check venue ID
-            if (venueId.isNotEmpty() && !venueIdList.any { it.equals(venueId, ignoreCase = true) }) {
-                missingFields.add(Pair("Venue ID", "Venue ID"))
-            }
-            
-            // Check vehicle type
-            if (vehicleType.isNotEmpty() && !vehicleTypeList.any { it.equals(vehicleType, ignoreCase = true) }) {
-                missingFields.add(Pair("Vehicle Type", "Type of Vehicles"))
-            }
-            
-            // Check rixo company
-            if (rixoCompany.isNotEmpty() && !rixoCompanyList.any { it.equals(rixoCompany, ignoreCase = true) }) {
-                missingFields.add(Pair("Rixo Company", "Rixo Company"))
-            }
-            
-            // Check stock location
-            if (stockLocation.isNotEmpty() && !stockLocationList.any { it.equals(stockLocation, ignoreCase = true) }) {
-                missingFields.add(Pair("Stock Location", "Stock Location"))
-            }
-            
-            // Check POL (only in edit mode)
-            if (isEditMode && pol.isNotEmpty() && !polList.any { it.equals(pol, ignoreCase = true) }) {
-                missingFields.add(Pair("POL", "POL"))
-            }
-            
-            // Check client name
-            if (clientName.isNotEmpty() && !clientsList.any { it.equals(clientName, ignoreCase = true) }) {
-                missingFields.add(Pair("Client Name", "Client"))
-            }
-            
-            // Check target country
-            if (targetCountry.isNotEmpty() && !countryList.any { it.equals(targetCountry, ignoreCase = true) }) {
-                missingFields.add(Pair("Target Country", "Country"))
-            }
-            
-            // Check repair company
-            if (repairCompany.isNotEmpty() && !repairCompanyList.any { it.equals(repairCompany, ignoreCase = true) }) {
-                missingFields.add(Pair("Repair Company", "Repair Company"))
-            }
-            
-            callback(missingFields)
-        }
-        .catch { error: dynamic ->
-            console.error("Error validating purchase fields: ${error.toString()}")
-            // On error, proceed with save (don't block the user)
-            callback(emptyList())
-        }
+    callback(emptyList())
 }
 
 fun parsePurchaseMasterListArray(raw: dynamic): List<String> {
@@ -10343,18 +11359,18 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     purchaseData.carName = js("getComboboxValue('carName')").unsafeCast<String>()
     purchaseData.vehicleType = js("getComboboxValue('typeOfVehicle')").unsafeCast<String>()
     purchaseData.shipmentSize = purchaseData.vehicleType
-    purchaseData.grade = (document.getElementById("gradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
-    purchaseData.rank = (document.getElementById("rank") as? HTMLInputElement)?.value ?: ""
-    purchaseData.color = (document.getElementById("color") as? HTMLInputElement)?.value ?: ""
+    purchaseData.grade = js("getComboboxValue('grade')").unsafeCast<String>()
+    purchaseData.rank = js("getComboboxValue('rank')").unsafeCast<String>()
+    purchaseData.color = js("getComboboxValue('color')").unsafeCast<String>()
     purchaseData.fuel = js("getComboboxValue('fuel')").unsafeCast<String>()
-    purchaseData.seat = (document.getElementById("seat") as? HTMLInputElement)?.value ?: ""
-    purchaseData.door = (document.getElementById("door") as? HTMLInputElement)?.value ?: ""
-    purchaseData.distance = (document.getElementById("distance") as? HTMLInputElement)?.value ?: ""
+    purchaseData.seat = js("getComboboxValue('seat')").unsafeCast<String>()
+    purchaseData.door = js("getComboboxValue('door')").unsafeCast<String>()
+    purchaseData.distance = sanitizeDistanceUiToDb((document.getElementById("distance") as? HTMLInputElement)?.value ?: "")
     purchaseData.driveType = (document.querySelector("input[name=\"driveType\"]:checked") as? HTMLInputElement)?.value ?: ""
     val predefinedOpts = (document.getElementById("optionsPredefined") as? HTMLInputElement)?.value?.trim() ?: ""
     val customOpts = (document.getElementById("options") as? HTMLInputElement)?.value?.trim() ?: ""
     purchaseData.options = listOf(predefinedOpts, customOpts).filter { it.isNotEmpty() }.joinToString(", ")
-    val ccValue = (document.getElementById("cc") as? HTMLInputElement)?.value ?: ""
+    val ccValue = js("getComboboxValue('cc')").unsafeCast<String>()
     // Backend expects Int? for cc field, so send only the numeric value
     purchaseData.cc = if (ccValue.isNotEmpty()) {
         val numValue = ccValue.replace(Regex("[^0-9]"), "")
@@ -10515,6 +11531,21 @@ fun showEditForm(id: Long) {
 fun showEditFormWithData(purchaseData: dynamic) {
     // Ensure scrolling is enabled when showing form
     js("if (typeof window.ensureScrollingRestored === 'function') { window.ensureScrollingRestored(); }")
+    // Chassis mapping may store multi-value cells as "a;b;c"; show only first token in edit form defaults.
+    val editBrandDisp = firstDisplayToken(purchaseData.brand)
+    val editCarNameDisp = firstDisplayToken(purchaseData.carName)
+    val editRankDisp = firstDisplayToken(purchaseData.rank)
+    val editColorDisp = firstDisplayToken(purchaseData.color)
+    val editFuelDisp = firstDisplayToken(purchaseData.fuel)
+    val editSeatDisp = firstDisplayToken(purchaseData.seat)
+    val editDoorDisp = firstDisplayToken(purchaseData.door)
+    val editCcDisp = extractNumericFromSuffixedValue(firstDisplayToken(purchaseData.cc))
+    val editShiftDisp = firstDisplayToken(purchaseData.shift)
+    val editWdDisp = firstDisplayToken(purchaseData.wd)
+    val editDriveDisp = firstDisplayToken(purchaseData.driveType)
+    val editShipDisp = firstDisplayToken(purchaseData.shipmentSize ?: purchaseData.vehicleType)
+    val editGradeDisp = firstDisplayToken(purchaseData.grade?.toString())
+    val wdFirstIs4Wd = editWdDisp.contains("4", ignoreCase = true)
     
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -10528,7 +11559,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                         <label>Purchase Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="editDate" value="${toIsoFromLabel(purchaseData.date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.date ?: ""}">
+                            <input type="date" id="editDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${toIsoFromLabel(purchaseData.date).takeUnless { it.isBlank() } ?: todayIsoLocalDate()}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.date ?: ""}">
                             <span id="editDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
@@ -10560,12 +11591,12 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Brand</label>
-                        ${createEditableCombobox("editBrand", "Add Brand", initialValue = purchaseData.brand ?: "")}
+                        ${createEditableCombobox("editBrand", "Add Brand", initialValue = editBrandDisp)}
                     </div>
                     <div>
                         <label>Car Name</label>
                         <div style="position: relative; width: 100%;">
-                            <input type="text" id="editCarNameInput" value="${purchaseData.carName ?: ""}" placeholder="Select Car Name" 
+                            <input type="text" id="editCarNameInput" value="$editCarNameDisp" placeholder="Select Car Name" 
                                    style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
                                    autocomplete="off">
                             <select id="editCarName" 
@@ -10573,7 +11604,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                     onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editCarName');"
                                     onchange="syncComboboxInput('editCarName')">
                                 <option value="">▼</option>
-                                ${if (purchaseData.carName != null) "<option value=\"${purchaseData.carName}\" selected>${purchaseData.carName}</option>" else ""}
+                                ${if (editCarNameDisp.isNotEmpty()) "<option value=\"$editCarNameDisp\" selected>$editCarNameDisp</option>" else ""}
                             </select>
                             <div id="editCarNameButton" onclick="openComboboxDropdown('editCarName')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
@@ -10583,19 +11614,17 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Grade</label>
-                        ${createEditableCombobox(
-                            "editGrade",
-                            "Select Grade",
-                            additionalAttrs = "oninput=\"this.value = this.value.split(';')[0].trim();\"",
-                            initialValue = purchaseData.grade?.toString()?.split(";")?.firstOrNull()?.trim()?.replace("\"", "&quot;") ?: ""
-                        )}
+                        ${createEditableCombobox("editGrade", "Select Grade", initialValue = editGradeDisp)}
                     </div>
                     <div>
                         <label>Production Date</label>
-                        <input type="month" id="editCarModelYear" value="${if (purchaseData.carModelYear != null) {
-                            val parts = purchaseData.carModelYear.toString().split("/")
-                            if (parts.size == 2) "${parts[1]}-${parts[0].padStart(2, '0')}" else purchaseData.carModelYear.toString()
-                        } else ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <div style="position:relative;">
+                            <input type="month" id="editCarModelYear" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${if (purchaseData.carModelYear != null) {
+                                val parts = purchaseData.carModelYear.toString().split("/")
+                                if (parts.size == 2) "${parts[1]}-${parts[0].padStart(2, '0')}" else purchaseData.carModelYear.toString()
+                            } else ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            <span id="editCarModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">mm/yyyy</span>
+                        </div>
                     </div>
                     <div>
                         <label>Auction No</label>
@@ -10640,16 +11669,16 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label>Rank</label>
-                        <input type="text" id="editRank" value="${purchaseData.rank ?: ""}" placeholder="e.g., S" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("editRank", "Select Rank", initialValue = editRankDisp)}
                     </div>
                     <div>
                         <label>Color</label>
-                        <input type="text" id="editColor" value="${purchaseData.color ?: ""}" placeholder="e.g., White" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("editColor", "Select Color", initialValue = editColorDisp)}
                     </div>
                     <div>
                         <label>Fuel</label>
                         <div style="position: relative; width: 100%;">
-                            <input type="text" id="editFuelInput" value="${purchaseData.fuel ?: ""}" placeholder="Select Fuel Type" 
+                            <input type="text" id="editFuelInput" value="$editFuelDisp" placeholder="Select Fuel Type" 
                                    style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
                                    autocomplete="off"
                                    onfocus="this.select();">
@@ -10658,7 +11687,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                     onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editFuel');"
                                     onchange="syncComboboxInput('editFuel')">
                                 <option value="">▼</option>
-                                ${if (purchaseData.fuel != null) "<option value=\"${purchaseData.fuel}\" selected>${purchaseData.fuel}</option>" else ""}
+                                ${if (editFuelDisp.isNotEmpty()) "<option value=\"$editFuelDisp\" selected>$editFuelDisp</option>" else ""}
                             </select>
                             <div id="editFuelButton" onclick="openComboboxDropdown('editFuel')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
@@ -10668,28 +11697,24 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Seat</label>
-                        <input type="number" id="editSeat" value="${purchaseData.seat ?: ""}" placeholder="e.g., 5" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("editSeat", "Select Seat", initialValue = editSeatDisp)}
                     </div>
                     <div>
                         <label>Door</label>
-                        <input type="number" id="editDoor" value="${purchaseData.door ?: ""}" placeholder="e.g., 4" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        ${createEditableCombobox("editDoor", "Select Door", initialValue = editDoorDisp)}
                     </div>
                     <div>
-                        <label>Mileage</label>
-                        <input type="text" id="editDistance" value="${extractNumericFromSuffixedValue(purchaseData.distance)}" placeholder="e.g., 50000" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
-                               oninput="this.value = this.value.replace(/[^0-9]/g, '')" 
-                               onblur="if(this.value && !this.value.endsWith('km')) { this.value = this.value + 'km'; }">
+                        <label>Distance</label>
+                        <input type="text" id="editDistance" class="comma-int-input km-suffix-input" value="${extractNumericFromSuffixedValue(purchaseData.distance)}" placeholder="e.g., 50,000 km" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label>CC</label>
-                        <input type="text" id="editCc" value="${extractNumericFromSuffixedValue(purchaseData.cc)}" placeholder="e.g., 2000" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;" 
-                               oninput="this.value = this.value.replace(/[^0-9]/g, '')" 
-                               onblur="if(this.value && !this.value.endsWith('CC')) { this.value = this.value + 'CC'; }">
+                        ${createEditableCombobox("editCc", "Select CC", initialValue = editCcDisp)}
                     </div>
                     <div>
                         <label>Shift</label>
                         <div style="position: relative; width: 100%;">
-                            <input type="text" id="editShiftInput" value="${purchaseData.shift ?: ""}" placeholder="Select Shift" 
+                            <input type="text" id="editShiftInput" value="$editShiftDisp" placeholder="Select Shift" 
                                    style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
                                    autocomplete="off"
                                    onfocus="this.select();">
@@ -10697,10 +11722,10 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                     style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
                                     onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editShift');"
                                     onchange="syncComboboxInput('editShift')">
-                                <option value="AT" ${if (purchaseData.shift == "AT") "selected" else ""}>AT</option>
-                                <option value="MT" ${if (purchaseData.shift == "MT") "selected" else ""}>MT</option>
-                                <option value="6F" ${if (purchaseData.shift == "6F") "selected" else ""}>6F</option>
-                                <option value="5F" ${if (purchaseData.shift == "5F") "selected" else ""}>5F</option>
+                                <option value="AT" ${if (editShiftDisp == "AT") "selected" else ""}>AT</option>
+                                <option value="MT" ${if (editShiftDisp == "MT") "selected" else ""}>MT</option>
+                                <option value="6F" ${if (editShiftDisp == "6F") "selected" else ""}>6F</option>
+                                <option value="5F" ${if (editShiftDisp == "5F") "selected" else ""}>5F</option>
                             </select>
                             <div id="editShiftButton" onclick="openComboboxDropdown('editShift')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
@@ -10712,12 +11737,12 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>WD</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
-                                <input type="radio" name="editWd" value="2WD" ${if (purchaseData.wd != "4WD") "checked" else ""}>
+                                <input type="radio" name="editWd" value="2WD" ${if (!wdFirstIs4Wd) "checked" else ""}>
                                 <span class="checkmark"></span>
                                 2WD
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="editWd" value="4WD" ${if (purchaseData.wd == "4WD") "checked" else ""}>
+                                <input type="radio" name="editWd" value="4WD" ${if (wdFirstIs4Wd) "checked" else ""}>
                                 <span class="checkmark"></span>
                                 4WD
                             </label>
@@ -10727,12 +11752,12 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>Drive Type</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
-                                <input type="radio" name="editDriveType" value="LHD" ${if (purchaseData.driveType == "LHD") "checked" else ""}>
+                                <input type="radio" name="editDriveType" value="LHD" ${if (editDriveDisp == "LHD") "checked" else ""}>
                                 <span class="checkmark"></span>
                                 LHD
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="editDriveType" value="RHD" ${if (purchaseData.driveType == "RHD") "checked" else ""}>
+                                <input type="radio" name="editDriveType" value="RHD" ${if (editDriveDisp == "RHD") "checked" else ""}>
                                 <span class="checkmark"></span>
                                 RHD
                             </label>
@@ -10740,7 +11765,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Vehicle type</label>
-                        ${createEditableCombobox("editShipmentSize", "Select Vehicle type", initialValue = (purchaseData.shipmentSize ?: purchaseData.vehicleType ?: ""))}
+                        ${createEditableCombobox("editShipmentSize", "Select Vehicle type", initialValue = editShipDisp)}
                     </div>
                     <div style="grid-column: 1 / -1; margin-bottom: 20px;">
                         <label>Options</label>
@@ -10815,7 +11840,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <select id="editStockLocation" 
                                     style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
                                     onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editStockLocation');"
-                                    onchange="syncComboboxInput('editStockLocation'); if (typeof window.fetchPolsByStockLocationAndUpdate === 'function') { window.fetchPolsByStockLocationAndUpdate(window.getComboboxValue('editStockLocation')); }">
+                                    onchange="syncComboboxInput('editStockLocation'); if (typeof window.fetchPolsAfterStockChange === 'function') { window.fetchPolsAfterStockChange('editStockLocation'); }">
                                 <option value="">▼</option>
                         </select>
                             <div id="editStockLocationButton" onclick="openComboboxDropdown('editStockLocation')" 
@@ -10909,7 +11934,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                         <label>Payment Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="editPaymentDate" value="${toIsoFromLabel(purchaseData.paymentDate ?: purchaseData.payment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.paymentDate ?: purchaseData.payment_date) ?: ""}">
+                            <input type="date" id="editPaymentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${toIsoFromLabel(purchaseData.paymentDate ?: purchaseData.payment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.paymentDate ?: purchaseData.payment_date) ?: ""}">
                             <span id="editPaymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
@@ -10930,9 +11955,13 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         ${createEditableCombobox("editPol", "Select POL", initialValue = purchaseData.pol?.toString() ?: "")}
                     </div>
                     <div>
+                        <label>Destination</label>
+                        <input type="text" id="editDestination" value="${escapeHtml(purchaseData.destination?.toString() ?: "")}" placeholder="e.g., KARACHI-PAKISTAN" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <div>
                         <label>Shipment Date</label>
                         <div style="position:relative;">
-                            <input type="date" id="editShipmentDate" value="${toIsoFromLabel(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date) ?: ""}">
+                            <input type="date" id="editShipmentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${toIsoFromLabel(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date) ?: ""}">
                             <span id="editShipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
                         </div>
                     </div>
@@ -11108,93 +12137,24 @@ fun showEditFormWithData(purchaseData: dynamic) {
     // Ensure base options exist for fuel/shift/grade (edit form)
     ensureBaseComboboxOptionsForAddEdit()
     
-    // Money formatting (commas on display, comma-less values for saving).
-    // This is needed on Edit pages too (Add page-only binding caused commas not to appear).
+    // Edit form: async field injection — re-format money fields only (listeners live in setupAddFormListeners).
     js("""
         (function(){
-            // Do not early-return: edit form values are populated async.
-            // Even if Add-page binding already happened, we still need to re-run
-            // formatting after Edit values are injected.
-            window.__moneyDelegationBound = true;
-
-            function _moneySanitize(raw) {
-                if (raw == null) return '';
-                var s = String(raw).trim();
-                if (!s) return '';
-                // keep digits and dot only
-                s = s.replace(/[^0-9.]/g, '');
-                // remove extra dots
-                var parts = s.split('.');
-                if (parts.length > 2) {
-                    s = parts[0] + '.' + parts.slice(1).join('');
-                    parts = s.split('.');
-                }
-                // trim leading zeros safely
-                if (parts[0]) {
-                    parts[0] = parts[0].replace(/^0+(?=\\d)/, '');
-                }
-                if (parts.length === 1) return parts[0] || '';
-                return (parts[0] || '0') + '.' + (parts[1] || '');
-            }
-
-            function _moneyFormat(raw) {
-                var s = _moneySanitize(raw);
-                if (!s) return '';
-                var parts = s.split('.');
-                var intPart = parts[0] || '0';
-                var decPart = parts.length > 1 ? parts[1] : '';
-                intPart = intPart.replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
-                return decPart ? (intPart + '.' + decPart) : intPart;
-            }
-
-            function _bindMoneyDelegation() {
-                // On focus: show raw (no commas)
-                document.addEventListener('focusin', function(e) {
-                    var el = e.target;
-                    if (!el || !el.classList || !el.classList.contains('money-input')) return;
-                    el.value = _moneySanitize(el.value);
-                }, true);
-
-                // On blur: format with commas
-                document.addEventListener('focusout', function(e) {
-                    var el = e.target;
-                    if (!el || !el.classList || !el.classList.contains('money-input')) return;
-                    el.value = _moneyFormat(el.value);
-                }, true);
-            }
-
             function _formatAllMoneyInputsNow() {
+                if (!window._moneyFormat || !window._moneySanitize || !window._commaIntFormat) return;
                 document.querySelectorAll('input.money-input').forEach(function(el) {
-                    el.value = _moneyFormat(el.value);
+                    if (!el) return;
+                    el.value = window._moneyFormat(window._moneySanitize(el.value));
+                });
+                document.querySelectorAll('input.comma-int-input').forEach(function(el) {
+                    if (!el) return;
+                    el.value = window._commaIntFormat(el.value);
                 });
             }
-
-            // Exposed helper for save flows (comma-less numeric)
-            window.getMoneyRawValue = function(id) {
-                var el = document.getElementById(id);
-                if (!el) return '';
-                return _moneySanitize(el.value);
-            };
-
-            _bindMoneyDelegation();
-            // Initial format pass + a few delayed passes for values injected later
             setTimeout(_formatAllMoneyInputsNow, 0);
             setTimeout(_formatAllMoneyInputsNow, 300);
             setTimeout(_formatAllMoneyInputsNow, 800);
             setTimeout(_formatAllMoneyInputsNow, 1500);
-
-            // Periodic re-format to catch auto-filled values that don't trigger blur
-            if (!window.__moneyAutoFormatIntervalStarted) {
-                window.__moneyAutoFormatIntervalStarted = true;
-                window.__moneyAutoFormatInterval = window.setInterval(function() {
-                    document.querySelectorAll('input.money-input').forEach(function(el) {
-                        if (!el) return;
-                        if (document.activeElement === el) return;
-                        var formatted = _moneyFormat(el.value);
-                        if (el.value !== formatted) el.value = formatted;
-                    });
-                }, 350);
-            }
         })();
     """)
     
@@ -11220,24 +12180,23 @@ fun showEditFormWithData(purchaseData: dynamic) {
             // Get Purchase Date
             val purchaseDateRaw = js("purchaseData.date")?.toString() ?: ""
             console.log("🔍 [KOTLIN] Checking purchaseDate - raw value:", purchaseDateRaw)
-            if (purchaseDateRaw.isNotBlank()) {
-                val editDateInput = document.getElementById("editDate") as? HTMLInputElement
-                if (editDateInput != null) {
-                    val isoDate = toIsoFromLabel(purchaseDateRaw)
-                    console.log("🔍 [KOTLIN] purchaseDate conversion result:", isoDate, "from:", purchaseDateRaw)
-                    if (isoDate.isNotBlank()) {
-                        editDateInput.value = isoDate
-                        console.log("✅ [KOTLIN FALLBACK] Set editDate:", isoDate, "from:", purchaseDateRaw)
-                        val hint = document.getElementById("editDateDayHint") as? HTMLElement
-                        hint?.textContent = isoToWeekdayLabelTopLevel(isoDate)
-                    } else {
-                        console.warn("⚠️ [KOTLIN FALLBACK] Could not convert purchaseDate to ISO:", purchaseDateRaw)
-                    }
-                } else {
-                    console.warn("⚠️ [KOTLIN FALLBACK] editDate input not found")
+            val editDateInput = document.getElementById("editDate") as? HTMLInputElement
+            if (editDateInput != null) {
+                var isoDate = if (purchaseDateRaw.isNotBlank()) toIsoFromLabel(purchaseDateRaw) else ""
+                if (isoDate.isBlank() && purchaseDateRaw.isNotBlank() &&
+                    purchaseDateRaw.length == 10 && purchaseDateRaw.contains("-")
+                ) {
+                    isoDate = purchaseDateRaw
                 }
+                if (isoDate.isBlank()) {
+                    isoDate = todayIsoLocalDate()
+                }
+                console.log("🔍 [KOTLIN] purchaseDate effective ISO:", isoDate)
+                editDateInput.value = isoDate
+                val hint = document.getElementById("editDateDayHint") as? HTMLElement
+                hint?.textContent = isoToWeekdayLabelTopLevel(isoDate)
             } else {
-                console.log("ℹ️ [KOTLIN FALLBACK] No purchaseDate found in purchaseData")
+                console.warn("⚠️ [KOTLIN FALLBACK] editDate input not found")
             }
             
             // Get payment date value - try multiple field names
@@ -11349,7 +12308,7 @@ fun setupEditFormListeners() {
             event.stopImmediatePropagation()
             event.stopPropagation()
             val currentUrl = window.location.origin + window.location.pathname
-            val url = "$currentUrl#/master/supplier"
+            val url = "$currentUrl#/master/supplier-map"
             console.log("🟢 [SUPPLIER BUTTON] Opening URL in new tab:", url)
             window.setTimeout({
                 val newWindow = window.open(url, "_blank")
@@ -11357,6 +12316,7 @@ fun setupEditFormListeners() {
                     console.error("❌ [SUPPLIER BUTTON] Popup blocked!")
                 } else {
                     console.log("✅ [SUPPLIER BUTTON] New tab opened successfully")
+                    showMasterDataRefreshPopup()
                 }
             }, 10)
         }
@@ -11374,12 +12334,13 @@ fun setupEditFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/supplier';
+                    var url = window.location.origin + window.location.pathname + '#/master/supplier-map';
                     console.log('🟢 [SUPPLIER] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
                         if (newWin) {
                             console.log('✅ [SUPPLIER] New tab opened');
+                            if (window.showMasterDataRefreshPopup) window.showMasterDataRefreshPopup();
                         } else {
                             console.error('❌ [SUPPLIER] Popup blocked');
                         }
@@ -11415,7 +12376,7 @@ fun setupEditFormListeners() {
             event.stopImmediatePropagation()
             event.stopPropagation()
             val currentUrl = window.location.origin + window.location.pathname
-            val url = "$currentUrl#/master/car-brands"
+            val url = "$currentUrl#/master/car-brands-map"
             console.log("🔵 [CAR BRANDS BUTTON EDIT] Opening URL in new tab:", url)
             window.setTimeout({
                 val newWindow = window.open(url, "_blank")
@@ -11423,6 +12384,7 @@ fun setupEditFormListeners() {
                     console.error("❌ [CAR BRANDS BUTTON EDIT] Popup blocked!")
                 } else {
                     console.log("✅ [CAR BRANDS BUTTON EDIT] New tab opened successfully")
+                    showMasterDataRefreshPopup()
                 }
             }, 10)
         }
@@ -11441,12 +12403,13 @@ fun setupEditFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/car-brands';
+                    var url = window.location.origin + window.location.pathname + '#/master/car-brands-map';
                     console.log('🔵 [CAR BRANDS EDIT] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
                         if (newWin) {
                             console.log('✅ [CAR BRANDS EDIT] New tab opened');
+                            if (window.showMasterDataRefreshPopup) window.showMasterDataRefreshPopup();
                         } else {
                             console.error('❌ [CAR BRANDS EDIT] Popup blocked');
                         }
@@ -11613,6 +12576,23 @@ fun setupEditFormListeners() {
         val hint = document.getElementById("editPaymentDateDayHint") as HTMLElement?
         hint?.textContent = isoToWeekdayLabelTopLevel(v)
     })
+    (document.getElementById("editCarModelYear") as HTMLInputElement?)?.let { monthEl ->
+        val hint = document.getElementById("editCarModelYearHint") as HTMLElement?
+        val updateHint = {
+            val isEmpty = monthEl.value.isBlank()
+            hint?.style?.display = if (isEmpty) "block" else "none"
+            if (isEmpty) {
+                monthEl.style.color = "transparent"
+                monthEl.style.setProperty("-webkit-text-fill-color", "transparent")
+            } else {
+                monthEl.style.color = ""
+                monthEl.style.setProperty("-webkit-text-fill-color", "")
+            }
+        }
+        updateHint()
+        monthEl.addEventListener("change", { _: Event -> updateHint() })
+        monthEl.addEventListener("input", { _: Event -> updateHint() })
+    }
 
     // Add SHAKEN checkbox listener for edit form
     document.getElementById("editShakenCheckbox")?.addEventListener("change", { event: Event ->
@@ -11852,18 +12832,18 @@ fun collectCurrentEditFormData(): dynamic {
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
     val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
-    val grade = (document.getElementById("editGradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
-    val rank = (document.getElementById("editRank") as? HTMLInputElement)?.value ?: ""
-    val color = (document.getElementById("editColor") as? HTMLInputElement)?.value ?: ""
+    val grade = getComboboxValueSafe("editGrade")
+    val rank = getComboboxValueSafe("editRank")
+    val color = getComboboxValueSafe("editColor")
     val fuel = getComboboxValueSafe("editFuel")
-    val seat = (document.getElementById("editSeat") as? HTMLInputElement)?.value ?: ""
-    val door = (document.getElementById("editDoor") as? HTMLInputElement)?.value ?: ""
-    val distance = (document.getElementById("editDistance") as? HTMLInputElement)?.value ?: ""
+    val seat = getComboboxValueSafe("editSeat")
+    val door = getComboboxValueSafe("editDoor")
+    val distance = sanitizeDistanceUiToDb((document.getElementById("editDistance") as? HTMLInputElement)?.value ?: "")
     val driveType = (document.querySelector("input[name=\"editDriveType\"]:checked") as HTMLInputElement?)?.value ?: ""
     val editPredefinedOpts = (document.getElementById("editOptionsPredefined") as? HTMLInputElement)?.value?.trim() ?: ""
     val editCustomOpts = (document.getElementById("editOptions") as? HTMLInputElement)?.value?.trim() ?: ""
     val options = listOf(editPredefinedOpts, editCustomOpts).filter { it.isNotEmpty() }.joinToString(", ")
-    val ccValue = (document.getElementById("editCc") as? HTMLInputElement)?.value ?: ""
+    val ccValue = getComboboxValueSafe("editCc")
     // Backend expects Int? for cc field, so send only the numeric value
     val cc = if (ccValue.isNotEmpty()) {
         val numValue = ccValue.replace(Regex("[^0-9]"), "")
@@ -12268,9 +13248,9 @@ fun handleEditPurchase() {
     val chassis = getComboboxValueSafe("editChassis")
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
-    val grade = (document.getElementById("editGradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    val grade = getComboboxValueSafe("editGrade")
     val fuel = getComboboxValueSafe("editFuel")
-    val door = (document.getElementById("editDoor") as? HTMLInputElement)?.value ?: ""
+    val door = getComboboxValueSafe("editDoor")
     val shift = getComboboxValueSafe("editShift")
     val wdRadio = document.querySelector("input[name=\"editWd\"]:checked") as? HTMLInputElement
     val wd = wdRadio?.value ?: ""
@@ -12362,7 +13342,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     
     // Extract field values for master list validation first
     val valBrand = getComboboxValueSafe("editBrand")
-    val valGrade = (document.getElementById("editGradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    val valGrade = getComboboxValueSafe("editGrade")
     val valFuel = getComboboxValueSafe("editFuel")
     val valShift = getComboboxValueSafe("editShift")
     val valSupplierName = getComboboxValueSafe("editAuctionName")
@@ -12417,18 +13397,18 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
     val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
-    val grade = (document.getElementById("editGradeInput") as? HTMLInputElement)?.value?.trim() ?: ""
-    val rank = (document.getElementById("editRank") as? HTMLInputElement)?.value ?: ""
-    val color = (document.getElementById("editColor") as? HTMLInputElement)?.value ?: ""
+    val grade = getComboboxValueSafe("editGrade")
+    val rank = getComboboxValueSafe("editRank")
+    val color = getComboboxValueSafe("editColor")
     val fuel = getComboboxValueSafe("editFuel")
-    val seat = (document.getElementById("editSeat") as? HTMLInputElement)?.value ?: ""
-    val door = (document.getElementById("editDoor") as? HTMLInputElement)?.value ?: ""
-    val distance = (document.getElementById("editDistance") as? HTMLInputElement)?.value ?: ""
+    val seat = getComboboxValueSafe("editSeat")
+    val door = getComboboxValueSafe("editDoor")
+    val distance = sanitizeDistanceUiToDb((document.getElementById("editDistance") as? HTMLInputElement)?.value ?: "")
     val driveType = (document.querySelector("input[name=\"editDriveType\"]:checked") as HTMLInputElement?)?.value ?: ""
     val editPredefinedOpts = (document.getElementById("editOptionsPredefined") as? HTMLInputElement)?.value?.trim() ?: ""
     val editCustomOpts = (document.getElementById("editOptions") as? HTMLInputElement)?.value?.trim() ?: ""
     val options = listOf(editPredefinedOpts, editCustomOpts).filter { it.isNotEmpty() }.joinToString(", ")
-    val ccValue = (document.getElementById("editCc") as? HTMLInputElement)?.value ?: ""
+    val ccValue = getComboboxValueSafe("editCc")
     // Backend expects Int? for cc field, so send only the numeric value
     val cc = if (ccValue.isNotEmpty()) {
         val numValue = ccValue.replace(Regex("[^0-9]"), "")
@@ -13455,15 +14435,11 @@ fun saveCarBookingState() {
         carBookingFormState.vesselSelect = vesselInputEl?.value ?: ""
         carBookingFormState.chassisSelect = chassisValue
         
-        // Save C&F/FOB checkbox states
-        val cnfCheckbox = document.getElementById("cnfCheckbox") as? HTMLInputElement
-        val fobCheckbox = document.getElementById("fobCheckbox") as? HTMLInputElement
-        carBookingFormState.cnfChecked = cnfCheckbox?.checked ?: false
-        carBookingFormState.fobChecked = fobCheckbox?.checked ?: false
+        // C&F/FOB UI removed — mode is derived from freight calculation + lastCalculationMode
+        carBookingFormState.cnfChecked = false
+        carBookingFormState.fobChecked = false
         
         console.log("🔍 Form state being saved:", carBookingFormState)
-        console.log("🔍 C&F checked:", carBookingFormState.cnfChecked)
-        console.log("🔍 FOB checked:", carBookingFormState.fobChecked)
     } else {
         console.log("🔍 Not on Car Booking page - preserving existing form state")
         console.log("🔍 Existing form state:", carBookingFormState)
@@ -13508,40 +14484,22 @@ fun saveBookingSelectionState(selection: String) {
     safeLocalStorageSet("bookingSelection", selection)
 }
 
-// Restore booking selection state - always unchecked after refresh
+// Restore booking selection state (C&F/FOB checkboxes removed from UI)
 fun restoreBookingSelectionState() {
-    console.log("🔄 Restoring booking selection checkboxes...")
-    
-        val cnfCheckbox = document.getElementById("cnfCheckbox") as HTMLInputElement?
-        val fobCheckbox = document.getElementById("fobCheckbox") as HTMLInputElement?
-        
-    // If checkboxes don't exist yet, retry after a short delay
+    val cnfCheckbox = document.getElementById("cnfCheckbox") as HTMLInputElement?
+    val fobCheckbox = document.getElementById("fobCheckbox") as HTMLInputElement?
     if (cnfCheckbox == null || fobCheckbox == null) {
-        console.log("⚠️ Checkboxes not found yet, retrying in 100ms...")
-        window.setTimeout({
-            restoreBookingSelectionState()
-        }, 100)
         return
     }
-    
-    // Restore checkbox states from saved state
     val cnfChecked = carBookingFormState.cnfChecked as? Boolean ?: false
     val fobChecked = carBookingFormState.fobChecked as? Boolean ?: false
-    
-    // Ensure mutual exclusivity when restoring state
     if (cnfChecked && fobChecked) {
-        // If both were checked (shouldn't happen, but handle it), prefer C&F
         cnfCheckbox.checked = true
         fobCheckbox.checked = false
-        carBookingFormState.cnfChecked = true
-        carBookingFormState.fobChecked = false
-        console.log("⚠️ Both checkboxes were checked, defaulting to C&F")
     } else {
         cnfCheckbox.checked = cnfChecked
         fobCheckbox.checked = fobChecked
     }
-    console.log("✅ C&F checkbox restored:", cnfCheckbox.checked)
-    console.log("✅ FOB checkbox restored:", fobCheckbox.checked)
 }
 
 fun restoreCarBookingState() {
@@ -15157,7 +16115,7 @@ fun showRixoTransportPage() {
                         <h3>Details</h3>
                         <div class="field">
                             <label for="transportDate">Date</label>
-                            <input class="input" type="date" id="transportDate" aria-required="true" data-required="true" />
+                            <input class="input" type="date" id="transportDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" aria-required="true" data-required="true" />
                             <div id="transportDateFormatted" style="margin-top: 4px; font-size: 12px; color: #6b7280; min-height: 16px;"></div>
                             <div id="transportDateError" class="error-text"></div>
                         </div>
@@ -15198,13 +16156,13 @@ fun showRixoRequestGeneratorPage() {
                         <!-- Buying Date -->
                         <div class="rixo-form-field">
                             <label for="buyingDate">Buying Date</label>
-                            <input type="date" id="buyingDate" class="rixo-input">
+                            <input type="date" id="buyingDate" class="rixo-input" onkeydown="return false;" onpaste="return false;" ondrop="return false;">
                         </div>
                         
-                        <!-- Rixo Company -->
+                        <!-- Rixo Company (speed-dial style; hidden select + input for existing APIs) -->
                         <div class="rixo-form-field">
-                            <label for="rixoCompany">Rixo Company</label>
-                            ${createEditableCombobox("rixoCompany", "Select Rixo Company")}
+                            <label for="rixoCompanyFabTrigger">Rixo Company</label>
+                            ${createRixoCompanyFabCombobox()}
                         </div>
                         
                         <!-- Head Message -->
@@ -15242,18 +16200,24 @@ FAX: 047-711-0409
                             </div>
                         </div>
                         
-                        <!-- Print Button -->
-                        <button type="button" id="printRixoRequest" class="rixo-print-btn">
-                            <span class="rixo-print-icon">🖨️</span>
-                            Print
-                        </button>
+                        <!-- Preview + Print -->
+                        <div class="rixo-print-actions">
+                            <button type="button" id="previewRixoRequest" class="rixo-preview-btn">
+                                <span class="rixo-preview-icon" aria-hidden="true"></span>
+                                Preview
+                            </button>
+                            <button type="button" id="printRixoRequest" class="rixo-print-btn">
+                                <span class="rixo-print-icon">🖨️</span>
+                                Print
+                            </button>
+                        </div>
                     </form>
                 </div>
                 
-                <!-- Right Panel: Rows Preview -->
+                <!-- Right Panel: Cars to Rixo -->
                 <div class="rixo-rows-preview-panel">
                     <div class="rixo-rows-header">
-                        <h2 class="rixo-rows-title">Rows Preview</h2>
+                        <h2 class="rixo-rows-title">Cars to Rixo</h2>
                     </div>
                     <div id="selectedCount" class="rixo-selected-count">Selected: 0 of 0</div>
                     
@@ -15445,6 +16409,180 @@ FAX: 047-711-0409
                 color: #374151;
                 font-weight: bold;
             }
+            .rixo-refresh-popup-actions {
+                margin-top: 18px;
+                display: flex;
+                justify-content: flex-end;
+                gap: 10px;
+            }
+            .rixo-refresh-popup-btn {
+                padding: 10px 20px;
+                border: none;
+                border-radius: 8px;
+                background: #059669;
+                color: #fff;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+            }
+            .rixo-refresh-popup-btn:hover {
+                background: #047857;
+            }
+            
+            /* Rixo Company — lightweight FAB / speed dial (fly down, no DaisyUI) */
+            .rixo-company-fab-native-select {
+                position: absolute !important;
+                width: 1px !important;
+                height: 1px !important;
+                padding: 0 !important;
+                margin: -1px !important;
+                overflow: hidden !important;
+                clip: rect(0, 0, 0, 0) !important;
+                white-space: nowrap !important;
+                border: 0 !important;
+            }
+            .rixo-company-fab-wrap {
+                position: relative;
+                width: 100%;
+            }
+            .rixo-company-fab {
+                display: flex;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0;
+            }
+            .rixo-fab-trigger {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                width: 100%;
+                padding: 10px 14px;
+                border: 1px solid #d1d5db;
+                border-radius: 12px;
+                background: #fff;
+                cursor: pointer;
+                text-align: left;
+                box-sizing: border-box;
+                transition: box-shadow 0.2s, border-color 0.2s;
+            }
+            .rixo-fab-trigger:hover {
+                border-color: #3abff8;
+                box-shadow: 0 4px 14px rgba(58, 191, 248, 0.2);
+            }
+            .rixo-company-fab-wrap.rixo-company-fab--open .rixo-fab-trigger {
+                border-color: #3abff8;
+                box-shadow: 0 4px 14px rgba(58, 191, 248, 0.25);
+            }
+            .rixo-fab-trigger-circle {
+                flex-shrink: 0;
+                width: 48px;
+                height: 48px;
+                border-radius: 50%;
+                background: linear-gradient(145deg, #3abff8, #0891b2);
+                color: #fff;
+                font-size: 18px;
+                font-weight: 700;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 4px 12px rgba(8, 145, 178, 0.35);
+            }
+            .rixo-fab-trigger-text-wrap {
+                flex: 1;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .rixo-fab-trigger-label {
+                font-size: 15px;
+                font-weight: 600;
+                color: #111827;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .rixo-fab-trigger-hint {
+                font-size: 12px;
+                color: #6b7280;
+            }
+            .rixo-company-fab-wrap.rixo-company-fab--open .rixo-fab-trigger-hint {
+                display: none;
+            }
+            .rixo-fab-trigger-chevron {
+                flex-shrink: 0;
+                font-size: 12px;
+                color: #6b7280;
+                transition: transform 0.2s;
+            }
+            .rixo-company-fab-wrap.rixo-company-fab--open .rixo-fab-trigger-chevron {
+                transform: rotate(180deg);
+            }
+            .rixo-fab-actions {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                padding: 8px 0 4px;
+            }
+            .rixo-fab-action-row {
+                display: flex;
+                align-items: center;
+                justify-content: flex-start;
+                flex-direction: row;
+                gap: 12px;
+                animation: rixoFabDown 0.28s ease-out both;
+            }
+            .rixo-fab-action-row:nth-child(1) { animation-delay: 0.03s; }
+            .rixo-fab-action-row:nth-child(2) { animation-delay: 0.06s; }
+            .rixo-fab-action-row:nth-child(3) { animation-delay: 0.09s; }
+            .rixo-fab-action-row:nth-child(4) { animation-delay: 0.12s; }
+            .rixo-fab-action-row:nth-child(5) { animation-delay: 0.15s; }
+            .rixo-fab-action-row:nth-child(6) { animation-delay: 0.18s; }
+            .rixo-fab-action-row:nth-child(7) { animation-delay: 0.21s; }
+            .rixo-fab-action-row:nth-child(8) { animation-delay: 0.24s; }
+            .rixo-fab-action-label {
+                font-size: 14px;
+                color: #374151;
+                font-weight: 500;
+                text-align: left;
+                flex: 1;
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .rixo-fab-action-btn {
+                flex-shrink: 0;
+                width: 48px;
+                height: 48px;
+                border-radius: 50%;
+                border: 1px solid #e5e7eb;
+                background: #f9fafb;
+                color: #111827;
+                font-size: 18px;
+                font-weight: 700;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+                transition: transform 0.15s, background 0.15s;
+            }
+            .rixo-fab-action-btn:hover {
+                background: #e0f2fe;
+                border-color: #3abff8;
+                transform: scale(1.06);
+            }
+            @keyframes rixoFabDown {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
             
             /* Responsive table for mobile */
             @media (max-width: 767px) {
@@ -15527,8 +16665,113 @@ FAX: 047-711-0409
     document.getElementById("buyingDate")?.setAttribute("value", today)
 }
 
+/** One-time window APIs + document listeners for Rixo Company FAB (Rixo Request page). */
+private fun ensureRixoCompanyFabApi() {
+    val already = js("typeof window.__rixoFabApiInstalled !== 'undefined' && window.__rixoFabApiInstalled").unsafeCast<Boolean>()
+    if (already) return
+    js("window.__rixoFabApiInstalled = true")
+    js(
+        """
+        (function() {
+          function closeRixoCompanyFab() {
+            var wrap = document.getElementById('rixoCompanyFabWrap');
+            var actions = document.getElementById('rixoCompanyFabActions');
+            var trigger = document.getElementById('rixoCompanyFabTrigger');
+            if (!wrap) return;
+            wrap.classList.remove('rixo-company-fab--open');
+            if (actions) actions.style.display = 'none';
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+          }
+          function openRixoCompanyFab() {
+            var wrap = document.getElementById('rixoCompanyFabWrap');
+            var actions = document.getElementById('rixoCompanyFabActions');
+            var trigger = document.getElementById('rixoCompanyFabTrigger');
+            if (!wrap) return;
+            if (typeof window.rebuildRixoCompanyFabFromSelect === 'function') window.rebuildRixoCompanyFabFromSelect();
+            wrap.classList.add('rixo-company-fab--open');
+            if (actions) actions.style.display = 'flex';
+            if (trigger) trigger.setAttribute('aria-expanded', 'true');
+          }
+          function toggleRixoCompanyFab() {
+            var wrap = document.getElementById('rixoCompanyFabWrap');
+            if (!wrap) return;
+            if (wrap.classList.contains('rixo-company-fab--open')) closeRixoCompanyFab();
+            else openRixoCompanyFab();
+          }
+          window.rebuildRixoCompanyFabFromSelect = function() {
+            var select = document.getElementById('rixoCompany');
+            var actions = document.getElementById('rixoCompanyFabActions');
+            if (!select || !actions) return;
+            actions.innerHTML = '';
+            var opts = select.querySelectorAll('option');
+            var count = 0;
+            opts.forEach(function(opt) {
+              if (!opt.value) return;
+              count++;
+              var row = document.createElement('div');
+              row.className = 'rixo-fab-action-row';
+              row.setAttribute('role', 'option');
+              var lbl = document.createElement('span');
+              lbl.className = 'rixo-fab-action-label';
+              lbl.textContent = opt.textContent || opt.value;
+              var btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'rixo-fab-action-btn';
+              var val = opt.value;
+              var letter = val.length ? val.charAt(0).toUpperCase() : '?';
+              btn.textContent = letter;
+              btn.setAttribute('data-value', val);
+              btn.setAttribute('title', val);
+              btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                select.value = val;
+                if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('rixoCompany');
+                if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') window.updateRixoCompanyFabTriggerLabel();
+                closeRixoCompanyFab();
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+              });
+              row.appendChild(btn);
+              row.appendChild(lbl);
+              actions.appendChild(row);
+            });
+            if (count === 0) {
+              var empty = document.createElement('div');
+              empty.className = 'rixo-fab-action-row';
+              empty.style.justifyContent = 'center';
+              empty.style.fontSize = '13px';
+              empty.style.color = '#6b7280';
+              empty.textContent = 'No companies for this date — pick another buying date.';
+              actions.appendChild(empty);
+            }
+          };
+          window.updateRixoCompanyFabTriggerLabel = function() {
+            var v = (typeof window.getComboboxValue === 'function') ? (window.getComboboxValue('rixoCompany') || '') : '';
+            v = (v || '').toString().trim();
+            var labelEl = document.getElementById('rixoCompanyFabLabel');
+            var letterEl = document.getElementById('rixoCompanyFabLetter');
+            if (labelEl) labelEl.textContent = v || 'Select Rixo Company';
+            if (letterEl) letterEl.textContent = v ? v.charAt(0).toUpperCase() : 'R';
+          };
+          window.closeRixoCompanyFab = closeRixoCompanyFab;
+          window.toggleRixoCompanyFab = toggleRixoCompanyFab;
+          document.addEventListener('click', function(e) {
+            var wrap = document.getElementById('rixoCompanyFabWrap');
+            if (!wrap || !wrap.classList.contains('rixo-company-fab--open')) return;
+            if (wrap.contains(e.target)) return;
+            closeRixoCompanyFab();
+          });
+          document.addEventListener('keydown', function(e) {
+            if (e.key !== 'Escape') return;
+            closeRixoCompanyFab();
+          });
+        })();
+        """
+    )
+}
+
 // Set up event listeners for the Rixo Request Generator page
 fun setupRixoRequestGeneratorListeners() {
+    ensureRixoCompanyFabApi()
     // Buying Date change - load Rixo companies and rows
     document.getElementById("buyingDate")?.addEventListener("change", { _: Event ->
         loadRixoCompaniesForDate()
@@ -15548,10 +16791,20 @@ fun setupRixoRequestGeneratorListeners() {
     rixoCompanyInput?.addEventListener("change", { _: Event ->
         loadRowsForDateAndCompany()
     })
+
+    // FAB trigger / close (speed-dial UI; IDs only exist on Rixo Request Generator page)
+    document.getElementById("rixoCompanyFabTrigger")?.addEventListener("click", { event: Event ->
+        event.asDynamic().stopPropagation()
+        js("if (typeof window.toggleRixoCompanyFab === 'function') window.toggleRixoCompanyFab()")
+    })
+    js("if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') window.updateRixoCompanyFabTriggerLabel()")
     
-    // Print button
+    // Preview + Print (same PDF from backend; Preview opens in new tab)
+    document.getElementById("previewRixoRequest")?.addEventListener("click", { _: Event ->
+        generateRixoRequestPdf(preview = true)
+    })
     document.getElementById("printRixoRequest")?.addEventListener("click", { _: Event ->
-        generateRixoRequestPdf()
+        generateRixoRequestPdf(preview = false)
     })
     
     // Contact Details Toggle (Mobile only)
@@ -15610,46 +16863,80 @@ fun loadRixoCompaniesForDate() {
                         select.add(option)
                     }
                 }
+                js("if (typeof window.rebuildRixoCompanyFabFromSelect === 'function') window.rebuildRixoCompanyFabFromSelect()")
+                js("if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') window.updateRixoCompanyFabTriggerLabel()")
             }
         }
     }
+}
+
+private fun setRixoRowsPreviewEmptyMessage(message: String) {
+    document.getElementById("rixoRowsPreview")?.innerHTML = """
+        <div class="rixo-empty-state">$message</div>
+    """
+    document.getElementById("selectedCount")?.textContent = "Selected: 0 of 0"
+}
+
+/** True if there is at least one purchase on [formattedDate] with Rixo pending (rixoRequested FALSE and rixo company set). */
+private fun hasAnyRixoPendingPurchaseForDate(allPurchases: Array<dynamic>, formattedDate: String): Boolean {
+    for (purchase in allPurchases) {
+        val date = js("purchase.date")?.toString() ?: ""
+        val rixoRequested = js("purchase.rixoRequested")?.toString() ?: "FALSE"
+        val rc = js("purchase.rixoCompany")?.toString() ?: ""
+        if (date == formattedDate && rixoRequested == "FALSE" && rc.isNotEmpty()) {
+            return true
+        }
+    }
+    return false
 }
 
 // Load rows for the selected date and company
 fun loadRowsForDateAndCompany() {
     val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
     val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
-    
-    if (buyingDate.isEmpty() || rixoCompany.isEmpty()) {
-        document.getElementById("rixoRowsPreview")?.innerHTML = """
-            <div style="text-align: center; padding: 40px; color: #9ca3af;">
-                Please select a buying date and Rixo company to view available rows.
-            </div>
-        """
-        document.getElementById("selectedCount")?.textContent = "Selected: 0 of 0"
+
+    if (buyingDate.isEmpty()) {
+        setRixoRowsPreviewEmptyMessage("Please select a buying date and Rixo company to view available rows.")
         return
     }
-    
-    // Convert ISO date to database format
+
     val formattedDate = formatWithWeekday(buyingDate)
-    
+
+    if (rixoCompany.isEmpty()) {
+        window.fetch(apiUrl("purchases")).then { response ->
+            if (response.ok) {
+                response.json().then { allPurchases ->
+                    val purchasesArray = allPurchases as Array<dynamic>
+                    val anyForDate = hasAnyRixoPendingPurchaseForDate(purchasesArray, formattedDate)
+                    val message = if (anyForDate) {
+                        "Please select a buying date and Rixo company to view available rows."
+                    } else {
+                        "(No Car is Found)"
+                    }
+                    setRixoRowsPreviewEmptyMessage(message)
+                }
+            }
+        }
+        return
+    }
+
     window.fetch(apiUrl("purchases")).then { response ->
         if (response.ok) {
             response.json().then { allPurchases ->
                 val purchasesArray = allPurchases as Array<dynamic>
                 val matchingPurchases = mutableListOf<dynamic>()
-                
+
                 for (purchase in purchasesArray) {
                     val date = js("purchase.date")?.toString() ?: ""
                     val rixoRequested = js("purchase.rixoRequested")?.toString() ?: "FALSE"
                     val company = js("purchase.rixoCompany")?.toString() ?: ""
-                    
+
                     // Only include purchases from the selected date and company where rixoRequested is FALSE
                     if (date == formattedDate && company == rixoCompany && rixoRequested == "FALSE") {
                         matchingPurchases.add(purchase)
                     }
                 }
-                
+
                 renderRixoRowsPreview(matchingPurchases)
             }
         }
@@ -15662,12 +16949,7 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
     val selectedCount = document.getElementById("selectedCount") ?: return
     
     if (purchases.isEmpty()) {
-        preview.innerHTML = """
-            <div style="text-align: center; padding: 40px; color: #9ca3af;">
-                No rows found for the selected date and Rixo company.
-            </div>
-        """
-        selectedCount.textContent = "Selected: 0 of 0"
+        setRixoRowsPreviewEmptyMessage("(No Car is Found)")
         return
     }
     
@@ -15792,7 +17074,10 @@ fun showRixoRefreshPopup() {
     val html = """
         <div id="rixoRefreshPopupOverlay" class="rixo-refresh-popup-overlay">
             <div class="rixo-refresh-popup-box">
-                <p class="rixo-refresh-popup-text">New data is available. Refresh the page to load the latest content.</p>
+                <p class="rixo-refresh-popup-text">New data may be available. Refresh the table to load the latest data.</p>
+                <div class="rixo-refresh-popup-actions">
+                    <button type="button" id="rixoRefreshTableBtn" class="rixo-refresh-popup-btn">Refresh Table</button>
+                </div>
             </div>
         </div>
     """
@@ -15801,6 +17086,11 @@ fun showRixoRefreshPopup() {
     fun closePopup() {
         document.getElementById("rixoRefreshPopupOverlay")?.remove()
     }
+    document.getElementById("rixoRefreshTableBtn")?.addEventListener("click", { ev: Event ->
+        ev.stopPropagation()
+        loadRowsForDateAndCompany()
+        closePopup()
+    })
     overlay?.addEventListener("click", { event: Event ->
         if ((event.target as? HTMLElement)?.id == "rixoRefreshPopupOverlay") closePopup()
     })
@@ -15835,8 +17125,8 @@ fun updateSelectAllRixoCheckbox() {
     }
 }
 
-// Generate Rixo Request PDF
-fun generateRixoRequestPdf() {
+// Generate Rixo Request PDF (preview = open same PDF in new tab; false = download)
+fun generateRixoRequestPdf(preview: Boolean = false) {
     val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
     val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
     val headMessage = (document.getElementById("headMessage") as HTMLTextAreaElement).value
@@ -15882,14 +17172,27 @@ fun generateRixoRequestPdf() {
                 }
                 
                 // Generate PDF using backend API
-                generateRixoRequestPdfViaBackend(selectedPurchases, buyingDate, rixoCompany, headMessage, footerMessage, extraMessage, contactDetails, selectedIds)
+                generateRixoRequestPdfViaBackend(
+                    selectedPurchases, buyingDate, rixoCompany, headMessage, footerMessage, extraMessage, contactDetails, selectedIds,
+                    preview = preview
+                )
             }
         }
     }
 }
 
 // Generate PDF using backend API
-fun generateRixoRequestPdfViaBackend(purchases: List<dynamic>, buyingDate: String, rixoCompany: String, headMessage: String, footerMessage: String, extraMessage: String, contactDetails: String, selectedIds: List<Long>) {
+fun generateRixoRequestPdfViaBackend(
+    purchases: List<dynamic>,
+    buyingDate: String,
+    rixoCompany: String,
+    headMessage: String,
+    footerMessage: String,
+    extraMessage: String,
+    contactDetails: String,
+    selectedIds: List<Long>,
+    preview: Boolean = false,
+) {
     console.log("🔧 [DEBUG] generateRixoRequestPdfViaBackend called with selectedIds:", selectedIds)
     
     // Prepare transport data
@@ -15923,25 +17226,42 @@ fun generateRixoRequestPdfViaBackend(purchases: List<dynamic>, buyingDate: Strin
     window.fetch(apiUrl("purchases/rixo-transport-pdf"), requestInit).then { response ->
         if (response.ok) {
             response.blob().then { blob ->
-                // Create download link
                 val url = js("URL.createObjectURL(blob)") as String
-                val a = document.createElement("a") as HTMLAnchorElement
-                a.href = url
-                a.setAttribute("download", "rixo-transport-${js("Date.now()")}.pdf")
-                document.body?.appendChild(a)
-                a.click()
-                document.body?.removeChild(a)
-                        // Revoke URL after download completes
+                if (preview) {
+                    val opened = window.open(url, "_blank")
+                    val blocked = js("(opened == null || typeof opened === 'undefined')") as Boolean
+                    if (blocked) {
+                        showMessage("Could not open preview. Allow pop-ups for this site, or use Print to download the PDF.", "error")
+                        try {
+                            js("URL.revokeObjectURL(url)")
+                        } catch (_: dynamic) {
+                        }
+                    } else {
                         window.setTimeout({
                             try {
-                js("URL.revokeObjectURL(url)")
+                                js("URL.revokeObjectURL(url)")
                             } catch (e: dynamic) {
-                                Logger.warn("Failed to revoke URL: ${e.toString()}")
+                                Logger.warn("Failed to revoke preview URL: ${e.toString()}")
                             }
-                        }, AppConstants.URL_REVOKE_DELAY_SHORT)
-                
-                // Client sets Rixo Requested manually (e.g. after faxing PDF to Rixo company)
-                showMessage("PDF downloaded successfully. Set Rixo Requested to TRUE manually when you have faxed the PDF.", "success")
+                        }, 120000)
+                        showMessage("PDF preview opened in a new tab.", "success")
+                    }
+                } else {
+                    val a = document.createElement("a") as HTMLAnchorElement
+                    a.href = url
+                    a.setAttribute("download", "rixo-transport-${js("Date.now()")}.pdf")
+                    document.body?.appendChild(a)
+                    a.click()
+                    document.body?.removeChild(a)
+                    window.setTimeout({
+                        try {
+                            js("URL.revokeObjectURL(url)")
+                        } catch (e: dynamic) {
+                            Logger.warn("Failed to revoke URL: ${e.toString()}")
+                        }
+                    }, AppConstants.URL_REVOKE_DELAY_SHORT)
+                    showMessage("PDF downloaded successfully. Set Rixo Requested to TRUE manually when you have faxed the PDF.", "success")
+                }
             }.catch { error ->
                 console.error("❌ Error processing blob:", error)
                 showMessage("Error processing PDF: ${error.toString()}", "error")
@@ -17663,11 +18983,6 @@ fun selectClientGlobal(clientId: Long) {
     selectClient(clientId)
 }
 
-@JsName("editClient")
-fun editClientGlobal(clientId: Long) {
-    editClient(clientId)
-}
-
 @JsName("addClientTransaction")
 fun addClientTransactionGlobal(clientId: Long) {
     addClientTransaction(clientId)
@@ -18015,55 +19330,7 @@ fun populateColumnCheckboxes(selectedColumns: Set<String>) {
     val container = document.getElementById("columnCheckboxes")
     if (container == null) return
     
-    val allColumns = mapOf(
-        "date" to "Purchase Date",
-        "chassis" to "Chassis",
-        "carName" to "Car Name",
-        "auctionHouse" to "Supplier Name",
-        "stockLocation" to "Stock Location",
-        "clientName" to "Client Name",
-        "rixoCompany" to "Rixo Company",
-        "price" to "Car Price",
-        "carModelYear" to "Production Date",
-        "brand" to "Brand",
-        "grade" to "Grade",
-        "rank" to "Rank",
-        "color" to "Color",
-        "fuel" to "Fuel",
-        "seat" to "Seat",
-        "door" to "Door",
-        "distance" to "Distance",
-        "options" to "Options",
-        "auctionNo" to "Auction No",
-        "country" to "Target Country",
-        "auctionFee" to "Auction Fee",
-        "recycleFee" to "Recycle Fee",
-        "roadTax" to "Road Tax",
-        "totalPrice" to "Total Price",
-        "paymentDate" to "Payment Date",
-        "rixoRequested" to "Rixo Requested",
-        "rixoConfirmed" to "Rixo Confirmed",
-        "rixoPrice" to "Rixo Price",
-        "shipmentDate" to "Shipment Date",
-        "blNo" to "BL No",
-        "vesselNo" to "Vessel No",
-        "destination" to "Destination",
-        "shipmentCharges" to "Shipment Charges",
-        "freight" to "Freight",
-        "storageCharges" to "Storage Charges",
-        "miscCharges" to "Misc Charges",
-        "inspectionFee" to "Inspection Fee",
-        "commission" to "Commission",
-        "repairCompany" to "Repair Company",
-        "repairCharges" to "Repair Charges",
-        "venueId" to "Venue ID",
-        "shipmentSize" to "Vehicle type",
-        "numberCut" to "Number Cut",
-        "taxTotal" to "Tax Total",
-        "profit" to "Profit",
-        "bookingId" to "Booking ID",
-        "notes" to "Notes"
-    )
+    val allColumns = purchaseListColumnLabels().entries.sortedBy { it.value.lowercase() }
     
     container.innerHTML = allColumns.map { (key, label) ->
         val isChecked = selectedColumns.contains(key)
@@ -18089,7 +19356,7 @@ fun updateColumnSelection() {
     
     // Get current device type and max columns
     val deviceType = getDeviceType()
-    val maxColumns = getMaxColumnsForDevice(deviceType)
+    val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
     
     // Update count display with device-specific limit (only 2 numbers: selected/max)
     val countElement = document.getElementById("selectedCount")
@@ -18118,20 +19385,20 @@ fun getDefaultColumns(): Set<String> {
     return defaultColumns.toSet()
 }
 
-fun saveSelectedColumns(columns: Set<String>) {
+fun saveSelectedColumns(columns: List<String>) {
     safeLocalStorageSet("selectedColumns", JSON.stringify(columns.toTypedArray()))
 }
 
 fun resetToDefaultColumns() {
-    val defaultColumns = getDefaultColumns()
-    saveSelectedColumns(defaultColumns)
-    populateColumnCheckboxes(defaultColumns)
+    val ordered = prioritizePurchaseListDateAndChassis(getDefaultColumnsForDevice())
+    saveSelectedColumns(ordered)
+    populateColumnCheckboxes(ordered.toSet())
     updateColumnSelection()
 }
 
 fun applyColumnChanges() {
     val checkboxes = document.querySelectorAll("#columnCheckboxes input[type='checkbox']")
-    val selectedColumns = mutableSetOf<String>()
+    val selectedColumns = mutableListOf<String>()
     
     for (i in 0 until checkboxes.length) {
         val checkbox = checkboxes.item(i) as HTMLInputElement
@@ -18140,12 +19407,14 @@ fun applyColumnChanges() {
         }
     }
     
+    val ordered = prioritizePurchaseListDateAndChassis(selectedColumns)
+    
     // Get current device type and max columns
     val deviceType = getDeviceType()
-    val maxColumns = getMaxColumnsForDevice(deviceType)
+    val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
     
     // Validate against device-specific limit
-    if (selectedColumns.size > maxColumns) {
+    if (ordered.size > maxColumns) {
         val deviceDisplayName = when (deviceType) {
             "mobile" -> "mobile"
             "tablet" -> "tablet"
@@ -18155,8 +19424,8 @@ fun applyColumnChanges() {
         return
     }
     
-    // Save selected columns
-    saveSelectedColumns(selectedColumns)
+    // Save selected columns (date & chassis pinned left in stored order)
+    saveSelectedColumns(ordered)
     closeColumnFilterModal()
     // Call loadPurchases from PurchaseManagement.kt - expose it globally if needed
     js("""
@@ -19054,7 +20323,7 @@ fun saveCarCostDetailsAndNavigate() {
 // loadMasterCarBrands, loadMasterBankAccounts, loadMasterVenueIds
 
 // showAddClientModal moved to MasterList.kt
-// Consignee functions moved to MasterList.kt: showAddConsigneeModal, showConsigneeModal, loadConsigneeDataForEdit, saveConsignee
+// Consignee functions moved to MasterList.kt: showAddConsigneeModal, showConsigneeModal, duplicateMasterConsignee, loadConsigneeDataForEdit, saveConsignee
 
 // ========== Car Brands Master List Functions ==========
 

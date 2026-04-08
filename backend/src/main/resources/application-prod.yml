@@ -7,6 +7,11 @@
 # - sql.init.mode: never = Spring will NOT run schema.sql/data.sql on startup.
 #   We do not use these files, but setting "never" avoids any future mistake.
 spring:
+  flyway:
+    # Existing RDS already has schema/data: first deploy baseline at V1 so this script is not re-run.
+    # Fresh empty DB: no baseline; Flyway runs V1__init_multiplatform.sql.
+    baseline-on-migrate: true
+    baseline-version: 1
   jpa:
     hibernate:
       ddl-auto: validate

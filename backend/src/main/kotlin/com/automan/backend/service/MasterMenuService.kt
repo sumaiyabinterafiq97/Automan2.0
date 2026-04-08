@@ -29,17 +29,6 @@ class MasterMenuService(
         return getAllFieldNames()
     }
 
-    fun deleteField(fieldName: String): List<String> {
-        val normalized = normalizeFieldName(fieldName) ?: return getAllFieldNames()
-        if (!masterMenuRepository.existsByFieldNameIgnoreCase(normalized)) {
-            return getAllFieldNames()
-        }
-        masterMenuRepository.deleteByFieldNameIgnoreCase(normalized)
-        Logger.debug("MasterMenuService.deleteField: deleted field='%s'", normalized)
-        return getAllFieldNames()
-    }
-
-
     private fun getDelimiter(fieldName: String): Char {
         return if (fieldName.equals("bank_accounts", ignoreCase = true)) ';' else ','
     }

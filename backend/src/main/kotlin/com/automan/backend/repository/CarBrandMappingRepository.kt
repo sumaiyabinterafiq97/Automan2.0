@@ -27,11 +27,11 @@ interface CarBrandMappingRepository : JpaRepository<CarBrandMapping, Long> {
     @Query("SELECT DISTINCT c.shift FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.shift IS NOT NULL AND c.shift != '' ORDER BY c.shift")
     fun findDistinctShiftByCarBrand(@Param("carBrand") carBrand: String): List<String>
     
-    @Query("SELECT DISTINCT c.cc FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.cc IS NOT NULL ORDER BY c.cc")
-    fun findDistinctCcByCarBrand(@Param("carBrand") carBrand: String): List<Int>
+    @Query("SELECT DISTINCT c.cc FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.cc IS NOT NULL AND c.cc != '' ORDER BY c.cc")
+    fun findDistinctCcByCarBrand(@Param("carBrand") carBrand: String): List<String>
     
-    @Query("SELECT DISTINCT c.door FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.door IS NOT NULL ORDER BY c.door")
-    fun findDistinctDoorByCarBrand(@Param("carBrand") carBrand: String): List<Int>
+    @Query("SELECT DISTINCT c.door FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.door IS NOT NULL AND c.door != '' ORDER BY c.door")
+    fun findDistinctDoorByCarBrand(@Param("carBrand") carBrand: String): List<String>
     
     @Query("SELECT DISTINCT c.grade FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.grade IS NOT NULL AND c.grade != '' ORDER BY c.grade")
     fun findDistinctGradeByCarBrand(@Param("carBrand") carBrand: String): List<String>

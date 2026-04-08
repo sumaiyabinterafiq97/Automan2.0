@@ -1,6 +1,11 @@
 spring:
+  flyway:
+    # Docker MySQL is pre-seeded by database/01-init-multiplatform.sql before Flyway runs;
+    # without baseline, Flyway refuses non-empty schemas with no flyway_schema_history.
+    baseline-on-migrate: true
+    baseline-version: 1
   datasource:
-    url: jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    url: jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&zeroDateTimeBehavior=convertToNull&jdbcCompliantTruncation=false
     username: ${SPRING_DATASOURCE_USERNAME:automan_user}
     password: ${SPRING_DATASOURCE_PASSWORD:automan_password}
     driver-class-name: com.mysql.cj.jdbc.Driver

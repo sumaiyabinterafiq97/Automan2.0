@@ -184,6 +184,33 @@ class PurchaseController(
         }
     }
 
+    @PostMapping("/save-total-fob-by-ids")
+    fun saveTotalFobPriceByPurchaseIds(@RequestBody requestData: Map<String, Any>): ResponseEntity<Map<String, String>> {
+        return try {
+            val purchaseIds = (requestData["purchaseIds"] as? List<*>)?.mapNotNull {
+                when (it) {
+                    is Number -> it.toLong()
+                    is String -> it.toLongOrNull()
+                    else -> null
+                }
+            } ?: emptyList()
+            val totalFobPrice = (requestData["totalFobPrice"] as? Number)?.toDouble() ?: 0.0
+
+            Logger.debug("Saving total FOB price by purchase IDs - purchaseIds: $purchaseIds, totalFobPrice: $totalFobPrice")
+
+            purchaseService.saveTotalFobPriceByPurchaseIds(purchaseIds, totalFobPrice)
+
+            ResponseEntity.ok(
+                mapOf(
+                    "message" to "Total FOB price saved successfully",
+                    "count" to purchaseIds.size.toString(),
+                    "totalFobPrice" to totalFobPrice.toString()
+                )
+            )
+        } catch (e: Exception) {
+            ResponseEntity.status(500).body(mapOf("error" to "Failed to save total FOB price: ${e.message}"))
+        }
+    }
 
     @PutMapping("/save-fob-costs")
     fun saveFobCarCostDetails(@RequestBody costData: Map<String, Any>): ResponseEntity<Map<String, String>> {

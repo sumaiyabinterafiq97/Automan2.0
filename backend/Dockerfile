@@ -32,9 +32,9 @@ EXPOSE 8083
 ENV SPRING_PROFILES_ACTIVE=docker
 # Note: Database credentials should be provided via docker-compose environment variables, not hardcoded here
 
-# Health check - hit an existing public endpoint
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8083/api/purchases || exit 1
+# Health check — actuator (no auth); avoids false failures if /purchases behavior changes
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD curl -f http://localhost:8083/api/actuator/health || exit 1
 
 # Run the application
 CMD ["java", "-jar", "app.jar"]

@@ -2,16 +2,15 @@ package com.automan.backend.repository
 
 import com.automan.backend.model.RixoPrice
 import org.springframework.data.jpa.repository.JpaRepository
-import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
-import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
-import org.springframework.transaction.annotation.Transactional
 
 @Repository
 interface RixoPriceRepository : JpaRepository<RixoPrice, Long> {
     
     fun findByAuctionHouse(auctionHouse: String): List<RixoPrice>
+
+    fun findFirstByAuctionHouseIgnoreCase(auctionHouse: String): RixoPrice?
     
     fun findByStockLocation(stockLocation: String): List<RixoPrice>
     
@@ -25,15 +24,4 @@ interface RixoPriceRepository : JpaRepository<RixoPrice, Long> {
     
     @Query("SELECT DISTINCT r.rixoCompany FROM RixoPrice r ORDER BY r.rixoCompany")
     fun findDistinctRixoCompanies(): List<String>
-    
-    @Query("SELECT DISTINCT r.rixoPrice FROM RixoPrice r WHERE r.rixoPrice IS NOT NULL ORDER BY r.rixoPrice")
-    fun findDistinctRixoPrices(): List<String>
-    
-    @Modifying
-    @Transactional
-    @Query(
-        value = "UPDATE rixo_prices SET auction_house = :auctionHouse WHERE id = :id",
-        nativeQuery = true
-    )
-    fun updateAuctionHouse(@Param("id") id: Long, @Param("auctionHouse") auctionHouse: String)
 }

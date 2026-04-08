@@ -3,8 +3,10 @@ package com.automan.backend.service
 import com.automan.backend.model.RixoPrice
 import com.automan.backend.repository.RixoPriceRepository
 import com.automan.backend.util.Logger
-import jakarta.persistence.EntityManager
+import com.automan.backend.util.RixoPolFromStockLocation
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -12,8 +14,7 @@ import java.io.InputStreamReader
 @Service
 class RixoImportService(
     private val rixoPriceRepository: RixoPriceRepository,
-    private val entityManager: EntityManager,
-    private val rixoMappingInsertService: RixoMappingInsertService
+    private val jdbcTemplate: JdbcTemplate
 ) {
     
     fun importRixoPricesFromCsv(csvContent: String): ImportResult {
@@ -36,22 +37,34 @@ class RixoImportService(
             dataLines.forEachIndexed { index, line ->
                 try {
                     val values = parseCsvLine(line)
-                    if (values.size >= 6) {
-                        val stockLoc = values[2].trim()
-                        val rixoPrice = RixoPrice(
+                    // 4 cols: auction, stock, company, venue — OR legacy 5 cols: auction, (vehicle type ignored), stock, company, venue
+                    val parsed = when {
+                        values.size >= 5 -> ParsedRixoCsvRow(
                             auctionHouse = values[0].trim(),
-                            shipmentSize = values[1].trim().takeIf { it.isNotEmpty() },
-                            stockLocation = stockLoc,
+                            stockLocation = values[2].trim(),
                             rixoCompany = values[3].trim(),
-                            venueId = values[4].trim().takeIf { it.isNotEmpty() },
-                            rixoPrice = values[5].trim().takeIf { it.isNotEmpty() },
-                            pol = if (values.size >= 7) values[6].trim().takeIf { it.isNotEmpty() } else polFromStockLocation(stockLoc)
+                            venueId = values[4].trim().takeIf { it.isNotEmpty() }
                         )
-                        
+                        values.size >= 4 -> ParsedRixoCsvRow(
+                            auctionHouse = values[0].trim(),
+                            stockLocation = values[1].trim(),
+                            rixoCompany = values[2].trim(),
+                            venueId = values[3].trim().takeIf { it.isNotEmpty() }
+                        )
+                        else -> null
+                    }
+                    if (parsed != null) {
+                        val rixoPrice = RixoPrice(
+                            auctionHouse = parsed.auctionHouse,
+                            stockLocation = parsed.stockLocation,
+                            rixoCompany = parsed.rixoCompany,
+                            venueId = parsed.venueId,
+                            pol = RixoPolFromStockLocation.derivePol(parsed.stockLocation)
+                        )
                         rixoPriceRepository.save(rixoPrice)
                         successCount++
                     } else {
-                        errors.add("Line ${index + 2}: Insufficient columns (expected 6, got ${values.size})")
+                        errors.add("Line ${index + 2}: Insufficient columns (expected 4+, got ${values.size})")
                         errorCount++
                     }
                 } catch (e: Exception) {
@@ -112,8 +125,33 @@ class RixoImportService(
         return result
     }
     
+    @Transactional(readOnly = true)
     fun getAllRixoPrices(): List<RixoPrice> {
         return rixoPriceRepository.findAll()
+    }
+
+    /**
+     * Supplier map and similar UIs use this path so we never rely on Hibernate-generated SQL for
+     * rixo_prices (avoids 500s when the DB was trimmed, e.g. no type_of_vehicle).
+     */
+    @Transactional(readOnly = true)
+    fun getAllRixoPricesAsMaps(): List<Map<String, Any>> {
+        val sql = """
+            SELECT id, auction_name, stock_location, rixo_company, venue_id, pol
+            FROM rixo_prices
+            ORDER BY id DESC
+        """.trimIndent()
+        return jdbcTemplate.query(sql) { rs, _ ->
+            buildMap {
+                put("id", rs.getLong("id"))
+                put("auctionHouse", rs.getString("auction_name").orEmpty())
+                put("shipmentSize", "")
+                put("stockLocation", rs.getString("stock_location").orEmpty())
+                put("rixoCompany", rs.getString("rixo_company").orEmpty())
+                put("venueId", rs.getString("venue_id").orEmpty())
+                put("pol", rs.getString("pol").orEmpty())
+            }
+        }
     }
     
     fun getDistinctAuctionHouses(): List<String> {
@@ -128,9 +166,8 @@ class RixoImportService(
         return rixoPriceRepository.findDistinctRixoCompanies()
     }
     
-    fun getDistinctRixoPrices(): List<String> {
-        return rixoPriceRepository.findDistinctRixoPrices()
-    }
+    /** No price column on rixo_prices; vehicle types live in master_menu. */
+    fun getDistinctRixoPrices(): List<String> = emptyList()
     
     fun getRixoPricesByAuctionHouse(auctionHouse: String): List<RixoPrice> {
         return rixoPriceRepository.findByAuctionHouse(auctionHouse)
@@ -138,51 +175,55 @@ class RixoImportService(
     
     // New CRUD methods for inline mapping management
     fun saveRixoPrice(rixoPrice: RixoPrice): RixoPrice {
-        val saved = rixoPriceRepository.save(rixoPrice)
-        if (saved.id > 0) {
-            try {
-                // Try to update auction_house to match auction_name using native query.
-                // On older schemas (e.g., some AWS environments) where auction_house might not exist,
-                // this native update can fail with "Unknown column" – in that case we just log and continue.
-                rixoPriceRepository.updateAuctionHouse(saved.id, saved.auctionHouse)
-                return rixoPriceRepository.findById(saved.id).orElse(saved)
-            } catch (e: Exception) {
-                Logger.warn("RIXO saveRixoPrice: failed to update auction_house column for id=${saved.id}: ${e.message}")
-                return saved
-            }
-        }
-        return saved
+        return rixoPriceRepository.save(rixoPrice)
     }
     
     /**
-     * Saves a rixo mapping. Tries INSERT with auction_house first (for schemas that have it);
-     * on failure (e.g. AWS with older schema without auction_house), retries in a new transaction
-     * without auction_house so the outer flow is not marked rollback-only.
-     * POL is derived from stock_location when not provided.
+     * Inserts a new row or, if [auctionHouse] already exists (case-insensitive), merges
+     * stock / company / venue tokens into the existing row (semicolon/comma-separated, deduped).
+     * [pol] is always derived from merged stock locations via [RixoPolFromStockLocation].
      */
+    @Transactional
     fun saveRixoPriceWithAuctionHouse(
         auctionHouse: String,
-        shipmentSize: String?,
         stockLocation: String,
         rixoCompany: String,
-        rixoPrice: String?,
-        venueId: String?,
-        pol: String? = null
-    ): RixoPrice {
-        val id = try {
-            rixoMappingInsertService.insertWithAuctionHouse(
-                auctionHouse, shipmentSize, stockLocation, rixoCompany, rixoPrice, venueId, pol
+        venueId: String?
+    ): SaveRixoMappingResult {
+        val auction = auctionHouse.trim()
+        val incomingStock = stockLocation.trim().ifBlank { "-" }
+        val incomingRixo = rixoCompany.trim().ifBlank { "-" }
+        val incomingVenue = venueId?.trim()?.takeIf { it.isNotBlank() }
+
+        val existing = rixoPriceRepository.findFirstByAuctionHouseIgnoreCase(auction)
+            ?: rixoPriceRepository.findByAuctionHouse(auction).firstOrNull()
+
+        if (existing != null) {
+            val mergedStock = mergeSemicolonRequired(existing.stockLocation, incomingStock)
+            val mergedRixo = mergeSemicolonRequired(existing.rixoCompany, incomingRixo)
+            val mergedVenue = mergeSemicolonNullable(existing.venueId, incomingVenue)
+            val derivedPol = RixoPolFromStockLocation.derivePol(mergedStock)
+            val updated = existing.copy(
+                stockLocation = mergedStock,
+                rixoCompany = mergedRixo,
+                venueId = mergedVenue,
+                pol = derivedPol,
+                createdAt = existing.createdAt
             )
-        } catch (e: Exception) {
-            // First insert failed (e.g. Unknown column 'auction_house', or schema differs on AWS).
-            // Retry without auction_house in a new transaction so we don't mark any transaction rollback-only.
-            rixoMappingInsertService.insertWithoutAuctionHouse(
-                auctionHouse, shipmentSize, stockLocation, rixoCompany, rixoPrice, venueId, pol
+            val saved = rixoPriceRepository.save(updated)
+            return SaveRixoMappingResult(price = saved, merged = true)
+        }
+
+        val saved = rixoPriceRepository.save(
+            RixoPrice(
+                auctionHouse = auction,
+                stockLocation = incomingStock,
+                rixoCompany = incomingRixo,
+                venueId = incomingVenue,
+                pol = RixoPolFromStockLocation.derivePol(incomingStock)
             )
-        }
-        return rixoPriceRepository.findById(id).orElseThrow {
-            IllegalStateException("Failed to retrieve inserted RixoPrice with id: $id")
-        }
+        )
+        return SaveRixoMappingResult(price = saved, merged = false)
     }
     
     fun getRixoPriceById(id: Long): RixoPrice? {
@@ -193,22 +234,45 @@ class RixoImportService(
         rixoPriceRepository.deleteById(id)
     }
 
-    /** POL from stock_location mapping (same as RixoMappingInsertService). */
-    private fun polFromStockLocation(stockLocation: String): String? {
-        val s = stockLocation.trim()
-        return when {
-            s.startsWith("GLOBAL KAWASAKI", ignoreCase = true) -> "YOKOHAMA"
-            s.equals("AQUA LOGISTICS", ignoreCase = true) -> "YOKOHAMA"
-            s.startsWith("GLOBAL NAGOYA", ignoreCase = true) -> "NAGOYA"
-            s.equals("FLASHRISE", ignoreCase = true) -> "NAGOYA"
-            s.equals("KLC", ignoreCase = true) -> "OSAKA"
-            s.startsWith("GLOBAL HAKATA", ignoreCase = true) -> "HAKATA"
-            s.equals("BARAKI PARKING", ignoreCase = true) -> "---"
-            s.equals("LOCAL", ignoreCase = true) -> "---"
-            else -> null
+    private fun semicolonTokens(raw: String): List<String> =
+        raw.split(';', ',').map { it.trim() }.filter { it.isNotEmpty() && it != "-" }
+
+    /** Preserves order: existing tokens first, then new; dedupes case-insensitively. */
+    private fun mergeSemicolonRequired(existing: String, incoming: String): String {
+        val merged = linkedMapOf<String, String>()
+        fun addFrom(s: String) {
+            for (t in semicolonTokens(s)) {
+                val key = t.lowercase()
+                if (!merged.containsKey(key)) merged[key] = t
+            }
         }
+        addFrom(existing)
+        addFrom(incoming)
+        val out = merged.values.joinToString(";")
+        return out.ifBlank { "-" }
+    }
+
+    private fun mergeSemicolonNullable(existing: String?, incoming: String?): String? {
+        val merged = linkedMapOf<String, String>()
+        fun addFrom(s: String?) {
+            if (s.isNullOrBlank()) return
+            for (t in semicolonTokens(s)) {
+                val key = t.lowercase()
+                if (!merged.containsKey(key)) merged[key] = t
+            }
+        }
+        addFrom(existing)
+        addFrom(incoming)
+        return merged.values.joinToString(";").takeIf { it.isNotBlank() }
     }
 }
+
+private data class ParsedRixoCsvRow(
+    val auctionHouse: String,
+    val stockLocation: String,
+    val rixoCompany: String,
+    val venueId: String?
+)
 
 data class ImportResult(
     val success: Boolean,
@@ -216,4 +280,9 @@ data class ImportResult(
     val successCount: Int,
     val errorCount: Int,
     val errors: List<String>? = null
+)
+
+data class SaveRixoMappingResult(
+    val price: RixoPrice,
+    val merged: Boolean
 )

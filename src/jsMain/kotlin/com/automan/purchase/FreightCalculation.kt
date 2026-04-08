@@ -503,6 +503,10 @@ fun confirmFreightCalculation() {
     Logger.debug("Stored in globalFreightValues (Kotlin): ${globalFreightValues.size} items")
     Logger.debug("Stored in window.globalFreightValues (JS)")
     
+    lastCalculationMode = "C&F"
+    js("window.lastCalculationMode = 'C&F'")
+    Logger.debug("Set lastCalculationMode to C&F (freight calculated)")
+    
     // Navigate back to C&F Calculation page with freight values
     Logger.debug("Returning to C&F Calculation page with freight values...")
     val selectedCars = cnfPageSelectedCars
