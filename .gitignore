@@ -280,3 +280,6 @@ automan-single-image-fixed/automan-complete-fresh.tar
 # AWS Deployment Guides (keep local only, not in repo)
 AWS-FREE-TIER-DEPLOYMENT-GUIDE.md
 AWS-DEPLOYMENT-GUIDE.md
+
+# Flyway SQL migrations — keep local only; not published to GitHub
+backend/src/main/resources/db/migration/
