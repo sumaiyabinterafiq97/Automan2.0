@@ -529,28 +529,28 @@ fun handleAddClientSubmit() {
         it.disabled = true
         it.textContent = "Adding..."
     }
-
-    val requestOptions = js("{}")
-    requestOptions["method"] = "POST"
-    requestOptions["headers"] = js("{\"Content-Type\": \"application/json\"}")
-    requestOptions["body"] = JSON.stringify(clientData)
-
-    window.fetch(apiUrl("clients"), requestOptions)
-        .then { response ->
-            if (response.ok) {
-                showMessage("Client added successfully!", "success")
-                closeAddClientModal()
-                showClientAccountsPage()
-            } else {
-                response.text().then { errorText ->
-                    showMessage("Failed to add client: $errorText", "error")
+            
+            val requestOptions = js("{}")
+            requestOptions["method"] = "POST"
+            requestOptions["headers"] = js("{\"Content-Type\": \"application/json\"}")
+            requestOptions["body"] = JSON.stringify(clientData)
+            
+            window.fetch(apiUrl("clients"), requestOptions)
+                .then { response ->
+                    if (response.ok) {
+                        showMessage("Client added successfully!", "success")
+                        closeAddClientModal()
+                        showClientAccountsPage()
+                    } else {
+                        response.text().then { errorText ->
+                            showMessage("Failed to add client: $errorText", "error")
+                        }
+                    }
                 }
-            }
-        }
-        .catch { error ->
-            showMessage("Error adding client: $error", "error")
-        }
-        .finally {
+                .catch { error ->
+                    showMessage("Error adding client: $error", "error")
+                }
+                .finally {
             submitBtn?.let {
                 it.disabled = false
                 it.textContent = "Add Client"
@@ -624,7 +624,7 @@ private fun populateClientNameOptions(selectId: String, selectedValue: String?) 
         }
         .catch { error: dynamic ->
             Logger.error("Failed to populate client-name options: ${error.toString()}")
-        }
+    }
 }
 
 fun addClientTransaction(clientId: Long) {
