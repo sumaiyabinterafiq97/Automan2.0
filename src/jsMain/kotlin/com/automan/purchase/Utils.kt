@@ -1,14 +1,29 @@
 package com.automan.purchase
 
+import com.automan.purchase.models.PurchaseResponse
 import kotlinx.browser.document
 import kotlinx.browser.window
 import org.w3c.dom.HTMLInputElement
+
+/** Invoice line amount when CNF/FOB totals are not stored on the purchase row. */
+fun purchaseInvoiceLineAmountYenFromDynamic(purchase: dynamic): Double {
+    val p = purchase
+    val tp = p.totalPrice?.toString()?.replace("¥", "")?.replace(",", "")?.trim()?.toDoubleOrNull()
+    if (tp != null && tp > 0) return tp
+    return p.price?.toString()?.replace("¥", "")?.replace(",", "")?.trim()?.toDoubleOrNull() ?: 0.0
+}
+
+fun purchaseInvoiceLineAmountYenFromResponse(purchase: PurchaseResponse): Double {
+    val tp = purchase.totalPrice?.replace("¥", "")?.replace(",", "")?.trim()?.toDoubleOrNull()
+    if (tp != null && tp > 0) return tp
+    return purchase.price?.replace("¥", "")?.replace(",", "")?.trim()?.toDoubleOrNull() ?: 0.0
+}
 
 /**
  * Escape HTML to prevent XSS attacks
  */
 fun escapeHtml(text: String?): String {
-    if (text == null || text.isEmpty()) return ""
+    if (text == null || text.length == 0) return ""
     return text
         .replace("&", "&amp;")
         .replace("<", "&lt;")
@@ -36,7 +51,7 @@ fun splitSemicolonDistinctTokens(raw: String): List<String> {
 fun splitMultiValueDisplayTokens(raw: String): List<String> {
     val out = mutableListOf<String>()
     val seen = HashSet<String>()
-    if (raw.isBlank()) return out
+    if (raw.trim().length == 0) return out
     raw.replace("\r\n", "\n")
         .replace('\r', '\n')
         .split(Regex("""[,;\n]+"""))
@@ -54,7 +69,7 @@ fun splitMultiValueDisplayTokens(raw: String): List<String> {
  * Do not use [normalizeStoredListForChips] here — it splits on commas and creates false extra chips.
  */
 fun normalizeBankInfoForChips(raw: String): String {
-    if (raw.isBlank()) return ""
+    if (raw.trim().length == 0) return ""
     return raw.replace("\r\n", "\n")
         .replace('\r', '\n')
         .split(Regex("""[;\n]+"""))
@@ -65,7 +80,7 @@ fun normalizeBankInfoForChips(raw: String): String {
 
 /** Prepare stored address text for chip UI: join distinct lines split only by `;` or newlines (commas stay inside one address). */
 fun normalizeMultilineSemicolonListForChips(raw: String): String {
-    if (raw.isBlank()) return ""
+    if (raw.trim().length == 0) return ""
     val seen = HashSet<String>()
     val out = mutableListOf<String>()
     raw.replace("\r\n", "\n")
@@ -84,7 +99,7 @@ fun normalizeMultilineSemicolonListForChips(raw: String): String {
 fun splitSemicolonOnlyDisplayTokens(raw: String): List<String> {
     val out = mutableListOf<String>()
     val seen = HashSet<String>()
-    if (raw.isBlank()) return out
+    if (raw.trim().length == 0) return out
     raw.replace("\r\n", "\n")
         .replace('\r', '\n')
         .split(Regex("""[;\n]+"""))
@@ -97,23 +112,109 @@ fun splitSemicolonOnlyDisplayTokens(raw: String): List<String> {
     return out
 }
 
+private fun singleValueChipSpanHtml(escapedText: String): String =
+    """<span style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:#eff6ff;color:#1e40af;line-height:1.35;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;">$escapedText</span>"""
+
+private fun consigneeMapShadowChipSpanHtml(escapedText: String, wrap: Boolean = false): String {
+    val wrapStyle = if (wrap) "white-space:normal;word-break:break-word;" else "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+    return """<span style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:#f8fafc;color:#111827;line-height:1.35;max-width:100%;box-shadow:0 1px 6px rgba(15,23,42,0.18);$wrapStyle">$escapedText</span>"""
+}
+
+/** Bank info variant must occupy full cell width so very long lines wrap inside the pill on desktop table view. */
+private fun bankInfoShadowChipSpanHtml(escapedText: String): String =
+    """<span style="display:block;width:100%;box-sizing:border-box;padding:6px 10px;border-radius:8px;font-size:12px;font-weight:500;background:#f8fafc;color:#111827;line-height:1.4;max-width:100%;white-space:normal !important;word-break:break-word;overflow-wrap:anywhere;overflow:hidden;box-shadow:0 1px 6px rgba(15,23,42,0.18);">$escapedText</span>"""
+
+/** Consignee Map — address column: black text + subtle shadow chips (professional neutral style). */
+fun formatConsigneeMapAddressChipHtml(displayText: String): String {
+    if (displayText.trim().length == 0) return ""
+    val esc = escapeHtml(displayText)
+    return consigneeMapShadowChipSpanHtml(esc, wrap = true)
+}
+
+/** Consignee Map generic values: black text + subtle shadow for all chips, no multi-color variants. */
+fun formatConsigneeMapValueChipHtml(raw: String): String {
+    val tokens = splitMultiValueDisplayTokens(raw)
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) return consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]))
+    val inner = tokens.joinToString("") { t ->
+        consigneeMapShadowChipSpanHtml(escapeHtml(t))
+    }
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+}
+
+/** Supplier Map generic values: black text + subtle shadow for all chips, no multi-color variants. */
+fun formatSupplierMapValueChipHtml(raw: String): String {
+    val tokens = splitMultiValueDisplayTokens(raw)
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) return consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]))
+    val inner = tokens.joinToString("") { t ->
+        consigneeMapShadowChipSpanHtml(escapeHtml(t))
+    }
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+}
+
+/** Car Brands Map generic values: black text + subtle shadow for all chips, no multi-color variants. */
+fun formatCarBrandMapValueChipHtml(raw: String): String {
+    val tokens = splitMultiValueDisplayTokens(raw)
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) return consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]))
+    val inner = tokens.joinToString("") { t ->
+        consigneeMapShadowChipSpanHtml(escapeHtml(t))
+    }
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+}
+
+/** Client Map generic values: black text + subtle shadow for all chips, no multi-color variants. */
+fun formatClientMapValueChipHtml(raw: String): String {
+    val tokens = splitMultiValueDisplayTokens(raw)
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) return consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]))
+    val inner = tokens.joinToString("") { t ->
+        consigneeMapShadowChipSpanHtml(escapeHtml(t))
+    }
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+}
+
+/** Purchase List — cell values: light blue chip (same as master-map single-token chips). */
+fun formatPurchaseListCellChipHtml(raw: String): String {
+    if (raw.trim().length == 0) return ""
+    val esc = escapeHtml(raw.trim())
+    return """<span class="purchase-list-cell-chip" style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:#eff6ff;color:#1e40af;line-height:1.35;max-width:100%;white-space:normal;word-break:break-word;">$esc</span>"""
+}
+
+/** Purchase List neutral chip style (standard-consignee-chip-style visual language). */
+fun formatPurchaseListNeutralChipHtml(raw: String): String {
+    if (raw.trim().length == 0) return ""
+    val esc = escapeHtml(raw.trim())
+    return """<span class="purchase-list-cell-chip" style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:#f8fafc;color:#111827;line-height:1.35;max-width:100%;white-space:normal;word-break:break-word;box-shadow:0 1px 6px rgba(15,23,42,0.18);">$esc</span>"""
+}
+
+/** Invoice History chassis column: semicolon-separated values → one neutral chip each. */
+fun formatInvoiceHistoryChassisChipsHtml(raw: String): String {
+    if (raw.isBlank()) return ""
+    val tokens = raw.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) return formatPurchaseListNeutralChipHtml(tokens[0])
+    val inner = tokens.joinToString("") { formatPurchaseListNeutralChipHtml(it) }
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+}
+
+/** Distinct values (e.g. grouped Shipping History column) → one neutral chip per value. */
+fun formatDistinctValueChipsHtml(values: List<String>): String {
+    if (values.isEmpty()) return ""
+    if (values.size == 1) return formatPurchaseListNeutralChipHtml(values[0])
+    val inner = values.joinToString("") { formatPurchaseListNeutralChipHtml(it) }
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+}
+
 /** Same chip styling as [formatMultiValueChipCellHtml] but splits only on `;`/newlines (for client map addresses). */
 fun formatMultiValueChipCellHtmlSemicolonOnly(raw: String): String {
     val tokens = splitSemicolonOnlyDisplayTokens(raw)
     if (tokens.isEmpty()) return ""
-    if (tokens.size == 1) return escapeHtml(tokens[0])
-    val palettes = listOf(
-        "#eff6ff" to "#1e40af",
-        "#fff7ed" to "#c2410c",
-        "#f5f3ff" to "#6d28d9",
-        "#ecfdf5" to "#047857",
-        "#fdf2f8" to "#be185d",
-        "#fef3c7" to "#b45309"
-    )
-    val inner = tokens.mapIndexed { i, t ->
-        val (bg, fg) = palettes[i % palettes.size]
-        """<span style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:$bg;color:$fg;line-height:1.35;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(t)}</span>"""
-    }.joinToString("")
+    if (tokens.size == 1) return consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]), wrap = true)
+    val inner = tokens.joinToString("") { t ->
+        consigneeMapShadowChipSpanHtml(escapeHtml(t), wrap = true)
+    }
     return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
 }
 
@@ -122,20 +223,11 @@ fun formatClientMapBankInfoCellHtml(raw: String): String {
     val tokens = splitSemicolonOnlyDisplayTokens(raw)
     if (tokens.isEmpty()) return ""
     if (tokens.size == 1) {
-        return """<div class="client-map-bank-text">${escapeHtml(tokens[0])}</div>"""
+        return """<div class="client-map-bank-text">${bankInfoShadowChipSpanHtml(escapeHtml(tokens[0]))}</div>"""
     }
-    val palettes = listOf(
-        "#eff6ff" to "#1e40af",
-        "#fff7ed" to "#c2410c",
-        "#f5f3ff" to "#6d28d9",
-        "#ecfdf5" to "#047857",
-        "#fdf2f8" to "#be185d",
-        "#fef3c7" to "#b45309"
-    )
-    val inner = tokens.mapIndexed { i, t ->
-        val (bg, fg) = palettes[i % palettes.size]
-        """<span class="client-map-bank-chip" style="background:$bg;color:$fg;">${escapeHtml(t)}</span>"""
-    }.joinToString("")
+    val inner = tokens.joinToString("") { t ->
+        bankInfoShadowChipSpanHtml(escapeHtml(t))
+    }
     return """<div class="client-map-bank-chips">$inner</div>"""
 }
 
@@ -147,20 +239,11 @@ fun formatClientMapConsigneeChipCellHtml(raw: String): String {
     val tokens = splitMultiValueDisplayTokens(raw)
     if (tokens.isEmpty()) return ""
     if (tokens.size == 1) {
-        return """<div class="client-map-consignee-plain">${escapeHtml(tokens[0])}</div>"""
+        return """<span class="client-map-chip-row">${consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]))}</span>"""
     }
-    val palettes = listOf(
-        "#eff6ff" to "#1e40af",
-        "#fff7ed" to "#c2410c",
-        "#f5f3ff" to "#6d28d9",
-        "#ecfdf5" to "#047857",
-        "#fdf2f8" to "#be185d",
-        "#fef3c7" to "#b45309"
-    )
-    val inner = tokens.mapIndexed { i, t ->
-        val (bg, fg) = palettes[i % palettes.size]
-        """<span class="client-map-chip-wrap" style="background:$bg;color:$fg;">${escapeHtml(t)}</span>"""
-    }.joinToString("")
+    val inner = tokens.joinToString("") { t ->
+        """<span class="client-map-chip-wrap">${consigneeMapShadowChipSpanHtml(escapeHtml(t))}</span>"""
+    }
     return """<span class="client-map-chip-row">$inner</span>"""
 }
 
@@ -169,10 +252,10 @@ fun formatClientMapConsigneeChipCellHtml(raw: String): String {
  * Shows yen prefix and thousands separators, e.g. `40000` → `¥40,000`.
  */
 fun formatClientMapDebitLimitCellHtml(raw: String): String {
-    if (raw.isBlank()) return ""
+    if (raw.trim().length == 0) return ""
     val cleaned = raw.replace(",", "").trim()
     val n = cleaned.toDoubleOrNull()
-        ?: return """<span class="client-map-debit-limit">${escapeHtml(raw)}</span>"""
+        ?: return formatLightBlueDebitChipSpan(escapeHtml(raw))
     val negative = n < 0.0
     val abs = kotlin.math.abs(n)
     val intPart = kotlin.math.floor(abs + 1e-9).toLong()
@@ -186,14 +269,17 @@ fun formatClientMapDebitLimitCellHtml(raw: String): String {
         val fracStr = if (cents < 10) "0$cents" else cents.toString()
         "$body.$fracStr"
     }
-    return """<span class="client-map-debit-limit">$formatted</span>"""
+    return formatLightBlueDebitChipSpan(escapeHtml(formatted))
 }
 
-/** Multiple values → pastel pill chips; single value → plain escaped text. */
+private fun formatLightBlueDebitChipSpan(escapedInner: String): String =
+    """<span class="client-map-debit-limit" style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:#f8fafc;color:#111827;line-height:1.35;box-shadow:0 1px 6px rgba(15,23,42,0.18);">$escapedInner</span>"""
+
+/** Multiple values → pastel pill chips; single value → same light-blue chip as first token in multi-value rows. */
 fun formatMultiValueChipCellHtml(raw: String): String {
     val tokens = splitMultiValueDisplayTokens(raw)
     if (tokens.isEmpty()) return ""
-    if (tokens.size == 1) return escapeHtml(tokens[0])
+    if (tokens.size == 1) return singleValueChipSpanHtml(escapeHtml(tokens[0]))
     val palettes = listOf(
         "#eff6ff" to "#1e40af",
         "#fff7ed" to "#c2410c",
@@ -251,6 +337,14 @@ fun apiUrl(path: String): String {
     val fullUrl = "$API_BASE_URL/$cleanPath"
     Logger.debug("apiUrl() called with path: '$path', fullUrl: '$fullUrl'")
     return fullUrl
+}
+
+/**
+ * In-app default after leaving a removed or invalid master screen.
+ * Do not use `#/` here — that route shows the sign-in page and looks like a logout even when the token is still valid.
+ */
+fun navigateToAppHome() {
+    window.location.hash = "#/purchase"
 }
 
 // Helper function to safely extract numeric value from database field (handles strings with ¥, numbers, null, etc.)
@@ -311,8 +405,8 @@ fun getMaxCarBrandMapColumnsForDevice(deviceType: String? = null): Int = 6
 /** Consignee Map & Supplier Map: max 6 data columns (plus actions). */
 fun getMaxConsigneeSupplierMapColumnsForDevice(deviceType: String? = null): Int = 6
 
-/** Purchase List table: max 6 data columns (plus actions). */
-fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int = 6
+/** Purchase List table: max 8 data columns (plus actions). */
+fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int = 8
 
 /**
  * Get default columns for a specific device type
@@ -412,9 +506,10 @@ fun purchaseListColumnLabels(): Map<String, String> {
         "notes" to "Notes",
         "shipmentDate" to "Shipment Date",
         "blNo" to "BL No",
-        "vesselNo" to "Vessel No",
         "vessel" to "Vessel",
+        "vesselNo" to "Vessel",
         "shipped" to "Shipped",
+        "invoiceConfirmed" to "Invoice Confirmed",
         "shipmentCharges" to "Shipment Charges",
         "freight" to "Freight",
         "storageCharges" to "Storage Charges",
@@ -427,9 +522,7 @@ fun purchaseListColumnLabels(): Map<String, String> {
         "repairCharges" to "Repair Charges",
         "profit" to "Profit",
         "isPackageMode" to "Package Mode",
-        "totalCnfPrice" to "Total CNF Price",
-        "totalFobPrice" to "Total FOB Price",
-        "bookingId" to "Booking ID",
+        "bookingId" to "Booking No",
         "carPictures" to "Car Pictures",
         // Legacy UI field (not a DB column); kept for older saved column prefs
         "destination" to "Destination"
@@ -461,13 +554,13 @@ fun purchaseTableCellValue(purchase: dynamic, columnKey: String): String {
             is Number -> raw.toString()
             else -> raw.toString()
         }
-        if (s.isEmpty()) return ""
+        if (s.length == 0) return ""
         return if (s.startsWith("¥")) s else "¥$s"
     }
     return when (columnKey) {
         "date" -> try {
             val dateStr = (p.date?.toString() ?: "").toString()
-            if (dateStr.isBlank()) "" else formatWithWeekday(dateStr)
+            if (dateStr.trim().length == 0) "" else formatWithWeekday(dateStr)
         } catch (e: dynamic) {
             ""
         }
@@ -513,7 +606,7 @@ fun purchaseTableCellValue(purchase: dynamic, columnKey: String): String {
         "country" -> field("country")
         "totalPrice" -> {
             val raw = (p.totalPrice as? String) ?: field("totalPrice")
-            if (raw.isEmpty()) "" else moneyWithYenIfMissing(raw)
+            if (raw.length == 0) "" else moneyWithYenIfMissing(raw)
         }
         "auctionFee" -> (p.auctionFee as? String) ?: field("auctionFee")
         "auctionPenaltyFee" -> (p.auctionPenaltyFee as? String) ?: field("auctionPenaltyFee")
@@ -535,8 +628,8 @@ fun purchaseTableCellValue(purchase: dynamic, columnKey: String): String {
         "notes" -> field("notes")
         "shipmentDate" -> (p.shipmentDate as? String) ?: field("shipmentDate")
         "blNo" -> (p.blNo as? String) ?: field("blNo")
-        "vesselNo" -> (p.vesselNo as? String) ?: field("vesselNo")
-        "vessel" -> field("vessel")
+        "vesselNo" -> (p.vessel as? String) ?: field("vesselNo")
+        "vessel" -> (p.vessel as? String) ?: field("vessel")
         "destination" -> (p.destination as? String) ?: field("destination")
         "shipped" -> field("shipped")
         "shipmentCharges" -> (p.shipmentCharges as? String) ?: field("shipmentCharges")
@@ -551,9 +644,10 @@ fun purchaseTableCellValue(purchase: dynamic, columnKey: String): String {
         "repairCharges" -> (p.repairCharges as? String) ?: field("repairCharges")
         "profit" -> (p.profit as? String) ?: field("profit")
         "isPackageMode" -> field("isPackageMode")
-        "totalCnfPrice" -> moneyWithYenIfMissing(p.totalCnfPrice)
-        "totalFobPrice" -> moneyWithYenIfMissing(p.totalFobPrice)
-        "bookingId" -> field("bookingId")
+        "bookingId" -> {
+            val primary = field("bookingId")
+            if (primary.length == 0) field("booking_id") else primary
+        }
         "carPictures" -> field("carPictures")
         "createdAt" -> field("createdAt")
         "updatedAt" -> field("updatedAt")
@@ -589,7 +683,7 @@ fun extractNumericFromSuffixedValue(value: dynamic): String {
 
 // Date formatting functions
 fun formatWithWeekday(isoDate: String?): String {
-    if (isoDate == null || isoDate.isBlank()) return ""
+    if (isoDate == null || isoDate.trim().length == 0) return ""
     // If already includes weekday, keep as is
     if (isoDate.contains("(") && isoDate.contains(")")) return isoDate
     try {
@@ -611,7 +705,7 @@ fun formatWithWeekday(isoDate: String?): String {
 }
 
 fun formatDateForDatabase(isoDate: String?): String {
-    if (isoDate == null || isoDate.isBlank()) return ""
+    if (isoDate == null || isoDate.trim().length == 0) return ""
     try {
         val date = js("new Date(isoDate)")
         if (js("isNaN(date)") as Boolean) return isoDate
@@ -633,7 +727,7 @@ fun formatDateForDatabase(isoDate: String?): String {
 // Formats carModelYear from YYYY-MM or MM/YYYY to "Month YYYY" format
 // Examples: "2025-07" -> "July 2025", "07/2025" -> "July 2025", "7/2025" -> "July 2025"
 fun formatCarModelYear(yearStr: String?): String {
-    if (yearStr == null || yearStr.isBlank()) return ""
+    if (yearStr == null || yearStr.trim().length == 0) return ""
     
     val months = arrayOf(
         "January", "February", "March", "April", "May", "June",
@@ -674,7 +768,7 @@ fun formatCarModelYear(yearStr: String?): String {
 
 /** Extracts only the 4-digit year from car_model_year (e.g. "July 2026" -> "2026", "2025-07" -> "2025"). */
 fun carModelYearToYearOnly(yearStr: String?): String {
-    if (yearStr == null || yearStr.isBlank()) return ""
+    if (yearStr == null || yearStr.trim().length == 0) return ""
     // YYYY-MM
     if (yearStr.contains("-")) {
         val parts = yearStr.split("-")
@@ -702,7 +796,7 @@ fun carModelYearToYearOnly(yearStr: String?): String {
 }
 
 fun normalizeDateForComparison(dateStr: String?): String {
-    if (dateStr == null || dateStr.isBlank()) return ""
+    if (dateStr == null || dateStr.trim().length == 0) return ""
     
     try {
         // Handle format: "24 Apr, 2025" -> convert to "April24, 2025"
@@ -778,7 +872,7 @@ fun toIsoFromLabel(dateStr: dynamic): String {
         }
     }
     
-    if (dateString.isEmpty() || dateString.trim().isEmpty()) return ""
+    if (dateString.length == 0 || dateString.trim().length == 0) return ""
     
     // If already ISO-like (YYYY-MM-DD), return as-is
     if (dateString.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) return dateString
@@ -929,6 +1023,22 @@ fun parseDateForSorting(dateStr: String): Long? {
     } else {
         null
     }
+}
+
+/**
+ * If the booking field looks like `"Country - Consignee Name"`, returns only the name part.
+ * Otherwise returns [raw] trimmed (consignee column should store the company name, not country).
+ */
+fun consigneeNameWithoutCountryPrefix(raw: String): String {
+    val t = raw.trim()
+    if (t.isEmpty()) return ""
+    val sep = " - "
+    val i = t.indexOf(sep)
+    if (i > 0 && i < 160) {
+        val after = t.substring(i + sep.length).trim()
+        if (after.isNotEmpty()) return after
+    }
+    return t
 }
 
 fun formatConsigneeForUpdate(rawConsignee: String, consigneeCountry: String): String {

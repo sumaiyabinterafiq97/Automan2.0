@@ -16,7 +16,8 @@ cd "$PROJECT_ROOT"
 # If a backend container exists from a different Compose project, remove it
 docker stop automan_backend_multiplatform 2>/dev/null || true
 docker rm -f automan_backend_multiplatform 2>/dev/null || true
-# Force-recreate backend within the same Compose project/network
-docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d --no-deps --force-recreate backend
+# Do not use --no-deps: backend depends on MySQL being healthy. Starting backend alone leaves DB down
+# and causes 502 from nginx plus phpMyAdmin "mysql" host resolution failures.
+docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate backend
 
 echo "✅ Done. Backend should be running on port 8083."

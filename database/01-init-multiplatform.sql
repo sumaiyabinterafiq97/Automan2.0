@@ -110,6 +110,7 @@ CREATE TABLE purchases (
     auction_house VARCHAR(100),
     stock_location VARCHAR(100),
     pol VARCHAR(100),
+    pod VARCHAR(255) NULL,
     rixo_company VARCHAR(100),
     client_name VARCHAR(100),
     consignee TEXT DEFAULT NULL,
@@ -128,9 +129,9 @@ CREATE TABLE purchases (
     notes TEXT,
     shippment_date VARCHAR(50),
     `B/L_no` VARCHAR(100),
-    vessel_no VARCHAR(100),
     vessel VARCHAR(255) DEFAULT NULL,
     shipped BOOLEAN DEFAULT FALSE,
+    invoice_confirmed BOOLEAN DEFAULT FALSE,
     shipment_charges VARCHAR(50),
     freight VARCHAR(50),
     storage_charges VARCHAR(50),
@@ -145,8 +146,6 @@ CREATE TABLE purchases (
     repair_charges VARCHAR(50),
     profit DECIMAL(15,2) DEFAULT 0,
     is_package_mode BOOLEAN DEFAULT FALSE,
-    total_cnf_price DECIMAL(15,2) DEFAULT NULL,
-    total_fob_price DECIMAL(15,2) DEFAULT NULL,
     booking_id BIGINT NULL,
     car_pictures TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -158,6 +157,52 @@ CREATE TABLE purchases (
     INDEX idx_client_name (client_name),
     INDEX idx_purchase_client_id (client_id),
     INDEX idx_purchase_booking_id (booking_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Shipping history: rows from C&F/FOB calculation + car booking (Flyway V18 + V19: one row per chassis).
+CREATE TABLE shipping_history (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    country VARCHAR(255),
+    consignee VARCHAR(512),
+    shipment_date DATE NULL,
+    pol VARCHAR(255),
+    pod VARCHAR(512),
+    booking_id VARCHAR(255),
+    vessel VARCHAR(255),
+    price_type VARCHAR(16),
+    chassis VARCHAR(255) NOT NULL,
+    client_name VARCHAR(512),
+    amount DECIMAL(19, 2) NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY ux_shipping_history_chassis (chassis),
+    INDEX idx_shipping_history_booking_id (booking_id),
+    INDEX idx_shipping_history_shipment_date (shipment_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Invoice history: saved from Create Customer Invoice — Confirm and Download PDF (Flyway V20).
+CREATE TABLE invoice_history (
+    invoice_number VARCHAR(64) NOT NULL PRIMARY KEY,
+    vessel VARCHAR(255),
+    client_name VARCHAR(512),
+    shipping_date DATE NULL,
+    lc_no VARCHAR(512),
+    bank TEXT,
+    messages TEXT,
+    chassis TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_invoice_history_invoice_number (invoice_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Rixo history: Rixo Request Generator Download PDF (Flyway V21).
+CREATE TABLE rixo_history (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    buying_date DATE NULL,
+    rixo_company VARCHAR(255),
+    message TEXT,
+    chassis TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_rixo_history_buying_date (buying_date),
+    INDEX idx_rixo_history_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Master menu table: Configurable dropdown values for forms

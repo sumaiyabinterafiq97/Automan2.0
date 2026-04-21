@@ -1,7 +1,10 @@
 package com.automan.backend.service
 
+import com.automan.backend.dto.ConsigneeMapPageResponse
 import com.automan.backend.model.BookingMapping
 import com.automan.backend.repository.BookingMappingRepository
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
@@ -14,6 +17,12 @@ data class BookingMappingSaveResult(
 class BookingMappingService(
     private val repo: BookingMappingRepository,
 ) {
+    @Transactional(readOnly = true)
+    fun getDistinctConsigneeNames(): List<String> {
+        return repo.findDistinctConsigneeNames()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
 
     @Transactional
     fun add(payload: BookingMapping): BookingMappingSaveResult {
@@ -121,4 +130,38 @@ class BookingMappingService(
         }
         return regex.split(s).map { it.trim() }.filter { it.isNotEmpty() }
     }
+
+    /**
+     * Paginated search for Consignee Map UI.
+     * [field]: `all`, `consigneeName`, `country`.
+     */
+    @Transactional(readOnly = true)
+    fun searchConsigneeMapPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): ConsigneeMapPageResponse {
+        val q = sanitizeConsigneeMapSearchToken(rawQuery)
+        require(q.isNotEmpty()) { "Search text is required" }
+        val field = rawField.trim().lowercase().ifEmpty { "all" }
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg = when (field) {
+            "consigneename", "consignee_name" ->
+                repo.searchConsigneeMapConsigneeNameContains(q, pageable)
+            "country" ->
+                repo.searchConsigneeMapCountryContains(q, pageable)
+            "all" -> repo.searchConsigneeMapAllFields(q, pageable)
+            else -> throw IllegalArgumentException(
+                "Invalid search field: $field. Use all, consigneeName, or country."
+            )
+        }
+        return ConsigneeMapPageResponse(
+            content = pg.content,
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    private fun sanitizeConsigneeMapSearchToken(raw: String): String =
+        raw.trim().replace("%", "").replace("_", "").take(120)
 }

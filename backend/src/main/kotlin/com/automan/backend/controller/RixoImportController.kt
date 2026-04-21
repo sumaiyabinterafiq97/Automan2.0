@@ -87,6 +87,23 @@ class RixoImportController(
             ))
         }
     }
+
+    /**
+     * Paginated search for Supplier Map (supplier name / stock location / rixo company / all).
+     */
+    @GetMapping("/prices/page-search")
+    fun searchSupplierMapPage(
+        @RequestParam q: String,
+        @RequestParam(defaultValue = "all") field: String,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(rixoImportService.searchSupplierMapPage(q, field, page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
     
     @GetMapping("/dropdowns/auction-names")
     fun getAuctionNames(): ResponseEntity<Map<String, Any>> {

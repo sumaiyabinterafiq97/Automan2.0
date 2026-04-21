@@ -46,6 +46,21 @@ class RixoMappingService(
             )
         )
 
+    /** Distinct non-blank [RixoMapping.auctionName] values for Rixo Price Mapping dropdowns. */
+    fun listDistinctAuctionNames(): List<String> =
+        rixoMappingRepository.findDistinctAuctionNamesOrdered()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .sortedBy { it.lowercase() }
+
+    fun listDistinctRixoCompanies(): List<String> =
+        rixoMappingRepository.findDistinctRixoCompaniesOrdered()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .sortedBy { it.lowercase() }
+
     fun findById(id: Long): RixoMapping? =
         rixoMappingRepository.findById(id).orElse(null)
 

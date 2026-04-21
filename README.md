@@ -506,10 +506,17 @@ The following report pages are planned:
   3. Wait a few seconds after starting - MySQL needs time to initialize
 
 **Problem**: Database migrations not running
-- **Solution**: 
-  1. Check that SQL files are in `database/` directory
-  2. Ensure files are named with numeric prefixes (e.g., `01-init-multiplatform.sql`)
-  3. Check MySQL logs for migration errors
+- **Solution**:
+  1. **Incremental schema changes** ship as **Flyway** scripts under `backend/src/main/resources/db/migration/` (`V1__….sql`, `V15__….sql`, `V16__….sql`, etc.). They run **automatically when the Spring Boot backend starts** (`spring.flyway.enabled: true` in `application.yml`). Deploy a new backend image/JAR that includes the new files, ensure MySQL is up and the datasource URL points at the right database, then **restart the backend**; Flyway applies **pending** migrations in version order and records them in `flyway_schema_history`.
+  2. The files under `database/` (e.g. `01-init-multiplatform.sql`) are mainly for **initial Docker/MySQL seeding** of an empty volume — they are not a substitute for Flyway on an existing environment.
+  3. If startup fails after a migration, check **backend logs** and the `flyway_schema_history` table. Docker-oriented setups may use `FlywayDockerRepairConfig`, which runs `repair()` then `migrate()` on startup.
+
+### Flyway on deploy (V15, V16, …)
+
+No separate “flyway deploy” step is required: **migrations run as part of backend startup.** After you merge migrations such as `V15__purchases_drop_vessel_no.sql` and `V16__purchases_search_indexes.sql`, build and deploy the backend, then restart it against the target MySQL instance. Flyway will apply V15 before V16 whenever both are pending.
+
+- **Profiles**: `application-docker.yml` and `application-prod.yml` set `baseline-on-migrate: true` (and baseline version `1`) when the database already contains objects from an older init path — adjust only if you know your `flyway_schema_history` state.
+- **Verify**: `SELECT * FROM flyway_schema_history ORDER BY installed_rank;` in MySQL, or watch backend logs for `Flyway` / migration success lines.
 
 ### Backend Issues
 

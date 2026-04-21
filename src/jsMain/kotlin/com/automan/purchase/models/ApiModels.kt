@@ -35,6 +35,7 @@ data class PurchaseResponse(
     val rixoRequested: String? = null,
     val rixoConfirmed: String? = null,
     val price: String? = null,
+    val totalPrice: String? = null,
     val auctionFees: String? = null,
     val recycleFees: String? = null,
     val roadTax: String? = null,
@@ -52,9 +53,8 @@ data class PurchaseResponse(
     val totalCostAfterTax: String? = null,
     val totalExpense: String? = null,
     val bookingId: Long? = null,
-    val totalCnfPrice: String? = null,
-    val totalFobPrice: String? = null,
     val shipped: Boolean? = null,
+    val invoiceConfirmed: Boolean? = null,
     val carModelYear: String? = null,
     val consignee: String? = null
 )

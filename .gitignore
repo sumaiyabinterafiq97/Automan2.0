@@ -281,5 +281,8 @@ automan-single-image-fixed/automan-complete-fresh.tar
 AWS-FREE-TIER-DEPLOYMENT-GUIDE.md
 AWS-DEPLOYMENT-GUIDE.md
 
-# Flyway SQL migrations — keep local only; not published to GitHub
+# Cursor IDE (local only)
+.cursor/
+
+# Flyway SQL migrations (local only; not pushed to GitHub)
 backend/src/main/resources/db/migration/

@@ -1563,11 +1563,11 @@ select:focus {
 }
 
 .rixo-request-form-panel {
-    flex: 1;
+    flex: 0.9;
 }
 
 .rixo-rows-preview-panel {
-    flex: 1;
+    flex: 1.45;
 }
 
 .rixo-request-title,
@@ -1993,6 +1993,7 @@ div[id$="_dropdown"] {
     overflow: hidden;
     max-height: calc(100vh - 300px);
     overflow-y: auto;
+    overflow-x: auto;
 }
 
 .rixo-empty-state {
@@ -2257,25 +2258,25 @@ div[id$="_dropdown"] {
    ============================================ */
 @media (min-width: 1025px) {
     .rixo-request-container {
-        max-width: 1600px; /* Increased from 1400px to accommodate wider layout */
+        max-width: 1920px; /* Wider desktop container for Cars to Rixo table */
         margin: 0 auto;
-        padding: 24px;
+        padding: 20px 18px;
         box-sizing: border-box; /* Ensure padding is included in width calculation */
     }
     
     .rixo-request-layout {
         flex-direction: row;
-        gap: 24px;
+        gap: 16px;
     }
     
     .rixo-request-form-panel {
-        flex: 0 0 50%; /* Reduced from 65% to prevent horizontal scrolling */
-        max-width: 600px; /* Add max-width constraint */
+        flex: 0 0 36%;
+        max-width: 560px;
     }
     
     .rixo-rows-preview-panel {
-        flex: 0 0 50%; /* Increased from 35% to balance layout */
-        min-width: 400px; /* Ensure table has enough space */
+        flex: 1 1 64%;
+        min-width: 920px;
     }
     
     .rixo-request-title,
@@ -2323,7 +2324,7 @@ div[id$="_dropdown"] {
     
     /* Rows Preview - Sticky Header */
     .rixo-rows-content {
-        max-height: calc(100vh - 250px);
+        max-height: calc(100vh - 220px);
         overflow-x: auto;
     }
     
@@ -2770,12 +2771,6 @@ div[id$="_dropdown"] {
     
     /* Add Button - Full Width on Mobile */
     #addConsigneeBtn {
-        width: 100%;
-        min-height: 44px;
-    }
-    
-    /* Clear Filter Button - Full Width on Mobile */
-    #clearConsigneeFilterBtn {
         width: 100%;
         min-height: 44px;
     }
@@ -3697,17 +3692,14 @@ div[id$="_dropdown"] {
     gap: 6px;
 }
 
-.client-map-bank-chip {
+.client-map-bank-text > span,
+.client-map-bank-chips > span {
     display: block;
-    padding: 4px 10px;
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 1.4;
+    width: 100%;
+    box-sizing: border-box;
     word-break: break-word;
     overflow-wrap: anywhere;
     white-space: normal;
-    max-width: 100%;
 }
 
 /* Consignee (and similar): wrap long chip labels inside fixed table columns */
@@ -4165,16 +4157,41 @@ div[id$="_dropdown"] {
     min-height: calc(100vh - 140px);
     padding: 20px;
     box-sizing: border-box;
+    background: linear-gradient(165deg, #f0f9ff 0%, #f8fafc 38%, #f1f5f9 100%);
 }
 
 /* Booking Header */
 .booking-header {
-    background: white;
-    border-radius: 12px;
-    padding: 24px;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    border: 1px solid #e5e7eb;
+    background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+    border-radius: 16px;
+    padding: 22px 28px;
+    margin-bottom: 22px;
+    box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08), 0 1px 0 rgba(255,255,255,0.8) inset;
+    border: 1px solid rgba(59, 130, 246, 0.12);
+    border-left: 4px solid #3b82f6;
+}
+
+.booking-header-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.booking-title {
+    margin: 0;
+    color: #0f172a;
+    font-size: 26px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+}
+
+.booking-header-sub {
+    margin: 0;
+    font-size: 14px;
+    color: #64748b;
+    font-weight: 500;
+    line-height: 1.45;
+    max-width: 52ch;
 }
 
 .booking-header h1 {
@@ -4186,11 +4203,20 @@ div[id$="_dropdown"] {
 
 /* Main Content Container */
 .booking-main-content {
-    background: white;
-    border-radius: 12px;
-    padding: 30px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    border: 1px solid #e5e7eb;
+    background: rgba(255, 255, 255, 0.92);
+    border-radius: 16px;
+    padding: 28px 32px;
+    box-shadow: 0 10px 40px rgba(15, 23, 42, 0.07);
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    backdrop-filter: blur(8px);
+}
+
+.booking-panel {
+    background: linear-gradient(180deg, #fafcff 0%, #ffffff 55%);
+    border-radius: 14px;
+    padding: 20px 22px;
+    border: 1px solid #e8eef5;
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.04);
 }
 
 /* Two Column Layout */
@@ -4215,11 +4241,14 @@ div[id$="_dropdown"] {
 
 /* Section Headers */
 .booking-section-header {
-    margin: 0 0 24px 0;
-    color: #111827;
-    font-size: 20px;
-    font-weight: 700;
+    margin: 0 0 20px 0;
+    padding-bottom: 10px;
+    color: #0f172a;
+    font-size: 17px;
+    font-weight: 800;
     text-transform: uppercase;
+    letter-spacing: 0.06em;
+    border-bottom: 2px solid #dbeafe;
 }
 
 /* Form Groups */
@@ -4239,11 +4268,129 @@ div[id$="_dropdown"] {
 .booking-form-group select,
 .booking-form-group textarea {
     width: 100%;
-    padding: 10px 12px;
-    border: 1px solid #d1d5db;
-    border-radius: 6px;
+    padding: 10px 14px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
     font-size: 14px;
     box-sizing: border-box;
+    background: #fff;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.booking-form-group input:focus,
+.booking-form-group select:focus,
+.booking-form-group textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+/* BOOKING NO: text field + glossy circular search (matches classic “blue orb” look) */
+.booking-no-search-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+
+.booking-no-search-input {
+    flex: 1;
+    min-width: 0;
+    width: auto !important;
+}
+
+.booking-no-search-btn {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 32% 28%, #a8d8ff 0%, #42a5f5 42%, #1565c0 88%, #0d47a1 100%);
+    box-shadow:
+        0 4px 10px rgba(13, 71, 161, 0.45),
+        inset 0 2px 8px rgba(255, 255, 255, 0.45),
+        inset 0 -3px 8px rgba(0, 0, 0, 0.18);
+    transition: transform 0.14s ease, box-shadow 0.14s ease;
+}
+
+.booking-no-search-btn:hover {
+    transform: scale(1.06);
+    box-shadow:
+        0 6px 14px rgba(13, 71, 161, 0.5),
+        inset 0 2px 8px rgba(255, 255, 255, 0.5),
+        inset 0 -3px 8px rgba(0, 0, 0, 0.2);
+}
+
+.booking-no-search-btn:active {
+    transform: scale(0.96);
+}
+
+.booking-no-search-btn:focus-visible {
+    outline: 2px solid #1e88e5;
+    outline-offset: 2px;
+}
+
+.booking-no-search-btn svg {
+    flex-shrink: 0;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+}
+
+.booking-chassis-search-wrap {
+    position: relative;
+}
+
+.booking-chassis-search-input {
+    width: 100%;
+    padding: 11px 14px !important;
+    border-radius: 10px !important;
+    border: 1px solid #cbd5e1 !important;
+    font-size: 14px !important;
+    transition: border-color 0.2s, box-shadow 0.2s !important;
+}
+
+.booking-chassis-search-input:focus {
+    outline: none !important;
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+}
+
+.booking-chassis-suggestions {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 100;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.12);
+}
+
+.booking-chassis-suggestion-item {
+    padding: 11px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 14px;
+    color: #334155;
+    transition: background 0.15s;
+}
+
+.booking-chassis-suggestion-item:last-child {
+    border-bottom: none;
+}
+
+.booking-chassis-suggestion-item--hover {
+    background: #eff6ff !important;
+    color: #1e3a8a;
 }
 
 /* Consignee Row */
@@ -4256,6 +4403,193 @@ div[id$="_dropdown"] {
 
 .booking-consignee-row select {
     flex: 1;
+}
+
+/* Car booking dropdowns — same speed-dial FAB UI as Rixo Company (Rixo Transport page) */
+.booking-fab-field.rixo-company-fab-wrap {
+    width: 100%;
+}
+.booking-details-section .booking-fab-field .rixo-fab-action-label {
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    font-weight: 600;
+}
+.booking-details-section .booking-fab-field .rixo-fab-action-row--text-only {
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    font-weight: 600;
+}
+.rixo-company-fab-native-select {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+.rixo-company-fab-wrap {
+    position: relative;
+    width: 100%;
+}
+.rixo-company-fab {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+}
+.booking-details-section .rixo-fab-trigger {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.rixo-fab-trigger {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    background: #fff;
+    cursor: pointer;
+    text-align: left;
+    box-sizing: border-box;
+    transition: box-shadow 0.2s, border-color 0.2s;
+}
+.rixo-fab-trigger:hover {
+    border-color: #3abff8;
+    box-shadow: 0 4px 14px rgba(58, 191, 248, 0.2);
+}
+.rixo-company-fab-wrap.rixo-company-fab--open .rixo-fab-trigger {
+    border-color: #3abff8;
+    box-shadow: 0 4px 14px rgba(58, 191, 248, 0.25);
+}
+.rixo-fab-trigger-circle {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: linear-gradient(145deg, #3abff8, #0891b2);
+    color: #fff;
+    font-size: 18px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 12px rgba(8, 145, 178, 0.35);
+}
+.rixo-fab-trigger-text-wrap {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.rixo-fab-trigger-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.rixo-fab-trigger-hint {
+    font-size: 12px;
+    color: #6b7280;
+}
+.rixo-company-fab-wrap.rixo-company-fab--open .rixo-fab-trigger-hint {
+    display: none;
+}
+.rixo-fab-trigger-chevron {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: #6b7280;
+    transition: transform 0.2s;
+}
+.rixo-company-fab-wrap.rixo-company-fab--open .rixo-fab-trigger-chevron {
+    transform: rotate(180deg);
+}
+.rixo-fab-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 8px 0 4px;
+}
+.rixo-fab-action-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-direction: row;
+    gap: 12px;
+    animation: rixoFabDownBooking 0.28s ease-out both;
+}
+.rixo-fab-action-row:nth-child(1) { animation-delay: 0.03s; }
+.rixo-fab-action-row:nth-child(2) { animation-delay: 0.06s; }
+.rixo-fab-action-row:nth-child(3) { animation-delay: 0.09s; }
+.rixo-fab-action-row:nth-child(4) { animation-delay: 0.12s; }
+.rixo-fab-action-row:nth-child(5) { animation-delay: 0.15s; }
+.rixo-fab-action-row:nth-child(6) { animation-delay: 0.18s; }
+.rixo-fab-action-row:nth-child(7) { animation-delay: 0.21s; }
+.rixo-fab-action-row:nth-child(8) { animation-delay: 0.24s; }
+.rixo-fab-action-label {
+    font-size: 14px;
+    color: #374151;
+    font-weight: 500;
+    text-align: left;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.rixo-fab-action-btn {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #111827;
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    transition: transform 0.15s, background 0.15s;
+}
+.rixo-fab-action-btn:hover {
+    background: #e0f2fe;
+    border-color: #3abff8;
+    transform: scale(1.06);
+}
+/* Booking FAB dropdown: full-width text rows (no circle + letter buttons) */
+.rixo-fab-action-row--text-only {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    background: #f9fafb;
+    font-size: 14px;
+    color: #374151;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: background 0.15s, border-color 0.15s;
+}
+.rixo-fab-action-row--text-only:hover {
+    background: #e0f2fe;
+    border-color: #3abff8;
+}
+@keyframes rixoFabDownBooking {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Selection Options (C&F/FOB) */
@@ -4288,15 +4622,22 @@ div[id$="_dropdown"] {
 /* Calculate Button */
 .booking-calculate-btn {
     width: 100%;
-    padding: 12px 20px;
-    background: #3b82f6;
+    padding: 14px 20px;
+    background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
     color: white;
     border: none;
-    border-radius: 8px;
+    border-radius: 12px;
     cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    min-height: 44px;
+    font-size: 15px;
+    font-weight: 700;
+    min-height: 48px;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.booking-calculate-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
 }
 
 /* Action Buttons Row */
@@ -4320,18 +4661,34 @@ div[id$="_dropdown"] {
 }
 
 .booking-action-btn {
-    padding: 8px 16px;
-    background: white;
-    color: #111827;
-    border: 1px solid #d1d5db;
-    border-radius: 6px;
+    padding: 10px 16px;
+    background: #fff;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     display: flex;
     align-items: center;
     gap: 6px;
     min-height: 44px;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.booking-action-btn:hover {
+    background: #f8fafc;
+    border-color: #94a3b8;
+}
+
+.booking-table-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 20px;
+    overflow-x: auto;
+    background: #fff;
+    box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
 }
 
 /* Chassis Search Table */
@@ -4342,15 +4699,56 @@ div[id$="_dropdown"] {
 
 .booking-chassis-table th,
 .booking-chassis-table td {
-    padding: 12px;
+    padding: 12px 14px;
     text-align: left;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid #eef2f7;
 }
 
+.booking-th,
 .booking-chassis-table th {
-    font-weight: 600;
-    color: #374151;
-    background-color: #f9fafb;
+    font-weight: 700;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #475569;
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.booking-th-select {
+    white-space: nowrap;
+}
+
+.booking-select-all-cb {
+    margin-right: 8px;
+    vertical-align: middle;
+    accent-color: #2563eb;
+}
+
+.booking-td {
+    padding: 12px 14px;
+    border-bottom: 1px solid #eef2f7;
+    vertical-align: middle;
+    font-size: 14px;
+}
+
+.booking-td-select {
+    width: 52px;
+    text-align: center;
+}
+
+.booking-td-select .car-checkbox {
+    width: 18px;
+    height: 18px;
+    accent-color: #2563eb;
+    cursor: pointer;
+}
+
+.booking-chassis-table tbody tr:hover {
+    background: #f8fafc;
+}
+
+.booking-chassis-table tbody tr:last-child td {
+    border-bottom: none;
 }
 
 /* Mobile Styles for Car Booking Page */
@@ -4363,8 +4761,11 @@ div[id$="_dropdown"] {
         padding: 16px;
     }
     
-    .booking-header h1 {
+    .booking-title {
         font-size: 18px;
+    }
+    .booking-header-sub {
+        font-size: 13px;
     }
     
     /* On mobile, main content becomes transparent wrapper */
@@ -4584,7 +4985,7 @@ div[id$="_dropdown"] {
         padding: 16px;
     }
     
-    .booking-header h1 {
+    .booking-title {
         font-size: 22px;
     }
     

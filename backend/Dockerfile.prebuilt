@@ -1,21 +1,16 @@
-# Use pre-built JAR to avoid Gradle downloads (and timeouts) inside Docker.
-# 1) Build JAR locally:  cd backend && ../gradlew build -x test
-# 2) From project root (single line): docker build --platform linux/amd64 -f backend/Dockerfile.prebuilt -t sumaiya890/automan-backend:latest backend/
-
-FROM eclipse-temurin:17-jre
-
+# Reliable image for Docker Hub / AWS: build the JAR on the host (uses your Gradle cache & network),
+# then package only the runtime.
+#
+#   cd backend && ./gradlew build -x test
+#   docker build --platform linux/amd64 -f Dockerfile.prebuilt -t YOUR_USER/automan-backend:latest .
+#   docker push YOUR_USER/automan-backend:latest
+#
+FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
-
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
-
-# Copy the pre-built JAR (must exist from local build)
 COPY build/libs/automan-backend-1.0-SNAPSHOT.jar app.jar
-
 EXPOSE 8083
-
 ENV SPRING_PROFILES_ACTIVE=docker
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8083/api/purchases || exit 1
-
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+  CMD curl -f http://localhost:8083/api/actuator/health || exit 1
 CMD ["java", "-jar", "app.jar"]

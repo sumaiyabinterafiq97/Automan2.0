@@ -22,6 +22,28 @@ class ClientMapController(
     private val clientMapService: ClientMapService,
 ) {
 
+    @GetMapping("/dropdowns/client-names")
+    fun getDistinctClientNames(): ResponseEntity<Map<String, Any>> {
+        return try {
+            val names = clientMapService.getDistinctClientNamesOrdered()
+            ResponseEntity.ok(
+                mapOf(
+                    "success" to true,
+                    "data" to names,
+                ),
+            )
+        } catch (e: Exception) {
+            Logger.error("Failed to load distinct client names: ${e.message}", e)
+            ResponseEntity.status(500).body(
+                mapOf(
+                    "success" to false,
+                    "message" to "Failed to load client names: ${e.message}",
+                    "data" to emptyList<String>(),
+                ),
+            )
+        }
+    }
+
     @GetMapping("/mappings")
     fun getAllMappings(): ResponseEntity<Map<String, Any>> {
         return try {

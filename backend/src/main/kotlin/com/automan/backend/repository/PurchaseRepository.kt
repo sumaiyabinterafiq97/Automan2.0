@@ -1,6 +1,8 @@
 package com.automan.backend.repository
 
 import com.automan.backend.model.Purchase
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
@@ -25,6 +27,72 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
            "LOWER(p.rixoConfirmed) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
            "LOWER(p.notes) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
     fun searchPurchases(@Param("searchTerm") searchTerm: String): List<Purchase>
+
+    /**
+     * Prefix match on chassis — uses `idx_chassis` (range scan on `chassis LIKE prefix%`).
+     * For booking “SEARCH CHASSIS” autocomplete performance.
+     */
+    @Query("SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT(:prefix, '%') ORDER BY p.chassis ASC")
+    fun searchByChassisPrefix(@Param("prefix") prefix: String, pageable: Pageable): List<Purchase>
+
+    /**
+     * Substring match on chassis only (narrower than [searchPurchases]). Leading `%` limits index use;
+     * still cheaper than OR across many columns. Limit via [Pageable].
+     */
+    @Query("SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT('%', :q, '%') ORDER BY p.chassis ASC")
+    fun searchByChassisContains(@Param("q") q: String, pageable: Pageable): List<Purchase>
+
+    /** Paged search: chassis, car name, brand, client, supplier — substring match on each (OR). */
+    @Query(
+        value = """
+            SELECT p FROM Purchase p WHERE
+            LOWER(COALESCE(p.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(p.carName,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(p.brand,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(p.clientName,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(p.auctionHouse,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """,
+        countQuery = """
+            SELECT count(p) FROM Purchase p WHERE
+            LOWER(COALESCE(p.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(p.carName,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(p.brand,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(p.clientName,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(p.auctionHouse,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """
+    )
+    fun searchPurchasesKeyFieldsContains(@Param("q") q: String, pageable: Pageable): Page<Purchase>
+
+    /** Prefix match on chassis (index-friendly when term has no leading wildcards). */
+    @Query(
+        value = "SELECT p FROM Purchase p WHERE LOWER(COALESCE(p.chassis,'')) LIKE LOWER(CONCAT(:q, '%'))",
+        countQuery = "SELECT count(p) FROM Purchase p WHERE LOWER(COALESCE(p.chassis,'')) LIKE LOWER(CONCAT(:q, '%'))"
+    )
+    fun searchPurchasesChassisPrefixPage(@Param("q") q: String, pageable: Pageable): Page<Purchase>
+
+    @Query(
+        value = "SELECT p FROM Purchase p WHERE LOWER(COALESCE(p.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))",
+        countQuery = "SELECT count(p) FROM Purchase p WHERE LOWER(COALESCE(p.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))"
+    )
+    fun searchPurchasesCarNameContainsPage(@Param("q") q: String, pageable: Pageable): Page<Purchase>
+
+    @Query(
+        value = "SELECT p FROM Purchase p WHERE LOWER(COALESCE(p.brand,'')) LIKE LOWER(CONCAT('%', :q, '%'))",
+        countQuery = "SELECT count(p) FROM Purchase p WHERE LOWER(COALESCE(p.brand,'')) LIKE LOWER(CONCAT('%', :q, '%'))"
+    )
+    fun searchPurchasesBrandContainsPage(@Param("q") q: String, pageable: Pageable): Page<Purchase>
+
+    @Query(
+        value = "SELECT p FROM Purchase p WHERE LOWER(COALESCE(p.clientName,'')) LIKE LOWER(CONCAT('%', :q, '%'))",
+        countQuery = "SELECT count(p) FROM Purchase p WHERE LOWER(COALESCE(p.clientName,'')) LIKE LOWER(CONCAT('%', :q, '%'))"
+    )
+    fun searchPurchasesClientNameContainsPage(@Param("q") q: String, pageable: Pageable): Page<Purchase>
+
+    @Query(
+        value = "SELECT p FROM Purchase p WHERE LOWER(COALESCE(p.auctionHouse,'')) LIKE LOWER(CONCAT('%', :q, '%'))",
+        countQuery = "SELECT count(p) FROM Purchase p WHERE LOWER(COALESCE(p.auctionHouse,'')) LIKE LOWER(CONCAT('%', :q, '%'))"
+    )
+    fun searchPurchasesSupplierContainsPage(@Param("q") q: String, pageable: Pageable): Page<Purchase>
     
     fun findByCarNameContainingIgnoreCase(carName: String): List<Purchase>
     fun findByAuctionHouseContainingIgnoreCase(auctionHouse: String): List<Purchase>
@@ -149,11 +217,26 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     
     // Invoice filtering: Find purchases by consignee, vessel, and shipment_date
     @Query("SELECT p FROM Purchase p WHERE " +
-           "(:consignee IS NULL OR :consignee = '' OR p.consignee = :consignee) AND " +
-           "(:vessel IS NULL OR :vessel = '' OR p.vessel = :vessel) AND " +
-           "(:shipmentDate IS NULL OR :shipmentDate = '' OR p.shipmentDate = :shipmentDate)")
+           "(:consignee IS NULL OR TRIM(:consignee) = '' OR LOWER(TRIM(COALESCE(p.consignee, ''))) = LOWER(TRIM(:consignee))) AND " +
+           "(:vessel IS NULL OR TRIM(:vessel) = '' OR LOWER(TRIM(COALESCE(p.vessel, ''))) = LOWER(TRIM(:vessel))) AND " +
+           "(:shipmentDate IS NULL OR TRIM(:shipmentDate) = '' OR TRIM(COALESCE(p.shipmentDate, '')) = TRIM(:shipmentDate)) AND " +
+           "(p.shipped IS NULL OR p.shipped = false) AND " +
+           "(p.invoiceConfirmed IS NULL OR p.invoiceConfirmed = false)")
     fun findByConsigneeAndVesselAndShipmentDate(
         @Param("consignee") consignee: String?,
+        @Param("vessel") vessel: String?,
+        @Param("shipmentDate") shipmentDate: String?
+    ): List<Purchase>
+
+    // Invoice filtering: purchases by client name (client_map / purchases.client_name), vessel, shipment_date
+    @Query("SELECT p FROM Purchase p WHERE " +
+           "(:clientName IS NULL OR TRIM(:clientName) = '' OR LOWER(TRIM(COALESCE(p.clientName, ''))) = LOWER(TRIM(:clientName))) AND " +
+           "(:vessel IS NULL OR TRIM(:vessel) = '' OR LOWER(TRIM(COALESCE(p.vessel, ''))) = LOWER(TRIM(:vessel))) AND " +
+           "(:shipmentDate IS NULL OR TRIM(:shipmentDate) = '' OR TRIM(COALESCE(p.shipmentDate, '')) = TRIM(:shipmentDate)) AND " +
+           "(p.shipped IS NULL OR p.shipped = false) AND " +
+           "(p.invoiceConfirmed IS NULL OR p.invoiceConfirmed = false)")
+    fun findByClientNameAndVesselAndShipmentDate(
+        @Param("clientName") clientName: String?,
         @Param("vessel") vessel: String?,
         @Param("shipmentDate") shipmentDate: String?
     ): List<Purchase>

@@ -103,16 +103,48 @@ function getUniqueConsignees(mappings) {
 }
 
 /**
- * Populate POD dropdown with unique POD values
+ * Rows whose consignee_name matches (trim, case-insensitive) — used so POD list matches the selected consignee only.
  */
-function populatePODDropdown(mappings) {
+function filterMappingsByConsigneeName(mappings, name) {
+  const n = (name || '').trim().toLowerCase();
+  if (!n || !Array.isArray(mappings)) return [];
+  return mappings.filter(function(m) {
+    var cn = (m && m.consigneeName) ? String(m.consigneeName).trim().toLowerCase() : '';
+    return cn === n;
+  });
+}
+
+/**
+ * Repopulate POD options from the mapping row(s) for the current consignee dropdown selection.
+ * @param {boolean} preserveCurrentPod — if false (e.g. user changed consignee), do not keep old POD / add custom option; pick first POD of this consignee.
+ */
+function applyConsigneePodRefresh(preserveCurrentPod) {
+  var mappings = window.__carBookingMappingsByCountry || [];
+  var consigneeSelect = document.getElementById('consigneeSelect');
+  var sub = mappings;
+  if (consigneeSelect && consigneeSelect.selectedIndex > 0) {
+    var sel = consigneeSelect.options[consigneeSelect.selectedIndex];
+    var name = (sel && (sel.textContent || sel.value)) ? String(sel.textContent || '').trim() : '';
+    sub = filterMappingsByConsigneeName(mappings, name);
+  } else if (consigneeSelect) {
+    sub = [];
+  }
+  populatePODDropdown(sub, preserveCurrentPod !== false);
+}
+
+/**
+ * Populate POD dropdown with unique POD values from the given mapping rows only.
+ * @param {Array} mappings — usually filtered to one consignee so PODs match Consignee Map / booking_mappings.
+ * @param {boolean} [preserveCurrentPod=true] — when false, clear current POD before filling (consignee switch).
+ */
+function populatePODDropdown(mappings, preserveCurrentPod) {
   const podInput = document.getElementById('podPort');
   if (!podInput) return;
   
   const pods = getUniquePODs(mappings);
   
-  // Preserve current value before converting/updating
-  const currentValue = podInput.value ? podInput.value.trim() : '';
+  // Preserve current value before converting/updating (unless switching consignee)
+  const currentValue = (preserveCurrentPod !== false && podInput.value) ? podInput.value.trim() : '';
   
   // Convert input to select if it's not already
   let podSelect = podInput;
@@ -172,6 +204,10 @@ function populatePODDropdown(mappings) {
     // Trigger change event for any listeners
     podSelect.dispatchEvent(new Event('change', { bubbles: true }));
   }
+
+  if (typeof window.ensureBookingFabPod === 'function') {
+    window.ensureBookingFabPod();
+  }
 }
 
 /**
@@ -191,16 +227,55 @@ function populateConsigneeField(mappings) {
     // Create container div
     consigneeContainer = document.createElement('div');
     consigneeContainer.id = 'consigneeContainer';
-    consigneeContainer.style.cssText = 'position: relative; width: 100%;';
+    consigneeContainer.style.cssText = 'position: relative; width: 100%; margin-top: 8px;';
     
-    // Create select dropdown for consignee selection
     consigneeSelect = document.createElement('select');
     consigneeSelect.id = 'consigneeSelect';
-    consigneeSelect.style.cssText = 'width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; background-color: white;';
-    
-    // Insert dropdown before the input
+    consigneeSelect.className = 'rixo-company-fab-native-select';
+    consigneeSelect.setAttribute('tabindex', '-1');
+    consigneeSelect.setAttribute('aria-hidden', 'true');
+
+    var fabWrap = document.createElement('div');
+    fabWrap.className = 'rixo-company-fab-wrap booking-fab-field';
+    fabWrap.id = 'bookingConsigneeFabWrap';
+    var fabCol = document.createElement('div');
+    fabCol.className = 'rixo-company-fab';
+    var fabTrigger = document.createElement('button');
+    fabTrigger.type = 'button';
+    fabTrigger.className = 'rixo-fab-trigger';
+    fabTrigger.id = 'bookingConsigneeFabTrigger';
+    fabTrigger.setAttribute('aria-expanded', 'false');
+    fabTrigger.setAttribute('aria-haspopup', 'listbox');
+    fabTrigger.setAttribute('aria-controls', 'bookingConsigneeFabActions');
+    var fabTw = document.createElement('span');
+    fabTw.className = 'rixo-fab-trigger-text-wrap';
+    var fabLab = document.createElement('span');
+    fabLab.className = 'rixo-fab-trigger-label';
+    fabLab.id = 'bookingConsigneeFabLabel';
+    fabLab.textContent = 'Select Consignee';
+    var fabHint = document.createElement('span');
+    fabHint.className = 'rixo-fab-trigger-hint';
+    fabHint.textContent = 'Tap to choose consignee';
+    fabTw.appendChild(fabLab);
+    fabTw.appendChild(fabHint);
+    var fabChev = document.createElement('span');
+    fabChev.className = 'rixo-fab-trigger-chevron';
+    fabChev.setAttribute('aria-hidden', 'true');
+    fabChev.textContent = '▼';
+    fabTrigger.appendChild(fabTw);
+    fabTrigger.appendChild(fabChev);
+    var fabActions = document.createElement('div');
+    fabActions.id = 'bookingConsigneeFabActions';
+    fabActions.className = 'rixo-fab-actions';
+    fabActions.style.display = 'none';
+    fabActions.setAttribute('role', 'listbox');
+    fabCol.appendChild(fabTrigger);
+    fabCol.appendChild(fabActions);
+    fabWrap.appendChild(consigneeSelect);
+    fabWrap.appendChild(fabCol);
+
     consigneeInput.parentNode.insertBefore(consigneeContainer, consigneeInput);
-    consigneeContainer.appendChild(consigneeSelect);
+    consigneeContainer.appendChild(fabWrap);
     
     // Remove legacy address preview block if it exists (older sessions)
     const legacyDisplay = document.getElementById('consigneeDisplay');
@@ -211,15 +286,28 @@ function populateConsigneeField(mappings) {
     // Hide original input but keep it for form submission (value = consignee name only)
     consigneeInput.style.display = 'none';
     
-    // Sync select dropdown to hidden input (name only; use option text so list refreshes stay correct)
+    // Sync select dropdown to hidden input; POD list follows selected consignee row(s) in booking_mappings
     consigneeSelect.addEventListener('change', function() {
       const sel = this.options[this.selectedIndex];
       if (!sel || sel.value === '') {
         applyConsigneeNameOnly('');
+        applyConsigneePodRefresh(false);
         return;
       }
       applyConsigneeNameOnly(sel.textContent || '');
+      applyConsigneePodRefresh(false);
     });
+    if (typeof window.registerBookingFabSelect === 'function') {
+      window.registerBookingFabSelect({
+        selectId: 'consigneeSelect',
+        wrapId: 'bookingConsigneeFabWrap',
+        triggerId: 'bookingConsigneeFabTrigger',
+        actionsId: 'bookingConsigneeFabActions',
+        labelId: 'bookingConsigneeFabLabel',
+        defaultLabel: 'Select Consignee',
+        emptyMessage: 'No consignee for this country'
+      });
+    }
   } else {
     consigneeSelect = document.getElementById('consigneeSelect');
   }
@@ -242,6 +330,10 @@ function populateConsigneeField(mappings) {
     }
   } else {
     consigneeInput.value = '';
+  }
+
+  if (typeof window.refreshBookingFabSelect === 'function') {
+    window.refreshBookingFabSelect('consigneeSelect');
   }
 }
 
@@ -281,26 +373,42 @@ function escapeHtml(text) {
  * Main function to apply booking mappings when country is selected
  */
 window.applyBookingMappingsByCountry = async function(country) {
-  // Preserve POD value before any operations
-  const podElement = document.getElementById('podPort');
-  const preservedPodValue = podElement ? (podElement.value ? podElement.value.trim() : '') : '';
+  function refreshBookingMappingFabLabels() {
+    if (typeof window.refreshBookingFabSelect !== 'function') return;
+    try {
+      window.refreshBookingFabSelect('consigneeSelect');
+    } catch (e) { /* consignee FAB may not exist yet */ }
+    try {
+      window.refreshBookingFabSelect('podPort');
+    } catch (e) { /* pod FAB may not exist yet */ }
+  }
   
   if (!country) {
     console.log('🌍 No country selected, clearing fields');
+    window.__carBookingMappingsByCountry = [];
     // Clear fields
     const podSelect = document.getElementById('podPort');
     if (podSelect && podSelect.tagName === 'SELECT') {
       podSelect.innerHTML = '<option value="">Select POD</option>';
+      podSelect.value = '';
+    } else if (podSelect && podSelect.tagName === 'INPUT') {
+      podSelect.value = '';
     }
     const consigneeInput = document.getElementById('consigneeName');
     if (consigneeInput) {
       consigneeInput.value = '';
+    }
+    const consigneeSelClear = document.getElementById('consigneeSelect');
+    if (consigneeSelClear) {
+      consigneeSelClear.innerHTML = '<option value="">Select Consignee</option>';
+      consigneeSelClear.value = '';
     }
     const legacyDisplay = document.getElementById('consigneeDisplay');
     if (legacyDisplay) {
       legacyDisplay.innerHTML = '';
       legacyDisplay.style.display = 'none';
     }
+    refreshBookingMappingFabLabels();
     return;
   }
   
@@ -311,40 +419,31 @@ window.applyBookingMappingsByCountry = async function(country) {
   
   if (mappings.length === 0) {
     console.log('⚠️ No mappings found for country:', country);
-    // Clear fields if no mappings, but preserve POD if it was manually entered
-    const podSelect = document.getElementById('podPort');
-    if (podSelect) {
-      if (podSelect.tagName === 'SELECT') {
-        podSelect.innerHTML = '<option value="">Select POD</option>';
-        // Restore preserved value if it exists
-        if (preservedPodValue && preservedPodValue !== '') {
-          const option = document.createElement('option');
-          option.value = preservedPodValue;
-          option.textContent = preservedPodValue;
-          podSelect.appendChild(option);
-          podSelect.value = preservedPodValue;
-          console.log('✅ Preserved POD value (no mappings):', preservedPodValue);
-        }
-      } else {
-        // For input element, just restore the value
-        podSelect.value = preservedPodValue;
-      }
-    }
-    const consigneeInputNm = document.getElementById('consigneeName');
-    if (consigneeInputNm) consigneeInputNm.value = '';
+    window.__carBookingMappingsByCountry = [];
     const legacyDisp = document.getElementById('consigneeDisplay');
     if (legacyDisp) {
       legacyDisp.innerHTML = '';
       legacyDisp.style.display = 'none';
     }
+    // When this country has no consignee_map rows: clear consignee + POD completely (no carry-over from previous country).
+    if (document.getElementById('consigneeSelect')) {
+      populateConsigneeField([]);
+    } else {
+      applyConsigneeNameOnly('');
+      const consigneeInputNm = document.getElementById('consigneeName');
+      if (consigneeInputNm) consigneeInputNm.value = '';
+    }
+    populatePODDropdown([], false);
+    refreshBookingMappingFabLabels();
     return;
   }
   
-  // Populate POD dropdown (will preserve value if it exists)
-  populatePODDropdown(mappings);
+  // Cache full list for consignee → POD filtering (multiple consignees per country, e.g. Kenya)
+  window.__carBookingMappingsByCountry = mappings;
   
-  // Populate CONSIGNEE field and dropdown
+  // Consignee dropdown first (first consignee auto-selected), then POD from that consignee's row(s) only
   populateConsigneeField(mappings);
+  applyConsigneePodRefresh(true);
   
   console.log('✅ Booking mappings applied successfully');
 };
@@ -401,3 +500,244 @@ if (window.MutationObserver) {
     subtree: true
   });
 }
+
+/**
+ * Booking page FAB dropdowns — same behavior as Rixo Company picker (avatar + fly-down list).
+ */
+(function bookingFabModule() {
+  var registry = {};
+
+  function cfgFor(selectId) {
+    return registry[selectId];
+  }
+
+  function closeFab(selectId) {
+    var c = cfgFor(selectId);
+    if (!c || !c.wrap) return;
+    c.wrap.classList.remove('rixo-company-fab--open');
+    if (c.actions) c.actions.style.display = 'none';
+    if (c.trigger) c.trigger.setAttribute('aria-expanded', 'false');
+  }
+
+  /** Close every booking FAB except [exceptSelectId] (omit arg to close all). */
+  function closeAllBookingFabsExcept(exceptSelectId) {
+    Object.keys(registry).forEach(function(sid) {
+      if (exceptSelectId != null && sid === exceptSelectId) return;
+      closeFab(sid);
+    });
+  }
+
+  function rebuildFab(selectId) {
+    var c = cfgFor(selectId);
+    var select = document.getElementById(selectId);
+    if (!select || select.tagName !== 'SELECT' || !c || !c.actions) return;
+    c.actions.innerHTML = '';
+    var opts = select.querySelectorAll('option');
+    var count = 0;
+    opts.forEach(function(opt) {
+      if (!opt.value) return;
+      count++;
+      var val = opt.value;
+      var labelText = (opt.textContent || opt.value || '').trim();
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'rixo-fab-action-row rixo-fab-action-row--text-only';
+      row.setAttribute('role', 'option');
+      row.textContent = labelText;
+      row.setAttribute('data-value', val);
+      row.setAttribute('title', labelText);
+      row.addEventListener('click', function(e) {
+        e.stopPropagation();
+        select.value = val;
+        closeFab(selectId);
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        updateLabel(selectId);
+      });
+      c.actions.appendChild(row);
+    });
+    if (count === 0 && c.emptyMessage) {
+      var empty = document.createElement('div');
+      empty.className = 'rixo-fab-action-row';
+      empty.style.cssText = 'justify-content:center;font-size:13px;color:#6b7280;padding:8px;';
+      empty.textContent = c.emptyMessage;
+      c.actions.appendChild(empty);
+    }
+  }
+
+  function openFab(selectId) {
+    var c = cfgFor(selectId);
+    if (!c || !c.wrap) return;
+    // Opening one FAB must collapse any other (trigger uses stopPropagation so document click never runs).
+    closeAllBookingFabsExcept(selectId);
+    rebuildFab(selectId);
+    c.wrap.classList.add('rixo-company-fab--open');
+    if (c.actions) c.actions.style.display = 'flex';
+    if (c.trigger) c.trigger.setAttribute('aria-expanded', 'true');
+  }
+
+  function toggleFab(selectId) {
+    var c = cfgFor(selectId);
+    if (!c || !c.wrap) return;
+    if (c.wrap.classList.contains('rixo-company-fab--open')) closeFab(selectId);
+    else openFab(selectId);
+  }
+
+  function updateLabel(selectId) {
+    var c = cfgFor(selectId);
+    var el = document.getElementById(selectId);
+    if (!el || !c) return;
+    // During booking restore POD can briefly be an <input>; never throw here.
+    if (!el.tagName || el.tagName.toUpperCase() !== 'SELECT') {
+      if (c.labelEl) c.labelEl.textContent = c.defaultLabel;
+      if (c.letterEl) c.letterEl.textContent = c.defaultLetter || '?';
+      return;
+    }
+    var select = el;
+    var v = (select.value || '').trim();
+    var display = '';
+    if (v) {
+      var idx = (typeof select.selectedIndex === 'number') ? select.selectedIndex : -1;
+      var opt = (idx >= 0 && select.options && select.options.length > idx) ? select.options[idx] : null;
+      display = (opt && (opt.textContent || '').trim()) || v;
+    }
+    if (c.labelEl) c.labelEl.textContent = display || c.defaultLabel;
+    if (c.letterEl) {
+      c.letterEl.textContent = display ? display.charAt(0).toUpperCase() : (c.defaultLetter || '?');
+    }
+  }
+
+  window.registerBookingFabSelect = function(config) {
+    var selectId = config.selectId;
+    var wrap = document.getElementById(config.wrapId);
+    var trigger = document.getElementById(config.triggerId);
+    var actions = document.getElementById(config.actionsId);
+    if (!wrap || !trigger || !actions || !document.getElementById(selectId)) return;
+
+    registry[selectId] = {
+      wrap: wrap,
+      trigger: trigger,
+      actions: actions,
+      labelEl: document.getElementById(config.labelId),
+      letterEl: config.letterId ? document.getElementById(config.letterId) : null,
+      defaultLabel: config.defaultLabel || 'Select',
+      defaultLetter: config.defaultLetter || '?',
+      emptyMessage: config.emptyMessage || ''
+    };
+
+    if (!trigger.hasAttribute('data-booking-fab-bound')) {
+      trigger.setAttribute('data-booking-fab-bound', 'true');
+      trigger.addEventListener('click', function(e) {
+        e.stopPropagation();
+        toggleFab(selectId);
+      });
+    }
+
+    var sel = document.getElementById(selectId);
+    if (sel && !sel.hasAttribute('data-booking-fab-change')) {
+      sel.setAttribute('data-booking-fab-change', 'true');
+      sel.addEventListener('change', function() {
+        updateLabel(selectId);
+      });
+    }
+    updateLabel(selectId);
+  };
+
+  window.refreshBookingFabSelect = function(selectId) {
+    updateLabel(selectId);
+  };
+
+  window.rebuildBookingFabFromSelect = function(selectId) {
+    rebuildFab(selectId);
+  };
+
+  if (!window.__bookingFabDocClickInstalled) {
+    window.__bookingFabDocClickInstalled = true;
+    document.addEventListener('click', function(e) {
+      Object.keys(registry).forEach(function(sid) {
+        var c = registry[sid];
+        if (!c || !c.wrap || !c.wrap.classList.contains('rixo-company-fab--open')) return;
+        if (c.wrap.contains(e.target)) return;
+        closeFab(sid);
+      });
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key !== 'Escape') return;
+      Object.keys(registry).forEach(function(sid) {
+        closeFab(sid);
+      });
+    });
+  }
+
+  window.ensureBookingFabPod = function() {
+    var sel = document.getElementById('podPort');
+    if (!sel || sel.tagName !== 'SELECT') return;
+
+    if (document.getElementById('bookingPodFabWrap')) {
+      window.registerBookingFabSelect({
+        selectId: 'podPort',
+        wrapId: 'bookingPodFabWrap',
+        triggerId: 'bookingPodFabTrigger',
+        actionsId: 'bookingPodFabActions',
+        labelId: 'bookingPodFabLabel',
+        defaultLabel: 'Select POD',
+        emptyMessage: 'No POD for this consignee'
+      });
+      return;
+    }
+
+    var parent = sel.parentNode;
+    if (!parent) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'rixo-company-fab-wrap booking-fab-field';
+    wrap.id = 'bookingPodFabWrap';
+    var col = document.createElement('div');
+    col.className = 'rixo-company-fab';
+    var trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'rixo-fab-trigger';
+    trigger.id = 'bookingPodFabTrigger';
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-controls', 'bookingPodFabActions');
+    var tw = document.createElement('span');
+    tw.className = 'rixo-fab-trigger-text-wrap';
+    var lab = document.createElement('span');
+    lab.className = 'rixo-fab-trigger-label';
+    lab.id = 'bookingPodFabLabel';
+    lab.textContent = 'Select POD';
+    var hint = document.createElement('span');
+    hint.className = 'rixo-fab-trigger-hint';
+    hint.textContent = 'Tap to choose POD';
+    tw.appendChild(lab);
+    tw.appendChild(hint);
+    var chev = document.createElement('span');
+    chev.className = 'rixo-fab-trigger-chevron';
+    chev.setAttribute('aria-hidden', 'true');
+    chev.textContent = '▼';
+    trigger.appendChild(tw);
+    trigger.appendChild(chev);
+    var actions = document.createElement('div');
+    actions.id = 'bookingPodFabActions';
+    actions.className = 'rixo-fab-actions';
+    actions.style.display = 'none';
+    actions.setAttribute('role', 'listbox');
+    col.appendChild(trigger);
+    col.appendChild(actions);
+    parent.insertBefore(wrap, sel);
+    sel.className = 'rixo-company-fab-native-select';
+    sel.setAttribute('tabindex', '-1');
+    sel.setAttribute('aria-hidden', 'true');
+    wrap.appendChild(sel);
+    wrap.appendChild(col);
+
+    window.registerBookingFabSelect({
+      selectId: 'podPort',
+      wrapId: 'bookingPodFabWrap',
+      triggerId: 'bookingPodFabTrigger',
+      actionsId: 'bookingPodFabActions',
+      labelId: 'bookingPodFabLabel',
+      defaultLabel: 'Select POD',
+      emptyMessage: 'No POD for this consignee'
+    });
+  };
+})();

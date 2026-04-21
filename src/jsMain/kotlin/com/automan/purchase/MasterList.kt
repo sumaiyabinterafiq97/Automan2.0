@@ -12,6 +12,15 @@ var carBrandsCurrentPage = 1
 var carBrandsItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allCarBrands: List<dynamic> = emptyList()
 
+/** When true, list data comes from [car-brand-mapping/mappings/page-search]. */
+var carBrandMapSearchServerMode: Boolean = false
+var carBrandMapSearchTotal: Long = 0
+var carBrandMapSearchTotalPages: Int = 0
+var carBrandMapSearchPageZeroBased: Int = 0
+/** API field: all | chassis | brand | carName */
+var carBrandMapSearchFieldChoice: String = "all"
+private var carBrandMapSearchDebounceTimer: dynamic = null
+
 var clientMapCurrentPage = 1
 var clientMapItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allClientMaps: List<dynamic> = emptyList()
@@ -21,6 +30,15 @@ var lastClientMapDeviceType: String? = getDeviceType()
 var suppliersCurrentPage = 1
 var suppliersItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allSuppliers: List<dynamic> = emptyList()
+
+/** When true, list data comes from [rixo/prices/page-search]. */
+var supplierMapSearchServerMode: Boolean = false
+var supplierMapSearchTotal: Long = 0
+var supplierMapSearchTotalPages: Int = 0
+var supplierMapSearchPageZeroBased: Int = 0
+/** API field: all | supplierName | stockLocation | rixoCompany */
+var supplierMapSearchFieldChoice: String = "all"
+private var supplierMapSearchDebounceTimer: dynamic = null
 
 // Global variable to track last device type for Supplier page
 var lastSupplierDeviceType: String? = getDeviceType()
@@ -104,6 +122,10 @@ private fun extractConsigneeMapSortKey(m: dynamic, field: String): String {
 }
 
 private fun toggleCarBrandMapSort(field: String) {
+    if (carBrandMapSearchServerMode) {
+        showMessage("Clear the search box to sort the full list.", "info")
+        return
+    }
     val cur = carBrandMapSortOrderByField[field] ?: "desc"
     carBrandMapSortOrderByField[field] = if (cur == "asc") "desc" else "asc"
     carBrandMapSortField = field
@@ -112,6 +134,10 @@ private fun toggleCarBrandMapSort(field: String) {
 }
 
 private fun toggleSupplierMapSort(field: String) {
+    if (supplierMapSearchServerMode) {
+        showMessage("Clear the search box to sort the full list.", "info")
+        return
+    }
     val cur = supplierMapSortOrderByField[field] ?: "desc"
     supplierMapSortOrderByField[field] = if (cur == "asc") "desc" else "asc"
     supplierMapSortField = field
@@ -120,6 +146,10 @@ private fun toggleSupplierMapSort(field: String) {
 }
 
 private fun toggleConsigneeMapSort(field: String) {
+    if (consigneeMapSearchServerMode) {
+        showMessage("Clear the search box to sort the full list.", "info")
+        return
+    }
     val cur = consigneeMapSortOrderByField[field] ?: "desc"
     consigneeMapSortOrderByField[field] = if (cur == "asc") "desc" else "asc"
     consigneeMapSortField = field
@@ -366,7 +396,6 @@ fun populateEditableComboboxFromMasterMenu(selectId: String, fieldName: String) 
 
 private fun populateSupplierMapModalComboboxes(isDuplicate: Boolean) {
     val prefix = if (isDuplicate) "dupSupplier" else "supplier"
-    populateEditableComboboxFromMasterMenu("${prefix}AuctionHouse", "supplier")
     populateEditableComboboxFromMasterMenu("${prefix}StockLocation", "stock_location")
     populateEditableComboboxFromMasterMenu("${prefix}RixoCompany", "rixo_company")
     populateEditableComboboxFromMasterMenu("${prefix}VenueId", "venue_id")
@@ -377,14 +406,12 @@ private fun populateSupplierMapModalComboboxes(isDuplicate: Boolean) {
 
 private fun populateConsigneeMapModalComboboxes() {
     populateEditableComboboxFromMasterMenu("consigneeMapCountry", "country")
-    populateEditableComboboxFromMasterMenu("consigneeMapConsigneeName", "consignee")
     populateEditableComboboxFromMasterMenu("consigneeMapPod", "pod")
 }
 
 /** Client Map modal: chip multi-selects + single client combobox from master_menu (see wireClientMapModalComboboxes). */
 fun wireClientMapModalComboboxes() {
     ensureSupplierChipJs()
-    populateEditableComboboxFromMasterMenu("clientMapMmClientName", "clients")
     populateEditableComboboxFromMasterMenu("clientMapMmCountry", "country")
     populateEditableComboboxFromMasterMenu("clientMapMmPod", "pod")
     populateEditableComboboxFromMasterMenu("clientMapMmBankInfo", "bank_accounts")
@@ -656,56 +683,24 @@ private fun ensureSupplierChipJs() {
     """)
 }
 
+@Suppress("UNUSED_PARAMETER")
 private fun enforceSupplierModalDropdownOnly(prefix: String) {
-    js("""
-        (function() {
-          function normalize(v) { return (v || '').toString().trim().toUpperCase(); }
-          function optionExists(selectId, rawValue) {
-            var select = document.getElementById(selectId);
-            if (!select) return false;
-            var needle = normalize(rawValue);
-            if (!needle) return false;
-            for (var i = 0; i < select.options.length; i++) {
-              var opt = select.options[i];
-              var ov = normalize(opt.value);
-              var ot = normalize(opt.text);
-              if (!ov) continue;
-              if (ov === '__SEE_MORE__' || ov === '__SEE_LESS__') continue;
-              if (needle === ov || needle === ot) return true;
-            }
-            return false;
-          }
-          function clearIfInvalid(selectId) {
-            var input = document.getElementById(selectId + 'Input');
-            if (!input) return;
-            var typed = (input.value || '').toString().trim();
-            if (!typed) return;
-            if (!optionExists(selectId, typed)) {
-              input.value = '';
-              var select = document.getElementById(selectId);
-              if (select) select.value = '';
-            }
-          }
-          var base = prefix + 'AuctionHouse';
-          var input = document.getElementById(base + 'Input');
-          if (input && !input.__supplierStrictBound) {
-            input.__supplierStrictBound = true;
-            input.addEventListener('blur', function() { clearIfInvalid(base); });
-            input.addEventListener('keydown', function(e) {
-              if (e && e.key === 'Enter') {
-                e.preventDefault();
-                clearIfInvalid(base);
-              }
-            });
-          }
-        })();
-    """)
+    // Supplier name is free text; chip fields use master-menu dropdowns.
 }
 
 // Global pagination variables for Consignees
 var consigneesCurrentPage = 1
 var consigneesItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allConsignees: List<dynamic> = emptyList()
+
+/** When true, list data comes from [booking/mappings/page-search]. */
+var consigneeMapSearchServerMode: Boolean = false
+var consigneeMapSearchTotal: Long = 0
+var consigneeMapSearchTotalPages: Int = 0
+var consigneeMapSearchPageZeroBased: Int = 0
+/** API field: all | consigneeName | country */
+var consigneeMapSearchFieldChoice: String = "all"
+private var consigneeMapSearchDebounceTimer: dynamic = null
 
 // Global variable to track last device type for Consignee page
 var lastConsigneeDeviceType: String? = getDeviceType()
@@ -1728,6 +1723,157 @@ fun showMasterConsigneePage() {
     showConsigneeMapPage()
 }
 
+private fun getConsigneeMapSearchQuery(): String =
+    (document.getElementById("consigneeMapSearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+
+private fun consigneeMapSearchFieldDisplayLabel(): String = when (consigneeMapSearchFieldChoice) {
+    "consigneeName" -> "Consignee name"
+    "country" -> "Country"
+    else -> "All fields"
+}
+
+private fun refreshConsigneeMapSearchScopeUi() {
+    val scopeLabel = consigneeMapSearchFieldDisplayLabel()
+    val btn = document.getElementById("consigneeMapSearchFilterBtn") as? HTMLElement
+    if (btn != null) {
+        btn.setAttribute("title", "Filter — search in: $scopeLabel")
+        btn.setAttribute("aria-label", "Open filter for which field to search. Current: $scopeLabel.")
+    }
+    val sr = document.getElementById("consigneeMapSearchFieldLabel") as? HTMLElement
+    if (sr != null) sr.textContent = scopeLabel
+}
+
+private fun closeConsigneeMapSearchFilterMenu() {
+    val menu = document.getElementById("consigneeMapSearchFilterMenu") as? HTMLElement
+    menu?.style?.setProperty("display", "none", "important")
+    window.asDynamic().__consigneeMapSearchFilterMenuOpen = false
+    document.getElementById("consigneeMapSearchFilterBtn")?.setAttribute("aria-expanded", "false")
+}
+
+private fun updateConsigneeMapSearchFilterMenuActive(selected: String) {
+    val pairs = listOf(
+        "all" to "consigneeMapSearchOptAll",
+        "consigneeName" to "consigneeMapSearchOptConsigneeName",
+        "country" to "consigneeMapSearchOptCountry"
+    )
+    for ((value, id) in pairs) {
+        val el = document.getElementById(id) as? HTMLElement ?: continue
+        if (value == selected) el.classList.add("consignee-map-search-filter-opt--active")
+        else el.classList.remove("consignee-map-search-filter-opt--active")
+    }
+}
+
+private fun scheduleConsigneeMapSearchDebounced() {
+    if (consigneeMapSearchDebounceTimer != null) {
+        window.clearTimeout(consigneeMapSearchDebounceTimer.unsafeCast<Int>())
+        consigneeMapSearchDebounceTimer = null
+    }
+    consigneeMapSearchDebounceTimer = window.setTimeout({
+        consigneeMapSearchDebounceTimer = null
+        runConsigneeMapSearchFromInput()
+    }, 420)
+}
+
+private fun runConsigneeMapSearchFromInput() {
+    val raw = getConsigneeMapSearchQuery()
+    if (raw.isEmpty()) {
+        consigneeMapSearchServerMode = false
+        consigneeMapSearchTotal = 0
+        consigneeMapSearchTotalPages = 0
+        consigneeMapSearchPageZeroBased = 0
+        consigneesCurrentPage = 1
+        loadMasterConsignee()
+        return
+    }
+    consigneeMapSearchPageZeroBased = 0
+    consigneesCurrentPage = 1
+    loadMasterConsignee()
+}
+
+fun setupConsigneeMapSearchBarListeners() {
+    val input = document.getElementById("consigneeMapSearchInput") as? HTMLInputElement ?: return
+    val filterBtn = document.getElementById("consigneeMapSearchFilterBtn") as? HTMLElement
+    val menu = document.getElementById("consigneeMapSearchFilterMenu") as? HTMLElement
+    val clearBtn = document.getElementById("consigneeMapSearchClearBtn") as? HTMLElement
+
+    if (!input.hasAttribute("data-consignee-map-search-bound")) {
+        input.setAttribute("data-consignee-map-search-bound", "true")
+        input.addEventListener("input", { _: Event -> scheduleConsigneeMapSearchDebounced() })
+        input.addEventListener("keydown", { ev: Event ->
+            val kev = ev.asDynamic()
+            if (kev.key == "Enter") {
+                ev.preventDefault()
+                if (consigneeMapSearchDebounceTimer != null) {
+                    window.clearTimeout(consigneeMapSearchDebounceTimer.unsafeCast<Int>())
+                    consigneeMapSearchDebounceTimer = null
+                }
+                runConsigneeMapSearchFromInput()
+            }
+        })
+    }
+
+    if (filterBtn != null && !filterBtn.hasAttribute("data-consignee-map-search-bound")) {
+        filterBtn.setAttribute("data-consignee-map-search-bound", "true")
+        filterBtn.addEventListener("click", { e: Event ->
+            e.stopPropagation()
+            if (menu == null) return@addEventListener
+            val open = window.asDynamic().__consigneeMapSearchFilterMenuOpen == true
+            window.asDynamic().__consigneeMapSearchFilterMenuOpen = !open
+            val nowOpen = !open
+            menu.style.setProperty("display", if (open) "none" else "block", "important")
+            filterBtn.setAttribute("aria-expanded", if (nowOpen) "true" else "false")
+        })
+    }
+
+    if (clearBtn != null && !clearBtn.hasAttribute("data-consignee-map-search-bound")) {
+        clearBtn.setAttribute("data-consignee-map-search-bound", "true")
+        clearBtn.addEventListener("click", { _: Event ->
+            input.value = ""
+            closeConsigneeMapSearchFilterMenu()
+            runConsigneeMapSearchFromInput()
+        })
+    }
+
+    val optIds = listOf(
+        "consigneeMapSearchOptAll" to "all",
+        "consigneeMapSearchOptConsigneeName" to "consigneeName",
+        "consigneeMapSearchOptCountry" to "country"
+    )
+    for ((id, value) in optIds) {
+        val el = document.getElementById(id) as? HTMLElement
+        if (el != null && !el.hasAttribute("data-consignee-map-search-bound")) {
+            el.setAttribute("data-consignee-map-search-bound", "true")
+            el.addEventListener("click", { _: Event ->
+                consigneeMapSearchFieldChoice = value
+                refreshConsigneeMapSearchScopeUi()
+                updateConsigneeMapSearchFilterMenuActive(value)
+                closeConsigneeMapSearchFilterMenu()
+                val q = input.value.trim()
+                if (q.isNotEmpty()) {
+                    consigneeMapSearchPageZeroBased = 0
+                    consigneesCurrentPage = 1
+                    loadMasterConsignee()
+                }
+            })
+        }
+    }
+
+    if (window.asDynamic().__consigneeMapSearchFilterOutsideAttached != true) {
+        window.asDynamic().__consigneeMapSearchFilterOutsideAttached = true
+        document.addEventListener("click", { event ->
+            val target = event.target as? Node ?: return@addEventListener
+            val m = document.getElementById("consigneeMapSearchFilterMenu") as? HTMLElement
+            val b = document.getElementById("consigneeMapSearchFilterBtn") as? HTMLElement
+            if (m == null) return@addEventListener
+            val insideMenu = m.contains(target)
+            val insideBtn = b != null && b.contains(target)
+            if (!insideMenu && !insideBtn) {
+                closeConsigneeMapSearchFilterMenu()
+            }
+        })
+    }
+}
+
 fun showConsigneeMapPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -1744,15 +1890,40 @@ fun showConsigneeMapPage() {
                 </div>
             </div>
             
-            <!-- Search and Filter Section -->
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 250px;">
-                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Country:</label>
-                        <input type="text" id="consigneeCountryFilter" placeholder="Type country name to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+            <style>
+                #consigneeList .consignee-map-search-filter-opt:hover { background: #f3f4f6 !important; }
+                #consigneeList .consignee-map-search-filter-opt--active { background: #eef2ff !important; font-weight: 600; }
+                #consigneeList .consignee-map-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+                #consigneeList #consigneeMapSearchFilterBtn:hover { background: #e8eaed !important; box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important; }
+                #consigneeList #consigneeMapSearchFilterBtn:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+            </style>
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px; width: 100%; max-width: 720px;">
+                    <div style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                        <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; color: #9ca3af; display: flex;" aria-hidden="true">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        </span>
+                        <input type="text" id="consigneeMapSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Type to search…" aria-label="Search consignee map" style="width: 100%; box-sizing: border-box; padding: 12px 40px 12px 44px; border: none; font-size: 14px; background: transparent; border-radius: 999px; outline: none;" />
+                        <button type="button" id="consigneeMapSearchClearBtn" title="Clear search" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: #9ca3af; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 8px;">×</button>
                     </div>
-                    <div style="display: flex; gap: 10px; align-items: flex-end;">
-                        <button id="clearConsigneeFilterBtn" style="padding: 10px 20px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">Clear Filter</button>
+                    <div style="position: relative; flex-shrink: 0;">
+                        <span id="consigneeMapSearchFieldLabel" class="consignee-map-sr-only" aria-live="polite">All fields</span>
+                        <button type="button" id="consigneeMapSearchFilterBtn" title="Filter — search in: All fields" aria-haspopup="true" aria-expanded="false" aria-label="Open filter for which field to search. Current: All fields." style="width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e5e7eb; background: #f3f4f6; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4b5563; padding: 0;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <line x1="3" y1="7" x2="21" y2="7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                <circle cx="8" cy="7" r="2.25" fill="currentColor"/>
+                                <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                <circle cx="16" cy="12" r="2.25" fill="currentColor"/>
+                                <line x1="3" y1="17" x2="21" y2="17" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                <circle cx="7" cy="17" r="2.25" fill="currentColor"/>
+                            </svg>
+                        </button>
+                        <div id="consigneeMapSearchFilterMenu" style="display: none; position: absolute; right: 0; top: calc(100% + 8px); z-index: 20001; min-width: 220px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12); padding: 8px 0;">
+                            <div style="padding: 8px 14px 4px; font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .04em;">Search in</div>
+                            <button type="button" class="consignee-map-search-filter-opt consignee-map-search-filter-opt--active" id="consigneeMapSearchOptAll" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">All fields</button>
+                            <button type="button" class="consignee-map-search-filter-opt" id="consigneeMapSearchOptConsigneeName" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Consignee name</button>
+                            <button type="button" class="consignee-map-search-filter-opt" id="consigneeMapSearchOptCountry" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Country</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1774,23 +1945,22 @@ fun showConsigneeMapPage() {
         </div>
     """
     
+    consigneeMapSearchFieldChoice = "all"
+    consigneeMapSearchServerMode = false
+    consigneeMapSearchTotal = 0
+    consigneeMapSearchTotalPages = 0
+    consigneeMapSearchPageZeroBased = 0
+    consigneesCurrentPage = 1
+    updateConsigneeMapSearchFilterMenuActive("all")
+    refreshConsigneeMapSearchScopeUi()
+    setupConsigneeMapSearchBarListeners()
+    
     // Load initial data
     loadMasterConsignee()
     
     // Event listeners
     document.getElementById("addConsigneeBtn")?.addEventListener("click", { _: Event ->
         showAddConsigneeModal()
-    })
-    
-    document.getElementById("clearConsigneeFilterBtn")?.addEventListener("click", { _: Event ->
-        val filterInput = document.getElementById("consigneeCountryFilter") as HTMLInputElement?
-        filterInput?.value = ""
-        loadMasterConsignee()
-    })
-    
-    // Real-time search filter
-    document.getElementById("consigneeCountryFilter")?.addEventListener("input", { _: Event ->
-        loadMasterConsignee()
     })
     
     // Column filter button
@@ -1876,197 +2046,87 @@ fun loadMasterConsignee() {
     loadMasterConsigneesWithTable()
 }
 
-fun loadMasterConsigneesWithCards() {
-    val tableDiv = document.getElementById("consigneeTable")
-    if (tableDiv == null) return
-    
-    // Get country filter value
-    val countryFilter = (document.getElementById("consigneeCountryFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
-    
-    // Show loading state
-    tableDiv.innerHTML = """
-        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-            <div style="font-size: 16px; margin-bottom: 8px;">Loading consignee data...</div>
-            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-        </div>
-    """
-    
-    // Load from booking mappings
-    window.fetch(apiUrl("booking/mappings"))
-        .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load consignee')")
+/**
+ * Renders Consignee Map table + pagination. [isServerSearch] uses [consigneeMapSearchPageZeroBased] / totals from API.
+ */
+private fun buildConsigneeTableUi(
+    tableDiv: HTMLElement,
+    paginatedMappings: List<dynamic>,
+    orderedForDisplay: List<dynamic>,
+    filterLabel: String,
+    totalPages: Int,
+    isServerSearch: Boolean,
+    footerStart: Int,
+    footerEnd: Int,
+) {
+    val consigneeSortable = setOf("consigneeName", "country", "pod")
+    if (orderedForDisplay.isEmpty()) {
+        val message = if (filterLabel.isNotEmpty()) {
+            "No consignee data found for: $filterLabel"
+        } else {
+            "No consignee data found."
         }
-        .then { result: dynamic ->
-            val mappings = result.data ?: js("[]")
-            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
-            
-            // Filter by country if filter is set
-            val filteredMappingsUnsorted = if (countryFilter.isNotEmpty()) {
-                mappingsArray.filter { mapping ->
-                    val country = (mapping.country ?: "").toString().uppercase()
-                    country.contains(countryFilter)
-                }
-            } else {
-                mappingsArray.toList()
-            }
-            
-            // Sort by ID descending (newest first)
-            val filteredMappings = filteredMappingsUnsorted.sortedByDescending { 
-                (it.id as? Number)?.toLong() ?: 0L 
-            }
-            val consigneeSortable = setOf("consigneeName", "country", "pod")
-            var orderedForDisplay = filteredMappings
-            val cmsf = consigneeMapSortField
-            if (cmsf != null && cmsf in consigneeSortable) {
-                val ord = consigneeMapSortOrderByField[cmsf] ?: "desc"
-                orderedForDisplay = if (ord == "asc") {
-                    filteredMappings.sortedBy { extractConsigneeMapSortKey(it, cmsf) }
-                } else {
-                    filteredMappings.sortedByDescending { extractConsigneeMapSortKey(it, cmsf) }
-                }
-            }
-            
-            // Store all filtered mappings for pagination
-            allConsignees = orderedForDisplay
-            if (countryFilter.isNotEmpty()) {
-                consigneesCurrentPage = 1
-            }
-            
-            displayConsigneesAsCards(orderedForDisplay, countryFilter)
-        }
-        .catch { error: dynamic ->
-            Logger.error("Error loading consignees: ${error.toString()}")
-            tableDiv.innerHTML = """
-                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading consignee data</div>
-                    <div style="font-size: 14px; color: #9ca3af;">${error.message}</div>
-                </div>
-            """
-        }
-}
+        tableDiv.innerHTML = """
+            <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
+                <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search or filter</div>
+            </div>
+        """
+        return
+    }
 
-fun loadMasterConsigneesWithTable() {
-    val tableDiv = document.getElementById("consigneeTable")
-    if (tableDiv == null) return
-    
-    // Get country filter value
-    val countryFilter = (document.getElementById("consigneeCountryFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
-    
-    // Show loading state
-    tableDiv.innerHTML = """
-        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-            <div style="font-size: 16px; margin-bottom: 8px;">Loading consignee data...</div>
-            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-        </div>
-    """
-    
-    // Load from booking mappings
-    window.fetch(apiUrl("booking/mappings"))
-        .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load consignee')")
-        }
-        .then { result: dynamic ->
-            val mappings = result.data ?: js("[]")
-            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
-            
-            // Filter by country if filter is set
-            val filteredMappingsUnsorted = if (countryFilter.isNotEmpty()) {
-                mappingsArray.filter { mapping ->
-                    val country = (mapping.country ?: "").toString().uppercase()
-                    country.contains(countryFilter)
-                }
-            } else {
-                mappingsArray.toList()
-            }
-            
-            // Sort by ID descending (newest first)
-            val filteredMappings = filteredMappingsUnsorted.sortedByDescending { 
-                (it.id as? Number)?.toLong() ?: 0L 
-            }
-            val consigneeSortable = setOf("consigneeName", "country", "pod")
-            var orderedForDisplay = filteredMappings
-            val cmsf = consigneeMapSortField
-            if (cmsf != null && cmsf in consigneeSortable) {
-                val ord = consigneeMapSortOrderByField[cmsf] ?: "desc"
-                orderedForDisplay = if (ord == "asc") {
-                    filteredMappings.sortedBy { extractConsigneeMapSortKey(it, cmsf) }
-                } else {
-                    filteredMappings.sortedByDescending { extractConsigneeMapSortKey(it, cmsf) }
-                }
-            }
-            
-            // Store all filtered mappings for pagination
-            allConsignees = orderedForDisplay
-            if (countryFilter.isNotEmpty()) {
-                consigneesCurrentPage = 1
-            }
-            
-            if (orderedForDisplay.isEmpty()) {
-                val message = if (countryFilter.isNotEmpty()) {
-                    "No consignee data found for country: $countryFilter"
-                } else {
-                    "No consignee data found."
-                }
-                tableDiv.innerHTML = """
-                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                        <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
-                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search filter</div>
-                    </div>
-                """
-                return@then
-            }
-            
-            // Calculate pagination
-            val totalPages = kotlin.math.ceil(orderedForDisplay.size.toDouble() / consigneesItemsPerPage).toInt()
-            val startIndex = (consigneesCurrentPage - 1) * consigneesItemsPerPage
-            val endIndex = kotlin.math.min(startIndex + consigneesItemsPerPage, orderedForDisplay.size)
-            val paginatedMappings = orderedForDisplay.subList(startIndex, endIndex)
-            
-            // Get selected columns
-            val selectedColumns = getSelectedConsigneeColumns()
-            val columnLabels = mapOf(
-                "country" to "Country",
-                "consigneeName" to "Consignee Name",
-                "consigneeAddress" to "Consignee Address",
-                "pod" to "POD"
-            )
-            
-            var html = """
+    if (paginatedMappings.isEmpty()) {
+        tableDiv.innerHTML = """
+            <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                <div style="font-size: 16px; margin-bottom: 8px;">No rows on this page.</div>
+            </div>
+        """
+        return
+    }
+
+    val selectedColumns = getSelectedConsigneeColumns()
+    val columnLabels = mapOf(
+        "country" to "Country",
+        "consigneeName" to "Consignee Name",
+        "consigneeAddress" to "Consignee Address",
+        "pod" to "POD"
+    )
+
+    var html = """
                 <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #d1d5db;">
                     <table style="width: 100%; border-collapse: collapse; border: 1px solid #d1d5db; background: #fff;" class="consignee-table">
                         <thead>
                             <tr>
                                 <th style="padding: 12px 14px; text-align: left; min-width: 72px; border: 1px solid #e5e7eb; background-color: #f3f4f6;"></th>
             """
-            
-            // Add headers for selected columns only
-            for (columnKey in selectedColumns) {
-                val label = columnLabels[columnKey] ?: columnKey
-                val thStyle = "padding: 12px 16px; text-align: left; font-weight: 700; color: #111827; font-size: 13px; letter-spacing: 0.02em; border: 1px solid #e5e7eb; background-color: #f3f4f6;"
-                html += if (columnKey in consigneeSortable) {
-                    val tip = masterMapColumnSortTooltip(consigneeMapSortOrderByField, columnKey)
-                    val bid = "consigneeMapSort_$columnKey"
-                    """<th style="$thStyle"><button type="button" id="$bid" title="$tip" style="background: none; border: none; cursor: pointer; font-weight: 700; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;"><span>$label</span><span style="font-size: 14px;">↕</span></button></th>"""
-                } else {
-                    """<th style="$thStyle">$label</th>"""
-                }
-            }
-            
-            html += """
+
+    for (columnKey in selectedColumns) {
+        val label = columnLabels[columnKey] ?: columnKey
+        val thStyle = "padding: 12px 16px; text-align: left; font-weight: 700; color: #111827; font-size: 13px; letter-spacing: 0.02em; border: 1px solid #e5e7eb; background-color: #f3f4f6;"
+        html += if (columnKey in consigneeSortable) {
+            val tip = masterMapColumnSortTooltip(consigneeMapSortOrderByField, columnKey)
+            val bid = "consigneeMapSort_$columnKey"
+            """<th style="$thStyle"><button type="button" id="$bid" title="$tip" style="background: none; border: none; cursor: pointer; font-weight: 700; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;"><span>$label</span><span style="font-size: 14px;">&#x2195;</span></button></th>"""
+        } else {
+            """<th style="$thStyle">$label</th>"""
+        }
+    }
+
+    html += """
                             </tr>
                         </thead>
                         <tbody>
             """
-            
-            for (mapping in paginatedMappings) {
-                val id = (mapping.id ?: "").toString()
-                val country = (mapping.country ?: "").toString()
-                val consigneeName = (mapping.consigneeName ?: "").toString()
-                val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
-                val consigneeAddressShort = if (consigneeAddress.length > 60) consigneeAddress.take(60) + "..." else consigneeAddress
-                val pod = (mapping.pod ?: "").toString()
-                
-                html += """
+
+    for (mapping in paginatedMappings) {
+        val id = (mapping.id ?: "").toString()
+        val country = (mapping.country ?: "").toString()
+        val consigneeName = (mapping.consigneeName ?: "").toString()
+        val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
+        val consigneeAddressShort = if (consigneeAddress.length > 60) consigneeAddress.take(60) + "..." else consigneeAddress
+        val pod = (mapping.pod ?: "").toString()
+
+        html += """
                     <tr>
                         <td style="padding: 10px 12px; border: 1px solid #e5e7eb; background-color: #ffffff; vertical-align: middle;">
                             <div style="display:flex; gap:6px; align-items:center;">
@@ -2086,43 +2146,47 @@ fun loadMasterConsigneesWithTable() {
                             </div>
                         </td>
                 """
-                
-                // Add cells for selected columns only
-                for (columnKey in selectedColumns) {
-                    val value = when (columnKey) {
-                        "country" -> country
-                        "consigneeName" -> consigneeName
-                        "consigneeAddress" -> consigneeAddressShort
-                        "pod" -> pod
-                        else -> ""
-                    }
-                    val cellStyle = when (columnKey) {
-                        "country", "consigneeName" -> "padding: 12px 16px; color: #111827; font-size: 14px; font-weight: 500; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
-                        "consigneeAddress" -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
-                        else -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
-                    }
-                    val titleAttr = if (columnKey == "consigneeAddress" && consigneeAddress.length > 60) " title=\"${escapeHtml(consigneeAddress)}\"" else ""
-                    val cellInner =
-                        if (columnKey == "consigneeAddress") escapeHtml(value)
-                        else formatMultiValueChipCellHtml(value)
-                    html += """<td style="$cellStyle"$titleAttr>$cellInner</td>"""
-                }
-                
-                html += """</tr>"""
+
+        for (columnKey in selectedColumns) {
+            val value = when (columnKey) {
+                "country" -> country
+                "consigneeName" -> consigneeName
+                "consigneeAddress" -> consigneeAddressShort
+                "pod" -> pod
+                else -> ""
             }
-            
-            html += """
+            val cellStyle = when (columnKey) {
+                "country", "consigneeName" -> "padding: 12px 16px; color: #111827; font-size: 14px; font-weight: 500; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
+                "consigneeAddress" -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
+                else -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
+            }
+            val titleAttr = if (columnKey == "consigneeAddress" && consigneeAddress.length > 60) " title=\"${escapeHtml(consigneeAddress)}\"" else ""
+            val cellInner =
+                if (columnKey == "consigneeAddress") formatConsigneeMapAddressChipHtml(value)
+                else formatConsigneeMapValueChipHtml(value)
+            html += """<td style="$cellStyle"$titleAttr>$cellInner</td>"""
+        }
+
+        html += """</tr>"""
+    }
+
+    html += """
                         </tbody>
                     </table>
                 </div>
             """
-            
-            // Add pagination controls if there are multiple pages
-            if (totalPages > 1) {
-                html += """
+
+    val footerSummary = if (isServerSearch) {
+        "Page $consigneesCurrentPage of $totalPages (search) · ${consigneeMapSearchTotal} matching row(s) · ${paginatedMappings.size} on this page"
+    } else {
+        "Showing $footerStart to $footerEnd of ${orderedForDisplay.size} consignee${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"
+    }
+
+    if (totalPages > 1) {
+        html += """
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
                         <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
-                            Showing ${startIndex + 1} to $endIndex of ${orderedForDisplay.size} consignee${if (orderedForDisplay.size != 1) "s" else ""}${if (countryFilter.isNotEmpty()) " (filtered)" else ""}
+                            $footerSummary
                         </div>
                         <div class="consignee-pagination-controls">
                             <button id="consigneesPrevPage" class="consignee-pagination-btn" ${if (consigneesCurrentPage == 1) "disabled" else ""}>
@@ -2135,39 +2199,289 @@ fun loadMasterConsigneesWithTable() {
                         </div>
                     </div>
                 """
-            } else {
-                html += """
+    } else {
+        html += """
                     <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-                        Total: ${orderedForDisplay.size} consignee${if (orderedForDisplay.size != 1) "s" else ""}${if (countryFilter.isNotEmpty()) " (filtered)" else ""}
+                        ${if (isServerSearch) footerSummary else "Total: ${orderedForDisplay.size} consignee${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"}
+                    </div>
+                """
+    }
+
+    tableDiv.innerHTML = html
+
+    document.getElementById("consigneesPrevPage")?.addEventListener("click", { _: Event ->
+        if (isServerSearch) {
+            if (consigneeMapSearchPageZeroBased > 0) {
+                consigneeMapSearchPageZeroBased--
+                consigneesCurrentPage = consigneeMapSearchPageZeroBased + 1
+                loadMasterConsignee()
+            }
+        } else if (consigneesCurrentPage > 1) {
+            consigneesCurrentPage--
+            loadMasterConsignee()
+        }
+    })
+
+    document.getElementById("consigneesNextPage")?.addEventListener("click", { _: Event ->
+        if (isServerSearch) {
+            if (consigneeMapSearchPageZeroBased < consigneeMapSearchTotalPages - 1) {
+                consigneeMapSearchPageZeroBased++
+                consigneesCurrentPage = consigneeMapSearchPageZeroBased + 1
+                loadMasterConsignee()
+            }
+        } else {
+            val tp = kotlin.math.ceil(allConsignees.size.toDouble() / consigneesItemsPerPage).toInt()
+            if (consigneesCurrentPage < tp) {
+                consigneesCurrentPage++
+                loadMasterConsignee()
+            }
+        }
+    })
+    val consigneeSortKeys = listOf("consigneeName", "country", "pod")
+    for (key in consigneeSortKeys) {
+        if (key in selectedColumns) {
+            document.getElementById("consigneeMapSort_$key")?.addEventListener("click", { _: Event ->
+                toggleConsigneeMapSort(key)
+            })
+        }
+    }
+}
+
+fun loadMasterConsigneesWithCards() {
+    val tableDiv = document.getElementById("consigneeTable") as? HTMLElement ?: return
+
+    val searchQ = getConsigneeMapSearchQuery()
+
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+            <div style="font-size: 16px; margin-bottom: 8px;">Loading consignee data...</div>
+            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+        </div>
+    """
+
+    if (searchQ.isNotEmpty()) {
+        consigneeMapSearchServerMode = true
+        val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
+        val encF = js("encodeURIComponent")(consigneeMapSearchFieldChoice).unsafeCast<String>()
+        val p = consigneeMapSearchPageZeroBased
+        val url = apiUrl("booking/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$consigneesItemsPerPage")
+        window.fetch(url)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Search failed')")
+            }
+            .then { body: dynamic ->
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) throw js("Error(err)")
+                val totalEl = js("body.totalElements")
+                consigneeMapSearchTotal = when (totalEl) {
+                    is Number -> totalEl.toLong()
+                    else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+                }
+                val tp = js("body.totalPages")
+                consigneeMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                    is Number -> tp.toInt()
+                    else -> tp?.toString()?.toIntOrNull() ?: 1
+                })
+                val num = js("body.page")
+                consigneeMapSearchPageZeroBased = when (num) {
+                    is Number -> num.toInt()
+                    else -> num?.toString()?.toIntOrNull() ?: 0
+                }
+                consigneesCurrentPage = consigneeMapSearchPageZeroBased + 1
+
+                val content = js("body.content") ?: js("[]")
+                val arr = js("Array.isArray(content) ? content : []") as Array<dynamic>
+                val list = arr.toList()
+                allConsignees = list
+                displayConsigneesAsCards(list, searchQ, true)
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error searching consignees: ${error.toString()}")
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading consignee data</div>
+                        <div style="font-size: 14px; color: #9ca3af;">${error.asDynamic().message}</div>
                     </div>
                 """
             }
-            
-            tableDiv.innerHTML = html
-            
-            // Add pagination event listeners
-            document.getElementById("consigneesPrevPage")?.addEventListener("click", { _: Event ->
-                if (consigneesCurrentPage > 1) {
-                    consigneesCurrentPage--
-                    loadMasterConsignee()
-                }
-            })
-            
-            document.getElementById("consigneesNextPage")?.addEventListener("click", { _: Event ->
-                val totalPages = kotlin.math.ceil(allConsignees.size.toDouble() / consigneesItemsPerPage).toInt()
-                if (consigneesCurrentPage < totalPages) {
-                    consigneesCurrentPage++
-                    loadMasterConsignee()
-                }
-            })
-            val consigneeSortKeys = listOf("consigneeName", "country", "pod")
-            for (key in consigneeSortKeys) {
-                if (key in selectedColumns) {
-                    document.getElementById("consigneeMapSort_$key")?.addEventListener("click", { _: Event ->
-                        toggleConsigneeMapSort(key)
-                    })
+        return
+    }
+
+    consigneeMapSearchServerMode = false
+    consigneeMapSearchTotal = 0
+    consigneeMapSearchTotalPages = 0
+    consigneeMapSearchPageZeroBased = 0
+
+    window.fetch(apiUrl("booking/mappings"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load consignee')")
+        }
+        .then { result: dynamic ->
+            val mappings = result.data ?: js("[]")
+            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
+            val filteredMappings = mappingsArray.toList().sortedByDescending {
+                (it.id as? Number)?.toLong() ?: 0L
+            }
+            val consigneeSortable = setOf("consigneeName", "country", "pod")
+            var orderedForDisplay = filteredMappings
+            val cmsf = consigneeMapSortField
+            if (cmsf != null && cmsf in consigneeSortable) {
+                val ord = consigneeMapSortOrderByField[cmsf] ?: "desc"
+                orderedForDisplay = if (ord == "asc") {
+                    filteredMappings.sortedBy { extractConsigneeMapSortKey(it, cmsf) }
+                } else {
+                    filteredMappings.sortedByDescending { extractConsigneeMapSortKey(it, cmsf) }
                 }
             }
+            allConsignees = orderedForDisplay
+            displayConsigneesAsCards(orderedForDisplay, "", false)
+        }
+        .catch { error: dynamic ->
+            Logger.error("Error loading consignees: ${error.toString()}")
+            tableDiv.innerHTML = """
+                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading consignee data</div>
+                    <div style="font-size: 14px; color: #9ca3af;">${error.message}</div>
+                </div>
+            """
+        }
+}
+
+fun loadMasterConsigneesWithTable() {
+    val tableDiv = document.getElementById("consigneeTable") as? HTMLElement ?: return
+
+    val searchQ = getConsigneeMapSearchQuery()
+
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+            <div style="font-size: 16px; margin-bottom: 8px;">Loading consignee data...</div>
+            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+        </div>
+    """
+
+    if (searchQ.isNotEmpty()) {
+        consigneeMapSearchServerMode = true
+        val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
+        val encF = js("encodeURIComponent")(consigneeMapSearchFieldChoice).unsafeCast<String>()
+        val p = consigneeMapSearchPageZeroBased
+        val url = apiUrl("booking/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$consigneesItemsPerPage")
+        window.fetch(url)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Search failed')")
+            }
+            .then { body: dynamic ->
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) throw js("Error(err)")
+                val totalEl = js("body.totalElements")
+                consigneeMapSearchTotal = when (totalEl) {
+                    is Number -> totalEl.toLong()
+                    else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+                }
+                val tp = js("body.totalPages")
+                consigneeMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                    is Number -> tp.toInt()
+                    else -> tp?.toString()?.toIntOrNull() ?: 1
+                })
+                val num = js("body.page")
+                consigneeMapSearchPageZeroBased = when (num) {
+                    is Number -> num.toInt()
+                    else -> num?.toString()?.toIntOrNull() ?: 0
+                }
+                consigneesCurrentPage = consigneeMapSearchPageZeroBased + 1
+
+                val content = js("body.content") ?: js("[]")
+                val arr = js("Array.isArray(content) ? content : []") as Array<dynamic>
+                val list = arr.toList()
+                allConsignees = list
+
+                if (list.isEmpty()) {
+                    tableDiv.innerHTML = """
+                        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                            <div style="font-size: 16px; margin-bottom: 8px;">No consignee data found for: $searchQ</div>
+                            <div style="font-size: 14px; color: #9ca3af;">Try a different search</div>
+                        </div>
+                    """
+                    return@then
+                }
+
+                val totalPages = consigneeMapSearchTotalPages
+                buildConsigneeTableUi(
+                    tableDiv,
+                    list,
+                    list,
+                    searchQ,
+                    totalPages,
+                    true,
+                    1,
+                    list.size
+                )
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error searching consignees: ${error.toString()}")
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading consignee data</div>
+                        <div style="font-size: 14px; color: #9ca3af;">${error.asDynamic().message}</div>
+                    </div>
+                """
+            }
+        return
+    }
+
+    consigneeMapSearchServerMode = false
+    consigneeMapSearchTotal = 0
+    consigneeMapSearchTotalPages = 0
+    consigneeMapSearchPageZeroBased = 0
+
+    window.fetch(apiUrl("booking/mappings"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load consignee')")
+        }
+        .then { result: dynamic ->
+            val mappings = result.data ?: js("[]")
+            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
+            val filteredMappings = mappingsArray.toList().sortedByDescending {
+                (it.id as? Number)?.toLong() ?: 0L
+            }
+            val consigneeSortable = setOf("consigneeName", "country", "pod")
+            var orderedForDisplay = filteredMappings
+            val cmsf = consigneeMapSortField
+            if (cmsf != null && cmsf in consigneeSortable) {
+                val ord = consigneeMapSortOrderByField[cmsf] ?: "desc"
+                orderedForDisplay = if (ord == "asc") {
+                    filteredMappings.sortedBy { extractConsigneeMapSortKey(it, cmsf) }
+                } else {
+                    filteredMappings.sortedByDescending { extractConsigneeMapSortKey(it, cmsf) }
+                }
+            }
+            allConsignees = orderedForDisplay
+
+            if (orderedForDisplay.isEmpty()) {
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px;">No consignee data found.</div>
+                    </div>
+                """
+                return@then
+            }
+
+            val totalPages = kotlin.math.max(1, kotlin.math.ceil(orderedForDisplay.size.toDouble() / consigneesItemsPerPage).toInt())
+            val startIndex = (consigneesCurrentPage - 1) * consigneesItemsPerPage
+            val endIndex = kotlin.math.min(startIndex + consigneesItemsPerPage, orderedForDisplay.size)
+            val paginatedMappings = orderedForDisplay.subList(startIndex, endIndex)
+            val footerStart = startIndex + 1
+            val footerEnd = endIndex
+
+            buildConsigneeTableUi(
+                tableDiv,
+                paginatedMappings,
+                orderedForDisplay,
+                "",
+                totalPages,
+                false,
+                footerStart,
+                footerEnd
+            )
         }
         .catch { error: dynamic ->
             Logger.error("Error loading consignee: ${error.toString()}")
@@ -2180,13 +2494,13 @@ fun loadMasterConsigneesWithTable() {
         }
 }
 
-fun displayConsigneesAsCards(filteredMappings: List<dynamic>, countryFilter: String) {
+fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: String, isServerSearch: Boolean = false) {
     val tableDiv = document.getElementById("consigneeTable")
     if (tableDiv == null) return
     
     if (filteredMappings.isEmpty()) {
-        val message = if (countryFilter.isNotEmpty()) {
-            "No consignee data found for country: $countryFilter"
+        val message = if (filterLabel.isNotEmpty()) {
+            "No consignee data found for: $filterLabel"
         } else {
             "No consignee data found."
         }
@@ -2198,11 +2512,18 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, countryFilter: Str
         return
     }
     
-    // Calculate pagination
-    val totalPages = kotlin.math.ceil(filteredMappings.size.toDouble() / consigneesItemsPerPage).toInt()
-    val startIndex = (consigneesCurrentPage - 1) * consigneesItemsPerPage
-    val endIndex = kotlin.math.min(startIndex + consigneesItemsPerPage, filteredMappings.size)
-    val paginatedMappings = filteredMappings.subList(startIndex, endIndex)
+    val totalPages = if (isServerSearch) {
+        kotlin.math.max(1, consigneeMapSearchTotalPages)
+    } else {
+        kotlin.math.max(1, kotlin.math.ceil(filteredMappings.size.toDouble() / consigneesItemsPerPage).toInt())
+    }
+    val paginatedMappings = if (isServerSearch) {
+        filteredMappings
+    } else {
+        val startIndex = (consigneesCurrentPage - 1) * consigneesItemsPerPage
+        val endIndex = kotlin.math.min(startIndex + consigneesItemsPerPage, filteredMappings.size)
+        filteredMappings.subList(startIndex, endIndex)
+    }
     
     val selectedColumns = getSelectedConsigneeColumns()
     val columnLabels = mapOf(
@@ -2236,8 +2557,8 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, countryFilter: Str
             
             if (value.isNotEmpty()) {
                 val displayValue =
-                    if (columnKey == "consigneeAddress") escapeHtml(value)
-                    else formatMultiValueChipCellHtml(value)
+                    if (columnKey == "consigneeAddress") formatConsigneeMapAddressChipHtml(value)
+                    else formatConsigneeMapValueChipHtml(value)
                 cardFields.append("""
                     <div style="margin-bottom: 8px;">
                         <span style="font-weight: 600; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">$label:</span>
@@ -2292,9 +2613,14 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, countryFilter: Str
             </div>
         """)
     } else {
+        val summary = if (isServerSearch) {
+            "Page $consigneesCurrentPage of $totalPages (search) · ${consigneeMapSearchTotal} matching row(s) · ${paginatedMappings.size} on this page"
+        } else {
+            "Total: ${filteredMappings.size} consignee${if (filteredMappings.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"
+        }
         cardsHTML.append("""
             <div style="padding: 16px; text-align: center; color: #6b7280; font-size: 14px;">
-                Total: ${filteredMappings.size} consignee${if (filteredMappings.size != 1) "s" else ""}${if (countryFilter.isNotEmpty()) " (filtered)" else ""}
+                $summary
             </div>
         """)
     }
@@ -2303,17 +2629,31 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, countryFilter: Str
     
     // Add pagination event listeners
     document.getElementById("consigneesPrevPage")?.addEventListener("click", { _: Event ->
-        if (consigneesCurrentPage > 1) {
+        if (isServerSearch) {
+            if (consigneeMapSearchPageZeroBased > 0) {
+                consigneeMapSearchPageZeroBased--
+                consigneesCurrentPage = consigneeMapSearchPageZeroBased + 1
+                loadMasterConsignee()
+            }
+        } else if (consigneesCurrentPage > 1) {
             consigneesCurrentPage--
             loadMasterConsignee()
         }
     })
     
     document.getElementById("consigneesNextPage")?.addEventListener("click", { _: Event ->
-        val totalPages = kotlin.math.ceil(allConsignees.size.toDouble() / consigneesItemsPerPage).toInt()
-        if (consigneesCurrentPage < totalPages) {
-            consigneesCurrentPage++
-            loadMasterConsignee()
+        if (isServerSearch) {
+            if (consigneeMapSearchPageZeroBased < consigneeMapSearchTotalPages - 1) {
+                consigneeMapSearchPageZeroBased++
+                consigneesCurrentPage = consigneeMapSearchPageZeroBased + 1
+                loadMasterConsignee()
+            }
+        } else {
+            val tp = kotlin.math.ceil(allConsignees.size.toDouble() / consigneesItemsPerPage).toInt()
+            if (consigneesCurrentPage < tp) {
+                consigneesCurrentPage++
+                loadMasterConsignee()
+            }
         }
     })
 }
@@ -2507,7 +2847,7 @@ fun showConsigneeModal(mappingId: Long?, duplicateFromId: Long? = null) {
                     <form id="consigneeForm">
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Consignee Name <span style="color: #ef4444;">*</span></label>
-                            ${createEditableCombobox("consigneeMapConsigneeName", "Select Consignee Name", required = true)}
+                            ${createPlainTextInput("consigneeMapConsigneeName", "Enter Consignee Name", required = true)}
                         </div>
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Consignee Address</label>
@@ -3159,6 +3499,160 @@ fun showEditCarBrandsMasterModal(originalName: String) {
     })
 }
 
+private fun getCarBrandSearchQuery(): String =
+    (document.getElementById("carBrandSearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+
+private fun carBrandMapSearchFieldDisplayLabel(): String = when (carBrandMapSearchFieldChoice) {
+    "chassis" -> "Chassis"
+    "brand" -> "Car brand"
+    "carName" -> "Car name"
+    else -> "All fields"
+}
+
+private fun refreshCarBrandSearchScopeUi() {
+    val scopeLabel = carBrandMapSearchFieldDisplayLabel()
+    val btn = document.getElementById("carBrandSearchFilterBtn") as? HTMLElement
+    if (btn != null) {
+        btn.setAttribute("title", "Filter — search in: $scopeLabel")
+        btn.setAttribute("aria-label", "Open filter for which field to search. Current: $scopeLabel.")
+    }
+    val sr = document.getElementById("carBrandSearchFieldLabel") as? HTMLElement
+    if (sr != null) sr.textContent = scopeLabel
+}
+
+private fun closeCarBrandSearchFilterMenu() {
+    val menu = document.getElementById("carBrandSearchFilterMenu") as? HTMLElement
+    menu?.style?.setProperty("display", "none", "important")
+    window.asDynamic().__carBrandSearchFilterMenuOpen = false
+    document.getElementById("carBrandSearchFilterBtn")?.setAttribute("aria-expanded", "false")
+}
+
+private fun updateCarBrandSearchFilterMenuActive(selected: String) {
+    val pairs = listOf(
+        "all" to "carBrandSearchOptAll",
+        "chassis" to "carBrandSearchOptChassis",
+        "brand" to "carBrandSearchOptBrand",
+        "carName" to "carBrandSearchOptCarName"
+    )
+    for ((value, id) in pairs) {
+        val el = document.getElementById(id) as? HTMLElement ?: continue
+        if (value == selected) el.classList.add("car-brand-search-filter-opt--active")
+        else el.classList.remove("car-brand-search-filter-opt--active")
+    }
+}
+
+private fun scheduleCarBrandSearchDebounced() {
+    if (carBrandMapSearchDebounceTimer != null) {
+        window.clearTimeout(carBrandMapSearchDebounceTimer.unsafeCast<Int>())
+        carBrandMapSearchDebounceTimer = null
+    }
+    carBrandMapSearchDebounceTimer = window.setTimeout({
+        carBrandMapSearchDebounceTimer = null
+        runCarBrandSearchFromInput()
+    }, 420)
+}
+
+private fun runCarBrandSearchFromInput() {
+    val raw = getCarBrandSearchQuery()
+    if (raw.isEmpty()) {
+        carBrandMapSearchServerMode = false
+        carBrandMapSearchTotal = 0
+        carBrandMapSearchTotalPages = 0
+        carBrandMapSearchPageZeroBased = 0
+        carBrandsCurrentPage = 1
+        loadMasterCarBrands()
+        return
+    }
+    carBrandMapSearchPageZeroBased = 0
+    carBrandsCurrentPage = 1
+    loadMasterCarBrands()
+}
+
+fun setupCarBrandSearchBarListeners() {
+    val input = document.getElementById("carBrandSearchInput") as? HTMLInputElement ?: return
+    val filterBtn = document.getElementById("carBrandSearchFilterBtn") as? HTMLElement
+    val menu = document.getElementById("carBrandSearchFilterMenu") as? HTMLElement
+    val clearBtn = document.getElementById("carBrandSearchClearBtn") as? HTMLElement
+
+    if (!input.hasAttribute("data-car-brand-search-bound")) {
+        input.setAttribute("data-car-brand-search-bound", "true")
+        input.addEventListener("input", { _: Event -> scheduleCarBrandSearchDebounced() })
+        input.addEventListener("keydown", { ev: Event ->
+            val kev = ev.asDynamic()
+            if (kev.key == "Enter") {
+                ev.preventDefault()
+                if (carBrandMapSearchDebounceTimer != null) {
+                    window.clearTimeout(carBrandMapSearchDebounceTimer.unsafeCast<Int>())
+                    carBrandMapSearchDebounceTimer = null
+                }
+                runCarBrandSearchFromInput()
+            }
+        })
+    }
+
+    if (filterBtn != null && !filterBtn.hasAttribute("data-car-brand-search-bound")) {
+        filterBtn.setAttribute("data-car-brand-search-bound", "true")
+        filterBtn.addEventListener("click", { e: Event ->
+            e.stopPropagation()
+            if (menu == null) return@addEventListener
+            val open = window.asDynamic().__carBrandSearchFilterMenuOpen == true
+            window.asDynamic().__carBrandSearchFilterMenuOpen = !open
+            val nowOpen = !open
+            menu.style.setProperty("display", if (open) "none" else "block", "important")
+            filterBtn.setAttribute("aria-expanded", if (nowOpen) "true" else "false")
+        })
+    }
+
+    if (clearBtn != null && !clearBtn.hasAttribute("data-car-brand-search-bound")) {
+        clearBtn.setAttribute("data-car-brand-search-bound", "true")
+        clearBtn.addEventListener("click", { _: Event ->
+            input.value = ""
+            closeCarBrandSearchFilterMenu()
+            runCarBrandSearchFromInput()
+        })
+    }
+
+    val optIds = listOf(
+        "carBrandSearchOptAll" to "all",
+        "carBrandSearchOptChassis" to "chassis",
+        "carBrandSearchOptBrand" to "brand",
+        "carBrandSearchOptCarName" to "carName"
+    )
+    for ((id, value) in optIds) {
+        val el = document.getElementById(id) as? HTMLElement
+        if (el != null && !el.hasAttribute("data-car-brand-search-bound")) {
+            el.setAttribute("data-car-brand-search-bound", "true")
+            el.addEventListener("click", { _: Event ->
+                carBrandMapSearchFieldChoice = value
+                refreshCarBrandSearchScopeUi()
+                updateCarBrandSearchFilterMenuActive(value)
+                closeCarBrandSearchFilterMenu()
+                val q = input.value.trim()
+                if (q.isNotEmpty()) {
+                    carBrandMapSearchPageZeroBased = 0
+                    carBrandsCurrentPage = 1
+                    loadMasterCarBrands()
+                }
+            })
+        }
+    }
+
+    if (window.asDynamic().__carBrandSearchFilterOutsideAttached != true) {
+        window.asDynamic().__carBrandSearchFilterOutsideAttached = true
+        document.addEventListener("click", { event ->
+            val target = event.target as? Node ?: return@addEventListener
+            val m = document.getElementById("carBrandSearchFilterMenu") as? HTMLElement
+            val b = document.getElementById("carBrandSearchFilterBtn") as? HTMLElement
+            if (m == null) return@addEventListener
+            val insideMenu = m.contains(target)
+            val insideBtn = b != null && b.contains(target)
+            if (!insideMenu && !insideBtn) {
+                closeCarBrandSearchFilterMenu()
+            }
+        })
+    }
+}
+
 fun showMasterCarBrandsPage() {
     showCarBrandsMapPage()
 }
@@ -3179,15 +3673,42 @@ fun showCarBrandsMapPage() {
                 </div>
             </div>
             
-            <!-- Search and Filter Section -->
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 250px;">
-                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search:</label>
-                        <input type="text" id="carBrandFilter" placeholder="Search by brand, car name, or chassis..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+            <!-- Search (same pattern as Purchase List) -->
+            <style>
+                #carBrandList .car-brand-search-filter-opt:hover { background: #f3f4f6 !important; }
+                #carBrandList .car-brand-search-filter-opt--active { background: #eef2ff !important; font-weight: 600; }
+                #carBrandList .car-brand-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+                #carBrandList #carBrandSearchFilterBtn:hover { background: #e8eaed !important; box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important; }
+                #carBrandList #carBrandSearchFilterBtn:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+            </style>
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px; width: 100%; max-width: 720px;">
+                    <div style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                        <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; color: #9ca3af; display: flex;" aria-hidden="true">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        </span>
+                        <input type="text" id="carBrandSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Type to search…" aria-label="Search car brand map" style="width: 100%; box-sizing: border-box; padding: 12px 40px 12px 44px; border: none; font-size: 14px; background: transparent; border-radius: 999px; outline: none;" />
+                        <button type="button" id="carBrandSearchClearBtn" title="Clear search" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: #9ca3af; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 8px;">×</button>
                     </div>
-                    <div style="display: flex; gap: 10px; align-items: flex-end;">
-                        <button id="clearCarBrandFilterBtn" style="padding: 10px 20px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">Clear Filter</button>
+                    <div style="position: relative; flex-shrink: 0;">
+                        <span id="carBrandSearchFieldLabel" class="car-brand-sr-only" aria-live="polite">All fields</span>
+                        <button type="button" id="carBrandSearchFilterBtn" title="Filter — search in: All fields" aria-haspopup="true" aria-expanded="false" aria-label="Open filter for which field to search. Current: All fields." style="width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e5e7eb; background: #f3f4f6; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4b5563; padding: 0;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <line x1="3" y1="7" x2="21" y2="7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                <circle cx="8" cy="7" r="2.25" fill="currentColor"/>
+                                <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                <circle cx="16" cy="12" r="2.25" fill="currentColor"/>
+                                <line x1="3" y1="17" x2="21" y2="17" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                <circle cx="7" cy="17" r="2.25" fill="currentColor"/>
+                            </svg>
+                        </button>
+                        <div id="carBrandSearchFilterMenu" style="display: none; position: absolute; right: 0; top: calc(100% + 8px); z-index: 20001; min-width: 220px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12); padding: 8px 0;">
+                            <div style="padding: 8px 14px 4px; font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .04em;">Search in</div>
+                            <button type="button" class="car-brand-search-filter-opt car-brand-search-filter-opt--active" id="carBrandSearchOptAll" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">All fields</button>
+                            <button type="button" class="car-brand-search-filter-opt" id="carBrandSearchOptChassis" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Chassis</button>
+                            <button type="button" class="car-brand-search-filter-opt" id="carBrandSearchOptBrand" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Car brand</button>
+                            <button type="button" class="car-brand-search-filter-opt" id="carBrandSearchOptCarName" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Car name</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3209,23 +3730,22 @@ fun showCarBrandsMapPage() {
         </div>
     """
     
+    carBrandMapSearchFieldChoice = "all"
+    carBrandMapSearchServerMode = false
+    carBrandMapSearchTotal = 0
+    carBrandMapSearchTotalPages = 0
+    carBrandMapSearchPageZeroBased = 0
+    carBrandsCurrentPage = 1
+    updateCarBrandSearchFilterMenuActive("all")
+    refreshCarBrandSearchScopeUi()
+    setupCarBrandSearchBarListeners()
+
     // Load initial data
     loadMasterCarBrands()
     
     // Event listeners
     document.getElementById("addCarBrandBtn")?.addEventListener("click", { _: Event ->
         showAddCarBrandModal()
-    })
-    
-    document.getElementById("clearCarBrandFilterBtn")?.addEventListener("click", { _: Event ->
-        val filterInput = document.getElementById("carBrandFilter") as HTMLInputElement?
-        filterInput?.value = ""
-        loadMasterCarBrands()
-    })
-    
-    // Real-time search filter
-    document.getElementById("carBrandFilter")?.addEventListener("input", { _: Event ->
-        loadMasterCarBrands()
     })
     
     // Column filter button
@@ -3312,21 +3832,70 @@ fun loadMasterCarBrands() {
 }
 
 fun loadMasterCarBrandsWithCards() {
-    val tableDiv = document.getElementById("carBrandTable")
-    if (tableDiv == null) return
-    
-    // Get brand filter value
-    val brandFilter = (document.getElementById("carBrandFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
-    
-    // Show loading state
+    val tableDiv = document.getElementById("carBrandTable") as? HTMLElement ?: return
+
+    val searchQ = getCarBrandSearchQuery()
+
     tableDiv.innerHTML = """
         <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
             <div style="font-size: 16px; margin-bottom: 8px;">Loading car brand data...</div>
             <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
         </div>
     """
-    
-    // Load from car brand mappings
+
+    if (searchQ.isNotEmpty()) {
+        carBrandMapSearchServerMode = true
+        val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
+        val encF = js("encodeURIComponent")(carBrandMapSearchFieldChoice).unsafeCast<String>()
+        val p = carBrandMapSearchPageZeroBased
+        val url = apiUrl("car-brand-mapping/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$carBrandsItemsPerPage")
+        window.fetch(url)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Search failed')")
+            }
+            .then { body: dynamic ->
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) throw js("Error(err)")
+                val totalEl = js("body.totalElements")
+                carBrandMapSearchTotal = when (totalEl) {
+                    is Number -> totalEl.toLong()
+                    else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+                }
+                val tp = js("body.totalPages")
+                carBrandMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                    is Number -> tp.toInt()
+                    else -> tp?.toString()?.toIntOrNull() ?: 1
+                })
+                val num = js("body.page")
+                carBrandMapSearchPageZeroBased = when (num) {
+                    is Number -> num.toInt()
+                    else -> num?.toString()?.toIntOrNull() ?: 0
+                }
+                carBrandsCurrentPage = carBrandMapSearchPageZeroBased + 1
+
+                val content = js("body.content") ?: js("[]")
+                val mappingsArray = js("Array.isArray(content) ? content : []") as Array<dynamic>
+                val groupedMappings = groupCarBrandMappingsForView(mappingsArray.toList())
+                allCarBrands = groupedMappings
+                displayCarBrandsAsCards(groupedMappings, searchQ, true)
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error searching car brands: ${error.toString()}")
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading car brand data</div>
+                        <div style="font-size: 14px; color: #9ca3af;">${error.asDynamic().message}</div>
+                    </div>
+                """
+            }
+        return
+    }
+
+    carBrandMapSearchServerMode = false
+    carBrandMapSearchTotal = 0
+    carBrandMapSearchTotalPages = 0
+    carBrandMapSearchPageZeroBased = 0
+
     window.fetch(apiUrl("car-brand-mapping/mappings"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load car brands')")
@@ -3336,11 +3905,9 @@ fun loadMasterCarBrandsWithCards() {
             if (!success) {
                 throw js("Error(result.message || 'Failed to load car brands')")
             }
-            
+
             val mappings = result.data ?: js("[]")
             val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
-            
-            // Sort by ID descending (newest first)
             val mappingsList = mappingsArray.toList()
             val sortedMappings = mappingsList.sortedByDescending { mapping ->
                 val id = mapping.id
@@ -3357,20 +3924,8 @@ fun loadMasterCarBrandsWithCards() {
                     0.0
                 }
             }
-            
-            // Filter by brand, car name, or chassis if filter is set
-            val filteredMappings = if (brandFilter.isNotEmpty()) {
-                sortedMappings.filter { mapping ->
-                    val brand = (mapping.carBrand ?: "").toString().uppercase()
-                    val carName = (mapping.carName ?: "").toString().uppercase()
-                    val chassis = (mapping.chassis ?: "").toString().uppercase()
-                    brand.contains(brandFilter) || carName.contains(brandFilter) || chassis.contains(brandFilter)
-                }
-            } else {
-                sortedMappings
-            }
 
-            val groupedMappings = groupCarBrandMappingsForView(filteredMappings)
+            val groupedMappings = groupCarBrandMappingsForView(sortedMappings)
             val carBrandSortable = setOf("chassis", "carBrand", "carName", "fuel", "vehicleType")
             var orderedForDisplay = groupedMappings
             val cbsf = carBrandMapSortField
@@ -3383,13 +3938,8 @@ fun loadMasterCarBrandsWithCards() {
                 }
             }
 
-            // Store grouped rows for pagination (one row per chassis)
             allCarBrands = orderedForDisplay
-            if (brandFilter.isNotEmpty()) {
-                carBrandsCurrentPage = 1
-            }
-            
-            displayCarBrandsAsCards(orderedForDisplay, brandFilter)
+            displayCarBrandsAsCards(orderedForDisplay, "", false)
         }
         .catch { error: dynamic ->
             Logger.error("Error loading car brands: ${error.toString()}")
@@ -3402,104 +3952,42 @@ fun loadMasterCarBrandsWithCards() {
         }
 }
 
-fun loadMasterCarBrandsWithTable() {
-    val tableDiv = document.getElementById("carBrandTable")
-    if (tableDiv == null) return
-    
-    // Get brand filter value
-    val brandFilter = (document.getElementById("carBrandFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
-    
-    // Show loading state
-    tableDiv.innerHTML = """
-        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-            <div style="font-size: 16px; margin-bottom: 8px;">Loading car brand data...</div>
-            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-        </div>
-    """
-    
-    // Load from car brand mappings
-    window.fetch(apiUrl("car-brand-mapping/mappings"))
-        .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load car brands')")
-        }
-        .then { result: dynamic ->
-            val success = result.success as? Boolean ?: false
-            if (!success) {
-                throw js("Error(result.message || 'Failed to load car brands')")
-            }
-            
-            val mappings = result.data ?: js("[]")
-            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
-            
-            // Sort by ID descending (newest first) so new entries appear at the top
-            val mappingsList = mappingsArray.toList()
-            val sortedMappings = mappingsList.sortedByDescending { mapping ->
-                val id = mapping.id
-                try {
-                    when (id) {
-                        is Number -> id.toDouble()
-                        is String -> id.toDoubleOrNull() ?: 0.0
-                        else -> {
-                            val idStr = id?.toString() ?: "0"
-                            idStr.toDoubleOrNull() ?: 0.0
-                        }
-                    }
-                } catch (e: dynamic) {
-                    0.0
-                }
-            }
-            
-            // Filter by brand, car name, or chassis if filter is set
-            val filteredMappings = if (brandFilter.isNotEmpty()) {
-                sortedMappings.filter { mapping ->
-                    val brand = (mapping.carBrand ?: "").toString().uppercase()
-                    val carName = (mapping.carName ?: "").toString().uppercase()
-                    val chassis = (mapping.chassis ?: "").toString().uppercase()
-                    brand.contains(brandFilter) || carName.contains(brandFilter) || chassis.contains(brandFilter)
-                }
-            } else {
-                sortedMappings
-            }
-
-            val groupedMappings = groupCarBrandMappingsForView(filteredMappings)
-            val carBrandSortable = setOf("chassis", "carBrand", "carName", "fuel", "vehicleType")
-            var orderedForDisplay = groupedMappings
-            val cbsf = carBrandMapSortField
-            if (cbsf != null && cbsf in carBrandSortable) {
-                val ord = carBrandMapSortOrderByField[cbsf] ?: "desc"
-                orderedForDisplay = if (ord == "asc") {
-                    groupedMappings.sortedBy { extractCarBrandSortKey(it, cbsf) }
-                } else {
-                    groupedMappings.sortedByDescending { extractCarBrandSortKey(it, cbsf) }
-                }
-            }
-
-            // Store grouped rows for pagination (one row per chassis)
-            allCarBrands = orderedForDisplay
-            if (brandFilter.isNotEmpty()) {
-                carBrandsCurrentPage = 1 // Reset to first page when filter changes
-            }
-            
+/**
+ * Renders Car Brands Map table + pagination. [isServerSearch] uses [carBrandMapSearchPageZeroBased] / totals from API.
+ */
+private fun buildCarBrandTableUi(
+    tableDiv: HTMLElement,
+    paginatedMappings: List<dynamic>,
+    orderedForDisplay: List<dynamic>,
+    filterLabel: String,
+    totalPages: Int,
+    isServerSearch: Boolean,
+    footerStart: Int,
+    footerEnd: Int,
+) {
             if (orderedForDisplay.isEmpty()) {
-                val message = if (brandFilter.isNotEmpty()) {
-                    "No car brand data found for: $brandFilter"
+                val message = if (filterLabel.isNotEmpty()) {
+                    "No car brand data found for: $filterLabel"
                 } else {
                     "No car brand data found."
                 }
                 tableDiv.innerHTML = """
                     <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
                         <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
-                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search filter</div>
+                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search or filter</div>
                     </div>
                 """
-                return@then
+                return
             }
             
-            // Calculate pagination
-            val totalPages = kotlin.math.ceil(orderedForDisplay.size.toDouble() / carBrandsItemsPerPage).toInt()
-            val startIndex = (carBrandsCurrentPage - 1) * carBrandsItemsPerPage
-            val endIndex = kotlin.math.min(startIndex + carBrandsItemsPerPage, orderedForDisplay.size)
-            val paginatedMappings = orderedForDisplay.subList(startIndex, endIndex)
+            if (paginatedMappings.isEmpty()) {
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px;">No rows on this page.</div>
+                    </div>
+                """
+                return
+            }
             
             // Get selected columns
             val selectedColumns = getSelectedCarBrandColumns()
@@ -3613,7 +4101,7 @@ fun loadMasterCarBrandsWithTable() {
                         "chassis", "carName" -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top;"
                         else -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top;"
                     }
-                    val cellInner = formatMultiValueChipCellHtml(value)
+                    val cellInner = formatCarBrandMapValueChipHtml(value)
                     html += """<td style="$cellStyle">$cellInner</td>"""
                 }
                 
@@ -3626,12 +4114,17 @@ fun loadMasterCarBrandsWithTable() {
                 </div>
             """
             
-            // Add pagination controls if there are multiple pages
+            val footerSummary = if (isServerSearch) {
+                "Page $carBrandsCurrentPage of $totalPages (search) · ${carBrandMapSearchTotal} matching row(s) · ${paginatedMappings.size} chassis group(s) on this page"
+            } else {
+                "Showing $footerStart to $footerEnd of ${orderedForDisplay.size} chassis group${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"
+            }
+
             if (totalPages > 1) {
                 html += """
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
                         <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
-                            Showing ${startIndex + 1} to $endIndex of ${orderedForDisplay.size} chassis group${if (orderedForDisplay.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}
+                            $footerSummary
                         </div>
                         <div class="car-brand-pagination-controls">
                             <button id="carBrandsPrevPage" class="car-brand-pagination-btn" ${if (carBrandsCurrentPage == 1) "disabled" else ""}>
@@ -3647,26 +4140,39 @@ fun loadMasterCarBrandsWithTable() {
             } else {
                 html += """
                     <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-                        Total: ${orderedForDisplay.size} chassis group${if (orderedForDisplay.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}
+                        ${if (isServerSearch) footerSummary else "Total: ${orderedForDisplay.size} chassis group${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"}
                     </div>
                 """
             }
             
             tableDiv.innerHTML = html
             
-            // Add pagination event listeners
             document.getElementById("carBrandsPrevPage")?.addEventListener("click", { _: Event ->
-                if (carBrandsCurrentPage > 1) {
+                if (carBrandMapSearchServerMode) {
+                    if (carBrandMapSearchPageZeroBased > 0) {
+                        carBrandMapSearchPageZeroBased--
+                        carBrandsCurrentPage = carBrandMapSearchPageZeroBased + 1
+                        loadMasterCarBrands()
+                    }
+                } else if (carBrandsCurrentPage > 1) {
                     carBrandsCurrentPage--
                     loadMasterCarBrands()
                 }
             })
             
             document.getElementById("carBrandsNextPage")?.addEventListener("click", { _: Event ->
-                val totalPages = kotlin.math.ceil(allCarBrands.size.toDouble() / carBrandsItemsPerPage).toInt()
-                if (carBrandsCurrentPage < totalPages) {
-                    carBrandsCurrentPage++
-                    loadMasterCarBrands()
+                if (carBrandMapSearchServerMode) {
+                    if (carBrandMapSearchPageZeroBased < carBrandMapSearchTotalPages - 1) {
+                        carBrandMapSearchPageZeroBased++
+                        carBrandsCurrentPage = carBrandMapSearchPageZeroBased + 1
+                        loadMasterCarBrands()
+                    }
+                } else {
+                    val tp = kotlin.math.ceil(allCarBrands.size.toDouble() / carBrandsItemsPerPage).toInt()
+                    if (carBrandsCurrentPage < tp) {
+                        carBrandsCurrentPage++
+                        loadMasterCarBrands()
+                    }
                 }
             })
             val sortKeys = listOf("chassis", "carBrand", "carName", "fuel", "vehicleType")
@@ -3677,6 +4183,170 @@ fun loadMasterCarBrandsWithTable() {
                     })
                 }
             }
+}
+
+fun loadMasterCarBrandsWithTable() {
+    val tableDiv = document.getElementById("carBrandTable") as? HTMLElement ?: return
+
+    val searchQ = getCarBrandSearchQuery()
+
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+            <div style="font-size: 16px; margin-bottom: 8px;">Loading car brand data...</div>
+            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+        </div>
+    """
+
+    if (searchQ.isNotEmpty()) {
+        carBrandMapSearchServerMode = true
+        val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
+        val encF = js("encodeURIComponent")(carBrandMapSearchFieldChoice).unsafeCast<String>()
+        val p = carBrandMapSearchPageZeroBased
+        val url = apiUrl("car-brand-mapping/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$carBrandsItemsPerPage")
+        window.fetch(url)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Search failed')")
+            }
+            .then { body: dynamic ->
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) {
+                    throw js("Error(err)")
+                }
+                val totalEl = js("body.totalElements")
+                carBrandMapSearchTotal = when (totalEl) {
+                    is Number -> totalEl.toLong()
+                    else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+                }
+                val tp = js("body.totalPages")
+                carBrandMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                    is Number -> tp.toInt()
+                    else -> tp?.toString()?.toIntOrNull() ?: 1
+                })
+                val num = js("body.page")
+                carBrandMapSearchPageZeroBased = when (num) {
+                    is Number -> num.toInt()
+                    else -> num?.toString()?.toIntOrNull() ?: 0
+                }
+                carBrandsCurrentPage = carBrandMapSearchPageZeroBased + 1
+
+                val content = js("body.content") ?: js("[]")
+                val mappingsArray = js("Array.isArray(content) ? content : []") as Array<dynamic>
+                val mappingsList = mappingsArray.toList()
+                val groupedMappings = groupCarBrandMappingsForView(mappingsList)
+                val orderedForDisplay = groupedMappings
+                allCarBrands = orderedForDisplay
+
+                if (orderedForDisplay.isEmpty()) {
+                    tableDiv.innerHTML = """
+                        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                            <div style="font-size: 16px; margin-bottom: 8px;">No car brand data found for: $searchQ</div>
+                            <div style="font-size: 14px; color: #9ca3af;">Try a different search</div>
+                        </div>
+                    """
+                    return@then
+                }
+
+                val paginatedMappings = orderedForDisplay
+                val totalPages = carBrandMapSearchTotalPages
+                buildCarBrandTableUi(
+                    tableDiv,
+                    paginatedMappings,
+                    orderedForDisplay,
+                    searchQ,
+                    totalPages,
+                    true,
+                    1,
+                    paginatedMappings.size
+                )
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error searching car brands: ${error.toString()}")
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading car brand data</div>
+                        <div style="font-size: 14px; color: #9ca3af;">${error.asDynamic().message}</div>
+                    </div>
+                """
+            }
+        return
+    }
+
+    carBrandMapSearchServerMode = false
+    carBrandMapSearchTotal = 0
+    carBrandMapSearchTotalPages = 0
+    carBrandMapSearchPageZeroBased = 0
+
+    window.fetch(apiUrl("car-brand-mapping/mappings"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load car brands')")
+        }
+        .then { result: dynamic ->
+            val success = result.success as? Boolean ?: false
+            if (!success) {
+                throw js("Error(result.message || 'Failed to load car brands')")
+            }
+
+            val mappings = result.data ?: js("[]")
+            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
+
+            val mappingsList = mappingsArray.toList()
+            val sortedMappings = mappingsList.sortedByDescending { mapping ->
+                val id = mapping.id
+                try {
+                    when (id) {
+                        is Number -> id.toDouble()
+                        is String -> id.toDoubleOrNull() ?: 0.0
+                        else -> {
+                            val idStr = id?.toString() ?: "0"
+                            idStr.toDoubleOrNull() ?: 0.0
+                        }
+                    }
+                } catch (e: dynamic) {
+                    0.0
+                }
+            }
+
+            val groupedMappings = groupCarBrandMappingsForView(sortedMappings)
+            val carBrandSortable = setOf("chassis", "carBrand", "carName", "fuel", "vehicleType")
+            var orderedForDisplay = groupedMappings
+            val cbsf = carBrandMapSortField
+            if (cbsf != null && cbsf in carBrandSortable) {
+                val ord = carBrandMapSortOrderByField[cbsf] ?: "desc"
+                orderedForDisplay = if (ord == "asc") {
+                    groupedMappings.sortedBy { extractCarBrandSortKey(it, cbsf) }
+                } else {
+                    groupedMappings.sortedByDescending { extractCarBrandSortKey(it, cbsf) }
+                }
+            }
+
+            allCarBrands = orderedForDisplay
+
+            if (orderedForDisplay.isEmpty()) {
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px;">No car brand data found.</div>
+                    </div>
+                """
+                return@then
+            }
+
+            val totalPages = kotlin.math.max(1, kotlin.math.ceil(orderedForDisplay.size.toDouble() / carBrandsItemsPerPage).toInt())
+            val startIndex = (carBrandsCurrentPage - 1) * carBrandsItemsPerPage
+            val endIndex = kotlin.math.min(startIndex + carBrandsItemsPerPage, orderedForDisplay.size)
+            val paginatedMappings = orderedForDisplay.subList(startIndex, endIndex)
+            val footerStart = startIndex + 1
+            val footerEnd = endIndex
+
+            buildCarBrandTableUi(
+                tableDiv,
+                paginatedMappings,
+                orderedForDisplay,
+                "",
+                totalPages,
+                false,
+                footerStart,
+                footerEnd
+            )
         }
         .catch { error: dynamic ->
             Logger.error("Error loading car brands: ${error.toString()}")
@@ -3689,7 +4359,7 @@ fun loadMasterCarBrandsWithTable() {
         }
 }
 
-fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String) {
+fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String, isServerSearch: Boolean = false) {
     val tableDiv = document.getElementById("carBrandTable")
     if (tableDiv == null) return
     
@@ -3707,11 +4377,18 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         return
     }
     
-    // Calculate pagination
-    val totalPages = kotlin.math.ceil(filteredMappings.size.toDouble() / carBrandsItemsPerPage).toInt()
-    val startIndex = (carBrandsCurrentPage - 1) * carBrandsItemsPerPage
-    val endIndex = kotlin.math.min(startIndex + carBrandsItemsPerPage, filteredMappings.size)
-    val paginatedMappings = filteredMappings.subList(startIndex, endIndex)
+    val totalPages = if (isServerSearch) {
+        kotlin.math.max(1, carBrandMapSearchTotalPages)
+    } else {
+        kotlin.math.max(1, kotlin.math.ceil(filteredMappings.size.toDouble() / carBrandsItemsPerPage).toInt())
+    }
+    val paginatedMappings = if (isServerSearch) {
+        filteredMappings
+    } else {
+        val startIndex = (carBrandsCurrentPage - 1) * carBrandsItemsPerPage
+        val endIndex = kotlin.math.min(startIndex + carBrandsItemsPerPage, filteredMappings.size)
+        filteredMappings.subList(startIndex, endIndex)
+    }
     
     val selectedColumns = getSelectedCarBrandColumns()
     val columnLabels = mapOf(
@@ -3777,7 +4454,7 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
             }
             
             if (value.isNotEmpty()) {
-                val displayValue = formatMultiValueChipCellHtml(value)
+                val displayValue = formatCarBrandMapValueChipHtml(value)
                 cardFields.append("""
                     <div style="margin-bottom: 8px;">
                         <span style="font-weight: 600; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">$label:</span>
@@ -3828,28 +4505,46 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
             </div>
         """)
     } else {
+        val summary = if (isServerSearch) {
+            "Page $carBrandsCurrentPage of $totalPages (search) · ${carBrandMapSearchTotal} matching row(s) · ${paginatedMappings.size} group(s) on this page"
+        } else {
+            "Total: ${filteredMappings.size} chassis group${if (filteredMappings.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}"
+        }
         cardsHTML.append("""
             <div style="padding: 16px; text-align: center; color: #6b7280; font-size: 14px;">
-                Total: ${filteredMappings.size} chassis group${if (filteredMappings.size != 1) "s" else ""}${if (brandFilter.isNotEmpty()) " (filtered)" else ""}
+                $summary
             </div>
         """)
     }
     
     tableDiv.innerHTML = cardsHTML.toString()
     
-    // Add pagination event listeners
     document.getElementById("carBrandsPrevPage")?.addEventListener("click", { _: Event ->
-        if (carBrandsCurrentPage > 1) {
+        if (isServerSearch) {
+            if (carBrandMapSearchPageZeroBased > 0) {
+                carBrandMapSearchPageZeroBased--
+                carBrandsCurrentPage = carBrandMapSearchPageZeroBased + 1
+                loadMasterCarBrands()
+            }
+        } else if (carBrandsCurrentPage > 1) {
             carBrandsCurrentPage--
             loadMasterCarBrands()
         }
     })
     
     document.getElementById("carBrandsNextPage")?.addEventListener("click", { _: Event ->
-        val totalPages = kotlin.math.ceil(allCarBrands.size.toDouble() / carBrandsItemsPerPage).toInt()
-        if (carBrandsCurrentPage < totalPages) {
-            carBrandsCurrentPage++
-            loadMasterCarBrands()
+        if (isServerSearch) {
+            if (carBrandMapSearchPageZeroBased < carBrandMapSearchTotalPages - 1) {
+                carBrandMapSearchPageZeroBased++
+                carBrandsCurrentPage = carBrandMapSearchPageZeroBased + 1
+                loadMasterCarBrands()
+            }
+        } else {
+            val tp = kotlin.math.ceil(allCarBrands.size.toDouble() / carBrandsItemsPerPage).toInt()
+            if (carBrandsCurrentPage < tp) {
+                carBrandsCurrentPage++
+                loadMasterCarBrands()
+            }
         }
     })
 }
@@ -5272,6 +5967,160 @@ fun showMasterSuppliersPage() {
     showSupplierMapPage()
 }
 
+private fun getSupplierMapSearchQuery(): String =
+    (document.getElementById("supplierMapSearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+
+private fun supplierMapSearchFieldDisplayLabel(): String = when (supplierMapSearchFieldChoice) {
+    "supplierName" -> "Supplier name"
+    "stockLocation" -> "Stock location"
+    "rixoCompany" -> "Rixo company"
+    else -> "All fields"
+}
+
+private fun refreshSupplierMapSearchScopeUi() {
+    val scopeLabel = supplierMapSearchFieldDisplayLabel()
+    val btn = document.getElementById("supplierMapSearchFilterBtn") as? HTMLElement
+    if (btn != null) {
+        btn.setAttribute("title", "Filter — search in: $scopeLabel")
+        btn.setAttribute("aria-label", "Open filter for which field to search. Current: $scopeLabel.")
+    }
+    val sr = document.getElementById("supplierMapSearchFieldLabel") as? HTMLElement
+    if (sr != null) sr.textContent = scopeLabel
+}
+
+private fun closeSupplierMapSearchFilterMenu() {
+    val menu = document.getElementById("supplierMapSearchFilterMenu") as? HTMLElement
+    menu?.style?.setProperty("display", "none", "important")
+    window.asDynamic().__supplierMapSearchFilterMenuOpen = false
+    document.getElementById("supplierMapSearchFilterBtn")?.setAttribute("aria-expanded", "false")
+}
+
+private fun updateSupplierMapSearchFilterMenuActive(selected: String) {
+    val pairs = listOf(
+        "all" to "supplierMapSearchOptAll",
+        "supplierName" to "supplierMapSearchOptSupplierName",
+        "stockLocation" to "supplierMapSearchOptStockLocation",
+        "rixoCompany" to "supplierMapSearchOptRixoCompany"
+    )
+    for ((value, id) in pairs) {
+        val el = document.getElementById(id) as? HTMLElement ?: continue
+        if (value == selected) el.classList.add("supplier-map-search-filter-opt--active")
+        else el.classList.remove("supplier-map-search-filter-opt--active")
+    }
+}
+
+private fun scheduleSupplierMapSearchDebounced() {
+    if (supplierMapSearchDebounceTimer != null) {
+        window.clearTimeout(supplierMapSearchDebounceTimer.unsafeCast<Int>())
+        supplierMapSearchDebounceTimer = null
+    }
+    supplierMapSearchDebounceTimer = window.setTimeout({
+        supplierMapSearchDebounceTimer = null
+        runSupplierMapSearchFromInput()
+    }, 420)
+}
+
+private fun runSupplierMapSearchFromInput() {
+    val raw = getSupplierMapSearchQuery()
+    if (raw.isEmpty()) {
+        supplierMapSearchServerMode = false
+        supplierMapSearchTotal = 0
+        supplierMapSearchTotalPages = 0
+        supplierMapSearchPageZeroBased = 0
+        suppliersCurrentPage = 1
+        loadMasterSuppliers()
+        return
+    }
+    supplierMapSearchPageZeroBased = 0
+    suppliersCurrentPage = 1
+    loadMasterSuppliers()
+}
+
+fun setupSupplierMapSearchBarListeners() {
+    val input = document.getElementById("supplierMapSearchInput") as? HTMLInputElement ?: return
+    val filterBtn = document.getElementById("supplierMapSearchFilterBtn") as? HTMLElement
+    val menu = document.getElementById("supplierMapSearchFilterMenu") as? HTMLElement
+    val clearBtn = document.getElementById("supplierMapSearchClearBtn") as? HTMLElement
+
+    if (!input.hasAttribute("data-supplier-map-search-bound")) {
+        input.setAttribute("data-supplier-map-search-bound", "true")
+        input.addEventListener("input", { _: Event -> scheduleSupplierMapSearchDebounced() })
+        input.addEventListener("keydown", { ev: Event ->
+            val kev = ev.asDynamic()
+            if (kev.key == "Enter") {
+                ev.preventDefault()
+                if (supplierMapSearchDebounceTimer != null) {
+                    window.clearTimeout(supplierMapSearchDebounceTimer.unsafeCast<Int>())
+                    supplierMapSearchDebounceTimer = null
+                }
+                runSupplierMapSearchFromInput()
+            }
+        })
+    }
+
+    if (filterBtn != null && !filterBtn.hasAttribute("data-supplier-map-search-bound")) {
+        filterBtn.setAttribute("data-supplier-map-search-bound", "true")
+        filterBtn.addEventListener("click", { e: Event ->
+            e.stopPropagation()
+            if (menu == null) return@addEventListener
+            val open = window.asDynamic().__supplierMapSearchFilterMenuOpen == true
+            window.asDynamic().__supplierMapSearchFilterMenuOpen = !open
+            val nowOpen = !open
+            menu.style.setProperty("display", if (open) "none" else "block", "important")
+            filterBtn.setAttribute("aria-expanded", if (nowOpen) "true" else "false")
+        })
+    }
+
+    if (clearBtn != null && !clearBtn.hasAttribute("data-supplier-map-search-bound")) {
+        clearBtn.setAttribute("data-supplier-map-search-bound", "true")
+        clearBtn.addEventListener("click", { _: Event ->
+            input.value = ""
+            closeSupplierMapSearchFilterMenu()
+            runSupplierMapSearchFromInput()
+        })
+    }
+
+    val optIds = listOf(
+        "supplierMapSearchOptAll" to "all",
+        "supplierMapSearchOptSupplierName" to "supplierName",
+        "supplierMapSearchOptStockLocation" to "stockLocation",
+        "supplierMapSearchOptRixoCompany" to "rixoCompany"
+    )
+    for ((id, value) in optIds) {
+        val el = document.getElementById(id) as? HTMLElement
+        if (el != null && !el.hasAttribute("data-supplier-map-search-bound")) {
+            el.setAttribute("data-supplier-map-search-bound", "true")
+            el.addEventListener("click", { _: Event ->
+                supplierMapSearchFieldChoice = value
+                refreshSupplierMapSearchScopeUi()
+                updateSupplierMapSearchFilterMenuActive(value)
+                closeSupplierMapSearchFilterMenu()
+                val q = input.value.trim()
+                if (q.isNotEmpty()) {
+                    supplierMapSearchPageZeroBased = 0
+                    suppliersCurrentPage = 1
+                    loadMasterSuppliers()
+                }
+            })
+        }
+    }
+
+    if (window.asDynamic().__supplierMapSearchFilterOutsideAttached != true) {
+        window.asDynamic().__supplierMapSearchFilterOutsideAttached = true
+        document.addEventListener("click", { event ->
+            val target = event.target as? Node ?: return@addEventListener
+            val m = document.getElementById("supplierMapSearchFilterMenu") as? HTMLElement
+            val b = document.getElementById("supplierMapSearchFilterBtn") as? HTMLElement
+            if (m == null) return@addEventListener
+            val insideMenu = m.contains(target)
+            val insideBtn = b != null && b.contains(target)
+            if (!insideMenu && !insideBtn) {
+                closeSupplierMapSearchFilterMenu()
+            }
+        })
+    }
+}
+
 fun showSupplierMapPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -5288,15 +6137,41 @@ fun showSupplierMapPage() {
                 </div>
             </div>
             
-            <!-- Search and Filter Section -->
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 250px;">
-                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Supplier Name:</label>
-                        <input type="text" id="supplierFilter" placeholder="Type supplier name to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+            <style>
+                #supplierList .supplier-map-search-filter-opt:hover { background: #f3f4f6 !important; }
+                #supplierList .supplier-map-search-filter-opt--active { background: #eef2ff !important; font-weight: 600; }
+                #supplierList .supplier-map-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+                #supplierList #supplierMapSearchFilterBtn:hover { background: #e8eaed !important; box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important; }
+                #supplierList #supplierMapSearchFilterBtn:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+            </style>
+            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+                <div style="display: flex; align-items: center; gap: 10px; width: 100%; max-width: 720px;">
+                    <div style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+                        <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; color: #9ca3af; display: flex;" aria-hidden="true">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        </span>
+                        <input type="text" id="supplierMapSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Type to search…" aria-label="Search supplier map" style="width: 100%; box-sizing: border-box; padding: 12px 40px 12px 44px; border: none; font-size: 14px; background: transparent; border-radius: 999px; outline: none;" />
+                        <button type="button" id="supplierMapSearchClearBtn" title="Clear search" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: #9ca3af; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 8px;">×</button>
                     </div>
-                    <div style="display: flex; gap: 10px; align-items: flex-end;">
-                        <button id="clearSupplierFilterBtn" style="padding: 10px 20px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">Clear Filter</button>
+                    <div style="position: relative; flex-shrink: 0;">
+                        <span id="supplierMapSearchFieldLabel" class="supplier-map-sr-only" aria-live="polite">All fields</span>
+                        <button type="button" id="supplierMapSearchFilterBtn" title="Filter — search in: All fields" aria-haspopup="true" aria-expanded="false" aria-label="Open filter for which field to search. Current: All fields." style="width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e5e7eb; background: #f3f4f6; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4b5563; padding: 0;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <line x1="3" y1="7" x2="21" y2="7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                <circle cx="8" cy="7" r="2.25" fill="currentColor"/>
+                                <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                <circle cx="16" cy="12" r="2.25" fill="currentColor"/>
+                                <line x1="3" y1="17" x2="21" y2="17" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                                <circle cx="7" cy="17" r="2.25" fill="currentColor"/>
+                            </svg>
+                        </button>
+                        <div id="supplierMapSearchFilterMenu" style="display: none; position: absolute; right: 0; top: calc(100% + 8px); z-index: 20001; min-width: 220px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12); padding: 8px 0;">
+                            <div style="padding: 8px 14px 4px; font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .04em;">Search in</div>
+                            <button type="button" class="supplier-map-search-filter-opt supplier-map-search-filter-opt--active" id="supplierMapSearchOptAll" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">All fields</button>
+                            <button type="button" class="supplier-map-search-filter-opt" id="supplierMapSearchOptSupplierName" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Supplier name</button>
+                            <button type="button" class="supplier-map-search-filter-opt" id="supplierMapSearchOptStockLocation" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Stock location</button>
+                            <button type="button" class="supplier-map-search-filter-opt" id="supplierMapSearchOptRixoCompany" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Rixo company</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -5318,6 +6193,16 @@ fun showSupplierMapPage() {
         </div>
     """
     
+    supplierMapSearchFieldChoice = "all"
+    supplierMapSearchServerMode = false
+    supplierMapSearchTotal = 0
+    supplierMapSearchTotalPages = 0
+    supplierMapSearchPageZeroBased = 0
+    suppliersCurrentPage = 1
+    updateSupplierMapSearchFilterMenuActive("all")
+    refreshSupplierMapSearchScopeUi()
+    setupSupplierMapSearchBarListeners()
+    
     // Load initial data
     loadMasterSuppliers()
     
@@ -5328,17 +6213,6 @@ fun showSupplierMapPage() {
     
     document.getElementById("supplierColumnFilterBtn")?.addEventListener("click", { _: Event ->
         showSupplierColumnFilterModal()
-    })
-    
-    document.getElementById("clearSupplierFilterBtn")?.addEventListener("click", { _: Event ->
-        val filterInput = document.getElementById("supplierFilter") as HTMLInputElement?
-        filterInput?.value = ""
-        loadMasterSuppliers()
-    })
-    
-    // Real-time search filter
-    document.getElementById("supplierFilter")?.addEventListener("input", { _: Event ->
-        loadMasterSuppliers()
     })
     
     // Setup device change listener for Supplier page
@@ -5515,10 +6389,17 @@ private var rixoCardInlineEditCompany: String = ""
 private var rixoCardInlineEditAuction: String = ""
 private var rixoCardInlineEditStock: String = ""
 private var rixoCardInlineEditCurrentLabel: String = ""
+/** Distinct non-blank `rixo_mapping.auction_name` values (ordered) for auction add/edit comboboxes on this page. */
 private var rixoMasterSuppliers: List<String> = emptyList()
 private var rixoMasterCompanies: List<String> = emptyList()
 private var rixoMasterStocks: List<String> = emptyList()
 private var rixoMasterVehicleTypes: List<String> = emptyList()
+private var rixoMasterOptionsReady: Boolean = false
+
+private var rixoCardInlineAddLevel: String? = null
+private var rixoCardInlineAddCompany: String = ""
+private var rixoCardInlineAddAuction: String = ""
+private var rixoCardInlineAddStock: String = ""
 
 /**
  * Tree flow: rixo_company -> auction_name -> stock_location -> vehicle/price rows.
@@ -5809,6 +6690,153 @@ fun showRixoMappingTreePage() {
                 font-weight: 600;
                 font-size: 12px;
                 cursor: pointer;
+            }
+            /* Inline "+ Add" for company / auction / stock: compact sizing aligned with card inline edit */
+            .rixo-tree-inline-add-outer {
+                flex-shrink: 0;
+                cursor: default;
+                position: relative;
+                z-index: 40;
+                isolation: isolate;
+                box-sizing: border-box;
+            }
+            .rixo-tree-inline-add-outer--company { width: 270px; }
+            .rixo-tree-inline-add-outer--auction,
+            .rixo-tree-inline-add-outer--stock { width: 240px; }
+            .rixo-tree-inline-add-box {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                width: 100%;
+                background: #fff;
+                border: 1px solid rgba(226, 232, 240, 0.95);
+                border-radius: 10px;
+                padding: 8px 10px;
+                box-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
+                box-sizing: border-box;
+            }
+            .rixo-tree-inline-add-box:focus-within {
+                border-color: #4CC9FF;
+                box-shadow: 0 0 0 3px rgba(76, 201, 255, 0.2);
+            }
+            .rixo-tree-inline-add-row--inputs {
+                display: flex;
+                flex-direction: row;
+                align-items: stretch;
+                gap: 8px;
+                width: 100%;
+            }
+            .rixo-tree-inline-add-field-primary {
+                flex: 1;
+                min-width: 0;
+                position: relative;
+                z-index: 50;
+            }
+            .rixo-tree-inline-add-field-primary.rixo-tree-card-combobox-wrap {
+                flex: 1 1 100%;
+                min-width: 0;
+                width: 100%;
+                max-width: 100%;
+            }
+            .rixo-tree-inline-add-row--inputs > .rixo-tree-inline-add-field-primary:only-child {
+                flex: 1 1 100%;
+                width: 100%;
+                max-width: 100%;
+            }
+            .rixo-tree-inline-add-box .rixo-tree-inline-add-field-primary input[type="text"] {
+                width: 100% !important;
+                box-sizing: border-box !important;
+            }
+            .rixo-tree-inline-add-plain input[type="text"] {
+                min-height: 34px !important;
+                font-size: 12px !important;
+                font-weight: 600 !important;
+                color: #0f172a !important;
+                padding: 8px 10px !important;
+                border-radius: 8px !important;
+                border: 1px solid #d1d5db !important;
+            }
+            .rixo-tree-inline-add-plain input[type="text"]:focus {
+                outline: none !important;
+                border-color: #4CC9FF !important;
+                box-shadow: 0 0 0 3px rgba(76, 201, 255, 0.2) !important;
+            }
+            .rixo-tree-inline-add-box .rixo-tree-card-combobox-wrap input[type="text"] {
+                min-height: 34px !important;
+                padding: 8px 40px 8px 10px !important;
+            }
+            .rixo-tree-inline-add-row--actions {
+                display: flex;
+                flex-direction: row;
+                justify-content: flex-end;
+                align-items: center;
+                gap: 6px;
+                width: 100%;
+                margin-top: 2px;
+            }
+            .rixo-tree-inline-add-box .rixo-tree-card-inline-add-cancel {
+                padding: 6px 12px;
+                border: 1px solid #d1d5db;
+                background: #fff;
+                color: #374151;
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 12px;
+                cursor: pointer;
+            }
+            .rixo-tree-inline-add-box .rixo-tree-card-inline-add-cancel:hover {
+                background: #f9fafb;
+            }
+            .rixo-tree-inline-add-box .rixo-tree-card-inline-add-save {
+                padding: 6px 14px;
+                border: none;
+                background: #58B98C;
+                color: #fff;
+                border-radius: 8px;
+                font-weight: 600;
+                font-size: 12px;
+                cursor: pointer;
+            }
+            .rixo-tree-inline-add-box .rixo-tree-card-inline-add-save:hover {
+                filter: brightness(0.95);
+            }
+            .rixo-tree-leaf-inline-add-cancel {
+                padding: 8px 12px;
+                border: 1px solid #d1d5db;
+                background: #fff;
+                color: #111827;
+                border-radius: 8px;
+                font-weight: 600;
+                cursor: pointer;
+                font-size: 13px;
+            }
+            .rixo-tree-leaf-inline-add-cancel:hover {
+                background: #f9fafb;
+            }
+            .rixo-tree-leaf-inline-add-save {
+                padding: 8px 12px;
+                border: none;
+                background: #58B98C;
+                color: #fff;
+                border-radius: 8px;
+                font-weight: 600;
+                cursor: pointer;
+                font-size: 13px;
+            }
+            .rixo-tree-leaf-inline-add-save:hover {
+                filter: brightness(0.95);
+            }
+            .rixo-tree-leaf-edit--inline-add-stack {
+                display: flex !important;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+                width: 100%;
+            }
+            .rixo-tree-leaf-edit--inline-add-stack .rixo-tree-leaf-vtype-wrap {
+                flex: 1;
+                min-width: 0;
+                max-width: none;
             }
             .rixo-tree-card-combobox-wrap {
                 flex: 1;
@@ -6153,7 +7181,7 @@ private fun parseRixoMappingRows(rows: List<dynamic>): List<RixoMappingRowLite> 
     }
 }
 
-/** Footer button: opens per-level add modal (values escaped for HTML attributes). */
+/** Footer "+ Add" (values escaped for HTML attributes). Opens inline add row, not a modal. */
 private fun rixoTreeAddButtonHtml(level: String, company: String?, auction: String?, stock: String?): String {
     val label = "+ Add"
     val c = escapeHtml(company ?: "")
@@ -6179,6 +7207,84 @@ private fun clearRixoCardInlineEdit() {
     rixoCardInlineEditAuction = ""
     rixoCardInlineEditStock = ""
     rixoCardInlineEditCurrentLabel = ""
+}
+
+private fun clearRixoCardInlineAdd() {
+    rixoCardInlineAddLevel = null
+    rixoCardInlineAddCompany = ""
+    rixoCardInlineAddAuction = ""
+    rixoCardInlineAddStock = ""
+}
+
+private fun rixoCardInlineAddMatchesAuctionBranch(company: String): Boolean =
+    rixoCardInlineAddLevel == "auction" &&
+        rixoNormCompany(rixoCardInlineAddCompany) == rixoNormCompany(company)
+
+private fun rixoCardInlineAddMatchesStockBranch(company: String, auction: String): Boolean =
+    rixoCardInlineAddLevel == "stock" &&
+        rixoNormCompany(rixoCardInlineAddCompany) == rixoNormCompany(company) &&
+        rixoNormAuction(rixoCardInlineAddAuction) == rixoNormAuction(auction)
+
+private fun rixoCardInlineAddMatchesLeafBranch(company: String, auction: String, stock: String): Boolean =
+    rixoCardInlineAddLevel == "leaf" &&
+        rixoNormCompany(rixoCardInlineAddCompany) == rixoNormCompany(company) &&
+        rixoNormAuction(rixoCardInlineAddAuction) == rixoNormAuction(auction) &&
+        rixoNormStock(rixoCardInlineAddStock) == rixoNormStock(stock)
+
+/** Boxed two-row inline add (inputs row + Cancel/Add), aligned with leaf add UX. */
+private fun buildRixoCardInlineAddHtml(level: String): String {
+    val outerClass = when (level) {
+        "company" -> "rixo-tree-inline-add-outer rixo-tree-inline-add-outer--company"
+        "auction" -> "rixo-tree-inline-add-outer rixo-tree-inline-add-outer--auction"
+        else -> "rixo-tree-inline-add-outer rixo-tree-inline-add-outer--stock"
+    }
+    val comboboxId = when (level) {
+        "company" -> "rixoCardInlineAddCompany"
+        "auction" -> "rixoCardInlineAddAuction"
+        else -> "rixoCardInlineAddStock"
+    }
+    val placeholder = when (level) {
+        "company" -> "Enter Rixo Company"
+        "auction" -> "Select Auction House"
+        else -> "Select Stock Location"
+    }
+    val fieldPrimary = if (level == "company") {
+        """<div class="rixo-tree-inline-add-field-primary rixo-tree-inline-add-plain">${createPlainTextInput(comboboxId, placeholder, required = true)}</div>"""
+    } else {
+        """<div class="rixo-tree-inline-add-field-primary rixo-tree-card-combobox-wrap">${createEditableCombobox(comboboxId, placeholder, required = true)}</div>"""
+    }
+    return """
+        <div class="$outerClass rixo-tree-card--inline-editing" data-level="$level" data-value="" aria-expanded="false" data-rixo-inline-add="1">
+            <div class="rixo-tree-inline-add-box">
+                <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--inputs">
+                    $fieldPrimary
+                </div>
+                <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--actions">
+                    <button type="button" class="rixo-tree-card-inline-add-cancel">Cancel</button>
+                    <button type="button" class="rixo-tree-card-inline-add-save">Add</button>
+                </div>
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+private fun buildRixoLeafInlineAddHtml(): String {
+    return """
+        <div class="rixo-tree-leaf-row rixo-tree-leaf-row--inline-editing" data-rixo-inline-add="leaf">
+            <div class="rixo-tree-leaf-cells">
+                <div class="rixo-tree-leaf-edit rixo-tree-leaf-edit--inline-add-stack">
+                    <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--inputs">
+                        <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("rixoCardInlineAddLeafType", "Select Vehicle Type", required = true)}</div>
+                        <input id="rixoCardInlineAddLeafPrice" class="rixo-tree-leaf-inline-price" type="number" step="any" min="0" value="">
+                    </div>
+                    <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--actions">
+                        <button type="button" class="rixo-tree-leaf-inline-add-cancel">Cancel</button>
+                        <button type="button" class="rixo-tree-leaf-inline-add-save">Add</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    """.trimIndent()
 }
 
 private fun rixoCardInlineTargetMatches(level: String, pathCompany: String, pathAuction: String, pathStock: String): Boolean {
@@ -6225,7 +7331,11 @@ private fun buildRixoCardHtml(
             "auction" -> "Select Auction House"
             else -> "Select Stock Location"
         }
-        val comboboxHtml = createEditableCombobox(comboboxId, placeholder, required = true)
+        val comboboxHtml = if (level == "company") {
+            createPlainTextInput(comboboxId, "Enter Rixo Company", required = true)
+        } else {
+            createEditableCombobox(comboboxId, placeholder, required = true)
+        }
         val extraInlineClass = if (useCardInline) " rixo-tree-card--inline-editing-with-actions" else ""
         val actionsHtml = if (useCardInline) {
             """
@@ -6499,10 +7609,14 @@ private fun buildRixoLeafRowHtml(
 private fun buildRixoMappingTreeHtmlFromCache(): String {
     val list = rixoTreeRowsCache
     if (list.isEmpty()) {
+        val inlineCompany = if (rixoCardInlineAddLevel == "company") {
+            """<div class="rixo-tree-node">${buildRixoCardInlineAddHtml("company")}</div>"""
+        } else ""
         return """
             <div class="rixo-tree">
                 <div class="rixo-tree-headers"><div class="rixo-tree-header">Rixo Company</div><div class="rixo-tree-header">Auction House</div><div class="rixo-tree-header">Stock Location</div><div class="rixo-tree-header">Supported Vehicle Type</div><div class="rixo-tree-header rixo-tree-header--price">Rixo Price</div></div>
                 <div class="rixo-tree-note" style="max-width:560px;">No rixo_mapping rows yet. Add your first mapping below (values must exist in master menus for each dropdown).</div>
+                $inlineCompany
                 <div class="rixo-tree-col-footer">${rixoTreeAddButtonHtml("company", null, null, null)}</div>
             </div>
         """.trimIndent()
@@ -6548,6 +7662,11 @@ private fun buildRixoMappingTreeHtmlFromCache(): String {
             val companyAuctions = rixoVisibleAuctionsForTree(companyRows)
             sb.append("""<div class="rixo-tree-children">""")
             if (companyAuctions.isEmpty()) {
+                if (rixoCardInlineAddMatchesAuctionBranch(company)) {
+                    sb.append("""<div class="rixo-tree-node">""")
+                    sb.append(buildRixoCardInlineAddHtml("auction"))
+                    sb.append("""</div>""")
+                }
                 sb.append("""<div class="rixo-tree-col-footer">${rixoTreeAddButtonHtml("auction", company, null, null)}</div>""")
             } else {
                 for (auction in companyAuctions) {
@@ -6564,6 +7683,11 @@ private fun buildRixoMappingTreeHtmlFromCache(): String {
                         val auctionStocks = rixoVisibleStocksForTree(auctionRows)
                         sb.append("""<div class="rixo-tree-children">""")
                         if (auctionStocks.isEmpty()) {
+                            if (rixoCardInlineAddMatchesStockBranch(company, auction)) {
+                                sb.append("""<div class="rixo-tree-node">""")
+                                sb.append(buildRixoCardInlineAddHtml("stock"))
+                                sb.append("""</div>""")
+                            }
                             sb.append("""<div class="rixo-tree-col-footer">${rixoTreeAddButtonHtml("stock", company, auction, null)}</div>""")
                         } else {
                             for (stock in auctionStocks) {
@@ -6590,9 +7714,17 @@ private fun buildRixoMappingTreeHtmlFromCache(): String {
                                             }
                                         }
                                     }
+                                    if (rixoCardInlineAddMatchesLeafBranch(company, auction, stock)) {
+                                        sb.append(buildRixoLeafInlineAddHtml())
+                                    }
                                     sb.append(rixoTreeAddButtonHtml("leaf", company, auction, stock))
                                     sb.append("""</div></div></div>""")
                                 }
+                                sb.append("""</div>""")
+                            }
+                            if (rixoCardInlineAddMatchesStockBranch(company, auction)) {
+                                sb.append("""<div class="rixo-tree-node">""")
+                                sb.append(buildRixoCardInlineAddHtml("stock"))
                                 sb.append("""</div>""")
                             }
                             sb.append("""<div class="rixo-tree-col-footer">${rixoTreeAddButtonHtml("stock", company, auction, null)}</div>""")
@@ -6604,10 +7736,20 @@ private fun buildRixoMappingTreeHtmlFromCache(): String {
             }
             // One auction + Add: empty branch already added it above; when there are auctions, footer adds another auction under this company.
             if (companyAuctions.isNotEmpty()) {
+                if (rixoCardInlineAddMatchesAuctionBranch(company)) {
+                    sb.append("""<div class="rixo-tree-node">""")
+                    sb.append(buildRixoCardInlineAddHtml("auction"))
+                    sb.append("""</div>""")
+                }
                 sb.append("""<div class="rixo-tree-col-footer">${rixoTreeAddButtonHtml("auction", company, null, null)}</div>""")
             }
             sb.append("""</div>""")
         }
+        sb.append("""</div>""")
+    }
+    if (rixoCardInlineAddLevel == "company") {
+        sb.append("""<div class="rixo-tree-node">""")
+        sb.append(buildRixoCardInlineAddHtml("company"))
         sb.append("""</div>""")
     }
     sb.append("""<div class="rixo-tree-col-footer">${rixoTreeAddButtonHtml("company", null, null, null)}</div>""")
@@ -6634,7 +7776,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
             val companyAttr = addBtn.getAttribute("data-company")?.trim().orEmpty()
             val auctionAttr = addBtn.getAttribute("data-auction")?.trim().orEmpty()
             val stockAttr = addBtn.getAttribute("data-stock")?.trim().orEmpty()
-            showRixoLevelAddModal(level, companyAttr, auctionAttr, stockAttr)
+            startRixoInlineAdd(level, companyAttr, auctionAttr, stockAttr, root)
             return@treeClick
         }
         val menuItemEl = target.closest(".rixo-tree-card-menu-item") as? HTMLElement
@@ -6655,6 +7797,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
                 "edit" -> {
                     rixoLeafInlineEditMappingId = null
                     rixoLeafInlineEditLineType = ""
+                    clearRixoCardInlineAdd()
                     rixoCardInlineEditLevel = cardLevel
                     rixoCardInlineEditCompany = pc
                     rixoCardInlineEditAuction = pa
@@ -6675,6 +7818,22 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
                 "delete" -> executeRixoBranchDelete(cardLevel, pc, pa, ps, currentLabel)
                 else -> {}
             }
+            return@treeClick
+        }
+        val cardInlineAddSave = target.closest(".rixo-tree-card-inline-add-save") as? HTMLElement
+        if (cardInlineAddSave != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            executeRixoCardInlineAddSave()
+            return@treeClick
+        }
+        val cardInlineAddCancel = target.closest(".rixo-tree-card-inline-add-cancel") as? HTMLElement
+        if (cardInlineAddCancel != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            clearRixoCardInlineAdd()
+            root.innerHTML = buildRixoMappingTreeHtmlFromCache()
+            bindRixoMappingTreeClicks(root)
             return@treeClick
         }
         val menuToggleBtn = target.closest(".rixo-tree-card-menu-btn") as? HTMLElement
@@ -6704,6 +7863,22 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
         if (target.closest(".rixo-tree-card--inline-editing") != null) {
             return@treeClick
         }
+        val leafInlineAddSave = target.closest(".rixo-tree-leaf-inline-add-save") as? HTMLElement
+        if (leafInlineAddSave != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            executeRixoLeafInlineAddSave()
+            return@treeClick
+        }
+        val leafInlineAddCancel = target.closest(".rixo-tree-leaf-inline-add-cancel") as? HTMLElement
+        if (leafInlineAddCancel != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            clearRixoCardInlineAdd()
+            root.innerHTML = buildRixoMappingTreeHtmlFromCache()
+            bindRixoMappingTreeClicks(root)
+            return@treeClick
+        }
         val leafEditBtn = target.closest(".rixo-tree-leaf-edit-btn") as? HTMLElement
         if (leafEditBtn != null) {
             ev.preventDefault()
@@ -6712,6 +7887,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
             val id = row.getAttribute("data-mapping-id")?.toLongOrNull() ?: return@treeClick
             val lineType = row.getAttribute("data-mapping-type")?.trim().orEmpty()
             clearRixoCardInlineEdit()
+            clearRixoCardInlineAdd()
             rixoLeafInlineEditMappingId = id
             rixoLeafInlineEditLineType = lineType
             rixoEnsureMasterOptions { ok ->
@@ -6774,11 +7950,14 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
                 showMessage("Rixo price must be numeric", "error")
                 return@treeClick
             }
-            val companyOk = rixoListContains(rixoMasterCompanies, company)
+            if (company.isEmpty()) {
+                showMessage("Rixo company is required", "error")
+                return@treeClick
+            }
             val auctionOk = auction.isEmpty() || rixoListContains(rixoMasterSuppliers, auction)
             val stockOk = stock.isEmpty() || rixoListContains(rixoMasterStocks, stock)
-            if (!companyOk || !auctionOk || !stockOk) {
-                showMessage("Please select Rixo company from the list; auction/stock must match master lists when set", "error")
+            if (!auctionOk || !stockOk) {
+                showMessage("Auction house must be a known Rixo mapping name; stock location must match the master list when set", "error")
                 return@treeClick
             }
             val merged = mergeRixoVehicleTypeForLineEdit(baseRow, lineType, vtype)
@@ -6826,6 +8005,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
             rixoLeafInlineEditMappingId = null
             rixoLeafInlineEditLineType = ""
             clearRixoCardInlineEdit()
+            clearRixoCardInlineAdd()
             val id = leaf.getAttribute("data-mapping-id")?.toLongOrNull()
             val leafType = leaf.getAttribute("data-mapping-type")?.trim()
             rixoSelectedMappingId = if (rixoSelectedMappingId == id) null else id
@@ -6841,6 +8021,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
                 rixoLeafInlineEditMappingId = null
                 rixoLeafInlineEditLineType = ""
                 clearRixoCardInlineEdit()
+                clearRixoCardInlineAdd()
                 if (rixoSelectedCompany == value) {
                     rixoSelectedCompany = null
                     rixoSelectedAuction = null
@@ -6859,6 +8040,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
                 rixoLeafInlineEditMappingId = null
                 rixoLeafInlineEditLineType = ""
                 clearRixoCardInlineEdit()
+                clearRixoCardInlineAdd()
                 if (rixoSelectedAuction == value) {
                     rixoSelectedAuction = null
                     rixoSelectedStock = null
@@ -6875,6 +8057,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
                 rixoLeafInlineEditMappingId = null
                 rixoLeafInlineEditLineType = ""
                 clearRixoCardInlineEdit()
+                clearRixoCardInlineAdd()
                 rixoSelectedStock = if (rixoSelectedStock == value) null else value
                 rixoSelectedMappingId = null
                 rixoSelectedLeafType = null
@@ -6910,8 +8093,10 @@ fun loadRixoMappingTree() {
             rixoLeafInlineEditMappingId = null
             rixoLeafInlineEditLineType = ""
             clearRixoCardInlineEdit()
+            clearRixoCardInlineAdd()
             root.innerHTML = buildRixoMappingTreeHtml(arr)
             bindRixoMappingTreeClicks(root)
+            fetchRixoDistinctAuctionNames()
         }
         .catch { err: dynamic ->
             Logger.error("Rixo mapping tree: ${err.toString()}")
@@ -6939,8 +8124,10 @@ private fun refreshRixoMappingTreeData() {
             rixoLeafInlineEditMappingId = null
             rixoLeafInlineEditLineType = ""
             clearRixoCardInlineEdit()
+            clearRixoCardInlineAdd()
             root.innerHTML = buildRixoMappingTreeHtmlFromCache()
             bindRixoMappingTreeClicks(root)
+            fetchRixoDistinctAuctionNames()
         }
         .catch { err: dynamic ->
             Logger.error("Rixo mapping refresh: ${err.toString()}")
@@ -6980,7 +8167,6 @@ private fun wireRixoInlineTreeComboboxes() {
             val coId = rixoInlinePathSelectId(mid, "company")
             val auId = rixoInlinePathSelectId(mid, "auction")
             val stId = rixoInlinePathSelectId(mid, "stock")
-            populateRixoEditableComboboxOptions(coId, rixoMasterCompanies)
             setEditableComboboxValue(coId, row.company.trim())
             populateRixoEditableComboboxOptions(auId, rixoMasterSuppliers)
             setEditableComboboxValue(auId, row.auction.trim())
@@ -6988,7 +8174,7 @@ private fun wireRixoInlineTreeComboboxes() {
             setEditableComboboxValue(stId, row.stock.trim())
             val treeRoot = document.getElementById("rixoMappingTreeRoot") as? HTMLElement
             val rowEl = treeRoot?.querySelector(".rixo-tree-leaf-row--inline-editing") as? HTMLElement
-            val strictIds = mutableListOf(coId, auId, stId)
+            val strictIds = mutableListOf(auId, stId)
             if (rowEl != null) {
                 val prefix = rowEl.getAttribute("data-inline-field-id")
                 if (prefix != null) {
@@ -7013,10 +8199,7 @@ private fun wireRixoCardInlineCombobox() {
     val id = rixoCardInlineComboboxId(level)
     when (level) {
         "company" -> {
-            populateRixoEditableComboboxOptions(id, rixoMasterCompanies)
             setEditableComboboxValue(id, rixoCardInlineEditCurrentLabel)
-            enforceRixoComboboxStrict(listOf(id))
-            syncRixoInlineComboboxInputs(listOf(id))
         }
         "auction" -> {
             populateRixoEditableComboboxOptions(id, rixoMasterSuppliers)
@@ -7053,7 +8236,7 @@ private fun executeRixoCardInlineSave(root: HTMLElement) {
         return
     }
     val listOk = when (level) {
-        "company" -> rixoListContains(rixoMasterCompanies, newVal)
+        "company" -> true
         "auction" -> rixoListContains(rixoMasterSuppliers, newVal)
         "stock" -> rixoListContains(rixoMasterStocks, newVal)
         else -> false
@@ -7166,14 +8349,25 @@ private fun enforceRixoComboboxStrict(selectIds: List<String>) {
     """)
 }
 
+private fun fetchRixoDistinctAuctionNames() {
+    window.fetch(apiUrl("rixo-mapping/distinct-auction-names"))
+        .then { r: dynamic -> if (r.ok as Boolean) r.json() else js("[]") }
+        .then { raw: dynamic ->
+            rixoMasterSuppliers = parseMasterListArray(raw).distinct().sortedBy { it.lowercase() }
+        }
+        .catch { err: dynamic ->
+            Logger.error("Rixo distinct auction names: ${err.toString()}")
+        }
+}
+
 private fun rixoEnsureMasterOptions(callback: (Boolean) -> Unit) {
-    if (rixoMasterCompanies.isNotEmpty() && rixoMasterSuppliers.isNotEmpty() && rixoMasterStocks.isNotEmpty() && rixoMasterVehicleTypes.isNotEmpty()) {
+    if (rixoMasterOptionsReady) {
         callback(true)
         return
     }
     val requests = js("[]")
     requests.push(window.fetch(apiUrl("master-menu/rixo_company")))
-    requests.push(window.fetch(apiUrl("master-menu/supplier")))
+    requests.push(window.fetch(apiUrl("rixo-mapping/distinct-auction-names")))
     requests.push(window.fetch(apiUrl("master-menu/stock_location")))
     requests.push(window.fetch(apiUrl("master-menu/type_of_vehicle")))
     js("Promise.all")(requests)
@@ -7190,6 +8384,7 @@ private fun rixoEnsureMasterOptions(callback: (Boolean) -> Unit) {
             rixoMasterSuppliers = parseMasterListArray(results[1]).distinct().sortedBy { it.lowercase() }
             rixoMasterStocks = parseMasterListArray(results[2]).distinct().sortedBy { it.lowercase() }
             rixoMasterVehicleTypes = parseMasterListArray(results[3]).distinct().sortedBy { it.lowercase() }
+            rixoMasterOptionsReady = true
             callback(true)
         }
         .catch { err: dynamic ->
@@ -7228,8 +8423,8 @@ private fun postRixoMappingBulkOneRow(
     val obj: dynamic = js("{}")
     when (mode) {
         "COMPANY" -> {
-            if (c.isEmpty() || !rixoListContains(rixoMasterCompanies, c)) {
-                showMessage("Please select a Rixo company from the list", "error")
+            if (c.isEmpty()) {
+                showMessage("Rixo company is required", "error")
                 return
             }
             obj.rixoCompany = c
@@ -7240,8 +8435,9 @@ private fun postRixoMappingBulkOneRow(
             obj.rixoPrice = null
         }
         "AUCTION" -> {
-            if (c.isEmpty() || !rixoListContains(rixoMasterCompanies, c)) {
-                showMessage("Please select a Rixo company from the list", "error")
+            // Company comes from the tree (existingrixo_mapping rows); it may not be in master-menu/rixo_company.
+            if (c.isEmpty()) {
+                showMessage("Rixo company is required", "error")
                 return
             }
             if (a.isEmpty() || !rixoListContains(rixoMasterSuppliers, a)) {
@@ -7256,8 +8452,8 @@ private fun postRixoMappingBulkOneRow(
             obj.rixoPrice = null
         }
         "STOCK" -> {
-            if (c.isEmpty() || !rixoListContains(rixoMasterCompanies, c)) {
-                showMessage("Please select a Rixo company from the list", "error")
+            if (c.isEmpty()) {
+                showMessage("Rixo company is required", "error")
                 return
             }
             if (a.isEmpty() || !rixoListContains(rixoMasterSuppliers, a)) {
@@ -7276,8 +8472,8 @@ private fun postRixoMappingBulkOneRow(
             obj.rixoPrice = null
         }
         else -> {
-            if (!rixoListContains(rixoMasterCompanies, c)) {
-                showMessage("Please select a Rixo company from the list", "error")
+            if (c.isEmpty()) {
+                showMessage("Rixo company is required", "error")
                 return
             }
             if (!rixoListContains(rixoMasterSuppliers, a)) {
@@ -7342,196 +8538,149 @@ private fun postRixoMappingBulkOneRow(
         }
 }
 
-/**
- * Per-level add (tree footers). Sends one row to [rixo-mapping/bulk] with [insertMode]
- * COMPANY / AUCTION / STOCK (skeleton rows) or full row for leaf.
- */
-private fun showRixoLevelAddModal(
-    level: String,
-    pathCompany: String,
-    pathAuction: String,
-    pathStock: String,
-) {
+private fun startRixoInlineAdd(level: String, pathCompany: String, pathAuction: String, pathStock: String, root: HTMLElement) {
+    rixoLeafInlineEditMappingId = null
+    rixoLeafInlineEditLineType = ""
+    clearRixoCardInlineEdit()
+    when (level) {
+        "company" -> Unit
+        "auction" -> {
+            if (pathCompany.isEmpty()) {
+                showMessage("Company context is required. Expand a company in the tree first.", "error")
+                return
+            }
+            rixoSelectedCompany = rixoNormCompany(pathCompany)
+        }
+        "stock" -> {
+            if (pathCompany.isEmpty() || pathAuction.isEmpty()) {
+                showMessage("Company and auction house context are required.", "error")
+                return
+            }
+            rixoSelectedCompany = rixoNormCompany(pathCompany)
+            rixoSelectedAuction = rixoNormAuction(pathAuction)
+        }
+        "leaf" -> {
+            if (pathCompany.isEmpty() || pathAuction.isEmpty() || pathStock.isEmpty()) {
+                showMessage("Open company, auction, and stock to add a vehicle type and price.", "error")
+                return
+            }
+            rixoSelectedCompany = rixoNormCompany(pathCompany)
+            rixoSelectedAuction = rixoNormAuction(pathAuction)
+            rixoSelectedStock = rixoNormStock(pathStock)
+        }
+        else -> return
+    }
+    rixoCardInlineAddLevel = level
+    rixoCardInlineAddCompany = pathCompany.trim()
+    rixoCardInlineAddAuction = pathAuction.trim()
+    rixoCardInlineAddStock = pathStock.trim()
     rixoEnsureMasterOptions { ok ->
-        if (!ok) return@rixoEnsureMasterOptions
-        document.getElementById("rixoLevelAddModal")?.remove()
-        val title = when (level) {
-            "company" -> "Add Rixo Company"
-            "auction" -> "Add Auction House"
-            "stock" -> "Add Stock Location"
-            "leaf" -> "Add Vehicle Type / Rixo Price"
-            else -> "Add Rixo Mapping"
+        if (!ok) {
+            clearRixoCardInlineAdd()
+            return@rixoEnsureMasterOptions
         }
-        val bodyHtml = when (level) {
-            "company" -> """
-                <div class="rixo-level-add-field">
-                    <label class="rixo-modal-label">Rixo Company <span style="color:#ef4444;">*</span></label>
-                    ${createEditableCombobox("rixoLevelAddCompany", "Select Rixo Company", required = true)}
-                </div>
-            """.trimIndent()
-            "auction" -> """
-                <div class="rixo-level-add-field">
-                    <label class="rixo-modal-label">Auction House <span style="color:#ef4444;">*</span></label>
-                    ${createEditableCombobox("rixoLevelAddAuction", "Select Auction House", required = true)}
-                </div>
-            """.trimIndent()
-            "stock" -> """
-                <div class="rixo-level-add-field">
-                    <label class="rixo-modal-label">Stock Location <span style="color:#ef4444;">*</span></label>
-                    ${createEditableCombobox("rixoLevelAddStock", "Select Stock Location", required = true)}
-                </div>
-            """.trimIndent()
-            "leaf" -> """
-                <div class="rixo-level-add-field">
-                    <label class="rixo-modal-label">Supported Vehicle Type <span style="color:#ef4444;">*</span></label>
-                    ${createEditableCombobox("rixoLevelAddVehicleType", "Select Vehicle Type", required = true)}
-                </div>
-                <div style="margin-top:12px;">
-                    <label class="rixo-modal-label">Rixo Price <span style="color:#ef4444;">*</span></label>
-                    <input id="rixoLevelAddPrice" class="rixo-modal-input" type="number" step="any" min="0" placeholder="Enter number only" />
-                </div>
-            """.trimIndent()
-            else -> """<div style="color:#b91c1c;">Unknown level</div>"""
+        root.innerHTML = buildRixoMappingTreeHtmlFromCache()
+        bindRixoMappingTreeClicks(root)
+        window.setTimeout({
+            wireRixoInlineAddComboboxes()
+        }, 0)
+    }
+}
+
+private fun wireRixoInlineAddComboboxes() {
+    when (rixoCardInlineAddLevel) {
+        "company" -> setEditableComboboxValue("rixoCardInlineAddCompany", "")
+        "auction" -> {
+            populateRixoEditableComboboxOptions("rixoCardInlineAddAuction", rixoMasterSuppliers)
+            setEditableComboboxValue("rixoCardInlineAddAuction", "")
+            enforceRixoComboboxStrict(listOf("rixoCardInlineAddAuction"))
+            syncRixoInlineComboboxInputs(listOf("rixoCardInlineAddAuction"))
         }
-        val modal = document.createElement("div")
-        modal.id = "rixoLevelAddModal"
-        modal.asDynamic().style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10005;display:flex;align-items:center;justify-content:center;"
-        modal.innerHTML = """
-            <div class="modal-content rixo-modal-content rixo-level-add-modal-box" style="background: white; border-radius: 12px; width: 92%; max-width: 520px; max-height: 90vh; overflow: visible; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); position: relative; z-index: 1;">
-                <style>
-                    .rixo-level-add-modal-box { overflow: visible !important; }
-                    .rixo-modal-label { display:block; margin-bottom:6px; font-weight:600; color:#374151; font-size:13px; }
-                    /* Form region must stack above footer so anchored dropdowns paint over Cancel/Add */
-                    .rixo-level-add-modal-body { position: relative; z-index: 40; overflow: visible; }
-                    .rixo-level-add-modal-footer { position: relative; z-index: 2; }
-                    .rixo-level-add-field { position: relative; z-index: 80; overflow: visible; }
-                    .rixo-level-add-field > div { position: relative; overflow: visible; }
-                    .rixo-level-add-field [id^="rixoLevelAdd"][id$="_dropdown"] {
-                        position: absolute !important;
-                        left: 0 !important;
-                        top: calc(100% + 2px) !important;
-                        width: 100% !important;
-                        min-width: 100% !important;
-                        max-width: 100% !important;
-                        max-height: 220px !important;
-                        overflow-y: auto !important;
-                        border-radius: 8px !important;
-                        box-shadow: 0 8px 18px rgba(0,0,0,0.14) !important;
-                        z-index: 60000 !important;
-                    }
-                    .rixo-modal-input { width:100%; height:40px; padding:9px 10px; border:1px solid #d1d5db; border-radius:6px; background:#fff; font-size:13px; color:#111827; box-sizing:border-box; }
-                    .rixo-modal-input:focus { outline:none; border-color:#4CC9FF; box-shadow:0 0 0 3px rgba(76,201,255,0.2); }
-                    .rixo-level-add-btn-cancel { padding:10px 18px; border:1px solid #d1d5db; background:#fff; color:#111827; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px; }
-                    .rixo-level-add-btn-cancel:hover { background:#f9fafb; }
-                    .rixo-level-add-btn-save { padding:10px 18px; border:none; background:#58B98C; color:#fff; border-radius:8px; font-weight:600; cursor:pointer; font-size:14px; }
-                    .rixo-level-add-btn-save:hover { filter: brightness(0.95); }
-                </style>
-                <div style="padding: 24px; border-bottom: 1px solid #e5e7eb; position: relative; z-index: 3;">
-                    <h2 style="margin: 0; font-size: 22px; font-weight: 700; color: #111827;">${escapeHtml(title)}</h2>
-                </div>
-                <div class="rixo-level-add-modal-body" style="padding: 24px;">
-                    $bodyHtml
-                </div>
-                <div class="rixo-level-add-modal-footer" style="padding: 0 24px 24px; display: flex; justify-content: flex-end; gap: 10px;">
-                    <button type="button" id="rixoLevelAddCancel" class="rixo-level-add-btn-cancel">Cancel</button>
-                    <button type="button" id="rixoLevelAddSave" class="rixo-level-add-btn-save">Add</button>
-                </div>
-            </div>
-        """.trimIndent()
-        document.body?.appendChild(modal)
-        fun closeModal() = modal.remove()
-        when (level) {
-            "company" -> {
-                populateRixoEditableComboboxOptions("rixoLevelAddCompany", rixoMasterCompanies)
-                setEditableComboboxValue("rixoLevelAddCompany", "")
-                enforceRixoComboboxStrict(listOf("rixoLevelAddCompany"))
-            }
-            "auction" -> {
-                populateRixoEditableComboboxOptions("rixoLevelAddAuction", rixoMasterSuppliers)
-                setEditableComboboxValue("rixoLevelAddAuction", "")
-                enforceRixoComboboxStrict(listOf("rixoLevelAddAuction"))
-            }
-            "stock" -> {
-                populateRixoEditableComboboxOptions("rixoLevelAddStock", rixoMasterStocks)
-                setEditableComboboxValue("rixoLevelAddStock", "")
-                enforceRixoComboboxStrict(listOf("rixoLevelAddStock"))
-            }
-            "leaf" -> {
-                populateRixoEditableComboboxOptions("rixoLevelAddVehicleType", rixoMasterVehicleTypes)
-                setEditableComboboxValue("rixoLevelAddVehicleType", "")
-                enforceRixoComboboxStrict(listOf("rixoLevelAddVehicleType"))
-            }
-            else -> {}
+        "stock" -> {
+            populateRixoEditableComboboxOptions("rixoCardInlineAddStock", rixoMasterStocks)
+            setEditableComboboxValue("rixoCardInlineAddStock", "")
+            enforceRixoComboboxStrict(listOf("rixoCardInlineAddStock"))
+            syncRixoInlineComboboxInputs(listOf("rixoCardInlineAddStock"))
         }
-        document.getElementById("rixoLevelAddCancel")?.addEventListener("click", { _: Event -> closeModal() })
-        document.getElementById("rixoLevelAddSave")?.addEventListener("click", { _: Event ->
-            when (level) {
-                "company" -> {
-                    val company = getEditableComboboxValue("rixoLevelAddCompany")
-                    if (company.isEmpty()) {
-                        showMessage("Rixo company is required", "error")
-                        return@addEventListener
-                    }
-                    postRixoMappingBulkOneRow("COMPANY", company, "", "", "", "") {
-                        closeModal()
-                        refreshRixoMappingTreeData()
-                    }
-                }
-                "auction" -> {
-                    val company = rixoFirstNonBlank(pathCompany, rixoSelectedCompany)
-                    val auction = getEditableComboboxValue("rixoLevelAddAuction")
-                    if (company.isEmpty()) {
-                        showMessage("Company context is required. Expand a company in the tree first.", "error")
-                        return@addEventListener
-                    }
-                    if (auction.isEmpty()) {
-                        showMessage("Auction house is required", "error")
-                        return@addEventListener
-                    }
-                    postRixoMappingBulkOneRow("AUCTION", company, auction, "", "", "") {
-                        closeModal()
-                        refreshRixoMappingTreeData()
-                    }
-                }
-                "stock" -> {
-                    val company = rixoFirstNonBlank(pathCompany, rixoSelectedCompany)
-                    val auction = rixoFirstNonBlank(pathAuction, rixoSelectedAuction)
-                    val stock = getEditableComboboxValue("rixoLevelAddStock")
-                    if (company.isEmpty() || auction.isEmpty()) {
-                        showMessage("Company and auction house context are required.", "error")
-                        return@addEventListener
-                    }
-                    if (stock.isEmpty()) {
-                        showMessage("Stock location is required", "error")
-                        return@addEventListener
-                    }
-                    postRixoMappingBulkOneRow("STOCK", company, auction, stock, "", "") {
-                        closeModal()
-                        refreshRixoMappingTreeData()
-                    }
-                }
-                "leaf" -> {
-                    val company = rixoFirstNonBlank(pathCompany, rixoSelectedCompany)
-                    val auction = rixoFirstNonBlank(pathAuction, rixoSelectedAuction)
-                    val stock = rixoFirstNonBlank(pathStock, rixoSelectedStock)
-                    val vtype = getEditableComboboxValue("rixoLevelAddVehicleType")
-                    val priceRaw = (document.getElementById("rixoLevelAddPrice") as? HTMLInputElement)?.value?.trim().orEmpty()
-                    if (company.isEmpty() || auction.isEmpty() || stock.isEmpty()) {
-                        showMessage("Missing company, auction, or stock context for this row.", "error")
-                        return@addEventListener
-                    }
-                    if (priceRaw.isEmpty() || priceRaw.toDoubleOrNull() == null) {
-                        showMessage("Enter a numeric Rixo price", "error")
-                        return@addEventListener
-                    }
-                    postRixoMappingBulkOneRow(null, company, auction, stock, vtype, priceRaw) {
-                        closeModal()
-                        refreshRixoMappingTreeData()
-                    }
-                }
-                else -> closeModal()
+        "leaf" -> {
+            populateRixoEditableComboboxOptions("rixoCardInlineAddLeafType", rixoMasterVehicleTypes)
+            setEditableComboboxValue("rixoCardInlineAddLeafType", "")
+            enforceRixoComboboxStrict(listOf("rixoCardInlineAddLeafType"))
+            syncRixoInlineComboboxInputs(listOf("rixoCardInlineAddLeafType"))
+            (document.getElementById("rixoCardInlineAddLeafPrice") as? HTMLInputElement)?.value = ""
+        }
+        else -> Unit
+    }
+}
+
+private fun executeRixoCardInlineAddSave() {
+    when (rixoCardInlineAddLevel) {
+        "company" -> {
+            val company = getEditableComboboxValue("rixoCardInlineAddCompany")
+            if (company.isEmpty()) {
+                showMessage("Rixo company is required", "error")
+                return
             }
-        })
+            postRixoMappingBulkOneRow("COMPANY", company, "", "", "", "") {
+                clearRixoCardInlineAdd()
+                refreshRixoMappingTreeData()
+            }
+        }
+        "auction" -> {
+            val company = rixoFirstNonBlank(rixoCardInlineAddCompany, rixoSelectedCompany)
+            val auction = getEditableComboboxValue("rixoCardInlineAddAuction")
+            if (company.isEmpty()) {
+                showMessage("Company context is required.", "error")
+                return
+            }
+            if (auction.isEmpty()) {
+                showMessage("Auction house is required", "error")
+                return
+            }
+            postRixoMappingBulkOneRow("AUCTION", company, auction, "", "", "") {
+                clearRixoCardInlineAdd()
+                refreshRixoMappingTreeData()
+            }
+        }
+        "stock" -> {
+            val company = rixoFirstNonBlank(rixoCardInlineAddCompany, rixoSelectedCompany)
+            val auction = rixoFirstNonBlank(rixoCardInlineAddAuction, rixoSelectedAuction)
+            val stock = getEditableComboboxValue("rixoCardInlineAddStock")
+            if (company.isEmpty() || auction.isEmpty()) {
+                showMessage("Company and auction house context are required.", "error")
+                return
+            }
+            if (stock.isEmpty()) {
+                showMessage("Stock location is required", "error")
+                return
+            }
+            postRixoMappingBulkOneRow("STOCK", company, auction, stock, "", "") {
+                clearRixoCardInlineAdd()
+                refreshRixoMappingTreeData()
+            }
+        }
+        else -> Unit
+    }
+}
+
+private fun executeRixoLeafInlineAddSave() {
+    if (rixoCardInlineAddLevel != "leaf") return
+    val company = rixoFirstNonBlank(rixoCardInlineAddCompany, rixoSelectedCompany)
+    val auction = rixoFirstNonBlank(rixoCardInlineAddAuction, rixoSelectedAuction)
+    val stock = rixoFirstNonBlank(rixoCardInlineAddStock, rixoSelectedStock)
+    val vtype = getEditableComboboxValue("rixoCardInlineAddLeafType")
+    val priceRaw = (document.getElementById("rixoCardInlineAddLeafPrice") as? HTMLInputElement)?.value?.trim().orEmpty()
+    if (company.isEmpty() || auction.isEmpty() || stock.isEmpty()) {
+        showMessage("Missing company, auction, or stock context for this row.", "error")
+        return
+    }
+    if (priceRaw.isEmpty() || priceRaw.toDoubleOrNull() == null) {
+        showMessage("Enter a numeric Rixo price", "error")
+        return
+    }
+    postRixoMappingBulkOneRow(null, company, auction, stock, vtype, priceRaw) {
+        clearRixoCardInlineAdd()
+        refreshRixoMappingTreeData()
     }
 }
 
@@ -7788,22 +8937,273 @@ fun loadMasterSuppliers() {
     loadMasterSuppliersWithTable()
 }
 
+/**
+ * Renders Supplier Map table + pagination. [isServerSearch] uses [supplierMapSearchPageZeroBased] / totals from API.
+ */
+private fun buildSupplierTableUi(
+    tableDiv: HTMLElement,
+    paginatedPrices: List<dynamic>,
+    orderedForDisplay: List<dynamic>,
+    filterLabel: String,
+    totalPages: Int,
+    isServerSearch: Boolean,
+    footerStart: Int,
+    footerEnd: Int,
+) {
+    val supplierSortable = setOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
+    if (orderedForDisplay.isEmpty()) {
+        val message = if (filterLabel.isNotEmpty()) {
+            "No supplier data found for: $filterLabel"
+        } else {
+            "No supplier data found."
+        }
+        tableDiv.innerHTML = """
+            <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
+                <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search or filter</div>
+            </div>
+        """
+        return
+    }
+
+    if (paginatedPrices.isEmpty()) {
+        tableDiv.innerHTML = """
+            <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                <div style="font-size: 16px; margin-bottom: 8px;">No rows on this page.</div>
+            </div>
+        """
+        return
+    }
+
+    val selectedColumns = getSelectedSupplierColumns()
+    val columnLabels = mapOf(
+        "supplierName" to "Supplier Name",
+        "stockLocation" to "Stock Location",
+        "rixoCompany" to "Rixo Company",
+        "venueId" to "Venue ID",
+        "pol" to "POL"
+    )
+
+    var html = """
+                <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+                    <table style="width: 100%; border-collapse: collapse;" class="supplier-table">
+                        <thead>
+                            <tr>
+                                <th style="padding: 12px 14px; text-align: left; min-width: 72px;"></th>
+            """
+
+    for (columnKey in selectedColumns) {
+        val label = columnLabels[columnKey] ?: columnKey
+        val thBase = """padding: 12px 16px; text-align: left; font-weight: 700; color: #111827; font-size: 13px; letter-spacing: 0.02em"""
+        html += if (columnKey in supplierSortable) {
+            val tip = masterMapColumnSortTooltip(supplierMapSortOrderByField, columnKey)
+            val bid = "supplierMapSort_$columnKey"
+            """<th style="$thBase"><button type="button" id="$bid" title="$tip" style="background: none; border: none; cursor: pointer; font-weight: 700; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;"><span>$label</span><span style="font-size: 14px;">↕</span></button></th>"""
+        } else {
+            """<th style="$thBase">$label</th>"""
+        }
+    }
+
+    html += """
+                            </tr>
+                        </thead>
+                        <tbody>
+            """
+
+    for (price in paginatedPrices) {
+        val id = (price.id ?: "").toString()
+        val supplierName = (price.auctionHouse ?: "").toString()
+        val stockLocation = (price.stockLocation ?: "").toString()
+        val rixoCompany = (price.rixoCompany ?: "").toString()
+        val venueId = (price.venueId ?: "").toString()
+        val pol = (price.pol ?: "").toString()
+
+        val rowDataJs = "window.__supplierRowData={supplierName:'${escapeJsString(supplierName)}',stockLocation:'${escapeJsString(stockLocation)}',rixoCompany:'${escapeJsString(rixoCompany)}',venueId:'${escapeJsString(venueId)}',pol:'${escapeJsString(pol)}'};"
+
+        html += """
+                    <tr>
+                        <td style="padding: 10px 12px;">
+                            <div style="display:flex; gap:6px; align-items:center;">
+                            <button onclick="$rowDataJs window.editMasterSupplier($id)" aria-label="Edit" title="Edit"
+                                    style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(76,201,255,0.30);">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                    <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                                </svg>
+                            </button>
+                                <button onclick="$rowDataJs window.duplicateMasterSupplier($id)" aria-label="Duplicate" title="Duplicate"
+                                        style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#3b82f6; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(59,130,246,0.30);">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </td>
+                """
+
+        for (columnKey in selectedColumns) {
+            val value = when (columnKey) {
+                "supplierName" -> supplierName
+                "stockLocation" -> stockLocation
+                "rixoCompany" -> rixoCompany
+                "venueId" -> venueId
+                "pol" -> pol
+                else -> ""
+            }
+            val cellStyle = when (columnKey) {
+                "venueId", "pol" -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top;"
+                "supplierName" -> "padding: 12px 16px; color: #111827; font-size: 14px; font-weight: 500; vertical-align: top;"
+                else -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top;"
+            }
+            val cellInner = formatSupplierMapValueChipHtml(value)
+            html += """<td style="$cellStyle">$cellInner</td>"""
+        }
+
+        html += """</tr>"""
+    }
+
+    html += """
+                        </tbody>
+                    </table>
+                </div>
+            """
+
+    val footerSummary = if (isServerSearch) {
+        "Page $suppliersCurrentPage of $totalPages (search) · ${supplierMapSearchTotal} matching row(s) · ${paginatedPrices.size} supplier group(s) on this page"
+    } else {
+        "Showing $footerStart to $footerEnd of ${orderedForDisplay.size} supplier${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"
+    }
+
+    if (totalPages > 1) {
+        html += """
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
+                        <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
+                            $footerSummary
+                        </div>
+                        <div class="supplier-pagination-controls">
+                            <button id="suppliersPrevPage" class="supplier-pagination-btn" ${if (suppliersCurrentPage == 1) "disabled" else ""}>
+                                Previous
+                            </button>
+                            <span class="supplier-pagination-page">Page $suppliersCurrentPage of $totalPages</span>
+                            <button id="suppliersNextPage" class="supplier-pagination-btn" ${if (suppliersCurrentPage >= totalPages) "disabled" else ""}>
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                """
+    } else {
+        html += """
+                    <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
+                        ${if (isServerSearch) footerSummary else "Total: ${orderedForDisplay.size} supplier${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"}
+                    </div>
+                """
+    }
+
+    tableDiv.innerHTML = html
+
+    document.getElementById("suppliersPrevPage")?.addEventListener("click", { _: Event ->
+        if (isServerSearch) {
+            if (supplierMapSearchPageZeroBased > 0) {
+                supplierMapSearchPageZeroBased--
+                suppliersCurrentPage = supplierMapSearchPageZeroBased + 1
+                loadMasterSuppliers()
+            }
+        } else if (suppliersCurrentPage > 1) {
+            suppliersCurrentPage--
+            loadMasterSuppliers()
+        }
+    })
+
+    document.getElementById("suppliersNextPage")?.addEventListener("click", { _: Event ->
+        if (isServerSearch) {
+            if (supplierMapSearchPageZeroBased < supplierMapSearchTotalPages - 1) {
+                supplierMapSearchPageZeroBased++
+                suppliersCurrentPage = supplierMapSearchPageZeroBased + 1
+                loadMasterSuppliers()
+            }
+        } else {
+            val tp = kotlin.math.ceil(allSuppliers.size.toDouble() / suppliersItemsPerPage).toInt()
+            if (suppliersCurrentPage < tp) {
+                suppliersCurrentPage++
+                loadMasterSuppliers()
+            }
+        }
+    })
+    val supplierSortKeys = listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
+    for (key in supplierSortKeys) {
+        if (key in selectedColumns) {
+            document.getElementById("supplierMapSort_$key")?.addEventListener("click", { _: Event ->
+                toggleSupplierMapSort(key)
+            })
+        }
+    }
+}
+
 fun loadMasterSuppliersWithCards() {
-    val tableDiv = document.getElementById("supplierTable")
-    if (tableDiv == null) return
-    
-    // Get supplier filter value
-    val supplierFilter = (document.getElementById("supplierFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
-    
-    // Show loading state
+    val tableDiv = document.getElementById("supplierTable") as? HTMLElement ?: return
+
+    val searchQ = getSupplierMapSearchQuery()
+
     tableDiv.innerHTML = """
         <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
             <div style="font-size: 16px; margin-bottom: 8px;">Loading supplier data...</div>
             <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
         </div>
     """
-    
-    // Load from rixo prices
+
+    if (searchQ.isNotEmpty()) {
+        supplierMapSearchServerMode = true
+        val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
+        val encF = js("encodeURIComponent")(supplierMapSearchFieldChoice).unsafeCast<String>()
+        val p = supplierMapSearchPageZeroBased
+        val url = apiUrl("rixo/prices/page-search?q=$encQ&field=$encF&page=$p&size=$suppliersItemsPerPage")
+        window.fetch(url)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Search failed')")
+            }
+            .then { body: dynamic ->
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) throw js("Error(err)")
+                val totalEl = js("body.totalElements")
+                supplierMapSearchTotal = when (totalEl) {
+                    is Number -> totalEl.toLong()
+                    else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+                }
+                val tp = js("body.totalPages")
+                supplierMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                    is Number -> tp.toInt()
+                    else -> tp?.toString()?.toIntOrNull() ?: 1
+                })
+                val num = js("body.page")
+                supplierMapSearchPageZeroBased = when (num) {
+                    is Number -> num.toInt()
+                    else -> num?.toString()?.toIntOrNull() ?: 0
+                }
+                suppliersCurrentPage = supplierMapSearchPageZeroBased + 1
+
+                val content = js("body.content") ?: js("[]")
+                val pricesArray = js("Array.isArray(content) ? content : []") as Array<dynamic>
+                val grouped = groupSupplierPricesForView(pricesArray.toList())
+                allSuppliers = grouped
+                displaySuppliersAsCards(grouped, searchQ, true)
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error searching suppliers: ${error.toString()}")
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading supplier data</div>
+                        <div style="font-size: 14px; color: #9ca3af;">${error.asDynamic().message}</div>
+                    </div>
+                """
+            }
+        return
+    }
+
+    supplierMapSearchServerMode = false
+    supplierMapSearchTotal = 0
+    supplierMapSearchTotalPages = 0
+    supplierMapSearchPageZeroBased = 0
+
     window.fetch(apiUrl("rixo/prices"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load suppliers')")
@@ -7813,11 +9213,10 @@ fun loadMasterSuppliersWithCards() {
             if (!success) {
                 throw js("Error(result.message || 'Failed to load suppliers')")
             }
-            
+
             val prices = result.data ?: js("[]")
             val pricesArray = js("Array.isArray(prices) ? prices : []") as Array<dynamic>
-            
-            // Sort by ID descending (newest first)
+
             val pricesList = pricesArray.toList()
             val sortedPrices = pricesList.sortedByDescending { price ->
                 val id = price.id
@@ -7834,19 +9233,8 @@ fun loadMasterSuppliersWithCards() {
                     0.0
                 }
             }
-            
-            // Filter by supplier name if filter is set
-            val filteredPrices = if (supplierFilter.isNotEmpty()) {
-                sortedPrices.filter { price ->
-                    val supplierName = (price.auctionHouse ?: "").toString().uppercase()
-                    supplierName.contains(supplierFilter)
-                }
-            } else {
-                sortedPrices
-            }
 
-            // View-only grouping by Supplier Name (auctionHouse)
-            val groupedPrices = groupSupplierPricesForView(filteredPrices)
+            val groupedPrices = groupSupplierPricesForView(sortedPrices)
             val supplierSortable = setOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
             var orderedForDisplay = groupedPrices
             val smsf = supplierMapSortField
@@ -7859,13 +9247,8 @@ fun loadMasterSuppliersWithCards() {
                 }
             }
 
-            // Store all grouped prices for pagination
             allSuppliers = orderedForDisplay
-            if (supplierFilter.isNotEmpty()) {
-                suppliersCurrentPage = 1
-            }
-
-            displaySuppliersAsCards(orderedForDisplay, supplierFilter)
+            displaySuppliersAsCards(orderedForDisplay, "", false)
         }
         .catch { error: dynamic ->
             Logger.error("Error loading suppliers: ${error.toString()}")
@@ -7878,13 +9261,13 @@ fun loadMasterSuppliersWithCards() {
         }
 }
 
-fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: String) {
+fun displaySuppliersAsCards(filteredPrices: List<dynamic>, filterLabel: String, isServerSearch: Boolean = false) {
     val tableDiv = document.getElementById("supplierTable")
     if (tableDiv == null) return
     
     if (filteredPrices.isEmpty()) {
-        val message = if (supplierFilter.isNotEmpty()) {
-            "No supplier data found for: $supplierFilter"
+        val message = if (filterLabel.isNotEmpty()) {
+            "No supplier data found for: $filterLabel"
         } else {
             "No supplier data found."
         }
@@ -7896,11 +9279,18 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
         return
     }
     
-    // Calculate pagination
-    val totalPages = kotlin.math.ceil(filteredPrices.size.toDouble() / suppliersItemsPerPage).toInt()
-    val startIndex = (suppliersCurrentPage - 1) * suppliersItemsPerPage
-    val endIndex = kotlin.math.min(startIndex + suppliersItemsPerPage, filteredPrices.size)
-    val paginatedPrices = filteredPrices.subList(startIndex, endIndex)
+    val totalPages = if (isServerSearch) {
+        kotlin.math.max(1, supplierMapSearchTotalPages)
+    } else {
+        kotlin.math.max(1, kotlin.math.ceil(filteredPrices.size.toDouble() / suppliersItemsPerPage).toInt())
+    }
+    val paginatedPrices = if (isServerSearch) {
+        filteredPrices
+    } else {
+        val startIndex = (suppliersCurrentPage - 1) * suppliersItemsPerPage
+        val endIndex = kotlin.math.min(startIndex + suppliersItemsPerPage, filteredPrices.size)
+        filteredPrices.subList(startIndex, endIndex)
+    }
     
     val selectedColumns = getSelectedSupplierColumns()
     val columnLabels = mapOf(
@@ -7938,7 +9328,7 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
             }
             
             if (value.isNotEmpty()) {
-                val displayValue = formatMultiValueChipCellHtml(value)
+                val displayValue = formatSupplierMapValueChipHtml(value)
                 cardFields.append("""
                     <div style="margin-bottom: 8px;">
                         <span style="font-weight: 600; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">$label:</span>
@@ -7989,9 +9379,14 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
             </div>
         """)
     } else {
+        val summary = if (isServerSearch) {
+            "Page $suppliersCurrentPage of $totalPages (search) · ${supplierMapSearchTotal} matching row(s) · ${paginatedPrices.size} group(s) on this page"
+        } else {
+            "Total: ${filteredPrices.size} supplier${if (filteredPrices.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"
+        }
         cardsHTML.append("""
             <div style="padding: 16px; text-align: center; color: #6b7280; font-size: 14px;">
-                Total: ${filteredPrices.size} supplier${if (filteredPrices.size != 1) "s" else ""}${if (supplierFilter.isNotEmpty()) " (filtered)" else ""}
+                $summary
             </div>
         """)
     }
@@ -8000,37 +9395,122 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, supplierFilter: Strin
     
     // Add pagination event listeners
     document.getElementById("suppliersPrevPage")?.addEventListener("click", { _: Event ->
-        if (suppliersCurrentPage > 1) {
+        if (isServerSearch) {
+            if (supplierMapSearchPageZeroBased > 0) {
+                supplierMapSearchPageZeroBased--
+                suppliersCurrentPage = supplierMapSearchPageZeroBased + 1
+                loadMasterSuppliers()
+            }
+        } else if (suppliersCurrentPage > 1) {
             suppliersCurrentPage--
             loadMasterSuppliers()
         }
     })
     
     document.getElementById("suppliersNextPage")?.addEventListener("click", { _: Event ->
-        val totalPages = kotlin.math.ceil(allSuppliers.size.toDouble() / suppliersItemsPerPage).toInt()
-        if (suppliersCurrentPage < totalPages) {
-            suppliersCurrentPage++
-            loadMasterSuppliers()
+        if (isServerSearch) {
+            if (supplierMapSearchPageZeroBased < supplierMapSearchTotalPages - 1) {
+                supplierMapSearchPageZeroBased++
+                suppliersCurrentPage = supplierMapSearchPageZeroBased + 1
+                loadMasterSuppliers()
+            }
+        } else {
+            val tp = kotlin.math.ceil(allSuppliers.size.toDouble() / suppliersItemsPerPage).toInt()
+            if (suppliersCurrentPage < tp) {
+                suppliersCurrentPage++
+                loadMasterSuppliers()
+            }
         }
     })
 }
 
 fun loadMasterSuppliersWithTable() {
-    val tableDiv = document.getElementById("supplierTable")
-    if (tableDiv == null) return
-    
-    // Get supplier filter value
-    val supplierFilter = (document.getElementById("supplierFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
-    
-    // Show loading state
+    val tableDiv = document.getElementById("supplierTable") as? HTMLElement ?: return
+
+    val searchQ = getSupplierMapSearchQuery()
+
     tableDiv.innerHTML = """
         <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
             <div style="font-size: 16px; margin-bottom: 8px;">Loading supplier data...</div>
             <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
         </div>
     """
-    
-    // Load from rixo prices
+
+    if (searchQ.isNotEmpty()) {
+        supplierMapSearchServerMode = true
+        val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
+        val encF = js("encodeURIComponent")(supplierMapSearchFieldChoice).unsafeCast<String>()
+        val p = supplierMapSearchPageZeroBased
+        val url = apiUrl("rixo/prices/page-search?q=$encQ&field=$encF&page=$p&size=$suppliersItemsPerPage")
+        window.fetch(url)
+            .then { response: dynamic ->
+                if (response.ok) response.json() else throw js("Error('Search failed')")
+            }
+            .then { body: dynamic ->
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) throw js("Error(err)")
+                val totalEl = js("body.totalElements")
+                supplierMapSearchTotal = when (totalEl) {
+                    is Number -> totalEl.toLong()
+                    else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+                }
+                val tp = js("body.totalPages")
+                supplierMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                    is Number -> tp.toInt()
+                    else -> tp?.toString()?.toIntOrNull() ?: 1
+                })
+                val num = js("body.page")
+                supplierMapSearchPageZeroBased = when (num) {
+                    is Number -> num.toInt()
+                    else -> num?.toString()?.toIntOrNull() ?: 0
+                }
+                suppliersCurrentPage = supplierMapSearchPageZeroBased + 1
+
+                val content = js("body.content") ?: js("[]")
+                val pricesArray = js("Array.isArray(content) ? content : []") as Array<dynamic>
+                val grouped = groupSupplierPricesForView(pricesArray.toList())
+                allSuppliers = grouped
+
+                if (grouped.isEmpty()) {
+                    tableDiv.innerHTML = """
+                        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                            <div style="font-size: 16px; margin-bottom: 8px;">No supplier data found for: $searchQ</div>
+                            <div style="font-size: 14px; color: #9ca3af;">Try a different search</div>
+                        </div>
+                    """
+                    return@then
+                }
+
+                val paginatedPrices = grouped
+                val totalPages = supplierMapSearchTotalPages
+                buildSupplierTableUi(
+                    tableDiv,
+                    paginatedPrices,
+                    grouped,
+                    searchQ,
+                    totalPages,
+                    true,
+                    1,
+                    paginatedPrices.size
+                )
+            }
+            .catch { error: dynamic ->
+                Logger.error("Error searching suppliers: ${error.toString()}")
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                        <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading supplier data</div>
+                        <div style="font-size: 14px; color: #9ca3af;">${error.asDynamic().message}</div>
+                    </div>
+                """
+            }
+        return
+    }
+
+    supplierMapSearchServerMode = false
+    supplierMapSearchTotal = 0
+    supplierMapSearchTotalPages = 0
+    supplierMapSearchPageZeroBased = 0
+
     window.fetch(apiUrl("rixo/prices"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load suppliers')")
@@ -8040,11 +9520,10 @@ fun loadMasterSuppliersWithTable() {
             if (!success) {
                 throw js("Error(result.message || 'Failed to load suppliers')")
             }
-            
+
             val prices = result.data ?: js("[]")
             val pricesArray = js("Array.isArray(prices) ? prices : []") as Array<dynamic>
-            
-            // Sort by ID descending (newest first) so new entries appear at the top
+
             val pricesList = pricesArray.toList()
             val sortedPrices = pricesList.sortedByDescending { price ->
                 val id = price.id
@@ -8061,19 +9540,8 @@ fun loadMasterSuppliersWithTable() {
                     0.0
                 }
             }
-            
-            // Filter by supplier name if filter is set
-            val filteredPrices = if (supplierFilter.isNotEmpty()) {
-                sortedPrices.filter { price ->
-                    val supplierName = (price.auctionHouse ?: "").toString().uppercase()
-                    supplierName.contains(supplierFilter)
-                }
-            } else {
-                sortedPrices
-            }
 
-            // View-only grouping by Supplier Name (auctionHouse)
-            val groupedPrices = groupSupplierPricesForView(filteredPrices)
+            val groupedPrices = groupSupplierPricesForView(sortedPrices)
             val supplierSortable = setOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
             var orderedForDisplay = groupedPrices
             val smsf = supplierMapSortField
@@ -8086,180 +9554,34 @@ fun loadMasterSuppliersWithTable() {
                 }
             }
 
-            // Store all grouped prices for pagination
             allSuppliers = orderedForDisplay
-            if (supplierFilter.isNotEmpty()) {
-                suppliersCurrentPage = 1 // Reset to first page when filter changes
-            }
 
             if (orderedForDisplay.isEmpty()) {
-                val message = if (supplierFilter.isNotEmpty()) {
-                    "No supplier data found for: $supplierFilter"
-                } else {
-                    "No supplier data found."
-                }
                 tableDiv.innerHTML = """
                     <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                        <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
-                        <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search filter</div>
+                        <div style="font-size: 16px; margin-bottom: 8px;">No supplier data found.</div>
                     </div>
                 """
                 return@then
             }
-            
-            // Calculate pagination
-            val totalPages = kotlin.math.ceil(orderedForDisplay.size.toDouble() / suppliersItemsPerPage).toInt()
+
+            val totalPages = kotlin.math.max(1, kotlin.math.ceil(orderedForDisplay.size.toDouble() / suppliersItemsPerPage).toInt())
             val startIndex = (suppliersCurrentPage - 1) * suppliersItemsPerPage
             val endIndex = kotlin.math.min(startIndex + suppliersItemsPerPage, orderedForDisplay.size)
             val paginatedPrices = orderedForDisplay.subList(startIndex, endIndex)
-            
-            // Get selected columns
-            val selectedColumns = getSelectedSupplierColumns()
-            val columnLabels = mapOf(
-                "supplierName" to "Supplier Name",
-                "stockLocation" to "Stock Location",
-                "rixoCompany" to "Rixo Company",
-                "venueId" to "Venue ID",
-                "pol" to "POL"
-            )
-            
-            var html = """
-                <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
-                    <table style="width: 100%; border-collapse: collapse;" class="supplier-table">
-                        <thead>
-                            <tr>
-                                <th style="padding: 12px 14px; text-align: left; min-width: 72px;"></th>
-            """
-            
-            // Add headers for selected columns only
-            for (columnKey in selectedColumns) {
-                val label = columnLabels[columnKey] ?: columnKey
-                val thBase = """padding: 12px 16px; text-align: left; font-weight: 700; color: #111827; font-size: 13px; letter-spacing: 0.02em"""
-                html += if (columnKey in supplierSortable) {
-                    val tip = masterMapColumnSortTooltip(supplierMapSortOrderByField, columnKey)
-                    val bid = "supplierMapSort_$columnKey"
-                    """<th style="$thBase"><button type="button" id="$bid" title="$tip" style="background: none; border: none; cursor: pointer; font-weight: 700; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;"><span>$label</span><span style="font-size: 14px;">↕</span></button></th>"""
-                } else {
-                    """<th style="$thBase">$label</th>"""
-                }
-            }
-            
-            html += """
-                            </tr>
-                        </thead>
-                        <tbody>
-            """
-            
-            for (price in paginatedPrices) {
-                val id = (price.id ?: "").toString()
-                val supplierName = (price.auctionHouse ?: "").toString()
-                val stockLocation = (price.stockLocation ?: "").toString()
-                val rixoCompany = (price.rixoCompany ?: "").toString()
-                val venueId = (price.venueId ?: "").toString()
-                val pol = (price.pol ?: "").toString()
+            val footerStart = startIndex + 1
+            val footerEnd = endIndex
 
-                val rowDataJs = "window.__supplierRowData={supplierName:'${escapeJsString(supplierName)}',stockLocation:'${escapeJsString(stockLocation)}',rixoCompany:'${escapeJsString(rixoCompany)}',venueId:'${escapeJsString(venueId)}',pol:'${escapeJsString(pol)}'};"
-                
-                html += """
-                    <tr>
-                        <td style="padding: 10px 12px;">
-                            <div style="display:flex; gap:6px; align-items:center;">
-                            <button onclick="$rowDataJs window.editMasterSupplier($id)" aria-label="Edit" title="Edit"
-                                    style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(76,201,255,0.30);">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
-                                    <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
-                                </svg>
-                            </button>
-                                <button onclick="$rowDataJs window.duplicateMasterSupplier($id)" aria-label="Duplicate" title="Duplicate"
-                                        style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#3b82f6; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(59,130,246,0.30);">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </td>
-                """
-                
-                // Add cells for selected columns only
-                for (columnKey in selectedColumns) {
-                    val value = when (columnKey) {
-                        "supplierName" -> supplierName.toString()
-                        "stockLocation" -> stockLocation.toString()
-                        "rixoCompany" -> rixoCompany.toString()
-                        "venueId" -> venueId.toString()
-                        "pol" -> pol.toString()
-                        else -> ""
-                    }
-                    val cellStyle = when (columnKey) {
-                        "venueId", "pol" -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top;"
-                        "supplierName" -> "padding: 12px 16px; color: #111827; font-size: 14px; font-weight: 500; vertical-align: top;"
-                        else -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top;"
-                    }
-                    val cellInner = formatMultiValueChipCellHtml(value)
-                    html += """<td style="$cellStyle">$cellInner</td>"""
-                }
-                
-                html += """</tr>"""
-            }
-            
-            html += """
-                        </tbody>
-                    </table>
-                </div>
-            """
-            
-            // Add pagination controls if there are multiple pages
-            if (totalPages > 1) {
-                html += """
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
-                        <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
-                            Showing ${startIndex + 1} to $endIndex of ${orderedForDisplay.size} supplier${if (orderedForDisplay.size != 1) "s" else ""}${if (supplierFilter.isNotEmpty()) " (filtered)" else ""}
-                        </div>
-                        <div class="supplier-pagination-controls">
-                            <button id="suppliersPrevPage" class="supplier-pagination-btn" ${if (suppliersCurrentPage == 1) "disabled" else ""}>
-                                Previous
-                            </button>
-                            <span class="supplier-pagination-page">Page $suppliersCurrentPage of $totalPages</span>
-                            <button id="suppliersNextPage" class="supplier-pagination-btn" ${if (suppliersCurrentPage >= totalPages) "disabled" else ""}>
-                                Next
-                            </button>
-                        </div>
-                    </div>
-                """
-            } else {
-                html += """
-                    <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-                        Total: ${orderedForDisplay.size} supplier${if (orderedForDisplay.size != 1) "s" else ""}${if (supplierFilter.isNotEmpty()) " (filtered)" else ""}
-                    </div>
-                """
-            }
-            
-            tableDiv.innerHTML = html
-            
-            // Add pagination event listeners
-            document.getElementById("suppliersPrevPage")?.addEventListener("click", { _: Event ->
-                if (suppliersCurrentPage > 1) {
-                    suppliersCurrentPage--
-                    loadMasterSuppliers()
-                }
-            })
-            
-            document.getElementById("suppliersNextPage")?.addEventListener("click", { _: Event ->
-                val totalPages = kotlin.math.ceil(allSuppliers.size.toDouble() / suppliersItemsPerPage).toInt()
-                if (suppliersCurrentPage < totalPages) {
-                    suppliersCurrentPage++
-                    loadMasterSuppliers()
-                }
-            })
-            val supplierSortKeys = listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
-            for (key in supplierSortKeys) {
-                if (key in selectedColumns) {
-                    document.getElementById("supplierMapSort_$key")?.addEventListener("click", { _: Event ->
-                        toggleSupplierMapSort(key)
-                    })
-                }
-            }
+            buildSupplierTableUi(
+                tableDiv,
+                paginatedPrices,
+                orderedForDisplay,
+                "",
+                totalPages,
+                false,
+                footerStart,
+                footerEnd
+            )
         }
         .catch { error: dynamic ->
             Logger.error("Error loading suppliers: ${error.toString()}")
@@ -8462,7 +9784,7 @@ fun showSupplierModal(priceId: Long?) {
                     <form id="supplierForm">
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Supplier Name <span style="color: #ef4444;">*</span></label>
-                            ${createEditableCombobox("supplierAuctionHouse", "Select Supplier Name", required = true)}
+                            ${createPlainTextInput("supplierAuctionHouse", "Enter Supplier Name", required = true)}
                         </div>
                         <div class="supplier-modal-grid">
                             <div>
@@ -8562,7 +9884,7 @@ fun showDuplicateSupplierModal(priceId: Long) {
                     <form id="duplicateSupplierForm">
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Supplier Name <span style="color: #ef4444;">*</span></label>
-                            ${createEditableCombobox("dupSupplierAuctionHouse", "Select Supplier Name", required = true)}
+                            ${createPlainTextInput("dupSupplierAuctionHouse", "Enter Supplier Name", required = true)}
                         </div>
                         <div class="supplier-modal-grid">
                             <div>
@@ -11018,7 +12340,14 @@ fun loadMasterFuel() { loadSimpleMaster("master-menu/fuel", "fuelFilter", "fuelT
 fun showAddFuelModal() { addSimpleMasterModal("master-menu/fuel", "Fuel", "fuelEditModal", "fuelModalInput", "fuelModalCancelBtn", "fuelModalAddBtn", { fuelCurrentPage = 1; loadMasterFuel() }) }
 fun showEditFuelModal(originalName: String) { editSimpleMasterModal("master-menu/fuel", "Fuel", originalName, "fuelEditModal", "fuelModalInput", "fuelModalCancelBtn", "fuelModalUpdateBtn", "fuelModalDeleteBtn", { loadMasterFuel() }, { fuelCurrentPage = 1; loadMasterFuel() }) }
 
-fun showMasterCarGradePage() { window.location.hash = "#/master/car-grade"; renderSimpleMasterPage("car_grade", "Car Grade", "carGrade", "carGradeFilter", "carGradeTable", "addCarGradeBtn", ::loadMasterCarGrade, ::showAddCarGradeModal) }
+/** Opens Car Grade master UI (hash must already be #/master/car-grade, or call [showMasterCarGradePage] to set it). */
+fun openMasterCarGradeRoute() {
+    renderSimpleMasterPage("car_grade", "Car Grade", "carGrade", "carGradeFilter", "carGradeTable", "addCarGradeBtn", ::loadMasterCarGrade, ::showAddCarGradeModal)
+}
+
+fun showMasterCarGradePage() {
+    window.location.hash = "#/master/car-grade"
+}
 fun loadMasterCarGrade() { loadSimpleMaster("master-menu/car_grade", "carGradeFilter", "carGradeTable", "Car Grade", carGradeCurrentPage, carGradeItemsPerPage, allCarGrades, { carGradeCurrentPage = it }, { allCarGrades = it }, ::showEditCarGradeModal, "car-grade-edit-btn", "data-car-grade", "carGradePrevPage", "carGradeNextPage", ::loadMasterCarGrade) }
 fun showAddCarGradeModal() { addSimpleMasterModal("master-menu/car_grade", "Car Grade", "carGradeEditModal", "carGradeModalInput", "carGradeModalCancelBtn", "carGradeModalAddBtn", { carGradeCurrentPage = 1; loadMasterCarGrade() }) }
 fun showEditCarGradeModal(originalName: String) { editSimpleMasterModal("master-menu/car_grade", "Car Grade", originalName, "carGradeEditModal", "carGradeModalInput", "carGradeModalCancelBtn", "carGradeModalUpdateBtn", "carGradeModalDeleteBtn", { loadMasterCarGrade() }, { carGradeCurrentPage = 1; loadMasterCarGrade() }) }
@@ -11039,6 +12368,36 @@ fun showDynamicMasterSetPage(fieldName: String) {
         showMessage("Invalid master set", "error")
         return
     }
+    if (normalizedField == "car_grade") {
+        window.location.hash = "#/master/car-grade"
+        return
+    }
+    window.fetch(apiUrl("master-menu/fields"))
+        .then { r: dynamic -> if (r.ok) r.json() else js("[]") }
+        .then { raw: dynamic ->
+            val fields = if (raw != null && js("Array.isArray(raw)").unsafeCast<Boolean>()) {
+                val arr = raw.unsafeCast<Array<*>>()
+                (0 until arr.size).mapNotNull { idx ->
+                    val value = arr[idx]?.toString()?.trim() ?: ""
+                    if (value.isEmpty()) null else value.lowercase()
+                }
+            } else {
+                emptyList()
+            }
+            val exists = fields.any { it.equals(normalizedField, ignoreCase = true) }
+            if (!exists) {
+                showMessage("This master set is not available. It may have been removed.", "warning")
+                navigateToAppHome()
+                return@then
+            }
+            showDynamicMasterSetPageInner(normalizedField)
+        }
+        .catch { _: dynamic ->
+            showDynamicMasterSetPageInner(normalizedField)
+        }
+}
+
+private fun showDynamicMasterSetPageInner(normalizedField: String) {
     val title = normalizedField
         .split("_")
         .filter { it.isNotBlank() }

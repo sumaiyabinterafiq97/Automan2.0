@@ -1,8 +1,11 @@
 package com.automan.backend.service
 
+import com.automan.backend.dto.CarBrandMappingPageResponse
 import com.automan.backend.model.CarBrandMapping
 import com.automan.backend.repository.CarBrandMappingRepository
 import com.automan.backend.util.Logger
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDateTime
@@ -269,11 +272,54 @@ class CarBrandMappingService(
         return mapOf("success" to true, "chassisList" to chassisList)
     }
 
+    fun listAllDistinctCarNames(): List<String> =
+        carBrandMappingRepository.findDistinctCarNamesAll()
+            .flatMap { raw ->
+                raw.split(";")
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() }
+            }
+            .distinctBy { it.lowercase() }
+            .sortedBy { it.lowercase() }
+
     fun getAllMappings(): Map<String, Any> {
         val mappings = carBrandMappingRepository.findAll()
         val mappingsData = mappings.map { toMap(it) }
         return mapOf("success" to true, "data" to mappingsData)
     }
+
+    /**
+     * Paginated search for Car Brands Map UI.
+     * [field]: `all`, `chassis`, `brand`, `carName`.
+     */
+    fun searchMappingsPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): CarBrandMappingPageResponse {
+        val q = sanitizeCarBrandMapSearchToken(rawQuery)
+        require(q.isNotEmpty()) { "Search text is required" }
+        val field = rawField.trim().lowercase().ifEmpty { "all" }
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg = when (field) {
+            "chassis" -> carBrandMappingRepository.searchCarBrandMappingChassisContains(q, pageable)
+            "brand", "carbrand" -> carBrandMappingRepository.searchCarBrandMappingBrandContains(q, pageable)
+            "carname", "car_name" -> carBrandMappingRepository.searchCarBrandMappingCarNameContains(q, pageable)
+            "all" -> carBrandMappingRepository.searchCarBrandMappingKeyFieldsContains(q, pageable)
+            else -> throw IllegalArgumentException(
+                "Invalid search field: $field. Use all, chassis, brand, or carName."
+            )
+        }
+        val content = pg.content.map { toMap(it) }
+        return CarBrandMappingPageResponse(
+            content = content,
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    private fun sanitizeCarBrandMapSearchToken(raw: String): String =
+        raw.trim().replace("%", "").replace("_", "").take(120)
 
     fun getAllMappingsByBrand(brandName: String): Map<String, Any> {
         val mappings = carBrandMappingRepository.findByCarBrand(brandName)

@@ -118,6 +118,7 @@ fun storeBookingDetailsForPdf() {
     // Get consignee value from consigneeName input field ONLY
     val consigneeNameInput = document.getElementById("consigneeName") as? HTMLInputElement
     val consigneeNameValue = consigneeNameInput?.value?.trim() ?: ""
+    val consigneeCountryForPdf = (document.getElementById("consigneeCountry") as? HTMLSelectElement)?.value?.trim() ?: ""
     
     Logger.debug("Extracting consignee for PDF - ConsigneeName: '$consigneeNameValue' (length: ${consigneeNameValue.length})")
     
@@ -127,9 +128,9 @@ fun storeBookingDetailsForPdf() {
     bookingDetails.pol = if (polValue.isNotEmpty()) polValue else "HAKATA"
     bookingDetails.pod = if (podValue.isNotEmpty()) podValue else "KARACHI"
     bookingDetails.shippingDate = if (shippingDateValue.isNotEmpty()) shippingDateValue else "2025-09-27"
-    // Use ONLY consigneeName field value - ignore consigneeAddress completely
     bookingDetails.consigneeName = if (consigneeNameValue.isNotEmpty()) consigneeNameValue else "OVERSEAS TRANSIT AGENCY (PVT) LTD."
-    bookingDetails.consigneeAddress = "" // Always empty - we only use consigneeName
+    bookingDetails.consigneeAddress = ""
+    bookingDetails.consigneeCountry = consigneeCountryForPdf
     
     globalBookingDetails = bookingDetails
     val selectedCars = getSelectedCarsFromTable()
@@ -334,6 +335,11 @@ fun initializeAppSetup() {
     window.asDynamic().handleSeeLessClick = { selectId: String ->
         handleSeeLessClick(selectId)
     }
+
+    /** DevTools / inline JS can call `loadExistingCarPictures(purchaseData)`; embedded `setEditFormValues` uses this for reliable timing. */
+    window.asDynamic().loadExistingCarPictures = { pd: dynamic ->
+        loadExistingCarPictures(pd)
+    }
     
     Logger.debug("Functions exposed to global scope successfully")
     Logger.debug("closeAddClientModal available: ${window.asDynamic().closeAddClientModal != null}")
@@ -350,7 +356,7 @@ fun main() {
     // Must run once at startup (not only when #/add loads). Otherwise opening Edit before Add
     // skipped money listeners entirely, and edit-form code used to set flags that blocked install.
     setupMoneyInputFormattingOnce()
-
+    
     val root = document.getElementById("root")
     if (root == null) {
         Logger.error("Root element not found! Waiting for DOM to load...")
@@ -396,24 +402,87 @@ fun main() {
 }
 
 // Helper function to create editable combobox HTML
-fun createEditableCombobox(id: String, placeholder: String, required: Boolean = false, additionalAttrs: String = "", initialValue: String = ""): String {
+fun createEditableCombobox(
+    id: String,
+    placeholder: String,
+    required: Boolean = false,
+    additionalAttrs: String = "",
+    initialValue: String = "",
+    showDropdownButton: Boolean = true
+): String {
     val requiredAttr = if (required) "required" else ""
+    val buttonDisplay = if (showDropdownButton) "flex" else "none"
+    val selectDisplay = if (showDropdownButton) "block" else "none"
+    val inputPaddingRight = if (showDropdownButton) "40px" else "8px"
     return """
         <div style="position: relative; width: 100%;">
             <input type="text" id="${id}Input" placeholder="$placeholder" $requiredAttr ${if (initialValue.isNotEmpty()) "value=\"$initialValue\"" else ""}
-                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
+                   style="width: 100%; padding: 8px $inputPaddingRight 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
                    autocomplete="off" $additionalAttrs
                    onfocus="this.select();">
             <select id="$id" $requiredAttr 
-                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
+                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0; display: $selectDisplay;"
                     onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('$id');"
                     onchange="syncComboboxInput('$id'); if (typeof handleRixoCompanyChange === 'function' && '$id' === 'rixoCompany') { handleRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleEditRixoCompanyChange === 'function' && '$id' === 'editRixoCompany') { handleEditRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleChassisSearchChange === 'function' && '$id' === 'chassisSearch') { handleChassisSearchChange(); } if (typeof window.fetchPolsAfterStockChange === 'function' && ('$id' === 'stockLocation' || '$id' === 'editStockLocation')) { window.fetchPolsAfterStockChange('$id'); }">
                 <option value="">▼</option>
             </select>
             <div id="${id}Button" onclick="openComboboxDropdown('$id')" 
-                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
+                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: $buttonDisplay; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                 ▼
             </div>
+        </div>
+    """.trimIndent()
+}
+
+private fun updateConditionalComboboxButtonVisibility(fieldId: String, options: List<String>, preferValue: String) {
+    val select = document.getElementById(fieldId) as? HTMLSelectElement ?: return
+    val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+    val button = document.getElementById("${fieldId}Button") as? HTMLElement
+    val normalizedOptions = options.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+    val showButton = normalizedOptions.size >= 2
+    button?.style?.display = if (showButton) "flex" else "none"
+    select.style.display = if (showButton) "block" else "none"
+    input?.style?.paddingRight = if (showButton) "40px" else "8px"
+
+    if (normalizedOptions.size == 1) {
+        val single = normalizedOptions.first()
+        select.value = single
+        input?.value = single
+        if (js("typeof window.syncComboboxInput === 'function'").unsafeCast<Boolean>()) {
+            window.asDynamic().__syncComboboxId = fieldId
+            js("window.syncComboboxInput(window.__syncComboboxId)")
+        }
+        return
+    }
+
+    if (preferValue.isNotBlank()) return
+
+    if (normalizedOptions.size >= 2) {
+        val first = normalizedOptions.first()
+        select.value = first
+        input?.value = first
+        if (js("typeof window.syncComboboxInput === 'function'").unsafeCast<Boolean>()) {
+            window.asDynamic().__syncComboboxId = fieldId
+            js("window.syncComboboxInput(window.__syncComboboxId)")
+        }
+    }
+}
+
+/** Free-text field only (no dropdown). Uses `${id}Input` so [getEditableComboboxValue] / [setEditableComboboxValue] in MasterList still work. */
+fun createPlainTextInput(id: String, placeholder: String, required: Boolean = false, initialValue: String = ""): String {
+    val requiredAttr = if (required) "required" else ""
+    val escPh = placeholder.replace("&", "&amp;").replace("\"", "&quot;")
+    val valPart = if (initialValue.isNotEmpty()) {
+        " value=\"${initialValue.replace("&", "&amp;").replace("\"", "&quot;")}\""
+    } else {
+        ""
+    }
+    return """
+        <div style="position: relative; width: 100%;">
+            <input type="text" id="${id}Input" placeholder="$escPh" $requiredAttr$valPart
+                   style="width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 14px;"
+                   autocomplete="off">
         </div>
     """.trimIndent()
 }
@@ -715,13 +784,19 @@ private fun fetchClientMapCountryForClientName(clientName: String, countrySelect
             }
             if (data == null) return@then
             val want = normalizeClientNameKey(clientName)
+            var matchedClientRow = false
             for (row in data.unsafeCast<Array<Any>>()) {
                 val d = asDynamicRow(row)
                 val n = (d.clientName as? String)?.trim() ?: (d.client_name as? String)?.trim() ?: ""
                 if (normalizeClientNameKey(n) != want) continue
+                matchedClientRow = true
                 val raw = (d.country as? String)?.trim() ?: ""
                 val tokens = splitSemicolonTokens(raw).map { it.trim() }.filter { it.isNotEmpty() }
-                if (tokens.isEmpty()) return@then
+                if (tokens.isEmpty()) {
+                    rebuildPurchaseTargetCountryDropdown(countrySelectId, clientName)
+                    setPurchaseComboboxValue(countrySelectId, "")
+                    return@then
+                }
                 val curMap = purchaseClientNameToCountryMap?.toMutableMap() ?: mutableMapOf()
                 if (!curMap.containsKey(want)) curMap[want] = tokens.first()
                 purchaseClientNameToCountryMap = curMap
@@ -735,6 +810,10 @@ private fun fetchClientMapCountryForClientName(clientName: String, countrySelect
                 rebuildPurchaseTargetCountryDropdown(countrySelectId, clientName)
                 setPurchaseComboboxValue(countrySelectId, tokens.first())
                 return@then
+            }
+            if (clientName.isNotBlank() && !matchedClientRow) {
+                rebuildPurchaseTargetCountryDropdown(countrySelectId, clientName)
+                setPurchaseComboboxValue(countrySelectId, "")
             }
         }
         .catch { err: dynamic ->
@@ -769,10 +848,25 @@ private fun rebuildPurchaseTargetCountryDropdown(countrySelectId: String, client
     } else {
         purchaseClientNameToCountryTokens?.get(key) ?: emptyList()
     }
+    // Client is selected but has no countries in client_map — do not keep Target Country from a previous client.
+    val noMappedCountriesForClient = key.isNotEmpty() && clientCountries.isEmpty()
     if (purchaseMasterCountryList.isEmpty()) {
-        if (clientCountries.isEmpty()) return
         val selectOnly = document.getElementById(countrySelectId) as? HTMLSelectElement ?: return
         val inputOnly = document.getElementById("${countrySelectId}Input") as? HTMLInputElement
+        if (clientCountries.isEmpty()) {
+            if (noMappedCountriesForClient) {
+                selectOnly.innerHTML = ""
+                val defaultOptOnly = document.createElement("option") as HTMLOptionElement
+                defaultOptOnly.value = ""
+                defaultOptOnly.textContent = ""
+                selectOnly.appendChild(defaultOptOnly)
+                selectOnly.value = ""
+                if (inputOnly != null) inputOnly.value = ""
+                window.asDynamic().__purchaseCountryComboRegId = countrySelectId
+                js("if (typeof registerSupplierMasterComboId === 'function') registerSupplierMasterComboId(window.__purchaseCountryComboRegId)")
+            }
+            return
+        }
         val preservedOnly = purchaseComboboxDisplayedValue(countrySelectId).trim()
         selectOnly.innerHTML = ""
         val defaultOptOnly = document.createElement("option") as HTMLOptionElement
@@ -801,7 +895,8 @@ private fun rebuildPurchaseTargetCountryDropdown(countrySelectId: String, client
     val rest = purchaseMasterCountryList.filter { it.isNotBlank() && !clientLower.contains(it.trim().lowercase()) }
     val select = document.getElementById(countrySelectId) as? HTMLSelectElement ?: return
     val input = document.getElementById("${countrySelectId}Input") as? HTMLInputElement
-    val preserved = purchaseComboboxDisplayedValue(countrySelectId).trim()
+    var preserved = purchaseComboboxDisplayedValue(countrySelectId).trim()
+    if (noMappedCountriesForClient) preserved = ""
     select.innerHTML = ""
     val defaultOpt = document.createElement("option") as HTMLOptionElement
     defaultOpt.value = ""
@@ -913,15 +1008,15 @@ fun populateTargetCountryComboboxesForPurchaseForm() {
         }
 }
 
-/** Populate Grade, Fuel, Shift, Client Name, Repair Company comboboxes from master_menu API. Target Country: [populateTargetCountryComboboxesForPurchaseForm]. */
+/** Populate Grade, Fuel, Shift, Repair Company comboboxes from master_menu API. Client Name: [populatePurchaseClientNameComboboxesFromClientMap]. Target Country: [populateTargetCountryComboboxesForPurchaseForm]. */
 fun populateMasterMenuComboboxesForPurchaseForm() {
     refreshPurchaseClientNameToCountryMap()
     populateTargetCountryComboboxesForPurchaseForm()
+    populatePurchaseClientNameComboboxesFromClientMap()
     val fieldToSelectIds = listOf(
         "car_grade" to listOf("grade", "editGrade"),
         "fuel" to listOf("fuel", "editFuel"),
         "shift" to listOf("shift", "editShift"),
-        "clients" to listOf("clientName", "editClientName"),
         "repair_company" to listOf("repairCompany", "editRepairCompany")
     )
     fieldToSelectIds.forEach { (apiField, selectIds) ->
@@ -935,8 +1030,8 @@ fun populateMasterMenuComboboxesForPurchaseForm() {
             }
             .then { raw: dynamic ->
                 val values = parsePurchaseMasterListArray(raw)
-                selectIds.forEach { selectId ->
-                    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return@forEach
+                selectIds.forEach selectRow@ { selectId ->
+                    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return@selectRow
                     val currentValue = select.value
                     select.innerHTML = ""
                     val defaultOpt = document.createElement("option") as HTMLOptionElement
@@ -962,6 +1057,131 @@ fun populateMasterMenuComboboxesForPurchaseForm() {
             .catch { _: dynamic ->
                 console.error("Failed to load master-menu/$apiField")
             }
+    }
+}
+
+/** Client Name comboboxes on Add/Edit Purchase: distinct `client_map.client_name` (ordered), not master_menu clients. */
+fun populatePurchaseClientNameComboboxesFromClientMap() {
+    window.fetch(apiUrl("client-map/dropdowns/client-names"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw RuntimeException("client-map/dropdowns/client-names")
+        }
+        .then { raw: dynamic ->
+            val values = parseApiDataStringArray(raw)
+            listOf("clientName", "editClientName").forEach { selectId ->
+                val select = document.getElementById(selectId) as? HTMLSelectElement ?: return@forEach
+                val currentValue = select.value
+                select.innerHTML = ""
+                val defaultOpt = document.createElement("option") as HTMLOptionElement
+                defaultOpt.value = ""
+                defaultOpt.textContent = ""
+                select.appendChild(defaultOpt)
+                values.forEach { v ->
+                    if (v.isNotBlank()) {
+                        val opt = document.createElement("option") as HTMLOptionElement
+                        opt.value = v
+                        opt.textContent = v
+                        select.appendChild(opt)
+                    }
+                }
+                if (currentValue.isNotEmpty()) {
+                    var matched = false
+                    for (i in 0 until select.options.length) {
+                        val o = select.options[i] as HTMLOptionElement
+                        if (o.value.isNotEmpty() && o.value.equals(currentValue, ignoreCase = true)) {
+                            select.value = o.value
+                            matched = true
+                            break
+                        }
+                    }
+                    if (!matched) {
+                        val opt = document.createElement("option") as HTMLOptionElement
+                        opt.value = currentValue
+                        opt.textContent = currentValue
+                        select.appendChild(opt)
+                        select.value = currentValue
+                    }
+                }
+                val input = document.getElementById("${selectId}Input") as? HTMLInputElement
+                if (input != null && select.value.isNotEmpty()) input.value = select.value
+            }
+        }
+        .catch { _: dynamic ->
+            console.error("Failed to load client-map/dropdowns/client-names for purchase form")
+        }
+}
+
+private fun parseApiDataStringArray(raw: dynamic): List<String> {
+    return try {
+        val arrDyn: dynamic = if (js("Array.isArray(raw)").unsafeCast<Boolean>()) {
+            raw
+        } else {
+            js("raw && raw.data !== undefined ? raw.data : null")
+        }
+        if (arrDyn == null || !js("Array.isArray(arrDyn)").unsafeCast<Boolean>()) {
+            emptyList()
+        } else {
+            arrDyn.unsafeCast<Array<dynamic>>().map { it.toString().trim() }.filter { it.isNotEmpty() }
+        }
+    } catch (_: dynamic) {
+        emptyList()
+    }
+}
+
+/** Supplier Name comboboxes: distinct ordered `rixo_prices.auction_name` via API. Returns a Promise for [setupRixoDropdowns] sequencing. */
+fun populateSupplierAuctionNameDropdownsFromRixoPricesApi(): dynamic {
+    val preserved = mutableMapOf<String, String>()
+    for (id in listOf("auctionName", "editAuctionName")) {
+        val sel = document.getElementById(id) as? HTMLSelectElement
+        if (sel != null) preserved[id] = sel.value
+    }
+    return window.fetch(apiUrl("rixo/dropdowns/auction-names"))
+        .then { response: dynamic ->
+            if (!response.ok) throw RuntimeException("rixo/dropdowns/auction-names failed: ${response.status}")
+            response.json()
+        }
+        .then { raw: dynamic ->
+            val names = parseApiDataStringArray(raw)
+            for (selectId in listOf("auctionName", "editAuctionName")) {
+                val select = document.getElementById(selectId) as? HTMLSelectElement ?: continue
+                val currentValue = preserved[selectId] ?: ""
+                select.innerHTML = ""
+                val def = document.createElement("option") as HTMLOptionElement
+                def.value = ""
+                def.textContent = "▼"
+                select.appendChild(def)
+                val seen = mutableSetOf<String>()
+                for (n in names) {
+                    val t = n.trim()
+                    if (t.isNotEmpty() && seen.add(t.lowercase())) {
+                        val opt = document.createElement("option") as HTMLOptionElement
+                        opt.value = t
+                        opt.textContent = t
+                        select.appendChild(opt)
+                    }
+                }
+                if (currentValue.isNotEmpty() && currentValue != "__add_new_supplier__") {
+                    var matched = false
+                    for (i in 0 until select.options.length) {
+                        val o = select.options[i] as HTMLOptionElement
+                        if (o.value.isNotEmpty() && o.value.equals(currentValue, ignoreCase = true)) {
+                            select.value = o.value
+                            matched = true
+                            break
+                        }
+                    }
+                    if (!matched) {
+                        val opt = document.createElement("option") as HTMLOptionElement
+                        opt.value = currentValue
+                        opt.textContent = currentValue
+                        select.appendChild(opt)
+                        select.value = currentValue
+                    }
+                }
+                val input = document.getElementById("${selectId}Input") as? HTMLInputElement
+                if (input != null && select.value.isNotEmpty()) input.value = select.value
+            }
+            Unit
     }
 }
 
@@ -1872,7 +2092,7 @@ fun setupEditableComboboxHandlers() {
             if (typeof window.ensureBaseComboboxOptionsForAddEdit === 'function') {
                 var skipChassisMaster = window.__chassisMasterComboIds && window.__chassisMasterComboIds.indexOf(selectId) !== -1;
                 if (!skipChassisMaster) {
-                    window.ensureBaseComboboxOptionsForAddEdit();
+                window.ensureBaseComboboxOptionsForAddEdit();
                 }
             }
             // Prevent infinite recursion for chassis dropdowns
@@ -2044,7 +2264,7 @@ fun setupEditableComboboxHandlers() {
             if (rixoFieldHost) {
                 rixoFieldHost.appendChild(dropdown);
             } else {
-                document.body.appendChild(dropdown);
+            document.body.appendChild(dropdown);
             }
             
             // When opening dropdown initially, show ALL options (not filtered)
@@ -2270,27 +2490,27 @@ fun setupEditableComboboxHandlers() {
                         dropdownEl.style.zIndex = '30000';
                     }
                     else {
-                        // MOBILE FIX: On mobile, use simpler positioning that works reliably
-                        if (isMobile) {
-                            // For mobile: position dropdown directly below input using viewport-relative coords
-                            var inputRect = input.getBoundingClientRect();
-                            dropdownEl.style.left = '16px';
-                            dropdownEl.style.right = '16px';
-                            dropdownEl.style.width = 'auto';
-                            // Respect showAbove for mobile too
-                            if (showAbove) {
-                                var dropdownHeight = Math.min(estimatedHeight, 200);
-                                dropdownEl.style.top = (inputRect.top - dropdownHeight - 4) + 'px';
-                                console.log('📱 Mobile dropdown positioned ABOVE at top: ' + (inputRect.top - dropdownHeight - 4) + 'px');
-                            } else {
-                                dropdownEl.style.top = (inputRect.bottom + 4) + 'px';
-                                console.log('📱 Mobile dropdown positioned BELOW at top: ' + (inputRect.bottom + 4) + 'px');
-                            }
+                    // MOBILE FIX: On mobile, use simpler positioning that works reliably
+                    if (isMobile) {
+                        // For mobile: position dropdown directly below input using viewport-relative coords
+                        var inputRect = input.getBoundingClientRect();
+                        dropdownEl.style.left = '16px';
+                        dropdownEl.style.right = '16px';
+                        dropdownEl.style.width = 'auto';
+                        // Respect showAbove for mobile too
+                        if (showAbove) {
+                            var dropdownHeight = Math.min(estimatedHeight, 200);
+                            dropdownEl.style.top = (inputRect.top - dropdownHeight - 4) + 'px';
+                            console.log('📱 Mobile dropdown positioned ABOVE at top: ' + (inputRect.top - dropdownHeight - 4) + 'px');
                         } else {
-                            dropdownEl.style.left = leftPos + 'px';
-                            dropdownEl.style.top = topPos + 'px';
-                            dropdownEl.style.width = dropdownWidth + 'px';
-                            dropdownEl.style.minWidth = dropdownWidth + 'px';
+                            dropdownEl.style.top = (inputRect.bottom + 4) + 'px';
+                            console.log('📱 Mobile dropdown positioned BELOW at top: ' + (inputRect.bottom + 4) + 'px');
+                        }
+                    } else {
+                        dropdownEl.style.left = leftPos + 'px';
+                        dropdownEl.style.top = topPos + 'px';
+                        dropdownEl.style.width = dropdownWidth + 'px';
+                        dropdownEl.style.minWidth = dropdownWidth + 'px';
                         }
                     }
                     
@@ -2740,6 +2960,7 @@ private fun toMasterSetLabel(fieldName: String): String {
 }
 
 private fun masterSetRouteForField(fieldName: String): String {
+    if (fieldName.equals("car_grade", ignoreCase = true)) return "#/master/car-grade"
     return "#/master/set/${js("encodeURIComponent(fieldName)") as String}"
 }
 
@@ -2827,12 +3048,160 @@ private fun openAddMasterSetModal() {
     })
 }
 
+/** If the user is on a master-set page for [deletedField], send them home after the set row is removed. */
+private fun navigateHomeIfViewingDeletedMasterSet(deletedField: String) {
+    val f = deletedField.trim().lowercase()
+    if (f.isEmpty()) return
+    val hash = window.location.hash
+
+    if (hash.startsWith("#/master/set/")) {
+        val enc = hash.removePrefix("#/master/set/").substringBefore("?")
+        val cur = try {
+            js("decodeURIComponent(enc)").unsafeCast<String>().trim().lowercase()
+        } catch (_: dynamic) {
+            enc.trim().lowercase()
+        }
+        if (cur == f) {
+            navigateToAppHome()
+            return
+        }
+    }
+
+    when (f) {
+        "clients" -> {
+            if (hash.startsWith("#/master/client") &&
+                !hash.startsWith("#/master/client-map") &&
+                !hash.startsWith("#/master/client-transactions")
+            ) {
+                navigateToAppHome()
+            }
+        }
+        "consignee" -> {
+            if (hash.startsWith("#/master/consignee") && !hash.startsWith("#/master/consignee-map")) {
+                navigateToAppHome()
+            }
+        }
+        "country" -> if (hash.startsWith("#/master/country")) navigateToAppHome()
+        "supplier" -> {
+            if (hash.startsWith("#/master/supplier") && !hash.startsWith("#/master/supplier-map")) {
+                navigateToAppHome()
+            }
+        }
+        "rixo_company" -> if (hash.startsWith("#/master/rixo-company")) navigateToAppHome()
+        "stock_location" -> if (hash.startsWith("#/master/stock-location")) navigateToAppHome()
+        "repair_company" -> if (hash.startsWith("#/master/repair-company")) navigateToAppHome()
+        "car_brands" -> {
+            if (hash.startsWith("#/master/car-brands") && !hash.startsWith("#/master/car-brands-map")) {
+                navigateToAppHome()
+            }
+        }
+        "bank_accounts" -> if (hash.startsWith("#/master/bank-accounts")) navigateToAppHome()
+        "venue_id" -> if (hash.startsWith("#/master/venue-id")) navigateToAppHome()
+        "pol" -> if (hash.startsWith("#/master/pol")) navigateToAppHome()
+        "pod" -> if (hash.startsWith("#/master/pod")) navigateToAppHome()
+        "fuel" -> if (hash.startsWith("#/master/fuel")) navigateToAppHome()
+        "shift" -> if (hash.startsWith("#/master/car-shift")) navigateToAppHome()
+        "type_of_vehicle" -> if (hash.startsWith("#/master/type-of-vehicles")) navigateToAppHome()
+        "car_grade" -> {
+            if (hash.startsWith("#/master/car-grade")) {
+                navigateToAppHome()
+            } else if (hash.startsWith("#/master/set/")) {
+                val enc = hash.removePrefix("#/master/set/").substringBefore("?")
+                val cur = try {
+                    js("decodeURIComponent(enc)").unsafeCast<String>().trim().lowercase()
+                } catch (_: dynamic) {
+                    enc.trim().lowercase()
+                }
+                if (cur == "car_grade") navigateToAppHome()
+            }
+        }
+        else -> { }
+    }
+}
+
+/* DELETE SET — uncomment this function + sidebar HTML + listener in setupDynamicMasterSetListeners to restore
+private fun openDeleteMasterSetModal() {
+    document.getElementById("deleteMasterSetModal")?.remove()
+    fetchMasterSetFields { fields ->
+        if (fields.isEmpty()) {
+            showMessage("No master sets found to delete.", "warning")
+            return@fetchMasterSetFields
+        }
+    val modal = document.createElement("div")
+    modal.id = "deleteMasterSetModal"
+        modal.asDynamic().style.cssText =
+            "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+        val optionsHtml = fields.sortedBy { toMasterSetLabel(it).lowercase() }.joinToString("") { f ->
+            val safeVal = f.replace("&", "&amp;").replace("<", "&lt;").replace("\"", "&quot;")
+            val label = toMasterSetLabel(f).replace("&", "&amp;").replace("<", "&lt;")
+            """<option value="$safeVal">$label ($safeVal)</option>"""
+        }
+    modal.innerHTML = """
+            <div style="background: white; border-radius: 10px; padding: 24px; max-width: 440px; width: 90%; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+            <h3 style="margin-top: 0;">Delete Master Set</h3>
+                <p style="margin: 0 0 12px; font-size: 14px; color: #4b5563; line-height: 1.5;">
+                    This removes the set from the database and its sidebar entry. Pages like <strong>#/master/set/…</strong> for that set will no longer apply. This cannot be undone.
+                </p>
+                <label style="display: block; font-weight: 600; color: #374151; margin-bottom: 6px;">Set</label>
+                <select id="deleteMasterSetSelect" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                    <option value="">— Select a set —</option>
+                    $optionsHtml
+                </select>
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 18px;">
+                    <button id="deleteMasterSetCancelBtn" type="button" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
+                    <button id="deleteMasterSetConfirmBtn" type="button" style="padding: 8px 16px; border-radius: 6px; border: none; background: #dc2626; color:white; cursor: pointer;">Delete</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    document.getElementById("deleteMasterSetCancelBtn")?.addEventListener("click", { _: Event -> modal.remove() })
+        modal.addEventListener("click", { ev: Event ->
+            if ((ev.target as? HTMLElement)?.id == "deleteMasterSetModal") modal.remove()
+        })
+    document.getElementById("deleteMasterSetConfirmBtn")?.addEventListener("click", { _: Event ->
+            val sel = document.getElementById("deleteMasterSetSelect") as? HTMLSelectElement
+            val field = sel?.value?.trim().orEmpty()
+            if (field.isEmpty()) {
+                showMessage("Please select a set to delete.", "error")
+            return@addEventListener
+        }
+            val enc = js("encodeURIComponent(field)").unsafeCast<String>()
+        val req = js("{}")
+        req.method = "DELETE"
+            window.fetch(apiUrl("master-menu/fields/$enc"), req)
+                .then { r: dynamic ->
+                    if (r.ok) {
+                modal.remove()
+                        showMessage("Master set deleted.", "success")
+                renderMasterSetSidebarButtons()
+                        navigateHomeIfViewingDeletedMasterSet(field)
+                    } else {
+                        throw js("Error('Delete failed')")
+                }
+            }
+                .catch { _: dynamic ->
+                    showMessage("Could not delete that set. It may already be removed.", "error")
+                }
+    })
+}
+}
+*/
+
 private fun setupDynamicMasterSetListeners() {
     val addBtn = document.getElementById("addMasterSetBtn")
     if (addBtn != null && !addBtn.hasAttribute("data-listener-attached")) {
         addBtn.setAttribute("data-listener-attached", "true")
         addBtn.addEventListener("click", { _: Event -> openAddMasterSetModal() })
     }
+
+    /* DELETE SET — uncomment with openDeleteMasterSetModal + sidebar button HTML
+    val delBtn = document.getElementById("deleteMasterSetBtn")
+    if (delBtn != null && !delBtn.hasAttribute("data-listener-attached")) {
+        delBtn.setAttribute("data-listener-attached", "true")
+        delBtn.addEventListener("click", { _: Event -> openDeleteMasterSetModal() })
+    }
+    */
 
     val container = document.getElementById("masterSetDynamicButtons")
     if (container != null && !container.hasAttribute("data-listener-attached")) {
@@ -2888,8 +3257,9 @@ fun createApp(root: Element) {
                         
                         <!-- Main Navigation -->
                         <button id="rixoRequestBtn" style="padding: 12px 20px; background-color: #8e44ad; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Rixo Note</button>
-                        <button id="carBookingBtn" style="padding: 12px 20px; background-color: #17a2b8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Car Booking</button>
+                        <button id="rixoHistorySidebarBtn" style="padding: 12px 20px; background-color: #6c3483; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Rixo History</button>
                         <button id="anInvoiceBtn" style="padding: 12px 20px; background-color: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Invoice</button>
+                        <button id="invoiceHistorySidebarBtn" style="padding: 12px 20px; background-color: #1e8449; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Invoice History</button>
                         <button id="clientTransactionsSidebarBtn" style="padding: 12px 20px; background-color: #2980b9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Client Transactions</button>
                         <button id="vehicleDetailsBtn" style="padding: 12px 20px; background-color: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Vehicle Details</button>
                         
@@ -2903,7 +3273,8 @@ fun createApp(root: Element) {
                                 <span id="shipmentArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
                             </div>
                             <div id="shipmentItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="shipmentStatusBtn" class="shipment-list-item" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipment Status</button>
+                                <button id="carBookingBtn" class="shipment-list-item" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Shipping</button>
+                                <button id="shipmentStatusBtn" class="shipment-list-item" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping History</button>
                             </div>
                         </div>
                         
@@ -2975,7 +3346,12 @@ fun createApp(root: Element) {
                                 <span id="masterListArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▲</span>
                             </div>
                             <div id="masterListItems" style="display: flex; flex-direction: column; gap: 8px; padding-left: 10px;">
+                                <div style="display: flex; flex-direction: column; gap: 6px;">
                                 <button id="addMasterSetBtn" style="padding: 10px 15px; background-color: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left;">+ Add Set</button>
+                                    <!-- DELETE SET: uncomment next line + Kotlin blocks marked "DELETE SET" to restore
+                                <button id="deleteMasterSetBtn" style="padding: 10px 15px; background-color: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left;">Delete Set</button>
+                                    -->
+                                </div>
                                 <div id="masterSetDynamicButtons" style="display: flex; flex-direction: column; gap: 8px;"></div>
                             </div>
                         </div>
@@ -3474,6 +3850,12 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        hash == "#/purchase" -> {
+            ensureSidebarPresent()
+            showPurchaseList()
+            // Hide only Rixo Transport by default; invoice button is controlled by selection
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
         hash.startsWith("#/add") -> {
             Logger.debug("[ROUTER] Navigating to Add Purchase page")
             // Ensure scrolling is enabled when showing form
@@ -3508,11 +3890,23 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        hash.startsWith("#/invoice-history") -> {
+            showInvoiceHistoryPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
         hash.startsWith("#/invoice") -> {
             showInvoicePage()
             ensureSidebarPresent() // Call after content is set
             // Hide sorting bar on invoice page
             // Hide PDF buttons on invoice page
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/rixo-history") -> {
+            showRixoHistoryPage()
+            ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
@@ -3523,6 +3917,12 @@ fun updateContent(root: Element) {
         hash.startsWith("#/booking") -> {
             showCarBookingPage()
             ensureSidebarPresent() // Call after content is set
+        }
+        hash.startsWith("#/shipping-history") -> {
+            showShippingHistoryPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/users/edit/") -> {
             val id = hash.substring(13).toLongOrNull()
@@ -3690,6 +4090,12 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        hash.startsWith("#/master/car-grade") -> {
+            openMasterCarGradeRoute()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
         hash.startsWith("#/master/car-shift") -> {
             showDynamicMasterSetPage("shift")
             ensureSidebarPresent()
@@ -3705,10 +4111,14 @@ fun updateContent(root: Element) {
         hash.startsWith("#/master/set/") -> {
             val encoded = hash.removePrefix("#/master/set/")
             val fieldName = js("decodeURIComponent(encoded)") as String
+            if (fieldName.trim().equals("car_grade", ignoreCase = true)) {
+                window.location.hash = "#/master/car-grade"
+            } else {
             showDynamicMasterSetPage(fieldName)
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+            }
         }
         hash.startsWith("#/client/") -> {
             val id = hash.substring(9).toLongOrNull()
@@ -4503,16 +4913,35 @@ fun setupSidebarListeners() {
         })
     }
     
-    // Shipment Status button
+    // Shipping History (shipment sub-item)
     val shipmentStatusBtn = document.getElementById("shipmentStatusBtn")
     if (shipmentStatusBtn != null && !shipmentStatusBtn.hasAttribute("data-listener-attached")) {
         shipmentStatusBtn.setAttribute("data-listener-attached", "true")
         shipmentStatusBtn.addEventListener("click", { _: Event ->
             closeSidebar()
-            showMessage("Shipment Status page - coming soon", "info")
+            window.location.hash = "#/shipping-history"
         })
     }
     
+    // Invoice History (main nav, below Invoice)
+    val invoiceHistorySidebarBtn = document.getElementById("invoiceHistorySidebarBtn")
+    if (invoiceHistorySidebarBtn != null && !invoiceHistorySidebarBtn.hasAttribute("data-listener-attached")) {
+        invoiceHistorySidebarBtn.setAttribute("data-listener-attached", "true")
+        invoiceHistorySidebarBtn.addEventListener("click", { _: Event ->
+            closeSidebar()
+            window.location.hash = "#/invoice-history"
+        })
+    }
+
+    val rixoHistorySidebarBtn = document.getElementById("rixoHistorySidebarBtn")
+    if (rixoHistorySidebarBtn != null && !rixoHistorySidebarBtn.hasAttribute("data-listener-attached")) {
+        rixoHistorySidebarBtn.setAttribute("data-listener-attached", "true")
+        rixoHistorySidebarBtn.addEventListener("click", { _: Event ->
+            closeSidebar()
+            window.location.hash = "#/rixo-history"
+        })
+    }
+
     // Invoice button (moved to Sales -> Export)
     val invoiceBtn = document.getElementById("invoiceBtn")
     if (invoiceBtn != null && !invoiceBtn.hasAttribute("data-listener-attached")) {
@@ -5246,27 +5675,29 @@ fun createAddFormHTML(): String {
                             <input type="month" id="carModelYear" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="carModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">mm/yyyy</span>
                         </div>
-                    </div>
+                </div>
                     <div>
                         <label>Grade</label>
-                        ${createEditableCombobox("grade", "Select Grade")}
+                        ${createEditableCombobox("grade", "Select Grade", showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Auction No</label>
                         <input type="text" id="auctionNo" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
-                    <div>
+                </div>
+
+                <!-- Number Cut Information: SHAKEN + detail fields live inside this collapsible section -->
+                <div id="numberCutSection">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('numberCut')"><h3 class="form-section-header" data-section="numberCut">Number Cut Information</h3></div>
+                <div class="form-section-content" data-section="numberCut">
+                    <div style="margin-bottom: 16px;">
                     <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; cursor: pointer;">
                         <input type="checkbox" id="shakenCheckbox" style="width: 18px; height: 18px; accent-color: #007bff;">
                         SHAKEN
                     </label>
                     </div>
-                </div>
-
-                <!-- Number Cut Information Section (initially hidden, shows when Shaken is checked) -->
-                <div id="numberCutSection" style="display: none;">
-                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('numberCut')"><h3 class="form-section-header" data-section="numberCut">Number Cut Information</h3></div>
-                <div class="form-section-content form-grid-4col" data-section="numberCut">
+                    <div id="numberCutFieldsWrap" style="display: none;">
+                    <div class="form-grid-4col">
                     <div>
                         <label>Place Name (Japanese)</label>
                         ${createEditableComboboxWithOptions("numberCutPlace", "Select Place", getNumberCutPlaceOptions(), "")}
@@ -5287,6 +5718,8 @@ fun createAddFormHTML(): String {
                 <div style="margin-bottom: 20px;">
                     <label>Number Cut:</label>
                     <input type="text" id="numberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
+                    </div>
+                    </div>
                 </div>
                 </div> <!-- End of numberCutSection -->
 
@@ -5294,11 +5727,11 @@ fun createAddFormHTML(): String {
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label>Rank</label>
-                        ${createEditableCombobox("rank", "Select Rank")}
+                        ${createEditableCombobox("rank", "Select Rank", showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Color</label>
-                        ${createEditableCombobox("color", "Select Color")}
+                        ${createEditableCombobox("color", "Select Color", showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Fuel</label>
@@ -5306,11 +5739,11 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Seat</label>
-                        ${createEditableCombobox("seat", "Select Seat")}
+                        ${createEditableCombobox("seat", "Select Seat", showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Door</label>
-                        ${createEditableCombobox("door", "Select Door")}
+                        ${createEditableCombobox("door", "Select Door", showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Distance</label>
@@ -5318,12 +5751,12 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>CC</label>
-                        ${createEditableCombobox("cc", "Select CC")}
+                        ${createEditableCombobox("cc", "Select CC", showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Shift</label>
                         ${createEditableCombobox("shift", "Select Shift")}
-                    </div>
+                </div>
                     <div>
                         <label>WD</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
@@ -5452,7 +5885,7 @@ fun createAddFormHTML(): String {
                             </label>
                         </div>
                     </div>
-                </div>
+                        </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="pricing">
@@ -5461,7 +5894,7 @@ fun createAddFormHTML(): String {
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="price" class="money-input" placeholder="0">
-                        </div>
+                </div>
                     </div>
                     <div>
                         <label>Auction Fees</label>
@@ -5496,8 +5929,8 @@ fun createAddFormHTML(): String {
                         <div style="position:relative;">
                             <input type="date" id="paymentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="paymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
-                        </div>
                     </div>
+                </div>
                 </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
@@ -5519,15 +5952,34 @@ fun createAddFormHTML(): String {
                         <div style="position:relative;">
                             <input type="date" id="shipmentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="shipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
-                        </div>
                     </div>
+                    </div>
+                    <div>
+                        <label>Shipping Confirmed</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="shippingConfirmed" value="TRUE">
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="shippingConfirmed" value="FALSE" checked>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
+                    </div>
+                </div>
                     <div>
                         <label>B/L No.</label>
                         <input type="text" id="blNo" placeholder="Bill of Lading Number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Vessel No.</label>
-                        <input type="text" id="vesselNo" placeholder="Vessel Number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <label>Booking No</label>
+                        <input type="text" id="addPurchaseBookingId" placeholder="Booking ID" inputmode="numeric" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <div>
+                        <label>Vessel</label>
+                        <input type="text" id="purchaseVessel" placeholder="Vessel name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label>Shipment Charges</label>
@@ -5562,26 +6014,11 @@ fun createAddFormHTML(): String {
                         </div>
                     </div>
                     <div>
-                        <label>Shipping Confirmed</label>
-                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
-                            <label class="checkwrap">
-                                <input type="radio" name="shippingConfirmed" value="TRUE">
-                                <span class="checkmark"></span>
-                                TRUE
-                            </label>
-                            <label class="checkwrap">
-                                <input type="radio" name="shippingConfirmed" value="FALSE" checked>
-                                <span class="checkmark"></span>
-                                FALSE
-                            </label>
-                        </div>
-                    </div>
-                    <div>
                         <label>Misc. Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="miscCharges" class="money-input" placeholder="0">
-                        </div>
+                    </div>
                     </div>
                     <div>
                         <label>Inspection Fees</label>
@@ -5607,13 +6044,28 @@ fun createAddFormHTML(): String {
                             <div class="currency-input" style="flex: 1;">
                                 <span class="currency-symbol">¥</span>
                                 <input type="text" inputmode="decimal" id="taxTotal" class="money-input" placeholder="0">
-                            </div>
+                    </div>
                             <button type="button" id="calculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; min-height: 44px; align-self: stretch;">10% Tax</button>
-                        </div>
+                </div>
                     </div>
                     <div>
                         <label>Total Cost (After Tax 10%)</label>
                         <input type="text" id="totalCostAfterTax" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
+                    </div>
+                    <div>
+                        <label>Invoice Confirmed</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="invoiceConfirmed" value="TRUE">
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="invoiceConfirmed" value="FALSE" checked>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
+                        </div>
                     </div>
                 </div>
                 
@@ -5632,9 +6084,103 @@ fun createAddFormHTML(): String {
 }
 
 // JavaScript functions for Rixo dropdown functionality
+
+/** API may send `carPictures` or `car_pictures`; some payloads use a JSON string or an array. */
+private fun carPicturesFieldFromPurchase(p: dynamic): dynamic {
+    if (p == null || p == js("undefined")) return null
+    val camel = js("p.carPictures")
+    if (camel != null && camel != js("undefined")) {
+        // Empty camel string must not hide a populated `car_pictures` (some serializers send both).
+        val camelEmptyStr = js("typeof camel === 'string' && String(camel).trim() === ''").unsafeCast<Boolean>()
+        if (!camelEmptyStr) return camel
+    }
+    return js("p.car_pictures")
+}
+
+/**
+ * Some environments return snake_case keys. Forms, loadExistingCarPictures, and comparisons expect camelCase.
+ */
+private fun normalizeApiPurchaseForClient(p: dynamic) {
+    if (p == null || p == js("undefined")) return
+    if (js(
+            "((p.carPictures === undefined || p.carPictures === null) || " +
+                "(typeof p.carPictures === 'string' && String(p.carPictures).trim() === '')) && " +
+                "p.car_pictures != null && String(p.car_pictures).trim() !== ''"
+        ).unsafeCast<Boolean>()
+    ) {
+        p.carPictures = js("p.car_pictures")
+    }
+    if (js("(p.venueId === undefined || p.venueId === null) && p.venue_id != null").unsafeCast<Boolean>()) {
+        p.venueId = js("p.venue_id")
+    }
+    if (js("(p.stockLocation === undefined || p.stockLocation === null) && p.stock_location != null").unsafeCast<Boolean>()) {
+        p.stockLocation = js("p.stock_location")
+    }
+    if (js("(p.auctionHouse === undefined || p.auctionHouse === null) && p.auction_house != null").unsafeCast<Boolean>()) {
+        p.auctionHouse = js("p.auction_house")
+    }
+    if (js("(p.rixoCompany === undefined || p.rixoCompany === null) && p.rixo_company != null").unsafeCast<Boolean>()) {
+        p.rixoCompany = js("p.rixo_company")
+    }
+    if (js("(p.clientName === undefined || p.clientName === null) && p.client_name != null").unsafeCast<Boolean>()) {
+        p.clientName = js("p.client_name")
+    }
+    if (js("(p.carModelYear === undefined || p.carModelYear === null) && p.car_model_year != null").unsafeCast<Boolean>()) {
+        p.carModelYear = js("p.car_model_year")
+    }
+    if (js("(p.bookingId === undefined || p.bookingId === null) && p.booking_id != null").unsafeCast<Boolean>()) {
+        p.bookingId = js("p.booking_id")
+    }
+    if (js("(p.shipmentSize === undefined || p.shipmentSize === null) && p.shipment_size != null").unsafeCast<Boolean>()) {
+        p.shipmentSize = js("p.shipment_size")
+    }
+    if (js("(p.paymentDate === undefined || p.paymentDate === null) && p.payment_date != null").unsafeCast<Boolean>()) {
+        p.paymentDate = js("p.payment_date")
+    }
+    if (js("(p.shipmentDate === undefined || p.shipmentDate === null) && p.shipment_date != null").unsafeCast<Boolean>()) {
+        p.shipmentDate = js("p.shipment_date")
+    }
+    if (js("(p.blNo === undefined || p.blNo === null) && p.bl_no != null").unsafeCast<Boolean>()) {
+        p.blNo = js("p.bl_no")
+    }
+}
+
+/** After supplier/rixo async mapping settles, baseline must match the form or Venue/Stock look "changed" when only pictures were edited. */
+private fun finalizeEditFormOriginalBaselineFromDom() {
+    if (document.getElementById("editForm") == null) return
+    if (originalPurchaseData == null) return
+    try {
+        val baseline = collectCurrentEditFormData()
+        originalPurchaseData = JSON.parse(JSON.stringify(baseline))
+    } catch (e: Throwable) {
+        console.log("finalizeEditFormOriginalBaselineFromDom:", e.message)
+    }
+}
+
+/** After existing thumbnails are in the DOM, baseline must match collectCarPictures() or every edit looks "changed". */
+private fun syncOriginalPurchaseCarPicturesBaselineFromDom() {
+    val snap = originalPurchaseData ?: return
+    snap.carPictures = collectCarPictures()
+}
+
 fun setEditFormValuesFromKotlin(purchaseData: dynamic) {
-    // Store original purchase data for comparison (deep copy)
-    originalPurchaseData = JSON.parse(JSON.stringify(purchaseData))
+    normalizeApiPurchaseForClient(purchaseData)
+    js("window.__editRixoFieldOverrides = {}; window.__suppressRixoAutoSelect = false;")
+    // Store original purchase data for comparison (deep copy). Huge base64 in carPictures can make stringify fail or stall.
+    originalPurchaseData = try {
+        JSON.parse(JSON.stringify(purchaseData))
+    } catch (e: Throwable) {
+        console.warn("originalPurchaseData deep copy failed, using shallow reference:", e.message)
+        purchaseData
+    }
+    // Unify snake_case API field so snapshot has carPictures (same as fetch object)
+    val snap = originalPurchaseData
+    if (snap != null) {
+        val raw = carPicturesFieldFromPurchase(snap)
+        if (raw != null && raw != js("undefined")) {
+            snap.carPictures = raw
+        }
+    }
     
     val dataToPass = purchaseData
     js("""
@@ -5650,6 +6196,9 @@ fun setEditFormValuesFromKotlin(purchaseData: dynamic) {
     """)
 }
 fun setupRixoDropdowns() {
+    window.asDynamic().populateSupplierAuctionNameDropdownsFromRixoPricesApi = {
+        populateSupplierAuctionNameDropdownsFromRixoPricesApi()
+    }
     js("""
         // Dynamic dropdown system with hierarchical filtering
         var populateRetryCount = 0;
@@ -5675,35 +6224,14 @@ fun setupRixoDropdowns() {
             // Reset retry count on success
             populateRetryCount = 0;
             
-            var auctionNames = Object.keys(window.rixoPriceMapping);
-            console.log('✅ Rixo price mapping loaded, found', auctionNames.length, 'auctions');
+            var mappingKeys = Object.keys(window.rixoPriceMapping || {});
+            console.log('✅ Rixo price mapping loaded,', mappingKeys.length, 'top-level mapping entries (used for cascading; supplier list from rixo_prices API)');
             
-            if (auctionNames.length === 0) {
+            if (mappingKeys.length === 0) {
                 console.warn('⚠️ Rixo price mapping is empty! Check rixo-price-mapping.js file.');
             }
             
-            // Populate Auction house dropdown (combobox format - starts with ▼)
-            var auctionSelect = document.getElementById('auctionName');
-            var editAuctionSelect = document.getElementById('editAuctionName');
-            if (auctionSelect) {
-                auctionSelect.innerHTML = '<option value="">▼</option>';
-                auctionNames.forEach(function(auction) {
-                    auctionSelect.innerHTML += '<option value="' + auction + '">' + auction + '</option>';
-                });
-                console.log('✅ Populated auctionName dropdown with', auctionNames.length, 'suppliers');
-            } else {
-                console.warn('⚠️ auctionName element not found in DOM');
-            }
-            if (editAuctionSelect) {
-                editAuctionSelect.innerHTML = '<option value="">▼</option>';
-                auctionNames.forEach(function(auction) {
-                    editAuctionSelect.innerHTML += '<option value="' + auction + '">' + auction + '</option>';
-                });
-                console.log('✅ Populated editAuctionName dropdown with', auctionNames.length, 'suppliers');
-            } else {
-                console.warn('⚠️ editAuctionName element not found in DOM');
-            }
-            
+            function finishPopulateDropdownOptions() {
             // Clear other dropdowns initially
             clearDropdown('typeOfVehicle');
             clearDropdown('editTypeOfVehicle');
@@ -5810,6 +6338,23 @@ fun setupRixoDropdowns() {
                     console.warn('reapply edit after populateDropdownOptions:', e);
                 }
             }, 0);
+            }
+            
+            var loadAuction = window.populateSupplierAuctionNameDropdownsFromRixoPricesApi;
+            if (typeof loadAuction === 'function') {
+                var pr = loadAuction();
+                if (pr && typeof pr.then === 'function') {
+                    pr.then(function() { finishPopulateDropdownOptions(); }).catch(function(err) {
+                        console.warn('Supplier (auction) names from rixo_prices:', err);
+                        finishPopulateDropdownOptions();
+                    });
+                } else {
+                    finishPopulateDropdownOptions();
+                }
+            } else {
+                console.warn('populateSupplierAuctionNameDropdownsFromRixoPricesApi not registered');
+                finishPopulateDropdownOptions();
+            }
         }
         
         function clearDropdown(elementId) {
@@ -5882,7 +6427,7 @@ fun setupRixoDropdowns() {
             var newOpt = document.createElement('option');
             newOpt.value = val;
             newOpt.textContent = val;
-            select.appendChild(newOpt);
+                select.appendChild(newOpt);
         }
         
         function updateDropdownOptions(auctionName, typeOfVehicle, stockLocation, rixoCompany) {
@@ -6266,6 +6811,29 @@ fun setupRixoDropdowns() {
             console.log('🔍 DEBUG: purchaseData.shipment_date:', purchaseData.shipment_date);
             console.log('🔍 DEBUG: purchaseData.shippment_date:', purchaseData.shippment_date);
             
+
+            // Edit: seed rixo auto-select with saved DB values before mapping refreshes dropdowns (DOM often still empty here)
+            if (document.getElementById('editForm')) {
+                var sl = (purchaseData.stockLocation || purchaseData.stock_location || '').toString().trim();
+                var vn = (purchaseData.venueId || purchaseData.venue_id || '').toString().trim();
+                var rc = (purchaseData.rixoCompany || purchaseData.rixo_company || '').toString().trim();
+                var pl = (purchaseData.pol || '').toString().trim();
+                window.__rixoSupplierPreserveSnapshot = { stock: sl, venue: vn, rixo: rc, pol: pl };
+            }
+
+            // Existing pictures: Kotlin schedules loadExistingCarPictures in showEditFormWithData, but that can race DOM/async mapping.
+            // Bridge from JS (same path as dropdown fill) so thumbnails appear under #existingPicturesList reliably.
+            (function scheduleLoadExistingPicturesBridge(pd) {
+                function tryLoad() {
+                    if (typeof window.loadExistingCarPictures !== 'function') return;
+                    if (!document.getElementById('existingPicturesList')) return;
+                    try { window.loadExistingCarPictures(pd); } catch (e) { console.warn('loadExistingCarPictures:', e); }
+                }
+                setTimeout(tryLoad, 0);
+                setTimeout(tryLoad, 400);
+                setTimeout(tryLoad, 1200);
+            })(purchaseData);
+            
             // Set Auction house first (combobox - set both select and input)
             var editAuctionSelect = document.getElementById('editAuctionName');
             var editAuctionInput = document.getElementById('editAuctionNameInput');
@@ -6325,8 +6893,8 @@ fun setupRixoDropdowns() {
             // Helper function to set all three dates
             function setAllDates() {
                 // Set Purchase Date (saved value, else today — matches Add form default)
-                var editDateInput = document.getElementById('editDate');
-                if (editDateInput) {
+                    var editDateInput = document.getElementById('editDate');
+                    if (editDateInput) {
                     var isoDate = '';
                     if (purchaseDateValue) {
                         if (typeof window.toIsoFromLabel === 'function') {
@@ -6340,11 +6908,11 @@ fun setupRixoDropdowns() {
                         isoDate = window.todayIsoLocalDate();
                     }
                     if (isoDate) {
-                        editDateInput.value = isoDate;
+                                editDateInput.value = isoDate;
                         console.log('✅ Set edit purchase date:', isoDate, purchaseDateValue ? ('from: ' + purchaseDateValue) : '(default today)');
-                        var hint = document.getElementById('editDateDayHint');
-                        if (hint && typeof window.isoToWeekdayLabel === 'function') {
-                            hint.textContent = window.isoToWeekdayLabel(isoDate);
+                                var hint = document.getElementById('editDateDayHint');
+                                if (hint && typeof window.isoToWeekdayLabel === 'function') {
+                                    hint.textContent = window.isoToWeekdayLabel(isoDate);
                         }
                     }
                 }
@@ -6778,10 +7346,18 @@ fun setupRixoDropdowns() {
                 if (shippingConfirmedRadio) {
                     shippingConfirmedRadio.checked = true;
                 }
+
+                // Set Invoice Confirmed radio button (invoiceConfirmed: true/1 -> TRUE, false/0/null -> FALSE)
+                var invoiceConfirmedRaw = purchaseData.invoiceConfirmed;
+                var invoiceConfirmedValue = (invoiceConfirmedRaw === true || invoiceConfirmedRaw === 1 || invoiceConfirmedRaw === "1") ? "TRUE" : "FALSE";
+                var invoiceConfirmedRadio = document.querySelector('input[name="editInvoiceConfirmed"][value="' + invoiceConfirmedValue + '"]');
+                if (invoiceConfirmedRadio) {
+                    invoiceConfirmedRadio.checked = true;
+                }
                 
-                // Set SHAKEN checkbox
+                // Set SHAKEN checkbox (detail fields in editNumberCutFieldsWrap)
                 var editShakenCheckbox = document.getElementById('editShakenCheckbox');
-                var editNumberCutSection = document.getElementById('editNumberCutSection');
+                var editNumberCutFieldsWrap = document.getElementById('editNumberCutFieldsWrap');
                 if (editShakenCheckbox) {
                     // Handle shaken value correctly: true, 1, "true", "1" -> checked; false, 0, null, undefined -> unchecked
                     // Access purchaseData.shaken - check both possible field names
@@ -6803,10 +7379,8 @@ fun setupRixoDropdowns() {
                     }
                     editShakenCheckbox.checked = isShaken;
                     console.log("🔍 [DEBUG] Loading shaken value:", shakenValue, "-> checkbox checked:", isShaken);
-                    if (isShaken) {
-                        editNumberCutSection.style.display = 'block';
-                    } else {
-                        editNumberCutSection.style.display = 'none';
+                    if (editNumberCutFieldsWrap) {
+                        editNumberCutFieldsWrap.style.display = isShaken ? 'block' : 'none';
                     }
                 }
                 
@@ -7470,8 +8044,8 @@ fun setupAddFormListeners() {
         }
         dateEl.addEventListener("change", { ev: Event ->
             val v = (ev.target as HTMLInputElement).value
-            hint?.textContent = isoToWeekdayLabel(v)
-        })
+        hint?.textContent = isoToWeekdayLabel(v)
+    })
     }
 
     // Initialize + keep day hints in sync for payment/shipment dates (no default on Add form)
@@ -7484,24 +8058,11 @@ fun setupAddFormListeners() {
         if (el.value.isNotBlank()) hint?.textContent = isoToWeekdayLabel(el.value)
     }
 
-    // Add SHAKEN checkbox listener
+    // Add SHAKEN checkbox listener — only toggles detail fields inside Number Cut Information
     document.getElementById("shakenCheckbox")?.addEventListener("change", { event: Event ->
         val target = event.target as HTMLInputElement
-        val numberCutSection = document.getElementById("numberCutSection") as HTMLElement?
-        val numberCutHeader = document.querySelector(".form-section-header[data-section='numberCut']") as? HTMLElement
-        val numberCutContent = document.querySelectorAll(".form-section-content[data-section='numberCut']")
-        
-        if (target.checked) {
-            numberCutSection?.style?.setProperty("display", "block")
-            // Ensure section is expanded when shown
-            numberCutHeader?.classList?.remove("collapsed")
-            for (i in 0 until numberCutContent.length) {
-                val content = numberCutContent.item(i) as HTMLElement
-                content.style.display = ""
-            }
-        } else {
-            numberCutSection?.style?.setProperty("display", "none")
-        }
+        val wrap = document.getElementById("numberCutFieldsWrap") as HTMLElement?
+        wrap?.style?.setProperty("display", if (target.checked) "" else "none")
     })
 
     // Add number cut listeners
@@ -7569,8 +8130,8 @@ fun setupAddFormListeners() {
                 BASIC_OPTIONS.forEach(function(opt) {
                     updatePredefinedInput(predefinedInput, opt, willSelect);
                     if (grid) {
-                        var otherBtn = grid.querySelector('.option-btn[data-option="' + opt + '"]');
-                        if (otherBtn) otherBtn.classList.toggle('selected', willSelect);
+                    var otherBtn = grid.querySelector('.option-btn[data-option="' + opt + '"]');
+                    if (otherBtn) otherBtn.classList.toggle('selected', willSelect);
                     }
                 });
                 return;
@@ -7586,7 +8147,7 @@ fun setupAddFormListeners() {
         }
         if (!window.__optionButtonClickBound) {
             window.__optionButtonClickBound = true;
-            document.addEventListener('click', onOptionButtonClick, true);
+        document.addEventListener('click', onOptionButtonClick, true);
         }
         function setupOptionButtons() {
             var optionsInput = document.getElementById('options');
@@ -8209,8 +8770,8 @@ fun populateBrandOptions(brandSelectId: String) {
                 brandsArray.forEach { brandRaw ->
                     for (brand in splitSemicolonTokens(brandRaw)) {
                         if (brand.isNotBlank() && seenLower.add(brand.lowercase())) {
-                            val option = js("new Option(brand, brand)")
-                            brandSelect.add(option)
+                        val option = js("new Option(brand, brand)")
+                        brandSelect.add(option)
                         }
                     }
                 }
@@ -8452,12 +9013,13 @@ private fun populateChassisMappingWithMasterListAsync(
             val sel = document.getElementById(selectId) as? HTMLSelectElement ?: return@then
             val inp = document.getElementById("${selectId}Input") as? HTMLInputElement
             for (item in masterList) {
-                val it = item.trim()
-                if (it.isNotBlank() && masterSeen.add(it.lowercase())) {
-                    val option = document.createElement("option") as HTMLOptionElement
-                    option.value = it
-                    option.textContent = it
-                    sel.appendChild(option)
+                for (token in splitSemicolonTokens(item)) {
+                    if (token.isNotBlank() && masterSeen.add(token.lowercase())) {
+                        val option = document.createElement("option") as HTMLOptionElement
+                        option.value = token
+                        option.textContent = token
+                        sel.appendChild(option)
+                    }
                 }
             }
             val cur = firstSemicolonToken((inp?.value ?: sel.value ?: "").toString())
@@ -8582,7 +9144,7 @@ private fun getMasterFieldApiPath(selectId: String): String? = when (selectId) {
     "shipmentSize", "editShipmentSize", "typeOfVehicle", "editTypeOfVehicle" -> "master-menu/type_of_vehicle"
     "fuel", "editFuel" -> "master-menu/fuel"
     "shift", "editShift" -> "master-menu/shift"
-    "rixoCompany", "editRixoCompany" -> "master-menu/rixo_company"
+    "rixoCompany", "editRixoCompany" -> "rixo-mapping/distinct-rixo-companies"
     "stockLocation", "editStockLocation" -> "master-menu/stock_location"
     "pol", "editPol" -> "master-menu/pol"
     else -> null
@@ -10008,7 +10570,13 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
             
             val carNameTokensList = splitSemicolonTokens(carNameRaw).ifEmpty { flattenSemicolonChoices(uniqueCarNames.toList()) }
             val carNameId = getFieldId("CarName")
-            populateComboboxTokensWithSeeMore(carNameId, "Select Car Name", carNameTokensList, carName, false)
+            populateChassisMappingWithMasterListAsync(
+                carNameId,
+                "Select Car Name",
+                carNameTokensList,
+                carName,
+                "car-brand-mapping/car-names/distinct"
+            )
             
             val brandId = if (isEditForm) "editBrand" else "brand"
             populateChassisMappingWithMasterListAsync(brandId, "Add Brand", brandsForDropdown, brand.trim(), "master-menu/car_brands")
@@ -10028,14 +10596,17 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                 "master-menu/type_of_vehicle"
             )
             
+            val gradeOptions = grades.sorted().toList()
             val gradeId = getFieldId("Grade")
-            populateComboboxTokensWithSeeMore(gradeId, "Select Grade", grades.sorted().toList(), grade, false)
+            populateComboboxTokensWithSeeMore(gradeId, "Select Grade", gradeOptions, grade, false)
             
+            val rankOptions = ranks.sorted().toList()
             val rankId = if (isEditForm) "editRank" else "rank"
-            populateComboboxTokensWithSeeMore(rankId, "Select Rank", ranks.sorted().toList(), rank, false)
+            populateComboboxTokensWithSeeMore(rankId, "Select Rank", rankOptions, rank, false)
             
+            val colorOptions = colors.sorted().toList()
             val colorId = if (isEditForm) "editColor" else "color"
-            populateComboboxTokensWithSeeMore(colorId, "Select Color", colors.sorted().toList(), color, false)
+            populateComboboxTokensWithSeeMore(colorId, "Select Color", colorOptions, color, false)
             
             val ccId = getFieldId("Cc")
             populateComboboxTokensWithSeeMore(ccId, "Select CC", ccsForDropdown, cc, false)
@@ -10043,8 +10614,17 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
             val doorId = getFieldId("Door")
             populateComboboxTokensWithSeeMore(doorId, "Select Door", doorsForDropdown, door, false)
             
+            val seatOptions = uniqueSeats.toList().sorted()
             val seatId = getFieldId("Seat")
-            populateComboboxTokensWithSeeMore(seatId, "Select Seat", uniqueSeats.toList().sorted(), seat, false)
+            populateComboboxTokensWithSeeMore(seatId, "Select Seat", seatOptions, seat, false)
+
+            // Chassis-dependent fields: show dropdown only when mapping yields 2+ options.
+            updateConditionalComboboxButtonVisibility(gradeId, gradeOptions, grade)
+            updateConditionalComboboxButtonVisibility(rankId, rankOptions, rank)
+            updateConditionalComboboxButtonVisibility(colorId, colorOptions, color)
+            updateConditionalComboboxButtonVisibility(seatId, seatOptions, seat)
+            updateConditionalComboboxButtonVisibility(doorId, doorsForDropdown, door)
+            updateConditionalComboboxButtonVisibility(ccId, ccsForDropdown, cc)
             
             // Now auto-fill form fields with first row values
             // Store current chassis for matching logic
@@ -10143,12 +10723,12 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                             fuelValue
                         } else {
                             if (!isEditForm) {
-                                fuelSelect.value = ""
-                                if (fuelInput != null) {
-                                    fuelInput.value = ""
-                                }
-                                syncComboboxField("Fuel", "")
-                                console.log("✅ Cleared fuel (mapping had no value)")
+                            fuelSelect.value = ""
+                            if (fuelInput != null) {
+                                fuelInput.value = ""
+                            }
+                            syncComboboxField("Fuel", "")
+                            console.log("✅ Cleared fuel (mapping had no value)")
                             }
                             ""
                         }
@@ -10189,12 +10769,12 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                             shiftValue
                         } else {
                             if (!isEditForm) {
-                                shiftSelect.value = ""
-                                if (shiftInput != null) {
-                                    shiftInput.value = ""
-                                }
-                                syncComboboxField("Shift", "")
-                                console.log("✅ Cleared shift (mapping had no value)")
+                            shiftSelect.value = ""
+                            if (shiftInput != null) {
+                                shiftInput.value = ""
+                            }
+                            syncComboboxField("Shift", "")
+                            console.log("✅ Cleared shift (mapping had no value)")
                             }
                             ""
                         }
@@ -10217,7 +10797,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                             numValue
                         } else {
                             if (!isEditForm) {
-                                ccInput.value = ""
+                            ccInput.value = ""
                                 ccSelect?.value = ""
                                 syncComboboxFromSelect(ccId)
                             }
@@ -10238,7 +10818,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                             doorValue
                         } else {
                             if (!isEditForm) {
-                                doorInput.value = ""
+                            doorInput.value = ""
                                 doorSelect?.value = ""
                                 syncComboboxFromSelect(doorId)
                             }
@@ -10282,9 +10862,9 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                             gradeValue
                         } else {
                             if (!isEditForm) {
-                                gradeInput.value = ""
+                            gradeInput.value = ""
                                 if (gradeSelect != null) gradeSelect.value = ""
-                                console.log("✅ Cleared grade (mapping had no value)")
+                            console.log("✅ Cleared grade (mapping had no value)")
                             }
                             ""
                         }
@@ -10520,7 +11100,7 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
     if (changedField.lowercase() != "cc") {
         val ccId = getFieldId("Cc")
         val ccInput = document.getElementById(ccId) as? HTMLInputElement
-        if (ccInput != null) {
+            if (ccInput != null) {
             val num = matchedCc.replace(Regex("[^0-9]"), "")
             ccInput.value = num
             console.log("✅ Auto-filled cc from match: $num")
@@ -10531,8 +11111,8 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
     if (changedField.lowercase() != "door") {
         val doorId = getFieldId("Door")
         val doorInput = document.getElementById(doorId) as? HTMLInputElement
-        if (doorInput != null) {
-            doorInput.value = matchedDoor
+            if (doorInput != null) {
+                doorInput.value = matchedDoor
             console.log("✅ Auto-filled door from match: $matchedDoor")
         }
     }
@@ -10542,8 +11122,8 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
         val gradeId = getFieldId("Grade")
         val gradeSelect = document.getElementById(gradeId) as? HTMLSelectElement
         val gradeInput = document.getElementById("${gradeId}Input") as? HTMLInputElement
-        if (gradeInput != null) {
-            gradeInput.value = matchedGrade
+            if (gradeInput != null) {
+                gradeInput.value = matchedGrade
             if (gradeSelect != null) gradeSelect.value = matchedGrade
             console.log("✅ Auto-filled grade from match: $matchedGrade")
         }
@@ -10748,8 +11328,8 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                     else -> ""
                 }
                 if (wdRadioVal.isNotBlank()) {
-                    val wdRadio = document.querySelector("input[name=\"wd\"][value=\"$wdRadioVal\"]") as? HTMLInputElement
-                    wdRadio?.checked = true
+                val wdRadio = document.querySelector("input[name=\"wd\"][value=\"$wdRadioVal\"]") as? HTMLInputElement
+                wdRadio?.checked = true
                 }
                 setFieldValue("shift", shift)
                 setFieldValue("cc", cc)
@@ -10916,6 +11496,20 @@ fun setupBrandSelectionHandlers() {
                     // Chassis cleared - clear input and auto-filled brand
                     if (chassisInput != null) {
                         chassisInput.value = ""
+                    }
+                    // Return chassis-dependent fields to plain editable inputs with hidden dropdown buttons.
+                    val ids = if (isEditForm) {
+                        listOf("editGrade", "editRank", "editColor", "editSeat", "editDoor", "editCc")
+                    } else {
+                        listOf("grade", "rank", "color", "seat", "door", "cc")
+                    }
+                    ids.forEach { id ->
+                        val btn = document.getElementById("${id}Button") as? HTMLElement
+                        val sel = document.getElementById(id) as? HTMLSelectElement
+                        val inp = document.getElementById("${id}Input") as? HTMLInputElement
+                        btn?.style?.display = "none"
+                        sel?.style?.display = "none"
+                        inp?.style?.paddingRight = "8px"
                     }
                     js("if (window.autoFilledBrand) { window.autoFilledBrand = null; }")
                     js("window.__chassisMasterComboIds = []")
@@ -11101,7 +11695,7 @@ fun validatePurchaseMasterFields(
     isEditMode: Boolean,
     callback: (List<Pair<String, String>>) -> Unit
 ) {
-    callback(emptyList())
+            callback(emptyList())
 }
 
 fun parsePurchaseMasterListArray(raw: dynamic): List<String> {
@@ -11418,7 +12012,9 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     val shipmentDateIso = (document.getElementById("shipmentDate") as? HTMLInputElement)?.value ?: ""
     purchaseData.shipmentDate = if (shipmentDateIso.isNotBlank()) formatWithWeekday(shipmentDateIso) else ""
     purchaseData.blNo = (document.getElementById("blNo") as? HTMLInputElement)?.value ?: ""
-    purchaseData.vesselNo = (document.getElementById("vesselNo") as? HTMLInputElement)?.value ?: ""
+    purchaseData.vessel = (document.getElementById("purchaseVessel") as? HTMLInputElement)?.value ?: ""
+    val addBookingRaw = (document.getElementById("addPurchaseBookingId") as? HTMLInputElement)?.value?.trim() ?: ""
+    purchaseData.bookingId = if (addBookingRaw.isNotEmpty()) addBookingRaw.toLongOrNull() else null
     purchaseData.destination = (document.getElementById("destination") as? HTMLInputElement)?.value ?: ""
     val shipmentChargesValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('shipmentCharges') : ''").unsafeCast<String>().trim()
     purchaseData.shipmentCharges = if (shipmentChargesValue.isNotBlank()) "¥$shipmentChargesValue" else ""
@@ -11437,6 +12033,8 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     purchaseData.repairCharges = if (repairChargesValue.isNotBlank()) "¥$repairChargesValue" else ""
     val shippingConfirmedValue = (document.querySelector("input[name=\"shippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
     purchaseData.shipped = (shippingConfirmedValue == "TRUE")
+    val invoiceConfirmedValue = (document.querySelector("input[name=\"invoiceConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
+    purchaseData.invoiceConfirmed = (invoiceConfirmedValue == "TRUE")
     
     // Other Fields
     purchaseData.shaken = (document.getElementById("shakenCheckbox") as? HTMLInputElement)?.checked ?: false
@@ -11464,7 +12062,7 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
                 // Avoid hash navigation because we may already be on "#/add".
                 reloadAddPurchaseForm()
             } else {
-                showPurchaseList()
+            showPurchaseList()
             }
             // Button will be re-enabled when page reloads, no need to re-enable here
         } else {
@@ -11507,6 +12105,7 @@ fun showEditForm(id: Long) {
     window.fetch(apiUrl("purchases/purchase/$id")).then { response ->
         if (response.ok) {
             response.json().then { purchaseData ->
+                normalizeApiPurchaseForClient(purchaseData)
                 // Debug: Log the raw purchase data to see what's being received
                 console.log("🔍 [DEBUG] Raw purchase data received:", JSON.stringify(purchaseData))
                 val shakenValue = js("purchaseData.shaken").unsafeCast<Any?>()
@@ -11609,20 +12208,20 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <div id="editCarNameButton" onclick="openComboboxDropdown('editCarName')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                                 ▼
-                            </div>
-                        </div>
+                    </div>
+                </div>
                     </div>
                     <div>
                         <label>Grade</label>
-                        ${createEditableCombobox("editGrade", "Select Grade", initialValue = editGradeDisp)}
+                        ${createEditableCombobox("editGrade", "Select Grade", initialValue = editGradeDisp, showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Production Date</label>
                         <div style="position:relative;">
                             <input type="month" id="editCarModelYear" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${if (purchaseData.carModelYear != null) {
-                                val parts = purchaseData.carModelYear.toString().split("/")
-                                if (parts.size == 2) "${parts[1]}-${parts[0].padStart(2, '0')}" else purchaseData.carModelYear.toString()
-                            } else ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            val parts = purchaseData.carModelYear.toString().split("/")
+                            if (parts.size == 2) "${parts[1]}-${parts[0].padStart(2, '0')}" else purchaseData.carModelYear.toString()
+                        } else ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                             <span id="editCarModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">mm/yyyy</span>
                         </div>
                     </div>
@@ -11630,18 +12229,20 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>Auction No</label>
                         <input type="text" id="editAuctionNo" value="${purchaseData.auctionNo ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
-                    <div>
+                </div>
+
+                <!-- Number Cut Information: SHAKEN + detail fields live inside this collapsible section -->
+                <div id="editNumberCutSection">
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('numberCut')"><h3 class="form-section-header" data-section="numberCut">Number Cut Information</h3></div>
+                <div class="form-section-content" data-section="numberCut">
+                    <div style="margin-bottom: 16px;">
                     <label style="display: flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; cursor: pointer;">
                             <input type="checkbox" id="editShakenCheckbox" ${if (purchaseData.shaken == true) "checked" else ""} style="width: 18px; height: 18px; accent-color: #007bff;">
                         SHAKEN
                     </label>
                     </div>
-                </div>
-
-                <!-- Number Cut Information Section (initially hidden, shows when Shaken is checked) -->
-                <div id="editNumberCutSection" style="display: ${if (purchaseData.shaken == true) "block" else "none"};">
-                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('numberCut')"><h3 class="form-section-header" data-section="numberCut">Number Cut Information</h3></div>
-                <div class="form-section-content form-grid-4col" data-section="numberCut">
+                    <div id="editNumberCutFieldsWrap" style="display: ${if (purchaseData.shaken == true) "block" else "none"};">
+                    <div class="form-grid-4col">
                     <div>
                         <label>Place Name (Japanese)</label>
                         ${createEditableComboboxWithOptions("editNumberCutPlace", "Select Place", getNumberCutPlaceOptions(), getInitialPlaceFromNumberCut(purchaseData.numberCut))}
@@ -11662,6 +12263,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div style="margin-bottom: 20px;">
                     <label>Number Cut:</label>
                     <input type="text" id="editNumberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
+                    </div>
+                    </div>
                 </div>
                 </div> <!-- End of editNumberCutSection -->
 
@@ -11669,11 +12272,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label>Rank</label>
-                        ${createEditableCombobox("editRank", "Select Rank", initialValue = editRankDisp)}
+                        ${createEditableCombobox("editRank", "Select Rank", initialValue = editRankDisp, showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Color</label>
-                        ${createEditableCombobox("editColor", "Select Color", initialValue = editColorDisp)}
+                        ${createEditableCombobox("editColor", "Select Color", initialValue = editColorDisp, showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Fuel</label>
@@ -11697,11 +12300,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Seat</label>
-                        ${createEditableCombobox("editSeat", "Select Seat", initialValue = editSeatDisp)}
+                        ${createEditableCombobox("editSeat", "Select Seat", initialValue = editSeatDisp, showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Door</label>
-                        ${createEditableCombobox("editDoor", "Select Door", initialValue = editDoorDisp)}
+                        ${createEditableCombobox("editDoor", "Select Door", initialValue = editDoorDisp, showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Distance</label>
@@ -11709,7 +12312,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>CC</label>
-                        ${createEditableCombobox("editCc", "Select CC", initialValue = editCcDisp)}
+                        ${createEditableCombobox("editCc", "Select CC", initialValue = editCcDisp, showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Shift</label>
@@ -11730,7 +12333,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <div id="editShiftButton" onclick="openComboboxDropdown('editShift')" 
                                  style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
                                 ▼
-                            </div>
+                </div>
                         </div>
                     </div>
                     <div>
@@ -11892,7 +12495,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             </label>
                         </div>
                     </div>
-                </div>
+                        </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="pricing">
@@ -11901,14 +12504,14 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editPrice" class="money-input" value="${extractNumericFromDbValue(purchaseData.price)}" placeholder="0">
-                        </div>
+                </div>
                     </div>
                     <div>
                         <label>Auction Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editAuctionFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.auctionFee)}" placeholder="0">
-                        </div>
+                </div>
                     </div>
                     <div>
                         <label>Auction Penalty Fee</label>
@@ -11936,8 +12539,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <div style="position:relative;">
                             <input type="date" id="editPaymentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${toIsoFromLabel(purchaseData.paymentDate ?: purchaseData.payment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.paymentDate ?: purchaseData.payment_date) ?: ""}">
                             <span id="editPaymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
-                        </div>
                     </div>
+                </div>
                 </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
@@ -11955,14 +12558,25 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         ${createEditableCombobox("editPol", "Select POL", initialValue = purchaseData.pol?.toString() ?: "")}
                     </div>
                     <div>
-                        <label>Destination</label>
-                        <input type="text" id="editDestination" value="${escapeHtml(purchaseData.destination?.toString() ?: "")}" placeholder="e.g., KARACHI-PAKISTAN" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                    </div>
-                    <div>
                         <label>Shipment Date</label>
                         <div style="position:relative;">
                             <input type="date" id="editShipmentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${toIsoFromLabel(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date) ?: ""}">
                             <span id="editShipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                    </div>
+                    </div>
+                    <div>
+                        <label>Shipping Confirmed</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="editShippingConfirmed" value="TRUE" ${if (purchaseData.shipped == true || (purchaseData.shipped as? Number)?.toInt() == 1) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="editShippingConfirmed" value="FALSE" ${if (!(purchaseData.shipped == true || (purchaseData.shipped as? Number)?.toInt() == 1)) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
                         </div>
                     </div>
                     <div>
@@ -11970,8 +12584,12 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <input type="text" id="editBlNo" value="${purchaseData.blNo ?: ""}" placeholder="Bill of Lading Number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Vessel No.</label>
-                        <input type="text" id="editVesselNo" value="${purchaseData.vesselNo ?: ""}" placeholder="Vessel Number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <label>Booking No</label>
+                        <input type="text" id="editBookingId" value="${purchaseData.bookingId?.toString() ?: ""}" placeholder="Booking ID" inputmode="numeric" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+                    <div>
+                        <label>Vessel</label>
+                        <input type="text" id="editVessel" value="${(purchaseData.vessel ?: purchaseData.vesselNo)?.toString() ?: ""}" placeholder="Vessel name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label>Shipment Charges</label>
@@ -12003,29 +12621,14 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editRepairCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.repairCharges)}" placeholder="0">
-                        </div>
                     </div>
-                    <div>
-                        <label>Shipping Confirmed</label>
-                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
-                            <label class="checkwrap">
-                                <input type="radio" name="editShippingConfirmed" value="TRUE" ${if (purchaseData.shipped == true || (purchaseData.shipped as? Number)?.toInt() == 1) "checked" else ""}>
-                                <span class="checkmark"></span>
-                                TRUE
-                            </label>
-                            <label class="checkwrap">
-                                <input type="radio" name="editShippingConfirmed" value="FALSE" ${if (!(purchaseData.shipped == true || (purchaseData.shipped as? Number)?.toInt() == 1)) "checked" else ""}>
-                                <span class="checkmark"></span>
-                                FALSE
-                            </label>
-                        </div>
-                    </div>
+                </div>
                     <div>
                         <label>Misc. Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editMiscCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.miscCharges)}" placeholder="0">
-                        </div>
+                    </div>
                     </div>
                     <div>
                         <label>Inspection Fees</label>
@@ -12051,13 +12654,28 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <div class="currency-input" style="flex: 1;">
                                 <span class="currency-symbol">¥</span>
                                 <input type="text" inputmode="decimal" id="editTaxTotal" class="money-input" value="${extractNumericFromDbValue(purchaseData.taxTotal)}" placeholder="0">
-                            </div>
+                    </div>
                             <button type="button" id="editCalculateTaxBtn" style="padding: 8px 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap; min-height: 44px; align-self: stretch;">10% Tax</button>
-                        </div>
+                </div>
                     </div>
                     <div>
                         <label>Total Cost (After Tax 10%)</label>
                         <input type="text" id="editTotalCostAfterTax" value="${purchaseData.totalPrice ?: ""}" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
+                    </div>
+                    <div>
+                        <label>Invoice Confirmed</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="editInvoiceConfirmed" value="TRUE" ${if (purchaseData.invoiceConfirmed == true || (purchaseData.invoiceConfirmed as? Number)?.toInt() == 1) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="editInvoiceConfirmed" value="FALSE" ${if (!(purchaseData.invoiceConfirmed == true || (purchaseData.invoiceConfirmed as? Number)?.toInt() == 1)) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
+                        </div>
                     </div>
                 </div>
                 
@@ -12168,9 +12786,15 @@ fun showEditFormWithData(purchaseData: dynamic) {
     // Set edit form values after a longer delay to ensure dropdowns are fully populated
     window.setTimeout({
         console.log("🔍 [KOTLIN] setTimeout callback started - setting up date fallbacks")
-        setEditFormValuesFromKotlin(purchaseData)
-        // Load existing car pictures
+        // Load pictures before deep copy in setEditFormValuesFromKotlin (JSON.stringify may fail on huge base64).
         loadExistingCarPictures(purchaseData)
+        setEditFormValuesFromKotlin(purchaseData)
+        // Baseline for diff must match collectCarPictures() DOM (API snapshot can omit or alias carPictures)
+        syncOriginalPurchaseCarPicturesBaselineFromDom()
+        // Supplier mapping runs async after load; re-baseline whole form so Venue/Stock match what the user sees
+        window.setTimeout({
+            finalizeEditFormOriginalBaselineFromDom()
+        }, 1600)
         
         // CRITICAL FIX: Set Purchase Date, Payment Date and Shipment Date directly from purchaseData
         // Run multiple times to ensure it works (after 200ms, after 600ms)
@@ -12180,8 +12804,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
             // Get Purchase Date
             val purchaseDateRaw = js("purchaseData.date")?.toString() ?: ""
             console.log("🔍 [KOTLIN] Checking purchaseDate - raw value:", purchaseDateRaw)
-            val editDateInput = document.getElementById("editDate") as? HTMLInputElement
-            if (editDateInput != null) {
+                val editDateInput = document.getElementById("editDate") as? HTMLInputElement
+                if (editDateInput != null) {
                 var isoDate = if (purchaseDateRaw.isNotBlank()) toIsoFromLabel(purchaseDateRaw) else ""
                 if (isoDate.isBlank() && purchaseDateRaw.isNotBlank() &&
                     purchaseDateRaw.length == 10 && purchaseDateRaw.contains("-")
@@ -12192,11 +12816,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     isoDate = todayIsoLocalDate()
                 }
                 console.log("🔍 [KOTLIN] purchaseDate effective ISO:", isoDate)
-                editDateInput.value = isoDate
-                val hint = document.getElementById("editDateDayHint") as? HTMLElement
-                hint?.textContent = isoToWeekdayLabelTopLevel(isoDate)
-            } else {
-                console.warn("⚠️ [KOTLIN FALLBACK] editDate input not found")
+                        editDateInput.value = isoDate
+                        val hint = document.getElementById("editDateDayHint") as? HTMLElement
+                        hint?.textContent = isoToWeekdayLabelTopLevel(isoDate)
+                } else {
+                    console.warn("⚠️ [KOTLIN FALLBACK] editDate input not found")
             }
             
             // Get payment date value - try multiple field names
@@ -12283,6 +12907,7 @@ fun setupEditFormListeners() {
     // Add event listener for auction name change - works with combobox
     document.getElementById("editAuctionName")?.addEventListener("change", { event: Event ->
         js("""
+            if (window.resetEditRixoOverridesAfterSupplierChange) window.resetEditRixoOverridesAfterSupplierChange();
             var supplierName = window.getComboboxValue('editAuctionName');
             if (window.handleAuctionNameChange) {
                 window.handleAuctionNameChange(supplierName);
@@ -12291,12 +12916,15 @@ fun setupEditFormListeners() {
     })
     document.getElementById("editAuctionNameInput")?.addEventListener("change", { event: Event ->
         js("""
+            if (window.resetEditRixoOverridesAfterSupplierChange) window.resetEditRixoOverridesAfterSupplierChange();
             var supplierName = window.getComboboxValue('editAuctionName');
             if (window.handleAuctionNameChange) {
                 window.handleAuctionNameChange(supplierName);
             }
         """)
     })
+
+    wireEditRixoUserOverrideListeners()
     
     // Add event listener for gear button to open Supplier Master List in new tab
     fun attachEditSupplierButtonListener() {
@@ -12451,7 +13079,7 @@ fun setupEditFormListeners() {
     })
     
     document.getElementById("editCancelBtn")?.addEventListener("click", { _: Event ->
-        showPurchaseList()
+        window.location.hash = "#/purchase"
     })
     
     // Form submit listener - matches documentation (simple approach)
@@ -12594,24 +13222,11 @@ fun setupEditFormListeners() {
         monthEl.addEventListener("input", { _: Event -> updateHint() })
     }
 
-    // Add SHAKEN checkbox listener for edit form
+    // Add SHAKEN checkbox listener for edit form — only toggles detail fields inside Number Cut Information
     document.getElementById("editShakenCheckbox")?.addEventListener("change", { event: Event ->
         val target = event.target as HTMLInputElement
-        val numberCutSection = document.getElementById("editNumberCutSection") as HTMLElement?
-        val numberCutHeader = document.querySelector(".form-section-header[data-section='numberCut']") as? HTMLElement
-        val numberCutContent = document.querySelectorAll(".form-section-content[data-section='numberCut']")
-        
-        if (target.checked) {
-            numberCutSection?.style?.setProperty("display", "block")
-            // Ensure section is expanded when shown
-            numberCutHeader?.classList?.remove("collapsed")
-            for (i in 0 until numberCutContent.length) {
-                val content = numberCutContent.item(i) as HTMLElement
-                content.style.display = ""
-            }
-        } else {
-            numberCutSection?.style?.setProperty("display", "none")
-        }
+        val wrap = document.getElementById("editNumberCutFieldsWrap") as HTMLElement?
+        wrap?.style?.setProperty("display", if (target.checked) "" else "none")
     })
 
     // Add number cut listeners for edit form
@@ -12774,6 +13389,7 @@ fun getFieldDisplayName(fieldName: String): String {
         "auctionNo" -> "Auction No"
         "auctionHouse" -> "Supplier Name"
         "stockLocation" -> "Stock Location"
+        "pol" -> "POL"
         "rixoCompany" -> "Rixo Company"
         "clientName" -> "Client Name"
         "country" -> "Target Country"
@@ -12790,7 +13406,7 @@ fun getFieldDisplayName(fieldName: String): String {
         "rixoPrice" -> "Rixo Price"
         "shipmentDate" -> "Shipment Date"
         "blNo" -> "BL No"
-        "vesselNo" -> "Vessel No"
+        "vessel" -> "Vessel"
         "destination" -> "Destination"
         "shipmentCharges" -> "Shipment Charges"
         "freight" -> "Freight"
@@ -12803,8 +13419,9 @@ fun getFieldDisplayName(fieldName: String): String {
         "shaken" -> "SHAKEN"
         "numberCut" -> "Number Cut"
         "notes" -> "Notes"
-        "bookingId" -> "Booking ID"
+        "bookingId" -> "Booking No"
         "shipped" -> "Shipping Confirmed"
+        "invoiceConfirmed" -> "Invoice Confirmed"
         else -> fieldName.replace(Regex("([A-Z])"), " $1").trim().replaceFirstChar { it.uppercaseChar() }
     }
 }
@@ -12886,13 +13503,15 @@ fun collectCurrentEditFormData(): dynamic {
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
     val shippingConfirmed = (document.querySelector("input[name=\"editShippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
+    val invoiceConfirmed = (document.querySelector("input[name=\"editInvoiceConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
     val rixoPriceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRixoPriceInput') : ''").unsafeCast<String>().trim()
     val rixoPrice = if (rixoPriceRaw.isNotBlank()) "¥$rixoPriceRaw" else ""
     val numberCutString = (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value ?: ""
     val shipmentDate = formatWithWeekday((document.getElementById("editShipmentDate") as? HTMLInputElement)?.value ?: "")
     val blNo = (document.getElementById("editBlNo") as? HTMLInputElement)?.value ?: ""
-    val vesselNo = (document.getElementById("editVesselNo") as? HTMLInputElement)?.value ?: ""
-    val destination = (document.getElementById("editDestination") as? HTMLInputElement)?.value ?: ""
+    val vessel = (document.getElementById("editVessel") as? HTMLInputElement)?.value ?: ""
+    val destination = (document.getElementById("editDestination") as? HTMLInputElement)?.value
+        ?: js("""(function(){ var pd = window.__editPurchaseDataForRixo || {}; return (pd.destination || ""); })()""").unsafeCast<String>()
     val bookingIdStr = (document.getElementById("editBookingId") as? HTMLInputElement)?.value?.trim() ?: ""
     val bookingId = if (bookingIdStr.isNotEmpty()) bookingIdStr.toLongOrNull() else null
     val shipmentChargesRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editShipmentCharges') : ''").unsafeCast<String>().trim()
@@ -12959,10 +13578,11 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.rixoRequested = rixoRequested
     purchaseData.rixoConfirmed = rixoConfirmed
     purchaseData.shipped = (shippingConfirmed == "TRUE")
+    purchaseData.invoiceConfirmed = (invoiceConfirmed == "TRUE")
     purchaseData.rixoPrice = rixoPrice
     purchaseData.shipmentDate = shipmentDate
     purchaseData.blNo = blNo
-    purchaseData.vesselNo = vesselNo
+    purchaseData.vessel = vessel
     purchaseData.destination = destination
     purchaseData.shipmentCharges = shipmentCharges
     purchaseData.freight = freight
@@ -12981,7 +13601,54 @@ fun collectCurrentEditFormData(): dynamic {
         purchaseData.bookingId = null
     }
     
+    // Include car pictures so change detection matches the save payload (edit form uses two DOM areas)
+    purchaseData.carPictures = collectCarPictures()
+    
     return purchaseData
+}
+
+/** Normalize carPictures (DB string, JSON array, or null) to a stable JSON string for diffing. */
+private fun normalizedCarPicturesJson(v: dynamic): String {
+    val arr: dynamic = try {
+        when {
+            v == null || v == js("undefined") -> js("[]")
+            v is String -> {
+                val s = v.trim()
+                if (s.isEmpty()) js("[]") else JSON.parse<dynamic>(s)
+            }
+            js("Array.isArray(v)").unsafeCast<Boolean>() -> v
+            else -> js("[]")
+        }
+    } catch (_: Throwable) {
+        js("[]")
+    }
+    val n = js("arr.length").unsafeCast<Int>()
+    val items = mutableListOf<Pair<String, String>>()
+    for (i in 0 until n) {
+        val item = js("arr[i]")
+        if (item == null || item == js("undefined")) continue
+        val id = js("String(item.id !== undefined && item.id !== null ? item.id : '')").toString()
+        val data = js("String(item.data !== undefined && item.data !== null ? item.data : '')").toString()
+        items.add(Pair(id, data))
+    }
+    items.sortBy { it.first }
+    val out = js("[]").unsafeCast<dynamic>()
+    for ((id, data) in items) {
+        val o = js("{}")
+        o.id = id
+        o.data = data
+        out.push(o)
+    }
+    return JSON.stringify(out)
+}
+
+private fun carPictureCountFromNormalizedJson(json: String): Int {
+    return try {
+        val a = JSON.parse<dynamic>(json)
+        js("a.length").unsafeCast<Int>()
+    } catch (_: Throwable) {
+        0
+    }
 }
 
 // Function to compare original and current data and return changes
@@ -12992,16 +13659,15 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
     console.log("🔍 [COMPARE] Original data:", JSON.stringify(original))
     console.log("🔍 [COMPARE] Current data:", JSON.stringify(current))
     
-    // List of fields to compare (exclude carPictures for now)
     val fieldsToCompare = listOf(
         "date", "chassis", "carModelYear", "brand", "carName", "vehicleType", "shipmentSize",
         "grade", "rank", "color", "fuel", "seat", "door", "distance", "options", "cc",
-        "shift", "wd", "driveType", "auctionNo", "auctionHouse", "stockLocation",
+        "shift", "wd", "driveType", "auctionNo", "auctionHouse", "stockLocation", "pol",
         "rixoCompany", "clientName", "country", "venueId", "price", "auctionFee", "auctionPenaltyFee", "recycleFee",
         "roadTax", "taxTotal", "totalPrice", "paymentDate", "rixoRequested", "rixoConfirmed",
-        "rixoPrice", "shipmentDate", "blNo", "vesselNo", "destination", "shipmentCharges",
+        "rixoPrice", "shipmentDate", "blNo", "vessel", "destination", "shipmentCharges",
         "freight", "storageCharges", "miscCharges", "inspectionFee", "commission", "repairCompany",
-        "repairCharges", "shaken", "numberCut", "notes", "bookingId", "shipped"
+        "repairCharges", "shaken", "numberCut", "notes", "bookingId", "shipped", "invoiceConfirmed", "carPictures"
     )
 
     // Compare money values by numeric content only (ignore `¥`, commas, formatting, etc.)
@@ -13056,6 +13722,22 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
             } else null
         } catch (e: dynamic) {
             null
+        }
+        
+        if (fieldName == "carPictures") {
+            val origRaw = carPicturesFieldFromPurchase(original) ?: originalValue
+            val origJson = normalizedCarPicturesJson(origRaw)
+            val currJson = normalizedCarPicturesJson(currentValue)
+            if (origJson != currJson) {
+                val oc = carPictureCountFromNormalizedJson(origJson)
+                val cc = carPictureCountFromNormalizedJson(currJson)
+                changes[fieldName] = Pair(
+                    if (oc == 0) "(no pictures)" else "$oc picture(s)",
+                    if (cc == 0) "(no pictures)" else "$cc picture(s)"
+                )
+                console.log("[COMPARE] Change detected in carPictures: $oc → $cc")
+            }
+            return@forEach
         }
         
         // Normalize values for comparison (treat empty string and null as same)
@@ -13147,6 +13829,26 @@ fun createEditConfirmationModal(changes: Map<String, Pair<String, String>>): Str
     """
 }
 
+private fun clearRixoAutoSelectSuppress() {
+    js("window.__suppressRixoAutoSelect = false")
+}
+
+private fun setRixoAutoSelectSuppress() {
+    js("window.__suppressRixoAutoSelect = true")
+}
+
+private fun wireEditRixoUserOverrideListeners() {
+    fun attach(fieldId: String, markJs: () -> Unit) {
+        document.getElementById(fieldId)?.addEventListener("change", { markJs() })
+        document.getElementById("${fieldId}Input")?.addEventListener("change", { markJs() })
+        document.getElementById("${fieldId}Input")?.addEventListener("blur", { markJs() })
+    }
+    attach("editStockLocation") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editStockLocation')") }
+    attach("editPol") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editPol')") }
+    attach("editVenueId") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editVenueId')") }
+    attach("editRixoCompany") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editRixoCompany')") }
+}
+
 // Function to show confirmation modal
 fun showEditConfirmationModal(changes: Map<String, Pair<String, String>>, purchaseId: Long) {
     // Remove existing modal if any
@@ -13169,21 +13871,26 @@ fun showEditConfirmationModal(changes: Map<String, Pair<String, String>>, purcha
     if (body != null) {
         body.appendChild(modal)
     }
+
+    setRixoAutoSelectSuppress()
     
     // Close button handler
     document.getElementById("closeEditConfirmationModal")?.addEventListener("click", { _: Event ->
         document.getElementById("editConfirmationModal")?.remove()
+        clearRixoAutoSelectSuppress()
     })
     
     // Cancel button handler
     document.getElementById("cancelEditConfirmation")?.addEventListener("click", { _: Event ->
         document.getElementById("editConfirmationModal")?.remove()
+        clearRixoAutoSelectSuppress()
     })
     
     // Backdrop click handler
     modal.addEventListener("click", { event: Event ->
         if ((event.target as? HTMLElement)?.id == "editConfirmationModal") {
             document.getElementById("editConfirmationModal")?.remove()
+            clearRixoAutoSelectSuppress()
         }
     })
     
@@ -13331,6 +14038,7 @@ fun handleEditPurchase() {
 
     // Proceed with editing purchase (extracted from handleEditPurchase)
 fun proceedWithEditPurchase(id: Long, chassis: String) {
+    setRixoAutoSelectSuppress()
     // Helper function to get combobox value (same as in handleEditPurchase)
     fun getComboboxValueSafe(fieldId: String): String {
         val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
@@ -13375,6 +14083,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
         if (missingFields.isNotEmpty()) {
             // Validation failed - show error modal
             showPurchaseMasterFieldsErrorModal(missingFields)
+            clearRixoAutoSelectSuppress()
             return@validatePurchaseMasterFields
         }
         
@@ -13444,14 +14153,16 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
     val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
     val shippingConfirmed = (document.querySelector("input[name=\"editShippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
+    val invoiceConfirmed = (document.querySelector("input[name=\"editInvoiceConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
     // Parse rixo price - add ¥ symbol before saving
     val rixoPriceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRixoPriceInput') : ''").unsafeCast<String>().trim()
     val rixoPrice = if (rixoPriceRaw.isNotBlank()) "¥$rixoPriceRaw" else ""
     val numberCutString = (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value ?: ""
     val shipmentDate = formatWithWeekday((document.getElementById("editShipmentDate") as? HTMLInputElement)?.value ?: "")
     val blNo = (document.getElementById("editBlNo") as? HTMLInputElement)?.value ?: ""
-    val vesselNo = (document.getElementById("editVesselNo") as? HTMLInputElement)?.value ?: ""
-    val destination = (document.getElementById("editDestination") as? HTMLInputElement)?.value ?: ""
+    val vessel = (document.getElementById("editVessel") as? HTMLInputElement)?.value ?: ""
+    val destination = (document.getElementById("editDestination") as? HTMLInputElement)?.value
+        ?: js("""(function(){ var pd = window.__editPurchaseDataForRixo || {}; return (pd.destination || ""); })()""").unsafeCast<String>()
     val bookingIdStr = (document.getElementById("editBookingId") as? HTMLInputElement)?.value?.trim() ?: ""
     // If field is empty, set to null to allow clearing the value
     // If field has value, convert to Long
@@ -13516,10 +14227,11 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.rixoRequested = rixoRequested
     purchaseData.rixoConfirmed = rixoConfirmed
     purchaseData.shipped = (shippingConfirmed == "TRUE")
+    purchaseData.invoiceConfirmed = (invoiceConfirmed == "TRUE")
     purchaseData.rixoPrice = rixoPrice
     purchaseData.shipmentDate = shipmentDate
     purchaseData.blNo = blNo
-    purchaseData.vesselNo = vesselNo
+    purchaseData.vessel = vessel
     purchaseData.destination = destination
     purchaseData.shipmentCharges = shipmentCharges
     purchaseData.freight = freight
@@ -13596,7 +14308,8 @@ fun submitEditPurchase(id: Long, purchaseData: dynamic) {
             // Clear original purchase data when update succeeds
             originalPurchaseData = null
             showMessage("Purchase updated successfully!", "success")
-            showPurchaseList()
+            window.location.hash = "#/purchase"
+            clearRixoAutoSelectSuppress()
         } else {
             response.text().then { errorText ->
                 console.log("Update error response: $errorText")
@@ -13619,11 +14332,16 @@ fun submitEditPurchase(id: Long, purchaseData: dynamic) {
                 showMessage("Failed to update purchase: $errorText", "error")
                     }
                 }
+                clearRixoAutoSelectSuppress()
+            }.catch { _: Throwable ->
+                clearRixoAutoSelectSuppress()
             }
         }
+        undefined
     }.catch { error ->
         console.log("Update error: ${error.message}")
         showMessage("Failed to update purchase: ${error.message}", "error")
+        clearRixoAutoSelectSuppress()
     }
 }
 
@@ -13631,20 +14349,21 @@ fun submitEditPurchase(id: Long, purchaseData: dynamic) {
 fun collectCarPictures(): dynamic {
     val pictures = js("[]")
     
-    // Get all uploaded pictures from the preview area
-    val previewDiv = document.getElementById("carPicturePreview")
+    val containerIds = listOf("carPicturePreview", "existingPicturesList")
+    for (containerId in containerIds) {
+        val previewDiv = document.getElementById(containerId)
     if (previewDiv != null) {
         val pictureElements = previewDiv.querySelectorAll("div[data-picture-id]")
         for (i in 0 until pictureElements.length) {
             val element = pictureElements.item(i) as HTMLElement
             val pictureId = element.getAttribute("data-picture-id")
             val pictureData = element.getAttribute("data-picture-data")
-            
             if (pictureId != null && pictureData != null) {
                 val pictureObj = js("{}")
                 pictureObj.id = pictureId
                 pictureObj.data = pictureData
                 pictures.push(pictureObj)
+                }
             }
         }
     }
@@ -13654,61 +14373,94 @@ fun collectCarPictures(): dynamic {
 }
 
 // Load existing car pictures when editing
-fun loadExistingCarPictures(purchaseData: dynamic) {
+fun loadExistingCarPictures(purchaseData: dynamic, domRetryCount: Int = 0) {
     console.log("📷 Loading existing car pictures for purchase:", purchaseData.id)
     
-    // Check if purchase has car pictures data
-    val carPicturesJson = purchaseData.carPictures
-    if (carPicturesJson != null && carPicturesJson.toString().isNotEmpty()) {
-        try {
-            // Parse JSON string to array
-            val carPictures = js("JSON.parse(carPicturesJson)")
-            console.log("📷 Parsed car pictures:", carPictures)
-            
-            if (js("Array.isArray(carPictures)") && js("carPictures.length > 0")) {
-                console.log("📷 Found ${js("carPictures.length")} existing pictures")
-                
+    normalizeApiPurchaseForClient(purchaseData)
+
+    val carPicturesRaw = carPicturesFieldFromPurchase(purchaseData)
+    if (carPicturesRaw == null || carPicturesRaw == js("undefined")) {
+        console.log("No existing pictures found")
+        return
+    }
+
+    val carPictures: dynamic = try {
+        when {
+            js("Array.isArray(carPicturesRaw)").unsafeCast<Boolean>() -> carPicturesRaw
+            carPicturesRaw is String -> {
+                // Avoid isEmpty/isNotEmpty on dynamic-derived strings (Kotlin/JS can throw "isEmpty is not a function").
+                val s = js("String(carPicturesRaw).trim()").toString()
+                if (s.length == 0) {
+                    console.log("No existing pictures found")
+                    return
+                }
+                var parsed = JSON.parse<dynamic>(s)
+                if (js("typeof parsed === 'string'").unsafeCast<Boolean>()) {
+                    val inner = js("String(parsed).trim()").toString()
+                    if (inner.length > 0) parsed = JSON.parse<dynamic>(inner)
+                }
+                parsed
+            }
+            else -> {
+                console.log("No existing pictures found")
+                return
+            }
+        }
+    } catch (e: Throwable) {
+        console.log("Error parsing car pictures JSON:", e.message)
+        return
+    }
+
+    console.log("Parsed car pictures:", carPictures)
+    if (!js("Array.isArray(carPictures)").unsafeCast<Boolean>() || js("carPictures.length").unsafeCast<Int>() <= 0) {
+        console.log("No pictures in parsed array")
+        return
+    }
+
+    console.log("Found ${js("carPictures.length")} existing pictures")
                 val existingPicturesList = document.getElementById("existingPicturesList")
-                if (existingPicturesList != null) {
-                    // Clear any existing content
+    if (existingPicturesList == null) {
+        if (domRetryCount < 5) {
+            console.warn("existingPicturesList not in DOM yet; retrying loadExistingCarPictures")
+            window.setTimeout({ loadExistingCarPictures(purchaseData, domRetryCount + 1) }, 200)
+        } else {
+            console.warn("existingPicturesList missing after retries; car pictures not shown")
+        }
+        return
+    }
                     existingPicturesList.innerHTML = ""
                     
-                    // Display each existing picture
                     for (i in 0 until js("carPictures.length").unsafeCast<Int>()) {
                         val picture = js("carPictures[i]")
-                        val pictureId = js("picture.id").toString()
-                        val pictureData = js("picture.data").toString()
-                        
-                        // Create picture element
+        val pictureId = js("picture.id !== undefined && picture.id !== null ? String(picture.id) : ''").toString()
+        var pictureData = ""
+        if (js("typeof picture === 'string'").unsafeCast<Boolean>()) {
+            pictureData = picture.toString()
+        } else {
+            pictureData = js("picture.data != null ? String(picture.data) : ''").toString()
+            if (pictureData.length == 0) pictureData = js("picture.src != null ? String(picture.src) : ''").toString()
+            if (pictureData.length == 0) pictureData = js("picture.url != null ? String(picture.url) : ''").toString()
+            if (pictureData.length == 0) pictureData = js("picture.image != null ? String(picture.image) : ''").toString()
+        }
+        if (pictureData.length == 0) continue
+
                         val pictureElement = document.createElement("div")
                         pictureElement.setAttribute("style", "position: relative; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: white;")
-                        pictureElement.setAttribute("data-picture-id", pictureId)
+        pictureElement.setAttribute("data-picture-id", if (pictureId.length == 0) "legacy_$i" else pictureId)
                         pictureElement.setAttribute("data-picture-data", pictureData)
                         
-                        // Create image
                         val img = document.createElement("img")
                         img.setAttribute("src", pictureData)
                         img.setAttribute("style", "width: 100%; height: 150px; object-fit: cover;")
                         
-                        // Create delete button
                         val deleteBtn = document.createElement("button")
-                        deleteBtn.innerHTML = "❌"
+        deleteBtn.innerHTML = "\u274C"
                         deleteBtn.setAttribute("style", "position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px;")
                         deleteBtn.setAttribute("onclick", "this.parentElement.remove();")
                         
                         pictureElement.appendChild(img)
                         pictureElement.appendChild(deleteBtn)
                         existingPicturesList.appendChild(pictureElement)
-                    }
-                }
-            } else {
-                console.log("📷 No pictures in parsed array")
-            }
-        } catch (e: Exception) {
-            console.log("📷 Error parsing car pictures JSON:", e.message)
-        }
-    } else {
-        console.log("📷 No existing pictures found")
     }
 }
 
@@ -14358,6 +15110,10 @@ fun restoreCnfFormState() {
 // Clear car booking states when navigating away from car booking system
 fun clearCarBookingStates() {
     console.log("🧹 Clearing car booking states...")
+    try {
+        window.sessionStorage.removeItem(SESSION_CAR_BOOKING_FORM_JSON)
+        window.sessionStorage.removeItem(SESSION_CAR_BOOKING_DISPLAYED_JSON)
+    } catch (e: dynamic) { }
     carBookingFormState = js("{}")
     js("window.cnfFormState = {}")
     cnfFormState = js("window.cnfFormState")
@@ -14368,6 +15124,113 @@ fun clearCarBookingStates() {
     cnfPageSelectedPurchaseIds = emptyList()
     // fobPageSelectedPurchaseIds removed - using cnfPageSelectedPurchaseIds for both modes
     console.log("✅ Car booking states cleared")
+}
+
+private const val SESSION_CAR_BOOKING_FORM_JSON = "automan_carBookingFormJson"
+private const val SESSION_CAR_BOOKING_DISPLAYED_JSON = "automan_carBookingDisplayedCarsJson"
+
+/** When native select.value is empty (FAB desync), use selected option text. */
+fun nativeSelectValueOrText(sel: HTMLSelectElement?): String {
+    if (sel == null) return ""
+    var v = sel.value?.trim().orEmpty()
+    if (v.isNotEmpty()) return v
+    val idx = sel.selectedIndex
+    if (idx >= 0) {
+        val opt = sel.options.item(idx) as? HTMLOptionElement
+        v = opt?.value?.trim().orEmpty()
+        if (v.isNotEmpty()) return v
+        v = opt?.textContent?.trim().orEmpty()
+    }
+    return v
+}
+
+/**
+ * Coerce [dynamic] / JSON / JS string values to Kotlin [String] so extensions like [String.isNotEmpty]
+ * work at runtime (plain JS strings do not implement Kotlin CharSequence in JS IR).
+ */
+fun bookingDynString(v: dynamic): String {
+    if (v == null || (js("v === undefined") as Boolean)) return ""
+    return "${v}".trim()
+}
+
+private fun persistCarBookingFormToSessionStorage() {
+    try {
+        val s = js("{}")
+        s.asDynamic().consigneeCountry = carBookingFormState.consigneeCountry ?: ""
+        s.asDynamic().consigneeName = carBookingFormState.consigneeName ?: ""
+        s.asDynamic().etdDate = carBookingFormState.etdDate ?: ""
+        s.asDynamic().polPort = carBookingFormState.polPort ?: ""
+        s.asDynamic().podPort = carBookingFormState.podPort ?: ""
+        s.asDynamic().bookingNo = carBookingFormState.bookingNo ?: ""
+        s.asDynamic().vesselSelect = carBookingFormState.vesselSelect ?: ""
+        s.asDynamic().chassisSelect = carBookingFormState.chassisSelect ?: ""
+        val json = js("JSON.stringify(s)") as String
+        window.sessionStorage.setItem(SESSION_CAR_BOOKING_FORM_JSON, json)
+    } catch (e: dynamic) {
+        console.warn("persistCarBookingFormToSessionStorage:", e)
+    }
+}
+
+/** If in-memory booking form was cleared/lost, recover from sessionStorage (Calculate → C&F → Back). */
+private fun mergeCarBookingFormFromSessionStorageIfNeeded() {
+    val raw = try {
+        window.sessionStorage.getItem(SESSION_CAR_BOOKING_FORM_JSON)
+    } catch (e: dynamic) {
+        null
+    } ?: return
+    if (raw.isBlank()) return
+    val o = try {
+        js("JSON.parse(raw)")
+    } catch (e: dynamic) {
+        return
+    }
+    val d = o.asDynamic()
+    fun mergeKey(key: String) {
+        val cur = bookingDynString(carBookingFormState.asDynamic()[key])
+        if (cur.isNotEmpty()) return
+        val incoming = bookingDynString(d.asDynamic()[key])
+        if (incoming.isNotEmpty()) {
+            carBookingFormState.asDynamic()[key] = incoming
+            console.log("📦 Merged $key from sessionStorage:", incoming)
+        }
+    }
+    mergeKey("consigneeCountry")
+    mergeKey("consigneeName")
+    mergeKey("etdDate")
+    mergeKey("polPort")
+    mergeKey("podPort")
+    mergeKey("bookingNo")
+    mergeKey("vesselSelect")
+    mergeKey("chassisSelect")
+}
+
+private fun persistDisplayedCarsToSessionStorage() {
+    if (carBookingDisplayedCars.isEmpty()) return
+    try {
+        val json = js("JSON.stringify(carBookingDisplayedCars)") as String
+        window.sessionStorage.setItem(SESSION_CAR_BOOKING_DISPLAYED_JSON, json)
+    } catch (e: dynamic) {
+        console.warn("persistDisplayedCarsToSessionStorage:", e)
+    }
+}
+
+private fun mergeDisplayedCarsFromSessionStorageIfNeeded() {
+    if (carBookingDisplayedCars.isNotEmpty()) return
+    val raw = try {
+        window.sessionStorage.getItem(SESSION_CAR_BOOKING_DISPLAYED_JSON)
+    } catch (e: dynamic) {
+        null
+    } ?: return
+    if (raw.isBlank()) return
+    try {
+        val arr = js("JSON.parse(raw)")
+        if (js("Array.isArray(arr)") as Boolean) {
+            carBookingDisplayedCars = arr.unsafeCast<Array<dynamic>>()
+            console.log("📦 Restored carBookingDisplayedCars from sessionStorage:", carBookingDisplayedCars.size)
+        }
+    } catch (e: dynamic) {
+        console.warn("mergeDisplayedCarsFromSessionStorageIfNeeded:", e)
+    }
 }
 
 fun saveCarBookingState() {
@@ -14397,7 +15260,7 @@ fun saveCarBookingState() {
         // Get POD value - handle both input and select elements
         var podPortValue = if (podPortEl != null) {
             if (podPortEl.tagName == "SELECT") {
-                (podPortEl as HTMLSelectElement).value ?: ""
+                nativeSelectValueOrText(podPortEl as HTMLSelectElement)
             } else {
                 (podPortEl as HTMLInputElement).value ?: ""
             }
@@ -14407,45 +15270,65 @@ fun saveCarBookingState() {
         
         // If POD is empty in form, try to get from saved state first
         if (podPortValue.isEmpty()) {
-            val savedPod = carBookingFormState.podPort as? String ?: ""
+            val savedPod = bookingDynString(carBookingFormState.podPort)
             if (savedPod.isNotEmpty()) {
                 podPortValue = savedPod
                 console.log("⚠️ POD was empty in form, using saved POD from state: $podPortValue")
             }
         }
         
+        var countryVal = consigneeCountryEl?.value?.trim().orEmpty()
+        if (countryVal.isEmpty()) {
+            countryVal = currentSelectedCountry.trim()
+            if (countryVal.isNotEmpty()) {
+                console.log("⚠️ Country empty on native select; using currentSelectedCountry:", countryVal)
+            }
+        }
+        
+        val polVal = nativeSelectValueOrText(polPortEl)
+        
         console.log("🔍 Form elements found:")
-        console.log("  - consigneeCountry: ${consigneeCountryEl?.value ?: "null"}")
+        console.log("  - consigneeCountry: ${consigneeCountryEl?.value ?: "null"} (effective: $countryVal)")
         console.log("  - consigneeName: ${consigneeNameEl?.value ?: "null"}")
         console.log("  - etdDate: ${etdDateEl?.value ?: "null"}")
-        console.log("  - polPort: ${polPortEl?.value ?: "null"}")
+        console.log("  - polPort: ${polPortEl?.value ?: "null"} (effective: $polVal)")
         console.log("  - podPort: $podPortValue (element type: ${podPortEl?.tagName ?: "null"}, from form: ${if (podPortEl != null) { if (podPortEl.tagName == "SELECT") (podPortEl as HTMLSelectElement).value else (podPortEl as HTMLInputElement).value } else ""}, from state: ${carBookingFormState.podPort})")
         console.log("  - bookingNo: ${bookingNoEl?.value ?: "null"}")
         console.log("  - vesselInput: ${vesselInputEl?.value ?: "null"}")
         console.log("  - chassisValue: $chassisValue")
         
-        // Save form field values
-        carBookingFormState = js("{}")
-        carBookingFormState.consigneeCountry = consigneeCountryEl?.value ?: ""
+        // Merge into existing state — do NOT replace with js("{}") (that drops selectedPurchaseIds and other keys).
+        carBookingFormState.consigneeCountry = countryVal
         carBookingFormState.consigneeName = consigneeNameEl?.value ?: ""
         carBookingFormState.etdDate = etdDateEl?.value ?: ""
-        carBookingFormState.polPort = polPortEl?.value ?: ""
+        carBookingFormState.polPort = polVal
         carBookingFormState.podPort = podPortValue
         carBookingFormState.bookingNo = bookingNoEl?.value ?: ""
         carBookingFormState.vesselSelect = vesselInputEl?.value ?: ""
         carBookingFormState.chassisSelect = chassisValue
         
-        // C&F/FOB UI removed — mode is derived from freight calculation + lastCalculationMode
-        carBookingFormState.cnfChecked = false
-        carBookingFormState.fobChecked = false
+        // Persist C&F/FOB selection from booking page checkboxes
+        val cnfCheckbox = document.getElementById("cnfCheckbox") as? HTMLInputElement
+        val fobCheckbox = document.getElementById("fobCheckbox") as? HTMLInputElement
+        val cnfChecked = cnfCheckbox?.checked ?: (carBookingFormState.cnfChecked as? Boolean ?: true)
+        val fobChecked = fobCheckbox?.checked ?: (carBookingFormState.fobChecked as? Boolean ?: false)
+        carBookingFormState.cnfChecked = cnfChecked
+        carBookingFormState.fobChecked = fobChecked
+        
+        if (countryVal.isNotEmpty()) {
+            currentSelectedCountry = countryVal
+        }
         
         console.log("🔍 Form state being saved:", carBookingFormState)
+        persistCarBookingFormToSessionStorage()
+        persistDisplayedCarsToSessionStorage()
     } else {
         console.log("🔍 Not on Car Booking page - preserving existing form state")
         console.log("🔍 Existing form state:", carBookingFormState)
     }
     
     // Save selected rows - handle different page contexts
+    val preservedSelectedRows = carBookingSelectedRows
     carBookingSelectedRows = emptyArray()
     
     // Check if we're on Car Booking page (has carSelectionTableBody)
@@ -14463,18 +15346,28 @@ fun saveCarBookingState() {
             }
         }
     } else {
-        // We're on C&F or Package page - use stored selected cars
+        // We're on C&F or Package page - preserve prior booking selection if available.
+        // Fallback to C&F selected cars only when we truly don't have prior state.
         console.log("🔍 Not on Car Booking page - using stored selected cars")
-        carBookingSelectedRows = cnfPageSelectedCars.map { it.chassis }.toTypedArray()
+        carBookingSelectedRows = if (preservedSelectedRows.isNotEmpty()) {
+            preservedSelectedRows
+        } else {
+            cnfPageSelectedCars.map { bookingDynString(it.chassis) }.filter { it.isNotEmpty() }.toTypedArray()
+        }
         console.log("🔍 Using ${carBookingSelectedRows.size} stored selected cars:", carBookingSelectedRows.contentToString())
     }
     
-    // Save table data - both displayed cars and selected cars
+    // Save table snapshot only while the booking LIST is in the DOM. On C&F / other pages
+    // [getSelectedCarsFromTable] is empty and would wipe the saved rows from before navigation.
+    if (carSelectionTableBodyEl2 != null) {
     carBookingTableData = getSelectedCarsFromTable().toTypedArray()
+        console.log("✅ Table data saved:", carBookingTableData.size)
+    } else {
+        console.log("✅ Table data preserved (off booking page):", carBookingTableData.size, "rows")
+    }
     
     console.log("✅ Car Booking state saved:", carBookingFormState)
     console.log("✅ Selected rows saved:", carBookingSelectedRows.size)
-    console.log("✅ Table data saved:", carBookingTableData.size)
     console.log("✅ Displayed cars saved:", carBookingDisplayedCars.size)
 }
 
@@ -14484,16 +15377,19 @@ fun saveBookingSelectionState(selection: String) {
     safeLocalStorageSet("bookingSelection", selection)
 }
 
-// Restore booking selection state (C&F/FOB checkboxes removed from UI)
+// Restore booking selection state (C&F/FOB checkboxes)
 fun restoreBookingSelectionState() {
     val cnfCheckbox = document.getElementById("cnfCheckbox") as HTMLInputElement?
     val fobCheckbox = document.getElementById("fobCheckbox") as HTMLInputElement?
     if (cnfCheckbox == null || fobCheckbox == null) {
         return
     }
-    val cnfChecked = carBookingFormState.cnfChecked as? Boolean ?: false
+    val cnfChecked = carBookingFormState.cnfChecked as? Boolean ?: true
     val fobChecked = carBookingFormState.fobChecked as? Boolean ?: false
     if (cnfChecked && fobChecked) {
+        cnfCheckbox.checked = true
+        fobCheckbox.checked = false
+    } else if (!cnfChecked && !fobChecked) {
         cnfCheckbox.checked = true
         fobCheckbox.checked = false
     } else {
@@ -14504,6 +15400,11 @@ fun restoreBookingSelectionState() {
 
 fun restoreCarBookingState() {
     console.log("🔄 Restoring Car Booking state...")
+    js("window.__bookingRestoreInProgress = true")
+    // Safety valve: never keep restore guard stuck on.
+    js("setTimeout(function(){ if (window.__bookingRestoreInProgress === true) window.__bookingRestoreInProgress = false; }, 4000)")
+    mergeCarBookingFormFromSessionStorageIfNeeded()
+    mergeDisplayedCarsFromSessionStorageIfNeeded()
     console.log("🔍 Form state to restore:", carBookingFormState)
     
     // Debug: Check if form elements exist before restoring
@@ -14526,14 +15427,32 @@ fun restoreCarBookingState() {
     console.log("  - vesselInput: ${vesselInputEl != null}")
     console.log("  - chassisInput: ${chassisInputEl != null}")
     
-    // Restore form field values
-    consigneeCountryEl?.value = carBookingFormState.consigneeCountry ?: ""
-    consigneeNameEl?.value = carBookingFormState.consigneeName ?: ""
-    etdDateEl?.value = carBookingFormState.etdDate ?: ""
-    polPortEl?.value = carBookingFormState.polPort ?: ""
+    // Restore form field values (bookingDynString: JSON/dynamic may be JS strings — isNotEmpty must be Kotlin String)
+    val syncCountry = bookingDynString(carBookingFormState.consigneeCountry)
+    consigneeCountryEl?.value = syncCountry
+    if (syncCountry.isNotEmpty()) {
+        currentSelectedCountry = syncCountry
+    }
+    consigneeNameEl?.value = bookingDynString(carBookingFormState.consigneeName)
+    etdDateEl?.value = bookingDynString(carBookingFormState.etdDate)
+    // POL options come from purchases only after country is set — repopulate before restoring POL value
+    val restoredCountry = syncCountry
+    if (restoredCountry.isNotEmpty()) {
+        loadStockLocations(restoredCountry) {
+            js(
+                """
+                if (typeof window.refreshBookingFabSelect === 'function') {
+                  window.refreshBookingFabSelect('polPort');
+                }
+                """
+            )
+        }
+    } else {
+        clearPolDropdownNoCountry()
+    }
     // Restore POD value - handle both input and select elements
     // Use a delay to ensure booking mappings have completed first
-    var podValue = carBookingFormState.podPort as? String ?: ""
+    var podValue = bookingDynString(carBookingFormState.podPort)
     
     console.log("🔍 POD restoration - saved state value: '$podValue'")
     
@@ -14624,16 +15543,30 @@ fun restoreCarBookingState() {
             }, 500)
         }
     }
-    bookingNoEl?.value = carBookingFormState.bookingNo ?: ""
-    vesselInputEl?.value = carBookingFormState.vesselSelect ?: ""
+    bookingNoEl?.value = bookingDynString(carBookingFormState.bookingNo)
+    vesselInputEl?.value = bookingDynString(carBookingFormState.vesselSelect)
     // Restore chassis search input value (plain input, no dropdown)
-    val chassisValue = carBookingFormState.chassisSelect ?: ""
+    val chassisValue = bookingDynString(carBookingFormState.chassisSelect)
     if (chassisInputEl != null && chassisValue != null && chassisValue != "" && chassisValue.trim() != "") {
         chassisInputEl.value = chassisValue
     }
     
     console.log("🔍 Form fields restored - Country: ${carBookingFormState.consigneeCountry}, POL: ${carBookingFormState.polPort}")
     console.log("🔍 After restoration - Country: ${consigneeCountryEl?.value}, POL: ${polPortEl?.value}")
+
+    js(
+        """
+        setTimeout(function() {
+          if (typeof window.refreshBookingFabSelect === 'function') {
+            if (document.getElementById('consigneeCountry')) window.refreshBookingFabSelect('consigneeCountry');
+            if (document.getElementById('polPort')) window.refreshBookingFabSelect('polPort');
+            if (document.getElementById('consigneeSelect')) window.refreshBookingFabSelect('consigneeSelect');
+            if (typeof window.ensureBookingFabPod === 'function') window.ensureBookingFabPod();
+            if (document.getElementById('podPort')) window.refreshBookingFabSelect('podPort');
+          }
+        }, 1200);
+        """
+    )
     
     // Restore displayed cars first, then selected rows
     // Also check carBookingTableData as fallback
@@ -14655,6 +15588,7 @@ fun restoreCarBookingState() {
         js("setTimeout(function() { window.restoreSelectedRows(); }, 500)")
             } else {
         console.log("⚠️ No displayed cars to restore")
+        js("window.__bookingRestoreInProgress = false")
     }
     
     console.log("✅ Car Booking state restored")
@@ -14709,6 +15643,14 @@ fun restoreSelectedRows() {
         }
     }
     
+    // Keep header checkbox consistent with restored row state.
+    val selectAll = document.getElementById("selectAllCars") as? HTMLInputElement
+    if (selectAll != null) {
+        selectAll.checked = (restoredCount > 0 && restoredCount == allCheckboxes.length)
+    }
+
+    js("window.__bookingRestoreInProgress = false")
+
     console.log("✅ Selected rows restored: $restoredCount out of ${carBookingSelectedRows.size}")
 }
 
@@ -15620,12 +16562,7 @@ fun populateInvoiceListTableFromPurchases(purchases: List<dynamic>) {
         val carName = js("purchase.carName")?.toString() ?: "N/A"
         val year = js("purchase.carModelYear")?.toString() ?: "N/A"
         
-        // Get amount - use totalCnfPrice if available, otherwise totalFobPrice, otherwise 0
-        val amount = when {
-            js("purchase.totalCnfPrice") != null -> js("purchase.totalCnfPrice").toString().toDoubleOrNull() ?: 0.0
-            js("purchase.totalFobPrice") != null -> js("purchase.totalFobPrice").toString().toDoubleOrNull() ?: 0.0
-            else -> 0.0
-        }
+        val amount = purchaseInvoiceLineAmountYenFromDynamic(purchase)
         totalAmount += amount
         
         val amountInt = amount.toInt()
@@ -15807,12 +16744,7 @@ fun handleInvoicePdfDownload() {
                 val distance = js("purchase.distance")?.toString()?.trim() ?: ""
                 val fuel = js("purchase.fuel")?.toString()?.trim() ?: ""
                 
-                // Get amount - use totalCnfPrice if available, otherwise totalFobPrice, otherwise 0
-                val amount = when {
-                    js("purchase.totalCnfPrice") != null -> js("purchase.totalCnfPrice").toString().toDoubleOrNull() ?: 0.0
-                    js("purchase.totalFobPrice") != null -> js("purchase.totalFobPrice").toString().toDoubleOrNull() ?: 0.0
-                    else -> 0.0
-                }
+                val amount = purchaseInvoiceLineAmountYenFromResponse(purchase)
                 totalAmount += amount
                 
                 // Format amount with ¥ symbol
@@ -16200,16 +17132,16 @@ FAX: 047-711-0409
                             </div>
                         </div>
                         
-                        <!-- Preview + Print -->
+                        <!-- Preview + Download PDF -->
                         <div class="rixo-print-actions">
                             <button type="button" id="previewRixoRequest" class="rixo-preview-btn">
                                 <span class="rixo-preview-icon" aria-hidden="true"></span>
                                 Preview
                             </button>
-                            <button type="button" id="printRixoRequest" class="rixo-print-btn">
-                                <span class="rixo-print-icon">🖨️</span>
-                                Print
-                            </button>
+                        <button type="button" id="printRixoRequest" class="rixo-print-btn">
+                            <span class="rixo-print-icon">🖨️</span>
+                            Download PDF
+                        </button>
                         </div>
                     </form>
                 </div>
@@ -16218,6 +17150,12 @@ FAX: 047-711-0409
                 <div class="rixo-rows-preview-panel">
                     <div class="rixo-rows-header">
                         <h2 class="rixo-rows-title">Cars to Rixo</h2>
+                        <button id="rixoColumnFilterBtn" type="button" style="padding:8px 14px;background-color:#6c757d;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
+                            </svg>
+                            Column Filter
+                        </button>
                     </div>
                     <div id="selectedCount" class="rixo-selected-count">Selected: 0 of 0</div>
                     
@@ -16659,6 +17597,7 @@ FAX: 047-711-0409
     
     // Set up event listeners
     setupRixoRequestGeneratorListeners()
+    loadRixoSelectedColumnsFromStorage()
     
     // Set default date to today
     val today = js("new Date().toISOString().split('T')[0]") as String
@@ -16772,6 +17711,9 @@ private fun ensureRixoCompanyFabApi() {
 // Set up event listeners for the Rixo Request Generator page
 fun setupRixoRequestGeneratorListeners() {
     ensureRixoCompanyFabApi()
+    document.getElementById("rixoColumnFilterBtn")?.addEventListener("click", { _: Event ->
+        showRixoColumnFilterModal()
+    })
     // Buying Date change - load Rixo companies and rows
     document.getElementById("buyingDate")?.addEventListener("change", { _: Event ->
         loadRixoCompaniesForDate()
@@ -16791,7 +17733,7 @@ fun setupRixoRequestGeneratorListeners() {
     rixoCompanyInput?.addEventListener("change", { _: Event ->
         loadRowsForDateAndCompany()
     })
-
+    
     // FAB trigger / close (speed-dial UI; IDs only exist on Rixo Request Generator page)
     document.getElementById("rixoCompanyFabTrigger")?.addEventListener("click", { event: Event ->
         event.asDynamic().stopPropagation()
@@ -16894,12 +17836,12 @@ private fun hasAnyRixoPendingPurchaseForDate(allPurchases: Array<dynamic>, forma
 fun loadRowsForDateAndCompany() {
     val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
     val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
-
+    
     if (buyingDate.isEmpty()) {
         setRixoRowsPreviewEmptyMessage("Please select a buying date and Rixo company to view available rows.")
         return
     }
-
+    
     val formattedDate = formatWithWeekday(buyingDate)
 
     if (rixoCompany.isEmpty()) {
@@ -16919,41 +17861,207 @@ fun loadRowsForDateAndCompany() {
         }
         return
     }
-
+    
     window.fetch(apiUrl("purchases")).then { response ->
         if (response.ok) {
             response.json().then { allPurchases ->
                 val purchasesArray = allPurchases as Array<dynamic>
                 val matchingPurchases = mutableListOf<dynamic>()
-
+                
                 for (purchase in purchasesArray) {
                     val date = js("purchase.date")?.toString() ?: ""
                     val rixoRequested = js("purchase.rixoRequested")?.toString() ?: "FALSE"
                     val company = js("purchase.rixoCompany")?.toString() ?: ""
-
+                    
                     // Only include purchases from the selected date and company where rixoRequested is FALSE
                     if (date == formattedDate && company == rixoCompany && rixoRequested == "FALSE") {
                         matchingPurchases.add(purchase)
                     }
                 }
-
+                
                 renderRixoRowsPreview(matchingPurchases)
             }
         }
     }
 }
 
+private val rixoFixedColumns: List<String> = listOf("select", "edit")
+private val rixoDefaultDataColumns: List<String> = listOf(
+    "chassis", "auctionNo", "carModelYear", "carName", "auctionHouse", "stockLocation", "venueId", "numberCut"
+)
+private var rixoCurrentRows: List<dynamic> = emptyList()
+private var rixoSelectedDataColumns: MutableList<String> = mutableListOf()
+private const val RIXO_MAX_FILTER_COLUMNS: Int = 8
+
+private fun rixoStorageKey(): String = "rixoSelectedColumns"
+
+private fun normalizeRixoSelectedDataColumns(cols: List<String>): MutableList<String> {
+    val available = rixoAvailableDataColumns().toSet()
+    val dedup = linkedSetOf<String>()
+    cols.forEach { c ->
+        val k = c.trim()
+        if (k.isNotEmpty() && available.contains(k)) dedup.add(k)
+    }
+    // Chassis is always fixed right after Edit.
+    dedup.remove("chassis")
+    val ordered = mutableListOf("chassis")
+    ordered.addAll(dedup)
+    return ordered.take(RIXO_MAX_FILTER_COLUMNS).toMutableList()
+}
+
+private fun rixoAvailableDataColumns(): List<String> =
+    purchaseListColumnLabels().keys
+        .filter { it != "id" && it != "createdAt" && it != "updatedAt" && it != "vesselNo" }
+
+private fun rixoColumnLabel(key: String): String = when (key) {
+    "carName" -> "Car"
+    "auctionHouse" -> "Supplier"
+    "stockLocation" -> "Stock"
+    else -> purchaseListColumnLabels()[key] ?: key
+}
+
+private fun loadRixoSelectedColumnsFromStorage() {
+    val available = rixoAvailableDataColumns().toSet()
+    val saved = safeLocalStorageGet(rixoStorageKey())
+    val parsed = if (saved != null) {
+        try {
+            JSON.parse<Array<String>>(saved).toList()
+        } catch (_: dynamic) {
+            emptyList()
+        }
+    } else {
+        emptyList()
+    }
+    val chosen = parsed.filter { available.contains(it) }
+    rixoSelectedDataColumns = if (chosen.isNotEmpty()) normalizeRixoSelectedDataColumns(chosen) else normalizeRixoSelectedDataColumns(rixoDefaultDataColumns)
+}
+
+private fun saveRixoSelectedColumnsToStorage() {
+    rixoSelectedDataColumns = normalizeRixoSelectedDataColumns(rixoSelectedDataColumns)
+    safeLocalStorageSet(rixoStorageKey(), JSON.stringify(rixoSelectedDataColumns.toTypedArray()))
+}
+
+private fun showRixoColumnFilterModal() {
+    val existing = document.getElementById("rixoColumnFilterModal")
+    existing?.remove()
+
+    val available = rixoAvailableDataColumns()
+    val selected = rixoSelectedDataColumns.toSet()
+    val checks = available.sortedBy { (purchaseListColumnLabels()[it] ?: it).lowercase() }.joinToString("") { key ->
+        val checked = if (selected.contains(key)) "checked" else ""
+        val disabled = if (key == "chassis") "disabled" else ""
+        """
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;">
+            <input type="checkbox" class="rixo-col-check" value="$key" $checked $disabled style="transform:scale(1.05);">
+            <span style="font-size:13px;color:#374151;">${escapeHtml(rixoColumnLabel(key))}</span>
+        </label>
+        """.trimIndent()
+    }
+
+    val modal = document.createElement("div")
+    modal.id = "rixoColumnFilterModal"
+    modal.asDynamic().style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;"
+    modal.innerHTML = """
+        <div style="background:#fff;border-radius:10px;padding:18px;max-width:420px;width:100%;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 18px 36px rgba(0,0,0,0.22);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <h3 style="margin:0;font-size:18px;font-weight:700;color:#111827;">Select Columns to Display</h3>
+                <button id="rixoColFilterClose" type="button" style="border:none;background:transparent;font-size:22px;cursor:pointer;color:#6b7280;">&times;</button>
+            </div>
+            <div id="rixoColFilterCount" style="font-size:12px;color:#6b7280;margin-bottom:10px;">Select up to $RIXO_MAX_FILTER_COLUMNS columns. Chassis stays fixed after Edit.</div>
+            <div id="rixoColChecksWrap" style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:2px;">
+                $checks
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+                <button id="rixoColFilterDefault" type="button" style="padding:8px 14px;border:1px solid #0ea5e9;background:#f0f9ff;color:#0369a1;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Default</button>
+                <button id="rixoColFilterCancel" type="button" style="padding:8px 14px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;">Cancel</button>
+                <button id="rixoColFilterApply" type="button" style="padding:8px 14px;border:none;background:#0ea5e9;color:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Apply</button>
+            </div>
+        </div>
+    """.trimIndent()
+    document.body?.appendChild(modal)
+
+    fun closeModal() {
+        document.getElementById("rixoColumnFilterModal")?.remove()
+    }
+
+    document.getElementById("rixoColFilterClose")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("rixoColFilterCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    modal.addEventListener("click", { e: Event ->
+        if ((e.target as? HTMLElement)?.id == "rixoColumnFilterModal") closeModal()
+    })
+    document.getElementById("rixoColFilterDefault")?.addEventListener("click", { _: Event ->
+        rixoSelectedDataColumns = normalizeRixoSelectedDataColumns(rixoDefaultDataColumns)
+        saveRixoSelectedColumnsToStorage()
+        renderRixoRowsPreview(rixoCurrentRows)
+        closeModal()
+    })
+    fun updateRixoColFilterChecks() {
+        val checksNode = document.querySelectorAll("#rixoColChecksWrap .rixo-col-check")
+        var checkedCount = 0
+        for (i in 0 until checksNode.length) {
+            val cb = checksNode.item(i) as? HTMLInputElement ?: continue
+            if (cb.checked) checkedCount++
+        }
+        for (i in 0 until checksNode.length) {
+            val cb = checksNode.item(i) as? HTMLInputElement ?: continue
+            cb.disabled = false
+            if (!cb.checked && checkedCount >= RIXO_MAX_FILTER_COLUMNS) cb.disabled = true
+            if (cb.value == "chassis") cb.disabled = true
+        }
+        (document.getElementById("rixoColFilterCount") as? HTMLElement)?.textContent = "Selected: $checkedCount/$RIXO_MAX_FILTER_COLUMNS (Chassis is fixed)"
+    }
+
+    val checksNodeInit = document.querySelectorAll("#rixoColChecksWrap .rixo-col-check")
+    for (i in 0 until checksNodeInit.length) {
+        val cb = checksNodeInit.item(i) as? HTMLInputElement ?: continue
+        cb.addEventListener("change", { _: Event ->
+            if (cb.value == "chassis") cb.checked = true
+            updateRixoColFilterChecks()
+        })
+    }
+    updateRixoColFilterChecks()
+
+    document.getElementById("rixoColFilterApply")?.addEventListener("click", { _: Event ->
+        val checksNode = document.querySelectorAll("#rixoColChecksWrap .rixo-col-check")
+        val selectedCols = mutableListOf<String>()
+        for (i in 0 until checksNode.length) {
+            val cb = checksNode.item(i) as? HTMLInputElement ?: continue
+            if (cb.checked) selectedCols.add(cb.value)
+        }
+        rixoSelectedDataColumns = normalizeRixoSelectedDataColumns(selectedCols)
+        saveRixoSelectedColumnsToStorage()
+        renderRixoRowsPreview(rixoCurrentRows)
+        closeModal()
+    })
+}
+
 // Render the rows preview table
 fun renderRixoRowsPreview(purchases: List<dynamic>) {
     val preview = document.getElementById("rixoRowsPreview") ?: return
     val selectedCount = document.getElementById("selectedCount") ?: return
+    rixoCurrentRows = purchases
     
     if (purchases.isEmpty()) {
         setRixoRowsPreviewEmptyMessage("(No Car is Found)")
         return
     }
+    if (rixoSelectedDataColumns.isEmpty()) loadRixoSelectedColumnsFromStorage()
     
     val tableHTML = StringBuilder()
+    val dataColumns = normalizeRixoSelectedDataColumns(rixoSelectedDataColumns).toList()
+
+    fun columnClassFor(key: String): String = when (key) {
+        "chassis" -> "rixo-col-chassis"
+        "auctionNo" -> "rixo-col-auction"
+        "carModelYear" -> "rixo-col-year"
+        "carName" -> "rixo-col-car"
+        "auctionHouse" -> "rixo-col-supplier"
+        "stockLocation" -> "rixo-col-stock"
+        "venueId" -> "rixo-col-venue"
+        "numberCut" -> "rixo-col-numbercut"
+        else -> "rixo-col-generic"
+    }
+
     tableHTML.append("""
         <table class="rixo-table">
             <thead>
@@ -16965,14 +18073,7 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
                         </label>
                     </th>
                     <th class="rixo-col-edit"></th>
-                    <th class="rixo-col-chassis">Chassis</th>
-                    <th class="rixo-col-auction">Auction No</th>
-                    <th class="rixo-col-year">Year</th>
-                    <th class="rixo-col-car">Car</th>
-                    <th class="rixo-col-supplier">Supplier</th>
-                    <th class="rixo-col-stock">Stock</th>
-                    <th class="rixo-col-venue">Venue ID</th>
-                    <th class="rixo-col-numbercut">Number Cut</th>
+                    ${dataColumns.joinToString("") { """<th class="${columnClassFor(it)}">${escapeHtml(rixoColumnLabel(it))}</th>""" }}
                 </tr>
             </thead>
             <tbody>
@@ -16980,15 +18081,6 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
     
     purchases.forEach { purchase ->
         val id = js("purchase.id").toString()
-        val chassis = escapeHtml(js("purchase.chassis")?.toString() ?: "")
-        val auctionNo = escapeHtml(js("purchase.auctionNo")?.toString() ?: "")
-        val yearRaw = js("purchase.carModelYear")?.toString() ?: ""
-        val year = carModelYearToYearOnly(yearRaw)
-        val carName = escapeHtml(js("purchase.carName")?.toString() ?: "")
-        val auctionHouse = escapeHtml(js("purchase.auctionHouse")?.toString() ?: "")
-        val stockLocation = escapeHtml(js("purchase.stockLocation")?.toString() ?: "")
-        val venueId = escapeHtml(js("purchase.venueId")?.toString() ?: "")
-        val numberCut = escapeHtml(js("purchase.numberCut")?.toString() ?: "")
         
         tableHTML.append("""
             <tr>
@@ -17005,14 +18097,12 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
                         </svg>
                     </button>
                 </td>
-                <td class="rixo-col-chassis" data-label="Chassis:">$chassis</td>
-                <td class="rixo-col-auction" data-label="Auction No:">$auctionNo</td>
-                <td class="rixo-col-year" data-label="Year:">$year</td>
-                <td class="rixo-col-car" data-label="Car:">$carName</td>
-                <td class="rixo-col-supplier" data-label="Supplier:">$auctionHouse</td>
-                <td class="rixo-col-stock" data-label="Stock:">$stockLocation</td>
-                <td class="rixo-col-venue" data-label="Venue ID:">$venueId</td>
-                <td class="rixo-col-numbercut" data-label="Number Cut:">$numberCut</td>
+                ${dataColumns.joinToString("") { key ->
+                    val label = escapeHtml(rixoColumnLabel(key))
+                    val raw = if (key == "carModelYear") carModelYearToYearOnly(js("purchase.carModelYear")?.toString() ?: "") else purchaseTableCellValue(purchase, key)
+                    val display = escapeHtml(raw)
+                    """<td class="${columnClassFor(key)}" data-label="$label:">$display</td>"""
+                }}
             </tr>
         """)
     }
@@ -17212,6 +18302,7 @@ fun generateRixoRequestPdfViaBackend(
     }
     requestBody.ids = jsArray
     requestBody.transportData = transportData
+    requestBody.persistHistory = !preview
     
     val requestInit = js("{}")
     requestInit.method = "POST"
@@ -17222,7 +18313,8 @@ fun generateRixoRequestPdfViaBackend(
     
     console.log("🔧 [DEBUG] Calling backend API with requestBody:", requestBody)
     
-    // Call backend API
+    // Call backend API — response is PDF bytes only; no server-side file/S3 storage for this endpoint.
+    // Preview: blob + createObjectURL stays in the browser tab; revoke after use. Do not upload this Blob to S3 or any bucket.
     window.fetch(apiUrl("purchases/rixo-transport-pdf"), requestInit).then { response ->
         if (response.ok) {
             response.blob().then { blob ->
@@ -17231,7 +18323,7 @@ fun generateRixoRequestPdfViaBackend(
                     val opened = window.open(url, "_blank")
                     val blocked = js("(opened == null || typeof opened === 'undefined')") as Boolean
                     if (blocked) {
-                        showMessage("Could not open preview. Allow pop-ups for this site, or use Print to download the PDF.", "error")
+                        showMessage("Could not open preview. Allow pop-ups for this site, or use Download PDF to save the PDF.", "error")
                         try {
                             js("URL.revokeObjectURL(url)")
                         } catch (_: dynamic) {
@@ -17247,20 +18339,20 @@ fun generateRixoRequestPdfViaBackend(
                         showMessage("PDF preview opened in a new tab.", "success")
                     }
                 } else {
-                    val a = document.createElement("a") as HTMLAnchorElement
-                    a.href = url
-                    a.setAttribute("download", "rixo-transport-${js("Date.now()")}.pdf")
-                    document.body?.appendChild(a)
-                    a.click()
-                    document.body?.removeChild(a)
-                    window.setTimeout({
-                        try {
-                            js("URL.revokeObjectURL(url)")
-                        } catch (e: dynamic) {
-                            Logger.warn("Failed to revoke URL: ${e.toString()}")
-                        }
-                    }, AppConstants.URL_REVOKE_DELAY_SHORT)
-                    showMessage("PDF downloaded successfully. Set Rixo Requested to TRUE manually when you have faxed the PDF.", "success")
+                val a = document.createElement("a") as HTMLAnchorElement
+                a.href = url
+                a.setAttribute("download", "rixo-transport-${js("Date.now()")}.pdf")
+                document.body?.appendChild(a)
+                a.click()
+                document.body?.removeChild(a)
+                        window.setTimeout({
+                            try {
+                js("URL.revokeObjectURL(url)")
+                            } catch (e: dynamic) {
+                                Logger.warn("Failed to revoke URL: ${e.toString()}")
+                            }
+                        }, AppConstants.URL_REVOKE_DELAY_SHORT)
+                showMessage("Rixo history saved. PDF downloaded. Set Rixo Requested to TRUE manually when you have faxed the PDF.", "success")
                 }
             }.catch { error ->
                 console.error("❌ Error processing blob:", error)
@@ -19427,15 +20519,12 @@ fun applyColumnChanges() {
     // Save selected columns (date & chassis pinned left in stored order)
     saveSelectedColumns(ordered)
     closeColumnFilterModal()
-    // Call loadPurchases from PurchaseManagement.kt - expose it globally if needed
-    js("""
-        if (typeof loadPurchases === 'function') {
-            loadPurchases();
-        } else {
-            // Fallback: reload the page to apply changes
-            window.location.reload();
-        }
-    """)
+    // Re-render current view in-place without any reload, preserving search/filter/sort state.
+    if (getDeviceType() == "mobile") {
+        displayPurchasesAsCards()
+    } else {
+        displayPurchasesWithPagination()
+    }
 }
 
 fun closeColumnFilterModal() {
@@ -19555,7 +20644,8 @@ fun generateShippingSchedulePdf() {
     pdfRequest.pod = globalBookingDetails.pod
     pdfRequest.shippingDate = globalBookingDetails.shippingDate
     pdfRequest.consigneeName = globalBookingDetails.consigneeName
-    pdfRequest.consigneeAddress = "" // Always empty - we only use consigneeName
+    pdfRequest.consigneeAddress = ""
+    pdfRequest.consigneeCountry = globalBookingDetails.consigneeCountry
     
     // Use stored selected cars, or try to get from table if on booking page
     val carsForPdf = if (isOnBookingPage && globalSelectedCarsForPdf.isEmpty()) {
@@ -19665,7 +20755,8 @@ fun generateShippingSchedulePdfPreview() {
     pdfRequest.pod = globalBookingDetails.pod
     pdfRequest.shippingDate = globalBookingDetails.shippingDate
     pdfRequest.consigneeName = globalBookingDetails.consigneeName
-    pdfRequest.consigneeAddress = "" // Always empty - we only use consigneeName
+    pdfRequest.consigneeAddress = ""
+    pdfRequest.consigneeCountry = globalBookingDetails.consigneeCountry
     
     // Use stored selected cars, or try to get from table if on booking page
     val carsForPdf = if (isOnBookingPage && globalSelectedCarsForPdf.isEmpty()) {
@@ -19779,7 +20870,7 @@ fun showChassisSuggestions(suggestions: Array<String>) {
     
     suggestions.forEach { chassis ->
         val suggestionItem = document.createElement("div") as HTMLElement
-        suggestionItem.style.cssText = "padding: 10px; cursor: pointer; border-bottom: 1px solid #e5e7eb;"
+        suggestionItem.className = "booking-chassis-suggestion-item"
         suggestionItem.textContent = chassis
         suggestionItem.addEventListener("click", { _: Event ->
             val chassisInput = document.getElementById("chassisSearchInput") as? HTMLInputElement
@@ -19793,10 +20884,10 @@ fun showChassisSuggestions(suggestions: Array<String>) {
             }
         })
         suggestionItem.addEventListener("mouseenter", { _: Event ->
-            suggestionItem.style.setProperty("background-color", "#f3f4f6")
+            suggestionItem.classList.add("booking-chassis-suggestion-item--hover")
         })
         suggestionItem.addEventListener("mouseleave", { _: Event ->
-            suggestionItem.style.setProperty("background-color", "white")
+            suggestionItem.classList.remove("booking-chassis-suggestion-item--hover")
         })
         suggestionsDiv.appendChild(suggestionItem)
     }
@@ -19833,14 +20924,18 @@ fun displayCars(cars: dynamic) {
     
     cars.forEachIndexed { index: Int, car: dynamic ->
         val row = document.createElement("tr")
+        val n = (index + 1).toString()
+        val ch = (car.chassis ?: "").toString()
+        val nm = (car.carName ?: "N/A").toString()
+        val yr = (car.carModelYear ?: "N/A").toString()
         row.innerHTML = """
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">
-                <input type="checkbox" value="${car.id}" style="margin-right: 8px;">
+            <td class="booking-td booking-td-select">
+                <input type="checkbox" value="${car.id}" aria-label="Select row">
             </td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${index + 1}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${car.chassis}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${car.carName ?: "N/A"}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${car.carModelYear ?: "N/A"}</td>
+            <td class="booking-td">${formatPurchaseListCellChipHtml(n)}</td>
+            <td class="booking-td">${formatPurchaseListCellChipHtml(ch)}</td>
+            <td class="booking-td">${formatPurchaseListCellChipHtml(nm)}</td>
+            <td class="booking-td">${formatPurchaseListCellChipHtml(yr)}</td>
         """
         tbody?.appendChild(row)
     }
@@ -20133,7 +21228,6 @@ fun confirmCarCostDetails() {
     costData.repairFee = repairFee
     costData.mscCharges = mscCharges
     costData.profit = profit
-    costData.totalCnfPrice = totalCnfPrice
     
     // Save to database using existing saveCarCostDetails function
     saveCarCostDetails()

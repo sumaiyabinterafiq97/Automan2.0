@@ -5,8 +5,34 @@ import kotlinx.browser.window
 import org.w3c.dom.*
 import org.w3c.dom.events.Event
 
+private data class ClientMapAdvancedFilter(
+    val field: String,
+    val value: String = ""
+)
+
 private var clientMapSortField: String? = null
 private val clientMapSortOrderByField: MutableMap<String, String> = mutableMapOf()
+private var clientMapBaseRows: List<dynamic> = emptyList()
+private var clientMapSearchQuery: String = ""
+private val clientMapFilterSelectedColumns: MutableSet<String> = mutableSetOf()
+private var clientMapAdvancedFilters: List<ClientMapAdvancedFilter> = emptyList()
+private var clientMapAdvancedPanelOpen: Boolean = false
+
+private val clientMapColumns = listOf(
+    "clientName", "country", "pod", "address", "bankInfo", "consignee", "debitLimit"
+)
+
+private val clientMapColumnLabels = mapOf(
+    "clientName" to "Client Name",
+    "country" to "Country",
+    "pod" to "POD",
+    "address" to "Address",
+    "bankInfo" to "Bank Info",
+    "consignee" to "Consignee",
+    "debitLimit" to "Debit Limit",
+)
+
+private val clientMapSortableCols = clientMapColumns.toSet()
 
 private fun clientMapSortTooltip(field: String): String {
     val ord = clientMapSortOrderByField[field] ?: "desc"
@@ -43,13 +69,54 @@ private fun clientMapCellText(mapping: dynamic, key: String): String {
     }
 }
 
-private fun clientMapRowMatches(mapping: dynamic, q: String): Boolean {
-    if (q.isEmpty()) return true
-    val keys = listOf("clientName", "country", "pod", "address", "bankInfo", "consignee", "debitLimit")
-    for (k in keys) {
-        if (clientMapCellText(mapping, k).uppercase().contains(q)) return true
+private fun clientMapMatchesSingleFilter(mapping: dynamic, f: ClientMapAdvancedFilter): Boolean {
+    val raw = clientMapCellText(mapping, f.field)
+    val value = raw.trim()
+    val q = f.value.trim().lowercase()
+    if (q.length == 0) return true
+    return value.lowercase().contains(q)
+}
+
+private fun clientMapComparableNumber(v: String): Double? {
+    val cleaned = v.replace(",", "").replace("¥", "").trim()
+    return cleaned.toDoubleOrNull()
+}
+
+private fun applyClientMapAdvancedFilters(rows: List<dynamic>): List<dynamic> {
+    if (clientMapAdvancedFilters.isEmpty()) return rows
+    return rows.filter { m -> clientMapAdvancedFilters.all { f -> clientMapMatchesSingleFilter(m, f) } }
+}
+
+private fun applyClientMapTextSearch(rows: List<dynamic>): List<dynamic> {
+    val q = clientMapSearchQuery.trim().lowercase()
+    if (q.length == 0) return rows
+    val keys = if (clientMapFilterSelectedColumns.isNotEmpty()) {
+        clientMapFilterSelectedColumns.toList()
+    } else {
+        clientMapColumns
     }
-    return false
+    return rows.filter { m -> keys.any { k -> clientMapCellText(m, k).lowercase().contains(q) } }
+}
+
+private fun applyClientMapSorting(rows: List<dynamic>): List<dynamic> {
+    val sf = clientMapSortField ?: return rows
+    if (sf !in clientMapSortableCols) return rows
+    val ord = clientMapSortOrderByField[sf] ?: "desc"
+    return if (sf == "debitLimit") {
+        if (ord == "asc") {
+            rows.sortedBy { clientMapComparableNumber(clientMapCellText(it, sf)) ?: Double.NEGATIVE_INFINITY }
+        } else {
+            rows.sortedByDescending { clientMapComparableNumber(clientMapCellText(it, sf)) ?: Double.NEGATIVE_INFINITY }
+        }
+    } else {
+        if (ord == "asc") rows.sortedBy { extractClientMapSortKey(it, sf) } else rows.sortedByDescending { extractClientMapSortKey(it, sf) }
+    }
+}
+
+private fun getProcessedClientMapRows(): List<dynamic> {
+    val filtered = applyClientMapAdvancedFilters(clientMapBaseRows)
+    val searched = applyClientMapTextSearch(filtered)
+    return applyClientMapSorting(searched)
 }
 
 fun showClientMapPage() {
@@ -68,15 +135,19 @@ fun showClientMapPage() {
                 </div>
             </div>
             <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 250px;">
-                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search:</label>
-                        <input type="text" id="clientMapFilter" placeholder="Search by client name, country, POD, address..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
+                <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                    <div style="flex:1; display:flex; align-items:center; background:#fff; border:1px solid #d1d5db; border-radius:9999px; padding:0 10px; min-height:40px;">
+                        <span style="display:inline-flex; align-items:center; color:#9ca3af; margin-right:6px;">🔍</span>
+                        <input type="text" id="clientMapSearchInput" role="searchbox" placeholder="Type to search..." style="flex:1; border:none; outline:none; background:transparent; font-size:14px; padding:8px 0;">
+                        <button id="clientMapSearchClearBtn" type="button" style="border:none; background:transparent; cursor:pointer; color:#9ca3af; font-size:16px; line-height:1;">×</button>
                     </div>
-                    <div style="display: flex; gap: 10px; align-items: flex-end;">
-                        <button id="clearClientMapFilterBtn" style="padding: 10px 20px; background-color: #6b7280; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;">Clear Filter</button>
-                    </div>
+                    <button id="clientMapSearchFilterBtn" type="button" title="Advanced Filters" aria-label="Open filter columns panel." style="width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e5e7eb; background: #f3f4f6; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4b5563; padding: 0; flex-shrink: 0;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M4 7h12M4 17h16M16 7l2-2m-2 2l2 2M10 17l2-2m-2 2l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
                 </div>
+                <div id="clientMapAdvancedFilterDropdown" style="display:none; border:1px solid #e5e7eb; border-radius:12px; background:#fff; padding:14px; margin-bottom:10px;"></div>
             </div>
             <div style="margin-bottom: 20px;">
                 <button id="addClientMapBtn" style="padding: 12px 24px; background-color: #059669; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -91,14 +162,38 @@ fun showClientMapPage() {
             </div>
         </div>
     """
+    (document.getElementById("clientMapSearchInput") as? HTMLInputElement)?.value = clientMapSearchQuery
+    renderClientMapAdvancedFilterDropdown()
     loadClientMaps()
     document.getElementById("addClientMapBtn")?.addEventListener("click", { _: Event -> showClientMapModal(null) })
-    document.getElementById("clearClientMapFilterBtn")?.addEventListener("click", { _: Event ->
-        (document.getElementById("clientMapFilter") as? HTMLInputElement)?.value = ""
-        loadClientMaps()
+    document.getElementById("clientMapSearchInput")?.addEventListener("input", { _: Event ->
+        clientMapSearchQuery = (document.getElementById("clientMapSearchInput") as? HTMLInputElement)?.value ?: ""
+        clientMapCurrentPage = 1
+        renderClientMapsFromState()
     })
-    document.getElementById("clientMapFilter")?.addEventListener("input", { _: Event -> loadClientMaps() })
+    document.getElementById("clientMapSearchClearBtn")?.addEventListener("click", { _: Event ->
+        clientMapSearchQuery = ""
+        (document.getElementById("clientMapSearchInput") as? HTMLInputElement)?.value = ""
+        clientMapCurrentPage = 1
+        renderClientMapsFromState()
+    })
+    document.getElementById("clientMapSearchFilterBtn")?.addEventListener("click", { ev: Event ->
+        ev.stopPropagation()
+        clientMapAdvancedPanelOpen = !clientMapAdvancedPanelOpen
+        renderClientMapAdvancedFilterDropdown()
+    })
     document.getElementById("clientMapColumnFilterBtn")?.addEventListener("click", { _: Event -> showClientMapColumnFilterModal() })
+    document.addEventListener("click", { ev: Event ->
+        val t = ev.target as? Node ?: return@addEventListener
+        val panel = document.getElementById("clientMapAdvancedFilterDropdown")
+        val btn = document.getElementById("clientMapSearchFilterBtn")
+        if (panel != null && btn != null && !panel.contains(t) && !btn.contains(t)) {
+            if (clientMapAdvancedPanelOpen) {
+                clientMapAdvancedPanelOpen = false
+                renderClientMapAdvancedFilterDropdown()
+            }
+        }
+    })
     setupClientMapDeviceChangeListener()
     checkClientMapDeviceChange()
 }
@@ -135,16 +230,6 @@ fun setupClientMapDeviceChangeListener() {
 
 fun loadClientMaps() {
     val tableDiv = document.getElementById("clientMapTable") ?: return
-    if (getDeviceType() == "mobile") {
-        loadClientMapsWithCards()
-        return
-    }
-    loadClientMapsWithTable()
-}
-
-fun loadClientMapsWithTable() {
-    val tableDiv = document.getElementById("clientMapTable") ?: return
-    val filterQ = (document.getElementById("clientMapFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
     tableDiv.innerHTML = """
         <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
             <div style="font-size: 16px; margin-bottom: 8px;">Loading client map data...</div>
@@ -158,7 +243,7 @@ fun loadClientMapsWithTable() {
             if (!ok) throw js("Error(result.message || 'Failed')")
             val arr = result.data ?: js("[]")
             val list = (js("Array.isArray(arr) ? arr : []") as Array<dynamic>).toList()
-            val sorted = list.sortedByDescending { m ->
+            clientMapBaseRows = list.sortedByDescending { m ->
                 val id = m.id
                 when (id) {
                     is Number -> id.toDouble()
@@ -166,64 +251,59 @@ fun loadClientMapsWithTable() {
                     else -> id?.toString()?.toDoubleOrNull() ?: 0.0
                 }
             }
-            val filtered = if (filterQ.isNotEmpty()) {
-                sorted.filter { clientMapRowMatches(it, filterQ) }
-            } else sorted
-            val clientMapSortableCols = setOf("clientName", "country", "pod", "consignee")
-            var orderedForDisplay = filtered
-            val cmsf = clientMapSortField
-            if (cmsf != null && cmsf in clientMapSortableCols) {
-                val ord = clientMapSortOrderByField[cmsf] ?: "desc"
-                orderedForDisplay = if (ord == "asc") {
-                    filtered.sortedBy { extractClientMapSortKey(it, cmsf) }
-                } else {
-                    filtered.sortedByDescending { extractClientMapSortKey(it, cmsf) }
-                }
-            }
-            allClientMaps = orderedForDisplay
-            if (filterQ.isNotEmpty()) clientMapCurrentPage = 1
-            if (orderedForDisplay.isEmpty()) {
-                tableDiv.innerHTML = """
-                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                        <div style="font-size: 16px; margin-bottom: 8px;">${if (filterQ.isNotEmpty()) "No rows match your search" else "No client map rows yet"}</div>
-                    </div>
-                """
-                return@then
-            }
-            val totalPages = kotlin.math.ceil(orderedForDisplay.size.toDouble() / clientMapItemsPerPage).toInt()
-            val start = (clientMapCurrentPage - 1) * clientMapItemsPerPage
-            val end = kotlin.math.min(start + clientMapItemsPerPage, orderedForDisplay.size)
-            val pageRows = orderedForDisplay.subList(start, end)
-            val selectedColumns = getSelectedClientMapColumns()
-            val columnLabels = mapOf(
-                "clientName" to "Client Name",
-                "country" to "Country",
-                "pod" to "POD",
-                "address" to "Address",
-                "bankInfo" to "Bank Info",
-                "consignee" to "Consignee",
-                "debitLimit" to "Debit Limit",
-            )
-            var html = """<div class="client-map-table-wrap"><table class="client-map-table"><colgroup><col class="client-map-col-actions">"""
-            for (ck in selectedColumns) {
-                html += when (ck) {
-                    "bankInfo" -> """<col class="client-map-col-bank">"""
-                    else -> """<col class="client-map-col-default">"""
-                }
-            }
-            html += """</colgroup><thead><tr><th class="client-map-th-actions"></th>"""
-            for (ck in selectedColumns) {
-                val label = columnLabels[ck] ?: ck
-                html += if (ck in clientMapSortableCols) {
-                    val tip = clientMapSortTooltip(ck)
-                    val bid = "clientMapSort_$ck"
-                    """<th class="client-map-th" data-col="$ck"><button type="button" id="$bid" title="${escapeHtml(tip)}" style="background: none; border: none; cursor: pointer; font-weight: 700; color: #111827; padding: 0; font-size: inherit; display: inline-flex; align-items: center; gap: 6px;"><span>$label</span><span style="font-size: 14px;">↕</span></button></th>"""
-                } else {
-                    """<th class="client-map-th" data-col="$ck">$label</th>"""
-                }
-            }
-            html += """</tr></thead><tbody>"""
-            for (mapping in pageRows) {
+            renderClientMapsFromState()
+        }
+        .catch { e: dynamic ->
+            tableDiv.innerHTML = """<div style="text-align:center;color:#b91c1c;padding:40px;">${escapeHtml(e.message?.toString() ?: "Error")}</div>"""
+        }
+}
+
+private fun renderClientMapsFromState() {
+    if (getDeviceType() == "mobile") {
+        loadClientMapsWithCards()
+    } else {
+        loadClientMapsWithTable()
+    }
+}
+
+fun loadClientMapsWithTable() {
+    val tableDiv = document.getElementById("clientMapTable") ?: return
+    val orderedForDisplay = getProcessedClientMapRows()
+    allClientMaps = orderedForDisplay
+    if (orderedForDisplay.isEmpty()) {
+        tableDiv.innerHTML = """
+            <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                <div style="font-size: 16px; margin-bottom: 8px;">No rows match your current search/filter</div>
+            </div>
+        """
+        return
+    }
+    val totalPages = kotlin.math.ceil(orderedForDisplay.size.toDouble() / clientMapItemsPerPage).toInt().coerceAtLeast(1)
+    if (clientMapCurrentPage > totalPages) clientMapCurrentPage = totalPages
+    val start = (clientMapCurrentPage - 1) * clientMapItemsPerPage
+    val end = kotlin.math.min(start + clientMapItemsPerPage, orderedForDisplay.size)
+    val pageRows = orderedForDisplay.subList(start, end)
+    val selectedColumns = getSelectedClientMapColumns()
+    var html = """<div class="client-map-table-wrap"><table class="client-map-table"><colgroup><col class="client-map-col-actions">"""
+    for (ck in selectedColumns) {
+        html += when (ck) {
+            "bankInfo" -> """<col class="client-map-col-bank">"""
+            else -> """<col class="client-map-col-default">"""
+        }
+    }
+    html += """</colgroup><thead><tr><th class="client-map-th-actions"></th>"""
+    for (ck in selectedColumns) {
+        val label = clientMapColumnLabels[ck] ?: ck
+        html += if (ck in clientMapSortableCols) {
+            val tip = clientMapSortTooltip(ck)
+            val bid = "clientMapSort_$ck"
+            """<th class="client-map-th" data-col="$ck"><button type="button" id="$bid" title="${escapeHtml(tip)}" style="background: none; border: none; cursor: pointer; font-weight: 700; color: #111827; padding: 0; font-size: inherit; display: inline-flex; align-items: center; gap: 6px;"><span>$label</span><span style="font-size: 14px;">↕</span></button></th>"""
+        } else {
+            """<th class="client-map-th" data-col="$ck">$label</th>"""
+        }
+    }
+    html += """</tr></thead><tbody>"""
+    for (mapping in pageRows) {
                 val id = (mapping.id ?: "").toString()
                 html += """
                     <tr>
@@ -247,120 +327,79 @@ fun loadClientMapsWithTable() {
                         "bankInfo" -> formatClientMapBankInfoCellHtml(value)
                         "consignee" -> formatClientMapConsigneeChipCellHtml(value)
                         "debitLimit" -> formatClientMapDebitLimitCellHtml(value)
-                        else -> formatMultiValueChipCellHtml(value)
+                        else -> formatClientMapValueChipHtml(value)
                     }
                     html += """<td class="client-map-td" data-col="$ck">$inner</td>"""
                 }
                 html += "</tr>"
-            }
-            html += """</tbody></table></div>"""
-            if (totalPages > 1) {
-                html += """
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
-                        <div style="color: #6b7280; font-size: 14px;">Showing ${start + 1} to $end of ${orderedForDisplay.size}</div>
-                        <div class="car-brand-pagination-controls">
-                            <button id="clientMapPrevPage" class="car-brand-pagination-btn" ${if (clientMapCurrentPage == 1) "disabled" else ""}>Previous</button>
-                            <span class="car-brand-pagination-page">Page $clientMapCurrentPage of $totalPages</span>
-                            <button id="clientMapNextPage" class="car-brand-pagination-btn" ${if (clientMapCurrentPage >= totalPages) "disabled" else ""}>Next</button>
-                        </div>
-                    </div>
-                """
-            }
-            tableDiv.innerHTML = html
-            document.getElementById("clientMapPrevPage")?.addEventListener("click", { _: Event ->
-                if (clientMapCurrentPage > 1) {
-                    clientMapCurrentPage--
-                    loadClientMaps()
-                }
-            })
-            document.getElementById("clientMapNextPage")?.addEventListener("click", { _: Event ->
-                val tp = kotlin.math.ceil(allClientMaps.size.toDouble() / clientMapItemsPerPage).toInt()
-                if (clientMapCurrentPage < tp) {
-                    clientMapCurrentPage++
-                    loadClientMaps()
-                }
-            })
-            val clientMapSortKeys = listOf("clientName", "country", "pod", "consignee")
-            for (key in clientMapSortKeys) {
-                if (key in selectedColumns) {
-                    document.getElementById("clientMapSort_$key")?.addEventListener("click", { _: Event ->
-                        toggleClientMapSort(key)
-                    })
-                }
-            }
+    }
+    html += """</tbody></table></div>"""
+    if (totalPages > 1) {
+        html += """
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
+                <div style="color: #6b7280; font-size: 14px;">Showing ${start + 1} to $end of ${orderedForDisplay.size}</div>
+                <div class="car-brand-pagination-controls">
+                    <button id="clientMapPrevPage" class="car-brand-pagination-btn" ${if (clientMapCurrentPage == 1) "disabled" else ""}>Previous</button>
+                    <span class="car-brand-pagination-page">Page $clientMapCurrentPage of $totalPages</span>
+                    <button id="clientMapNextPage" class="car-brand-pagination-btn" ${if (clientMapCurrentPage >= totalPages) "disabled" else ""}>Next</button>
+                </div>
+            </div>
+        """
+    }
+    tableDiv.innerHTML = html
+    document.getElementById("clientMapPrevPage")?.addEventListener("click", { _: Event ->
+        if (clientMapCurrentPage > 1) {
+            clientMapCurrentPage--
+            renderClientMapsFromState()
         }
-        .catch { e: dynamic ->
-            tableDiv.innerHTML = """<div style="text-align:center;color:#b91c1c;padding:40px;">${escapeHtml(e.message?.toString() ?: "Error")}</div>"""
+    })
+    document.getElementById("clientMapNextPage")?.addEventListener("click", { _: Event ->
+        val tp = kotlin.math.ceil(allClientMaps.size.toDouble() / clientMapItemsPerPage).toInt()
+        if (clientMapCurrentPage < tp) {
+            clientMapCurrentPage++
+            renderClientMapsFromState()
         }
+    })
+    for (key in clientMapSortableCols) {
+        if (key in selectedColumns) {
+            document.getElementById("clientMapSort_$key")?.addEventListener("click", { _: Event ->
+                toggleClientMapSort(key)
+            })
+        }
+    }
 }
 
 fun loadClientMapsWithCards() {
     val tableDiv = document.getElementById("clientMapTable") ?: return
-    val filterQ = (document.getElementById("clientMapFilter") as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
-    tableDiv.innerHTML = """<div style="text-align:center;color:#6b7280;padding:40px;">Loading…</div>"""
-    window.fetch(apiUrl("client-map/mappings"))
-        .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed')") }
-        .then { result: dynamic ->
-            val ok = result.success as? Boolean ?: false
-            if (!ok) throw js("Error(result.message)")
-            val arr = result.data ?: js("[]")
-            val list = (js("Array.isArray(arr) ? arr : []") as Array<dynamic>).toList()
-            val sorted = list.sortedByDescending { m ->
-                val id = m.id
-                when (id) {
-                    is Number -> id.toDouble()
-                    is String -> id.toDoubleOrNull() ?: 0.0
-                    else -> id?.toString()?.toDoubleOrNull() ?: 0.0
-                }
-            }
-            val filtered = if (filterQ.isNotEmpty()) sorted.filter { clientMapRowMatches(it, filterQ) } else sorted
-            val clientMapSortableCols = setOf("clientName", "country", "pod", "consignee")
-            var orderedForDisplay = filtered
-            val cmsf = clientMapSortField
-            if (cmsf != null && cmsf in clientMapSortableCols) {
-                val ord = clientMapSortOrderByField[cmsf] ?: "desc"
-                orderedForDisplay = if (ord == "asc") {
-                    filtered.sortedBy { extractClientMapSortKey(it, cmsf) }
-                } else {
-                    filtered.sortedByDescending { extractClientMapSortKey(it, cmsf) }
-                }
-            }
-            allClientMaps = orderedForDisplay
-            if (filterQ.isNotEmpty()) clientMapCurrentPage = 1
-            if (orderedForDisplay.isEmpty()) {
-                tableDiv.innerHTML = """<div style="text-align:center;padding:40px;color:#6b7280;">No rows</div>"""
-                return@then
-            }
-            val totalPages = kotlin.math.ceil(orderedForDisplay.size.toDouble() / clientMapItemsPerPage).toInt()
-            val start = (clientMapCurrentPage - 1) * clientMapItemsPerPage
-            val end = kotlin.math.min(start + clientMapItemsPerPage, orderedForDisplay.size)
-            val pageRows = orderedForDisplay.subList(start, end)
-            val selectedColumns = getSelectedClientMapColumns()
-            val columnLabels = mapOf(
-                "clientName" to "Client Name",
-                "country" to "Country",
-                "pod" to "POD",
-                "address" to "Address",
-                "bankInfo" to "Bank Info",
-                "consignee" to "Consignee",
-                "debitLimit" to "Debit Limit",
-            )
-            val sb = StringBuilder()
-            sb.append("""<div class="car-brand-cards-container">""")
-            for (mapping in pageRows) {
+    val orderedForDisplay = getProcessedClientMapRows()
+    allClientMaps = orderedForDisplay
+    if (orderedForDisplay.isEmpty()) {
+        tableDiv.innerHTML = """<div style="text-align:center;padding:40px;color:#6b7280;">No rows</div>"""
+        return
+    }
+    val totalPages = kotlin.math.ceil(orderedForDisplay.size.toDouble() / clientMapItemsPerPage).toInt().coerceAtLeast(1)
+    if (clientMapCurrentPage > totalPages) clientMapCurrentPage = totalPages
+    val start = (clientMapCurrentPage - 1) * clientMapItemsPerPage
+    val end = kotlin.math.min(start + clientMapItemsPerPage, orderedForDisplay.size)
+    val pageRows = orderedForDisplay.subList(start, end)
+    val selectedColumns = getSelectedClientMapColumns()
+    val sb = StringBuilder()
+    sb.append("""<div class="car-brand-cards-container">""")
+    for (mapping in pageRows) {
                 val id = (mapping.id ?: "").toString()
-                val title = clientMapCellText(mapping, "clientName").ifEmpty { "Client #$id" }
+                val titleRaw = clientMapCellText(mapping, "clientName")
+                val title = if (titleRaw.length == 0) "Client #$id" else titleRaw
                 val fields = StringBuilder()
                 for (ck in selectedColumns) {
-                    val label = columnLabels[ck] ?: ck
+                    val label = clientMapColumnLabels[ck] ?: ck
                     val value = clientMapCellText(mapping, ck)
-                    if (value.isNotEmpty()) {
+                    if (value.length > 0) {
                         val cellHtml = when (ck) {
                             "address" -> formatMultiValueChipCellHtmlSemicolonOnly(value)
                             "bankInfo" -> formatClientMapBankInfoCellHtml(value)
                             "consignee" -> formatClientMapConsigneeChipCellHtml(value)
                             "debitLimit" -> formatClientMapDebitLimitCellHtml(value)
-                            else -> formatMultiValueChipCellHtml(value)
+                            else -> formatClientMapValueChipHtml(value)
                         }
                         fields.append("""<div style="margin-bottom:8px;"><span style="font-weight:600;color:#666;font-size:12px;">$label:</span><div style="margin-top:2px;">$cellHtml</div></div>""")
                     }
@@ -377,33 +416,100 @@ fun loadClientMapsWithCards() {
                         <div class="card-body">$fields</div>
                     </div>
                 """)
-            }
-            sb.append("</div>")
-            if (totalPages > 1) {
-                sb.append("""<div class="pagination-controls">
-                    <button id="clientMapPrevPage" class="pagination-btn" ${if (clientMapCurrentPage == 1) "disabled" else ""}>Previous</button>
-                    <span class="pagination-page">Page $clientMapCurrentPage of $totalPages</span>
-                    <button id="clientMapNextPage" class="pagination-btn" ${if (clientMapCurrentPage >= totalPages) "disabled" else ""}>Next</button>
-                </div>""")
-            }
-            tableDiv.innerHTML = sb.toString()
-            document.getElementById("clientMapPrevPage")?.addEventListener("click", { _: Event ->
-                if (clientMapCurrentPage > 1) {
-                    clientMapCurrentPage--
-                    loadClientMaps()
-                }
-            })
-            document.getElementById("clientMapNextPage")?.addEventListener("click", { _: Event ->
-                val tp = kotlin.math.ceil(allClientMaps.size.toDouble() / clientMapItemsPerPage).toInt()
-                if (clientMapCurrentPage < tp) {
-                    clientMapCurrentPage++
-                    loadClientMaps()
-                }
-            })
+    }
+    sb.append("</div>")
+    if (totalPages > 1) {
+        sb.append("""<div class="pagination-controls">
+            <button id="clientMapPrevPage" class="pagination-btn" ${if (clientMapCurrentPage == 1) "disabled" else ""}>Previous</button>
+            <span class="pagination-page">Page $clientMapCurrentPage of $totalPages</span>
+            <button id="clientMapNextPage" class="pagination-btn" ${if (clientMapCurrentPage >= totalPages) "disabled" else ""}>Next</button>
+        </div>""")
+    }
+    tableDiv.innerHTML = sb.toString()
+    document.getElementById("clientMapPrevPage")?.addEventListener("click", { _: Event ->
+        if (clientMapCurrentPage > 1) {
+            clientMapCurrentPage--
+            renderClientMapsFromState()
         }
-        .catch { e: dynamic ->
-            tableDiv.innerHTML = """<div style="color:#b91c1c;text-align:center;">${escapeHtml(e.message?.toString() ?: "")}</div>"""
+    })
+    document.getElementById("clientMapNextPage")?.addEventListener("click", { _: Event ->
+        val tp = kotlin.math.ceil(allClientMaps.size.toDouble() / clientMapItemsPerPage).toInt()
+        if (clientMapCurrentPage < tp) {
+            clientMapCurrentPage++
+            renderClientMapsFromState()
         }
+    })
+}
+
+private fun renderClientMapAdvancedFilterDropdown() {
+    val panel = document.getElementById("clientMapAdvancedFilterDropdown") ?: return
+    panel.asDynamic().style.display = if (clientMapAdvancedPanelOpen) "block" else "none"
+    if (!clientMapAdvancedPanelOpen) return
+    panel.addEventListener("click", { ev: Event -> ev.stopPropagation() })
+
+    val chips = clientMapColumns.joinToString("") { key ->
+        val active = clientMapFilterSelectedColumns.contains(key)
+        val bg = if (active) "#e0f2fe" else "#f3f4f6"
+        val color = if (active) "#0369a1" else "#374151"
+        val cross = if (active) """<span id="clientMapFilterChipRemove_$key" data-chip-remove="$key" style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; background:#bae6fd; color:#075985; font-size:11px; font-weight:700; margin-right:6px; line-height:1;">×</span>""" else ""
+        """<button type="button" id="clientMapFilterChip_$key" style="border:none; border-radius:9999px; padding:6px 10px; margin:0 6px 8px 0; cursor:pointer; background:$bg; color:$color; font-size:12px; display:inline-flex; align-items:center;">$cross<span>${clientMapColumnLabels[key] ?: key}</span></button>"""
+    }
+
+    val rows = clientMapFilterSelectedColumns.joinToString("") { key ->
+        val current = clientMapAdvancedFilters.find { it.field == key }
+        val v1 = escapeHtml(current?.value ?: "")
+        """
+        <div id="clientMapFilterRow_$key" style="display:grid; grid-template-columns:180px 1fr; gap:8px; margin-bottom:8px;">
+            <div style="font-size:13px; color:#111827; padding-top:8px;">${clientMapColumnLabels[key] ?: key}</div>
+            <input id="clientMapFilterValue_$key" type="text" value="$v1" placeholder="Contains value..." style="padding:8px; border:1px solid #d1d5db; border-radius:6px;">
+        </div>
+        """
+    }
+
+    panel.innerHTML = """
+        <div style="font-weight:700; color:#111827; margin-bottom:6px;">Advanced Filters</div>
+        <div style="font-size:11px; color:#6b7280; margin-bottom:8px;">CHOOSE FILTER COLUMNS</div>
+        <div style="margin-bottom:8px;">$chips</div>
+        <div id="clientMapFilterRowsWrap">$rows</div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:10px;">
+            <button type="button" id="clientMapFilterClearAll" style="padding:8px 12px; border:none; border-radius:6px; background:#f3f4f6; color:#374151; cursor:pointer;">Clear all</button>
+            <button type="button" id="clientMapFilterApplyBtn" style="padding:8px 12px; border:none; border-radius:6px; background:#0ea5e9; color:white; cursor:pointer;">Apply filter</button>
+        </div>
+    """
+
+    clientMapColumns.forEach { key ->
+        document.getElementById("clientMapFilterChip_$key")?.addEventListener("click", { ev: Event ->
+            val target = ev.target as? HTMLElement
+            val removeKey = target?.getAttribute("data-chip-remove")
+            if (removeKey != null && removeKey.length > 0) {
+                clientMapFilterSelectedColumns.remove(removeKey)
+                clientMapAdvancedFilters = clientMapAdvancedFilters.filterNot { it.field == removeKey }
+                clientMapCurrentPage = 1
+                renderClientMapAdvancedFilterDropdown()
+                renderClientMapsFromState()
+                return@addEventListener
+            }
+            if (clientMapFilterSelectedColumns.contains(key)) clientMapFilterSelectedColumns.remove(key) else clientMapFilterSelectedColumns.add(key)
+            renderClientMapAdvancedFilterDropdown()
+        })
+    }
+    document.getElementById("clientMapFilterClearAll")?.addEventListener("click", { _: Event ->
+        clientMapFilterSelectedColumns.clear()
+        clientMapAdvancedFilters = emptyList()
+        clientMapCurrentPage = 1
+        renderClientMapAdvancedFilterDropdown()
+        renderClientMapsFromState()
+    })
+    document.getElementById("clientMapFilterApplyBtn")?.addEventListener("click", { _: Event ->
+        val out = mutableListOf<ClientMapAdvancedFilter>()
+        clientMapFilterSelectedColumns.forEach { key ->
+            val v1 = (document.getElementById("clientMapFilterValue_$key") as? HTMLInputElement)?.value ?: ""
+            if (v1.trim().length > 0) out.add(ClientMapAdvancedFilter(field = key, value = v1))
+        }
+        clientMapAdvancedFilters = out
+        clientMapCurrentPage = 1
+        renderClientMapsFromState()
+    })
 }
 
 fun showClientMapColumnFilterModal() {
@@ -487,7 +593,7 @@ fun showClientMapColumnFilterModal() {
         }
         safeLocalStorageSet("selectedClientMapColumns", JSON.stringify(out.toTypedArray()))
         modal.remove()
-        loadClientMaps()
+        renderClientMapsFromState()
     })
     modal.addEventListener("click", { ev: Event ->
         if ((ev.target as? HTMLElement)?.id == "clientMapColumnFilterModal") modal.remove()
@@ -529,7 +635,7 @@ fun showClientMapModal(mappingId: Long?, duplicateFromId: Long? = null) {
                     <form id="clientMapForm">
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Client Name <span style="color: #ef4444;">*</span></label>
-                            ${createEditableCombobox("clientMapMmClientName", "Select Client Name", required = true)}
+                            ${createPlainTextInput("clientMapMmClientName", "Enter Client Name", required = true)}
                         </div>
                         <div class="car-brand-modal-grid">
                             <div>

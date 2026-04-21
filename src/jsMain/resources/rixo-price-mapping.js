@@ -10,6 +10,37 @@ function apiUrl(path) {
     return `${API_BASE_URL}/${cleanPath}`;
 }
 
+/**
+ * Edit-form guard: Rixo auto-mapping must not stomp user edits or the confirm-save window.
+ * - window.__suppressRixoAutoSelect: set true while confirm modal is open and until PUT completes.
+ * - window.__editRixoFieldOverrides: per-field user overrides (edit* element ids).
+ */
+window.__editRixoFieldOverrides = window.__editRixoFieldOverrides || {};
+
+window.markEditRixoFieldUserOverride = function(editFieldId) {
+    if (!editFieldId) return;
+    window.__editRixoFieldOverrides = window.__editRixoFieldOverrides || {};
+    window.__editRixoFieldOverrides[String(editFieldId)] = true;
+};
+
+window.resetEditRixoOverridesAfterSupplierChange = function() {
+    var o = window.__editRixoFieldOverrides;
+    if (!o || typeof o !== 'object') return;
+    delete o.editStockLocation;
+    delete o.editPol;
+    delete o.editVenueId;
+    delete o.editRixoCompany;
+};
+
+function __rixoSkipAutoEditField(editFieldId) {
+    if (!editFieldId) return false;
+    var id = String(editFieldId);
+    if (id.indexOf('edit') !== 0) return false;
+    if (window.__suppressRixoAutoSelect === true) return true;
+    var o = window.__editRixoFieldOverrides;
+    return !!(o && typeof o === 'object' && o[id] === true);
+}
+
 window.rixoPriceMapping = {
     "ARAI BAYSIDE": {
         typeOfVehicle: ['CAR'],
@@ -2520,7 +2551,7 @@ window.fetchPolsByStockLocationAndUpdate = function(auctionHouse, stockLocation,
             window.updateDropdown('pol', 'editPol', [], true);
         }
         if (polSelect) { polSelect.value = ''; var inp = document.getElementById('polInput'); if (inp) inp.value = ''; }
-        if (editPolSelect) { editPolSelect.value = ''; var inp = document.getElementById('editPolInput'); if (inp) inp.value = ''; }
+        if (editPolSelect && !__rixoSkipAutoEditField('editPol')) { editPolSelect.value = ''; var inp = document.getElementById('editPolInput'); if (inp) inp.value = ''; }
         return Promise.resolve();
     }
     if (!auctionHouse || String(auctionHouse).trim() === '') {
@@ -2658,6 +2689,11 @@ function __getCurrentSupplierFieldValues() {
 // Helper function to auto-select related fields
 window.autoSelectRelatedFields = function(auctionName, changedField, changedValue) {
     console.log('autoSelectRelatedFields called:', auctionName, changedField, changedValue);
+
+    if (window.__suppressRixoAutoSelect === true) {
+        console.log('autoSelectRelatedFields: skipped (__suppressRixoAutoSelect)');
+        return;
+    }
     
     // Prevent infinite loops
     if (window.isAutoSelecting) {
@@ -2855,7 +2891,7 @@ function masterApiPathForSupplierField(selectId) {
         'typeOfVehicle': 'master-menu/type_of_vehicle', 'editTypeOfVehicle': 'master-menu/type_of_vehicle',
         'shipmentSize': 'master-menu/type_of_vehicle', 'editShipmentSize': 'master-menu/type_of_vehicle',
         'stockLocation': 'master-menu/stock_location', 'editStockLocation': 'master-menu/stock_location',
-        'rixoCompany': 'master-menu/rixo_company', 'editRixoCompany': 'master-menu/rixo_company',
+        'rixoCompany': 'rixo-mapping/distinct-rixo-companies', 'editRixoCompany': 'rixo-mapping/distinct-rixo-companies',
         'pol': 'master-menu/pol', 'editPol': 'master-menu/pol'
     };
     return map[selectId] || null;
@@ -2872,6 +2908,7 @@ function appendMasterAfterSeparatorForSupplierField(selectId) {
             var list = Array.isArray(raw) ? raw : [];
             var sel = document.getElementById(selectId);
             if (!sel) return;
+            if (window.__suppressRixoAutoSelect === true && String(selectId).indexOf('edit') === 0) return;
             var seen = {};
             for (var i = 0; i < sel.options.length; i++) {
                 var v = (sel.options[i].value || '').trim();
@@ -2955,7 +2992,7 @@ window.updateDropdown = function(elementId, editElementId, options, mergeSupplie
             });
         }
         
-        if (editDropdown) {
+        if (editDropdown && !__rixoSkipAutoEditField(editElementId)) {
             editDropdown.innerHTML = '<option value="">▼</option>';
             var uniqueOptions = window.getUniqueValues(options);
             uniqueOptions.forEach(function(option) {
@@ -2990,7 +3027,7 @@ window.updateDropdown = function(elementId, editElementId, options, mergeSupplie
             }
         }
         
-        if (editDropdown) {
+        if (editDropdown && !__rixoSkipAutoEditField(editElementId)) {
             var isEditMasterField = MASTER_FIELD_IDS[editElementId];
             var editUniqueOptions = isEditMasterField ? uniqueOptionsForMasterField(options) : window.getUniqueValues(options);
             if (isEditMasterField) {
@@ -3007,7 +3044,7 @@ window.updateDropdown = function(elementId, editElementId, options, mergeSupplie
         if (inputField) {
             inputField.placeholder = 'Select ' + defaultLabel;
         }
-        if (editInputField) {
+        if (editInputField && !__rixoSkipAutoEditField(editElementId)) {
             editInputField.placeholder = 'Select ' + editDefaultLabel;
         }
     }
@@ -3020,6 +3057,11 @@ window.setFieldValue = function(addFieldId, editFieldId, value) {
     if (!value || value.trim() === '') {
         console.log('⚠️ Empty value provided, skipping');
         return;
+    }
+
+    var skipEditWrites = (editFieldId !== addFieldId) && __rixoSkipAutoEditField(editFieldId);
+    if (skipEditWrites) {
+        console.log('setFieldValue: skipped edit side for', editFieldId, '(suppress or user override)');
     }
     
     const addField = document.getElementById(addFieldId);
@@ -3057,7 +3099,7 @@ window.setFieldValue = function(addFieldId, editFieldId, value) {
     }
     
     // Set edit form values
-    if (editField) {
+    if (!skipEditWrites && editField) {
         // For select elements, ensure the option exists before setting value
         if (editField.tagName === 'SELECT') {
             // Check if option exists, if not add it
@@ -3078,7 +3120,7 @@ window.setFieldValue = function(addFieldId, editFieldId, value) {
             window.syncComboboxInput(editFieldId);
         }
     }
-    if (editInputField) {
+    if (!skipEditWrites && editInputField) {
         editInputField.value = value;
         console.log('✅ Set edit input value:', editFieldId + 'Input', '=', value);
     }
@@ -3097,7 +3139,7 @@ window.setFieldValue = function(addFieldId, editFieldId, value) {
             addInput.dispatchEvent(new Event('input', { bubbles: true }));
             addInput.dispatchEvent(new Event('change', { bubbles: true }));
         }
-        if (editInput && editFieldId === 'editRixoPrice') {
+        if (editInput && editFieldId === 'editRixoPrice' && !skipEditWrites) {
             editInput.value = numericValue;
             console.log('Set edit rixo price input value (numeric):', numericValue);
             editInput.dispatchEvent(new Event('input', { bubbles: true }));

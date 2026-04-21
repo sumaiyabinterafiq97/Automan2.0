@@ -94,6 +94,16 @@ class CarBrandMappingController(
         }
     }
 
+    @GetMapping("/car-names/distinct")
+    fun getAllDistinctCarNames(): ResponseEntity<List<String>> {
+        return try {
+            ResponseEntity.ok(carBrandMappingService.listAllDistinctCarNames())
+        } catch (e: Exception) {
+            Logger.error("Failed to load car names list: ${e.message}", e)
+            ResponseEntity.status(500).body(emptyList())
+        }
+    }
+
     @GetMapping("/mappings")
     fun getAllMappings(): ResponseEntity<Map<String, Any>> {
         return try {
@@ -106,6 +116,23 @@ class CarBrandMappingController(
                 "message" to "Failed to load mappings: ${e.message}",
                 "data" to emptyList<Map<String, Any>>()
             ))
+        }
+    }
+
+    /**
+     * Paginated search for Car Brands Map (chassis / car brand / car name / all).
+     */
+    @GetMapping("/mappings/page-search")
+    fun searchMappingsPage(
+        @RequestParam q: String,
+        @RequestParam(defaultValue = "all") field: String,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(carBrandMappingService.searchMappingsPage(q, field, page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }
     }
 

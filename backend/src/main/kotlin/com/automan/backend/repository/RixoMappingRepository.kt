@@ -9,6 +9,28 @@ interface RixoMappingRepository : JpaRepository<RixoMapping, Long> {
 
     @Query(
         """
+        SELECT DISTINCT r.auctionName
+        FROM RixoMapping r
+        WHERE r.auctionName IS NOT NULL
+          AND TRIM(r.auctionName) <> ''
+        ORDER BY r.auctionName ASC
+        """
+    )
+    fun findDistinctAuctionNamesOrdered(): List<String>
+
+    @Query(
+        """
+        SELECT DISTINCT r.rixoCompany
+        FROM RixoMapping r
+        WHERE r.rixoCompany IS NOT NULL
+          AND TRIM(r.rixoCompany) <> ''
+        ORDER BY r.rixoCompany ASC
+        """
+    )
+    fun findDistinctRixoCompaniesOrdered(): List<String>
+
+    @Query(
+        """
         SELECT rm
         FROM RixoMapping rm
         WHERE UPPER(rm.stockLocation) = UPPER(:stockLocation)

@@ -29,6 +29,20 @@ class MasterMenuService(
         return getAllFieldNames()
     }
 
+    /**
+     * Removes the entire `master_menu` row for this [fieldName].
+     * Values under `DELETE /{fieldName}?value=` only edit CSV; this deletes the set definition.
+     */
+    fun deleteEntireField(fieldName: String): Boolean {
+        val normalized = normalizeFieldName(fieldName) ?: return false
+        val deleted = masterMenuRepository.deleteByFieldNameIgnoreCase(normalized)
+        if (deleted > 0) {
+            Logger.debug("MasterMenuService.deleteEntireField: removed field='%s' (rows=%d)", normalized, deleted)
+            return true
+        }
+        return false
+    }
+
     private fun getDelimiter(fieldName: String): Char {
         return if (fieldName.equals("bank_accounts", ignoreCase = true)) ';' else ','
     }

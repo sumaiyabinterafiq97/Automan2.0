@@ -19,18 +19,24 @@ INDEX_HTML="$PROJECT_ROOT/src/jsMain/resources/index.html"
 
 cd "$PROJECT_ROOT"
 
-# Step 1: Bump version in index.html (styles.css and automan-car-purchase.js only)
-CURRENT_VERSION=$(grep 'styles.css?v=' "$INDEX_HTML" | sed 's/.*v=\([0-9]*\).*/\1/' | head -1)
-NEW_VERSION=$((CURRENT_VERSION + 1))
-echo "📌 Step 1: Bumping version v$CURRENT_VERSION → v$NEW_VERSION"
-if [[ "$(uname)" == "Darwin" ]]; then
-  sed -i '' "s/styles.css?v=$CURRENT_VERSION/styles.css?v=$NEW_VERSION/g" "$INDEX_HTML"
-  sed -i '' "s/automan-car-purchase.js?v=$CURRENT_VERSION/automan-car-purchase.js?v=$NEW_VERSION/g" "$INDEX_HTML"
-else
-  sed -i "s/styles.css?v=$CURRENT_VERSION/styles.css?v=$NEW_VERSION/g" "$INDEX_HTML"
-  sed -i "s/automan-car-purchase.js?v=$CURRENT_VERSION/automan-car-purchase.js?v=$NEW_VERSION/g" "$INDEX_HTML"
+# Step 1: Bump version in index.html (cache bust)
+# IMPORTANT: styles.css and automan-car-purchase.js versions can drift; always force BOTH to the same new version.
+STYLES_VERSION=$(grep -oE 'styles\.css\?v=[0-9]+' "$INDEX_HTML" | head -1 | sed 's/.*v=//')
+JS_VERSION=$(grep -oE 'automan-car-purchase\.js\?v=[0-9]+' "$INDEX_HTML" | head -1 | sed 's/.*v=//')
+BASE_VERSION="${STYLES_VERSION:-0}"
+if [[ -n "$JS_VERSION" && "$JS_VERSION" -gt "$BASE_VERSION" ]]; then
+  BASE_VERSION="$JS_VERSION"
 fi
-echo "   Updated index.html to v=$NEW_VERSION"
+NEW_VERSION=$((BASE_VERSION + 1))
+echo "📌 Step 1: Bumping version v$BASE_VERSION → v$NEW_VERSION"
+if [[ "$(uname)" == "Darwin" ]]; then
+  sed -i '' -E "s/(styles\\.css\\?v=)[0-9]+/\\1$NEW_VERSION/g" "$INDEX_HTML"
+  sed -i '' -E "s/(automan-car-purchase\\.js\\?v=)[0-9]+/\\1$NEW_VERSION/g" "$INDEX_HTML"
+else
+  sed -i -E "s/(styles\\.css\\?v=)[0-9]+/\\1$NEW_VERSION/g" "$INDEX_HTML"
+  sed -i -E "s/(automan-car-purchase\\.js\\?v=)[0-9]+/\\1$NEW_VERSION/g" "$INDEX_HTML"
+fi
+echo "   Updated index.html to v=$NEW_VERSION (forced for CSS + main JS)"
 echo ""
 
 # Step 2: Build frontend
@@ -61,14 +67,11 @@ echo "🔄 Step 4: Recreating frontend container..."
 COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.multiplatform.yml"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-automan_local}"
 
-# IMPORTANT:
-# - This script must NOT attempt to recreate backend/mysql/phpmyadmin.
-# - We only force-recreate the frontend service/container.
-# - Use --no-deps to avoid touching dependent services (prevents container name conflicts).
-# - If an old container exists from a different Compose project, remove it first.
+# Do not use --no-deps: frontend depends_on backend (healthy). With --no-deps, nginx serves the SPA
+# but /api/* returns 502 if MySQL/backend were never started (common after Docker Desktop restart).
 docker stop automan_frontend_multiplatform 2>/dev/null || true
 docker rm -f automan_frontend_multiplatform 2>/dev/null || true
-docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d --no-deps --force-recreate frontend
+docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate frontend
 
 if [ $? -ne 0 ]; then
     echo "❌ Container start failed!"

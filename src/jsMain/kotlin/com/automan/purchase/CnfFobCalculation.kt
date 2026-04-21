@@ -53,7 +53,7 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                     </div>
 """
     val freightField = if (isFobMode) "" else """
-                            <div class="cnf-cost-field" id="cnfFreightFieldWrap" style="display: none;">
+                            <div class="cnf-cost-field" id="cnfFreightFieldWrap">
                                 <label>FREIGHT (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
@@ -178,7 +178,6 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                     
                     <!-- Action Buttons -->
                     <div class="cnf-action-buttons">
-                        <button id="saveCarCostsBtn" class="cnf-btn cnf-btn-save">SAVE</button>
                         <button id="previewPdfBtn" class="cnf-btn cnf-btn-preview">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -193,7 +192,7 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                                 <line x1="16" y1="13" x2="8" y2="13"></line>
                                 <line x1="16" y1="17" x2="8" y2="17"></line>
                             </svg>
-                            DOWNLOAD PDF
+                            Save and Download PDF
                         </button>
                     </div>
                 </div>
@@ -202,16 +201,15 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
     """
 }
 
-/** Show FREIGHT (¥) only after user completes Calculate Freight (values in [globalFreightValues]). */
+/** Keep FREIGHT (¥) visible in C&F mode; default remains 0 until freight is calculated. */
 fun updateCnfFreightFieldVisibility() {
     if (cnfPageIsFobMode) return
     val wrap = document.getElementById("cnfFreightFieldWrap") as? HTMLElement
     if (wrap == null) return
-    val show = globalFreightValues.isNotEmpty()
-    wrap.style.display = if (show) "" else "none"
-    if (!show) {
-        val freightInput = document.getElementById("freight") as? HTMLInputElement
-        if (freightInput != null) freightInput.value = "0"
+    wrap.style.display = ""
+    val freightInput = document.getElementById("freight") as? HTMLInputElement
+    if (freightInput != null && freightInput.value.trim().isEmpty()) {
+        freightInput.value = "0"
     }
 }
 
@@ -379,13 +377,6 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
         calculateCnfTotal()
     }, 1500) // Increased delay to ensure loadCarCostDetails completes first
     
-    // Save button - save calculated Total C&F Price (as per documentation: only saves total price, not cost details)
-    document.getElementById("saveCarCostsBtn")?.addEventListener("click", { _: Event ->
-        js("if (window.saveCnfFormState) window.saveCnfFormState()")
-        // Per documentation: SAVE button should only save total C&F/FOB price, not cost details
-        saveTotalCnfPrice()
-    })
-    
     // Calculate Freight (C&F page only): save state then open freight allocation UI
     if (!isFobMode) {
         document.getElementById("calculateFreightBtn")?.addEventListener("click", { _: Event ->
@@ -405,16 +396,16 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
         }
     }
     
-    // Preview PDF button
+    // Preview PDF: same as Save and Download (shipping_history + client_name on server), then open preview tab
     document.getElementById("previewPdfBtn")?.addEventListener("click", { _: Event ->
         console.log("📄 Preview PDF button clicked")
-        generateShippingSchedulePdfPreview()
+        saveShippingHistoryThenPreviewPdf()
     })
     
-    // Download PDF button
+    // Save shipping history (all batch chassis) then download PDF (same frontend payload as before)
     document.getElementById("downloadPdfBtn")?.addEventListener("click", { _: Event ->
-        console.log("📥 Download PDF button clicked")
-        generateShippingSchedulePdf()
+        console.log("📥 Save and Download PDF clicked")
+        saveShippingHistoryThenDownloadPdf()
     })
     
     updateCnfFreightFieldVisibility()
@@ -890,14 +881,12 @@ fun saveCarCostDetails() {
 }
 
 fun saveTotalCnfPriceForSelectedPurchases() {
-    console.log("💾 Saving TOTAL C&F PRICE for selected purchases...")
+    console.log("💾 Refreshing purchases after C&F screen (totals are not persisted on purchase rows)...")
     console.log("🔍 cnfPageSelectedPurchaseIds:", cnfPageSelectedPurchaseIds)
     
-    // Use stored purchase IDs from when navigating to C&F page
     val finalPurchaseIds = if (cnfPageSelectedPurchaseIds.isNotEmpty()) {
         cnfPageSelectedPurchaseIds
     } else {
-        // Fallback: try to get from table
         console.log("⚠️ No purchase IDs stored, trying to get from table...")
         getSelectedPurchaseIds()
     }
@@ -908,52 +897,8 @@ fun saveTotalCnfPriceForSelectedPurchases() {
         return
     }
     
-    console.log("📋 Purchase IDs to update: $finalPurchaseIds")
-    
-    // Get current TOTAL C&F PRICE from the display
-    val totalCnfPriceElement = document.getElementById("totalCnfPrice")
-    val totalCnfPriceText = totalCnfPriceElement?.textContent ?: "¥0"
-    
-    // Extract numeric value from "¥476900" format
-    val totalCnfPrice = totalCnfPriceText.replace("¥", "").replace(",", "").toDoubleOrNull() ?: 0.0
-    
-    console.log("📊 TOTAL C&F PRICE to save: $totalCnfPrice")
-    
-    // Create request data object - convert IDs to JS numbers to avoid Long serialization issues
-    val purchaseIdsJs = finalPurchaseIds.map { it.toDouble() }.toTypedArray()
-    val requestData = js("{}")
-    requestData.purchaseIds = purchaseIdsJs
-    requestData.totalCnfPrice = totalCnfPrice
-    
-    console.log("📊 Request data to save:", requestData)
-    
-    // Call backend API to save total C&F price for selected purchases
-    val requestInit = js("{}")
-    requestInit.method = "POST"
-    val headers = js("{}")
-    headers["Content-Type"] = "application/json"
-    requestInit.headers = headers
-    requestInit.body = JSON.stringify(requestData)
-    window.fetch(apiUrl("purchases/save-total-cnf-by-ids"), requestInit)
-        .then { response: dynamic ->
-            console.log("Save Total C&F API response status:", response.status)
-            if (response.ok) {
-                response.json()
-            } else {
-                throw js("Error('Failed to save total C&F price')")
-            }
-        }
-        .then { result: dynamic ->
-            console.log("✅ TOTAL C&F PRICE saved successfully for ${purchaseIdsJs.size} purchase(s):", result)
-            showMessage("Total C&F price saved successfully", "success")
-            // Refresh purchase data from API to get updated totalCnfPrice
-            console.log("🔄 Refreshing purchase data from API...")
-            refreshPurchasesByIds(finalPurchaseIds)
-        }
-        .catch { error: dynamic ->
-            console.error("❌ Error saving total C&F price:", error)
-            showMessage("Error saving total C&F price: ${error.message}", "error")
-        }
+    showMessage("Refreshing purchase data (C&F/FOB totals are shown on screen only).", "info")
+    refreshPurchasesByIds(finalPurchaseIds)
 }
 
 fun refreshPurchasesByIds(purchaseIds: List<Long>) {
@@ -991,7 +936,7 @@ fun refreshPurchasesByIds(purchaseIds: List<Long>) {
                 if (index >= 0) {
                     // Update existing entry with fresh data
                     carBookingDisplayedCars[index] = freshPurchase
-                    console.log("✅ Updated purchase ${purchaseId} with fresh totalCnfPrice: ${freshPurchase.totalCnfPrice}")
+                    console.log("✅ Updated purchase ${purchaseId} from API refresh")
                     
                     // Check if this purchase has a destination (POD) value and save it to state
                     // Use js() to avoid asDynamic on API response (plain JS objects may not have Kotlin extensions)
@@ -1046,7 +991,6 @@ fun saveTotalCnfPrice() {
         return
     }
     
-    // Get the purchase ID for the currently selected chassis
     val purchaseId = cnfPageCurrentPurchaseId
     if (purchaseId == null) {
         console.error("❌ No purchase ID found for chassis: $selectedChassis")
@@ -1054,66 +998,221 @@ fun saveTotalCnfPrice() {
         return
     }
     
-    console.log("💾 Saving Total C&F Price for chassis: $selectedChassis, purchase ID: $purchaseId")
-    
-    // Get current Total C&F Price from the display
-    val totalCnfPriceElement = document.getElementById("totalCnfPrice")
-    val totalCnfPriceText = totalCnfPriceElement?.textContent ?: "¥0"
-    
-    // Extract numeric value from "¥476900" format
-    val totalCnfPrice = totalCnfPriceText.replace("¥", "").replace(",", "").toDoubleOrNull() ?: 0.0
-    
     val saveAsCnf = lastCalculationMode == "C&F"
-    console.log("📊 Total price to save (${if (saveAsCnf) "C&F" else "FOB"}): $totalCnfPrice for purchase ID: $purchaseId (lastCalculationMode=$lastCalculationMode)")
-    
-    val requestData = js("{}")
-    requestData.purchaseIds = arrayOf(purchaseId.toDouble())
-    if (saveAsCnf) {
-        requestData.totalCnfPrice = totalCnfPrice
-    } else {
-        requestData.totalFobPrice = totalCnfPrice
-    }
-    
-    val saveUrl = if (saveAsCnf) {
-        apiUrl("purchases/save-total-cnf-by-ids")
-    } else {
-        apiUrl("purchases/save-total-fob-by-ids")
-    }
-    
-    console.log("📤 Sending save request to $saveUrl:", JSON.stringify(requestData))
-    
-    val requestInit = js("{}")
-    requestInit.method = "POST"
-    val headers = js("{}")
-    headers["Content-Type"] = "application/json"
-    requestInit.headers = headers
-    requestInit.body = JSON.stringify(requestData)
-    
-    window.fetch(saveUrl, requestInit)
-        .then { response: dynamic ->
-            console.log("📥 Response status:", response.status)
-            if (response.ok) {
-                response.json()
-            } else {
-                response.text().then { errorText: dynamic ->
-                    console.error("❌ API Error Response (status ${response.status}):", errorText)
-                    throw js("Error('Failed to save total C&F price: ' + errorText)")
-                }
-            }
-        }
-        .then { result: dynamic ->
-            console.log("✅ Total ${if (saveAsCnf) "C&F" else "FOB"} price saved successfully:", result)
-            val message = if (saveAsCnf) "Total C&F price saved successfully" else "Total FOB price saved successfully"
-            showMessage(message, "success")
-        }
-        .catch { error: dynamic ->
-            console.error("❌ Error saving total C&F price:", error)
-            showMessage("Error saving total C&F price: ${error.message}", "error")
-        }
+    console.log("ℹ️ C&F/FOB total for chassis $selectedChassis is display-only (not stored on purchase); mode=${if (saveAsCnf) "C&F" else "FOB"}")
+    showMessage("C&F/FOB totals are shown on screen only; they are not saved to the database.", "info")
 }
 
 fun calculateTotalCnfPrice() {
     // Alias for calculateCnfTotal() for backward compatibility
     calculateCnfTotal()
+}
+
+private fun getCnfFormStateForChassis(chassis: String): dynamic {
+    val fs = window.asDynamic().cnfFormState ?: return null
+    return js("(function(o, k) { return (o && o[k] != null && typeof o[k] !== 'undefined') ? o[k] : null; })")(fs, chassis)
+}
+
+private fun mergedCostField(st: dynamic?, baseline: Double, key: String): Double {
+    if (st == null) return baseline
+    val raw = js("(function(s, k) { return (s && s[k] != null && s[k] !== undefined) ? s[k] : null; })")(st, key)
+    if (raw == null || raw == js("undefined")) return baseline
+    val s = raw.toString().trim()
+    if (s.length == 0) return baseline
+    return parseCurrency(s)
+}
+
+private fun purchaseFieldDouble(car: dynamic, keys: Array<out String>): Double {
+    for (k in keys) {
+        val raw = js("(function(o, key) { try { return (o != null && Object.prototype.hasOwnProperty.call(o, key)) ? o[key] : null; } catch (e) { return null; } })")(car, k)
+        if (raw != null && raw != js("undefined")) {
+            val t = raw.toString().trim()
+            if (t.length > 0) return parseCurrency(t)
+        }
+    }
+    return 0.0
+}
+
+/** Per-chassis total matching [calculateCnfTotal] (uses form state + purchase fallback + global freight for C&F). */
+fun computeTotalCnfOrFobForChassis(car: dynamic, chassis: String, isFobMode: Boolean): Double {
+    val st = getCnfFormStateForChassis(chassis)
+    val carPrice = mergedCostField(st, purchaseFieldDouble(car, arrayOf("price", "carPrice")), "carPrice")
+    val auctionFee = mergedCostField(st, purchaseFieldDouble(car, arrayOf("auctionFee", "auction_fee")), "auctionFee")
+    val rixoPrice = mergedCostField(st, purchaseFieldDouble(car, arrayOf("rixoPrice", "rixo_price")), "rixoPrice")
+    val shippingCharge = mergedCostField(
+        st,
+        purchaseFieldDouble(car, arrayOf("shipmentCharges", "shipment_charges", "shippingCharge")),
+        "shippingCharge",
+    )
+    val freightFromGlobal = if (isFobMode) 0.0 else (globalFreightValues[chassis] ?: 0.0)
+    val freight = if (isFobMode) 0.0 else mergedCostField(st, freightFromGlobal, "freight")
+    val inspectionFee = mergedCostField(st, purchaseFieldDouble(car, arrayOf("inspectionFee", "inspection_fee")), "inspectionFee")
+    val repairFee = mergedCostField(st, purchaseFieldDouble(car, arrayOf("repairCharges", "repair_charges", "repairFee")), "repairFee")
+    val mscCharges = mergedCostField(st, purchaseFieldDouble(car, arrayOf("miscCharges", "misc_charges")), "mscCharges")
+    val profit = mergedCostField(st, purchaseFieldDouble(car, arrayOf("profit")), "profit")
+
+    return if (isFobMode) {
+        carPrice + auctionFee + rixoPrice + shippingCharge + inspectionFee + repairFee + mscCharges + profit
+    } else {
+        carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+    }
+}
+
+private fun extractClientNameFromCar(car: dynamic): String {
+    val a = car.clientName
+    val b = car.client_name
+    val fromA = a?.toString()?.trim().orEmpty()
+    if (fromA.length > 0) return fromA
+    val fromB = b?.toString()?.trim().orEmpty()
+    return fromB
+}
+
+/**
+ * Loads numeric cost fields from DB so totals are correct even when the user never opened this chassis in the dropdown.
+ */
+private fun enrichCarWithCostsFromApi(car: dynamic, chassis: String): dynamic {
+    val enc = js("encodeURIComponent")(chassis) as String
+    val url = apiUrl("purchases/costs-by-chassis/$enc")
+    return window.fetch(url)
+        .then { r: dynamic ->
+            if (js("r.ok") as Boolean) {
+                r.json()
+            } else {
+                js("Promise.resolve(null)")
+            }
+        }
+        .then { cost: dynamic ->
+            val out: dynamic = js("{}")
+            js("Object.assign")(out, car)
+            out.chassis = chassis
+            if (cost != null && js("typeof cost !== 'undefined'") as Boolean) {
+                out.price = cost.carPrice
+                out.carPrice = cost.carPrice
+                out.auctionFee = cost.auctionFee
+                out.rixoPrice = cost.rixoPrice
+                out.shipmentCharges = cost.shippingCharge
+                out.shippingCharge = cost.shippingCharge
+                out.inspectionFee = cost.inspectionFee
+                out.repairCharges = cost.repairFee
+                out.repairFee = cost.repairFee
+                out.miscCharges = cost.mscCharges
+                out.profit = cost.profit
+            }
+            out
+        }
+}
+
+/**
+ * Persists [shipping_history] (server fills [client_name] from [purchases]), then downloads the PDF.
+ */
+fun saveShippingHistoryThenDownloadPdf() {
+    saveShippingHistoryThenPdf(openPreview = false)
+}
+
+/**
+ * Same as [saveShippingHistoryThenDownloadPdf], but opens the PDF in a new tab instead of downloading.
+ */
+fun saveShippingHistoryThenPreviewPdf() {
+    saveShippingHistoryThenPdf(openPreview = true)
+}
+
+private fun saveShippingHistoryThenPdf(openPreview: Boolean) {
+    console.log(
+        if (openPreview) "💾 Saving shipping history then opening PDF preview..."
+        else "💾 Saving shipping history then downloading PDF...",
+    )
+    saveCnfFormState()
+
+    if (cnfPageSelectedCars.isEmpty()) {
+        showMessage("No cars in this calculation batch.", "error")
+        return
+    }
+
+    val bd: dynamic = globalBookingDetails
+    val bookingNo = bd.bookingNo?.toString()?.trim().orEmpty()
+    if (bookingNo.length == 0 || bookingNo == "EBKG14265885") {
+        showMessage("Booking details missing or invalid. Go back to Car Booking and click Calculate again.", "error")
+        return
+    }
+
+    val isFob = cnfPageIsFobMode
+    val priceType = if (isFob) "FOB" else "C&F"
+
+    val promiseArr = js("[]")
+    for (idx in cnfPageSelectedCars.indices) {
+        val car: dynamic = cnfPageSelectedCars[idx]
+        val chassis = car.chassis?.toString()?.trim().orEmpty()
+        if (chassis.length == 0 || chassis == "N/A") continue
+        promiseArr.push(enrichCarWithCostsFromApi(car, chassis))
+    }
+    val pc = (promiseArr.length as Number).toInt()
+    if (pc == 0) {
+        showMessage("No valid chassis to save.", "error")
+        return
+    }
+
+    js("Promise.all")(promiseArr)
+        .then { enrichedArr: dynamic ->
+            val items: dynamic = js("[]")
+            for (i in 0 until pc) {
+                val enriched = js("(function(a, i) { return a[i]; })")(enrichedArr, i)
+                val chassis = enriched.chassis?.toString()?.trim().orEmpty()
+                if (chassis.length == 0) continue
+                val row: dynamic = js("{}")
+                row.chassis = chassis
+                row.clientName = extractClientNameFromCar(enriched)
+                row.amount = computeTotalCnfOrFobForChassis(enriched, chassis, isFob)
+                items.push(row)
+            }
+            val n = (items.length as Number).toInt()
+            if (n == 0) {
+                showMessage("No valid chassis to save.", "error")
+            } else {
+                val req: dynamic = js("{}")
+                req.country = bd.consigneeCountry
+                req.consignee = bd.consigneeName
+                req.shipmentDate = bd.shippingDate
+                req.pol = bd.pol
+                req.pod = bd.pod
+                req.bookingId = bd.bookingNo
+                req.vessel = bd.vesselName
+                req.priceType = priceType
+                req.items = items
+
+                val requestInit = js("{}")
+                requestInit.method = "POST"
+                val headers = js("{}")
+                headers["Content-Type"] = "application/json"
+                requestInit.headers = headers
+                requestInit.body = JSON.stringify(req)
+
+                window.fetch(apiUrl("shipping-history/batch"), requestInit)
+                    .then { response: dynamic ->
+                        if (!(js("response.ok") as Boolean)) {
+                            val hint = if (openPreview) "Preview was not opened." else "PDF was not downloaded."
+                            showMessage("Failed to save shipping history (HTTP ${js("response.status")}). $hint", "error")
+                            throw js("Error('shipping-history save failed')")
+                        }
+                        response.json()
+                    }
+                    .then { _: dynamic ->
+                        showMessage("Shipping history saved.", "success")
+                        if (openPreview) {
+                            generateShippingSchedulePdfPreview()
+                        } else {
+                            generateShippingSchedulePdf()
+                        }
+                    }
+                    .catch { err: dynamic ->
+                        console.error("❌ shipping-history batch:", err)
+                        showMessage("Failed to save shipping history.", "error")
+                    }
+                Unit
+            }
+        }
+        .catch { err: dynamic ->
+            console.error("❌ saveShippingHistoryThenPdf (cost fetch):", err)
+            showMessage("Failed to load cost data for all chassis. Try again.", "error")
+        }
 }
 

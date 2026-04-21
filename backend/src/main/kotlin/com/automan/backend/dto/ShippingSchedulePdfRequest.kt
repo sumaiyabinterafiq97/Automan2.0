@@ -8,6 +8,8 @@ data class ShippingSchedulePdfRequest(
     val shippingDate: String,
     val consigneeName: String,
     val consigneeAddress: String,
+    /** Consignee country selected on booking form — used with POD to pick the right `booking_mappings` row when names repeat. */
+    val consigneeCountry: String? = null,
     val chassisNumbers: List<String>,
     val calculationMode: String? = null // "C&F" or "FOB" - determines PDF column header
 )

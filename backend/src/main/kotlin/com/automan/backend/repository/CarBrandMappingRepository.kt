@@ -1,6 +1,8 @@
 package com.automan.backend.repository
 
 import com.automan.backend.model.CarBrandMapping
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
@@ -61,5 +63,69 @@ interface CarBrandMappingRepository : JpaRepository<CarBrandMapping, Long> {
     // Get all distinct chassis from entire table (for chassis dropdown initialization)
     @Query("SELECT DISTINCT c.chassis FROM CarBrandMapping c WHERE c.chassis IS NOT NULL AND c.chassis != '' ORDER BY c.chassis")
     fun findDistinctChassisAll(): List<String>
+
+    @Query(
+        """
+        SELECT DISTINCT c.carName
+        FROM CarBrandMapping c
+        WHERE c.carName IS NOT NULL
+          AND TRIM(c.carName) <> ''
+        ORDER BY c.carName
+        """
+    )
+    fun findDistinctCarNamesAll(): List<String>
+
+    /** Car Brands Map: OR search on chassis, car brand, car name. */
+    @Query(
+        value = """
+            SELECT c FROM CarBrandMapping c WHERE
+            LOWER(COALESCE(c.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(c.carBrand,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(c.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """,
+        countQuery = """
+            SELECT count(c) FROM CarBrandMapping c WHERE
+            LOWER(COALESCE(c.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(c.carBrand,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(c.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """
+    )
+    fun searchCarBrandMappingKeyFieldsContains(@Param("q") q: String, pageable: Pageable): Page<CarBrandMapping>
+
+    @Query(
+        value = """
+            SELECT c FROM CarBrandMapping c WHERE
+            LOWER(COALESCE(c.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """,
+        countQuery = """
+            SELECT count(c) FROM CarBrandMapping c WHERE
+            LOWER(COALESCE(c.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """
+    )
+    fun searchCarBrandMappingChassisContains(@Param("q") q: String, pageable: Pageable): Page<CarBrandMapping>
+
+    @Query(
+        value = """
+            SELECT c FROM CarBrandMapping c WHERE
+            LOWER(COALESCE(c.carBrand,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """,
+        countQuery = """
+            SELECT count(c) FROM CarBrandMapping c WHERE
+            LOWER(COALESCE(c.carBrand,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """
+    )
+    fun searchCarBrandMappingBrandContains(@Param("q") q: String, pageable: Pageable): Page<CarBrandMapping>
+
+    @Query(
+        value = """
+            SELECT c FROM CarBrandMapping c WHERE
+            LOWER(COALESCE(c.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """,
+        countQuery = """
+            SELECT count(c) FROM CarBrandMapping c WHERE
+            LOWER(COALESCE(c.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            """
+    )
+    fun searchCarBrandMappingCarNameContains(@Param("q") q: String, pageable: Pageable): Page<CarBrandMapping>
 }
 

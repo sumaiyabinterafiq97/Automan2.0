@@ -1,9 +1,16 @@
 package com.automan.backend.service
 
+import com.automan.backend.dto.PurchasePageResponse
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
+import com.automan.backend.model.BookingMapping
+import com.automan.backend.repository.BookingMappingRepository
 import com.automan.backend.repository.PurchaseRepository
+import com.automan.backend.repository.ShippingHistoryRepository
 import com.automan.backend.util.Logger
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
@@ -11,7 +18,9 @@ import org.springframework.web.multipart.MultipartFile
 @Service
 class PurchaseService(
     private val purchaseRepository: PurchaseRepository,
-    private val pdfService: PdfService
+    private val pdfService: PdfService,
+    private val bookingMappingRepository: BookingMappingRepository,
+    private val shippingHistoryRepository: ShippingHistoryRepository,
 ) {
     /** POL from stock_location mapping (same mapping used in Rixo import). */
     private fun polFromStockLocation(stockLocation: String?): String? {
@@ -71,6 +80,11 @@ class PurchaseService(
     fun getPurchaseById(id: Long): Purchase? {
         return purchaseRepository.findById(id).orElse(null)
     }
+
+    /** All purchases sharing the same shipping booking id (car booking search). */
+    fun getPurchasesByBookingId(bookingId: Long): List<Purchase> {
+        return purchaseRepository.findByBookingId(bookingId)
+    }
     
     @Transactional
     fun createPurchase(purchase: Purchase): Purchase {
@@ -129,6 +143,7 @@ class PurchaseService(
                 auctionHouse = purchase.auctionHouse ?: existingPurchase.auctionHouse,
                 stockLocation = purchase.stockLocation ?: existingPurchase.stockLocation,
                 pol = purchase.pol ?: existingPurchase.pol,
+                pod = purchase.pod ?: existingPurchase.pod,
                 rixoCompany = purchase.rixoCompany ?: existingPurchase.rixoCompany,
                 clientName = purchase.clientName ?: existingPurchase.clientName,
                 consignee = purchase.consignee ?: existingPurchase.consignee,
@@ -146,7 +161,7 @@ class PurchaseService(
                 notes = purchase.notes ?: existingPurchase.notes,
                 shipmentDate = purchase.shipmentDate ?: existingPurchase.shipmentDate,
                 blNo = purchase.blNo ?: existingPurchase.blNo,
-                vesselNo = purchase.vesselNo ?: existingPurchase.vesselNo,
+                vessel = purchase.vessel ?: existingPurchase.vessel,
                 shipmentCharges = purchase.shipmentCharges ?: existingPurchase.shipmentCharges,
                 freight = purchase.freight ?: existingPurchase.freight,
                 storageCharges = purchase.storageCharges ?: existingPurchase.storageCharges,
@@ -172,7 +187,6 @@ class PurchaseService(
                 },
                 repairCompany = purchase.repairCompany ?: existingPurchase.repairCompany,
                 repairCharges = purchase.repairCharges ?: existingPurchase.repairCharges,
-                totalFobPrice = purchase.totalFobPrice ?: existingPurchase.totalFobPrice,
                 updatedAt = java.time.LocalDateTime.now()
             )
             
@@ -251,6 +265,23 @@ class PurchaseService(
                     ?: existingPurchase.auctionHouse,
                 stockLocation = updateData["stockLocation"] as? String ?: existingPurchase.stockLocation,
                 pol = updateData["pol"] as? String ?: existingPurchase.pol,
+                pod = run {
+                    val hasPod = updateData.containsKey("pod")
+                    val hasDest = updateData.containsKey("destination")
+                    if (!hasPod && !hasDest) {
+                        existingPurchase.pod
+                    } else {
+                        val raw: Any? = when {
+                            hasPod -> updateData["pod"]
+                            else -> updateData["destination"]
+                        }
+                        when (raw) {
+                            null -> null
+                            is String -> raw.trim().ifEmpty { null }
+                            else -> raw.toString().trim().ifEmpty { null }
+                        }
+                    }
+                },
                 rixoCompany = updateData["rixoCompany"] as? String ?: existingPurchase.rixoCompany,
                 clientName = updateData["clientName"] as? String ?: existingPurchase.clientName,
                 consignee = run {
@@ -282,7 +313,6 @@ class PurchaseService(
                 notes = updateData["notes"] as? String ?: existingPurchase.notes,
                 shipmentDate = updateData["shipmentDate"] as? String ?: existingPurchase.shipmentDate,
                 blNo = updateData["blNo"] as? String ?: existingPurchase.blNo,
-                vesselNo = updateData["vesselNo"] as? String ?: existingPurchase.vesselNo,
                 shipmentCharges = updateData["shipmentCharges"] as? String ?: existingPurchase.shipmentCharges,
                 freight = updateData["freight"] as? String ?: existingPurchase.freight,
                 storageCharges = updateData["storageCharges"] as? String ?: existingPurchase.storageCharges,
@@ -332,14 +362,18 @@ class PurchaseService(
                 repairCompany = updateData["repairCompany"] as? String ?: existingPurchase.repairCompany,
                 repairCharges = updateData["repairCharges"] as? String ?: existingPurchase.repairCharges,
                 carPictures = run {
-                    val carPicturesData = updateData["carPictures"]
-                    if (carPicturesData != null) {
-                        // Convert car pictures array to JSON string
-                        val jsonString = com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(carPicturesData)
-                        Logger.debug("📷 [Service] Saving car pictures data: $jsonString")
-                        jsonString
-                    } else {
+                    // Frontend may send camelCase or snake_case. Accept both.
+                    val carPicturesData = updateData["carPictures"] ?: updateData["car_pictures"]
+                    if (carPicturesData == null) {
                         existingPurchase.carPictures
+                    } else {
+                        // Convert car pictures array (or already-JSON string) to JSON string
+                        val jsonString = when (carPicturesData) {
+                            is String -> carPicturesData
+                            else -> com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(carPicturesData)
+                        }
+                        Logger.debug("📷 [Service] Saving car pictures data (len=${jsonString.length}): ${jsonString.take(200)}")
+                        jsonString
                     }
                 },
                 bookingId = run {
@@ -398,20 +432,17 @@ class PurchaseService(
                     result
                 },
                 vessel = run {
-                    val vesselValue = updateData["vessel"]
-                    Logger.debug("Processing vessel - updateData['vessel'] = $vesselValue")
-                    when {
-                        vesselValue is String -> {
-                            Logger.debug("vessel is String, setting to: '$vesselValue'")
-                            vesselValue
-                        }
-                        vesselValue == null -> {
-                            Logger.debug("vessel is null, keeping existing: '${existingPurchase.vessel}'")
-                            existingPurchase.vessel
-                        }
-                        else -> {
-                            Logger.debug("vessel is unknown type, converting to string: '$vesselValue'")
-                            vesselValue.toString()
+                    val hasVessel = updateData.containsKey("vessel")
+                    val hasVesselNo = updateData.containsKey("vesselNo")
+                    if (!hasVessel && !hasVesselNo) {
+                        existingPurchase.vessel
+                    } else {
+                        val raw: Any? = if (hasVessel) updateData["vessel"] else updateData["vesselNo"]
+                        Logger.debug("Processing vessel - raw = $raw (hasVessel=$hasVessel hasVesselNo=$hasVesselNo)")
+                        when {
+                            raw == null -> null
+                            raw is String -> raw
+                            else -> raw.toString()
                         }
                     }
                 },
@@ -424,58 +455,17 @@ class PurchaseService(
                         else -> existingPurchase.shipped
                     }
                 },
-                totalCnfPrice = run {
-                    val totalCnfPriceValue = updateData["totalCnfPrice"]
-                    Logger.debug("Processing totalCnfPrice - updateData['totalCnfPrice'] = $totalCnfPriceValue")
-                    Logger.debug("Existing totalCnfPrice = ${existingPurchase.totalCnfPrice}")
-                    val result = when {
-                        totalCnfPriceValue == null -> {
-                            Logger.debug("totalCnfPrice is null, keeping existing: ${existingPurchase.totalCnfPrice}")
-                            existingPurchase.totalCnfPrice
-                        }
-                        totalCnfPriceValue is Number -> {
-                            val newValue = java.math.BigDecimal(totalCnfPriceValue.toDouble())
-                            Logger.debug("totalCnfPrice is Number, converting to BigDecimal: $newValue")
-                            newValue
-                        }
-                        totalCnfPriceValue is String -> {
-                            val doubleValue = totalCnfPriceValue.toDoubleOrNull()
-                            if (doubleValue != null) {
-                                val newValue = java.math.BigDecimal(doubleValue)
-                                Logger.debug("totalCnfPrice is String '$totalCnfPriceValue', converted to BigDecimal: $newValue")
-                                newValue
-                            } else {
-                                Logger.debug("totalCnfPrice String conversion failed, keeping existing: ${existingPurchase.totalCnfPrice}")
-                                existingPurchase.totalCnfPrice
-                            }
-                        }
-                        else -> {
-                            try {
-                                val doubleValue = totalCnfPriceValue.toString().toDoubleOrNull()
-                                if (doubleValue != null) {
-                                    val newValue = java.math.BigDecimal(doubleValue)
-                                    Logger.debug("totalCnfPrice converted from '${totalCnfPriceValue}' to BigDecimal: $newValue")
-                                    newValue
-                                } else {
-                                    Logger.debug("totalCnfPrice conversion failed, keeping existing: ${existingPurchase.totalCnfPrice}")
-                                    existingPurchase.totalCnfPrice
-                                }
-                            } catch (e: Exception) {
-                                Logger.error("Exception converting totalCnfPrice: ${e.message}, keeping existing: ${existingPurchase.totalCnfPrice}")
-                                existingPurchase.totalCnfPrice
-                            }
-                        }
+                invoiceConfirmed = run {
+                    val raw = if (updateData.containsKey("invoiceConfirmed")) {
+                        updateData["invoiceConfirmed"]
+                    } else {
+                        updateData["invoice_confirmed"]
                     }
-                    Logger.debug("FINAL totalCnfPrice value to save: $result")
-                    result
-                },
-                totalFobPrice = run {
-                    val v = updateData["totalFobPrice"]
                     when {
-                        v == null -> existingPurchase.totalFobPrice
-                        v is Number -> java.math.BigDecimal(v.toDouble())
-                        v is String -> v.toDoubleOrNull()?.let { java.math.BigDecimal(it) } ?: existingPurchase.totalFobPrice
-                        else -> existingPurchase.totalFobPrice
+                        raw is Boolean -> raw
+                        raw is String -> raw.toBoolean()
+                        raw is Number -> raw.toInt() != 0
+                        else -> existingPurchase.invoiceConfirmed
                     }
                 },
                 updatedAt = java.time.LocalDateTime.now()
@@ -498,19 +488,6 @@ class PurchaseService(
             val purchaseToReturn = freshPurchase ?: savedPurchase
             
             Logger.debug("Successfully saved purchase - ID: ${purchaseToReturn.id}, shipmentDate: ${purchaseToReturn.shipmentDate}, bookingId: ${purchaseToReturn.bookingId}")
-            // Verify the saved totalCnfPrice matches what we intended to save
-            if (updateData.containsKey("totalCnfPrice")) {
-                val expectedValue = when (val value = updateData["totalCnfPrice"]) {
-                    is Number -> java.math.BigDecimal(value.toDouble())
-                    is String -> value.toDoubleOrNull()?.let { java.math.BigDecimal(it) }
-                    else -> null
-                }
-                if (expectedValue != null && purchaseToReturn.totalCnfPrice != expectedValue) {
-                    Logger.warn("WARNING: totalCnfPrice mismatch! Expected: $expectedValue, Saved: ${purchaseToReturn.totalCnfPrice}. This may indicate a database constraint or trigger issue")
-                } else if (expectedValue != null) {
-                    Logger.debug("totalCnfPrice verified: ${purchaseToReturn.totalCnfPrice}")
-                }
-            }
             
             // Verify the saved value matches what we intended
             if (purchaseToReturn.bookingId != updatedPurchase.bookingId) {
@@ -559,6 +536,30 @@ class PurchaseService(
         Logger.debug("Successfully marked ${updatedPurchases.size} purchases as shipped")
         return updatedPurchases
     }
+
+    @Transactional
+    fun markPurchasesAsInvoiceConfirmed(purchaseIds: List<Long>): List<Purchase> {
+        Logger.log("Marking ${purchaseIds.size} purchases as invoice_confirmed: $purchaseIds")
+        val updatedPurchases = mutableListOf<Purchase>()
+
+        for (id in purchaseIds) {
+            val existingPurchase = purchaseRepository.findById(id).orElse(null)
+            if (existingPurchase != null) {
+                val updatedPurchase = existingPurchase.copy(
+                    invoiceConfirmed = true,
+                    updatedAt = java.time.LocalDateTime.now()
+                )
+                val savedPurchase = purchaseRepository.save(updatedPurchase)
+                updatedPurchases.add(savedPurchase)
+                Logger.debug("Marked purchase $id as invoice_confirmed")
+            } else {
+                Logger.warn("Purchase $id not found, skipping invoice_confirmed update")
+            }
+        }
+
+        Logger.debug("Successfully marked ${updatedPurchases.size} purchases as invoice_confirmed")
+        return updatedPurchases
+    }
     
     fun searchPurchases(searchTerm: String): List<Purchase> {
         return if (searchTerm.isBlank()) {
@@ -567,6 +568,60 @@ class PurchaseService(
             purchaseRepository.searchPurchases(searchTerm)
         }
     }
+
+    /**
+     * Paginated search for purchase list UI (chassis, car name, brand, client, supplier).
+     * [field]: `all`, `chassis` (prefix match, index-friendly), `carName`, `brand`, `clientName`, `supplier`.
+     */
+    fun searchPurchasesPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): PurchasePageResponse {
+        val q = sanitizePurchaseListSearchToken(rawQuery)
+        require(q.isNotEmpty()) { "Search text is required" }
+        val field = rawField.trim().lowercase().ifEmpty { "all" }
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg: Page<Purchase> = when (field) {
+            "chassis" -> purchaseRepository.searchPurchasesChassisPrefixPage(q, pageable)
+            "carname", "car_name" -> purchaseRepository.searchPurchasesCarNameContainsPage(q, pageable)
+            "brand" -> purchaseRepository.searchPurchasesBrandContainsPage(q, pageable)
+            "clientname", "client_name", "client" -> purchaseRepository.searchPurchasesClientNameContainsPage(q, pageable)
+            "supplier", "suppliername", "auctionhouse", "auction_house" ->
+                purchaseRepository.searchPurchasesSupplierContainsPage(q, pageable)
+            "all" -> purchaseRepository.searchPurchasesKeyFieldsContains(q, pageable)
+            else -> throw IllegalArgumentException("Invalid search field: $field. Use all, chassis, carName, brand, clientName, or supplier.")
+        }
+        return PurchasePageResponse(
+            content = pg.content,
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    private fun sanitizePurchaseListSearchToken(raw: String): String =
+        raw.trim().replace("%", "").replace("_", "").take(120)
+
+    /**
+     * Car booking "SEARCH CHASSIS": prefer prefix matches (uses [com.automan.backend.repository.PurchaseRepository.searchByChassisPrefix] → `idx_chassis`),
+     * then fill with chassis-only substring matches up to [maxResults].
+     */
+    fun searchChassisForBooking(rawQuery: String, maxResults: Int = 50): List<Purchase> {
+        val q = sanitizeChassisSearchToken(rawQuery)
+        if (q.isEmpty()) return emptyList()
+        val cap = maxResults.coerceIn(1, 100)
+        val prefix = purchaseRepository.searchByChassisPrefix(q, PageRequest.of(0, cap))
+        if (prefix.size >= cap) return prefix
+        val need = cap - prefix.size
+        val prefixIds = prefix.mapNotNull { it.id }.toSet()
+        val contains = purchaseRepository.searchByChassisContains(q, PageRequest.of(0, need + 20))
+            .filter { p -> p.id != null && p.id !in prefixIds }
+            .take(need)
+        return prefix + contains
+    }
+
+    private fun sanitizeChassisSearchToken(raw: String): String =
+        raw.trim().replace("%", "").replace("_", "").take(100)
     
     fun sortPurchases(field: String, order: String): List<Purchase> {
         val allPurchases = getAllPurchases()
@@ -603,6 +658,10 @@ class PurchaseService(
     
     fun filterByConsigneeAndVesselAndShipmentDate(consignee: String?, vessel: String?, shipmentDate: String?): List<Purchase> {
         return purchaseRepository.findByConsigneeAndVesselAndShipmentDate(consignee, vessel, shipmentDate)
+    }
+
+    fun filterByClientNameAndVesselAndShipmentDate(clientName: String?, vessel: String?, shipmentDate: String?): List<Purchase> {
+        return purchaseRepository.findByClientNameAndVesselAndShipmentDate(clientName, vessel, shipmentDate)
     }
     
     fun importPurchases(file: MultipartFile): ImportResponse {
@@ -955,7 +1014,7 @@ class PurchaseService(
             rixoPrice = getColumnValue(values, columnMapping, "RIXO PRICE", "RIXO CHARGES")?.take(10) ?: "",
             shipmentDate = getColumnValue(values, columnMapping, "SHIPMENT DATE")?.take(10) ?: "",
             blNo = getColumnValue(values, columnMapping, "B/L NO", "B/L NO.", "BL NO")?.take(10) ?: "",
-            vesselNo = getColumnValue(values, columnMapping, "VESSEL NO", "VESSEL NO.", "VESSEL")?.take(10) ?: "",
+            vessel = getColumnValue(values, columnMapping, "VESSEL NO", "VESSEL NO.", "VESSEL")?.take(255) ?: "",
             shipmentCharges = getColumnValue(values, columnMapping, "SHIPMENT CHARGES")?.take(10) ?: "",
             freight = getColumnValue(values, columnMapping, "FREIGHT")?.take(10) ?: "",
             storageCharges = getColumnValue(values, columnMapping, "STORAGE CHARGES")?.take(10) ?: "",
@@ -1311,12 +1370,21 @@ class PurchaseService(
         return purchaseRepository.findDistinctStockLocationsByCountry(country)
     }
     
+    /**
+     * Distinct POL values for unshipped purchases in [country], in **first-seen order**
+     * (table order is by chassis), so the first entry matches the first qualifying row — not alphabetical.
+     */
     fun getPolByCountry(country: String): List<String> {
         val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
-        return purchases
-            .mapNotNull { effectivePol(it.pol, it.stockLocation) }
-            .distinct()
-            .sorted()
+        val out = mutableListOf<String>()
+        val seen = HashSet<String>()
+        for (p in purchases) {
+            val pol = effectivePol(p.pol, p.stockLocation)?.trim() ?: continue
+            if (pol.isEmpty()) continue
+            val key = pol.lowercase()
+            if (seen.add(key)) out.add(pol)
+        }
+        return out
     }
     
     fun getUniqueRixoCompanies(): List<String> {
@@ -1407,68 +1475,6 @@ class PurchaseService(
         }
     }
 
-    fun saveTotalCnfPrice(
-        chassis: String,
-        totalCnfPrice: Double
-    ) {
-        val existingPurchases = purchaseRepository.findByChassis(chassis)
-        // Update all purchases with this chassis (since chassis is no longer unique)
-        existingPurchases.forEach { existingPurchase ->
-            // Create a new Purchase object with updated total C&F price
-            val updatedPurchase = existingPurchase.copy(
-                totalCnfPrice = java.math.BigDecimal(totalCnfPrice),
-                updatedAt = java.time.LocalDateTime.now()
-            )
-            
-            purchaseRepository.save(updatedPurchase)
-        }
-        if (existingPurchases.isNotEmpty()) {
-            Logger.debug("Updated total C&F price for chassis: $chassis = $totalCnfPrice (${existingPurchases.size} purchase(s))")
-        } else {
-            throw RuntimeException("Purchase not found for chassis: $chassis")
-        }
-    }
-    
-    fun saveTotalCnfPriceByPurchaseIds(
-        purchaseIds: List<Long>,
-        totalCnfPrice: Double
-    ) {
-        val purchases = purchaseRepository.findAllById(purchaseIds)
-        if (purchases.isEmpty()) {
-            throw RuntimeException("No purchases found for IDs: $purchaseIds")
-        }
-        
-        purchases.forEach { purchase ->
-            val updatedPurchase = purchase.copy(
-                totalCnfPrice = java.math.BigDecimal(totalCnfPrice),
-                updatedAt = java.time.LocalDateTime.now()
-            )
-            purchaseRepository.save(updatedPurchase)
-        }
-        
-        Logger.debug("Updated total C&F price for ${purchases.size} purchase(s): $totalCnfPrice")
-    }
-
-    fun saveTotalFobPriceByPurchaseIds(
-        purchaseIds: List<Long>,
-        totalFobPrice: Double
-    ) {
-        val purchases = purchaseRepository.findAllById(purchaseIds)
-        if (purchases.isEmpty()) {
-            throw RuntimeException("No purchases found for IDs: $purchaseIds")
-        }
-
-        purchases.forEach { purchase ->
-            val updatedPurchase = purchase.copy(
-                totalFobPrice = java.math.BigDecimal(totalFobPrice),
-                updatedAt = java.time.LocalDateTime.now()
-            )
-            purchaseRepository.save(updatedPurchase)
-        }
-
-        Logger.debug("Updated total FOB price for ${purchases.size} purchase(s): $totalFobPrice")
-    }
-
     fun saveFobCarCostDetails(
         chassis: String,
         carPrice: Double,
@@ -1504,6 +1510,46 @@ class PurchaseService(
             throw RuntimeException("Purchase not found for chassis: $chassis")
         }
     }
+
+    private fun splitBookingMappingTokens(raw: String?): List<String> =
+        raw.orEmpty().split(Regex("[;,\\n]")).map { it.trim() }.filter { it.isNotEmpty() }
+
+    /**
+     * Resolves consignee address from `booking_mappings` (Consignee Map) for PDF output.
+     * When multiple rows share the same consignee name, uses [country] and [pod] from the booking form to pick a row.
+     */
+    private fun resolveConsigneeAddressFromBookingMappings(
+        consigneeName: String,
+        country: String?,
+        pod: String?
+    ): String {
+        val name = consigneeName.trim()
+        if (name.isEmpty()) return ""
+        val rows = bookingMappingRepository.findAllByConsigneeNameIgnoreCaseOrderByIdAsc(name)
+        if (rows.isEmpty()) return ""
+        if (rows.size == 1) return rows.first().consigneeAddress?.trim().orEmpty()
+        val countryQ = country?.trim()?.lowercase().orEmpty()
+        val podQ = pod?.trim()?.lowercase().orEmpty()
+        fun matchesCountry(m: BookingMapping): Boolean {
+            if (countryQ.isEmpty()) return false
+            return splitBookingMappingTokens(m.country).any { it.equals(countryQ, ignoreCase = true) }
+        }
+        fun matchesPod(m: BookingMapping): Boolean {
+            if (podQ.isEmpty()) return false
+            return splitBookingMappingTokens(m.pod).any { t ->
+                t.equals(podQ, ignoreCase = true) ||
+                    podQ.contains(t, ignoreCase = true) ||
+                    t.contains(podQ, ignoreCase = true)
+            }
+        }
+        val both = rows.filter { matchesCountry(it) && matchesPod(it) }
+        if (both.isNotEmpty()) return both.first().consigneeAddress?.trim().orEmpty()
+        val byCountry = rows.filter { matchesCountry(it) }
+        if (byCountry.isNotEmpty()) return byCountry.first().consigneeAddress?.trim().orEmpty()
+        val byPod = rows.filter { matchesPod(it) }
+        if (byPod.isNotEmpty()) return byPod.first().consigneeAddress?.trim().orEmpty()
+        return rows.first().consigneeAddress?.trim().orEmpty()
+    }
     
     // Get shipping schedule PDF data
     fun getShippingSchedulePdfData(request: com.automan.backend.dto.ShippingSchedulePdfRequest): com.automan.backend.dto.ShippingSchedulePdfData {
@@ -1520,38 +1566,36 @@ class PurchaseService(
             request.shippingDate // Fallback to original format
         }
         
-        // Use ONLY consigneeName field value - ignore consigneeAddress completely
-        // The consigneeName will be split by commas in PDF generation
         Logger.debug("ConsigneeName from request: '${request.consigneeName}'")
         
         val consigneeNameValue = request.consigneeName?.trim() ?: ""
-        
-        // Create consignee details - use consigneeName as-is, address is empty
-        // PDF generation will split consigneeName by commas
+        val addressFromMap = resolveConsigneeAddressFromBookingMappings(
+            consigneeNameValue,
+            request.consigneeCountry?.trim(),
+            request.pod?.trim()
+        )
+        val addressFallback = request.consigneeAddress?.trim().orEmpty()
         val consigneeDetails = com.automan.backend.dto.ConsigneeDetailsDto(
             name = consigneeNameValue,
-            address = "" // Always empty - we only use consigneeName
+            address = addressFromMap.ifEmpty { addressFallback }
         )
         
-        // Fetch car details for each chassis
-        val carList = request.chassisNumbers.mapIndexed { index, chassis ->
+        // Fetch car details for each chassis — price column uses shipping_history.amount (one row per chassis)
+        val carList = request.chassisNumbers.mapIndexed { index, chassisRaw ->
+            val chassis = chassisRaw.trim()
+            val historyRow = shippingHistoryRepository.findFirstByChassisOrderByIdDesc(chassis)
             val purchases = purchaseRepository.findByChassis(chassis)
             val purchase = purchases.firstOrNull() // Use first purchase if multiple exist
             if (purchase != null) {
-                // Use saved totalCnfPrice if available, otherwise calculate it
-                val totalCnfPrice = if (purchase.totalCnfPrice != null) {
-                    // Use saved total C&F price
-                    purchase.totalCnfPrice!!
+                val totalCnfPrice = if (historyRow != null) {
+                    historyRow.amount
                 } else {
-                    // Fallback: Calculate final C&F price (package_price column removed)
                     val carPrice = try { java.math.BigDecimal(purchase.price ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
                     val isPackageMode = purchase.isPackageMode ?: false
                     
                     if (isPackageMode) {
-                        // Package mode: C&F = Car Price (package_price column was removed)
                         carPrice
                     } else {
-                        // Normal mode: C&F = Car Price + All Fees
                         val auctionFee = try { java.math.BigDecimal(purchase.auctionFee ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
                         val rixoPrice = try { java.math.BigDecimal(purchase.rixoPrice ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
                         val shipmentCharges = try { java.math.BigDecimal(purchase.shipmentCharges ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
@@ -1570,16 +1614,17 @@ class PurchaseService(
                     no = index + 1,
                     name = purchase.carName ?: "Unknown",
                     chassisNumber = purchase.chassis,
-                    year = purchase.carModelYear ?: "Unknown",
+                    year = purchase.carModelYear?.trim()?.takeIf { it.isNotEmpty() } ?: "",
                     cnfPrice = "¥${totalCnfPrice.toInt()}"
                 )
             } else {
+                val amountFromHistory = historyRow?.amount
                 com.automan.backend.dto.CarPdfDto(
                     no = index + 1,
                     name = "Unknown",
                     chassisNumber = chassis,
-                    year = "Unknown",
-                    cnfPrice = "¥0"
+                    year = "",
+                    cnfPrice = if (amountFromHistory != null) "¥${amountFromHistory.toInt()}" else "¥0"
                 )
             }
         }

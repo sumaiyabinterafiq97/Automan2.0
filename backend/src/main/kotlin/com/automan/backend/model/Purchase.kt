@@ -2,6 +2,7 @@ package com.automan.backend.model
 
 import jakarta.persistence.*
 import java.time.LocalDateTime
+import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 
 @Entity
@@ -81,6 +82,11 @@ data class Purchase(
     
     @Column(name = "pol")
     val pol: String? = null,
+
+    /** Port of discharge (POD); JSON may use "destination" as alias. */
+    @field:JsonAlias("destination")
+    @Column(name = "pod")
+    val pod: String? = null,
     
     @Column(name = "rixo_company")
     val rixoCompany: String? = null,
@@ -135,15 +141,17 @@ data class Purchase(
     
     @Column(name = "`B/L_no`")
     val blNo: String? = null,
-    
-    @Column(name = "vessel_no")
-    val vesselNo: String? = null,
-    
+
+    /** Shipment vessel name; JSON may still send `vesselNo` from older clients. */
+    @field:JsonAlias("vesselNo")
     @Column(name = "vessel")
     val vessel: String? = null,
     
     @Column(name = "shipped")
     val shipped: Boolean? = null,
+
+    @Column(name = "invoice_confirmed")
+    val invoiceConfirmed: Boolean? = null,
     
     @Column(name = "shipment_charges")
     val shipmentCharges: String? = null,
@@ -188,12 +196,6 @@ data class Purchase(
     
     @Column(name = "is_package_mode")
     val isPackageMode: Boolean? = null,
-    
-    @Column(name = "total_cnf_price")
-    val totalCnfPrice: java.math.BigDecimal? = null,
-    
-    @Column(name = "total_fob_price")
-    val totalFobPrice: java.math.BigDecimal? = null,
     
     @Column(name = "booking_id")
     val bookingId: Long? = null,

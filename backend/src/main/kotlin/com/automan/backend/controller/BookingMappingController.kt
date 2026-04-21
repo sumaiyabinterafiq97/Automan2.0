@@ -33,6 +33,23 @@ class BookingMappingController(
     private val bookingMappingService: BookingMappingService,
     private val masterMenuService: MasterMenuService
 ) {
+    /**
+     * Paginated search for Consignee Map (consignee name / country / all).
+     */
+    @GetMapping("/page-search")
+    fun pageSearch(
+        @RequestParam q: String,
+        @RequestParam(defaultValue = "all") field: String,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(bookingMappingService.searchConsigneeMapPage(q, field, page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
     @GetMapping
     fun getAll(): ResponseEntity<ApiResponse<List<BookingMapping>>> {
         return try {
@@ -43,6 +60,17 @@ class BookingMappingController(
         } catch (e: Exception) {
             Logger.error("Error in BookingMappingController.getAll(): ${e.message}")
             e.printStackTrace()
+            ResponseEntity.status(500).body(ApiResponse(false, null, "Error: ${e.message}"))
+        }
+    }
+
+    @GetMapping("/consignee-names")
+    fun getDistinctConsigneeNames(): ResponseEntity<ApiResponse<List<String>>> {
+        return try {
+            val names = bookingMappingService.getDistinctConsigneeNames()
+            ResponseEntity.ok(ApiResponse(true, names))
+        } catch (e: Exception) {
+            Logger.error("Error in BookingMappingController.getDistinctConsigneeNames: ${e.message}")
             ResponseEntity.status(500).body(ApiResponse(false, null, "Error: ${e.message}"))
         }
     }

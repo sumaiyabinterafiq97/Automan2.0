@@ -167,6 +167,14 @@ class RixoMappingController(
         return null
     }
 
+    @GetMapping("/distinct-auction-names")
+    fun distinctAuctionNames(): ResponseEntity<List<String>> =
+        ResponseEntity.ok(rixoMappingService.listDistinctAuctionNames())
+
+    @GetMapping("/distinct-rixo-companies")
+    fun distinctRixoCompanies(): ResponseEntity<List<String>> =
+        ResponseEntity.ok(rixoMappingService.listDistinctRixoCompanies())
+
     @GetMapping("/all")
     fun listAll(): ResponseEntity<Map<String, Any?>> {
         val items = rixoMappingService.listAllForTree().map { m ->

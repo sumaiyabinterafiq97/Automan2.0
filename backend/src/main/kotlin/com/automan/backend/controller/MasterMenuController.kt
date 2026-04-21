@@ -44,6 +44,19 @@ class MasterMenuController(
         return ResponseEntity.ok(masterMenuService.addField(request.fieldName))
     }
 
+    @DeleteMapping("/fields/{fieldName}")
+    fun deleteEntireField(
+        @PathVariable fieldName: String,
+    ): ResponseEntity<Map<String, Any>> {
+        Logger.debug("MasterMenuController.deleteEntireField field='%s'", fieldName)
+        val removed = masterMenuService.deleteEntireField(fieldName)
+        return if (removed) {
+            ResponseEntity.ok(mapOf("success" to true))
+        } else {
+            ResponseEntity.status(404).body(mapOf("success" to false, "message" to "Field not found"))
+        }
+    }
+
     @GetMapping("/{fieldName}")
     fun getValues(@PathVariable fieldName: String): ResponseEntity<List<String>> {
         val values = masterMenuService.getValues(fieldName)

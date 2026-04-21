@@ -22,6 +22,9 @@ class ClientMapService(
     fun listAll(): List<ClientMap> =
         clientMapRepository.findAll(Sort.by(Sort.Order.desc("id")))
 
+    fun getDistinctClientNamesOrdered(): List<String> =
+        clientMapRepository.findDistinctClientNamesOrdered()
+
     fun findById(id: Long): ClientMap? =
         clientMapRepository.findById(id).orElse(null)
 

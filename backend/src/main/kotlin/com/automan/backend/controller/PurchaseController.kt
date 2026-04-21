@@ -1,15 +1,18 @@
 package com.automan.backend.controller
 
 import com.automan.backend.dto.CreateTransactionRequest
+import com.automan.backend.dto.InvoiceConfirmAndDownloadRequest
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
 import com.automan.backend.service.PurchaseService
 import com.automan.backend.service.ClientService
 import com.automan.backend.service.TransactionService
 import com.automan.backend.util.Logger
+import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
+import org.springframework.web.server.ResponseStatusException
 import java.math.BigDecimal
 
 @RestController
@@ -19,7 +22,9 @@ class PurchaseController(
     private val purchaseService: PurchaseService,
     private val clientService: ClientService,
     private val transactionService: TransactionService,
-    private val pdfService: com.automan.backend.service.PdfService
+    private val pdfService: com.automan.backend.service.PdfService,
+    private val invoiceHistoryService: com.automan.backend.service.InvoiceHistoryService,
+    private val rixoHistoryService: com.automan.backend.service.RixoHistoryService,
 ) {
     
     @GetMapping
@@ -31,6 +36,32 @@ class PurchaseController(
     @GetMapping("/search")
     fun searchPurchases(@RequestParam query: String): ResponseEntity<List<Purchase>> {
         val purchases = purchaseService.searchPurchases(query)
+        return ResponseEntity.ok(purchases)
+    }
+
+    /**
+     * Paginated search for the purchase list (bounded result sets).
+     * @param q non-blank search text
+     * @param field `all` | `chassis` (prefix) | `carName` | `brand` | `clientName` | `supplier`
+     */
+    @GetMapping("/page-search")
+    fun searchPurchasesPage(
+        @RequestParam q: String,
+        @RequestParam(defaultValue = "all") field: String,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(purchaseService.searchPurchasesPage(q, field, page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    /** Chassis-only search for car booking autocomplete; uses `idx_chassis` for prefix matches. */
+    @GetMapping("/search-chassis")
+    fun searchPurchasesByChassisForBooking(@RequestParam query: String): ResponseEntity<List<Purchase>> {
+        val purchases = purchaseService.searchChassisForBooking(query)
         return ResponseEntity.ok(purchases)
     }
     
@@ -108,6 +139,13 @@ class PurchaseController(
         val purchases = purchaseService.getFilteredPurchasesByCountryAndPol(country, polPort)
         return ResponseEntity.ok(purchases)
     }
+
+    /** Car booking: load LIST rows that share this [bookingId] (`booking_id` column). */
+    @GetMapping("/by-booking/{bookingId}")
+    fun getPurchasesByBookingId(@PathVariable bookingId: Long): ResponseEntity<List<Purchase>> {
+        val purchases = purchaseService.getPurchasesByBookingId(bookingId)
+        return ResponseEntity.ok(purchases)
+    }
     
     @GetMapping("/unshipped-chassis")
     fun getUnshippedChassisByPol(
@@ -143,72 +181,6 @@ class PurchaseController(
             ResponseEntity.ok(mapOf("message" to "Car cost details saved successfully", "chassis" to chassis))
         } catch (e: Exception) {
             ResponseEntity.status(500).body(mapOf("error" to "Failed to save car cost details: ${e.message}"))
-        }
-    }
-
-    @PostMapping("/save-total-cnf")
-    fun saveTotalCnfPriceEndpoint(@RequestBody costData: Map<String, Any>): ResponseEntity<Map<String, String>> {
-        return try {
-            val chassis = costData["chassis"] as String
-            val totalCnfPrice = (costData["totalCnfPrice"] as? Number)?.toDouble() ?: 0.0
-            
-            Logger.debug("Saving total C&F price - chassis: $chassis, totalCnfPrice: $totalCnfPrice")
-            
-            purchaseService.saveTotalCnfPrice(chassis, totalCnfPrice)
-            
-            ResponseEntity.ok(mapOf("message" to "Total C&F price saved successfully", "chassis" to chassis, "totalCnfPrice" to totalCnfPrice.toString()))
-        } catch (e: Exception) {
-            ResponseEntity.status(500).body(mapOf("error" to "Failed to save total C&F price: ${e.message}"))
-        }
-    }
-    
-    @PostMapping("/save-total-cnf-by-ids")
-    fun saveTotalCnfPriceByPurchaseIds(@RequestBody requestData: Map<String, Any>): ResponseEntity<Map<String, String>> {
-        return try {
-            val purchaseIds = (requestData["purchaseIds"] as? List<*>)?.mapNotNull { 
-                when (it) {
-                    is Number -> it.toLong()
-                    is String -> it.toLongOrNull()
-                    else -> null
-                }
-            } ?: emptyList()
-            val totalCnfPrice = (requestData["totalCnfPrice"] as? Number)?.toDouble() ?: 0.0
-            
-            Logger.debug("Saving total C&F price by purchase IDs - purchaseIds: $purchaseIds, totalCnfPrice: $totalCnfPrice")
-            
-            purchaseService.saveTotalCnfPriceByPurchaseIds(purchaseIds, totalCnfPrice)
-            
-            ResponseEntity.ok(mapOf("message" to "Total C&F price saved successfully", "count" to purchaseIds.size.toString(), "totalCnfPrice" to totalCnfPrice.toString()))
-        } catch (e: Exception) {
-            ResponseEntity.status(500).body(mapOf("error" to "Failed to save total C&F price: ${e.message}"))
-        }
-    }
-
-    @PostMapping("/save-total-fob-by-ids")
-    fun saveTotalFobPriceByPurchaseIds(@RequestBody requestData: Map<String, Any>): ResponseEntity<Map<String, String>> {
-        return try {
-            val purchaseIds = (requestData["purchaseIds"] as? List<*>)?.mapNotNull {
-                when (it) {
-                    is Number -> it.toLong()
-                    is String -> it.toLongOrNull()
-                    else -> null
-                }
-            } ?: emptyList()
-            val totalFobPrice = (requestData["totalFobPrice"] as? Number)?.toDouble() ?: 0.0
-
-            Logger.debug("Saving total FOB price by purchase IDs - purchaseIds: $purchaseIds, totalFobPrice: $totalFobPrice")
-
-            purchaseService.saveTotalFobPriceByPurchaseIds(purchaseIds, totalFobPrice)
-
-            ResponseEntity.ok(
-                mapOf(
-                    "message" to "Total FOB price saved successfully",
-                    "count" to purchaseIds.size.toString(),
-                    "totalFobPrice" to totalFobPrice.toString()
-                )
-            )
-        } catch (e: Exception) {
-            ResponseEntity.status(500).body(mapOf("error" to "Failed to save total FOB price: ${e.message}"))
         }
     }
 
@@ -343,7 +315,7 @@ class PurchaseController(
         return try {
             val updatedPurchase = purchaseService.updatePurchasePartial(id, updateData)
             if (updatedPurchase != null) {
-                Logger.debug("[Controller] Purchase updated successfully - shipmentDate: ${updatedPurchase.shipmentDate}, bookingId: ${updatedPurchase.bookingId}, vessel: ${updatedPurchase.vessel}, totalCnfPrice: ${updatedPurchase.totalCnfPrice}, auctionHouse: ${updatedPurchase.auctionHouse}")
+                Logger.debug("[Controller] Purchase updated successfully - shipmentDate: ${updatedPurchase.shipmentDate}, bookingId: ${updatedPurchase.bookingId}, vessel: ${updatedPurchase.vessel}, auctionHouse: ${updatedPurchase.auctionHouse}")
                 ResponseEntity.ok(updatedPurchase)
             } else {
                 Logger.error("[Controller] Purchase not found or update failed")
@@ -394,7 +366,61 @@ class PurchaseController(
             "purchaseIds" to purchaseIds
         ))
     }
+
+    @PostMapping("/invoice/confirm")
+    fun confirmInvoicePurchases(@RequestBody request: Map<String, Any>): ResponseEntity<Map<String, Any>> {
+        Logger.debug("[Controller] Confirm invoice request received")
+        val purchaseIds = (request["purchaseIds"] as? List<*>)?.mapNotNull {
+            when (it) {
+                is Number -> it.toLong()
+                is String -> it.toLongOrNull()
+                else -> null
+            }
+        } ?: emptyList()
+
+        if (purchaseIds.isEmpty()) {
+            Logger.error("[Controller] No purchase IDs provided for invoice confirm")
+            return ResponseEntity.badRequest().body(mapOf("error" to "No purchase IDs provided"))
+        }
+
+        Logger.debug("[Controller] Marking ${purchaseIds.size} purchases as invoice_confirmed")
+        val updatedPurchases = purchaseService.markPurchasesAsInvoiceConfirmed(purchaseIds)
+
+        return ResponseEntity.ok(
+            mapOf(
+                "success" to true,
+                "message" to "Successfully confirmed invoice for ${updatedPurchases.size} purchase(s)",
+                "updatedCount" to updatedPurchases.size,
+                "purchaseIds" to purchaseIds
+            )
+        )
+    }
     
+    /**
+     * Saves [com.automan.backend.model.InvoiceHistory], sets invoice_confirmed on purchases, returns PDF.
+     * 409 if invoice number already exists.
+     */
+    @PostMapping("/invoice/confirm-and-download")
+    fun confirmAndDownloadInvoice(@RequestBody request: InvoiceConfirmAndDownloadRequest): ResponseEntity<ByteArray> {
+        return try {
+            val pdfBytes = invoiceHistoryService.confirmAndDownload(request)
+            val headers = org.springframework.http.HttpHeaders()
+            headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
+            headers.set(
+                org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"invoice_${request.pdf.invoiceNumber}.pdf\"",
+            )
+            headers.contentLength = pdfBytes.size.toLong()
+            ResponseEntity.ok().headers(headers).body(pdfBytes)
+        } catch (e: IllegalArgumentException) {
+            val msg = e.message ?: "Invalid request"
+            if (msg.contains("already exists", ignoreCase = true)) {
+                throw ResponseStatusException(HttpStatus.CONFLICT, msg)
+            }
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, msg)
+        }
+    }
+
     @PostMapping("/invoice/generate-pdf")
     fun generateInvoicePdf(@RequestBody request: com.automan.backend.dto.InvoicePdfRequest): ResponseEntity<ByteArray> {
         try {
@@ -512,6 +538,7 @@ class PurchaseController(
         }
     }
     
+    /** Returns PDF bytes in the HTTP body only; does not persist or upload to object storage (S3, etc.). */
     @PostMapping("/rixo-transport-pdf")
     fun generateRixoTransportPdf(@RequestBody request: Map<String, Any>): ResponseEntity<ByteArray> {
         try {
@@ -562,7 +589,16 @@ class PurchaseController(
             Logger.debug("Controller: Transport data: $transportData")
             Logger.debug("Controller: Purchase data: $purchaseData")
             Logger.debug("Controller: Generating Rixo Transport PDF for ${selectedIds.size} purchases")
-            
+
+            val persistHistory = when (val p = request["persistHistory"]) {
+                is Boolean -> p
+                is String -> p.equals("true", ignoreCase = true)
+                else -> false
+            }
+            if (persistHistory && selectedIds.isNotEmpty()) {
+                rixoHistoryService.saveFromTransport(selectedIds, transportData)
+            }
+
             val pdfBytes = purchaseService.generateRixoTransportPdf(selectedIds, transportData, purchaseData)
             
             return ResponseEntity.ok()
@@ -624,10 +660,16 @@ class PurchaseController(
     @GetMapping("/filter/invoice")
     fun filterForInvoice(
         @RequestParam(required = false) consignee: String?,
+        @RequestParam(required = false) clientName: String?,
         @RequestParam(required = false) vessel: String?,
         @RequestParam(required = false) shipmentDate: String?
     ): ResponseEntity<List<Purchase>> {
-        val purchases = purchaseService.filterByConsigneeAndVesselAndShipmentDate(consignee, vessel, shipmentDate)
+        val purchases = when {
+            !clientName.isNullOrBlank() ->
+                purchaseService.filterByClientNameAndVesselAndShipmentDate(clientName, vessel, shipmentDate)
+            else ->
+                purchaseService.filterByConsigneeAndVesselAndShipmentDate(consignee, vessel, shipmentDate)
+        }
         return ResponseEntity.ok(purchases)
     }
     
@@ -885,46 +927,11 @@ class PurchaseController(
         // Add consignee label row (first row) - center aligned
         consigneeTable.addCell(createCellWithBorderCentered("CONSIGNEE:", true))
         
-        // Get consignee name value (contains full consignee details)
         val consigneeName = pdfData.consigneeDetails.name ?: ""
+        val consigneeAddress = pdfData.consigneeDetails.address ?: ""
         Logger.debug("PDF Generation - Consignee Name: '$consigneeName'")
-        Logger.debug("PDF Generation - Consignee Name length: ${consigneeName.length}")
-        
-        if (consigneeName.isNotEmpty()) {
-            // Split consignee name by commas and add each part as a separate row
-            val consigneeParts = consigneeName.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            Logger.debug("Split consignee into ${consigneeParts.size} parts: $consigneeParts")
-            
-            // Add each comma-separated part as a separate row (center-aligned, not bold)
-            consigneeParts.forEachIndexed { index, part ->
-                Logger.debug("Processing consignee part $index: '$part'")
-                
-                val partText = com.itextpdf.layout.element.Text(part)
-                    .setFontSize(10f)
-                
-                val partParagraph = com.itextpdf.layout.element.Paragraph(partText)
-                    .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-                    .setMargin(0f)
-                
-                val partCell = com.itextpdf.layout.element.Cell()
-                    .add(partParagraph as com.itextpdf.layout.element.IBlockElement)
-                    .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-                    .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-                    .setBorderTop(if (index == 0) com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f) else com.itextpdf.layout.borders.Border.NO_BORDER)
-                    .setBorderBottom(if (index == consigneeParts.size - 1) com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f) else com.itextpdf.layout.borders.Border.NO_BORDER)
-                    .setPadding(6f)
-                    .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-                    .setMinHeight(20f) // Increased height to ensure visible separation
-                    .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
-                
-                consigneeTable.addCell(partCell)
-                Logger.debug("Added consignee part $index to table: '$part'")
-            }
-            
-            Logger.debug("Total rows in consignee table after adding parts: ${consigneeTable.numberOfRows}")
-        } else {
-            Logger.warn("PDF Generation - Consignee name is empty, not adding consignee rows")
-        }
+        Logger.debug("PDF Generation - Consignee Address length: ${consigneeAddress.length}")
+        addShippingScheduleConsigneeRows(consigneeTable, consigneeName, consigneeAddress, padding = 6f, minHeight = 20f)
         
         document.add(consigneeTable)
         
@@ -1021,45 +1028,72 @@ class PurchaseController(
         
         consigneeTable.addCell(createCellWithBorderCentered("CONSIGNEE:", true))
         
-        // Get consignee name value (contains full consignee details)
         val consigneeName = pdfData.consigneeDetails.name ?: ""
+        val consigneeAddress = pdfData.consigneeDetails.address ?: ""
         Logger.debug("FOB PDF Generation - Consignee Name: '$consigneeName'")
-        
-        if (consigneeName.isNotEmpty()) {
-            // Split consignee name by commas and add each part as a separate row
-            val consigneeParts = consigneeName.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            Logger.debug("FOB PDF - Split consignee into ${consigneeParts.size} parts: $consigneeParts")
-            
-            // Add each comma-separated part as a separate row (center-aligned, not bold)
-            consigneeParts.forEachIndexed { index, part ->
-                val partText = com.itextpdf.layout.element.Text(part)
-                    .setFontSize(10f)
-                val partParagraph = com.itextpdf.layout.element.Paragraph()
-                    .add(partText)
-                    .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-                    .setMargin(0f) // Remove paragraph margins to ensure proper line breaks
-                
-                val partCell = com.itextpdf.layout.element.Cell()
-                    .add(partParagraph)
-                    .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-                    .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
-                    .setBorderTop(if (index == 0) com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f) else com.itextpdf.layout.borders.Border.NO_BORDER)
-                    .setBorderBottom(if (index == consigneeParts.size - 1) com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f) else com.itextpdf.layout.borders.Border.NO_BORDER)
-                    .setPadding(4f)
-                    .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
-                    .setMinHeight(15f) // Ensure minimum height for each row
-                
-                consigneeTable.addCell(partCell)
-                Logger.debug("FOB PDF - Added consignee part $index: '$part'")
-            }
-        } else {
-            Logger.warn("FOB PDF Generation - Consignee name is empty, not adding consignee rows")
-        }
+        addShippingScheduleConsigneeRows(consigneeTable, consigneeName, consigneeAddress, padding = 4f, minHeight = 15f)
         
         document.add(consigneeTable)
         
         document.close()
         return outputStream.toByteArray()
+    }
+
+    /**
+     * Name rows: comma-separated parts of [consigneeName]. Address rows: lines from [consigneeAddress] (Consignee Map), shown below the name.
+     */
+    private fun addShippingScheduleConsigneeRows(
+        consigneeTable: com.itextpdf.layout.element.Table,
+        consigneeName: String,
+        consigneeAddress: String,
+        padding: Float,
+        minHeight: Float
+    ) {
+        val nameParts = consigneeName.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        val addr = consigneeAddress.trim()
+        val addressLines = if (addr.isEmpty()) {
+            emptyList()
+        } else {
+            addr.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+        }
+        val rows = mutableListOf<Pair<String, Boolean>>()
+        nameParts.forEach { rows.add(it to true) }
+        addressLines.forEach { rows.add(it to false) }
+        if (rows.isEmpty()) {
+            Logger.warn("PDF Generation - Consignee name and address empty, not adding consignee content rows")
+            return
+        }
+        rows.forEachIndexed { index, (text, isNameLine) ->
+            val fontSize = if (isNameLine) 10f else 9f
+            val partText = com.itextpdf.layout.element.Text(text).setFontSize(fontSize)
+            val partParagraph = com.itextpdf.layout.element.Paragraph(partText)
+                .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                .setMargin(0f)
+            val isLast = index == rows.size - 1
+            val partCell = com.itextpdf.layout.element.Cell()
+                .add(partParagraph as com.itextpdf.layout.element.IBlockElement)
+                .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+                .setBorderTop(
+                    if (index == 0) {
+                        com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f)
+                    } else {
+                        com.itextpdf.layout.borders.Border.NO_BORDER
+                    }
+                )
+                .setBorderBottom(
+                    if (isLast) {
+                        com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f)
+                    } else {
+                        com.itextpdf.layout.borders.Border.NO_BORDER
+                    }
+                )
+                .setPadding(padding)
+                .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.CENTER)
+                .setMinHeight(minHeight)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+            consigneeTable.addCell(partCell)
+        }
     }
     
     private fun createCell(text: String, isBold: Boolean): com.itextpdf.layout.element.Cell {
