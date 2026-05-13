@@ -20,6 +20,18 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- Backfill POL for legacy purchases where stock_location has a single canonical POL mapping.
+-- Multi-POL mappings are left blank so operators can choose the correct port explicitly.
+UPDATE purchases p
+JOIN booking_mappings bm
+    ON bm.country = 'STOCK_LOCATION_POL'
+    AND bm.stock_location = p.stock_location
+SET p.pol = bm.pols
+WHERE (p.pol IS NULL OR p.pol = '')
+  AND bm.pols IS NOT NULL
+  AND bm.pols <> ''
+  AND bm.pols NOT LIKE '%,%';
+
 -- Add other columns that may be missing on older RDS (idempotent; add more blocks as needed)
 SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'total_fob_price');
