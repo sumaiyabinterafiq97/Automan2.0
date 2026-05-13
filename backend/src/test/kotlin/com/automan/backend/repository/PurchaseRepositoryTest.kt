@@ -61,8 +61,7 @@ class PurchaseRepositoryTest {
             .containsExactly("GLOBAL KAWASAKI", "YOKOHAMA")
         assertThat(purchaseRepository.findFilteredChassis("Japan", "GLOBAL KAWASAKI"))
             .containsExactly("LEGACY-001")
-        assertThat(purchaseRepository.findFilteredPurchasesByCountryAndPol("Japan", "GLOBAL KAWASAKI"))
-            .extracting<String> { it.chassis }
+        assertThat(purchaseRepository.findFilteredPurchasesByCountryAndPol("Japan", "GLOBAL KAWASAKI").map { it.chassis })
             .containsExactly("LEGACY-001")
         assertThat(purchaseRepository.findUnshippedChassisByPolPort("GLOBAL KAWASAKI"))
             .containsExactly("LEGACY-001")

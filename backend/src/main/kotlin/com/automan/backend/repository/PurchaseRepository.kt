@@ -108,7 +108,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT DISTINCT p.venueId FROM Purchase p WHERE p.venueId IS NOT NULL AND p.venueId != '' ORDER BY p.venueId")
     fun findDistinctVenueIds(): List<String>
     
-    // Filtered chassis methods - filter by shipped=0 (unshipped cars only)
+    // Filtered chassis methods - filter by shipped=false (unshipped cars only)
     // Filter by POL field, falling back to stock_location for legacy rows where POL is missing.
     @Query(
         value = """
@@ -118,7 +118,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
               AND COALESCE(NULLIF(p.pol, ''), p.stock_location) = :polPort
               AND p.chassis IS NOT NULL
               AND p.chassis <> ''
-              AND (p.shipped IS NULL OR p.shipped = 0)
+              AND (p.shipped IS NULL OR p.shipped = FALSE)
             ORDER BY p.chassis
         """,
         nativeQuery = true
@@ -131,7 +131,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             FROM purchases p
             WHERE p.country = :country
               AND COALESCE(NULLIF(p.pol, ''), p.stock_location) = :polPort
-              AND (p.shipped IS NULL OR p.shipped = 0)
+              AND (p.shipped IS NULL OR p.shipped = FALSE)
             ORDER BY p.chassis
         """,
         nativeQuery = true
@@ -141,15 +141,14 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
         @Param("polPort") polPort: String
     ): List<Purchase>
     
-    // Unshipped chassis by POL (using shipped field: null or 0 = unshipped)
-    // Note: shipped is stored as TINYINT(1) in MySQL, so we check for 0 or NULL
-    // Using native query to avoid Boolean/Integer comparison issues
+    // Unshipped chassis by POL (using shipped field: null or false = unshipped)
+    // MySQL accepts FALSE for TINYINT(1), and this keeps the native query portable in tests.
     @Query(
         value = """
             SELECT DISTINCT p.chassis
             FROM purchases p
             WHERE COALESCE(NULLIF(p.pol, ''), p.stock_location) = :polPort
-              AND (p.shipped IS NULL OR p.shipped = 0)
+              AND (p.shipped IS NULL OR p.shipped = FALSE)
               AND p.chassis IS NOT NULL
               AND p.chassis <> ''
             ORDER BY p.chassis
