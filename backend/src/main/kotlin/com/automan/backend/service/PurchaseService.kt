@@ -2,6 +2,7 @@ package com.automan.backend.service
 
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
+import com.automan.backend.repository.BookingMappingRepository
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.util.Logger
 import org.springframework.stereotype.Service
@@ -11,6 +12,7 @@ import org.springframework.web.multipart.MultipartFile
 @Service
 class PurchaseService(
     private val purchaseRepository: PurchaseRepository,
+    private val bookingMappingRepository: BookingMappingRepository,
     private val pdfService: PdfService
 ) {
     
@@ -1223,7 +1225,10 @@ class PurchaseService(
     }
     
     fun getPolByCountry(country: String): List<String> {
-        return purchaseRepository.findDistinctPolByCountry(country)
+        val explicitPols = purchaseRepository.findDistinctPolByCountry(country)
+        val legacyPols = purchaseRepository.findDistinctStockLocationsWithBlankPolByCountry(country)
+            .flatMap { stockLocation -> resolvePolsForStockLocation(stockLocation) }
+        return (explicitPols + legacyPols).normalizedDistinctSorted()
     }
     
     fun getUniqueRixoCompanies(): List<String> {
@@ -1240,18 +1245,79 @@ class PurchaseService(
     
     @Transactional(readOnly = true)
     fun getFilteredChassis(country: String, polPort: String): List<String> {
-        // Use optimized database query instead of loading all purchases into memory
-        // This is much more efficient, especially with large datasets
-        return purchaseRepository.findFilteredChassis(country, polPort)
+        val explicitChassis = purchaseRepository.findFilteredChassis(country, polPort)
+        val legacyStockLocations = findLegacyStockLocationsForPol(country, polPort)
+        if (legacyStockLocations.isEmpty()) {
+            return explicitChassis.normalizedDistinctSorted()
+        }
+
+        val legacyChassis = purchaseRepository.findFilteredChassisByCountryAndLegacyStockLocations(
+            country,
+            legacyStockLocations
+        )
+        return (explicitChassis + legacyChassis).normalizedDistinctSorted()
     }
 
     @Transactional(readOnly = true)
     fun getFilteredPurchasesByCountryAndPol(country: String, polPort: String): List<Purchase> {
-        return purchaseRepository.findFilteredPurchasesByCountryAndPol(country, polPort)
+        val explicitPurchases = purchaseRepository.findFilteredPurchasesByCountryAndPol(country, polPort)
+        val legacyStockLocations = findLegacyStockLocationsForPol(country, polPort)
+        if (legacyStockLocations.isEmpty()) {
+            return explicitPurchases
+        }
+
+        val legacyPurchases = purchaseRepository.findFilteredPurchasesByCountryAndLegacyStockLocations(
+            country,
+            legacyStockLocations
+        )
+        return (explicitPurchases + legacyPurchases)
+            .distinctBy { it.id ?: it.chassis }
+            .sortedBy { it.chassis }
     }
     
     fun getUnshippedChassisByPolPort(polPort: String): List<String> {
         return purchaseRepository.findUnshippedChassisByPolPort(polPort)
+    }
+
+    private fun findLegacyStockLocationsForPol(country: String, polPort: String): List<String> {
+        val selectedPol = polPort.trim()
+        if (selectedPol.isEmpty()) {
+            return emptyList()
+        }
+
+        return purchaseRepository.findDistinctStockLocationsWithBlankPolByCountry(country)
+            .filter { stockLocation ->
+                resolvePolsForStockLocation(stockLocation)
+                    .any { it.equals(selectedPol, ignoreCase = true) }
+            }
+            .normalizedDistinctSorted()
+    }
+
+    private fun resolvePolsForStockLocation(stockLocation: String?): List<String> {
+        val normalizedStockLocation = stockLocation?.trim().orEmpty()
+        if (normalizedStockLocation.isEmpty()) {
+            return emptyList()
+        }
+
+        val mappedPols = bookingMappingRepository.findByStockLocationIgnoreCase(normalizedStockLocation)
+            .flatMap { mapping -> mapping.pols?.split(',') ?: emptyList() }
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .normalizedDistinctSorted()
+
+        return if (mappedPols.isNotEmpty()) {
+            mappedPols
+        } else {
+            listOf(normalizedStockLocation)
+        }
+    }
+
+    private fun List<String>.normalizedDistinctSorted(): List<String> {
+        return this
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .sortedWith(String.CASE_INSENSITIVE_ORDER)
     }
     
     fun saveCarCostDetails(

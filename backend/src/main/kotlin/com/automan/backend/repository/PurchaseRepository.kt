@@ -80,6 +80,9 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     
     @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.country = :country AND p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
     fun findDistinctStockLocationsByCountry(@Param("country") country: String): List<String>
+
+    @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.country = :country AND (p.pol IS NULL OR p.pol = '') AND p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
+    fun findDistinctStockLocationsWithBlankPolByCountry(@Param("country") country: String): List<String>
     
     // POL by country (from purchases only) - used for booking page POL dropdown
     @Query("SELECT DISTINCT p.pol FROM Purchase p WHERE p.country = :country AND p.pol IS NOT NULL AND p.pol != '' ORDER BY p.pol")
@@ -106,6 +109,18 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     fun findFilteredPurchasesByCountryAndPol(
         @Param("country") country: String,
         @Param("polPort") polPort: String
+    ): List<Purchase>
+
+    @Query("SELECT DISTINCT p.chassis FROM Purchase p WHERE p.country = :country AND p.stockLocation IN :stockLocations AND (p.pol IS NULL OR p.pol = '') AND (p.shipped IS NULL OR p.shipped = false) AND p.chassis IS NOT NULL AND p.chassis != '' ORDER BY p.chassis")
+    fun findFilteredChassisByCountryAndLegacyStockLocations(
+        @Param("country") country: String,
+        @Param("stockLocations") stockLocations: List<String>
+    ): List<String>
+
+    @Query("SELECT p FROM Purchase p WHERE p.country = :country AND p.stockLocation IN :stockLocations AND (p.pol IS NULL OR p.pol = '') AND (p.shipped IS NULL OR p.shipped = false) ORDER BY p.chassis")
+    fun findFilteredPurchasesByCountryAndLegacyStockLocations(
+        @Param("country") country: String,
+        @Param("stockLocations") stockLocations: List<String>
     ): List<Purchase>
     
     // Unshipped chassis by POL (using shipped field: null or 0 = unshipped)
