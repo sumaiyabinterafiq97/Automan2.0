@@ -20,6 +20,26 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- Backfill only unambiguous legacy rows. Stock locations with multiple possible POLs
+-- stay blank and are resolved at query time from booking_mappings.
+UPDATE purchases p
+JOIN (
+    SELECT
+        stock_location,
+        MIN(TRIM(pols)) AS pol
+    FROM booking_mappings
+    WHERE stock_location IS NOT NULL
+      AND TRIM(stock_location) != ''
+      AND pols IS NOT NULL
+      AND TRIM(pols) != ''
+      AND pols NOT LIKE '%,%'
+    GROUP BY stock_location
+) bm ON LOWER(TRIM(bm.stock_location)) = LOWER(TRIM(p.stock_location))
+SET p.pol = bm.pol
+WHERE (p.pol IS NULL OR TRIM(p.pol) = '')
+  AND p.stock_location IS NOT NULL
+  AND TRIM(p.stock_location) != '';
+
 -- Add other columns that may be missing on older RDS (idempotent; add more blocks as needed)
 SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'total_fob_price');
