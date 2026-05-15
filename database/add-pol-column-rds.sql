@@ -18,7 +18,7 @@ DEALLOCATE PREPARE stmt;
 UPDATE purchases p
 JOIN (
     SELECT
-        stock_location,
+        LOWER(TRIM(stock_location)) AS normalized_stock_location,
         MIN(TRIM(pols)) AS pol
     FROM booking_mappings
     WHERE stock_location IS NOT NULL
@@ -26,9 +26,9 @@ JOIN (
       AND pols IS NOT NULL
       AND TRIM(pols) != ''
       AND pols NOT LIKE '%,%'
-    GROUP BY stock_location
+    GROUP BY LOWER(TRIM(stock_location))
     HAVING COUNT(DISTINCT TRIM(pols)) = 1
-) bm ON LOWER(TRIM(bm.stock_location)) = LOWER(TRIM(p.stock_location))
+) bm ON bm.normalized_stock_location = LOWER(TRIM(p.stock_location))
 SET p.pol = bm.pol
 WHERE (p.pol IS NULL OR TRIM(p.pol) = '')
   AND p.stock_location IS NOT NULL
