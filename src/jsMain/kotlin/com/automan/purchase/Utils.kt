@@ -65,17 +65,18 @@ fun apiUrl(path: String): String {
 fun installAuthenticatedFetch() {
     js(
         """
+        (function() {
         if (!window.__automanAuthenticatedFetchInstalled) {
-            const originalFetch = window.fetch.bind(window);
+            var originalFetch = window.fetch.bind(window);
             window.fetch = function(input, init) {
                 try {
-                    const rawUrl = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
-                    const isApiRequest = rawUrl.startsWith('/api') || rawUrl.indexOf('://localhost:8083/api') !== -1;
-                    const token = window.localStorage ? window.localStorage.getItem('authToken') : null;
+                    var rawUrl = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+                    var isApiRequest = rawUrl.startsWith('/api') || rawUrl.indexOf('://localhost:8083/api') !== -1;
+                    var token = window.localStorage ? window.localStorage.getItem('authToken') : null;
                     if (isApiRequest && token) {
                         init = init || {};
-                        const existingHeaders = init.headers || (input && input.headers) || {};
-                        const headers = new Headers(existingHeaders);
+                        var existingHeaders = init.headers || (input && input.headers) || {};
+                        var headers = new Headers(existingHeaders);
                         if (!headers.has('Authorization')) {
                             headers.set('Authorization', 'Bearer ' + token);
                         }
@@ -88,6 +89,7 @@ fun installAuthenticatedFetch() {
             };
             window.__automanAuthenticatedFetchInstalled = true;
         }
+        })()
         """
     )
 }
