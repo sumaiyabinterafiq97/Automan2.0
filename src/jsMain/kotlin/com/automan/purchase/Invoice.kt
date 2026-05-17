@@ -11,8 +11,49 @@ import com.automan.purchase.ErrorHandler
 import com.automan.purchase.ApiClient
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.await
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 // Invoice Functions
+
+/** Invoice number for the current #/recreate-invoice session (delete / upsert). */
+private var invoiceRecreateInvoiceNumber: String? = null
+
+fun isInvoiceRecreateSession(): Boolean =
+    window.location.hash.startsWith("#/recreate-invoice")
+
+private fun clearInvoiceRecreateSessionData() {
+    invoiceRecreateInvoiceNumber = null
+    window.sessionStorage.removeItem(INVOICE_RECREATE_META_SESSION_KEY)
+}
+
+private fun persistInvoiceRecreateMeta() {
+    if (!isInvoiceRecreateSession()) return
+    val inv = invoiceRecreateInvoiceNumber?.trim().orEmpty()
+    if (inv.isEmpty()) return
+    val o = js("{}")
+    o.invoiceNumber = inv
+    window.sessionStorage.setItem(INVOICE_RECREATE_META_SESSION_KEY, JSON.stringify(o))
+}
+
+private fun restoreInvoiceRecreateMetaFromSession() {
+    if (!isInvoiceRecreateSession()) return
+    val raw = window.sessionStorage.getItem(INVOICE_RECREATE_META_SESSION_KEY)?.takeIf { it.isNotEmpty() }
+        ?: return
+    val o: dynamic = try {
+        JSON.parse(raw)
+    } catch (_: Throwable) {
+        return
+    }
+    val inv = o.invoiceNumber?.toString()?.trim().orEmpty()
+    if (inv.isNotEmpty()) invoiceRecreateInvoiceNumber = inv
+}
+
+private fun lockInvoiceRecreateClientAndVessel() {
+    (document.getElementById("invoiceClient") as? HTMLSelectElement)?.disabled = true
+    (document.getElementById("invoiceVessel") as? HTMLSelectElement)?.disabled = true
+}
 
 fun showInvoicePage() {
     val content = document.getElementById("content") ?: return
@@ -24,6 +65,28 @@ fun showInvoicePage() {
     
     // Check for URL parameters (ids) for pre-selected purchases
     val urlHash = window.location.hash
+    val isRecreateInvoice = urlHash.startsWith("#/recreate-invoice")
+    val invoicePageMainTitle =
+        if (isRecreateInvoice) {
+            "AUTOMAN | RECREATE LOCAL CUSTOMER INVOICE"
+        } else {
+            "AUTOMAN | CREATE LOCAL CUSTOMER INVOICE"
+        }
+    val invoiceSaveBtnLabel = if (isRecreateInvoice) "Update" else "Save"
+    val invoiceListFooterHtml = if (isRecreateInvoice) {
+        """
+                        <div class="invoice-list-footer" style="display:flex;justify-content:flex-end;margin-top:14px;padding-top:12px;">
+                            <button type="button" id="deleteInvoiceFromRecreate" class="invoice-btn" style="padding:10px 20px;border:1px solid #b91c1c;border-radius:8px;background:#fff;color:#b91c1c;font-weight:600;font-size:14px;cursor:pointer;">Delete</button>
+                        </div>
+        """.trimIndent()
+    } else {
+        ""
+    }
+
+    if (!isRecreateInvoice) {
+        clearInvoiceRecreateSessionData()
+    }
+
     val idsParam = if (urlHash.contains("?")) {
         val queryString = urlHash.substringAfter("?")
         val params = queryString.split("&")
@@ -48,7 +111,7 @@ fun showInvoicePage() {
         <div class="invoice-page-container">
             <div class="invoice-card">
                 <div class="invoice-page-header">
-                    <h1>AUTOMAN | CREATE CUSTOMER INVOICE</h1>
+                    <h1>$invoicePageMainTitle</h1>
                 </div>
                 
                 <div class="invoice-layout">
@@ -66,11 +129,22 @@ fun showInvoicePage() {
                             <select id="invoiceVessel" class="invoice-select">
                                 <option value="">Select vessel</option>
                             </select>
+                            <p id="invoiceVesselEmptyHint" class="invoice-vessel-empty-hint" style="display: none; margin: 6px 0 0; font-size: 13px; color: #6c757d;">No open vessels for this client</p>
                         </div>
                         
                         <div class="invoice-field">
                             <label for="invoiceShippingDate">SHIPPING DATE:</label>
-                            <input type="date" id="invoiceShippingDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" class="invoice-input" placeholder="Select shipping date" />
+                            <div style="position:relative; width:100%;">
+                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                                    <input type="text" id="invoiceShippingDateText" maxlength="10" inputmode="numeric" autocomplete="off"
+                                           class="invoice-input" placeholder="MM/DD/YYYY"
+                                           style="flex:1; min-width:0;" />
+                                    <button type="button" id="invoiceShippingDateCalendarBtn" title="Open calendar"
+                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                </div>
+                                <input type="date" id="invoiceShippingDate" class="invoice-input" tabindex="-1" aria-hidden="true"
+                                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
+                            </div>
                         </div>
                         
                         <div class="invoice-field">
@@ -138,47 +212,53 @@ SWIFT CODE: SMBCJPJT</option>
                     <div class="invoice-list-section">
                         <h2>LIST</h2>
                         
-                        <!-- Table for Tablet/Desktop -->
-                        <table class="invoice-list-table" id="invoiceListTable">
-                            <thead>
-                                <tr>
-                                    <th>NO.</th>
-                                    <th>CHASSIS</th>
-                                    <th>NAME</th>
-                                    <th>YEAR</th>
-                                    <th>AMOUNT</th>
-                                </tr>
-                            </thead>
-                            <tbody id="invoiceListTableBody">
+                        <!-- Table/Cards Container (grows to fill space) -->
+                        <div class="invoice-table-container">
+                            <!-- Table for Tablet/Desktop -->
+                            <table class="invoice-list-table" id="invoiceListTable">
+                                <thead>
+                                    <tr>
+                                        <th>NO.</th>
+                                        <th>CHASSIS</th>
+                                        <th>NAME</th>
+                                        <th>YEAR</th>
+                                        <th>AMOUNT</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="invoiceListTableBody">
+                                    <!-- Will be populated by JavaScript -->
+                                </tbody>
+                            </table>
+                            
+                            <!-- Cards for Mobile -->
+                            <div class="invoice-cards-container" id="invoiceCardsContainer">
                                 <!-- Will be populated by JavaScript -->
-                            </tbody>
-                        </table>
-                        
-                        <!-- Cards for Mobile -->
-                        <div class="invoice-cards-container" id="invoiceCardsContainer">
-                            <!-- Will be populated by JavaScript -->
+                            </div>
                         </div>
                         
                         <div class="invoice-total" id="invoiceTotalAmount">
                             TOTAL AMOUNT: ¥000,000
                         </div>
+                        $invoiceListFooterHtml
                     </div>
                 </div>
                 
                 <!-- Action Buttons -->
                 <div class="invoice-actions">
-                    <button type="button" id="cancelInvoiceBtn" class="invoice-btn invoice-btn-secondary">CANCEL</button>
-                    <button type="button" id="downloadPdfBtn" class="invoice-btn invoice-btn-primary">CONFIRM AND DOWNLOAD PDF</button>
-                    <button type="button" id="showFullPreviewBtn" class="invoice-btn invoice-btn-secondary">PREVIEW</button>
+                    <button type="button" id="invoiceSaveBtn" class="invoice-btn invoice-btn-primary">$invoiceSaveBtnLabel</button>
+                    <button type="button" id="showFullPreviewBtn" class="invoice-btn invoice-btn-secondary">Preview</button>
+                    <button type="button" id="invoicePdfBtn" class="invoice-btn invoice-btn-secondary">PDF</button>
                 </div>
             </div>
         </div>
     """
 
+    bindStrictDateTextMask("invoiceShippingDate")
+
     // Setup event listeners
     setupInvoicePageListeners()
     
-    // Load unique client_name values from client_map for CLIENT dropdown
+    // Load unique client_name values from shipping_history for CLIENT dropdown
     loadInvoiceClientOptions()
     
     // Initialize empty LIST table
@@ -206,11 +286,30 @@ SWIFT CODE: SMBCJPJT</option>
         emptyList<Long>()
     }
     
-    if (selectedIds.isNotEmpty()) {
-        // Load purchases by IDs and auto-fill form
+    val prefillRaw = window.sessionStorage.getItem(INVOICE_HISTORY_EDIT_SESSION_KEY)
+    val shippingInvoicePrefillRaw = window.sessionStorage.getItem(SHIPPING_HISTORY_INVOICE_PREFILL_SESSION_KEY)
+    if (prefillRaw != null && prefillRaw.isNotEmpty()) {
+        window.sessionStorage.removeItem(INVOICE_HISTORY_EDIT_SESSION_KEY)
+        MainScope().launch {
+            applyInvoiceHistoryEditPrefillFromJson(prefillRaw)
+            if (isInvoiceRecreateSession()) {
+                lockInvoiceRecreateClientAndVessel()
+            }
+        }
+    } else if (shippingInvoicePrefillRaw != null && shippingInvoicePrefillRaw.isNotEmpty()) {
+        window.sessionStorage.removeItem(SHIPPING_HISTORY_INVOICE_PREFILL_SESSION_KEY)
+        MainScope().launch {
+            applyShippingHistoryInvoicePrefillFromJson(shippingInvoicePrefillRaw)
+        }
+    } else if (selectedIds.isNotEmpty()) {
         window.setTimeout({
             loadPurchasesByIds(selectedIds)
-        }, 500) // Delay to ensure DOM is ready
+        }, 500)
+    } else if (isRecreateInvoice) {
+        restoreInvoiceRecreateMetaFromSession()
+        window.setTimeout({
+            lockInvoiceRecreateClientAndVessel()
+        }, 300)
     }
 }
 
@@ -260,8 +359,378 @@ fun loadPurchasesByIds(ids: List<Long>) {
         }
 }
 
+/** Fetches invoice slice; applies POL/POD/date/price header only (not LIST lines). */
+private fun loadInvoiceShippingHeaderForPrefill(client: String, vessel: String, onDone: () -> Unit) {
+    val encodedClient = js("encodeURIComponent")(client.trim()) as String
+    val encodedVessel = js("encodeURIComponent")(vessel.trim()) as String
+    window.fetch(apiUrl("shipping-history/for-invoice/lines?clientName=$encodedClient&vessel=$encodedVessel"))
+        .then { response: dynamic ->
+            if (!response.ok) {
+                onDone()
+                return@then
+            }
+            response.json().then { payload: dynamic ->
+                if (js("payload && payload.success === true") as Boolean) {
+                    applyInvoiceHeaderFromShipping(payload)
+                }
+                onDone()
+            }
+        }
+        .catch { _: dynamic -> onDone() }
+}
+
+private suspend fun invoicePrefillEnsureClientDropdownAndSelect(clientName: String) {
+    val response = window.fetch(apiUrl("shipping-history/for-invoice/client-names")).await()
+    if (!response.ok) return
+    val text = response.text().await()
+    val payload = JSON.parse<dynamic>(text)
+    val namesRaw = if (js("payload && payload.success") as Boolean) payload.data else js("[]")
+    val arr = namesRaw.unsafeCast<Array<dynamic>>()
+    val clientSelect = document.getElementById("invoiceClient") as? HTMLSelectElement ?: return
+    while (clientSelect.options.length > 1) {
+        clientSelect.remove(1)
+    }
+    for (name in arr) {
+        val option = document.createElement("option") as HTMLOptionElement
+        val n = name.toString()
+        option.value = n
+        option.textContent = n
+        clientSelect.appendChild(option)
+    }
+    if (clientName.isBlank()) return
+    var found = false
+    for (i in 0 until clientSelect.options.length) {
+        val opt = clientSelect.options.item(i) as? HTMLOptionElement ?: continue
+        if (opt.value == clientName) {
+            found = true
+            break
+        }
+    }
+    if (!found) {
+        val opt = document.createElement("option") as HTMLOptionElement
+        opt.value = clientName
+        opt.textContent = clientName
+        clientSelect.appendChild(opt)
+    }
+    clientSelect.value = clientName
+}
+
+private suspend fun invoicePrefillLoadVesselsAndSelect(clientName: String, vessel: String) {
+    suspendCoroutine<Unit> { cont ->
+        loadInvoiceVesselOptionsForClient(clientName, vessel) { cont.resume(Unit) }
+    }
+}
+
+private suspend fun invoicePrefillLoadShippingHeader(clientName: String, vessel: String) {
+    suspendCoroutine<Unit> { cont ->
+        loadInvoiceShippingHeaderForPrefill(clientName, vessel) { cont.resume(Unit) }
+    }
+}
+
+private fun parseInvoiceHistoryChassisTokens(raw: String): List<String> {
+    if (raw.isBlank()) return emptyList()
+    return raw.split(';', ',', '\n', '\r').map { it.trim() }.filter { it.isNotEmpty() }
+}
+
+private fun invoicePrefillChassisTokenMatchesPurchase(token: String, purchaseChassis: String): Boolean {
+    val t = token.trim()
+    val ch = purchaseChassis.trim()
+    if (t.isEmpty() || ch.isEmpty()) return false
+    if (ch.equals(t, ignoreCase = true)) return true
+    val head = ch.substringBefore('-').trim()
+    if (head.equals(t, ignoreCase = true)) return true
+    if (ch.startsWith(t, ignoreCase = true) &&
+        (ch.length == t.length || ch.getOrNull(t.length) == '-')
+    ) {
+        return true
+    }
+    return false
+}
+
+private fun invoicePrefillDateKey(raw: String): String =
+    toIsoFromLabel(raw.trim()).trim()
+
+/** Invoice history edit: match each chassis token to purchases with same client + vessel (no purchase date filter). */
+private fun invoicePrefillPurchaseMatchesClientAndVessel(
+    p: dynamic,
+    historyClient: String,
+    historyVessel: String,
+): Boolean {
+    if (historyClient.isNotBlank()) {
+        val pc = js("p.clientName")?.toString()?.trim() ?: ""
+        if (!historyClient.equals(pc, ignoreCase = true)) return false
+    }
+    if (historyVessel.isNotBlank()) {
+        val pv = js("p.vessel")?.toString()?.trim() ?: ""
+        if (!historyVessel.equals(pv, ignoreCase = true)) return false
+    }
+    return true
+}
+
+/**
+ * Applies invoice form header + LIST from resolved shipping/invoice-history fields (shared by Invoice History edit and Shipping History → Create Invoice).
+ */
+private suspend fun invoicePrefillApplyHeaderRadiosPurchasesMatch(
+    clientName: String,
+    vessel: String,
+    shippingDateRaw: String,
+    invoiceNumber: String,
+    lcNo: String,
+    bank: String,
+    messages: String,
+    polRaw: String,
+    podRaw: String,
+    chassisRaw: String,
+    priceTypeFromHistory: String,
+) {
+    invoicePrefillEnsureClientDropdownAndSelect(clientName)
+    if (clientName.isNotBlank() && vessel.isNotBlank()) {
+        invoicePrefillLoadVesselsAndSelect(clientName, vessel)
+        invoicePrefillLoadShippingHeader(clientName, vessel)
+    }
+
+    val vesselSelect = document.getElementById("invoiceVessel") as? HTMLSelectElement
+    if (vessel.isNotBlank() && vesselSelect != null) {
+        var hasV = false
+        for (i in 0 until vesselSelect.options.length) {
+            val opt = vesselSelect.options.item(i) as? HTMLOptionElement ?: continue
+            if (opt.value == vessel) {
+                hasV = true
+                break
+            }
+        }
+        if (!hasV) {
+            val opt = document.createElement("option") as HTMLOptionElement
+            opt.value = vessel
+            opt.textContent = vessel
+            vesselSelect.appendChild(opt)
+        }
+        vesselSelect.value = vessel
+    }
+
+    val shippingIso = invoicePrefillDateKey(shippingDateRaw).ifBlank { shippingDateRaw }
+    (document.getElementById("invoiceNumber") as? HTMLInputElement)?.value = invoiceNumber
+    (document.getElementById("invoiceLcNo") as? HTMLInputElement)?.value = lcNo
+    (document.getElementById("invoiceMessage") as? HTMLTextAreaElement)?.value = messages
+    if (shippingIso.isNotBlank()) {
+        val hid = document.getElementById("invoiceShippingDate") as? HTMLInputElement
+        if (hid != null) {
+            hid.value = shippingIso
+            val txt = document.getElementById("invoiceShippingDateText") as? HTMLInputElement
+            if (txt != null) txt.value = isoToMmDdYyyy(shippingIso)
+        }
+    }
+    if (bank.isNotBlank()) {
+        val sel = document.getElementById("invoiceBankAccount") as? HTMLSelectElement
+        if (sel != null) {
+            var has = false
+            for (i in 0 until sel.options.length) {
+                val opt = sel.options.item(i) as? HTMLOptionElement ?: continue
+                if (opt.value == bank) {
+                    has = true
+                    break
+                }
+            }
+            if (!has) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = bank
+                opt.textContent = bank
+                sel.appendChild(opt)
+            }
+            sel.value = bank
+        }
+    }
+    if (polRaw.isNotBlank()) {
+        (document.getElementById("invoiceFrom") as? HTMLInputElement)?.value = polRaw
+    }
+    if (podRaw.isNotBlank()) {
+        (document.getElementById("invoiceTo") as? HTMLInputElement)?.value = podRaw
+    }
+
+    val invoiceCnf = document.getElementById("invoiceCnf") as? HTMLInputElement
+    val invoiceFob = document.getElementById("invoiceFob") as? HTMLInputElement
+    if (priceTypeFromHistory.isNotEmpty()) {
+        val upper = priceTypeFromHistory.uppercase()
+        when {
+            upper.contains("FOB") -> {
+                invoiceFob?.checked = true
+                invoiceCnf?.checked = false
+            }
+            upper.contains("CNF") || upper.contains("C&F") || priceTypeFromHistory.contains("C&F") -> {
+                invoiceCnf?.checked = true
+                invoiceFob?.checked = false
+            }
+            else -> { }
+        }
+    }
+
+    when (val result = ApiClient.get<Array<dynamic>>("purchases")) {
+        is ApiResult.Success -> {
+            val arr = result.data
+            val tokens = parseInvoiceHistoryChassisTokens(chassisRaw)
+            val matched = mutableListOf<dynamic>()
+            val seenIds = mutableSetOf<Long>()
+            for (tok in tokens) {
+                for (i in 0 until arr.size) {
+                    val p = arr[i]
+                    val id = js("p.id")?.toString()?.toLongOrNull() ?: continue
+                    if (id in seenIds) continue
+                    val ch = js("p.chassis")?.toString()?.trim() ?: ""
+                    // Match by chassis only — client/vessel already known from history, no need to re-filter
+                    if (!invoicePrefillChassisTokenMatchesPurchase(tok, ch)) continue
+                    matched.add(p)
+                    seenIds.add(id)
+                }
+            }
+            populateInvoiceListTable(matched.toTypedArray())
+            if (matched.isEmpty() && tokens.isNotEmpty()) {
+                showMessage(
+                    "No purchases matched (chassis). Check Purchase List.",
+                    "warning",
+                )
+            }
+        }
+        is ApiResult.Error -> showMessage("Failed to load purchases: ${result.message}", "error")
+    }
+}
+
+private suspend fun applyInvoiceHistoryEditPrefillFromJson(raw: String) {
+    val o: dynamic = try {
+        JSON.parse(raw)
+    } catch (_: Throwable) {
+        return
+    }
+    val invoiceNumber = (o.invoiceNumber?.toString() ?: "").trim()
+    invoiceRecreateInvoiceNumber = invoiceNumber.takeIf { it.isNotEmpty() }
+    persistInvoiceRecreateMeta()
+    val vessel = (o.vessel?.toString() ?: "").trim()
+    val clientName = (o.clientName?.toString() ?: "").trim()
+    val shippingDateRaw = (o.shippingDate?.toString() ?: "").trim()
+    val lcNo = (o.lcNo?.toString() ?: "").trim()
+    val bank = (o.bank?.toString() ?: "").trim()
+    val messages = (o.messages?.toString() ?: "").trim()
+    val polRaw = (o.pol?.toString() ?: "").trim()
+    val podRaw = (o.pod?.toString() ?: "").trim()
+    val chassisRaw = (o.chassis?.toString() ?: "").trim()
+    val priceTypeFromHistory = (o.priceType?.toString() ?: "").trim()
+    invoicePrefillApplyHeaderRadiosPurchasesMatch(
+        clientName = clientName,
+        vessel = vessel,
+        shippingDateRaw = shippingDateRaw,
+        invoiceNumber = invoiceNumber,
+        lcNo = lcNo,
+        bank = bank,
+        messages = messages,
+        polRaw = polRaw,
+        podRaw = podRaw,
+        chassisRaw = chassisRaw,
+        priceTypeFromHistory = priceTypeFromHistory,
+    )
+}
+
+private fun shippingHistoryInvoiceRowDynStr(row: dynamic, key: String): String {
+    // Do not call row.asDynamic() — Kotlin/JS sort/comparator passes plain JS objects; .asDynamic is not a function on them.
+    val d = row
+    val v: dynamic = when (key) {
+        "id" -> d.id
+        "chassis" -> d.chassis
+        "clientName" -> d.clientName
+        "vessel" -> d.vessel
+        "pol" -> d.pol
+        "pod" -> d.pod
+        "shipmentDate" -> d.shipmentDate
+        "priceType" -> d.priceType
+        else -> null
+    }
+    if (v == null) return ""
+    val undef = js("void 0")
+    if (v === undef) return ""
+    return v.toString().trim()
+}
+
+private suspend fun applyShippingHistoryInvoicePrefillFromJson(raw: String) {
+    val payload: dynamic = try {
+        JSON.parse(raw)
+    } catch (_: Throwable) {
+        return
+    }
+    val rowsRaw = payload.rows
+    if (js("!Array.isArray(rowsRaw)") as Boolean) return
+    val rows = rowsRaw.unsafeCast<Array<dynamic>>()
+    if (rows.size == 0) {
+        showMessage("No shipping history rows in prefilled payload.", "warning")
+        return
+    }
+
+    /** Copy to Kotlin list without sortBy on mixed JS proxies (stable + avoids comparator edge cases). */
+    val mutableRows = mutableListOf<dynamic>()
+    for (i in 0 until rows.size) {
+        mutableRows.add(rows[i])
+    }
+    mutableRows.sortWith { a, b ->
+        val ia = shippingHistoryInvoiceRowDynStr(a, "id").toLongOrNull() ?: 0L
+        val ib = shippingHistoryInvoiceRowDynStr(b, "id").toLongOrNull() ?: 0L
+        ia.compareTo(ib)
+    }
+    val sortedList: List<dynamic> = mutableRows
+
+    fun distinctNonempty(selector: (dynamic) -> String): List<String> =
+        sortedList.map { selector(it) }.filter { it.isNotBlank() }.distinct()
+
+    val clientOpts = distinctNonempty { shippingHistoryInvoiceRowDynStr(it, "clientName") }
+    val vesselOpts = distinctNonempty { shippingHistoryInvoiceRowDynStr(it, "vessel") }
+
+    val clientName = clientOpts.singleOrNull() ?: clientOpts.firstOrNull().orEmpty()
+    if (clientOpts.size > 1) {
+        showMessage("Multiple clients in this booking; using «$clientName». Verify before saving.", "warning")
+    }
+
+    val vessel = vesselOpts.singleOrNull() ?: vesselOpts.firstOrNull().orEmpty()
+    if (vesselOpts.size > 1) {
+        showMessage("Multiple vessels in this booking; using «$vessel». Verify before saving.", "warning")
+    }
+
+    val chassisToks = mutableListOf<String>()
+    val seenTok = mutableSetOf<String>()
+    for (r in sortedList) {
+        val cs = shippingHistoryInvoiceRowDynStr(r, "chassis")
+        for (tok in parseInvoiceHistoryChassisTokens(cs)) {
+            val k = tok.lowercase()
+            if (seenTok.add(k)) chassisToks.add(tok)
+        }
+    }
+    val chassisRaw = chassisToks.joinToString(",")
+
+    val shipmentDateRaw = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "shipmentDate").takeIf { it.isNotBlank() }
+    }.orEmpty()
+    val polRaw = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "pol").takeIf { it.isNotBlank() }
+    }.orEmpty()
+    val podRaw = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "pod").takeIf { it.isNotBlank() }
+    }.orEmpty()
+    val priceTypeFromHistory = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "priceType").takeIf { it.isNotBlank() }
+    }.orEmpty()
+
+    invoicePrefillApplyHeaderRadiosPurchasesMatch(
+        clientName = clientName,
+        vessel = vessel,
+        shippingDateRaw = shipmentDateRaw,
+        invoiceNumber = "",
+        lcNo = "",
+        bank = "",
+        messages = "",
+        polRaw = polRaw,
+        podRaw = podRaw,
+        chassisRaw = chassisRaw,
+        priceTypeFromHistory = priceTypeFromHistory,
+    )
+}
+
 fun loadInvoiceClientOptions() {
-    window.fetch(apiUrl("client-map/dropdowns/client-names"))
+    window.fetch(apiUrl("shipping-history/for-invoice/client-names"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load client names')")
         }
@@ -284,8 +753,8 @@ fun loadInvoiceClientOptions() {
             }
         }
         .catch { error: dynamic ->
-            val errorMsg = ErrorHandler.handleNetworkError(error, "client-map")
-            Logger.error("Error loading client map names: $errorMsg")
+            val errorMsg = ErrorHandler.handleNetworkError(error, "shipping-history")
+            Logger.error("Error loading shipping history client names: $errorMsg")
             ErrorHandler.showError("Failed to load client options: $errorMsg")
         }
 }
@@ -298,10 +767,13 @@ fun loadInvoiceVesselOptionsForClient(client: String, preferredVessel: String? =
     }
 
     vesselSelect.innerHTML = "<option value=\"\">Select vessel</option>"
+    (document.getElementById("invoiceVesselEmptyHint") as? HTMLElement)?.style?.display = "none"
     if (client.isBlank()) {
         onDone?.invoke()
         return
     }
+
+    clearInvoiceShippingHeaderFields()
 
     val encodedClient = js("encodeURIComponent")(client.trim()) as String
     window.fetch(apiUrl("shipping-history/for-invoice/vessels?clientName=$encodedClient"))
@@ -311,28 +783,66 @@ fun loadInvoiceVesselOptionsForClient(client: String, preferredVessel: String? =
         .then { payload: dynamic ->
             val namesRaw = js("payload && payload.success ? payload.data : []")
             val vessels = js("Array.isArray(namesRaw) ? namesRaw : []") as Array<dynamic>
+            val vesselStrings = mutableListOf<String>()
             for (v in vessels) {
-                val vessel = v.toString()
-                if (vessel.isBlank()) continue
+                val vesselName = v.toString().trim()
+                if (vesselName.isBlank()) continue
+                vesselStrings.add(vesselName)
                 val option = document.createElement("option") as HTMLOptionElement
-                option.value = vessel
-                option.textContent = vessel
+                option.value = vesselName
+                option.textContent = vesselName
                 vesselSelect.appendChild(option)
             }
 
-            val preferred = preferredVessel?.trim().orEmpty()
-            if (preferred.isNotEmpty()) {
-                val hasPreferred = (0 until vesselSelect.options.length).any { i ->
-                    (vesselSelect.options.item(i) as? HTMLOptionElement)?.value == preferred
-                }
-                if (hasPreferred) vesselSelect.value = preferred
+            val emptyHint = document.getElementById("invoiceVesselEmptyHint") as? HTMLElement
+            val hasAnyVessel = vesselSelect.options.length > 1
+            if (emptyHint != null) {
+                emptyHint.style.display = if (client.isNotBlank() && !hasAnyVessel) "block" else "none"
             }
+
+            val preferred = preferredVessel?.trim().orEmpty()
+            var selectedVessel = ""
+            if (preferred.isNotEmpty()) {
+                val hasPreferred = vesselStrings.any { it == preferred }
+                if (hasPreferred) {
+                    vesselSelect.value = preferred
+                    selectedVessel = preferred
+                } else {
+                    showInvoiceListPlaceholder(
+                        "That vessel has no open invoice lines for this client (they may already be invoice-confirmed). Pick another vessel from the list if available.",
+                    )
+                }
+            } else {
+                when {
+                    vesselStrings.size == 1 -> {
+                        val only = vesselStrings[0]
+                        vesselSelect.value = only
+                        selectedVessel = only
+                    }
+                    vesselStrings.isEmpty() -> {
+                        showInvoiceListPlaceholder(
+                            "No chassis to invoice for this client yet. There must be shipping history rows with chassis not already invoice-confirmed. If everything is already confirmed, nothing appears here.",
+                        )
+                    }
+                    else -> {
+                        showInvoiceListPlaceholder(
+                            "Multiple vessels found for this client. Choose VESSEL above to load shipping date, From/To ports, and chassis rows.",
+                        )
+                    }
+                }
+            }
+
+            if (selectedVessel.isNotEmpty()) {
+                loadInvoiceShippingLines(client, selectedVessel)
+            }
+
             onDone?.invoke()
         }
         .catch { error: dynamic ->
             val errorMsg = ErrorHandler.handleNetworkError(error, "shipping-history")
             Logger.error("Error loading vessel options: $errorMsg")
             ErrorHandler.showError("Failed to load vessels: $errorMsg")
+            showInvoiceListPlaceholder("Could not load vessels for this client. Try again or check the server.")
             onDone?.invoke()
         }
 }
@@ -362,6 +872,9 @@ fun setupInvoicePageListeners() {
     // Client and Vessel selection listeners
     document.getElementById("invoiceClient")?.addEventListener("change", { _: Event ->
         val client = (document.getElementById("invoiceClient") as? HTMLSelectElement)?.value ?: ""
+        if (client.isBlank()) {
+            clearInvoiceShippingHeaderFields()
+        }
         loadInvoiceVesselOptionsForClient(client)
         handleInvoiceClientVesselChange()
     })
@@ -370,16 +883,18 @@ fun setupInvoicePageListeners() {
         handleInvoiceClientVesselChange()
     })
     
-    // Cancel button
-    document.getElementById("cancelInvoiceBtn")?.addEventListener("click", { _: Event ->
-        showPurchaseList()
+    document.getElementById("invoiceSaveBtn")?.addEventListener("click", { _: Event ->
+        handleInvoiceSave()
     })
-    
-    // Confirm and download PDF (saves invoice_history, marks purchases confirmed, downloads PDF)
-    document.getElementById("downloadPdfBtn")?.addEventListener("click", { _: Event ->
-        handleConfirmAndDownloadPdf()
+
+    document.getElementById("deleteInvoiceFromRecreate")?.addEventListener("click", { _: Event ->
+        handleDeleteInvoiceFromRecreate()
     })
-    
+
+    document.getElementById("invoicePdfBtn")?.addEventListener("click", { _: Event ->
+        handleInvoicePdfDownload()
+    })
+
     // Show full preview button
     document.getElementById("showFullPreviewBtn")?.addEventListener("click", { _: Event ->
         Logger.debug("[PREVIEW] Button clicked!")
@@ -399,20 +914,52 @@ fun handleInvoiceClientVesselChange() {
     if (client.isNotEmpty() && vessel.isNotEmpty()) {
         loadInvoiceShippingLines(client, vessel)
     } else {
-        val tableBody = document.getElementById("invoiceListTableBody")
-        if (tableBody != null) {
-            tableBody.innerHTML = ""
+        clearInvoiceListAndTotals()
+        // Placeholder until vessels finish loading (single vessel auto-loads in callback).
+        if (client.isNotBlank()) {
+            showInvoiceListPlaceholder("Loading vessels…")
         }
-        val cardsContainer = document.getElementById("invoiceCardsContainer")
-        cardsContainer?.innerHTML = ""
-        val totalElement = document.getElementById("invoiceTotalAmount")
-        if (totalElement != null) {
-            totalElement.textContent = "TOTAL AMOUNT: ¥000,000"
-        }
-        js("window.currentInvoicePurchaseIds = []")
-        js("window.currentInvoicePdfLines = []")
-        js("window.currentInvoiceChassisList = []")
     }
+}
+
+private fun clearInvoiceShippingHeaderFields() {
+    (document.getElementById("invoiceFrom") as? HTMLInputElement)?.value = ""
+    (document.getElementById("invoiceTo") as? HTMLInputElement)?.value = ""
+    (document.getElementById("invoiceShippingDate") as? HTMLInputElement)?.value = ""
+    (document.getElementById("invoiceShippingDateText") as? HTMLInputElement)?.value = ""
+}
+
+private fun clearInvoiceListAndTotals() {
+    val tableBody = document.getElementById("invoiceListTableBody")
+    if (tableBody != null) {
+        tableBody.innerHTML = ""
+    }
+    val cardsContainer = document.getElementById("invoiceCardsContainer")
+    cardsContainer?.innerHTML = ""
+    val totalElement = document.getElementById("invoiceTotalAmount")
+    if (totalElement != null) {
+        totalElement.textContent = "TOTAL AMOUNT: ¥000,000"
+    }
+    js("window.currentInvoicePurchaseIds = []")
+    js("window.currentInvoicePdfLines = []")
+    js("window.currentInvoiceChassisList = []")
+}
+
+private fun showInvoiceListPlaceholder(message: String) {
+    val tableBody = document.getElementById("invoiceListTableBody") ?: return
+    val cardsContainer = document.getElementById("invoiceCardsContainer")
+    tableBody.innerHTML = ""
+    cardsContainer?.innerHTML = ""
+    val esc = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    val emptyRow = document.createElement("tr")
+    emptyRow.innerHTML =
+        """<td colspan="5" style="text-align:center; padding: 16px; color:#495057; font-size: 14px; line-height: 1.4;">$esc</td>"""
+    tableBody.appendChild(emptyRow)
+    val totalElement = document.getElementById("invoiceTotalAmount")
+    totalElement?.textContent = "TOTAL AMOUNT: ¥000,000"
+    js("window.currentInvoicePurchaseIds = []")
+    js("window.currentInvoicePdfLines = []")
+    js("window.currentInvoiceChassisList = []")
 }
 
 fun loadInvoiceShippingLines(client: String, vessel: String) {
@@ -457,7 +1004,7 @@ fun populateInvoiceListTable(purchases: Array<dynamic>) {
     // Populate table rows and mobile cards
     if (purchases.isEmpty()) {
         val emptyRow = document.createElement("tr")
-        emptyRow.innerHTML = """<td colspan="5" style="text-align:center; padding: 12px; color:#6c757d;">No Unshipped car available</td>"""
+        emptyRow.innerHTML = """<td colspan="5" style="text-align:center; padding: 12px; color:#6c757d;">No car available (booking not requested or filters exclude all rows)</td>"""
         tableBody.appendChild(emptyRow)
     }
 
@@ -726,7 +1273,7 @@ fun populateInvoiceListFromShippingLines(lines: Array<dynamic>) {
     if (lines.isEmpty()) {
         val emptyRow = document.createElement("tr")
         emptyRow.innerHTML =
-            """<td colspan="5" style="text-align:center; padding: 12px; color:#6c757d;">No cars selected</td>"""
+            """<td colspan="5" style="text-align:center; padding: 16px; color:#6c757d; font-size: 14px; line-height: 1.4;">No chassis rows for this shipment (all listed cars may already be invoice-confirmed, or purchases are missing for these chassis).</td>"""
         tableBody.appendChild(emptyRow)
         js("window.currentInvoicePurchaseIds = []")
         js("window.currentInvoicePdfLines = []")
@@ -797,9 +1344,15 @@ private fun applyInvoiceHeaderFromShipping(payload: dynamic) {
     val header = payload.header
     if (header == null) return
 
-    val shipmentDate = header.shipmentDate?.toString()?.trim() ?: ""
-    if (shipmentDate.isNotEmpty()) {
-        (document.getElementById("invoiceShippingDate") as? HTMLInputElement)?.value = shipmentDate
+    val shipmentDateRaw = header.shipmentDate?.toString()?.trim() ?: ""
+    if (shipmentDateRaw.isNotEmpty()) {
+        val iso = shipmentDateRaw.take(10)
+        val hid = document.getElementById("invoiceShippingDate") as? HTMLInputElement
+        if (hid != null) {
+            hid.value = iso
+            val txt = document.getElementById("invoiceShippingDateText") as? HTMLInputElement
+            if (txt != null) txt.value = isoToMmDdYyyy(iso)
+        }
     }
 
     val polValue = header.pol?.toString()?.trim() ?: ""
@@ -829,13 +1382,24 @@ private fun applyInvoiceHeaderFromShipping(payload: dynamic) {
     }
 }
 
+private fun escapeJsonStringForInvoice(str: String): String =
+    str.replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+
 /**
- * Saves invoice_history, sets invoice_confirmed on listed purchases, downloads PDF.
- * Duplicate invoice number returns 409 from the server.
+ * Loads purchases, builds invoice JSON. [mode]: `"save"` → POST `/invoice/save`;
+ * `"preview"` / `"pdf"` → POST `/invoice/generate-pdf` (open vs download).
  */
-fun handleConfirmAndDownloadPdf() {
-    Logger.debug("Confirm and download PDF clicked for invoice")
-    
+private fun invoiceBuildPayloadAndRun(mode: String) {
+    if (mode == "preview") {
+        Logger.debug("[PREVIEW] invoiceBuildPayloadAndRun(preview)")
+    } else {
+        Logger.debug("invoiceBuildPayloadAndRun mode=$mode")
+    }
+
     // Get purchase IDs from current invoice purchases
     val currentIds = js("window.currentInvoicePurchaseIds") as? Array<dynamic>
     val selectedIds = if (currentIds != null) {
@@ -951,58 +1515,49 @@ fun handleConfirmAndDownloadPdf() {
             }
             val totalAmount = built.second
             val formattedTotal = formatInvoiceYenInt(totalAmount)
-            
-            // Helper function to escape JSON strings
-            fun escapeJsonString(str: String): String {
-                return str.replace("\\", "\\\\")
-                    .replace("\"", "\\\"")
-                    .replace("\n", "\\n")
-                    .replace("\r", "\\r")
-                    .replace("\t", "\\t")
-            }
-            
+
             // Prepare request body - build JSON string manually to avoid Kotlin/JS interop issues
             val itemsJsonArray = itemsList.joinToString(",") { item ->
                 val itemDynamic = item.unsafeCast<dynamic>()
                 val unit = itemDynamic.unit?.toString() ?: "0"
-                val description = escapeJsonString((itemDynamic.description as? String) ?: "")
-                val amount = escapeJsonString((itemDynamic.amount as? String) ?: "")
+                val description = escapeJsonStringForInvoice((itemDynamic.description as? String) ?: "")
+                val amount = escapeJsonStringForInvoice((itemDynamic.amount as? String) ?: "")
                 "{\"unit\":" + unit + ",\"description\":\"" + description + "\",\"amount\":\"" + amount + "\"}"
             }
             
             val lcNumberPart = if (invoiceLcNo.isNotEmpty()) {
-                "\"" + escapeJsonString(invoiceLcNo) + "\""
+                "\"" + escapeJsonStringForInvoice(invoiceLcNo) + "\""
             } else {
                 "null"
             }
             val clientAddressPart = if (clientAddress != null) {
-                "\"" + escapeJsonString(clientAddress) + "\""
+                "\"" + escapeJsonStringForInvoice(clientAddress) + "\""
             } else {
                 "null"
             }
             val bankAccountPart = if (bankAccountValue.isNotEmpty()) {
-                "\"" + escapeJsonString(bankAccountValue) + "\""
+                "\"" + escapeJsonStringForInvoice(bankAccountValue) + "\""
             } else {
                 "null"
             }
             val messagePart = if (invoiceMessage.isNotEmpty()) {
-                "\"" + escapeJsonString(invoiceMessage) + "\""
+                "\"" + escapeJsonStringForInvoice(invoiceMessage) + "\""
             } else {
                 "null"
             }
             
-            val requestBodyJson = "{\"invoiceNumber\":\"" + escapeJsonString(invoiceNumber) + 
-                "\",\"invoiceDate\":\"" + escapeJsonString(invoiceDate) + 
+            val requestBodyJson = "{\"invoiceNumber\":\"" + escapeJsonStringForInvoice(invoiceNumber) + 
+                "\",\"invoiceDate\":\"" + escapeJsonStringForInvoice(invoiceDate) + 
                 "\",\"lcNumber\":" + lcNumberPart + 
-                ",\"clientName\":\"" + escapeJsonString(clientName) + 
+                ",\"clientName\":\"" + escapeJsonStringForInvoice(clientName) + 
                 "\",\"clientAddress\":" + clientAddressPart + 
-                ",\"vessel\":\"" + escapeJsonString(invoiceVessel) + 
-                "\",\"shippingDate\":\"" + escapeJsonString(formattedShippingDate) + 
-                "\",\"from\":\"" + escapeJsonString(invoiceFrom) + 
-                "\",\"to\":\"" + escapeJsonString(invoiceTo) + 
-                "\",\"priceType\":\"" + escapeJsonString(priceType) + 
+                ",\"vessel\":\"" + escapeJsonStringForInvoice(invoiceVessel) + 
+                "\",\"shippingDate\":\"" + escapeJsonStringForInvoice(formattedShippingDate) + 
+                "\",\"from\":\"" + escapeJsonStringForInvoice(invoiceFrom) + 
+                "\",\"to\":\"" + escapeJsonStringForInvoice(invoiceTo) + 
+                "\",\"priceType\":\"" + escapeJsonStringForInvoice(priceType) + 
                 "\",\"items\":[" + itemsJsonArray + 
-                "],\"totalAmount\":\"" + escapeJsonString(formattedTotal) + 
+                "],\"totalAmount\":\"" + escapeJsonStringForInvoice(formattedTotal) + 
                 "\",\"bankAccount\":" + bankAccountPart + 
                 ",\"message\":" + messagePart + 
                 "}"
@@ -1010,71 +1565,142 @@ fun handleConfirmAndDownloadPdf() {
             val chassisList = js("window.currentInvoiceChassisList || []") as Array<dynamic>
             val chassisJoinedRaw = chassisList.joinToString(";") { it?.toString()?.trim() ?: "" }
             val shippingDateIsoPart = if (invoiceShippingDate.isNotEmpty()) {
-                "\"" + escapeJsonString(invoiceShippingDate) + "\""
+                "\"" + escapeJsonStringForInvoice(invoiceShippingDate) + "\""
             } else {
                 "null"
             }
             val purchaseIdsCsv = selectedIds.joinToString(",")
             val wrappedBody =
                 "{\"purchaseIds\":[" + purchaseIdsCsv + "],\"chassisJoined\":\"" +
-                escapeJsonString(chassisJoinedRaw) + "\",\"shippingDateIso\":" + shippingDateIsoPart +
+                escapeJsonStringForInvoice(chassisJoinedRaw) + "\",\"shippingDateIso\":" + shippingDateIsoPart +
                 ",\"pdf\":" + requestBodyJson + "}"
 
-            Logger.debug("Sending invoice confirm-and-download request")
-            
-            val headers = Headers()
-            headers.set("Content-Type", "application/json")
-            
-            val requestInit = RequestInit(
-                method = "POST",
-                headers = headers,
-                body = wrappedBody
-            )
-            
-            window.fetch(apiUrl("purchases/invoice/confirm-and-download"), requestInit).then { response ->
-                val status = response.status.toInt()
-                if (response.ok) {
-                    response.blob().then { blob ->
-                        val url = js("window.URL.createObjectURL(blob)") as String
-                        val a = document.createElement("a") as HTMLAnchorElement
-                        a.href = url
-                        a.download = "invoice_" + invoiceNumber + ".pdf"
-                        document.body?.appendChild(a)
-                        a.click()
-                        document.body?.removeChild(a)
-                        window.setTimeout({
-                            try {
-                                js("URL.revokeObjectURL(url)")
-                            } catch (e: dynamic) {
-                                Logger.warn("Failed to revoke URL: ${e.toString()}")
+            when (mode) {
+                "save" -> {
+                    Logger.debug("Sending invoice save request")
+                    val headers = Headers()
+                    headers.set("Content-Type", "application/json")
+                    val requestInit = RequestInit(
+                        method = "POST",
+                        headers = headers,
+                        body = wrappedBody,
+                    )
+                    window.fetch(apiUrl("purchases/invoice/save"), requestInit).then { response ->
+                        val status = response.status.toInt()
+                        if (response.ok) {
+                            response.json().then {
+                                Logger.debug("Invoice saved successfully")
+                                showMessage("Invoice saved successfully", "success")
                             }
-                        }, 1000)
-                        
-                        Logger.debug("Invoice PDF downloaded successfully")
-                        showMessage("Invoice saved and PDF downloaded successfully", "success")
-                    }.catch { error ->
-                        Logger.error("Error processing blob: ${error.toString()}")
-                        showMessage("Error processing PDF: ${error.toString()}", "error")
-                    }
-                } else {
-                    response.text().then { errorText ->
-                        Logger.error("Invoice confirm-and-download failed: $errorText")
-                        var userMsg = errorText
-                        if (status == 409) {
-                            try {
-                                val parsed = JSON.parse<dynamic>(errorText)
-                                val m = parsed.message?.toString()
-                                if (m != null && m.isNotEmpty()) userMsg = m
-                            } catch (_: dynamic) { }
-                            showMessage(userMsg, "error")
                         } else {
-                            showMessage("Failed to confirm invoice and download PDF: $errorText", "error")
+                            response.text().then { errorText ->
+                                Logger.error("Invoice save failed: $errorText")
+                                var userMsg = errorText
+                                if (status == 409) {
+                                    try {
+                                        val parsed = JSON.parse<dynamic>(errorText)
+                                        val m = parsed.message?.toString()
+                                        if (m != null && m.isNotEmpty()) userMsg = m
+                                    } catch (_: dynamic) {
+                                    }
+                                    showMessage(userMsg, "error")
+                                } else {
+                                    showMessage("Failed to save invoice: $errorText", "error")
+                                }
+                            }
                         }
+                    }.catch { error ->
+                        Logger.error("Error saving invoice: ${error.toString()}")
+                        showMessage("Error saving invoice: ${error.toString()}", "error")
                     }
                 }
-            }.catch { error ->
-                Logger.error("Error confirming invoice / generating PDF: ${error.toString()}")
-                showMessage("Error confirming invoice / generating PDF: ${error.toString()}", "error")
+                in setOf("preview", "pdf") -> {
+                    Logger.debug("Invoice generate-pdf request mode=$mode")
+                    val headers = Headers()
+                    headers.set("Content-Type", "application/json")
+                    val requestInit = RequestInit(
+                        method = "POST",
+                        headers = headers,
+                        body = requestBodyJson,
+                    )
+                    window.fetch(apiUrl("purchases/invoice/generate-pdf"), requestInit).then { response ->
+                        if (response.ok) {
+                            response.blob().then { blob ->
+                                val url = js("URL.createObjectURL(blob)") as String
+                                var urlRevoked = false
+                                fun revokeUrl() {
+                                    if (!urlRevoked) {
+                                        try {
+                                            js("URL.revokeObjectURL(url)")
+                                            urlRevoked = true
+                                        } catch (e: dynamic) {
+                                            Logger.warn("Failed to revoke URL: ${e.toString()}")
+                                        }
+                                    }
+                                }
+                                if (mode == "preview") {
+                                    try {
+                                        val newWindow = js("window.open(url, '_blank')")
+                                        if (newWindow == null) {
+                                            Logger.warn("Popup blocked, falling back to download")
+                                            val a = document.createElement("a") as HTMLAnchorElement
+                                            a.href = url
+                                            a.download = "invoice_" + invoiceNumber + ".pdf"
+                                            document.body?.appendChild(a)
+                                            a.click()
+                                            document.body?.removeChild(a)
+                                            showMessage("Popup blocked. PDF downloaded instead.", "info")
+                                            window.setTimeout({ revokeUrl() }, 1000)
+                                        } else {
+                                            Logger.debug("Invoice PDF preview opened successfully")
+                                            showMessage("✅ Invoice PDF preview opened", "success")
+                                            js("""
+                                                if (newWindow) {
+                                                    newWindow.addEventListener('beforeunload', function() {
+                                                        URL.revokeObjectURL(url);
+                                                    });
+                                                }
+                                            """)
+                                            window.setTimeout({ revokeUrl() }, 300000)
+                                        }
+                                    } catch (e: dynamic) {
+                                        Logger.error("Error opening PDF: ${e.toString()}")
+                                        revokeUrl()
+                                        showMessage("Error opening PDF preview", "error")
+                                    }
+                                } else {
+                                    try {
+                                        val a = document.createElement("a") as HTMLAnchorElement
+                                        a.href = url
+                                        a.download = "invoice_" + invoiceNumber + ".pdf"
+                                        document.body?.appendChild(a)
+                                        a.click()
+                                        document.body?.removeChild(a)
+                                        window.setTimeout({ revokeUrl() }, 1000)
+                                        Logger.debug("Invoice PDF downloaded")
+                                        showMessage("PDF downloaded successfully", "success")
+                                    } catch (e: dynamic) {
+                                        Logger.error("Error downloading PDF: ${e.toString()}")
+                                        revokeUrl()
+                                        showMessage("Error downloading PDF", "error")
+                                    }
+                                }
+                            }.catch { error ->
+                                Logger.error("Error processing blob: ${error.toString()}")
+                                showMessage("Error processing PDF: ${error.toString()}", "error")
+                            }
+                        } else {
+                            response.text().then { errorText ->
+                                Logger.error("Invoice PDF generation failed: $errorText")
+                                showMessage("Failed to generate invoice PDF: $errorText", "error")
+                            }
+                        }
+                    }.catch { error ->
+                        Logger.error("Error generating invoice PDF: ${error.toString()}")
+                        showMessage("Error generating invoice PDF: ${error.toString()}", "error")
+                    }
+                }
+                else -> Logger.warn("Unknown invoice action mode: $mode")
             }
         }.catch { error ->
             Logger.error("Error loading purchases: ${error.toString()}")
@@ -1084,254 +1710,60 @@ fun handleConfirmAndDownloadPdf() {
 }
 
 fun handleShowFullPreview() {
-    Logger.debug("[PREVIEW] handleShowFullPreview() called")
-    
-    // Get purchase IDs from global variable
-    val selectedIds = (js("window.currentInvoicePurchaseIds") as? Array<dynamic>)?.mapNotNull { 
-        js("it").toString().toLongOrNull() 
-    } ?: emptyList()
-    
-    Logger.debug("[PREVIEW] Selected IDs: $selectedIds")
-    
-    if (selectedIds.isEmpty()) {
-        Logger.warn("[PREVIEW] No purchases selected")
-        showMessage("Please select purchases first", "warning")
-        return
-    }
-    
-    // Get form values
-    val invoiceNumber = (document.getElementById("invoiceNumber") as? HTMLInputElement)?.value ?: ""
-    val invoiceClient = (document.getElementById("invoiceClient") as? HTMLSelectElement)?.value ?: ""
-    val invoiceVessel = (document.getElementById("invoiceVessel") as? HTMLSelectElement)?.value ?: ""
-    val invoiceShippingDate = (document.getElementById("invoiceShippingDate") as? HTMLInputElement)?.value ?: ""
-    val invoiceFrom = (document.getElementById("invoiceFrom") as? HTMLInputElement)?.value ?: ""
-    val invoiceTo = (document.getElementById("invoiceTo") as? HTMLInputElement)?.value ?: ""
-    val invoiceLcNo = (document.getElementById("invoiceLcNo") as? HTMLInputElement)?.value ?: ""
-    val invoiceMessage = (document.getElementById("invoiceMessage") as? HTMLTextAreaElement)?.value ?: ""
-    
-    // Get price type (C&F or FOB)
-    val invoiceCnf = document.getElementById("invoiceCnf") as? HTMLInputElement
-    val invoiceFob = document.getElementById("invoiceFob") as? HTMLInputElement
-    val priceType = when {
-        invoiceCnf?.checked == true -> "C&F"
-        invoiceFob?.checked == true -> "FOB"
-        else -> "C&F"
-    }
-    
-    // Get bank account
-    val invoiceBankAccount = document.getElementById("invoiceBankAccount") as? HTMLSelectElement
-    val bankAccountValue = invoiceBankAccount?.value ?: ""
-    
-    // Validation
-    if (invoiceNumber.isEmpty()) {
-        showMessage("Please enter an invoice number", "warning")
-        return
-    }
-    
-    if (invoiceClient.isEmpty()) {
-        showMessage("Please enter a client name", "warning")
-        return
-    }
-    
-    // Parse client name and address
-    val clientParts = invoiceClient.split("\n", limit = 2)
-    val clientName = clientParts[0].trim()
-    val clientAddress = if (clientParts.size > 1) clientParts[1].trim() else null
-    
-    // Get current date for invoice date
-    val currentDate = js("new Date()").unsafeCast<dynamic>()
-    val year = currentDate.getFullYear() as Int
-    val month = ((currentDate.getMonth() as Int) + 1).toString().padStart(2, '0')
-    val day = (currentDate.getDate() as Int).toString().padStart(2, '0')
-    val invoiceDate = year.toString() + "-" + month + "-" + day
-    
-    // Format shipping date (convert from YYYY-MM-DD to DD.MMM.YYYY format)
-    val formattedShippingDate = if (invoiceShippingDate.isNotEmpty()) {
-        try {
-            val dateParts = invoiceShippingDate.split("-")
-            if (dateParts.size == 3) {
-                val months = arrayOf("", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
-                val monthNum = dateParts[1].toIntOrNull() ?: 0
-                val monthName = if (monthNum in 1..12) months[monthNum] else dateParts[1]
-                dateParts[2] + "." + monthName + "." + dateParts[0]
-            } else {
-                invoiceShippingDate
-            }
-        } catch (e: dynamic) {
-            invoiceShippingDate
+    invoiceBuildPayloadAndRun("preview")
+}
+
+fun handleInvoiceSave() {
+    invoiceBuildPayloadAndRun("save")
+}
+
+fun handleInvoicePdfDownload() {
+    invoiceBuildPayloadAndRun("pdf")
+}
+
+private fun resolveInvoiceNumberForRecreateDelete(): String {
+    restoreInvoiceRecreateMetaFromSession()
+    val fromSession = invoiceRecreateInvoiceNumber?.trim().orEmpty()
+    if (fromSession.isNotEmpty()) return fromSession
+    return (document.getElementById("invoiceNumber") as? HTMLInputElement)?.value?.trim().orEmpty()
+}
+
+private fun handleDeleteInvoiceFromRecreate() {
+    val ok = window.confirm("Are you sure you want to Delete the invoice?")
+    if (!ok) return
+    MainScope().launch {
+        val invoiceNumber = resolveInvoiceNumberForRecreateDelete()
+        if (invoiceNumber.isEmpty()) {
+            showMessage("No invoice is linked to this session.", "error")
+            return@launch
         }
-    } else {
-        ""
-    }
-    
-    // Fetch purchase data to get all fields including brand, door, seat, fuel
-    window.fetch(apiUrl("purchases")).then { response ->
-        if (!response.ok) {
-            showMessage("Failed to load purchase details", "error")
-            return@then
-        }
-        response.json().then { allPurchases ->
-            val purchasesArray = allPurchases as Array<dynamic>
-            val selectedPurchasesList = mutableListOf<dynamic>()
-            
-            // Filter to only selected purchases
-            for (purchase in purchasesArray) {
-                val id = js("purchase.id").toString().toLongOrNull()
-                if (id != null && selectedIds.contains(id)) {
-                    selectedPurchasesList.add(purchase)
+        val numbersArr = js("[]")
+        numbersArr.push(invoiceNumber)
+        val body = js("{}")
+        body.invoiceNumbers = numbersArr
+        ApiClient.post<dynamic>("invoice-history/batch-delete", body).fold(
+            onSuccess = { data ->
+                val d = (data as Any).unsafeCast<dynamic>()
+                val n = d.deleted
+                val deleted = when (n) {
+                    is Number -> n.toInt()
+                    else -> n?.toString()?.toIntOrNull() ?: 0
                 }
-            }
-            
-            if (selectedPurchasesList.isEmpty()) {
-                showMessage("No items found for selected purchases", "warning")
-                return@then
-            }
-            
-            val built = buildInvoicePdfItemsAndTotal(purchasesArray, selectedIds)
-            val itemsList = built.first
-            if (itemsList.isEmpty()) {
-                showMessage("No items found for selected purchases", "warning")
-                return@then
-            }
-            val totalAmount = built.second
-            val formattedTotal = formatInvoiceYenInt(totalAmount)
-            
-            // Helper function to escape JSON strings
-            fun escapeJsonString(str: String): String {
-                return str.replace("\\", "\\\\")
-                    .replace("\"", "\\\"")
-                    .replace("\n", "\\n")
-                    .replace("\r", "\\r")
-                    .replace("\t", "\\t")
-            }
-            
-            // Prepare request body - build JSON string manually to avoid Kotlin/JS interop issues
-            val itemsJsonArray = itemsList.joinToString(",") { item ->
-                val itemDynamic = item.unsafeCast<dynamic>()
-                val unit = itemDynamic.unit?.toString() ?: "0"
-                val description = escapeJsonString((itemDynamic.description as? String) ?: "")
-                val amount = escapeJsonString((itemDynamic.amount as? String) ?: "")
-                "{\"unit\":" + unit + ",\"description\":\"" + description + "\",\"amount\":\"" + amount + "\"}"
-            }
-            
-            val lcNumberPart = if (invoiceLcNo.isNotEmpty()) {
-                "\"" + escapeJsonString(invoiceLcNo) + "\""
-            } else {
-                "null"
-            }
-            val clientAddressPart = if (clientAddress != null) {
-                "\"" + escapeJsonString(clientAddress) + "\""
-            } else {
-                "null"
-            }
-            val bankAccountPart = if (bankAccountValue.isNotEmpty()) {
-                "\"" + escapeJsonString(bankAccountValue) + "\""
-            } else {
-                "null"
-            }
-            val messagePart = if (invoiceMessage.isNotEmpty()) {
-                "\"" + escapeJsonString(invoiceMessage) + "\""
-            } else {
-                "null"
-            }
-            
-            val requestBodyJson = "{\"invoiceNumber\":\"" + escapeJsonString(invoiceNumber) + 
-                "\",\"invoiceDate\":\"" + escapeJsonString(invoiceDate) + 
-                "\",\"lcNumber\":" + lcNumberPart + 
-                ",\"clientName\":\"" + escapeJsonString(clientName) + 
-                "\",\"clientAddress\":" + clientAddressPart + 
-                ",\"vessel\":\"" + escapeJsonString(invoiceVessel) + 
-                "\",\"shippingDate\":\"" + escapeJsonString(formattedShippingDate) + 
-                "\",\"from\":\"" + escapeJsonString(invoiceFrom) + 
-                "\",\"to\":\"" + escapeJsonString(invoiceTo) + 
-                "\",\"priceType\":\"" + escapeJsonString(priceType) + 
-                "\",\"items\":[" + itemsJsonArray + 
-                "],\"totalAmount\":\"" + escapeJsonString(formattedTotal) + 
-                "\",\"bankAccount\":" + bankAccountPart + 
-                ",\"message\":" + messagePart + 
-                "}"
-            Logger.debug("Generating invoice PDF for preview")
-            
-            // Make API call to generate PDF
-            val headers = Headers()
-            headers.set("Content-Type", "application/json")
-            
-            val requestInit = RequestInit(
-                method = "POST",
-                headers = headers,
-                body = requestBodyJson
-            )
-            
-            window.fetch(apiUrl("purchases/invoice/generate-pdf"), requestInit).then { response ->
-                if (response.ok) {
-                    response.blob().then { blob ->
-                        // Create object URL and open in new window for preview
-                        val url = js("URL.createObjectURL(blob)") as String
-                        var urlRevoked = false
-                        
-                        // Function to safely revoke URL
-                        fun revokeUrl() {
-                            if (!urlRevoked) {
-                                try {
-                                    js("URL.revokeObjectURL(url)")
-                                    urlRevoked = true
-                                } catch (e: dynamic) {
-                                    Logger.warn("Failed to revoke URL: ${e.toString()}")
-                                }
-                            }
-                        }
-                        
-                        try {
-                            val newWindow = js("window.open(url, '_blank')")
-                            if (newWindow == null) {
-                                Logger.warn("Popup blocked, falling back to download")
-                                // Fallback to download if popup is blocked
-                                val a = document.createElement("a") as HTMLAnchorElement
-                                a.href = url
-                                a.download = "invoice_" + invoiceNumber + ".pdf"
-                                document.body?.appendChild(a)
-                                a.click()
-                                document.body?.removeChild(a)
-                                showMessage("Popup blocked. PDF downloaded instead.", "info")
-                                // Revoke URL after download (short delay to ensure download starts)
-                                window.setTimeout({ revokeUrl() }, 1000)
-                            } else {
-                                Logger.debug("Invoice PDF preview opened successfully")
-                                showMessage("✅ Invoice PDF preview opened", "success")
-                                // Revoke URL when window is closed or after delay
-                                js("""
-                                    if (newWindow) {
-                                        newWindow.addEventListener('beforeunload', function() {
-                                            URL.revokeObjectURL(url);
-                                        });
-                                    }
-                                """)
-                                // Fallback: revoke after 5 minutes if window still open
-                                window.setTimeout({ revokeUrl() }, 300000)
-                            }
-                        } catch (e: dynamic) {
-                            Logger.error("Error opening PDF: ${e.toString()}")
-                            revokeUrl()
-                            showMessage("Error opening PDF preview", "error")
-                        }
-                    }.catch { error ->
-                        Logger.error("Error processing blob: ${error.toString()}")
-                        showMessage("Error processing PDF: ${error.toString()}", "error")
-                    }
-                } else {
-                    response.text().then { errorText ->
-                        Logger.error("Invoice PDF generation failed: $errorText")
-                        showMessage("Failed to generate invoice PDF: $errorText", "error")
-                    }
+                if (deleted <= 0) {
+                    showMessage("Invoice could not be deleted (not found).", "warning")
+                    return@fold
                 }
-            }.catch { error ->
-                Logger.error("Error generating invoice PDF: ${error.toString()}")
-                showMessage("Error generating invoice PDF: ${error.toString()}", "error")
-            }
-        }.catch { error ->
-            Logger.error("Error loading purchases: ${error.toString()}")
-            showMessage("Error loading purchase details", "error")
-        }
+                clearInvoiceRecreateSessionData()
+                showMessage("Invoice deleted.", "success")
+                window.location.hash = "#/invoice-history"
+            },
+            onError = { message, statusCode ->
+                val msg =
+                    if (statusCode == 400 && message.isNotBlank()) message
+                    else "Failed to delete invoice: $message"
+                showMessage(msg, "error")
+            },
+        )
     }
 }
 

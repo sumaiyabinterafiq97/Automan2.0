@@ -12,9 +12,10 @@ body {
     color: #333;
 }
 
-/* Rixo table polish */
+/* Rixo table polish — equal-width data columns; select/edit widths come from <colgroup> in markup */
 .rixo-table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
 }
 
@@ -26,6 +27,11 @@ body {
 .rixo-table td {
     border: 1px solid #dee2e6;
     padding: 8px 10px;
+}
+
+.rixo-table thead th:not(.rixo-col-select):not(.rixo-col-edit),
+.rixo-table tbody td:not(.rixo-col-select):not(.rixo-col-edit) {
+    min-width: 0;
 }
 
 .rixo-row { transition: background-color 140ms ease-in, box-shadow 140ms ease-in; }
@@ -1551,6 +1557,7 @@ select:focus {
     height: 100%;
     width: 100%;
     box-sizing: border-box; /* Ensure gap doesn't cause overflow */
+    align-items: stretch;
 }
 
 .rixo-request-form-panel,
@@ -1560,6 +1567,9 @@ select:focus {
     padding: 24px;
     box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     border: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
 }
 
 .rixo-request-form-panel {
@@ -1934,6 +1944,29 @@ div[id$="_dropdown"] {
     border-color: #8e44ad;
 }
 
+.rixo-save-history-btn {
+    flex: 1;
+    min-width: 120px;
+    padding: 14px;
+    background: #fff;
+    color: #0f766e;
+    border: 2px solid #14b8a6;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.rixo-save-history-btn:hover {
+    background: #f0fdfa;
+    border-color: #0d9488;
+}
+
 .rixo-preview-icon {
     font-size: 18px;
 }
@@ -1994,6 +2027,20 @@ div[id$="_dropdown"] {
     max-height: calc(100vh - 300px);
     overflow-y: auto;
     overflow-x: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.rixo-updater-delete-wrap {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: auto;
+    padding-top: 12px;
+}
+
+.rixo-updater-delete-wrap.hidden {
+    display: none;
 }
 
 .rixo-empty-state {
@@ -2117,6 +2164,7 @@ div[id$="_dropdown"] {
     }
     
     .rixo-print-actions .rixo-preview-btn,
+    .rixo-print-actions .rixo-save-history-btn,
     .rixo-print-actions .rixo-print-btn {
         flex: 1;
         min-width: 0;
@@ -2211,6 +2259,7 @@ div[id$="_dropdown"] {
     }
     
     .rixo-print-actions .rixo-preview-btn,
+    .rixo-print-actions .rixo-save-history-btn,
     .rixo-print-actions .rixo-print-btn {
         min-height: 44px;
     }
@@ -2246,10 +2295,6 @@ div[id$="_dropdown"] {
     
     .rixo-col-select {
         width: 90px;
-    }
-    
-    .rixo-select-all-text {
-        font-size: 12px;
     }
 }
 
@@ -2307,6 +2352,7 @@ div[id$="_dropdown"] {
     }
     
     .rixo-print-actions .rixo-preview-btn,
+    .rixo-print-actions .rixo-save-history-btn,
     .rixo-print-actions .rixo-print-btn {
         min-height: 40px;
         padding: 12px 20px;
@@ -3158,6 +3204,7 @@ div[id$="_dropdown"] {
 .purchase-list-table {
     width: 100%;
     border-collapse: collapse;
+    table-layout: fixed;
     border: 1px solid #d1d5db;
     background-color: #ffffff;
 }
@@ -3210,6 +3257,50 @@ div[id$="_dropdown"] {
 .supplier-table tbody tr:hover td,
 .purchase-list-table tbody tr:hover td {
     background-color: #fafafa;
+}
+
+/* Shipping History: Create Invoice (per booking row), glossy pill style */
+button.shipping-history-invoice-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    min-height: 46px;
+    padding: 0;
+    margin: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    vertical-align: middle;
+    border: 3px solid #b8bec8;
+    box-shadow:
+        inset 0 2px 6px rgba(255, 255, 255, 0.55),
+        inset 0 -4px 8px rgba(0, 0, 0, 0.18),
+        0 2px 8px rgba(0, 0, 0, 0.2);
+    background: radial-gradient(circle at 32% 24%, #c8f5b8 0%, #4abf52 42%, #1a6e22 100%);
+}
+
+button.shipping-history-invoice-btn:hover {
+    filter: brightness(1.07);
+}
+
+button.shipping-history-invoice-btn:active {
+    transform: scale(0.96);
+}
+
+.shipping-history-invoice-btn__text {
+    display: block;
+    font-size: 6.5px;
+    font-weight: 800;
+    line-height: 1.05;
+    color: #fff;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    font-family: Georgia, "Times New Roman", serif;
+    max-width: 34px;
 }
 
 #purchaseTable table.purchase-list-table th,
@@ -3615,19 +3706,6 @@ div[id$="_dropdown"] {
     table-layout: fixed;
 }
 
-.client-map-col-actions {
-    width: 88px;
-}
-
-.client-map-col-bank {
-    width: 200px;
-    max-width: 22%;
-}
-
-.client-map-col-default {
-    width: auto;
-}
-
 .client-map-th-actions {
     padding: 12px 10px;
     text-align: left;
@@ -3671,11 +3749,6 @@ div[id$="_dropdown"] {
 .client-map-table tbody tr:nth-child(even) .client-map-td,
 .client-map-table tbody tr:nth-child(even) .client-map-td-actions {
     background: #fafafa;
-}
-
-.client-map-td[data-col="bankInfo"],
-.client-map-th[data-col="bankInfo"] {
-    max-width: 220px;
 }
 
 .client-map-bank-text {
@@ -4224,6 +4297,7 @@ div[id$="_dropdown"] {
     display: flex;
     gap: 30px;
     min-height: 600px;
+    align-items: stretch;
 }
 
 /* Left Section: Booking Details */
@@ -4237,6 +4311,9 @@ div[id$="_dropdown"] {
 .booking-list-section {
     flex: 1;
     padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
 }
 
 /* Section Headers */
@@ -4502,6 +4579,20 @@ div[id$="_dropdown"] {
 .rixo-company-fab-wrap.rixo-company-fab--open .rixo-fab-trigger-hint {
     display: none;
 }
+/* Rixo Request Generator — Buying date FAB (distinct from Rixo Company blue) */
+.rixo-buying-date-fab-wrap .rixo-buying-date-fab-circle {
+    background: linear-gradient(145deg, #a855f7, #7c3aed);
+    box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+}
+.rixo-buying-date-fab-row-btn {
+    border-color: #e9d5ff;
+    background: #faf5ff;
+    color: #5b21b6;
+}
+.rixo-buying-date-fab-row-btn:hover {
+    background: #f3e8ff;
+    border-color: #a855f7;
+}
 .rixo-fab-trigger-chevron {
     flex-shrink: 0;
     font-size: 12px;
@@ -4685,10 +4776,22 @@ div[id$="_dropdown"] {
     border: 1px solid #e2e8f0;
     border-radius: 12px;
     overflow: hidden;
-    margin-bottom: 20px;
-    overflow-x: auto;
+    margin-bottom: 0;
+    overflow-y: auto;
     background: #fff;
     box-shadow: 0 4px 18px rgba(15, 23, 42, 0.06);
+    flex: 1;
+    min-height: 0;
+}
+
+/* Booking List Footer */
+.booking-list-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: auto;
+    padding-top: 12px;
+    gap: 12px;
 }
 
 /* Chassis Search Table */
@@ -5531,6 +5634,7 @@ div[id$="_dropdown"] {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 24px;
+    align-items: stretch;
 }
 
 /* Invoice Form Section */
@@ -5543,6 +5647,7 @@ div[id$="_dropdown"] {
 .invoice-list-section {
     display: flex;
     flex-direction: column;
+    min-height: 100%;
 }
 
 .invoice-list-section h2 {
@@ -5653,6 +5758,13 @@ div[id$="_dropdown"] {
     margin-top: 16px;
 }
 
+/* Invoice Table Container - grows to fill available space */
+.invoice-table-container {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
 .invoice-list-table th,
 .invoice-list-table td {
     padding: 12px;
@@ -5676,6 +5788,16 @@ div[id$="_dropdown"] {
     text-align: right;
     font-size: 18px;
     font-weight: 700;
+}
+
+/* Invoice List Footer */
+.invoice-list-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: auto;
+    padding-top: 12px;
+    gap: 12px;
 }
 
 /* Invoice Action Buttons */
@@ -5888,16 +6010,14 @@ div[id$="_dropdown"] {
         order: 3;
     }
     
-    /* Row 2: CANCEL (red), DOWNLOAD, PREVIEW */
-    #cancelInvoiceBtn {
+    /* Row 2: SAVE, PREVIEW, PDF */
+    #invoiceSaveBtn {
         order: 4;
-        background: #dc2626 !important;
-        color: white !important;
-    }
-    #downloadPdfBtn {
-        order: 5;
     }
     #showFullPreviewBtn {
+        order: 5;
+    }
+    #invoicePdfBtn {
         order: 6;
     }
 }
@@ -7421,4 +7541,1153 @@ div[id$="_dropdown"] {
     .edit-purchase-container > * {
         position: relative !important;
     }
+}
+
+/* ============================================
+   C&F / FOB Calculation - Table-Based UI
+   ============================================ */
+
+.cnf-cars-table-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    margin: 20px 0;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.cnf-cars-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    font-size: 14px;
+}
+
+.cnf-cars-table thead {
+    background: linear-gradient(135deg, #ecf0f1 0%, #f8f9fa 100%);
+    border-bottom: 2px solid #bdc3c7;
+}
+
+.cnf-cars-table thead th {
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+    color: #2c3e50;
+    border-right: 1px solid #bdc3c7;
+}
+
+.cnf-cars-table thead th:last-child {
+    border-right: none;
+}
+
+.cnf-table-row {
+    background-color: #ffffff;
+    border-bottom: 1px solid #ecf0f1;
+    transition: all 0.2s ease;
+}
+
+.cnf-table-row:hover {
+    background-color: #f8f9fa;
+}
+
+.cnf-table-row td {
+    padding: 12px;
+    vertical-align: middle;
+    border-right: 1px solid #ecf0f1;
+}
+
+.cnf-table-row td:last-child {
+    border-right: none;
+}
+
+/* C&F table: per-row “saved” indicator (light green when costs persisted) */
+.cnf-row-saved-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid #cbd5e1;
+    background: #f8fafc;
+    box-sizing: border-box;
+    vertical-align: middle;
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.cnf-row-saved-indicator--on {
+    border-color: #86efac;
+    background: #dcfce7;
+    box-shadow: inset 0 0 0 1px #bbf7d0;
+}
+
+.cnf-row-saved-indicator--on::after {
+    content: "";
+    display: block;
+    width: 5px;
+    height: 9px;
+    border: solid #166534;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+    margin-bottom: 2px;
+}
+
+.cnf-expand-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+    color: #7f8c8d;
+    transition: transform 0.2s ease, color 0.2s ease;
+}
+
+.cnf-expand-btn:hover {
+    color: #2c3e50;
+    transform: scale(1.2);
+}
+
+.cnf-quick-save-btn {
+    background: #27ae60;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+    transition: all 0.2s ease;
+}
+
+.cnf-quick-save-btn:hover {
+    background: #229954;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.cnf-quick-save-btn:active {
+    transform: translateY(0);
+}
+
+.cnf-expanded-row-hidden {
+    display: none;
+}
+
+.cnf-expanded-row {
+    background: linear-gradient(to right, #f0f7ff 0%, #ffffff 100%);
+    border: 2px solid #3498db;
+}
+
+.cnf-expanded-row td {
+    padding: 20px;
+}
+
+.cnf-expanded-content {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.cnf-expanded-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 1200px) {
+    .cnf-expanded-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.cnf-expanded-column {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cnf-cost-field {
+    display: flex;
+    flex-direction: column;
+}
+
+.cnf-cost-field label {
+    font-weight: 600;
+    font-size: 12px;
+    color: #2c3e50;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.input-with-prefix {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.input-with-prefix span {
+    font-weight: 600;
+    color: #7f8c8d;
+    width: 20px;
+    text-align: center;
+}
+
+.cnf-expanded-input,
+.money-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #bdc3c7;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: monospace;
+    transition: all 0.2s ease;
+}
+
+.cnf-expanded-input:focus,
+.money-input:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 4px rgba(52, 152, 219, 0.2);
+}
+
+.cnf-expanded-totals {
+    margin: 10px 0;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 6px;
+    border-left: 4px solid #3498db;
+}
+
+.cnf-totals-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+}
+
+.cnf-total-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cnf-total-box label {
+    font-weight: 600;
+    font-size: 12px;
+    color: #7f8c8d;
+    text-transform: uppercase;
+}
+
+.cnf-expanded-total-value {
+    font-size: 18px;
+    font-weight: 700;
+    font-family: monospace;
+    padding: 8px 12px;
+    border-radius: 4px;
+}
+
+.cnf-expanded-total-value.green {
+    color: #27ae60;
+    background: rgba(39, 174, 96, 0.1);
+}
+
+.cnf-expanded-total-value.red {
+    color: #e74c3c;
+    background: rgba(231, 76, 60, 0.1);
+}
+
+.cnf-total-display {
+    font-weight: 700;
+    font-family: monospace;
+    color: #27ae60;
+}
+
+.cnf-expanded-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+}
+
+.cnf-expanded-save-btn,
+.cnf-expanded-preview-btn,
+.cnf-expanded-download-btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.cnf-expanded-save-btn {
+    background: #27ae60;
+    color: white;
+}
+
+.cnf-expanded-save-btn:hover {
+    background: #229954;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.cnf-expanded-preview-btn {
+    background: #8e44ad;
+    color: white;
+}
+
+.cnf-expanded-preview-btn:hover {
+    background: #7d3c98;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.cnf-expanded-download-btn {
+    background: #3498db;
+    color: white;
+}
+
+.cnf-expanded-download-btn:hover {
+    background: #2980b9;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Rixo Price Mapping & Supplier Map tree (was inline in MasterList) */
+.rixo-tree-page {
+    max-width: 1280px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 12px 32px;
+}
+.rixo-tree-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+.rixo-tree-title {
+    margin: 0;
+    color: #0f172a;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+.rixo-tree-btn {
+    border: 1px solid #cbd5e1;
+    background: #fff;
+    color: #334155;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.rixo-tree-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.rixo-tree-btn--add {
+    background: #10b981;
+    border-color: #10b981;
+    color: #fff;
+}
+.rixo-tree-btn--danger {
+    background: #ef4444;
+    border-color: #ef4444;
+    color: #fff;
+}
+.rixo-tree-root {
+    background: linear-gradient(180deg, #eef2f7 0%, #e8edf5 100%);
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 18px 16px 24px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+    overflow-x: auto;
+}
+.rixo-tree-loading {
+    text-align: center;
+    color: #64748b;
+    padding: 48px 16px;
+    font-size: 15px;
+}
+.rixo-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 1020px;
+}
+/* Header row uses the same column widths as cards; nested tree rows add 8px margin + 30px
+   padding per level, so we pad each header cell to line up with the left edge of cards below. */
+.rixo-tree-headers {
+    display: grid;
+    grid-template-columns: 270px 240px 240px minmax(180px, 1fr) minmax(120px, 1fr);
+    gap: 18px;
+    padding: 0 0 10px 0;
+    margin: 0 0 12px 0;
+    border-bottom: 1px solid #cbd5e1;
+    align-items: end;
+}
+.rixo-tree-header {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #64748b;
+    box-sizing: border-box;
+}
+/* Company card: match card padding-left (10px) so label lines up with the card content */
+.rixo-tree-header:nth-child(1) { padding-left: 10px; }
+/* Nested columns: card starts 34px right of the plain grid column start per nesting level
+   (tree uses node gap 14 + .rixo-tree-children margin 8 + padding 30; grid gap is 18). */
+.rixo-tree-header:nth-child(2) { padding-left: 34px; }
+.rixo-tree-header:nth-child(3) { padding-left: 68px; }
+.rixo-tree-header:nth-child(4) { padding-left: 102px; }
+/* Price sits in the right part of the leaf row (with >>); center over value + control */
+.rixo-tree-header--price {
+    text-align: center;
+    padding-left: 0;
+    padding-right: 8px;
+}
+.rixo-tree-node {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+}
+.rixo-tree-children {
+    position: relative;
+    margin-left: 8px;
+    padding-left: 30px;
+    padding-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+/* Main vertical spine for this branch column */
+.rixo-tree-children::before {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(180deg, #94a3b8 0%, #cbd5e1 100%);
+    border-radius: 1px;
+    pointer-events: none;
+}
+/* Horizontal branch from spine to each row card (does not overlap the color ball) */
+.rixo-tree-children > .rixo-tree-node::before {
+    content: "";
+    position: absolute;
+    left: -20px;
+    top: 26px;
+    width: 20px;
+    height: 2px;
+    background: linear-gradient(90deg, #94a3b8 0%, #cbd5e1 100%);
+    border-radius: 1px;
+    z-index: 0;
+    pointer-events: none;
+}
+.rixo-tree-card {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 46px;
+    padding: 8px 12px 8px 10px;
+    background: #fff;
+    border-radius: 10px;
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    box-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    z-index: 1;
+}
+.rixo-tree-card-wrapper {
+    display: flex;
+    align-items: stretch;
+    gap: 2px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+.rixo-tree-card-wrapper .rixo-tree-card:not(.rixo-tree-card--inline-editing) {
+    flex: 1;
+    min-width: 0;
+    width: auto !important;
+}
+.rixo-tree-card-wrapper--company { width: 270px; }
+.rixo-tree-card-wrapper--auction { width: 240px; }
+.rixo-tree-card-wrapper--stock { width: 240px; }
+.rixo-tree-card-menu-wrap {
+    position: relative;
+    flex-shrink: 0;
+    align-self: center;
+    z-index: 20;
+}
+.rixo-tree-card-menu-btn {
+    width: 28px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: #64748b;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.rixo-tree-card-menu-btn:hover {
+    background: rgba(148, 163, 184, 0.2);
+    color: #0f172a;
+}
+.rixo-tree-card-menu-panel {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    min-width: 148px;
+    padding: 4px 0;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
+    z-index: 200;
+}
+.rixo-tree-card-menu-wrap.is-open .rixo-tree-card-menu-panel {
+    display: block;
+}
+.rixo-tree-card-menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 9px 14px;
+    border: none;
+    background: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: #1e293b;
+    cursor: pointer;
+}
+.rixo-tree-card-menu-item:hover {
+    background: #f1f5f9;
+}
+.rixo-tree-card-menu-item--danger {
+    color: #b91c1c;
+}
+.rixo-tree-card-menu-item--danger:hover {
+    background: #fef2f2;
+}
+.rixo-tree-card--company { width: 270px; }
+.rixo-tree-card--auction { width: 240px; }
+.rixo-tree-card--stock { width: 240px; }
+.rixo-tree-card--inline-editing {
+    cursor: default;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    position: relative;
+    z-index: 40;
+    isolation: isolate;
+}
+.rixo-tree-card--inline-editing-with-actions {
+    flex-wrap: wrap;
+    align-items: stretch;
+}
+.rixo-tree-card-inline-actions {
+    width: 100%;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+.rixo-tree-card-inline-cancel {
+    padding: 6px 12px;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    color: #374151;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+}
+.rixo-tree-card-inline-save {
+    padding: 6px 14px;
+    border: none;
+    background: #58B98C;
+    color: #fff;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+}
+/* Inline "+ Add" for company / auction / stock: compact sizing aligned with card inline edit */
+.rixo-tree-inline-add-outer {
+    flex-shrink: 0;
+    cursor: default;
+    position: relative;
+    z-index: 40;
+    isolation: isolate;
+    box-sizing: border-box;
+}
+.rixo-tree-inline-add-outer--company { width: 270px; }
+.rixo-tree-inline-add-outer--auction,
+.rixo-tree-inline-add-outer--stock { width: 240px; }
+.rixo-tree-inline-add-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    background: #fff;
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 10px;
+    padding: 8px 10px;
+    box-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
+    box-sizing: border-box;
+}
+.rixo-tree-inline-add-box:focus-within {
+    border-color: #4CC9FF;
+    box-shadow: 0 0 0 3px rgba(76, 201, 255, 0.2);
+}
+.rixo-tree-inline-add-row--inputs {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 8px;
+    width: 100%;
+}
+.rixo-tree-inline-add-field-primary {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    z-index: 50;
+}
+.rixo-tree-inline-add-field-primary.rixo-tree-card-combobox-wrap {
+    flex: 1 1 100%;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+}
+.rixo-tree-inline-add-row--inputs > .rixo-tree-inline-add-field-primary:only-child {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: 100%;
+}
+.rixo-tree-inline-add-box .rixo-tree-inline-add-field-primary input[type="text"] {
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+.rixo-tree-inline-add-plain input[type="text"] {
+    min-height: 34px !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    padding: 8px 10px !important;
+    border-radius: 8px !important;
+    border: 1px solid #d1d5db !important;
+}
+.rixo-tree-inline-add-plain input[type="text"]:focus {
+    outline: none !important;
+    border-color: #4CC9FF !important;
+    box-shadow: 0 0 0 3px rgba(76, 201, 255, 0.2) !important;
+}
+.rixo-tree-inline-add-box .rixo-tree-card-combobox-wrap input[type="text"] {
+    min-height: 34px !important;
+    padding: 8px 40px 8px 10px !important;
+}
+.rixo-tree-inline-add-row--actions {
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin-top: 2px;
+}
+.rixo-tree-inline-add-box .rixo-tree-card-inline-add-cancel {
+    padding: 6px 12px;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    color: #374151;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+}
+.rixo-tree-inline-add-box .rixo-tree-card-inline-add-cancel:hover {
+    background: #f9fafb;
+}
+.rixo-tree-inline-add-box .rixo-tree-card-inline-add-save {
+    padding: 6px 14px;
+    border: none;
+    background: #58B98C;
+    color: #fff;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+}
+.rixo-tree-inline-add-box .rixo-tree-card-inline-add-save:hover {
+    filter: brightness(0.95);
+}
+.rixo-tree-leaf-inline-add-cancel {
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    background: #fff;
+    color: #111827;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+}
+.rixo-tree-leaf-inline-add-cancel:hover {
+    background: #f9fafb;
+}
+.rixo-tree-leaf-inline-add-save {
+    padding: 8px 12px;
+    border: none;
+    background: #58B98C;
+    color: #fff;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+}
+.rixo-tree-leaf-inline-add-save:hover {
+    filter: brightness(0.95);
+}
+.rixo-tree-leaf-edit--inline-add-stack {
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    width: 100%;
+}
+.rixo-tree-leaf-edit--inline-add-stack .rixo-tree-leaf-vtype-wrap {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+}
+.rixo-tree-card-combobox-wrap {
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+    position: relative;
+    z-index: 50;
+    pointer-events: auto;
+}
+.rixo-tree-card-combobox-wrap > div[style*="position: relative"] {
+    width: 100% !important;
+    z-index: 1;
+}
+/* Editable combobox: input below hit targets (select + ▼); styling matches inline-edit cards */
+.rixo-tree-card-combobox-wrap input[type="text"] {
+    position: relative;
+    z-index: 1 !important;
+    border-radius: 8px !important;
+    border: 1px solid #d1d5db !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: #0f172a !important;
+    padding: 8px 40px 8px 10px !important;
+    min-height: 36px !important;
+    box-sizing: border-box !important;
+}
+.rixo-tree-card-combobox-wrap select {
+    z-index: 12 !important;
+}
+.rixo-tree-card-combobox-wrap div[id$="Button"] {
+    z-index: 13 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation;
+}
+.rixo-tree-card-combobox-wrap input[type="text"]:focus {
+    outline: none !important;
+    border-color: #4CC9FF !important;
+    box-shadow: 0 0 0 3px rgba(76,201,255,0.2) !important;
+}
+.rixo-tree-leaf-vtype-wrap {
+    flex: 1;
+    min-width: 0;
+    max-width: 220px;
+    position: relative;
+    z-index: 50;
+    pointer-events: auto;
+}
+.rixo-tree-leaf-vtype-wrap > div[style*="position: relative"] {
+    width: 100% !important;
+    z-index: 1;
+}
+.rixo-tree-leaf-vtype-wrap input[type="text"] {
+    position: relative;
+    z-index: 1 !important;
+    border-radius: 8px !important;
+    border: 1px solid #d1d5db !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    min-height: 34px !important;
+    box-sizing: border-box !important;
+}
+.rixo-tree-leaf-vtype-wrap select {
+    z-index: 12 !important;
+}
+.rixo-tree-leaf-vtype-wrap div[id$="Button"] {
+    z-index: 13 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation;
+}
+.rixo-tree-leaf-vtype-wrap input[type="text"]:focus {
+    outline: none !important;
+    border-color: #4CC9FF !important;
+    box-shadow: 0 0 0 3px rgba(76,201,255,0.2) !important;
+}
+.rixo-tree-card:hover {
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+    border-color: #cbd5e1;
+}
+.rixo-tree-card.rixo-tree-card--selected {
+    border-color: #6478d7;
+    box-shadow: 0 0 0 2px rgba(100, 120, 215, 0.22);
+    background: linear-gradient(180deg, #fafbff 0%, #f4f6ff 100%);
+}
+.rixo-tree-exp-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    flex-shrink: 0;
+    background: #cbd5e1;
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.45);
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+    font-size: 0;
+    line-height: 0;
+    overflow: hidden;
+}
+.rixo-tree-card--selected .rixo-tree-exp-indicator {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    box-shadow: 0 1px 4px rgba(37, 99, 235, 0.45);
+}
+.rixo-tree-label {
+    flex: 1;
+    min-width: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+    line-height: 1.35;
+    word-break: break-word;
+}
+.rixo-tree-leaf-wrap {
+    min-width: 320px;
+    max-width: 580px;
+}
+.rixo-tree-leaf-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.rixo-tree-leaf-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 9px 10px;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+}
+.rixo-tree-leaf-cells {
+    width: 100%;
+    min-width: 0;
+}
+.rixo-tree-leaf-view {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+.rixo-tree-leaf-price-cell {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+    max-width: 58%;
+}
+.rixo-tree-leaf-edit {
+    display: none;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+.rixo-tree-leaf-row--inline-editing .rixo-tree-leaf-view {
+    display: none !important;
+}
+.rixo-tree-leaf-row--inline-editing .rixo-tree-leaf-edit {
+    display: flex !important;
+    position: relative;
+    z-index: 35;
+    isolation: isolate;
+}
+.rixo-tree-leaf-inline-price {
+    width: 104px;
+    height: 34px;
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    font-size: 13px;
+    box-sizing: border-box;
+}
+.rixo-tree-leaf-inline-price:focus {
+    outline: none;
+    border-color: #4CC9FF;
+    box-shadow: 0 0 0 3px rgba(76,201,255,0.2);
+}
+.rixo-tree-leaf-edit-btn {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 999px;
+    padding: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(180deg, #7dd3fc 0%, #4cc9ff 100%);
+    box-shadow: 0 1px 4px rgba(14, 165, 233, 0.45);
+    color: #fff;
+}
+.rixo-tree-leaf-edit-btn:hover {
+    filter: brightness(1.05);
+}
+.rixo-tree-leaf-edit-btn:active {
+    transform: scale(0.96);
+}
+.rixo-tree-leaf-delete-btn {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 999px;
+    padding: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(180deg, #fecaca 0%, #f87171 100%);
+    box-shadow: 0 1px 4px rgba(220, 38, 38, 0.35);
+    color: #fff;
+}
+.rixo-tree-leaf-delete-btn:hover {
+    filter: brightness(1.06);
+}
+.rixo-tree-leaf-delete-btn:active {
+    transform: scale(0.96);
+}
+.rixo-tree-leaf-update-btn {
+    flex-shrink: 0;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 999px;
+    padding: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at 30% 25%, #f8fafc 0%, #cbd5e1 38%, #94a3b8 100%);
+    box-shadow:
+        inset 0 1px 1px rgba(255,255,255,0.85),
+        inset 0 -2px 3px rgba(15, 23, 42, 0.18),
+        0 2px 4px rgba(15, 23, 42, 0.2);
+    color: #1e3a8a;
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1;
+}
+.rixo-tree-leaf-update-btn:hover {
+    filter: brightness(1.04);
+}
+.rixo-tree-leaf-update-icon {
+    display: block;
+    letter-spacing: -0.12em;
+    text-shadow: 0 1px 0 rgba(255,255,255,0.5);
+}
+.rixo-tree-leaf-row--selectable {
+    cursor: pointer;
+}
+.rixo-tree-leaf-row--selected {
+    border-color: #8ea2f2;
+    box-shadow: 0 0 0 2px rgba(100, 120, 215, 0.20);
+    background: linear-gradient(180deg, #fafbff 0%, #f4f6ff 100%);
+}
+.rixo-tree-leaf-type {
+    font-size: 12px;
+    font-weight: 600;
+    color: #334155;
+    min-width: 0;
+    flex: 1;
+}
+.rixo-tree-leaf-price {
+    font-size: 13px;
+    color: #0f172a;
+    text-align: right;
+    word-break: break-all;
+}
+.rixo-tree-note {
+    width: 320px;
+    background: rgba(255,255,255,0.75);
+    border: 1px dashed #cbd5e1;
+    border-radius: 10px;
+    color: #64748b;
+    font-size: 12px;
+    padding: 12px;
+}
+.rixo-tree-add-wrap {
+    position: relative;
+    margin-top: 10px;
+    padding-top: 4px;
+    padding-left: 0;
+}
+.rixo-tree-add-wrap--leaf {
+    margin-top: 10px;
+    padding-top: 4px;
+}
+.rixo-tree-col-footer {
+    margin-top: 14px;
+    padding-top: 8px;
+    position: relative;
+}
+.rixo-tree-children > .rixo-tree-col-footer::before {
+    content: "";
+    position: absolute;
+    left: -20px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 2px;
+    background: linear-gradient(90deg, #94a3b8 0%, #cbd5e1 100%);
+    border-radius: 1px;
+    z-index: 0;
+    pointer-events: none;
+}
+.rixo-tree-add-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #111827;
+    background: #fff;
+    border: 1px solid #7dd3fc;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+.rixo-tree-add-btn:hover {
+    background: #f8fafc;
+    border-color: #38bdf8;
+}
+
+/* Supplier Map: Supplier | Stock | POL | Venue | Rixo */
+.supplier-map-tree {
+    min-width: 1180px;
+}
+.supplier-map-tree .rixo-tree-headers {
+    grid-template-columns: 270px 240px minmax(148px, 1fr) minmax(148px, 1fr) minmax(200px, 1.2fr);
+}
+.supplier-map-tree .rixo-tree-header:nth-child(1) { padding-left: 10px; }
+.supplier-map-tree .rixo-tree-header:nth-child(2) { padding-left: 34px; }
+.supplier-map-tree .rixo-tree-header:nth-child(3) { padding-left: 68px; }
+.supplier-map-tree .rixo-tree-header:nth-child(4) { padding-left: 102px; }
+.supplier-map-tree .rixo-tree-header:nth-child(5) {
+    padding-left: 0;
+    text-align: center;
+}
+
+.supplier-tree-branch-columns {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.supplier-tree-branch-grid {
+    display: grid;
+    grid-template-columns: minmax(140px, 1fr) minmax(140px, 1fr) minmax(200px, 1.25fr);
+    gap: 12px;
+    align-items: start;
+    width: 100%;
+}
+.supplier-tree-branch-col--venue,
+.supplier-tree-branch-col--pol,
+.supplier-tree-branch-col--rixo {
+    min-width: 0;
+}
+.supplier-tree-branch-col--rixo .rixo-tree-add-wrap {
+    margin-top: 6px;
+}
+
+.supplier-tree-venue-sub {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    margin-top: 3px;
+    padding-left: 2px;
+}
+
+.supplier-tree-pol-strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 10px;
+    margin-bottom: 4px;
+}
+.supplier-tree-pol-strip--editing {
+    gap: 8px;
+}
+.supplier-tree-pol-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #64748b;
+}
+.supplier-tree-pol-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: #0f172a;
+}
+.supplier-tree-pol-edit-btn {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 15px;
+    color: #3b82f6;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+.supplier-tree-pol-edit-btn:hover {
+    background: rgba(59, 130, 246, 0.12);
+}
+.supplier-tree-pol-combo {
+    flex: 1;
+    min-width: 140px;
 }

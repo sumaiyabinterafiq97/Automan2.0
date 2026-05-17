@@ -5,6 +5,7 @@ import kotlinx.browser.window
 import org.w3c.dom.*
 import org.w3c.files.File
 import org.w3c.dom.events.Event
+import org.w3c.dom.events.KeyboardEvent
 import org.w3c.fetch.RequestInit
 import org.w3c.fetch.Headers
 import com.automan.purchase.Logger
@@ -13,6 +14,7 @@ import com.automan.purchase.ApiClient
 import com.automan.purchase.models.PurchaseResponse
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
+import kotlin.js.unsafeCast
 
 private val minimalPurchaseScope = MainScope()
 
@@ -60,6 +62,8 @@ var cnfPageSelectedCountry: String = "PAKISTAN" // Default value
 var globalBookingDetails: dynamic = js("{}")
 var globalSelectedCarsForPdf: List<dynamic> = emptyList()
 var globalFreightValues: MutableMap<String, Double> = mutableMapOf()
+/** Per chassis shipping charge (¥) from Calculate Freight + Shipping Charge Map; applied on C&F like freight. */
+var globalShippingChargeValues: MutableMap<String, Double> = mutableMapOf()
 
 // Global variable to store original purchase data for edit confirmation modal
 var originalPurchaseData: dynamic = null
@@ -76,6 +80,358 @@ fun isoToWeekdayLabelTopLevel(value: String): String {
     } catch (e: dynamic) {
         return ""
     }
+}
+
+fun maskMmDdYyyyFromDigits(digitsRaw: String): String {
+    val d = digitsRaw.filter { it.isDigit() }.take(8)
+    if (d.isEmpty()) return ""
+    val mm = d.take(2)
+    if (d.length < 2) return mm
+    if (d.length == 2) return "$mm/"
+    val dd = d.drop(2).take(2)
+    if (d.length < 4) return "$mm/$dd"
+    if (d.length == 4) return "$mm/$dd/"
+    val yyyy = d.drop(4).take(4)
+    return "$mm/$dd/$yyyy"
+}
+
+/**
+ * Keeps MM/DD/YYYY segment boundaries while typing so editing month won't pull digits from day/year.
+ * If no separators exist (e.g., pasted "01022026"), falls back to stream mask.
+ */
+fun normalizeMmDdYyyyPreservingSegments(raw: String): String {
+    if (raw.isBlank()) return ""
+    val cleaned = raw.filter { it.isDigit() || it == '/' }
+    if (!cleaned.contains("/")) return maskMmDdYyyyFromDigits(cleaned)
+    val parts = cleaned.split("/").take(3)
+    val mm = (parts.getOrNull(0) ?: "").filter { it.isDigit() }.take(2)
+    if (parts.size == 1) return mm
+    val dd = (parts.getOrNull(1) ?: "").filter { it.isDigit() }.take(2)
+    if (parts.size == 2) {
+        return if (dd.length == 2) "$mm/$dd/" else "$mm/$dd"
+    }
+    val yyyy = (parts.getOrNull(2) ?: "").filter { it.isDigit() }.take(4)
+    return "$mm/$dd/$yyyy"
+}
+
+/** Auto-inserts MM/DD/YYYY separators while preserving segment edits when separators already exist. */
+fun autoInsertDateSeparatorsMmDdYyyy(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return ""
+    return if (trimmed.contains("/")) normalizeMmDdYyyyPreservingSegments(trimmed)
+    else maskMmDdYyyyFromDigits(trimmed)
+}
+
+/** True when partial MM/DD/YYYY text is still potentially valid for strict Purchase Date typing. */
+fun isPotentialStrictPurchaseDateInput(value: String): Boolean {
+    if (value.isBlank()) return true
+    val v = value.trim()
+    if (!v.matches(Regex("^\\d{0,2}(/\\d{0,2}(/\\d{0,4})?)?$"))) return false
+    val parts = v.split("/")
+    val mm = parts.getOrNull(0) ?: ""
+    val dd = parts.getOrNull(1) ?: ""
+    val yyyy = parts.getOrNull(2) ?: ""
+
+    if (mm.length == 1) {
+        if (!mm[0].isDigit()) return false
+    } else if (mm.length == 2) {
+        val m = mm.toIntOrNull() ?: return false
+        if (m !in 1..12) return false
+    }
+
+    if (dd.length == 1) {
+        if (!dd[0].isDigit()) return false
+    } else if (dd.length == 2) {
+        val d = dd.toIntOrNull() ?: return false
+        if (d !in 1..31) return false
+    }
+
+    if (yyyy.length > 4) return false
+    if (yyyy.any { !it.isDigit() }) return false
+    return true
+}
+
+private fun isLeapYearGregorian(y: Int): Boolean = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+
+private fun daysInMonthCal(year: Int, month: Int): Int {
+    return when (month) {
+        1, 3, 5, 7, 8, 10, 12 -> 31
+        4, 6, 9, 11 -> 30
+        2 -> if (isLeapYearGregorian(year)) 29 else 28
+        else -> 0
+    }
+}
+
+/**
+ * Purchase Date on Edit form: only `MM/DD/YYYY` with MM 01–12, DD valid for month (incl. leap years),
+ * YYYY exactly four digits in AppConstants year range. Other edit date fields use [toIsoFromLabel].
+ */
+fun strictMmDdYyyySlashToIso(raw: String): String? {
+    val t = raw.trim()
+    if (!t.matches(Regex("^\\d{2}/\\d{2}/\\d{4}$"))) return null
+    val mm = t.substring(0, 2).toIntOrNull() ?: return null
+    val dd = t.substring(3, 5).toIntOrNull() ?: return null
+    val yyyy = t.substring(6, 10).toIntOrNull() ?: return null
+    if (mm !in 1..12 || dd !in 1..31 || yyyy !in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) return null
+    if (dd > daysInMonthCal(yyyy, mm)) return null
+    return yyyy.toString() + "-" + mm.toString().padStart(2, '0') + "-" + dd.toString().padStart(2, '0')
+}
+
+/** Converts Edit Purchase Date field (strict MM/DD/YYYY only) for save/compare payloads. */
+fun editPurchaseDateDisplayToWeekdayFormatted(raw: String): String {
+    if (raw.isBlank()) return ""
+    val iso = strictMmDdYyyySlashToIso(raw) ?: return ""
+    return formatWithWeekday(iso)
+}
+
+fun strictMmYyyySlashToIsoMonth(raw: String): String? {
+    val t = raw.trim()
+    if (!t.matches(Regex("^\\d{2}/\\d{4}$"))) return null
+    val mm = t.substring(0, 2).toIntOrNull() ?: return null
+    val yyyy = t.substring(3, 7).toIntOrNull() ?: return null
+    if (mm !in 1..12) return null
+    if (yyyy !in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) return null
+    return yyyy.toString() + "-" + mm.toString().padStart(2, '0')
+}
+
+fun isoMonthToMmYyyy(isoMonth: String?): String {
+    if (isoMonth.isNullOrBlank()) return ""
+    val t = isoMonth.trim()
+    if (!t.matches(Regex("^\\d{4}-\\d{2}$"))) return ""
+    return t.substring(5, 7) + "/" + t.substring(0, 4)
+}
+
+fun maskMmYyyyFromDigits(digitsRaw: String): String {
+    val d = digitsRaw.filter { it.isDigit() }.take(6)
+    if (d.isEmpty()) return ""
+    val mm = d.take(2)
+    if (d.length <= 2) return mm
+    val yyyy = d.drop(2).take(4)
+    return "$mm/$yyyy"
+}
+
+fun isPotentialStrictMonthYearInput(value: String): Boolean {
+    if (value.isBlank()) return true
+    val v = value.trim()
+    if (!v.matches(Regex("^\\d{0,2}(/\\d{0,4})?$"))) return false
+    val parts = v.split("/")
+    val mm = parts.getOrNull(0) ?: ""
+    val yyyy = parts.getOrNull(1) ?: ""
+    if (mm.length == 1) {
+        if (mm[0] !in '0'..'1') return false
+    } else if (mm.length == 2) {
+        val m = mm.toIntOrNull() ?: return false
+        if (m !in 1..12) return false
+    }
+    if (yyyy.length > 4) return false
+    if (yyyy.any { !it.isDigit() }) return false
+    return true
+}
+
+/** Converts any strict MM/DD/YYYY edit field to weekday-formatted payload. */
+fun editStrictMmDdYyyyDisplayToWeekdayFormatted(raw: String): String {
+    if (raw.isBlank()) return ""
+    val iso = strictMmDdYyyySlashToIso(raw) ?: return ""
+    return formatWithWeekday(iso)
+}
+
+/** Converts edit-form masked or labeled dates to weekday label payload (same normalization as save path). */
+fun editFormDateRawToWeekdayFormatted(raw: String): String {
+    if (raw.isBlank()) return ""
+    val iso = toIsoFromLabel(raw).trim()
+    return if (iso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) formatWithWeekday(iso)
+    else formatWithWeekday(raw)
+}
+
+fun bindStrictDateTextMask(baseId: String, hintId: String? = null) {
+    val hidden = document.getElementById(baseId) as? HTMLInputElement ?: return
+    val already = hidden.asDynamic().__strictDateBound as? Boolean ?: false
+    if (already) return
+    val textId = baseId + "Text"
+    val btnId = baseId + "CalendarBtn"
+    val text = document.getElementById(textId) as? HTMLInputElement ?: return
+    val btn = document.getElementById(btnId) as? HTMLElement ?: return
+    val hint = if (hintId.isNullOrBlank()) null else document.getElementById(hintId) as? HTMLElement
+
+    fun syncHint(iso: String) {
+        hint?.textContent = if (iso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) isoToWeekdayLabelTopLevel(iso) else ""
+    }
+
+    fun setFromIso(iso: String) {
+        hidden.value = iso
+        text.value = isoToMmDdYyyy(iso)
+        syncHint(iso)
+    }
+
+    fun caretPosForDigits(masked: String, digitsCount: Int): Int {
+        if (digitsCount <= 0) return 0
+        var seen = 0
+        for (i in masked.indices) {
+            if (masked[i].isDigit()) {
+                seen++
+                if (seen >= digitsCount) {
+                    var pos = i + 1
+                    // Advance past auto-inserted "/" separator if present
+                    if (pos < masked.length && masked[pos] == '/') pos++
+                    return pos
+                }
+            }
+        }
+        return masked.length
+    }
+
+    hidden.style.position = "absolute"
+    hidden.style.left = "0"
+    hidden.style.top = "0"
+    hidden.style.width = "0"
+    hidden.style.height = "0"
+    hidden.style.opacity = "0"
+    hidden.style.border = "none"
+    hidden.style.padding = "0"
+    hidden.style.margin = "0"
+    hidden.style.setProperty("overflow", "hidden")
+    hidden.tabIndex = -1
+
+    if (hidden.value.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) setFromIso(hidden.value)
+    else if (text.value.isNotBlank()) {
+        val iso = strictMmDdYyyySlashToIso(text.value.trim())
+        if (iso != null) setFromIso(iso) else syncHint("")
+    } else {
+        syncHint("")
+    }
+
+    var lastAcceptedText = text.value
+    text.addEventListener("input", { _: Event ->
+        val raw = text.value
+        val caret = text.selectionStart ?: raw.length
+        val digitsBeforeCaret = raw.take(caret).count { it.isDigit() }
+        val next = autoInsertDateSeparatorsMmDdYyyy(text.value)
+        if (!isPotentialStrictPurchaseDateInput(next)) {
+            text.value = lastAcceptedText
+            val backPos = caretPosForDigits(lastAcceptedText, digitsBeforeCaret.coerceAtMost(lastAcceptedText.count { it.isDigit() }))
+            text.setSelectionRange(backPos, backPos)
+            return@addEventListener
+        }
+        text.value = next
+        lastAcceptedText = next
+        val pos = caretPosForDigits(next, digitsBeforeCaret.coerceAtMost(next.count { it.isDigit() }))
+        text.setSelectionRange(pos, pos)
+        val iso = strictMmDdYyyySlashToIso(next)
+        if (iso != null) {
+            hidden.value = iso
+            syncHint(iso)
+        } else {
+            hidden.value = ""
+            syncHint("")
+        }
+    })
+    text.addEventListener("keydown", { ev ->
+        val ke = ev as? KeyboardEvent ?: return@addEventListener
+        val key = ke.key
+        val isDigit = key.length == 1 && key[0] in '0'..'9'
+        val isSep = key == "/" || key == "-"
+        val navKeys = setOf("Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Enter", "Home", "End")
+        if (ke.ctrlKey || ke.metaKey || ke.altKey) return@addEventListener
+        if (isDigit || isSep || navKeys.contains(key)) return@addEventListener
+        ke.preventDefault()
+    })
+    text.addEventListener("blur", { _: Event ->
+        val iso = strictMmDdYyyySlashToIso(text.value.trim())
+        if (iso != null) {
+            setFromIso(iso)
+            hidden.dispatchEvent(Event("change"))
+        } else if (text.value.isBlank()) {
+            hidden.value = ""
+            syncHint("")
+        }
+    })
+    btn.addEventListener("click", { ev ->
+        ev.preventDefault()
+        val iso = strictMmDdYyyySlashToIso(text.value.trim()) ?: hidden.value.takeIf { it.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) } ?: todayIsoLocalDate()
+        hidden.value = iso
+        val dyn = hidden.asDynamic()
+        try { dyn.showPicker() } catch (_: dynamic) { hidden.click() }
+    })
+    hidden.addEventListener("change", { _: Event ->
+        val iso = hidden.value.trim()
+        if (iso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) {
+            setFromIso(iso)
+        } else {
+            syncHint("")
+        }
+    })
+    hidden.asDynamic().__strictDateBound = true
+}
+
+fun bindStrictMonthYearTextMask(baseId: String, hintId: String? = null) {
+    val hidden = document.getElementById(baseId) as? HTMLInputElement ?: return
+    val already = hidden.asDynamic().__strictMonthBound as? Boolean ?: false
+    if (already) return
+    val textId = baseId + "Text"
+    val btnId = baseId + "CalendarBtn"
+    val text = document.getElementById(textId) as? HTMLInputElement ?: return
+    val btn = document.getElementById(btnId) as? HTMLElement ?: return
+    val hint = if (hintId.isNullOrBlank()) null else document.getElementById(hintId) as? HTMLElement
+
+    hidden.style.position = "absolute"
+    hidden.style.left = "0"
+    hidden.style.top = "0"
+    hidden.style.width = "0"
+    hidden.style.height = "0"
+    hidden.style.opacity = "0"
+    hidden.style.border = "none"
+    hidden.style.padding = "0"
+    hidden.style.margin = "0"
+    hidden.style.setProperty("overflow", "hidden")
+    hidden.tabIndex = -1
+
+    fun syncHint() {
+        hint?.style?.display = if (text.value.isBlank()) "block" else "none"
+    }
+
+    if (hidden.value.matches(Regex("^\\d{4}-\\d{2}$"))) text.value = isoMonthToMmYyyy(hidden.value)
+    syncHint()
+    var lastAcceptedText = text.value
+    text.addEventListener("input", { _: Event ->
+        val next = maskMmYyyyFromDigits(text.value)
+        if (!isPotentialStrictMonthYearInput(next)) {
+            text.value = lastAcceptedText
+            return@addEventListener
+        }
+        text.value = next
+        lastAcceptedText = next
+        hidden.value = strictMmYyyySlashToIsoMonth(next) ?: ""
+        syncHint()
+    })
+    text.addEventListener("keydown", { ev ->
+        val ke = ev as? KeyboardEvent ?: return@addEventListener
+        val key = ke.key
+        val isDigit = key.length == 1 && key[0] in '0'..'9'
+        val isSep = key == "/" || key == "-"
+        val navKeys = setOf("Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Enter", "Home", "End")
+        if (ke.ctrlKey || ke.metaKey || ke.altKey) return@addEventListener
+        if (isDigit || isSep || navKeys.contains(key)) return@addEventListener
+        ke.preventDefault()
+    })
+    text.addEventListener("blur", { _: Event ->
+        val iso = strictMmYyyySlashToIsoMonth(text.value.trim())
+        if (iso != null) {
+            hidden.value = iso
+            text.value = isoMonthToMmYyyy(iso)
+        } else if (text.value.isBlank()) hidden.value = ""
+        syncHint()
+    })
+    btn.addEventListener("click", { ev ->
+        ev.preventDefault()
+        hidden.value = strictMmYyyySlashToIsoMonth(text.value.trim()) ?: hidden.value.takeIf { it.matches(Regex("^\\d{4}-\\d{2}$")) } ?: todayIsoLocalYearMonth()
+        val dyn = hidden.asDynamic()
+        try { dyn.showPicker() } catch (_: dynamic) { hidden.click() }
+    })
+    hidden.addEventListener("change", { _: Event ->
+        if (hidden.value.matches(Regex("^\\d{4}-\\d{2}$"))) text.value = isoMonthToMmYyyy(hidden.value)
+        syncHint()
+    })
+    hidden.asDynamic().__strictMonthBound = true
 }
 
 fun storeBookingDetailsForPdf() {
@@ -254,12 +610,15 @@ fun initializeAppSetup() {
     window.asDynamic().duplicateMasterClientMap = ::duplicateMasterClientMap
     window.asDynamic().editMasterSupplier = ::editMasterSupplier
     window.asDynamic().duplicateMasterSupplier = ::duplicateMasterSupplier
+    window.asDynamic().editMasterShippingCharge = ::editMasterShippingCharge
+    window.asDynamic().duplicateMasterShippingCharge = ::duplicateMasterShippingCharge
     window.asDynamic().addClientTransaction = ::addClientTransaction
     
     // Expose date conversion functions for edit form
     window.asDynamic().toIsoFromLabel = ::toIsoFromLabel
     window.asDynamic().isoToWeekdayLabel = ::isoToWeekdayLabelTopLevel
     window.asDynamic().todayIsoLocalDate = ::todayIsoLocalDate
+    window.asDynamic().isoToMmDdYyyy = ::isoToMmDdYyyy
     
     // Expose state persistence functions to global scope
     window.asDynamic().saveCarBookingState = ::saveCarBookingState
@@ -284,9 +643,47 @@ fun initializeAppSetup() {
     
     // Expose freight calculation functions to global scope
     window.asDynamic().removeCarFromContainer = { containerId: String, chassis: String ->
-        // Get the current selected cars from the global variable
-        val selectedCars = if (cnfConfirmedCars.isNotEmpty()) cnfConfirmedCars else fobConfirmedCars
+        val selectedCars = when {
+            cnfPageSelectedCars.isNotEmpty() -> cnfPageSelectedCars
+            cnfConfirmedCars.isNotEmpty() -> cnfConfirmedCars
+            fobConfirmedCars.isNotEmpty() -> fobConfirmedCars
+            else -> emptyList()
+        }
         removeCarFromContainer(containerId, chassis, selectedCars)
+    }
+    window.asDynamic().removeFreightContainer = { idx: dynamic ->
+        val n = (idx as? Number)?.toInt() ?: idx?.toString()?.toIntOrNull() ?: 0
+        if (n > 0) removeFreightContainer(n)
+    }
+    window.asDynamic().removeCarFromShippingChargeContainer = { containerId: String, chassis: String ->
+        val cars = when {
+            cnfPageSelectedCars.isNotEmpty() -> cnfPageSelectedCars
+            fobConfirmedCars.isNotEmpty()    -> fobConfirmedCars
+            else                             -> emptyList()
+        }
+        // Remove the car item from the container list and rebuild dropdowns
+        val carList = document.getElementById("${containerId}CarList")
+        carList?.querySelector("[data-chassis='$chassis']")?.remove()
+        rebuildShippingChargeContainerDropdowns(cars)
+    }
+    window.asDynamic().removeShippingChargeContainer = { idx: dynamic ->
+        val n = (idx as? Number)?.toInt() ?: idx?.toString()?.toIntOrNull() ?: 0
+        if (n > 0) {
+            val current = (document.getElementById("scNumberOfContainers") as? HTMLInputElement)
+                ?.value?.toIntOrNull() ?: 1
+            if (current <= 1) {
+                showMessage("Cannot remove the only container.", "warning")
+            } else {
+                val numInput = document.getElementById("scNumberOfContainers") as? HTMLInputElement
+                numInput?.value = (current - 1).toString()
+                val cars = when {
+                    cnfPageSelectedCars.isNotEmpty() -> cnfPageSelectedCars
+                    fobConfirmedCars.isNotEmpty()    -> fobConfirmedCars
+                    else                             -> emptyList()
+                }
+                generateShippingChargeContainerSections(cars)
+            }
+        }
     }
     
     // Expose client selection handlers used by Add/Edit forms
@@ -346,6 +743,13 @@ fun initializeAppSetup() {
     Logger.debug("selectClient available: ${window.asDynamic().selectClient != null}")
 }
 
+private fun bootstrapRouting(root: Element) {
+    minimalPurchaseScope.launch {
+        prodAutoLoginIfNeeded()
+        updateContent(root)
+    }
+}
+
 fun main() {
     Logger.debug("INVOICE PDF BUTTON FIX - CACHE BUST - 1762413057")
     Logger.debug("INVOICE PDF BUTTON - GLOBAL EVENT DELEGATION ACTIVE!")
@@ -370,7 +774,7 @@ fun main() {
                     Logger.debug("Root element found after DOMContentLoaded")
                     createApp(rootElement)
                     window.addEventListener("hashchange", { _: Event -> updateContent(rootElement) })
-                    updateContent(rootElement)
+                    bootstrapRouting(rootElement)
                 } else {
                     Logger.error("Root element still not found after DOMContentLoaded!")
                 }
@@ -389,8 +793,8 @@ fun main() {
     // Create app (sign in / sign up only; no setup page)
     createApp(root)
     window.addEventListener("hashchange", { _: Event -> updateContent(root) })
-    updateContent(root)
-    
+    bootstrapRouting(root)
+
     // Setup brand selection handlers
     setupBrandSelectionHandlers()
     
@@ -398,6 +802,7 @@ fun main() {
     setupEditableComboboxHandlers()
     // Date validation (global) and refresh popup bridge for inline JS handlers.
     setupGlobalDateValidation()
+    setupCollapsibleChipsDelegation()
     window.asDynamic().showMasterDataRefreshPopup = { showMasterDataRefreshPopup() }
 }
 
@@ -513,6 +918,31 @@ fun createRixoCompanyFabCombobox(): String {
     """.trimIndent()
 }
 
+/**
+ * Rixo Request Generator: same FAB pattern as Rixo Company — hidden select, card trigger, speed-dial list.
+ * ISO in `#buyingDate`; display via [syncComboboxInput] + `updateRixoBuyingDateFabTriggerLabel`.
+ */
+fun createRixoBuyingDateCombobox(): String = """
+    <div class="rixo-company-fab-wrap rixo-buying-date-fab-wrap" id="buyingDateFabWrap">
+        <input type="hidden" id="buyingDateInput" value="" />
+        <select id="buyingDate" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true"
+            onchange="syncComboboxInput('buyingDate');">
+            <option value="">▼</option>
+        </select>
+        <div class="rixo-company-fab" id="buyingDateFabRoot">
+            <button type="button" id="buyingDateFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="buyingDateFabActions">
+                <span class="rixo-fab-trigger-circle rixo-buying-date-fab-circle" id="buyingDateFabLetter" aria-hidden="true">B</span>
+                <span class="rixo-fab-trigger-text-wrap">
+                    <span class="rixo-fab-trigger-label" id="buyingDateFabLabel">Select purchase date</span>
+                    <span class="rixo-fab-trigger-hint" id="buyingDateFabHint">Tap to choose purchase date</span>
+                </span>
+                <span class="rixo-fab-trigger-chevron" aria-hidden="true">▼</span>
+            </button>
+            <div id="buyingDateFabActions" class="rixo-fab-actions" style="display: none;" role="listbox" aria-label="Purchase dates" aria-live="polite"></div>
+        </div>
+    </div>
+""".trimIndent()
+
 // Create editable combobox with pre-populated options (like chassis dropdown design)
 fun createEditableComboboxWithOptions(id: String, placeholder: String, options: List<Pair<String, String>>, initialValue: String = "", required: Boolean = false): String {
     val requiredAttr = if (required) "required" else ""
@@ -579,7 +1009,7 @@ fun getNumberCutPlaceOptions(): List<Pair<String, String>> = listOf(
     "大阪" to "大阪 (Osaka)", "兵庫" to "兵庫 (Hyogo)", "奈良" to "奈良 (Nara)", "和歌山" to "和歌山 (Wakayama)",
     "鳥取" to "鳥取 (Tottori)", "島根" to "島根 (Shimane)", "岡山" to "岡山 (Okayama)", "広島" to "広島 (Hiroshima)",
     "山口" to "山口 (Yamaguchi)", "徳島" to "徳島 (Tokushima)", "香川" to "香川 (Kagawa)", "愛媛" to "愛媛 (Ehime)",
-    "高知" to "高知 (Kochi)", "福岡" to "福岡 (Fukuoka)", "佐賀" to "佐賀 (Saga)", "長崎" to "長崎 (Nagasaki)",
+    "高知" to "高知 (Kochi)", "福岡" to "福岡 (Fukuoka)", "福山" to "福山 (Fukuyama)", "北九州" to "北九州(KITA-KYUSHU)", "佐賀" to "佐賀 (Saga)", "長崎" to "長崎 (Nagasaki)",
     "熊本" to "熊本 (Kumamoto)", "大分" to "大分 (Oita)", "宮崎" to "宮崎 (Miyazaki)", "鹿児島" to "鹿児島 (Kagoshima)",
     "沖縄" to "沖縄 (Okinawa)"
 )
@@ -606,6 +1036,116 @@ fun getInitialPlaceFromNumberCut(numberCut: Any?): String {
 fun getInitialHiraganaFromNumberCut(numberCut: Any?): String {
     val s = numberCut?.toString() ?: return ""
     return getNumberCutHiraganaOptions().find { (c, _) -> s.contains(c) }?.first ?: ""
+}
+
+private data class RixoNumberCutParts(val place: String, val num1: String, val hiragana: String, val num2: String)
+
+private fun parseRixoNumberCutParts(numberCutRaw: String?): RixoNumberCutParts {
+    val s = numberCutRaw?.trim().orEmpty()
+    if (s.isEmpty()) return RixoNumberCutParts("", "", "", "")
+    val place = getInitialPlaceFromNumberCut(s)
+    val rest = if (place.isNotEmpty()) s.removePrefix(place) else s
+    val hiraganaChars = getNumberCutHiraganaOptions().map { it.first }.sortedByDescending { it.length }
+    var hiragana = ""
+    var idx = -1
+    for (h in hiraganaChars) {
+        val i = rest.indexOf(h)
+        if (i >= 0) {
+            hiragana = h
+            idx = i
+            break
+        }
+    }
+    if (idx < 0) return RixoNumberCutParts(place, rest, "", "")
+    val n1 = rest.substring(0, idx)
+    val n2 = rest.substring(idx + hiragana.length)
+    return RixoNumberCutParts(place, n1, hiragana, n2)
+}
+
+/** Cars-to-Rixo: strip legacy `shaken` from saved selections (Shaken is edited inside the Number Cut column only). */
+private fun rixoEffectiveDataColumns(columns: List<String>): List<String> =
+    columns.filter { it != "shaken" }
+
+/** Cars-to-Rixo data columns include Chassis; user picks 2–4 additional fields → 3–5 data columns total (plus select + edit). */
+private const val RIXO_MIN_DATA_COLUMNS_INCLUDING_CHASSIS: Int = 3
+private const val RIXO_MAX_DATA_COLUMNS_INCLUDING_CHASSIS: Int = 5
+private const val RIXO_MIN_NON_CHASSIS_COLUMNS_USER: Int = RIXO_MIN_DATA_COLUMNS_INCLUDING_CHASSIS - 1
+private const val RIXO_MAX_NON_CHASSIS_COLUMNS_USER: Int = RIXO_MAX_DATA_COLUMNS_INCLUDING_CHASSIS - 1
+private const val RIXO_MAX_NON_CHASSIS_AFTER_EFFECTIVE: Int = RIXO_MAX_NON_CHASSIS_COLUMNS_USER
+
+private fun rixoCapDataColumnsAfterEffective(effective: List<String>): List<String> {
+    val wantsChassis = effective.contains("chassis")
+    val rest = effective.filter { it != "chassis" }.take(RIXO_MAX_NON_CHASSIS_AFTER_EFFECTIVE)
+    return if (wantsChassis) listOf("chassis") + rest else rest
+}
+
+private val RIXO_INLINE_COMBO_FETCH: Map<String, String> = mapOf(
+    "auctionHouse" to "rixo/dropdowns/auction-names",
+    "brand" to "master-menu/car_brands",
+    "clientName" to "client-map/dropdowns/client-names",
+    "consignee" to "booking/mappings/consignee-names",
+    "fuel" to "master-menu/fuel",
+    "shift" to "master-menu/shift",
+    "pol" to "master-menu/pol",
+    "stockLocation" to "master-menu/stock_location",
+    "country" to "master-menu/country",
+    "shipmentSize" to "master-menu/type_of_vehicle",
+    "venueId" to "master-menu/venue_id",
+    "rixoCompany" to "rixo-mapping/distinct-rixo-companies",
+)
+
+private val RIXO_INLINE_STATIC_COMBO: Map<String, List<String>> = mapOf(
+    "driveType" to listOf("LHD", "RHD"),
+    "wd" to listOf("2WD", "4WD"),
+)
+
+/** Sentinel `<option>` value for purchases with blank Rixo company; UI label is [RIXO_UNDEFINED_COMPANY_DISPLAY_LABEL]. */
+private const val RIXO_UNDEFINED_COMPANY_OPTION_VALUE = "__RIXO_COMPANY_UNDEFINED__"
+private const val RIXO_UNDEFINED_COMPANY_DISPLAY_LABEL = "Undefined"
+
+private fun purchaseRixoCompanyRaw(purchase: dynamic): String =
+    js("purchase.rixoCompany")?.toString()?.trim()
+        ?: (js("purchase.rixo_company")?.toString()?.trim() ?: "")
+
+private fun normalizedRixoCompanyDropdownBucket(raw: String?): String {
+    val t = raw?.trim() ?: ""
+    return if (t.isEmpty()) RIXO_UNDEFINED_COMPANY_OPTION_VALUE else t
+}
+
+private fun selectedRixoCompanyMatchesPurchase(purchaseCompanyTrimmed: String, selectedFromCombobox: String): Boolean {
+    val sel = selectedFromCombobox.trim()
+    val undefinedSel =
+        sel.isEmpty() ||
+            sel == RIXO_UNDEFINED_COMPANY_OPTION_VALUE ||
+            sel.equals(RIXO_UNDEFINED_COMPANY_DISPLAY_LABEL, ignoreCase = true)
+    return if (undefinedSel) purchaseCompanyTrimmed.isEmpty() else purchaseCompanyTrimmed == sel
+}
+
+private fun persistableRixoCompanyFromCombobox(raw: String): String {
+    val t = raw.trim()
+    return when {
+        t.isEmpty() -> ""
+        t == RIXO_UNDEFINED_COMPANY_OPTION_VALUE -> ""
+        t.equals(RIXO_UNDEFINED_COMPANY_DISPLAY_LABEL, ignoreCase = true) -> ""
+        else -> t
+    }
+}
+
+/**
+ * Reads combobox fields the same way across Add/Edit.
+ * For Rixo company, prefer the native `<select>` value (canonical option value / FAB) over `#rixoCompanyInput`,
+ * which mirrors display labels and can diverge (e.g. Undefined vs sentinel).
+ */
+private fun getComboboxValueSafe(fieldId: String): String {
+    if (fieldId == "rixoCompany" || fieldId == "editRixoCompany") {
+        val select = document.getElementById(fieldId) as? HTMLSelectElement
+        val sv = select?.value?.trim() ?: ""
+        if (sv.isNotEmpty()) return sv
+        return (document.getElementById("${fieldId}Input") as? HTMLInputElement)?.value?.trim() ?: ""
+    }
+    val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+    val select = document.getElementById(fieldId) as? HTMLSelectElement
+    return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
 }
 
 // Client name suggestions for Add/Edit purchase (Shipment Information)
@@ -772,11 +1312,38 @@ private fun normalizeClientNameKey(input: String): String {
 /** JSON array rows from fetch are plain JS objects; [asDynamic] on loop vars can throw — use [unsafeCast]. */
 private fun asDynamicRow(row: Any?): dynamic = row.unsafeCast<dynamic>()
 
+/** True if the Client Name combobox still matches the name this fetch/rebuild was started for (avoids stale async clears). */
+private fun purchaseCountryAutofillStillRelevant(requestedClientDisplayName: String, countrySelectId: String): Boolean {
+    val clientSelectId = if (countrySelectId == "editCountry") "editClientName" else "clientName"
+    val current = normalizeClientNameKey(purchaseComboboxDisplayedValue(clientSelectId).trim())
+    val wanted = normalizeClientNameKey(requestedClientDisplayName.trim())
+    return current == wanted
+}
+
+/** Match typed Client Name to an option (case-insensitive) so select.value and prefetch keys stay in sync. */
+private fun syncPurchaseClientSelectFromTypedInput(clientSelectId: String) {
+    val sel = document.getElementById(clientSelectId) as? HTMLSelectElement ?: return
+    val inp = document.getElementById("${clientSelectId}Input") as? HTMLInputElement ?: return
+    val typed = inp.value.trim()
+    if (typed.isEmpty()) return
+    for (i in 0 until sel.options.length) {
+        val o = sel.options[i] as? HTMLOptionElement ?: continue
+        val v = o.value
+        if (v.isEmpty() || v == "__SEE_MORE__" || v == "__SEE_LESS__" || v == "__CHASSIS_MASTER_SEP__") continue
+        if (v.equals(typed, ignoreCase = true) || o.text.equals(typed, ignoreCase = true)) {
+            sel.value = v
+            inp.value = v
+            return
+        }
+    }
+}
+
 /** When the prefetch map is missing or has no match, resolve Target Country from `client_map`. */
 private fun fetchClientMapCountryForClientName(clientName: String, countrySelectId: String) {
     window.fetch(apiUrl("client-map/mappings"))
         .then { r: dynamic -> if (r.ok) r.json() else js("null") }
         .then { payload: dynamic ->
+            if (!purchaseCountryAutofillStillRelevant(clientName, countrySelectId)) return@then
             val data: dynamic = when {
                 payload != null && payload.data != null && (js("Array.isArray(payload.data)") as Boolean) -> payload.data
                 payload != null && (js("Array.isArray(payload)") as Boolean) -> payload
@@ -793,6 +1360,7 @@ private fun fetchClientMapCountryForClientName(clientName: String, countrySelect
                 val raw = (d.country as? String)?.trim() ?: ""
                 val tokens = splitSemicolonTokens(raw).map { it.trim() }.filter { it.isNotEmpty() }
                 if (tokens.isEmpty()) {
+                    if (!purchaseCountryAutofillStillRelevant(clientName, countrySelectId)) return@then
                     rebuildPurchaseTargetCountryDropdown(countrySelectId, clientName)
                     setPurchaseComboboxValue(countrySelectId, "")
                     return@then
@@ -807,11 +1375,13 @@ private fun fetchClientMapCountryForClientName(clientName: String, countrySelect
                 }
                 curTok[want] = merged
                 purchaseClientNameToCountryTokens = curTok
+                if (!purchaseCountryAutofillStillRelevant(clientName, countrySelectId)) return@then
                 rebuildPurchaseTargetCountryDropdown(countrySelectId, clientName)
                 setPurchaseComboboxValue(countrySelectId, tokens.first())
                 return@then
             }
             if (clientName.isNotBlank() && !matchedClientRow) {
+                if (!purchaseCountryAutofillStillRelevant(clientName, countrySelectId)) return@then
                 rebuildPurchaseTargetCountryDropdown(countrySelectId, clientName)
                 setPurchaseComboboxValue(countrySelectId, "")
             }
@@ -1189,6 +1759,51 @@ fun populateSupplierAuctionNameDropdownsFromRixoPricesApi(): dynamic {
 fun setupEditableComboboxHandlers() {
     js("""
         window.syncComboboxInput = function(selectId) {
+            // Rixo buying date: show option label in input, keep ISO on select
+            if (selectId === 'buyingDate') {
+                var sel = document.getElementById('buyingDate');
+                var inp = document.getElementById('buyingDateInput');
+                if (sel && inp) {
+                    if (sel.value) {
+                        var so = sel.options[sel.selectedIndex];
+                        inp.value = (so && so.text) ? so.text : sel.value;
+                    } else {
+                        inp.value = '';
+                    }
+                    if (typeof window.clearInvalidFieldMarker === 'function') {
+                        window.clearInvalidFieldMarker(selectId);
+                    }
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                    // Do NOT dispatch change on #buyingDate here: the select has onchange="syncComboboxInput('buyingDate')"
+                    // and would re-enter this function until the stack overflows. FAB / native select already fire
+                    // change on the select when the user picks a value (see rebuildRixoBuyingDateFabFromSelect).
+                    if (typeof window.updateRixoBuyingDateFabTriggerLabel === 'function') {
+                        window.updateRixoBuyingDateFabTriggerLabel();
+                    }
+                }
+                return;
+            }
+            // Rixo Request generator: show option label in input (e.g. "Undefined"), value stays on select
+            if (selectId === 'rixoCompany') {
+                var sel = document.getElementById('rixoCompany');
+                var inp = document.getElementById('rixoCompanyInput');
+                if (sel && inp) {
+                    if (sel.value) {
+                        var so = sel.options[sel.selectedIndex];
+                        inp.value = (so && so.text) ? so.text : sel.value;
+                    } else {
+                        inp.value = '';
+                    }
+                    if (typeof window.clearInvalidFieldMarker === 'function') {
+                        window.clearInvalidFieldMarker(selectId);
+                    }
+                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                    if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') {
+                        window.updateRixoCompanyFabTriggerLabel();
+                    }
+                }
+                return;
+            }
             // Prevent infinite recursion for chassis fields
             if (window.__syncingChassis === true && (selectId === 'chassis' || selectId === 'editChassis')) {
                 return;
@@ -1456,8 +2071,17 @@ fun setupEditableComboboxHandlers() {
             });
         };
         
-        // Helper function to get combobox value (reads from input, falls back to select)
+        // Helper function to get combobox value (reads from input, falls back to select).
+        // Rixo company: hidden input mirrors option *labels*; prefer select.value (FAB/native select).
         window.getComboboxValue = function(fieldId) {
+            if (fieldId === 'rixoCompany' || fieldId === 'editRixoCompany') {
+                var selRc = document.getElementById(fieldId);
+                if (selRc && selRc.value) {
+                    return selRc.value;
+                }
+                var inpRc = document.getElementById(fieldId + 'Input');
+                return (inpRc && inpRc.value) ? inpRc.value : '';
+            }
             var input = document.getElementById(fieldId + 'Input');
             if (input && input.value) {
                 return input.value;
@@ -3255,13 +3879,20 @@ fun createApp(root: Element) {
                         <button id="newBtn" style="padding: 12px 20px; background-color: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">New+</button>
                         <button id="importBtn" style="padding: 12px 20px; background-color: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Import CSV</button>
                         
-                        <!-- Main Navigation -->
-                        <button id="rixoRequestBtn" style="padding: 12px 20px; background-color: #8e44ad; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Rixo Note</button>
-                        <button id="rixoHistorySidebarBtn" style="padding: 12px 20px; background-color: #6c3483; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Rixo History</button>
-                        <button id="anInvoiceBtn" style="padding: 12px 20px; background-color: #27ae60; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Invoice</button>
-                        <button id="invoiceHistorySidebarBtn" style="padding: 12px 20px; background-color: #1e8449; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Invoice History</button>
-                        <button id="clientTransactionsSidebarBtn" style="padding: 12px 20px; background-color: #2980b9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Client Transactions</button>
-                        <button id="vehicleDetailsBtn" style="padding: 12px 20px; background-color: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Vehicle Details</button>
+                        <!-- Rixo Section -->
+                        <div id="rixoSection" style="margin-top: 10px;">
+                            <div id="rixoHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #8e44ad 0%, #6c3483 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleRixoList()">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-size: 16px;">📝</span>
+                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Rixo</h3>
+                                </div>
+                                <span id="rixoArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
+                            </div>
+                            <div id="rixoItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
+                                <button id="rixoRequestBtn" class="rixo-list-item" style="padding: 10px 15px; background-color: rgba(142, 68, 173, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Request</button>
+                                <button id="rixoHistorySidebarBtn" class="rixo-list-item" style="padding: 10px 15px; background-color: rgba(142, 68, 173, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo History</button>
+                            </div>
+                        </div>
                         
                         <!-- Shipment Section -->
                         <div id="shipmentSection" style="margin-top: 10px;">
@@ -3273,10 +3904,28 @@ fun createApp(root: Element) {
                                 <span id="shipmentArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
                             </div>
                             <div id="shipmentItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="carBookingBtn" class="shipment-list-item" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Shipping</button>
+                                <button id="carBookingBtn" class="shipment-list-item" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Booking</button>
                                 <button id="shipmentStatusBtn" class="shipment-list-item" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping History</button>
                             </div>
                         </div>
+                        
+                        <!-- Invoice (nav) Section: customer invoice + history -->
+                        <div id="invoiceNavSection" style="margin-top: 10px;">
+                            <div id="invoiceNavHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleInvoiceNavList()">
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <span style="font-size: 16px;">🧾</span>
+                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Invoice</h3>
+                                </div>
+                                <span id="invoiceNavArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
+                            </div>
+                            <div id="invoiceNavItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
+                                <button id="anInvoiceBtn" class="invoice-nav-list-item" style="padding: 10px 15px; background-color: rgba(39, 174, 96, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Invoice</button>
+                                <button id="invoiceHistorySidebarBtn" class="invoice-nav-list-item" style="padding: 10px 15px; background-color: rgba(39, 174, 96, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Invoice History</button>
+                            </div>
+                        </div>
+                        
+                        <button id="clientTransactionsSidebarBtn" style="padding: 12px 20px; background-color: #2980b9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Client Transactions</button>
+                        <button id="vehicleDetailsBtn" style="padding: 12px 20px; background-color: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Vehicle Details</button>
                         
                         <!-- Sales Section -->
                         <div id="salesSection" style="margin-top: 10px;">
@@ -3367,9 +4016,10 @@ fun createApp(root: Element) {
                             </div>
                             <div id="masterMapItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
                                 <button id="masterSupplierMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
-                                <button id="masterCarBrandsMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Car Brands Map</button>
+                                <button id="masterCarBrandsMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Chassis Map</button>
                                 <button id="masterClientMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client Map</button>
                                 <button id="masterConsigneeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee Map</button>
+                                <button id="masterShippingChargeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping Charge Map</button>
                                 <button id="masterRixoMappingBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Price Mapping</button>
                             </div>
                         </div>
@@ -3425,6 +4075,22 @@ fun createApp(root: Element) {
                 }
                 .shipment-list-item:active {
                     background-color: rgba(52, 152, 219, 0.5) !important;
+                }
+                .rixo-list-item:hover {
+                    background-color: rgba(142, 68, 173, 0.35) !important;
+                    color: white !important;
+                    transform: translateX(5px);
+                }
+                .rixo-list-item:active {
+                    background-color: rgba(142, 68, 173, 0.5) !important;
+                }
+                .invoice-nav-list-item:hover {
+                    background-color: rgba(39, 174, 96, 0.35) !important;
+                    color: white !important;
+                    transform: translateX(5px);
+                }
+                .invoice-nav-list-item:active {
+                    background-color: rgba(39, 174, 96, 0.5) !important;
                 }
                 /* Sales List Item Hover Effects */
                 .sales-list-item:hover {
@@ -3490,7 +4156,7 @@ fun createApp(root: Element) {
     })
     
     document.getElementById("rixoRequestBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/rixo-transport"
+        window.location.hash = "#/rixo-generator"
     })
     
     document.getElementById("carBookingBtn")?.addEventListener("click", { _: Event ->
@@ -3584,6 +4250,34 @@ fun createApp(root: Element) {
         window.toggleShipmentList = function() {
             var items = document.getElementById('shipmentItems');
             var arrow = document.getElementById('shipmentArrow');
+            if (items && arrow) {
+                if (items.style.display === 'none') {
+                    items.style.display = 'flex';
+                    arrow.textContent = '▲';
+                } else {
+                    items.style.display = 'none';
+                    arrow.textContent = '▼';
+                }
+            }
+        };
+        
+        window.toggleRixoList = function() {
+            var items = document.getElementById('rixoItems');
+            var arrow = document.getElementById('rixoArrow');
+            if (items && arrow) {
+                if (items.style.display === 'none') {
+                    items.style.display = 'flex';
+                    arrow.textContent = '▲';
+                } else {
+                    items.style.display = 'none';
+                    arrow.textContent = '▼';
+                }
+            }
+        };
+        
+        window.toggleInvoiceNavList = function() {
+            var items = document.getElementById('invoiceNavItems');
+            var arrow = document.getElementById('invoiceNavArrow');
             if (items && arrow) {
                 if (items.style.display === 'none') {
                     items.style.display = 'flex';
@@ -3689,6 +4383,20 @@ fun createApp(root: Element) {
             if (shipmentItems && shipmentArrow) {
                 shipmentItems.style.display = 'none';
                 shipmentArrow.textContent = '▼';
+            }
+            // Rixo
+            var rixoItems = document.getElementById('rixoItems');
+            var rixoArrow = document.getElementById('rixoArrow');
+            if (rixoItems && rixoArrow) {
+                rixoItems.style.display = 'none';
+                rixoArrow.textContent = '▼';
+            }
+            // Invoice (sidebar nav)
+            var invoiceNavItems = document.getElementById('invoiceNavItems');
+            var invoiceNavArrow = document.getElementById('invoiceNavArrow');
+            if (invoiceNavItems && invoiceNavArrow) {
+                invoiceNavItems.style.display = 'none';
+                invoiceNavArrow.textContent = '▼';
             }
             // Sales
             var salesItems = document.getElementById('salesItems');
@@ -3815,6 +4523,10 @@ fun createApp(root: Element) {
         closeSidebar()
         window.location.hash = "#/master/consignee-map"
     })
+    document.getElementById("masterShippingChargeMapBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        window.location.hash = "#/master/shipping-charge-map"
+    })
     document.getElementById("masterRixoMappingBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
         window.location.hash = "#/master/rixo-mapping"
@@ -3835,7 +4547,13 @@ fun updateContent(root: Element) {
         Logger.error("[ROUTER] Content element not found!")
         return
     }
-    
+
+    // C&F and Freight reuse #/booking (same hash while innerHTML swaps). Shipping-history edit uses #/recalculate-booking.
+    // Any other route drops draft booking state.
+    if (!hash.startsWith("#/booking") && !hash.startsWith("#/recalculate-booking")) {
+        clearCarBookingStates()
+    }
+
     // If unauthenticated, allow navigation but render auth page only when hash is "#/"
     val token = window.localStorage.getItem("authToken")
     if ((token == null || token.isBlank()) && (hash == "" || hash == "#")) {
@@ -3896,7 +4614,8 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        hash.startsWith("#/invoice") -> {
+        hash.startsWith("#/recreate-invoice") ||
+            hash.startsWith("#/invoice") -> {
             showInvoicePage()
             ensureSidebarPresent() // Call after content is set
             // Hide sorting bar on invoice page
@@ -3910,9 +4629,41 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        hash.startsWith("#/rixo-transport") -> {
+        hash.startsWith("#/rixo-generator") ||
+            hash.startsWith("#/rixo-updater") ||
+            hash.startsWith("#/rixo-transport") -> {
             showRixoRequestGeneratorPage()
             ensureSidebarPresent() // Call after content is set
+        }
+        hash.startsWith("#/recalculate-booking/recalculation") -> {
+            ensureSidebarPresent()
+            if (cnfPageSelectedCars.isNotEmpty()) {
+                showCnfCalculationPage(
+                    selectedCars = cnfPageSelectedCars,
+                    selectedCountry = cnfPageSelectedCountry,
+                    isFobMode = cnfPageIsFobMode,
+                    isRecreateCalculation = true,
+                )
+            } else {
+                window.location.hash = "#/recalculate-booking"
+            }
+        }
+        hash.startsWith("#/recalculate-booking") -> {
+            showCarBookingPage()
+            ensureSidebarPresent()
+        }
+        hash.startsWith("#/booking/calculation") -> {
+            ensureSidebarPresent()
+            if (cnfPageSelectedCars.isNotEmpty()) {
+                showCnfCalculationPage(
+                    selectedCars = cnfPageSelectedCars,
+                    selectedCountry = cnfPageSelectedCountry,
+                    isFobMode = cnfPageIsFobMode,
+                    isRecreateCalculation = false,
+                )
+            } else {
+                window.location.hash = "#/booking"
+            }
         }
         hash.startsWith("#/booking") -> {
             showCarBookingPage()
@@ -4014,6 +4765,12 @@ fun updateContent(root: Element) {
         }
         hash.startsWith("#/master/supplier-map") -> {
             showSupplierMapPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/shipping-charge-map") -> {
+            showShippingChargeMapPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -4767,7 +5524,7 @@ fun setupSidebarListeners() {
         rixoRequestBtn.setAttribute("data-listener-attached", "true")
         rixoRequestBtn.addEventListener("click", { _: Event ->
     closeSidebar()
-            window.location.hash = "#/rixo-transport"
+            window.location.hash = "#/rixo-generator"
         })
     }
     
@@ -5643,9 +6400,18 @@ fun createAddFormHTML(): String {
                 <div class="form-section-content form-grid-2col" data-section="basic">
                     <div>
                         <label>Purchase Date</label>
-                        <div style="position:relative;">
-                            <input type="date" id="date" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${todayIsoLocalDate()}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <span id="dateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="dateText" maxlength="10" inputmode="numeric" autocomplete="off"
+                                       placeholder="MM/DD/YYYY"
+                                       value="${isoToMmDdYyyy(todayIsoLocalDate())}"
+                                       style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
+                                <button type="button" id="dateCalendarBtn" title="Open calendar"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                <span id="dateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
+                            </div>
+                            <input type="date" id="date" value="${todayIsoLocalDate()}" tabindex="-1" aria-hidden="true"
+                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
                         </div>
                     </div>
                     <div>
@@ -5671,9 +6437,17 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Production Date</label>
-                        <div style="position:relative;">
-                            <input type="month" id="carModelYear" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <span id="carModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">mm/yyyy</span>
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="carModelYearText" maxlength="7" inputmode="numeric" autocomplete="off"
+                                       placeholder="MM/YYYY"
+                                       style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
+                                <button type="button" id="carModelYearCalendarBtn" title="Open month picker"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                            </div>
+                            <input type="month" id="carModelYear" value="" tabindex="-1" aria-hidden="true"
+                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                            <span id="carModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">MM/YYYY</span>
                         </div>
                 </div>
                     <div>
@@ -5796,9 +6570,9 @@ fun createAddFormHTML(): String {
                         <div class="options-buttons-grid">
                             <button type="button" class="option-btn" data-option="ABS">ABS</button>
                             <button type="button" class="option-btn" data-option="Air Bag">Air Bag</button>
-                            <button type="button" class="option-btn" data-option="Aluminum Wheels">Aluminum Wheels</button>
-                            <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
                             <button type="button" class="option-btn" data-option="Power Window">Power Window</button>
+                            <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
+                            <button type="button" class="option-btn" data-option="Aluminum Wheels">Aluminum Wheels</button>
                             <button type="button" class="option-btn" data-option="Sunroof">Sunroof</button>
                             <button type="button" class="option-btn" data-option="Navigation/TV">Navigation/TV</button>
                             <button type="button" class="option-btn" data-option="Leather Seats">Leather Seats</button>
@@ -5807,7 +6581,7 @@ fun createAddFormHTML(): String {
                         </div>
                         <input type="hidden" id="optionsPredefined" value="">
                         <div style="display: flex; gap: 10px; align-items: center;">
-                            <button type="button" class="option-btn option-btn-basic" data-option="Basic" title="Select ABS, Power Window, Power Steering, AC">Basic</button>
+                            <button type="button" class="option-btn option-btn-basic" data-option="Basic" title="Select ABS, Air Bag, Power Window, Power Steering, AC">Basic</button>
                             <input type="text" id="options" placeholder="Type custom option and press Enter..." style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                         </div>
                     </div>
@@ -5855,16 +6629,35 @@ fun createAddFormHTML(): String {
                             </button>
                         </div>
                     </div>
+                        </div>
+
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('status')"><h3 class="form-section-header" data-section="status">Status</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="status">
                     <div>
-                        <label>Rixo Requested</label>
+                        <label>Purchased</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
-                                <input type="radio" name="rixoRequested" value="TRUE">
+                                <input type="radio" name="statusPurchased" value="TRUE" checked disabled>
                                 <span class="checkmark"></span>
                                 TRUE
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="rixoRequested" value="FALSE" checked>
+                                <input type="radio" name="statusPurchased" value="FALSE" disabled>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Rixo Requested</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="statusRixoRequested" value="TRUE">
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="statusRixoRequested" value="FALSE" checked>
                                 <span class="checkmark"></span>
                                 FALSE
                             </label>
@@ -5874,18 +6667,48 @@ fun createAddFormHTML(): String {
                         <label>Rixo Confirmed</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
-                                <input type="radio" name="rixoConfirmed" value="TRUE">
+                                <input type="radio" name="statusRixoConfirmed" value="TRUE">
                                 <span class="checkmark"></span>
                                 TRUE
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="rixoConfirmed" value="FALSE" checked>
+                                <input type="radio" name="statusRixoConfirmed" value="FALSE" checked>
                                 <span class="checkmark"></span>
                                 FALSE
                             </label>
                         </div>
                     </div>
+                    <div>
+                        <label>Booking Requested</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="statusBookingRequested" value="TRUE">
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="statusBookingRequested" value="FALSE" checked>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
                         </div>
+                    </div>
+                    <div>
+                        <label>Sold</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="statusInvoiceConfirmed" value="TRUE">
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="statusInvoiceConfirmed" value="FALSE" checked>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="pricing">
@@ -5904,13 +6727,6 @@ fun createAddFormHTML(): String {
                         </div>
                     </div>
                     <div>
-                        <label>Auction Penalty Fee</label>
-                        <div class="currency-input">
-                            <span class="currency-symbol">¥</span>
-                            <input type="text" inputmode="decimal" id="auctionPenaltyFee" class="money-input" placeholder="0">
-                        </div>
-                    </div>
-                    <div>
                         <label>Recycle Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
@@ -5925,10 +6741,25 @@ fun createAddFormHTML(): String {
                         </div>
                     </div>
                     <div>
+                        <label>Auction Penalty Fee</label>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="text" inputmode="decimal" id="auctionPenaltyFee" class="money-input" placeholder="0">
+                        </div>
+                    </div>
+                    <div>
                         <label>Payment Date</label>
-                        <div style="position:relative;">
-                            <input type="date" id="paymentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <span id="paymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="paymentDateText" maxlength="10" inputmode="numeric" autocomplete="off"
+                                       placeholder="MM/DD/YYYY"
+                                       style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
+                                <button type="button" id="paymentDateCalendarBtn" title="Open calendar"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                <span id="paymentDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
+                            </div>
+                            <input type="date" id="paymentDate" value="" tabindex="-1" aria-hidden="true"
+                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
                     </div>
                 </div>
                 </div>
@@ -5949,26 +6780,19 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Shipment Date</label>
-                        <div style="position:relative;">
-                            <input type="date" id="shipmentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <span id="shipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="shipmentDateText" maxlength="10" inputmode="numeric" autocomplete="off"
+                                       placeholder="MM/DD/YYYY"
+                                       style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
+                                <button type="button" id="shipmentDateCalendarBtn" title="Open calendar"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                <span id="shipmentDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
+                            </div>
+                            <input type="date" id="shipmentDate" value="" tabindex="-1" aria-hidden="true"
+                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
                     </div>
                     </div>
-                    <div>
-                        <label>Shipping Confirmed</label>
-                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
-                            <label class="checkwrap">
-                                <input type="radio" name="shippingConfirmed" value="TRUE">
-                                <span class="checkmark"></span>
-                                TRUE
-                            </label>
-                            <label class="checkwrap">
-                                <input type="radio" name="shippingConfirmed" value="FALSE" checked>
-                                <span class="checkmark"></span>
-                                FALSE
-                            </label>
-                    </div>
-                </div>
                     <div>
                         <label>B/L No.</label>
                         <input type="text" id="blNo" placeholder="Bill of Lading Number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
@@ -6052,21 +6876,6 @@ fun createAddFormHTML(): String {
                         <label>Total Cost (After Tax 10%)</label>
                         <input type="text" id="totalCostAfterTax" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
                     </div>
-                    <div>
-                        <label>Invoice Confirmed</label>
-                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
-                            <label class="checkwrap">
-                                <input type="radio" name="invoiceConfirmed" value="TRUE">
-                                <span class="checkmark"></span>
-                                TRUE
-                            </label>
-                            <label class="checkwrap">
-                                <input type="radio" name="invoiceConfirmed" value="FALSE" checked>
-                                <span class="checkmark"></span>
-                                FALSE
-                            </label>
-                        </div>
-                    </div>
                 </div>
                 
                 <div style="margin-bottom: 20px;">
@@ -6142,6 +6951,9 @@ private fun normalizeApiPurchaseForClient(p: dynamic) {
     }
     if (js("(p.blNo === undefined || p.blNo === null) && p.bl_no != null").unsafeCast<Boolean>()) {
         p.blNo = js("p.bl_no")
+    }
+    if (js("(p.bookingRequested === undefined || p.bookingRequested === null) && p.booking_requested != null").unsafeCast<Boolean>()) {
+        p.bookingRequested = js("p.booking_requested")
     }
 }
 
@@ -6892,8 +7704,13 @@ fun setupRixoDropdowns() {
             
             // Helper function to set all three dates
             function setAllDates() {
+                function maskFromIso(isoDate) {
+                    if (typeof window.isoToMmDdYyyy === 'function') return window.isoToMmDdYyyy(isoDate) || '';
+                    return isoDate;
+                }
                 // Set Purchase Date (saved value, else today — matches Add form default)
                     var editDateInput = document.getElementById('editDate');
+                    var editDatePicker = document.getElementById('editDatePicker');
                     if (editDateInput) {
                     var isoDate = '';
                     if (purchaseDateValue) {
@@ -6908,7 +7725,8 @@ fun setupRixoDropdowns() {
                         isoDate = window.todayIsoLocalDate();
                     }
                     if (isoDate) {
-                                editDateInput.value = isoDate;
+                        editDateInput.value = maskFromIso(isoDate);
+                        if (editDatePicker) editDatePicker.value = isoDate;
                         console.log('✅ Set edit purchase date:', isoDate, purchaseDateValue ? ('from: ' + purchaseDateValue) : '(default today)');
                                 var hint = document.getElementById('editDateDayHint');
                                 if (hint && typeof window.isoToWeekdayLabel === 'function') {
@@ -6920,18 +7738,22 @@ fun setupRixoDropdowns() {
                 // Set Payment Date
                 if (paymentDateValue) {
                     var editPaymentDateInput = document.getElementById('editPaymentDate');
+                    var editPaymentDatePicker = document.getElementById('editPaymentDatePicker');
                     if (editPaymentDateInput) {
                         if (typeof window.toIsoFromLabel === 'function') {
                             var isoDate = window.toIsoFromLabel(paymentDateValue);
                             if (isoDate && isoDate !== '') {
-                                editPaymentDateInput.value = isoDate;
+                                editPaymentDateInput.value = maskFromIso(isoDate);
+                                if (editPaymentDatePicker) editPaymentDatePicker.value = isoDate;
                                 console.log('✅ Set edit payment date:', isoDate, 'from:', paymentDateValue);
                                 var hint = document.getElementById('editPaymentDateDayHint');
                                 if (hint && typeof window.isoToWeekdayLabel === 'function') {
                                     hint.textContent = window.isoToWeekdayLabel(isoDate);
                                 }
                             } else if (paymentDateValue.indexOf('-') !== -1 && paymentDateValue.length === 10) {
-                                editPaymentDateInput.value = paymentDateValue;
+                                var isoPd = paymentDateValue;
+                                editPaymentDateInput.value = maskFromIso(isoPd);
+                                if (editPaymentDatePicker) editPaymentDatePicker.value = isoPd;
                                 console.log('✅ Set edit payment date directly (already ISO):', paymentDateValue);
                             }
                         }
@@ -6941,18 +7763,22 @@ fun setupRixoDropdowns() {
                 // Set Shipment Date
                 if (shipmentDateValue) {
                     var editShipmentDateInput = document.getElementById('editShipmentDate');
+                    var editShipmentDatePicker = document.getElementById('editShipmentDatePicker');
                     if (editShipmentDateInput) {
                         if (typeof window.toIsoFromLabel === 'function') {
                             var isoDate = window.toIsoFromLabel(shipmentDateValue);
                             if (isoDate && isoDate !== '') {
-                                editShipmentDateInput.value = isoDate;
+                                editShipmentDateInput.value = maskFromIso(isoDate);
+                                if (editShipmentDatePicker) editShipmentDatePicker.value = isoDate;
                                 console.log('✅ Set edit shipment date:', isoDate, 'from:', shipmentDateValue);
                                 var hint = document.getElementById('editShipmentDateDayHint');
                                 if (hint && typeof window.isoToWeekdayLabel === 'function') {
                                     hint.textContent = window.isoToWeekdayLabel(isoDate);
                                 }
                             } else if (shipmentDateValue.indexOf('-') !== -1 && shipmentDateValue.length === 10) {
-                                editShipmentDateInput.value = shipmentDateValue;
+                                var isoSd = shipmentDateValue;
+                                editShipmentDateInput.value = maskFromIso(isoSd);
+                                if (editShipmentDatePicker) editShipmentDatePicker.value = isoSd;
                                 console.log('✅ Set edit shipment date directly (already ISO):', shipmentDateValue);
                             }
                         }
@@ -7221,11 +8047,13 @@ fun setupRixoDropdowns() {
                 var paymentDateValue = purchaseData.paymentDate || purchaseData.payment_date;
                 if (paymentDateValue) {
                     var editPaymentDateInput = document.getElementById('editPaymentDate');
+                    var editPaymentDatePickerBk = document.getElementById('editPaymentDatePicker');
                     if (editPaymentDateInput) {
                         if (typeof window.toIsoFromLabel === 'function') {
                             var isoDate = window.toIsoFromLabel(paymentDateValue);
                             if (isoDate && isoDate !== '') {
-                                editPaymentDateInput.value = isoDate;
+                                editPaymentDateInput.value = typeof window.isoToMmDdYyyy === 'function' ? window.isoToMmDdYyyy(isoDate) : isoDate;
+                                if (editPaymentDatePickerBk) editPaymentDatePickerBk.value = isoDate;
                                 console.log('✅ Set edit payment date (backup after chassis load):', isoDate, 'from:', paymentDateValue);
                                 // Update day hint
                                 var hint = document.getElementById('editPaymentDateDayHint');
@@ -7234,7 +8062,8 @@ fun setupRixoDropdowns() {
                                 }
                             } else if (paymentDateValue.indexOf('-') !== -1 && paymentDateValue.length === 10) {
                                 // Already in ISO format
-                                editPaymentDateInput.value = paymentDateValue;
+                                editPaymentDateInput.value = typeof window.isoToMmDdYyyy === 'function' ? window.isoToMmDdYyyy(paymentDateValue) : paymentDateValue;
+                                if (editPaymentDatePickerBk) editPaymentDatePickerBk.value = paymentDateValue;
                                 console.log('✅ Set edit payment date directly (backup, already ISO):', paymentDateValue);
                             }
                         }
@@ -7246,11 +8075,13 @@ fun setupRixoDropdowns() {
                 var shipmentDateValue = purchaseData.shipmentDate || purchaseData.shipment_date || purchaseData.shippment_date;
                 if (shipmentDateValue) {
                     var editShipmentDateInput = document.getElementById('editShipmentDate');
+                    var editShipmentDatePickerBk = document.getElementById('editShipmentDatePicker');
                     if (editShipmentDateInput) {
                         if (typeof window.toIsoFromLabel === 'function') {
                             var isoDate = window.toIsoFromLabel(shipmentDateValue);
                             if (isoDate && isoDate !== '') {
-                                editShipmentDateInput.value = isoDate;
+                                editShipmentDateInput.value = typeof window.isoToMmDdYyyy === 'function' ? window.isoToMmDdYyyy(isoDate) : isoDate;
+                                if (editShipmentDatePickerBk) editShipmentDatePickerBk.value = isoDate;
                                 console.log('✅ Set edit shipment date (backup after chassis load):', isoDate, 'from:', shipmentDateValue);
                                 // Update day hint
                                 var hint = document.getElementById('editShipmentDateDayHint');
@@ -7259,7 +8090,8 @@ fun setupRixoDropdowns() {
                                 }
                             } else if (shipmentDateValue.indexOf('-') !== -1 && shipmentDateValue.length === 10) {
                                 // Already in ISO format
-                                editShipmentDateInput.value = shipmentDateValue;
+                                editShipmentDateInput.value = typeof window.isoToMmDdYyyy === 'function' ? window.isoToMmDdYyyy(shipmentDateValue) : shipmentDateValue;
+                                if (editShipmentDatePickerBk) editShipmentDatePickerBk.value = shipmentDateValue;
                                 console.log('✅ Set edit shipment date directly (backup, already ISO):', shipmentDateValue);
                             }
                         }
@@ -7275,7 +8107,7 @@ fun setupRixoDropdowns() {
                     o = pd.options_str || pd.carOptions;
                     return (o != null && String(o).trim() !== '') ? String(o) : '';
                 }
-                var PREDEFINED_OPTIONS = ['ABS', 'Air Bag', 'Aluminum Wheels', 'Power Steering', 'Power Window', 'Sunroof', 'Navigation/TV', 'Leather Seats', 'Spare Key', 'AC'];
+                var PREDEFINED_OPTIONS = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'Aluminum Wheels', 'Sunroof', 'Navigation/TV', 'Leather Seats', 'Spare Key', 'AC'];
                 var OPTIONS_NORMALIZE = { 'Navigation': 'Navigation/TV', 'TV': 'Navigation/TV' };
                 var editOptions = document.getElementById('editOptions');
                 var editOptionsPredefined = document.getElementById('editOptionsPredefined');
@@ -7308,7 +8140,7 @@ fun setupRixoDropdowns() {
                         // Keep Basic in sync with ABS/PW/PS/AC in Edit form after loading saved options
                         if (editForm) {
                             var basicBtn = editForm.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
-                            var required = ['ABS', 'Power Window', 'Power Steering', 'AC'];
+                            var required = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'AC'];
                             var allSelected = required.every(function(opt) {
                                 var b = editForm.querySelector('.options-buttons-grid .option-btn[data-option="' + opt + '"]');
                                 return !!(b && b.classList.contains('selected'));
@@ -7339,15 +8171,15 @@ fun setupRixoDropdowns() {
                     }
                 }
                 
-                // Set Shipping Confirmed radio button (shipped: true/1 -> TRUE, false/0/null -> FALSE)
-                var shippedValue = purchaseData.shipped;
-                var shippingConfirmedValue = (shippedValue === true || shippedValue === 1 || shippedValue === "1") ? "TRUE" : "FALSE";
-                var shippingConfirmedRadio = document.querySelector('input[name="editShippingConfirmed"][value="' + shippingConfirmedValue + '"]');
-                if (shippingConfirmedRadio) {
-                    shippingConfirmedRadio.checked = true;
+                // Booking Requested (bookingRequested: true/1 -> TRUE, false/0/null -> FALSE)
+                var bookingRequestedRaw = purchaseData.bookingRequested;
+                var bookingRequestedRadioValue = (bookingRequestedRaw === true || bookingRequestedRaw === 1 || bookingRequestedRaw === "1") ? "TRUE" : "FALSE";
+                var bookingRequestedRadio = document.querySelector('input[name="editBookingRequested"][value="' + bookingRequestedRadioValue + '"]');
+                if (bookingRequestedRadio) {
+                    bookingRequestedRadio.checked = true;
                 }
 
-                // Set Invoice Confirmed radio button (invoiceConfirmed: true/1 -> TRUE, false/0/null -> FALSE)
+                // Set "Sold" radio button (backed by invoiceConfirmed: true/1 -> TRUE, false/0/null -> FALSE)
                 var invoiceConfirmedRaw = purchaseData.invoiceConfirmed;
                 var invoiceConfirmedValue = (invoiceConfirmedRaw === true || invoiceConfirmedRaw === 1 || invoiceConfirmedRaw === "1") ? "TRUE" : "FALSE";
                 var invoiceConfirmedRadio = document.querySelector('input[name="editInvoiceConfirmed"][value="' + invoiceConfirmedValue + '"]');
@@ -7541,7 +8373,7 @@ fun setupRixoDropdowns() {
                 var optionButtons = editForm ? editForm.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn');
                 var editOptionsPredefined = document.getElementById('editOptionsPredefined');
                 var editOptionsInput = document.getElementById('editOptions');
-                var BASIC_OPTIONS = ['ABS', 'Power Window', 'Power Steering', 'AC'];
+                var BASIC_OPTIONS = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'AC'];
                 function updatePredefined(option, add) {
                     if (!editOptionsPredefined) return;
                     var current = editOptionsPredefined.value.trim();
@@ -7673,8 +8505,59 @@ fun setupMoneyInputFormattingOnce() {
             intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
             return decPart ? (intPart + '.' + decPart) : intPart;
         }
+        function _moneySanitizeAllowNegative(raw) {
+            if (raw == null) return '';
+            var s = String(raw).trim();
+            if (!s) return '';
+            var neg = (s.charAt(0) === '-');
+            if (neg) s = s.slice(1).trim();
+            s = s.replace(/[^0-9.]/g, '');
+            var parts = s.split('.');
+            if (parts.length > 2) {
+                s = parts[0] + '.' + parts.slice(1).join('');
+                parts = s.split('.');
+            }
+            if (parts[0]) {
+                parts[0] = parts[0].replace(/^0+(?=\\d)/, '');
+            }
+            var core = '';
+            if (parts.length === 1) core = parts[0] || '';
+            else core = (parts[0] || '0') + '.' + (parts[1] || '');
+            if (!core && neg) return '-';
+            if (!core) return '';
+            return neg ? ('-' + core) : core;
+        }
+        function _moneyFormatAllowNegative(raw) {
+            var s = _moneySanitizeAllowNegative(raw);
+            if (!s) return '';
+            if (s === '-') return '-';
+            var neg = (s.charAt(0) === '-');
+            var body = neg ? s.slice(1) : s;
+            var parts = body.split('.');
+            var intPart = parts[0] || '0';
+            var decPart = parts.length > 1 ? parts[1] : '';
+            intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            var out = decPart ? (intPart + '.' + decPart) : intPart;
+            return neg ? ('-' + out) : out;
+        }
+        function _moneyFinalDisplay(el, formatted, useNeg) {
+            if (!el.classList || !el.classList.contains('money-empty-as-zero')) return formatted;
+            var s = useNeg ? _moneySanitizeAllowNegative(formatted) : _moneySanitize(formatted);
+            if (useNeg) {
+                if (s === '' || s === '-') return (s === '-') ? '-' : '';
+                var pn = parseFloat(s);
+                if (!isNaN(pn) && pn === 0) return '';
+                return formatted;
+            }
+            if (s === '') return '';
+            var n = parseFloat(s);
+            if (!isNaN(n) && n === 0) return '';
+            return formatted;
+        }
         window._moneySanitize = function(raw) { return _moneySanitize(raw); };
         window._moneyFormat = function(raw) { return _moneyFormat(raw); };
+        window._moneySanitizeAllowNegative = function(raw) { return _moneySanitizeAllowNegative(raw); };
+        window._moneyFormatAllowNegative = function(raw) { return _moneyFormatAllowNegative(raw); };
         window._commaIntSanitize = function(raw) { return _commaIntSanitize(raw); };
         window._commaIntFormat = function(raw) { return _commaIntFormat(raw); };
         function _bindMoneyDelegation() {
@@ -7725,15 +8608,17 @@ fun setupMoneyInputFormattingOnce() {
                 var sel = (el.selectionStart == null) ? oldVal.length : el.selectionStart;
                 var before = oldVal.substring(0, sel);
                 var digitsBefore = before.replace(/[^0-9]/g, '').length;
-                var sanitized = _moneySanitize(oldVal);
-                var formatted = _moneyFormat(sanitized);
+                var useNeg = el.classList.contains('allow-negative');
+                var sanitized = useNeg ? _moneySanitizeAllowNegative(oldVal) : _moneySanitize(oldVal);
+                var formatted = useNeg ? _moneyFormatAllowNegative(sanitized) : _moneyFormat(sanitized);
+                formatted = _moneyFinalDisplay(el, formatted, useNeg);
                 if (formatted === oldVal) return;
                 __moneyFormatting = true;
                 try {
                     el.value = formatted;
                     var newPos = formatted.length;
                     if (digitsBefore <= 0) {
-                        newPos = 0;
+                        newPos = (useNeg && formatted.length && formatted.charAt(0) === '-') ? 1 : 0;
                     } else {
                         var d = 0;
                         newPos = formatted.length;
@@ -7757,9 +8642,17 @@ fun setupMoneyInputFormattingOnce() {
                 var k = e.key;
                 if (k === 'Backspace' || k === 'Delete' || k === 'Tab' || k === 'Enter' || k === 'Escape') return;
                 if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown' || k === 'Home' || k === 'End') return;
-                // mileage wants digits only; money allows dot
+                // mileage wants digits only; money allows dot (and optional leading minus on allow-negative)
                 if (el.classList.contains('comma-int-input')) {
                     if (k.length === 1 && !/[0-9]/.test(k)) e.preventDefault();
+                    return;
+                }
+                if (el.classList.contains('allow-negative') && k === '-') {
+                    var val = el.value;
+                    var ss = el.selectionStart == null ? 0 : el.selectionStart;
+                    var se = el.selectionEnd == null ? 0 : el.selectionEnd;
+                    if (ss !== 0) { e.preventDefault(); return; }
+                    if (val.indexOf('-') >= 0 && !(ss === 0 && se === val.length)) { e.preventDefault(); return; }
                     return;
                 }
                 if (k.length === 1 && !/[0-9.]/.test(k)) {
@@ -7785,12 +8678,17 @@ fun setupMoneyInputFormattingOnce() {
                     return;
                 }
                 if (!el.classList.contains('money-input')) return;
-                el.value = _moneyFormat(el.value);
+                var useNegOut = el.classList.contains('allow-negative');
+                var fm = useNegOut ? _moneyFormatAllowNegative(el.value) : _moneyFormat(el.value);
+                el.value = _moneyFinalDisplay(el, fm, useNegOut);
             }, true);
         }
         function _formatAllMoneyInputsNow() {
             document.querySelectorAll('input.money-input').forEach(function(el) {
-                el.value = _moneyFormat(el.value);
+                var un = el.classList && el.classList.contains('allow-negative');
+                var fm = un ? _moneyFormatAllowNegative(el.value) : _moneyFormat(el.value);
+                fm = _moneyFinalDisplay(el, fm, un);
+                el.value = fm;
             });
             document.querySelectorAll('input.comma-int-input').forEach(function(el) {
                 if (el.classList && el.classList.contains('km-suffix-input') && document.activeElement !== el) {
@@ -7803,6 +8701,9 @@ fun setupMoneyInputFormattingOnce() {
         window.getMoneyRawValue = function(id) {
             var el = document.getElementById(id);
             if (!el) return '';
+            if (el.classList && el.classList.contains('allow-negative')) {
+                return _moneySanitizeAllowNegative(el.value);
+            }
             return _moneySanitize(el.value);
         };
         _bindMoneyDelegation();
@@ -7819,7 +8720,9 @@ fun setupMoneyInputFormattingOnce() {
                         return;
                     }
                     if (el.classList && el.classList.contains('money-input')) {
-                        var formatted = _moneyFormat(el.value);
+                        var un = el.classList.contains('allow-negative');
+                        var formatted = un ? _moneyFormatAllowNegative(el.value) : _moneyFormat(el.value);
+                        formatted = _moneyFinalDisplay(el, formatted, un);
                         if (el.value !== formatted) el.value = formatted;
                     }
                 });
@@ -7831,10 +8734,27 @@ fun setupMoneyInputFormattingOnce() {
     }
     document.addEventListener("focusout", { ev: Event ->
         val t = ev.target as? HTMLElement ?: return@addEventListener
+        // Defer so overlay click commits Client Name before autofill (blur fires before click).
         when (t.id) {
-            "clientNameInput" -> applyPurchaseCountryFromClientName("clientName")
-            "editClientNameInput" -> applyPurchaseCountryFromClientName("editClientName")
+            "clientNameInput" -> window.setTimeout({
+                applyPurchaseCountryFromClientName("clientName")
+            }, 0)
+            "editClientNameInput" -> window.setTimeout({
+                applyPurchaseCountryFromClientName("editClientName")
+            }, 0)
+            else -> Unit
         }
+    }, true)
+    document.addEventListener("keydown", { ev: Event ->
+        val t = ev.target as? HTMLElement ?: return@addEventListener
+        if (t.id != "clientNameInput" && t.id != "editClientNameInput") return@addEventListener
+        val key = js("ev.key").unsafeCast<String>()
+        if (key != "Enter") return@addEventListener
+        ev.preventDefault()
+        val sid = if (t.id == "editClientNameInput") "editClientName" else "clientName"
+        syncPurchaseClientSelectFromTypedInput(sid)
+        window.asDynamic().__purchaseClientSyncSid = sid
+        js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(window.__purchaseClientSyncSid)")
     }, true)
     document.addEventListener("change", { ev: Event ->
         val t = ev.target as? HTMLElement ?: return@addEventListener
@@ -7843,6 +8763,81 @@ fun setupMoneyInputFormattingOnce() {
             "editClientNameInput" -> applyPurchaseCountryFromClientName("editClientName")
         }
     }, true)
+}
+
+private fun purchaseStatusRead(name: String, fallbackName: String? = null, default: String = "FALSE"): String {
+    val direct = (document.querySelector("input[name=\"$name\"]:checked") as? HTMLInputElement)?.value
+    if (!direct.isNullOrBlank()) return direct
+    if (!fallbackName.isNullOrBlank()) {
+        val fallback = (document.querySelector("input[name=\"$fallbackName\"]:checked") as? HTMLInputElement)?.value
+        if (!fallback.isNullOrBlank()) return fallback
+    }
+    return default
+}
+
+private fun purchaseStatusSet(name: String, value: String) {
+    val node = document.querySelector("input[name=\"$name\"][value=\"$value\"]") as? HTMLInputElement
+    node?.checked = true
+}
+
+private fun isLocalPurchaseByClientCombobox(isEdit: Boolean): Boolean {
+    val clientField = if (isEdit) "editClientName" else "clientName"
+    val value = getComboboxValueSafe(clientField).trim().uppercase()
+    return value == "LOCAL"
+}
+
+private fun enforcePurchaseStatusState(isEdit: Boolean) {
+    val rrName = if (isEdit) "editStatusRixoRequested" else "statusRixoRequested"
+    val rcName = if (isEdit) "editStatusRixoConfirmed" else "statusRixoConfirmed"
+    val brName = if (isEdit) "editStatusBookingRequested" else "statusBookingRequested"
+    val icName = if (isEdit) "editStatusInvoiceConfirmed" else "statusInvoiceConfirmed"
+
+    var rr = purchaseStatusRead(rrName) == "TRUE"
+    var rc = purchaseStatusRead(rcName) == "TRUE"
+    var br = purchaseStatusRead(brName) == "TRUE"
+    var ic = purchaseStatusRead(icName) == "TRUE"
+    val isLocal = isLocalPurchaseByClientCombobox(isEdit)
+
+    if (!rr) {
+        rc = false
+        br = false
+        ic = false
+    } else if (!rc) {
+        br = false
+        ic = false
+    } else if (!br && !isLocal) {
+        ic = false
+    }
+    if (ic && !rc) ic = false
+    if (ic && !isLocal && !br) ic = false
+
+    purchaseStatusSet(rrName, if (rr) "TRUE" else "FALSE")
+    purchaseStatusSet(rcName, if (rc) "TRUE" else "FALSE")
+    purchaseStatusSet(brName, if (br) "TRUE" else "FALSE")
+    purchaseStatusSet(icName, if (ic) "TRUE" else "FALSE")
+
+    (document.querySelector("input[name=\"$rcName\"][value=\"TRUE\"]") as? HTMLInputElement)?.disabled = !rr
+    (document.querySelector("input[name=\"$brName\"][value=\"TRUE\"]") as? HTMLInputElement)?.disabled = !rc
+    (document.querySelector("input[name=\"$icName\"][value=\"TRUE\"]") as? HTMLInputElement)?.disabled = !rc || (!isLocal && !br)
+}
+
+private fun setupPurchaseStatusStateMachine(isEdit: Boolean) {
+    val rrName = if (isEdit) "editStatusRixoRequested" else "statusRixoRequested"
+    val rcName = if (isEdit) "editStatusRixoConfirmed" else "statusRixoConfirmed"
+    val brName = if (isEdit) "editStatusBookingRequested" else "statusBookingRequested"
+    val icName = if (isEdit) "editStatusInvoiceConfirmed" else "statusInvoiceConfirmed"
+    listOf(rrName, rcName, brName, icName).forEach { group ->
+        val radios = document.querySelectorAll("input[name=\"$group\"]")
+        for (i in 0 until radios.length) {
+            (radios.item(i) as? HTMLInputElement)?.addEventListener("change", { _: Event ->
+                enforcePurchaseStatusState(isEdit)
+            })
+        }
+    }
+    val clientBase = if (isEdit) "editClientName" else "clientName"
+    document.getElementById(clientBase)?.addEventListener("change", { _: Event -> enforcePurchaseStatusState(isEdit) })
+    document.getElementById("${clientBase}Input")?.addEventListener("change", { _: Event -> enforcePurchaseStatusState(isEdit) })
+    enforcePurchaseStatusState(isEdit)
 }
 
 fun setupAddFormListeners() {
@@ -7901,6 +8896,13 @@ fun setupAddFormListeners() {
 
     // Setup Rixo dropdowns
     setupRixoDropdowns()
+    setupPurchaseStatusStateMachine(isEdit = false)
+
+    // Strict text+mask+calendar for Add form date fields
+    bindStrictDateTextMask("date", "dateDayHint")
+    bindStrictDateTextMask("paymentDate", "paymentDateDayHint")
+    bindStrictDateTextMask("shipmentDate", "shipmentDateDayHint")
+    bindStrictMonthYearTextMask("carModelYear", "carModelYearHint")
     
     // Add event listener for auction name change (Supplier Name) - works with combobox
     document.getElementById("auctionName")?.addEventListener("change", { event: Event ->
@@ -8102,7 +9104,7 @@ fun setupAddFormListeners() {
             if (!add && idx > -1) { opts.splice(idx, 1); }
             predefinedInput.value = opts.join(', ');
         }
-        var BASIC_OPTIONS = ['ABS', 'Power Window', 'Power Steering', 'AC'];
+        var BASIC_OPTIONS = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'AC'];
         function syncBasicButtonState(form) {
             if (!form) return;
             var basicBtn = form.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
@@ -8883,6 +9885,13 @@ private fun splitSemicolonTokens(raw: String?): List<String> {
 private fun firstSemicolonToken(raw: String?): String =
     splitSemicolonTokens(raw).firstOrNull() ?: raw?.trim() ?: ""
 
+/** First semicolon token of mapping recycle fee / numeric cells → digits for `.money-input` autofill (keeps `.`). */
+private fun digitsDotOnlyFromMappingMoney(raw: String?): String {
+    val t = firstSemicolonToken(raw?.trim())
+    if (t.isBlank()) return ""
+    return t.replace(Regex("[^0-9.]"), "")
+}
+
 /** First token for edit-form HTML defaults (`Any?` from purchase row / DB multi-value cells). */
 private fun firstDisplayToken(raw: Any?): String {
     if (raw == null) return ""
@@ -9596,6 +10605,18 @@ fun autoFillBrandFields(firstRow: dynamic, isEditForm: Boolean) {
     setFieldValue(fieldId("Cc"), cc)
     setFieldValue(fieldId("Door"), door)
     setFieldValue(fieldId("Grade"), grade)
+    val recycleDigits = digitsDotOnlyFromMappingMoney(js("firstRow.recycleFee")?.toString())
+    val recycleFieldId = if (isEditForm) "editRecycleFee" else "recycleFee"
+    (document.getElementById(recycleFieldId) as? HTMLInputElement)?.let {
+        if (recycleDigits.isNotBlank()) it.value = recycleDigits
+    }
+    if (isEditForm) {
+        calculateEditTotalCostBeforeTax()
+        calculateEditTotalCostAfterTax()
+    } else {
+        calculateTotalCostBeforeTax()
+        calculateTotalCostAfterTax()
+    }
 }
 
 // Function to clear brand mappings when brand is cleared
@@ -9748,6 +10769,7 @@ fun fetchMappingsByCarName(brandName: String, carName: String, isEditForm: Boole
             val doorRaw = js("firstRow.door")?.toString() ?: ""
             val seatRaw = js("firstRow.seat")?.toString() ?: ""
             val grade = firstSemicolonToken(js("firstRow.grade")?.toString() ?: "")
+            val recycleDigits = digitsDotOnlyFromMappingMoney(js("firstRow.recycleFee")?.toString())
             
             // Convert "0" to empty string for select dropdowns (NULL values)
             val cc = firstSemicolonToken(if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw)
@@ -9816,6 +10838,17 @@ fun fetchMappingsByCarName(brandName: String, carName: String, isEditForm: Boole
                 setFieldValue("cc", cc)
                 setFieldValue("door", door)
                 setFieldValue("grade", grade)
+            }
+            if (recycleDigits.isNotBlank()) {
+                val rfId = if (isEditForm) "editRecycleFee" else "recycleFee"
+                (document.getElementById(rfId) as? HTMLInputElement)?.value = recycleDigits
+            }
+            if (isEditForm) {
+                calculateEditTotalCostBeforeTax()
+                calculateEditTotalCostAfterTax()
+            } else {
+                calculateTotalCostBeforeTax()
+                calculateTotalCostAfterTax()
             }
             data
         }
@@ -10198,6 +11231,30 @@ fun setupGlobalDateValidation() {
     document.addEventListener("input", enforceInput, true)
 }
 
+/** Single delegated listener for "See more / See less" toggle on collapsible chip groups. */
+fun setupCollapsibleChipsDelegation() {
+    if ((document.asDynamic().__collapsibleChipsBound as? Boolean) == true) return
+    document.asDynamic().__collapsibleChipsBound = true
+    document.addEventListener("click", { e: Event ->
+        val target = e.target as? Element ?: return@addEventListener
+        val btn = target.closest("button.chips-toggle-btn") as? HTMLElement ?: return@addEventListener
+        val expanded = btn.getAttribute("data-chips-expanded") == "true"
+        val parent = btn.parentElement ?: return@addEventListener
+        val hiddenSpan = parent.querySelector(".chips-hidden") as? HTMLElement ?: return@addEventListener
+        if (expanded) {
+            hiddenSpan.style.display = "none"
+            btn.setAttribute("data-chips-expanded", "false")
+            // Restore label: count hidden items
+            val count = hiddenSpan.querySelectorAll(".purchase-list-cell-chip").length
+            btn.textContent = "See more \u25be ($count)"
+        } else {
+            hiddenSpan.style.display = "inline-flex"
+            btn.setAttribute("data-chips-expanded", "true")
+            btn.textContent = "See less \u25b4"
+        }
+    })
+}
+
 // Function to fetch mapping by chassis only (chassis-first flow)
 fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForMerge: dynamic? = null): dynamic {
     if (chassis.isBlank()) {
@@ -10252,6 +11309,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
             val rankRaw = ((frDyn.rank as? String) ?: (data.rank as? String) ?: "").trim()
             val colorRaw = ((frDyn.color as? String) ?: (data.color as? String) ?: "").trim()
             val driveTypeRaw = ((frDyn.driveType as? String) ?: (data.driveType as? String) ?: "").trim()
+            val recycleFeeRaw = ((frDyn.recycleFee as? String) ?: (data.recycleFee as? String) ?: "").trim()
 
             var brand = firstSemicolonToken(brandRaw)
             var carName = firstSemicolonToken(carNameRaw)
@@ -10478,7 +11536,13 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                 }
             }
             
-            console.log("✅ Found mapping for chassis $chassis: brand=$brand, carName=$carName, fuel=$fuel, wd=$wd, cc=$cc, door=$door, seat=$seat, grade=$grade")
+            var recycleFeeDigits = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
+            if (isEditForm && purchaseForMerge != null && !js("purchaseForMerge === void 0").unsafeCast<Boolean>() && recycleFeeDigits.isBlank()) {
+                val pd = purchaseForMerge.unsafeCast<dynamic>()
+                recycleFeeDigits = digitsDotOnlyFromMappingMoney(extractNumericFromDbValue(pd.recycleFee))
+            }
+            
+            console.log("✅ Found mapping for chassis $chassis: brand=$brand, carName=$carName, fuel=$fuel, wd=$wd, cc=$cc, door=$door, seat=$seat, grade=$grade, recycleFeeDigits=$recycleFeeDigits")
             
             // Auto-fill Brand field first (using combobox helper)
             val brandFieldId = if (isEditForm) "editBrand" else "brand"
@@ -10912,8 +11976,20 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                         }
                     }
                     
+                    val recycleMoneyId = if (isEditForm) "editRecycleFee" else "recycleFee"
+                    (document.getElementById(recycleMoneyId) as? HTMLInputElement)?.let { rf ->
+                        if (recycleFeeDigits.isNotBlank()) rf.value = recycleFeeDigits
+                    }
+                    if (isEditForm) {
+                        calculateEditTotalCostBeforeTax()
+                        calculateEditTotalCostAfterTax()
+                    } else {
+                        calculateTotalCostBeforeTax()
+                        calculateTotalCostAfterTax()
+                    }
+                    
                     // Log final values that were actually set (after preservation logic)
-                    console.log("✅ Final field values set: carName=$finalCarName, fuel=$finalFuelValue, wd=$finalWdValue, shift=$finalShiftValue, cc=$finalCcValue, door=$finalDoorValue, seat=$finalSeatValue, grade=$finalGradeValue, vehicleType=$vehicleTypeValue, rank=$rankValue, color=$colorValue, driveType=$driveTypeValue")
+                    console.log("✅ Final field values set: carName=$finalCarName, fuel=$finalFuelValue, wd=$finalWdValue, shift=$finalShiftValue, cc=$finalCcValue, door=$finalDoorValue, seat=$finalSeatValue, grade=$finalGradeValue, vehicleType=$vehicleTypeValue, rank=$rankValue, color=$colorValue, driveType=$driveTypeValue, recycleFeeDigits=$recycleFeeDigits")
                     console.log("✅ Auto-filled all fields from chassis mapping")
                     null
                 }
@@ -10984,8 +12060,9 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
     val matchedRank = firstSemicolonToken((matchDynamic.rank as? String ?: "").trim())
     val matchedColor = firstSemicolonToken((matchDynamic.color as? String ?: "").trim())
     val matchedDriveType = firstSemicolonToken((matchDynamic.driveType as? String ?: "").trim()).uppercase()
+    val matchedRecycleFee = digitsDotOnlyFromMappingMoney(matchDynamic.recycleFee as? String)
     
-    console.log("✅ Found matching row: brand=$matchedBrand, carName=$matchedCarName, fuel=$matchedFuel, wd=$matchedWd, shift=$matchedShift, cc=$matchedCc, door=$matchedDoor, seat=$matchedSeat, grade=$matchedGrade, vehicleType=$matchedVehicleType, rank=$matchedRank, color=$matchedColor, driveType=$matchedDriveType")
+    console.log("✅ Found matching row: brand=$matchedBrand, carName=$matchedCarName, fuel=$matchedFuel, wd=$matchedWd, shift=$matchedShift, cc=$matchedCc, door=$matchedDoor, seat=$matchedSeat, grade=$matchedGrade, vehicleType=$matchedVehicleType, rank=$matchedRank, color=$matchedColor, driveType=$matchedDriveType, recycleFee=$matchedRecycleFee")
     
     // Helper function to get correct field ID
     fun getFieldId(base: String): String {
@@ -11165,6 +12242,18 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
         seatInput?.value = matchedSeat
     }
     
+    if (matchedRecycleFee.isNotBlank()) {
+        val rfId = if (isEditForm) "editRecycleFee" else "recycleFee"
+        (document.getElementById(rfId) as? HTMLInputElement)?.value = matchedRecycleFee
+    }
+    if (isEditForm) {
+        calculateEditTotalCostBeforeTax()
+        calculateEditTotalCostAfterTax()
+    } else {
+        calculateTotalCostBeforeTax()
+        calculateTotalCostAfterTax()
+    }
+    
     // Clear flag after a delay
     js("setTimeout(function() { window.isAutoFillingFromMatch = false; }, 300);")
 }
@@ -11227,6 +12316,8 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
             val rank = firstSemicolonToken(js("mappingData.rank")?.toString()?.trim())
             val color = firstSemicolonToken(js("mappingData.color")?.toString()?.trim())
             val driveType = firstSemicolonToken(js("mappingData.driveType")?.toString()?.trim()?.uppercase())
+            
+            val recycleDigits = digitsDotOnlyFromMappingMoney(js("mappingData.recycleFee")?.toString())
             
             val cc = firstSemicolonToken(if (ccRaw == "0" || ccRaw.isBlank()) "" else ccRaw).replace(Regex("[^0-9]"), "")
             val door = firstSemicolonToken(if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw)
@@ -11347,6 +12438,17 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                     val r = document.querySelector("input[name=\"driveType\"][value=\"$driveType\"]") as? HTMLInputElement
                     r?.checked = true
                 }
+            }
+            if (recycleDigits.isNotBlank()) {
+                val rfId = if (isEditForm) "editRecycleFee" else "recycleFee"
+                (document.getElementById(rfId) as? HTMLInputElement)?.value = recycleDigits
+            }
+            if (isEditForm) {
+                calculateEditTotalCostBeforeTax()
+                calculateEditTotalCostAfterTax()
+            } else {
+                calculateTotalCostBeforeTax()
+                calculateTotalCostAfterTax()
             }
         }
         .catch { error ->
@@ -11802,7 +12904,7 @@ fun saveNewPurchase() {
     val valSupplierName = js("getComboboxValue('auctionName')").unsafeCast<String>()
     val valVenueId = js("getComboboxValue('venueId')").unsafeCast<String>()
     val valVehicleType = js("getComboboxValue('typeOfVehicle')").unsafeCast<String>()
-    val valRixoCompany = js("getComboboxValue('rixoCompany')").unsafeCast<String>()
+    val valRixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("rixoCompany"))
     val valStockLocation = js("getComboboxValue('stockLocation')").unsafeCast<String>()
     val valClientName = getComboboxValueSafe("clientName")
     val valTargetCountry = getComboboxValueSafe("country")
@@ -11887,7 +12989,7 @@ fun saveNewPurchaseAndAddMore() {
     val valSupplierName = js("getComboboxValue('auctionName')").unsafeCast<String>()
     val valVenueId = js("getComboboxValue('venueId')").unsafeCast<String>()
     val valVehicleType = js("getComboboxValue('typeOfVehicle')").unsafeCast<String>()
-    val valRixoCompany = js("getComboboxValue('rixoCompany')").unsafeCast<String>()
+    val valRixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("rixoCompany"))
     val valStockLocation = js("getComboboxValue('stockLocation')").unsafeCast<String>()
     val valClientName = getComboboxValueSafe("clientName")
     val valTargetCountry = getComboboxValueSafe("country")
@@ -11922,6 +13024,14 @@ fun saveNewPurchaseAndAddMore() {
 
 // Reload Add purchase page after saving so we get an empty form immediately.
 // Must not rely on hash navigation because we may already be on "#/add".
+/** Scroll window and common scroll containers to top (used after Save and Add More reload). */
+private fun scrollPurchaseFormToTop() {
+    window.scrollTo(0.0, 0.0)
+    document.documentElement?.unsafeCast<HTMLElement>()?.let { it.scrollTop = 0.0 }
+    document.body?.unsafeCast<HTMLElement>()?.let { it.scrollTop = 0.0 }
+    (document.getElementById("root") as? HTMLElement)?.scrollTop = 0.0
+}
+
 fun reloadAddPurchaseForm() {
     js("if (typeof window.ensureScrollingRestored === 'function') { window.ensureScrollingRestored(); }")
     val content = document.getElementById("content") ?: return
@@ -11983,13 +13093,13 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     purchaseData.shipmentSize = js("getComboboxValue('shipmentSize')").unsafeCast<String>()
     
     // Rixo Information
-    purchaseData.rixoCompany = js("getComboboxValue('rixoCompany')").unsafeCast<String>()
+    purchaseData.rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("rixoCompany"))
     purchaseData.clientName = getComboboxValueSafe("clientName")
     purchaseData.country = getComboboxValueSafe("country")
     val rixoPriceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('rixoPriceInput') : ''").unsafeCast<String>().trim()
     purchaseData.rixoPrice = if (rixoPriceRaw.isNotBlank()) "¥$rixoPriceRaw" else ""
-    purchaseData.rixoRequested = (document.querySelector("input[name=\"rixoRequested\"]:checked") as? HTMLInputElement)?.value ?: ""
-    purchaseData.rixoConfirmed = (document.querySelector("input[name=\"rixoConfirmed\"]:checked") as? HTMLInputElement)?.value ?: ""
+    purchaseData.rixoRequested = purchaseStatusRead("statusRixoRequested", "rixoRequested")
+    purchaseData.rixoConfirmed = purchaseStatusRead("statusRixoConfirmed", "rixoConfirmed")
     
     // Pricing Information
     val priceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('price') : ''").unsafeCast<String>().trim()
@@ -12031,9 +13141,12 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     purchaseData.repairCompany = getComboboxValueSafe("repairCompany")
     val repairChargesValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('repairCharges') : ''").unsafeCast<String>().trim()
     purchaseData.repairCharges = if (repairChargesValue.isNotBlank()) "¥$repairChargesValue" else ""
-    val shippingConfirmedValue = (document.querySelector("input[name=\"shippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
-    purchaseData.shipped = (shippingConfirmedValue == "TRUE")
-    val invoiceConfirmedValue = (document.querySelector("input[name=\"invoiceConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
+    val bookingRequestedFormValue = purchaseStatusRead("statusBookingRequested", "bookingRequested")
+    purchaseData.bookingRequested = (bookingRequestedFormValue == "TRUE")
+    // "Sold" form field was removed; the form's Sold control now maps to invoiceConfirmed.
+    // New purchases default the legacy [sold] flag to false.
+    purchaseData.sold = false
+    val invoiceConfirmedValue = purchaseStatusRead("statusInvoiceConfirmed", "invoiceConfirmed")
     purchaseData.invoiceConfirmed = (invoiceConfirmedValue == "TRUE")
     
     // Other Fields
@@ -12056,13 +13169,17 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
         console.log("📥 [NEW] Response status:", response.status)
         if (response.ok) {
             console.log("✅ [NEW] Purchase created successfully!")
-            showMessage("Purchase created successfully!", "success")
             if (saveButton?.id == "addSaveAndMoreBtn") {
                 // Reload Add page with empty form for a new entry immediately.
                 // Avoid hash navigation because we may already be on "#/add".
                 reloadAddPurchaseForm()
+                window.setTimeout({
+                    scrollPurchaseFormToTop()
+                    showMessage("Purchase saved. You can add another.", "success")
+                }, 0)
             } else {
-            showPurchaseList()
+                showMessage("Purchase created successfully!", "success")
+                showPurchaseList()
             }
             // Button will be re-enabled when page reloads, no need to re-enable here
         } else {
@@ -12145,7 +13262,15 @@ fun showEditFormWithData(purchaseData: dynamic) {
     val editShipDisp = firstDisplayToken(purchaseData.shipmentSize ?: purchaseData.vehicleType)
     val editGradeDisp = firstDisplayToken(purchaseData.grade?.toString())
     val wdFirstIs4Wd = editWdDisp.contains("4", ignoreCase = true)
-    
+    val editPurchaseDateIsoInitial =
+        toIsoFromLabel(purchaseData.date).takeUnless { it.isBlank() } ?: todayIsoLocalDate()
+    val editPurchaseDateMaskedInitial = isoToMmDdYyyy(editPurchaseDateIsoInitial)
+    val editPaymentIsoInitial = toIsoFromLabel(purchaseData.paymentDate ?: purchaseData.payment_date)
+    val editPaymentMaskedInitial = if (editPaymentIsoInitial.isBlank()) "" else isoToMmDdYyyy(editPaymentIsoInitial)
+    val editShipmentIsoInitial =
+        toIsoFromLabel(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date)
+    val editShipmentMaskedInitial = if (editShipmentIsoInitial.isBlank()) "" else isoToMmDdYyyy(editShipmentIsoInitial)
+
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div class="edit-purchase-container" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; position: relative;">
@@ -12157,9 +13282,19 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-content form-grid-2col" data-section="basic">
                     <div>
                         <label>Purchase Date</label>
-                        <div style="position:relative;">
-                            <input type="date" id="editDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${toIsoFromLabel(purchaseData.date).takeUnless { it.isBlank() } ?: todayIsoLocalDate()}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${purchaseData.date ?: ""}">
-                            <span id="editDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="editDate" maxlength="10" inputmode="numeric" autocomplete="off"
+                                       placeholder="MM/DD/YYYY"
+                                       value="${editPurchaseDateMaskedInitial}"
+                                       style="flex:1; min-width:0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing:border-box;" />
+                                <button type="button" id="editDateCalendarBtn" title="Open calendar"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                <span id="editDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
+                            </div>
+                            <input type="date" id="editDatePicker" tabindex="-1" aria-hidden="true"
+                                   value="${editPurchaseDateIsoInitial}"
+                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
                         </div>
                     </div>
                     <div>
@@ -12217,12 +13352,24 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Production Date</label>
-                        <div style="position:relative;">
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="editCarModelYearText" maxlength="7" inputmode="numeric" autocomplete="off"
+                                       placeholder="MM/YYYY"
+                                       value="${if (purchaseData.carModelYear != null) {
+                            val parts = purchaseData.carModelYear.toString().split("/")
+                            if (parts.size == 2) "${parts[0].padStart(2, '0')}/${parts[1]}" else isoMonthToMmYyyy(purchaseData.carModelYear.toString())
+                        } else ""}"
+                                       style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
+                                <button type="button" id="editCarModelYearCalendarBtn" title="Open month picker"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                            </div>
                             <input type="month" id="editCarModelYear" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${if (purchaseData.carModelYear != null) {
                             val parts = purchaseData.carModelYear.toString().split("/")
                             if (parts.size == 2) "${parts[1]}-${parts[0].padStart(2, '0')}" else purchaseData.carModelYear.toString()
-                        } else ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
-                            <span id="editCarModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">mm/yyyy</span>
+                        } else ""}" tabindex="-1" aria-hidden="true"
+                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                            <span id="editCarModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">MM/YYYY</span>
                         </div>
                     </div>
                     <div>
@@ -12375,9 +13522,9 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <div class="options-buttons-grid">
                             <button type="button" class="option-btn" data-option="ABS">ABS</button>
                             <button type="button" class="option-btn" data-option="Air Bag">Air Bag</button>
-                            <button type="button" class="option-btn" data-option="Aluminum Wheels">Aluminum Wheels</button>
-                            <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
                             <button type="button" class="option-btn" data-option="Power Window">Power Window</button>
+                            <button type="button" class="option-btn" data-option="Power Steering">Power Steering</button>
+                            <button type="button" class="option-btn" data-option="Aluminum Wheels">Aluminum Wheels</button>
                             <button type="button" class="option-btn" data-option="Sunroof">Sunroof</button>
                             <button type="button" class="option-btn" data-option="Navigation/TV">Navigation/TV</button>
                             <button type="button" class="option-btn" data-option="Leather Seats">Leather Seats</button>
@@ -12386,7 +13533,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         </div>
                         <input type="hidden" id="editOptionsPredefined" value="">
                         <div style="display: flex; gap: 10px; align-items: center;">
-                            <button type="button" class="option-btn option-btn-basic" data-option="Basic" title="Select ABS, Power Window, Power Steering, AC">Basic</button>
+                            <button type="button" class="option-btn option-btn-basic" data-option="Basic" title="Select ABS, Air Bag, Power Window, Power Steering, AC">Basic</button>
                             <input type="text" id="editOptions" placeholder="Type custom option and press Enter..." style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                         </div>
                     </div>
@@ -12465,16 +13612,35 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             </button>
                         </div>
                     </div>
+                        </div>
+
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('status')"><h3 class="form-section-header" data-section="status">Status</h3></div>
+                <div class="form-section-content form-grid-2col" data-section="status">
                     <div>
-                        <label>Rixo Requested</label>
+                        <label>Purchased</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
-                                <input type="radio" name="editRixoRequested" value="TRUE" ${if (purchaseData.rixoRequested == "TRUE") "checked" else ""}>
+                                <input type="radio" name="editStatusPurchased" value="TRUE" checked disabled>
                                 <span class="checkmark"></span>
                                 TRUE
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="editRixoRequested" value="FALSE" ${if (purchaseData.rixoRequested != "TRUE") "checked" else ""}>
+                                <input type="radio" name="editStatusPurchased" value="FALSE" disabled>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Rixo Requested</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="editStatusRixoRequested" value="TRUE" ${if (purchaseData.rixoRequested == "TRUE") "checked" else ""}>
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="editStatusRixoRequested" value="FALSE" ${if (purchaseData.rixoRequested != "TRUE") "checked" else ""}>
                                 <span class="checkmark"></span>
                                 FALSE
                             </label>
@@ -12484,18 +13650,48 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>Rixo Confirmed</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
-                                <input type="radio" name="editRixoConfirmed" value="TRUE" ${if (purchaseData.rixoConfirmed == "TRUE") "checked" else ""}>
+                                <input type="radio" name="editStatusRixoConfirmed" value="TRUE" ${if (purchaseData.rixoConfirmed == "TRUE") "checked" else ""}>
                                 <span class="checkmark"></span>
                                 TRUE
                             </label>
                             <label class="checkwrap">
-                                <input type="radio" name="editRixoConfirmed" value="FALSE" ${if (purchaseData.rixoConfirmed != "TRUE") "checked" else ""}>
+                                <input type="radio" name="editStatusRixoConfirmed" value="FALSE" ${if (purchaseData.rixoConfirmed != "TRUE") "checked" else ""}>
                                 <span class="checkmark"></span>
                                 FALSE
                             </label>
                         </div>
                     </div>
+                    <div>
+                        <label>Booking Requested</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="editStatusBookingRequested" value="TRUE" ${if (purchaseData.bookingRequested == true || (purchaseData.bookingRequested as? Number)?.toInt() == 1) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="editStatusBookingRequested" value="FALSE" ${if (!(purchaseData.bookingRequested == true || (purchaseData.bookingRequested as? Number)?.toInt() == 1)) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
                         </div>
+                    </div>
+                    <div>
+                        <label>Sold</label>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
+                            <label class="checkwrap">
+                                <input type="radio" name="editStatusInvoiceConfirmed" value="TRUE" ${if (purchaseData.invoiceConfirmed == true || (purchaseData.invoiceConfirmed as? Number)?.toInt() == 1) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                TRUE
+                            </label>
+                            <label class="checkwrap">
+                                <input type="radio" name="editStatusInvoiceConfirmed" value="FALSE" ${if (!(purchaseData.invoiceConfirmed == true || (purchaseData.invoiceConfirmed as? Number)?.toInt() == 1)) "checked" else ""}>
+                                <span class="checkmark"></span>
+                                FALSE
+                            </label>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="pricing">
@@ -12514,13 +13710,6 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 </div>
                     </div>
                     <div>
-                        <label>Auction Penalty Fee</label>
-                        <div class="currency-input">
-                            <span class="currency-symbol">¥</span>
-                            <input type="text" inputmode="decimal" id="editAuctionPenaltyFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.auctionPenaltyFee)}" placeholder="0">
-                        </div>
-                    </div>
-                    <div>
                         <label>Recycle Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
@@ -12535,10 +13724,27 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         </div>
                     </div>
                     <div>
+                        <label>Auction Penalty Fee</label>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="text" inputmode="decimal" id="editAuctionPenaltyFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.auctionPenaltyFee)}" placeholder="0">
+                        </div>
+                    </div>
+                    <div>
                         <label>Payment Date</label>
-                        <div style="position:relative;">
-                            <input type="date" id="editPaymentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${toIsoFromLabel(purchaseData.paymentDate ?: purchaseData.payment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.paymentDate ?: purchaseData.payment_date) ?: ""}">
-                            <span id="editPaymentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="editPaymentDate" maxlength="10" inputmode="numeric" autocomplete="off"
+                                       placeholder="MM/DD/YYYY"
+                                       value="${editPaymentMaskedInitial}"
+                                       style="flex:1; min-width:0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing:border-box;" />
+                                <button type="button" id="editPaymentDateCalendarBtn" title="Open calendar"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                <span id="editPaymentDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
+                            </div>
+                            <input type="date" id="editPaymentDatePicker" tabindex="-1" aria-hidden="true"
+                                   value="${editPaymentIsoInitial}"
+                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
                     </div>
                 </div>
                 </div>
@@ -12559,25 +13765,20 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Shipment Date</label>
-                        <div style="position:relative;">
-                            <input type="date" id="editShipmentDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${toIsoFromLabel(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date)}" style="width:100%; padding: 8px 8px 8px 8px; border: 1px solid #ddd; border-radius: 4px;" placeholder="${(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date) ?: ""}">
-                            <span id="editShipmentDateDayHint" style="position:absolute; right:45px; top:50%; transform: translateY(-50%); color:#6b7280; pointer-events:none;"></span>
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="editShipmentDate" maxlength="10" inputmode="numeric" autocomplete="off"
+                                       placeholder="MM/DD/YYYY"
+                                       value="${editShipmentMaskedInitial}"
+                                       style="flex:1; min-width:0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing:border-box;" />
+                                <button type="button" id="editShipmentDateCalendarBtn" title="Open calendar"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                <span id="editShipmentDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
+                            </div>
+                            <input type="date" id="editShipmentDatePicker" tabindex="-1" aria-hidden="true"
+                                   value="${editShipmentIsoInitial}"
+                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
                     </div>
-                    </div>
-                    <div>
-                        <label>Shipping Confirmed</label>
-                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
-                            <label class="checkwrap">
-                                <input type="radio" name="editShippingConfirmed" value="TRUE" ${if (purchaseData.shipped == true || (purchaseData.shipped as? Number)?.toInt() == 1) "checked" else ""}>
-                                <span class="checkmark"></span>
-                                TRUE
-                            </label>
-                            <label class="checkwrap">
-                                <input type="radio" name="editShippingConfirmed" value="FALSE" ${if (!(purchaseData.shipped == true || (purchaseData.shipped as? Number)?.toInt() == 1)) "checked" else ""}>
-                                <span class="checkmark"></span>
-                                FALSE
-                            </label>
-                        </div>
                     </div>
                     <div>
                         <label>B/L No.</label>
@@ -12662,21 +13863,6 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label>Total Cost (After Tax 10%)</label>
                         <input type="text" id="editTotalCostAfterTax" value="${purchaseData.totalPrice ?: ""}" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
                     </div>
-                    <div>
-                        <label>Invoice Confirmed</label>
-                        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
-                            <label class="checkwrap">
-                                <input type="radio" name="editInvoiceConfirmed" value="TRUE" ${if (purchaseData.invoiceConfirmed == true || (purchaseData.invoiceConfirmed as? Number)?.toInt() == 1) "checked" else ""}>
-                                <span class="checkmark"></span>
-                                TRUE
-                            </label>
-                            <label class="checkwrap">
-                                <input type="radio" name="editInvoiceConfirmed" value="FALSE" ${if (!(purchaseData.invoiceConfirmed == true || (purchaseData.invoiceConfirmed as? Number)?.toInt() == 1)) "checked" else ""}>
-                                <span class="checkmark"></span>
-                                FALSE
-                            </label>
-                        </div>
-                    </div>
                 </div>
                 
                 <div style="margin-bottom: 20px;">
@@ -12714,6 +13900,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <!-- Existing pictures will be displayed here -->
                         </div>
                     </div>
+                </div>
+                
+                <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('changeHistory')"><h3 class="form-section-header" data-section="changeHistory">Change History</h3></div>
+                <div class="form-section-content" data-section="changeHistory" style="width:100%;max-width:100%;box-sizing:border-box;margin-bottom: 20px;">
+                    <div id="editPurchaseChangeHistoryHost" style="width:100%;max-width:100%;box-sizing:border-box;"><span style="color:#6b7280;">Loading…</span></div>
                 </div>
                 
                 <div class="form-actions">
@@ -12777,7 +13968,9 @@ fun showEditFormWithData(purchaseData: dynamic) {
     """)
     
     setupEditFormListeners()
-    
+
+    loadEditPurchaseChangeHistory((purchaseData.id as? Number)?.toLong() ?: 0L)
+
     // Populate Grade, Country, Client Name, Repair Company from master_menu for edit form
     populateMasterMenuComboboxesForPurchaseForm()
     
@@ -12816,7 +14009,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     isoDate = todayIsoLocalDate()
                 }
                 console.log("🔍 [KOTLIN] purchaseDate effective ISO:", isoDate)
-                        editDateInput.value = isoDate
+                        editDateInput.value = isoToMmDdYyyy(isoDate)
+                        (document.getElementById("editDatePicker") as? HTMLInputElement)?.value = isoDate
                         val hint = document.getElementById("editDateDayHint") as? HTMLElement
                         hint?.textContent = isoToWeekdayLabelTopLevel(isoDate)
                 } else {
@@ -12832,7 +14026,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     val isoDate = toIsoFromLabel(paymentDateRaw)
                     console.log("🔍 [KOTLIN] paymentDate conversion result:", isoDate, "from:", paymentDateRaw)
                     if (isoDate.isNotBlank()) {
-                        editPaymentDateInput.value = isoDate
+                        editPaymentDateInput.value = isoToMmDdYyyy(isoDate)
+                        (document.getElementById("editPaymentDatePicker") as? HTMLInputElement)?.value = isoDate
                         console.log("✅ [KOTLIN FALLBACK] Set editPaymentDate:", isoDate, "from:", paymentDateRaw)
                         // Update day hint
                         val hint = document.getElementById("editPaymentDateDayHint") as? HTMLElement
@@ -12856,7 +14051,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     val isoDate = toIsoFromLabel(shipmentDateRaw)
                     console.log("🔍 [KOTLIN] shipmentDate conversion result:", isoDate, "from:", shipmentDateRaw)
                     if (isoDate.isNotBlank()) {
-                        editShipmentDateInput.value = isoDate
+                        editShipmentDateInput.value = isoToMmDdYyyy(isoDate)
+                        (document.getElementById("editShipmentDatePicker") as? HTMLInputElement)?.value = isoDate
                         console.log("✅ [KOTLIN FALLBACK] Set editShipmentDate:", isoDate, "from:", shipmentDateRaw)
                         // Update day hint
                         val hint = document.getElementById("editShipmentDateDayHint") as? HTMLElement
@@ -12885,6 +14081,99 @@ fun showEditFormWithData(purchaseData: dynamic) {
             setAllDatesFromKotlin() 
         }, AppConstants.CHASSIS_LOAD_DELAY)
     }, 500)
+}
+
+private fun loadEditPurchaseChangeHistory(purchaseId: Long) {
+    val host = document.getElementById("editPurchaseChangeHistoryHost") as? HTMLElement ?: return
+    if (purchaseId <= 0L) {
+        host.innerHTML =
+            "<p style=\"margin:0;color:#6b7280;font-size:13px;\">No changes recorded for this purchase</p>"
+        return
+    }
+    host.innerHTML = """<span style="color:#6b7280;">Loading…</span>"""
+    minimalPurchaseScope.launch {
+        val result = ApiClient.get<Array<dynamic>>("purchases/$purchaseId/change-history")
+        result.fold(
+            onSuccess = { data ->
+                val h = document.getElementById("editPurchaseChangeHistoryHost") as? HTMLElement ?: return@fold
+                val rows = mutableListOf<dynamic>()
+                if (data != null && js("Array.isArray")(data) as Boolean) {
+                    val arr = data.unsafeCast<dynamic>()
+                    val n = (arr.length as Number).toInt()
+                    for (i in 0 until n) rows.add(arr[i])
+                }
+                val sb = StringBuilder()
+                sb.append("""<div style="display:block;width:100%;max-width:100%;box-sizing:border-box;overflow-x:auto;border-radius:8px;background:#fff;border:1px solid #e5e7eb;">""")
+                sb.append("""<table style="width:100%;min-width:100%;border-collapse:collapse;table-layout:auto;font-size:13px;"><thead><tr>""")
+                sb.append("""<th style="text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#374151;">Date &amp; Time</th>""")
+                sb.append("""<th style="text-align:right;padding:8px 10px;border-bottom:1px solid #e5e7eb;color:#374151;width:60px;">Details</th>""")
+                sb.append("</tr></thead><tbody>")
+                if (rows.isEmpty()) {
+                    sb.append(
+                        """<tr><td colspan="2" style="padding:16px;color:#6b7280;">No changes recorded for this purchase</td></tr>"""
+                    )
+                } else {
+                    for (i in rows.indices) {
+                        val r = rows[i]
+                        val rd = r.unsafeCast<dynamic>()
+                        val tsRaw = rd.changedAt?.toString() ?: ""
+                        val fname = rd.fieldName?.toString() ?: ""
+                        val oldV = rd.oldValue
+                        val newV = rd.newValue
+                        val oldS = if (oldV == null || oldV == js("undefined")) "" else oldV.toString()
+                        val newS = if (newV == null || newV == js("undefined")) "" else newV.toString()
+                        val dt = escapeHtml(formatPurchaseChangeHistoryDateTime(tsRaw))
+                        
+                        val rowId = "ch_details_$i"
+                        
+                        // Summary Row
+                        sb.append("""<tr style="cursor:pointer;background:#f9fafb;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'; this.querySelector('.ch-indicator').style.backgroundColor='#d1d5db';" onmouseout="this.style.background='#f9fafb'; this.querySelector('.ch-indicator').style.backgroundColor='#e5e7eb';" onclick="var el = document.getElementById('$rowId'); if(el.style.display==='none'){ el.style.display='table-row'; this.querySelector('.ch-indicator').textContent='-'; }else{ el.style.display='none'; this.querySelector('.ch-indicator').textContent='+'; }">""")
+                        sb.append("""<td style="padding:10px 10px;border-bottom:1px solid #e5e7eb;white-space:nowrap;font-weight:500;">$dt</td>""")
+                        sb.append("""<td style="padding:10px 10px;border-bottom:1px solid #e5e7eb;text-align:right;"><span class="ch-indicator" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background-color:#e5e7eb;color:#374151;font-size:18px;font-weight:bold;line-height:1;user-select:none;box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:background-color 0.2s;">+</span></td>""")
+                        sb.append("</tr>")
+                        
+                        // Details Row
+                        sb.append("""<tr id="$rowId" style="display:none;background:#ffffff;">""")
+                        sb.append("""<td colspan="2" style="padding:16px 10px;border-bottom:1px solid #e5e7eb;">""")
+                        sb.append("""<table style="width:100%;border-collapse:collapse;font-size:12px;background:#fefefe;border:1px solid #f3f4f6;border-radius:4px;overflow:hidden;">""")
+                        sb.append("""<thead style="background:#f9fafb;"><tr>""")
+                        sb.append("""<th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:600;width:30%;">Field</th>""")
+                        sb.append("""<th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:600;width:35%;">Old value</th>""")
+                        sb.append("""<th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:600;width:35%;">New value</th>""")
+                        sb.append("""</tr></thead><tbody>""")
+                        
+                        val fields = fname.split(" ; ")
+                        val oldValues = oldS.split(" ; ")
+                        val newValues = newS.split(" ; ")
+                        
+                        for (j in fields.indices) {
+                            val f = escapeHtml(purchaseChangeHistoryFieldLabel(fields[j]))
+                            val o = escapeHtml(oldValues.getOrNull(j) ?: "")
+                            val n = escapeHtml(newValues.getOrNull(j) ?: "")
+                            
+                            val displayO = if (o.isBlank()) "<span style='color:#9ca3af;font-style:italic;'>empty</span>" else "<span style='color:#ef4444;'><del>$o</del></span>"
+                            val displayN = if (n.isBlank()) "<span style='color:#9ca3af;font-style:italic;'>empty</span>" else "<span style='color:#10b981;'>$n</span>"
+                            
+                            sb.append("<tr>")
+                            sb.append("""<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-weight:500;">$f</td>""")
+                            sb.append("""<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;word-break:break-word;background:#fef2f2;">$displayO</td>""")
+                            sb.append("""<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;word-break:break-word;background:#f0fdf4;">$displayN</td>""")
+                            sb.append("</tr>")
+                        }
+                        
+                        sb.append("""</tbody></table></td></tr>""")
+                    }
+                }
+                sb.append("</tbody></table></div>")
+                h.innerHTML = sb.toString()
+            },
+            onError = { message, _ ->
+                val h = document.getElementById("editPurchaseChangeHistoryHost") as? HTMLElement
+                h?.innerHTML =
+                    "<p style=\"margin:0;color:#b91c1c;font-size:13px;\">" + escapeHtml(message) + "</p>"
+            },
+        )
+    }
 }
 
 fun setupEditFormListeners() {
@@ -12925,6 +14214,7 @@ fun setupEditFormListeners() {
     })
 
     wireEditRixoUserOverrideListeners()
+    setupPurchaseStatusStateMachine(isEdit = true)
     
     // Add event listener for gear button to open Supplier Master List in new tab
     fun attachEditSupplierButtonListener() {
@@ -13160,50 +14450,159 @@ fun setupEditFormListeners() {
         }
     })
 
-    // Hook day hints for date inputs (edit form)
-    fun isoToWeekdayLabel(value: String): String {
-        if (value.isBlank()) return ""
-        try {
-            val date = js("new Date(value)")
-            val days = arrayOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
-            val idx = js("date.getDay()") as Int
-            return "(" + days[idx] + ")"
-        } catch (e: dynamic) {
-            return ""
+    fun updateEditMaskedDayHint(textInputId: String, hintId: String) {
+        val dateInput = document.getElementById(textInputId) as? HTMLInputElement ?: return
+        val hint = document.getElementById(hintId) as? HTMLElement ?: return
+        if (dateInput.value.isBlank()) {
+            hint.textContent = ""
+            return
         }
+        val isoStr = when (textInputId) {
+            "editDate", "editPaymentDate" -> strictMmDdYyyySlashToIso(dateInput.value.trim()) ?: ""
+            else -> {
+                val t = toIsoFromLabel(dateInput.value.trim()).trim()
+                if (t.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) t else ""
+            }
+        }
+        hint.textContent = if (isoStr.isNotBlank()) isoToWeekdayLabelTopLevel(isoStr) else ""
     }
 
-    // Set day hints for date inputs when form loads (for Purchase Date, Payment Date, Shipment Date)
-    fun updateDateDayHint(dateInputId: String, hintId: String) {
-        val dateInput = document.getElementById(dateInputId) as? HTMLInputElement
-        val hint = document.getElementById(hintId) as? HTMLElement?
-        if (dateInput != null && hint != null && dateInput.value.isNotBlank()) {
-            hint.textContent = isoToWeekdayLabelTopLevel(dateInput.value)
+    fun syncEditMaskedPickerFromText(textInputId: String, pickerId: String) {
+        val textInput = document.getElementById(textInputId) as? HTMLInputElement ?: return
+        val picker = document.getElementById(pickerId) as? HTMLInputElement ?: return
+        val isoStr = when (textInputId) {
+            "editDate", "editPaymentDate" -> strictMmDdYyyySlashToIso(textInput.value.trim()) ?: ""
+            else -> {
+                val t = toIsoFromLabel(textInput.value.trim()).trim()
+                if (t.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) t else ""
+            }
         }
+        picker.value = isoStr
     }
-    
-    // Update day hints for all date fields when form loads
+
+    fun attachMaskedEditDateField(
+        textInputId: String,
+        pickerId: String,
+        hintId: String,
+        btnId: String,
+        strictPurchaseDate: Boolean,
+    ) {
+        val text = document.getElementById(textInputId) as? HTMLInputElement ?: return
+        val picker = document.getElementById(pickerId) as? HTMLInputElement ?: return
+        val hint = document.getElementById(hintId) as? HTMLElement
+        val btn = document.getElementById(btnId)
+        var lastAcceptedText = text.value
+
+        fun textToIso(trimmed: String): String {
+            val t = trimmed.trim()
+            if (strictPurchaseDate) return strictMmDdYyyySlashToIso(t) ?: ""
+            val u = toIsoFromLabel(t).trim()
+            return if (u.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) u else ""
+        }
+
+        fun caretPosForDigits(masked: String, digitsCount: Int): Int {
+            if (digitsCount <= 0) return 0
+            var seen = 0
+            for (i in masked.indices) {
+                if (masked[i].isDigit()) {
+                    seen++
+                    if (seen >= digitsCount) {
+                        var pos = i + 1
+                        // Advance past auto-inserted "/" separator if present
+                        if (pos < masked.length && masked[pos] == '/') pos++
+                        return pos
+                    }
+                }
+            }
+            return masked.length
+        }
+
+        text.addEventListener("input", { _: Event ->
+            val raw = text.value
+            val caret = text.selectionStart ?: raw.length
+            val digitsBeforeCaret = raw.take(caret).count { it.isDigit() }
+            val next = if (strictPurchaseDate) autoInsertDateSeparatorsMmDdYyyy(text.value)
+            else maskMmDdYyyyFromDigits(text.value)
+            if (strictPurchaseDate && !isPotentialStrictPurchaseDateInput(next)) {
+                text.value = lastAcceptedText
+                val backPos = caretPosForDigits(lastAcceptedText, digitsBeforeCaret.coerceAtMost(lastAcceptedText.count { it.isDigit() }))
+                text.setSelectionRange(backPos, backPos)
+                return@addEventListener
+            }
+            text.value = next
+            lastAcceptedText = next
+            val pos = caretPosForDigits(next, digitsBeforeCaret.coerceAtMost(next.count { it.isDigit() }))
+            text.setSelectionRange(pos, pos)
+            updateEditMaskedDayHint(textInputId, hintId)
+        })
+        text.addEventListener("blur", { _: Event ->
+            val raw = text.value.trim()
+            if (raw.isBlank()) {
+                hint?.textContent = ""
+                if (strictPurchaseDate) picker.value = ""
+                return@addEventListener
+            }
+            val iso = textToIso(raw)
+            if (iso.isNotBlank()) {
+                text.value = isoToMmDdYyyy(iso)
+                picker.value = iso
+            } else if (strictPurchaseDate) {
+                picker.value = ""
+                hint?.textContent = ""
+            }
+            updateEditMaskedDayHint(textInputId, hintId)
+        })
+        text.addEventListener("keydown", { ev ->
+            val ke = ev as? KeyboardEvent ?: return@addEventListener
+            val key = ke.key
+            val isDigit = key.length == 1 && key[0] in '0'..'9'
+            val isSep = key == "/" || key == "-"
+            val navKeys = setOf(
+                "Backspace", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown",
+                "Tab", "Enter", "Home", "End",
+            )
+            if (ke.ctrlKey || ke.metaKey || ke.altKey) return@addEventListener
+            if (isDigit || isSep || navKeys.contains(key)) return@addEventListener
+            ke.preventDefault()
+        })
+
+        picker.addEventListener("change", { _: Event ->
+            val iso = picker.value.trim()
+            if (iso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) {
+                text.value = isoToMmDdYyyy(iso)
+                hint?.textContent = isoToWeekdayLabelTopLevel(iso)
+            } else if (iso.isBlank()) {
+                hint?.textContent = ""
+            }
+        })
+
+        btn?.addEventListener("click", { ev ->
+            ev.preventDefault()
+            var cur = textToIso(text.value).takeIf { it.isNotBlank() }
+                ?: picker.value.trim().takeIf { it.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) }
+            if (cur.isNullOrBlank()) cur = todayIsoLocalDate()
+            picker.value = cur
+            val dyn = picker.asDynamic()
+            try {
+                dyn.showPicker()
+            } catch (_: dynamic) {
+                picker.click()
+            }
+        })
+    }
+
     window.setTimeout({
-        updateDateDayHint("editDate", "editDateDayHint")
-        updateDateDayHint("editPaymentDate", "editPaymentDateDayHint")
-        updateDateDayHint("editShipmentDate", "editShipmentDateDayHint")
+        syncEditMaskedPickerFromText("editDate", "editDatePicker")
+        syncEditMaskedPickerFromText("editPaymentDate", "editPaymentDatePicker")
+        syncEditMaskedPickerFromText("editShipmentDate", "editShipmentDatePicker")
+        updateEditMaskedDayHint("editDate", "editDateDayHint")
+        updateEditMaskedDayHint("editPaymentDate", "editPaymentDateDayHint")
+        updateEditMaskedDayHint("editShipmentDate", "editShipmentDateDayHint")
+        attachMaskedEditDateField("editDate", "editDatePicker", "editDateDayHint", "editDateCalendarBtn", strictPurchaseDate = true)
+        attachMaskedEditDateField("editPaymentDate", "editPaymentDatePicker", "editPaymentDateDayHint", "editPaymentDateCalendarBtn", strictPurchaseDate = true)
+        attachMaskedEditDateField("editShipmentDate", "editShipmentDatePicker", "editShipmentDateDayHint", "editShipmentDateCalendarBtn", strictPurchaseDate = true)
+        bindStrictMonthYearTextMask("editCarModelYear", "editCarModelYearHint")
     }, 100)
-
-    (document.getElementById("editDate") as HTMLInputElement?)?.addEventListener("change", { ev: Event ->
-        val v = (ev.target as HTMLInputElement).value
-        val hint = document.getElementById("editDateDayHint") as HTMLElement?
-        hint?.textContent = isoToWeekdayLabelTopLevel(v)
-    })
-    (document.getElementById("editShipmentDate") as HTMLInputElement?)?.addEventListener("change", { ev: Event ->
-        val v = (ev.target as HTMLInputElement).value
-        val hint = document.getElementById("editShipmentDateDayHint") as HTMLElement?
-        hint?.textContent = isoToWeekdayLabelTopLevel(v)
-    })
-    (document.getElementById("editPaymentDate") as HTMLInputElement?)?.addEventListener("change", { ev: Event ->
-        val v = (ev.target as HTMLInputElement).value
-        val hint = document.getElementById("editPaymentDateDayHint") as HTMLElement?
-        hint?.textContent = isoToWeekdayLabelTopLevel(v)
-    })
     (document.getElementById("editCarModelYear") as HTMLInputElement?)?.let { monthEl ->
         val hint = document.getElementById("editCarModelYearHint") as HTMLElement?
         val updateHint = {
@@ -13420,8 +14819,9 @@ fun getFieldDisplayName(fieldName: String): String {
         "numberCut" -> "Number Cut"
         "notes" -> "Notes"
         "bookingId" -> "Booking No"
-        "shipped" -> "Shipping Confirmed"
-        "invoiceConfirmed" -> "Invoice Confirmed"
+        "bookingRequested" -> "Booking Requested"
+        "sold" -> "Sold"
+        "invoiceConfirmed" -> "Sold"
         else -> fieldName.replace(Regex("([A-Z])"), " $1").trim().replaceFirstChar { it.uppercaseChar() }
     }
 }
@@ -13438,13 +14838,7 @@ fun formatValueForDisplay(value: dynamic): String {
 
 // Function to collect current form data (same logic as proceedWithEditPurchase)
 fun collectCurrentEditFormData(): dynamic {
-    fun getComboboxValueSafe(fieldId: String): String {
-        val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
-        val select = document.getElementById(fieldId) as? HTMLSelectElement
-        return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
-    }
-    
-    val date = formatWithWeekday((document.getElementById("editDate") as? HTMLInputElement)?.value ?: "")
+    val date = editPurchaseDateDisplayToWeekdayFormatted((document.getElementById("editDate") as? HTMLInputElement)?.value ?: "")
     val carModelYear = (document.getElementById("editCarModelYear") as? HTMLInputElement)?.value ?: ""
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
@@ -13473,7 +14867,7 @@ fun collectCurrentEditFormData(): dynamic {
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
     val pol = getComboboxValueSafe("editPol")
-    val rixoCompany = getComboboxValueSafe("editRixoCompany")
+    val rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
     val clientName = getComboboxValueSafe("editClientName")
     val country = getComboboxValueSafe("editCountry")
     val venueId = getComboboxValueSafe("editVenueId")
@@ -13499,15 +14893,22 @@ fun collectCurrentEditFormData(): dynamic {
     val taxTotalRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editTaxTotal') : ''").unsafeCast<String>().trim()
     val taxTotal = if (taxTotalRaw.isNotBlank()) "¥$taxTotalRaw" else ""
     val totalPrice = (document.getElementById("editTotalCostAfterTax") as? HTMLInputElement)?.value ?: ""
-    val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
-    val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
-    val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
-    val shippingConfirmed = (document.querySelector("input[name=\"editShippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
-    val invoiceConfirmed = (document.querySelector("input[name=\"editInvoiceConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
+    val paymentDate =
+        editStrictMmDdYyyyDisplayToWeekdayFormatted((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
+    val rixoRequested = purchaseStatusRead("editStatusRixoRequested", "editRixoRequested", "")
+    val rixoConfirmed = purchaseStatusRead("editStatusRixoConfirmed", "editRixoConfirmed", "")
+    val editBookingRequested = purchaseStatusRead("editStatusBookingRequested", "editBookingRequested")
+    // "Sold" form field was removed; the form's Sold control now maps to invoiceConfirmed.
+    // Preserve the legacy [sold] flag from the loaded record so editing doesn't reset it.
+    val sold = js(
+        """(function(){ var pd = window.__editPurchaseDataForRixo || {}; var raw = pd.sold; return (raw === true || raw === 1 || raw === "1" || raw === "TRUE") ? "TRUE" : "FALSE"; })()""",
+    ).unsafeCast<String>()
+    val invoiceConfirmed = purchaseStatusRead("editStatusInvoiceConfirmed", "editInvoiceConfirmed")
     val rixoPriceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRixoPriceInput') : ''").unsafeCast<String>().trim()
     val rixoPrice = if (rixoPriceRaw.isNotBlank()) "¥$rixoPriceRaw" else ""
     val numberCutString = (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value ?: ""
-    val shipmentDate = formatWithWeekday((document.getElementById("editShipmentDate") as? HTMLInputElement)?.value ?: "")
+    val shipmentDate =
+        editStrictMmDdYyyyDisplayToWeekdayFormatted((document.getElementById("editShipmentDate") as? HTMLInputElement)?.value ?: "")
     val blNo = (document.getElementById("editBlNo") as? HTMLInputElement)?.value ?: ""
     val vessel = (document.getElementById("editVessel") as? HTMLInputElement)?.value ?: ""
     val destination = (document.getElementById("editDestination") as? HTMLInputElement)?.value
@@ -13577,7 +14978,8 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.paymentDate = paymentDate
     purchaseData.rixoRequested = rixoRequested
     purchaseData.rixoConfirmed = rixoConfirmed
-    purchaseData.shipped = (shippingConfirmed == "TRUE")
+    purchaseData.bookingRequested = (editBookingRequested == "TRUE")
+    purchaseData.sold = (sold == "TRUE")
     purchaseData.invoiceConfirmed = (invoiceConfirmed == "TRUE")
     purchaseData.rixoPrice = rixoPrice
     purchaseData.shipmentDate = shipmentDate
@@ -13667,7 +15069,7 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
         "roadTax", "taxTotal", "totalPrice", "paymentDate", "rixoRequested", "rixoConfirmed",
         "rixoPrice", "shipmentDate", "blNo", "vessel", "destination", "shipmentCharges",
         "freight", "storageCharges", "miscCharges", "inspectionFee", "commission", "repairCompany",
-        "repairCharges", "shaken", "numberCut", "notes", "bookingId", "shipped", "invoiceConfirmed", "carPictures"
+        "repairCharges", "shaken", "numberCut", "notes", "bookingId", "bookingRequested", "sold", "invoiceConfirmed", "carPictures"
     )
 
     // Compare money values by numeric content only (ignore `¥`, commas, formatting, etc.)
@@ -13899,11 +15301,6 @@ fun showEditConfirmationModal(changes: Map<String, Pair<String, String>>, purcha
     confirmBtn?.addEventListener("click", { _: Event ->
         document.getElementById("editConfirmationModal")?.remove()
         // Get chassis value for proceedWithEditPurchase
-        fun getComboboxValueSafe(fieldId: String): String {
-            val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
-            val select = document.getElementById(fieldId) as? HTMLSelectElement
-            return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
-        }
         val chassis = getComboboxValueSafe("editChassis")
         // Proceed with update
         proceedWithEditPurchase(id, chassis)
@@ -13944,13 +15341,6 @@ fun handleEditPurchase() {
     
     console.log("✅ Purchase ID: $id")
     
-    // Helper function to safely get combobox value (matches approach used elsewhere)
-    fun getComboboxValueSafe(fieldId: String): String {
-        val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
-        val select = document.getElementById(fieldId) as? HTMLSelectElement
-        return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
-    }
-    
     // Get all field values
     val chassis = getComboboxValueSafe("editChassis")
     val brand = getComboboxValueSafe("editBrand")
@@ -13966,7 +15356,7 @@ fun handleEditPurchase() {
     val stockLocation = getComboboxValueSafe("editStockLocation")
     val pol = getComboboxValueSafe("editPol")
     val venueId = getComboboxValueSafe("editVenueId")
-    val rixoCompany = getComboboxValueSafe("editRixoCompany")
+    val rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
     val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
     
     // Check if at least one field is filled
@@ -13980,11 +15370,52 @@ fun handleEditPurchase() {
         return
     }
     
-    // Validate date format if provided
-    val editDateIso = (document.getElementById("editDate") as? HTMLInputElement)?.value ?: ""
-    if (editDateIso.isNotBlank() && !editDateIso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) {
-        showErrorModal("Invalid Date", "Please enter a valid date in YYYY-MM-DD format.")
+    // Purchase Date: strict MM/DD/YYYY only (no loose parsing).
+    val editDateEl = document.getElementById("editDate") as? HTMLInputElement
+    val rawPurchaseDate = editDateEl?.value?.trim() ?: ""
+    val editPurchaseDateIso = strictMmDdYyyySlashToIso(rawPurchaseDate)
+    if (rawPurchaseDate.isNotBlank() && editPurchaseDateIso == null) {
+        showErrorModal(
+            "Invalid Purchase Date",
+            "Use MM/DD/YYYY with a 2-digit month (01–12), 2-digit day (valid for that month), and 4-digit year.",
+        )
         return
+    }
+    if (editPurchaseDateIso != null) {
+        editDateEl?.value = isoToMmDdYyyy(editPurchaseDateIso)
+        (document.getElementById("editDatePicker") as? HTMLInputElement)?.value = editPurchaseDateIso
+    }
+
+    // Payment Date: strict MM/DD/YYYY when non-empty.
+    val editPaymentDateEl = document.getElementById("editPaymentDate") as? HTMLInputElement
+    val rawPaymentDate = editPaymentDateEl?.value?.trim() ?: ""
+    val editPaymentDateIso = strictMmDdYyyySlashToIso(rawPaymentDate)
+    if (rawPaymentDate.isNotBlank() && editPaymentDateIso == null) {
+        showErrorModal(
+            "Invalid Payment Date",
+            "Use MM/DD/YYYY with a 2-digit month (01–12), 2-digit day (valid for that month), and 4-digit year.",
+        )
+        return
+    }
+    if (editPaymentDateIso != null) {
+        editPaymentDateEl?.value = isoToMmDdYyyy(editPaymentDateIso)
+        (document.getElementById("editPaymentDatePicker") as? HTMLInputElement)?.value = editPaymentDateIso
+    }
+
+    // Shipment Date: strict MM/DD/YYYY when non-empty.
+    val editShipmentDateEl = document.getElementById("editShipmentDate") as? HTMLInputElement
+    val rawShipmentDate = editShipmentDateEl?.value?.trim() ?: ""
+    val editShipmentDateIso = strictMmDdYyyySlashToIso(rawShipmentDate)
+    if (rawShipmentDate.isNotBlank() && editShipmentDateIso == null) {
+        showErrorModal(
+            "Invalid Shipment Date",
+            "Use MM/DD/YYYY with a 2-digit month (01–12), 2-digit day (valid for that month), and 4-digit year.",
+        )
+        return
+    }
+    if (editShipmentDateIso != null) {
+        editShipmentDateEl?.value = isoToMmDdYyyy(editShipmentDateIso)
+        (document.getElementById("editShipmentDatePicker") as? HTMLInputElement)?.value = editShipmentDateIso
     }
     
     // Validate Production Date year
@@ -14039,13 +15470,6 @@ fun handleEditPurchase() {
     // Proceed with editing purchase (extracted from handleEditPurchase)
 fun proceedWithEditPurchase(id: Long, chassis: String) {
     setRixoAutoSelectSuppress()
-    // Helper function to get combobox value (same as in handleEditPurchase)
-    fun getComboboxValueSafe(fieldId: String): String {
-        val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
-        val select = document.getElementById(fieldId) as? HTMLSelectElement
-        return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
-    }
-    
     console.log("📝 [TEST] Starting data collection in proceedWithEditPurchase()")
     
     // Extract field values for master list validation first
@@ -14056,7 +15480,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     val valSupplierName = getComboboxValueSafe("editAuctionName")
     val valVenueId = getComboboxValueSafe("editVenueId")
     val valVehicleType = getComboboxValueSafe("editTypeOfVehicle")
-    val valRixoCompany = getComboboxValueSafe("editRixoCompany")
+    val valRixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
     val valStockLocation = getComboboxValueSafe("editStockLocation")
     val valPol = getComboboxValueSafe("editPol")
     val valClientName = getComboboxValueSafe("editClientName")
@@ -14094,14 +15518,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
 
 // Extracted function to perform the actual edit purchase save after master list validation
 fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
-    // Helper function to get combobox value
-    fun getComboboxValueSafe(fieldId: String): String {
-        val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
-        val select = document.getElementById(fieldId) as? HTMLSelectElement
-        return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
-    }
-    
-    val date = formatWithWeekday((document.getElementById("editDate") as? HTMLInputElement)?.value ?: "")
+    val date = editPurchaseDateDisplayToWeekdayFormatted((document.getElementById("editDate") as? HTMLInputElement)?.value ?: "")
     val carModelYear = (document.getElementById("editCarModelYear") as? HTMLInputElement)?.value ?: ""
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
@@ -14130,7 +15547,7 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
     val pol = getComboboxValueSafe("editPol")
-    val rixoCompany = getComboboxValueSafe("editRixoCompany")
+    val rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
     val clientName = getComboboxValueSafe("editClientName")
     val country = getComboboxValueSafe("editCountry")
     val venueId = getComboboxValueSafe("editVenueId")
@@ -14149,16 +15566,23 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     val taxTotalRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editTaxTotal') : ''").unsafeCast<String>().trim()
     val taxTotal = if (taxTotalRaw.isNotBlank()) "¥$taxTotalRaw" else ""
     val totalPrice = (document.getElementById("editTotalCostAfterTax") as? HTMLInputElement)?.value ?: ""
-    val paymentDate = formatWithWeekday((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
-    val rixoRequested = (document.querySelector("input[name=\"editRixoRequested\"]:checked") as HTMLInputElement?)?.value ?: ""
-    val rixoConfirmed = (document.querySelector("input[name=\"editRixoConfirmed\"]:checked") as HTMLInputElement?)?.value ?: ""
-    val shippingConfirmed = (document.querySelector("input[name=\"editShippingConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
-    val invoiceConfirmed = (document.querySelector("input[name=\"editInvoiceConfirmed\"]:checked") as HTMLInputElement?)?.value ?: "FALSE"
+    val paymentDate =
+        editStrictMmDdYyyyDisplayToWeekdayFormatted((document.getElementById("editPaymentDate") as? HTMLInputElement)?.value ?: "")
+    val rixoRequested = purchaseStatusRead("editStatusRixoRequested", "editRixoRequested", "")
+    val rixoConfirmed = purchaseStatusRead("editStatusRixoConfirmed", "editRixoConfirmed", "")
+    val editBookingRequested = purchaseStatusRead("editStatusBookingRequested", "editBookingRequested")
+    // "Sold" form field was removed; the form's Sold control now maps to invoiceConfirmed.
+    // Preserve the legacy [sold] flag from the loaded record so editing doesn't reset it.
+    val sold = js(
+        """(function(){ var pd = window.__editPurchaseDataForRixo || {}; var raw = pd.sold; return (raw === true || raw === 1 || raw === "1" || raw === "TRUE") ? "TRUE" : "FALSE"; })()""",
+    ).unsafeCast<String>()
+    val invoiceConfirmed = purchaseStatusRead("editStatusInvoiceConfirmed", "editInvoiceConfirmed")
     // Parse rixo price - add ¥ symbol before saving
     val rixoPriceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editRixoPriceInput') : ''").unsafeCast<String>().trim()
     val rixoPrice = if (rixoPriceRaw.isNotBlank()) "¥$rixoPriceRaw" else ""
     val numberCutString = (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value ?: ""
-    val shipmentDate = formatWithWeekday((document.getElementById("editShipmentDate") as? HTMLInputElement)?.value ?: "")
+    val shipmentDate =
+        editStrictMmDdYyyyDisplayToWeekdayFormatted((document.getElementById("editShipmentDate") as? HTMLInputElement)?.value ?: "")
     val blNo = (document.getElementById("editBlNo") as? HTMLInputElement)?.value ?: ""
     val vessel = (document.getElementById("editVessel") as? HTMLInputElement)?.value ?: ""
     val destination = (document.getElementById("editDestination") as? HTMLInputElement)?.value
@@ -14226,7 +15650,8 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.paymentDate = paymentDate
     purchaseData.rixoRequested = rixoRequested
     purchaseData.rixoConfirmed = rixoConfirmed
-    purchaseData.shipped = (shippingConfirmed == "TRUE")
+    purchaseData.bookingRequested = (editBookingRequested == "TRUE")
+    purchaseData.sold = (sold == "TRUE")
     purchaseData.invoiceConfirmed = (invoiceConfirmed == "TRUE")
     purchaseData.rixoPrice = rixoPrice
     purchaseData.shipmentDate = shipmentDate
@@ -14276,13 +15701,6 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     
     // Submit the purchase update
     submitEditPurchase(id, purchaseData)
-}
-
-// Helper function for actuallyProceedWithEditPurchase
-private fun getComboboxValueSafe(fieldId: String): String {
-    val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
-    val select = document.getElementById(fieldId) as? HTMLSelectElement
-    return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
 }
 
 // Submit edit purchase request
@@ -14976,15 +16394,16 @@ fun saveCnfFormState() {
     
     // Create or update state for this specific chassis
     val chassisState = js("{}")
-    chassisState.carPrice = (document.getElementById("carPrice") as? HTMLInputElement)?.value ?: "0"
-    chassisState.auctionFee = (document.getElementById("auctionFee") as? HTMLInputElement)?.value ?: "0"
-    chassisState.rixoPrice = (document.getElementById("rixoPrice") as? HTMLInputElement)?.value ?: "0"
-    chassisState.shippingCharge = (document.getElementById("shippingCharge") as? HTMLInputElement)?.value ?: "0"
-    chassisState.freight = (document.getElementById("freight") as? HTMLInputElement)?.value ?: "0"
-    chassisState.inspectionFee = (document.getElementById("inspectionFee") as? HTMLInputElement)?.value ?: "0"
-    chassisState.repairFee = (document.getElementById("repairFee") as? HTMLInputElement)?.value ?: "0"
-    chassisState.mscCharges = (document.getElementById("mscCharges") as? HTMLInputElement)?.value ?: "0"
-    chassisState.profit = (document.getElementById("profit") as? HTMLInputElement)?.value ?: "0"
+    chassisState.carPrice = (document.getElementById("carPrice") as? HTMLInputElement)?.value ?: ""
+    chassisState.auctionFee = (document.getElementById("auctionFee") as? HTMLInputElement)?.value ?: ""
+    chassisState.rixoPrice = (document.getElementById("rixoPrice") as? HTMLInputElement)?.value ?: ""
+    chassisState.shippingCharge = (document.getElementById("shippingCharge") as? HTMLInputElement)?.value ?: ""
+    chassisState.freight = (document.getElementById("freight") as? HTMLInputElement)?.value ?: ""
+    chassisState.inspectionFee = (document.getElementById("inspectionFee") as? HTMLInputElement)?.value ?: ""
+    chassisState.repairFee = (document.getElementById("repairFee") as? HTMLInputElement)?.value ?: ""
+    chassisState.auctionPenaltyFee = (document.getElementById("auctionPenaltyFee") as? HTMLInputElement)?.value ?: ""
+    chassisState.mscCharges = (document.getElementById("mscCharges") as? HTMLInputElement)?.value ?: ""
+    chassisState.profit = (document.getElementById("profit") as? HTMLInputElement)?.value ?: ""
     
     // Store state for this chassis - use window object
     js("window.cnfFormState[selectedChassis] = chassisState")
@@ -15038,25 +16457,30 @@ fun restoreCnfFormState() {
     window.setTimeout({
         // Restore all fields EXCEPT freight (freight will be handled separately)
         // Access properties from window object
-        val carPrice = js("window.cnfFormState[currentChassis].carPrice") as? String ?: "0"
-        val auctionFee = js("window.cnfFormState[currentChassis].auctionFee") as? String ?: "0"
-        val rixoPrice = js("window.cnfFormState[currentChassis].rixoPrice") as? String ?: "0"
-        val shippingCharge = js("window.cnfFormState[currentChassis].shippingCharge") as? String ?: "0"
-        val inspectionFee = js("window.cnfFormState[currentChassis].inspectionFee") as? String ?: "0"
-        val repairFee = js("window.cnfFormState[currentChassis].repairFee") as? String ?: "0"
-        val mscCharges = js("window.cnfFormState[currentChassis].mscCharges") as? String ?: "0"
-        val profit = js("window.cnfFormState[currentChassis].profit") as? String ?: "0"
+        val carPrice = js("window.cnfFormState[currentChassis].carPrice") as? String ?: ""
+        val auctionFee = js("window.cnfFormState[currentChassis].auctionFee") as? String ?: ""
+        val rixoPrice = js("window.cnfFormState[currentChassis].rixoPrice") as? String ?: ""
+        val shippingCharge = js("window.cnfFormState[currentChassis].shippingCharge") as? String ?: ""
+        val inspectionFee = js("window.cnfFormState[currentChassis].inspectionFee") as? String ?: ""
+        val repairFee = js("window.cnfFormState[currentChassis].repairFee") as? String ?: ""
+        val auctionPenaltyFee = js("window.cnfFormState[currentChassis].auctionPenaltyFee") as? String ?: ""
+        val mscCharges = js("window.cnfFormState[currentChassis].mscCharges") as? String ?: ""
+        val profit = js("window.cnfFormState[currentChassis].profit") as? String ?: ""
         
-        // Restore ALL saved values for this specific chassis (even if "0" - user may have edited to 0)
-        // This ensures each chassis gets its own edited values restored, not mixed with other chassis
-        (document.getElementById("carPrice") as? HTMLInputElement)?.value = carPrice
-        (document.getElementById("auctionFee") as? HTMLInputElement)?.value = auctionFee
-        (document.getElementById("rixoPrice") as? HTMLInputElement)?.value = rixoPrice
-        (document.getElementById("shippingCharge") as? HTMLInputElement)?.value = shippingCharge
-        (document.getElementById("inspectionFee") as? HTMLInputElement)?.value = inspectionFee
-        (document.getElementById("repairFee") as? HTMLInputElement)?.value = repairFee
-        (document.getElementById("mscCharges") as? HTMLInputElement)?.value = mscCharges
-        (document.getElementById("profit") as? HTMLInputElement)?.value = profit
+        // Restore saved values; blank when numeric zero so inputs stay visually empty
+        (document.getElementById("carPrice") as? HTMLInputElement)?.value = cnfRestoreMoneyDisplay(carPrice)
+        (document.getElementById("auctionFee") as? HTMLInputElement)?.value = cnfRestoreMoneyDisplay(auctionFee)
+        (document.getElementById("rixoPrice") as? HTMLInputElement)?.value = cnfRestoreMoneyDisplay(rixoPrice)
+        (document.getElementById("shippingCharge") as? HTMLInputElement)?.value = cnfRestoreMoneyDisplay(shippingCharge)
+        if (currentChassis.isNotEmpty() && globalShippingChargeValues.containsKey(currentChassis)) {
+            val shipG = globalShippingChargeValues[currentChassis] ?: 0.0
+            (document.getElementById("shippingCharge") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(shipG)
+        }
+        (document.getElementById("inspectionFee") as? HTMLInputElement)?.value = cnfRestoreMoneyDisplay(inspectionFee)
+        (document.getElementById("repairFee") as? HTMLInputElement)?.value = cnfRestoreMoneyDisplay(repairFee)
+        (document.getElementById("auctionPenaltyFee") as? HTMLInputElement)?.value = cnfRestoreMoneyDisplay(auctionPenaltyFee)
+        (document.getElementById("mscCharges") as? HTMLInputElement)?.value = cnfRestoreMoneyDisplay(mscCharges)
+        (document.getElementById("profit") as? HTMLInputElement)?.value = cnfRestoreMoneyDisplay(profit)
         
         // Handle freight field: ALWAYS prioritize globalFreightValues over saved form state
         // This ensures freight values from Calculate Freight page are preserved
@@ -15072,14 +16496,15 @@ fun restoreCnfFormState() {
             
             if (freightFromGlobal != null) {
                 // Use freight from globalFreightValues (backtracked value) - this takes priority
-                freightField.value = freightFromGlobal.toInt().toString()
+                freightField.value = cnfMoneyFieldDisplay(freightFromGlobal)
                 console.log("🚢 Restored freight from globalFreightValues: ¥${freightFromGlobal.toInt()}")
             } else {
                 // Fall back to saved form state only if no globalFreightValues exists
-                val savedFreight = js("window.cnfFormState[currentChassis].freight") as? String ?: "0"
-                if (savedFreight != "0") {
-                    freightField.value = savedFreight
-                    console.log("💾 Restored freight from form state: $savedFreight")
+                val savedFreight = js("window.cnfFormState[currentChassis].freight") as? String ?: ""
+                val restoredFreight = cnfRestoreMoneyDisplay(savedFreight)
+                freightField.value = restoredFreight
+                if (restoredFreight.isNotEmpty()) {
+                    console.log("💾 Restored freight from form state: $restoredFreight")
                 }
             }
         }
@@ -15097,7 +16522,7 @@ fun restoreCnfFormState() {
             val freightValue = globalFreightValues[currentChassis] ?: 0.0
             if (freightValue > 0.0) {
                 val freightFieldFinal = document.getElementById("freight") as? HTMLInputElement
-                freightFieldFinal?.value = freightValue.toInt().toString()
+                freightFieldFinal?.value = cnfMoneyFieldDisplay(freightValue)
                 console.log("🚢 Final freight restoration from globalFreightValues: ¥${freightValue.toInt()}")
                 calculateCnfTotal()
             }
@@ -15122,6 +16547,22 @@ fun clearCarBookingStates() {
     carBookingTableData = emptyArray()
     carBookingDisplayedCars = emptyArray()
     cnfPageSelectedPurchaseIds = emptyList()
+    cnfPageSelectedCars = emptyList()
+    cnfConfirmedCars.clear()
+    fobConfirmedCars.clear()
+    cnfPageIsFobMode = false
+    cnfPageCurrentPurchaseId = null
+    lastCalculationMode = ""
+    js("if (typeof window !== 'undefined') window.lastCalculationMode = ''")
+    currentSelectedCountry = ""
+    cnfPageSelectedCountry = ""
+    globalBookingDetails = js("{}")
+    globalSelectedCarsForPdf = emptyList()
+    globalFreightValues.clear()
+    globalShippingChargeValues.clear()
+    try {
+        safeLocalStorageRemove("bookingSelection")
+    } catch (_: dynamic) { }
     // fobPageSelectedPurchaseIds removed - using cnfPageSelectedPurchaseIds for both modes
     console.log("✅ Car booking states cleared")
 }
@@ -15584,8 +17025,12 @@ fun restoreCarBookingState() {
         console.log("🔄 Restoring displayed cars:", carsArray.size)
         displayPurchasesAsCars(carsToRestore)
         
-        // Restore selected rows after a longer delay to ensure table is fully rendered
-        js("setTimeout(function() { window.restoreSelectedRows(); }, 500)")
+        // Recreate booking uses × remove buttons, not row checkboxes — skip checkbox restore.
+        if (!isCarBookingRecreateSession()) {
+            js("setTimeout(function() { window.restoreSelectedRows(); }, 500)")
+        } else {
+            js("window.__bookingRestoreInProgress = false")
+        }
             } else {
         console.log("⚠️ No displayed cars to restore")
         js("window.__bookingRestoreInProgress = false")
@@ -15595,24 +17040,35 @@ fun restoreCarBookingState() {
 }
 
 fun restoreSelectedRows() {
+    if (isCarBookingRecreateSession()) {
+        js("window.__bookingRestoreInProgress = false")
+        return
+    }
     console.log("🔄 Restoring selected rows...")
     console.log("🔍 carBookingSelectedRows contains:", carBookingSelectedRows.contentToString())
     
     // Check if table body exists and has rows
     val tableBody = document.getElementById("carSelectionTableBody")
     if (tableBody == null) {
+        val retries = (window.asDynamic().__restoreSelectedRowsRetries as? Number)?.toInt() ?: 0
+        if (retries >= 15) {
+            js("window.__bookingRestoreInProgress = false")
+            window.asDynamic().__restoreSelectedRowsRetries = 0
+            return
+        }
+        window.asDynamic().__restoreSelectedRowsRetries = retries + 1
         console.log("❌ Table body not found, retrying in 200ms...")
         js("setTimeout(function() { window.restoreSelectedRows(); }, 200)")
         return
     }
+    window.asDynamic().__restoreSelectedRowsRetries = 0
     
     // Clear all checkboxes first
     val allCheckboxes = document.querySelectorAll("#carSelectionTableBody input[type='checkbox']")
     console.log("🔍 Found ${allCheckboxes.length} total checkboxes to clear")
     
     if (allCheckboxes.length == 0) {
-        console.log("❌ No checkboxes found in table, retrying in 200ms...")
-        js("setTimeout(function() { window.restoreSelectedRows(); }, 200)")
+        js("window.__bookingRestoreInProgress = false")
         return
     }
     
@@ -16404,7 +17860,7 @@ fun handleRixoTransportPdfGeneration() {
     console.log("Storing selected IDs for Rixo Transport:", selectedIds)
     
     // Navigate to rixo transport page in new tab
-    val url = "${window.location.origin}${window.location.pathname}#/rixo-transport?ids=${selectedIds.joinToString(",")}"
+    val url = "${window.location.origin}${window.location.pathname}#/rixo-generator?ids=${selectedIds.joinToString(",")}"
     window.open(url, "_blank")
 }
 
@@ -16627,325 +18083,6 @@ fun escapeJsonString(str: String): String {
         }
 }
 
-fun handleInvoicePdfDownload() {
-    Logger.debug("Download PDF button clicked for invoice")
-    
-    // Get purchase IDs from current invoice purchases
-    val currentIds = js("window.currentInvoicePurchaseIds") as? Array<dynamic>
-    val selectedIds = if (currentIds != null) {
-        currentIds.mapNotNull { id ->
-            when (id) {
-                is Number -> id.toLong()
-                is String -> id.toLongOrNull()
-                else -> null
-            }
-        }
-    } else {
-        emptyList<Long>()
-    }
-    
-    if (selectedIds.isEmpty()) {
-        showMessage("No purchases selected. Please select CLIENT and VESSEL first.", "warning")
-        return
-    }
-    
-    // Collect form field values
-    val invoiceNumber = (document.getElementById("invoiceNumber") as? HTMLInputElement)?.value?.trim() ?: ""
-    val invoiceLcNo = (document.getElementById("invoiceLcNo") as? HTMLInputElement)?.value?.trim() ?: ""
-    val invoiceClient = (document.getElementById("invoiceClient") as? HTMLSelectElement)?.value?.trim() ?: ""
-    val invoiceVessel = (document.getElementById("invoiceVessel") as? HTMLInputElement)?.value?.trim() ?: ""
-    val invoiceShippingDate = (document.getElementById("invoiceShippingDate") as? HTMLInputElement)?.value?.trim() ?: ""
-    val invoiceFrom = (document.getElementById("invoiceFrom") as? HTMLInputElement)?.value?.trim() ?: ""
-    val invoiceTo = (document.getElementById("invoiceTo") as? HTMLInputElement)?.value?.trim() ?: ""
-    val invoiceMessage = (document.getElementById("invoiceMessage") as? HTMLTextAreaElement)?.value?.trim() ?: ""
-    
-    // Get price type (C&F or FOB)
-    val invoiceCnf = document.getElementById("invoiceCnf") as? HTMLInputElement
-    val invoiceFob = document.getElementById("invoiceFob") as? HTMLInputElement
-    val priceType = when {
-        invoiceCnf?.checked == true -> "C&F"
-        invoiceFob?.checked == true -> "FOB"
-        else -> "C&F"
-    }
-    
-    // Get bank account - use value attribute which preserves newlines
-    val invoiceBankAccount = document.getElementById("invoiceBankAccount") as? HTMLSelectElement
-    val bankAccountValue = invoiceBankAccount?.value?.trim() ?: ""
-    
-    // Validate required fields
-    if (invoiceNumber.isEmpty()) {
-        showMessage("Please enter an invoice number", "warning")
-        return
-    }
-    
-    if (invoiceClient.isEmpty()) {
-        showMessage("Please enter a client name", "warning")
-        return
-    }
-    
-    // Parse client name and address
-    val clientParts = invoiceClient.split("\n", limit = 2)
-    val clientName = if (clientParts.isNotEmpty()) clientParts[0].trim() else invoiceClient.trim()
-    val clientAddress = if (clientParts.size > 1) clientParts[1].trim() else null
-    
-    // Get current date for invoice date
-    val currentDate = js("new Date()").unsafeCast<dynamic>()
-    val year = currentDate.getFullYear() as Int
-    val month = ((currentDate.getMonth() as Int) + 1).toString().padStart(2, '0')
-    val day = (currentDate.getDate() as Int).toString().padStart(2, '0')
-    val invoiceDate = year.toString() + "-" + month + "-" + day
-    
-    // Format shipping date (convert from YYYY-MM-DD to readable format)
-    val formattedShippingDate = if (invoiceShippingDate.isNotEmpty()) {
-        try {
-            val dateParts = invoiceShippingDate.split("-")
-            if (dateParts.size == 3) {
-                val months = arrayOf("", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
-                val monthNum = dateParts[1].toIntOrNull() ?: 0
-                val monthName = if (monthNum in 1..12) months[monthNum] else dateParts[1]
-                dateParts[2] + "." + monthName + "." + dateParts[0]
-            } else {
-                invoiceShippingDate
-            }
-            } catch (e: dynamic) {
-            invoiceShippingDate
-        }
-    } else {
-        ""
-    }
-    
-    // Fetch purchase data to get all fields including brand, door, seat, fuel
-    minimalPurchaseScope.launch {
-        val result = ApiClient.get<Array<PurchaseResponse>>("purchases")
-        result.fold(
-            onSuccess = { purchases ->
-                val selectedPurchasesList = purchases.filter { it.id != null && selectedIds.contains(it.id) }
-                
-                if (selectedPurchasesList.isEmpty()) {
-                    showMessage("No items found for selected purchases", "warning")
-                    return@fold
-                }
-            
-                // Build items list with description field
-                val itemsList = mutableListOf<dynamic>()
-                var totalAmount = 0.0
-                var unitNumber = 1
-            
-            for (purchase in selectedPurchasesList) {
-                val chassis = js("purchase.chassis")?.toString()?.trim() ?: ""
-                val carName = js("purchase.carName")?.toString()?.trim() ?: ""
-                val grade = js("purchase.grade")?.toString()?.trim() ?: ""
-                val carModelYear = js("purchase.carModelYear")?.toString()?.trim() ?: ""
-                val shift = js("purchase.shift")?.toString()?.trim() ?: ""
-                val door = js("purchase.door")?.toString()?.trim() ?: ""
-                val seat = js("purchase.seat")?.toString()?.trim() ?: ""
-                val cc = js("purchase.cc")?.toString()?.trim() ?: ""
-                val color = js("purchase.color")?.toString()?.trim() ?: ""
-                val distance = js("purchase.distance")?.toString()?.trim() ?: ""
-                val fuel = js("purchase.fuel")?.toString()?.trim() ?: ""
-                
-                val amount = purchaseInvoiceLineAmountYenFromResponse(purchase)
-                totalAmount += amount
-                
-                // Format amount with ¥ symbol
-                val amountInt = amount.toInt()
-                val amountStr = amountInt.toString()
-                val reversed = amountStr.reversed()
-                val chunked = reversed.chunked(3)
-                val joined = chunked.joinToString(",")
-                val finalReversed = joined.reversed()
-                val formattedAmount = "¥$finalReversed"
-                
-                // Build description with new format:
-                // Line 1: chassis + 3 spaces + carName + 3 spaces + grade + 5 spaces + production date + 5 spaces + shift + comma + door value (like "5 door") + comma + seat value (like "5 seat")
-                // Line 2: CC value (like "1000CC") + 7 spaces + color + 5 spaces + distance + 5 spaces + fuel
-                
-                // Line 1: chassis + 3 spaces + carName + 3 spaces + grade + 5 spaces + production date + 5 spaces + shift + comma + door + comma + seat
-                val line1Parts = mutableListOf<String>()
-                if (chassis.isNotEmpty()) line1Parts.add(chassis)
-                if (carName.isNotEmpty()) line1Parts.add(carName)
-                if (grade.isNotEmpty()) line1Parts.add(grade)
-                
-                val line1MiddleParts = mutableListOf<String>()
-                if (carModelYear.isNotEmpty()) line1MiddleParts.add(carModelYear)
-                if (shift.isNotEmpty()) line1MiddleParts.add(shift)
-                
-                val doorSeatParts = mutableListOf<String>()
-                if (door.isNotEmpty()) doorSeatParts.add("$door DOOR")
-                if (seat.isNotEmpty()) doorSeatParts.add("$seat SEAT")
-                
-                val line1 = buildString {
-                    if (chassis.isNotEmpty()) append(chassis)
-                    if (carName.isNotEmpty()) {
-                        if (isNotEmpty()) append("   ") // 3 spaces
-                        append(carName)
-                    }
-                    if (grade.isNotEmpty()) {
-                        if (isNotEmpty()) append("   ") // 3 spaces
-                        append(grade)
-                    }
-                    if (carModelYear.isNotEmpty()) {
-                        if (isNotEmpty()) append("     ") // 5 spaces
-                        append(carModelYear)
-                    }
-                    if (shift.isNotEmpty()) {
-                        if (isNotEmpty()) append("     ") // 5 spaces
-                        append(shift)
-                    }
-                    if (doorSeatParts.isNotEmpty()) {
-                        if (isNotEmpty()) append(", ")
-                        append(doorSeatParts.joinToString(", "))
-                    }
-                }
-                
-                // Line 2: CC value + 7 spaces + color + 5 spaces + distance + 5 spaces + fuel
-                val line2 = buildString {
-                    if (cc.isNotEmpty()) {
-                        append("${cc}CC")
-                    }
-                    if (color.isNotEmpty()) {
-                        if (isNotEmpty()) append("       ") // 7 spaces
-                        append(color)
-                    }
-                    if (distance.isNotEmpty()) {
-                        if (isNotEmpty()) append("     ") // 5 spaces
-                        append(distance)
-                    }
-                    if (fuel.isNotEmpty()) {
-                        if (isNotEmpty()) append("     ") // 5 spaces
-                        append(fuel)
-                    }
-                }
-                
-                val description = if (line2.isNotEmpty()) {
-                    "$line1\n$line2"
-        } else {
-                    line1
-                }
-                
-                val item = js("{}").unsafeCast<dynamic>()
-                item.unit = unitNumber
-                item.description = description
-                item.amount = formattedAmount
-                itemsList.add(item)
-                unitNumber++
-            }
-            
-            // Get total amount (formatted)
-            val totalInt = totalAmount.toInt()
-            val totalStr = totalInt.toString()
-            val totalReversed = totalStr.reversed()
-            val totalChunked = totalReversed.chunked(3)
-            val totalJoined = totalChunked.joinToString(",")
-            val totalFinalReversed = totalJoined.reversed()
-            val formattedTotal = "¥$totalFinalReversed"
-            
-            // Prepare request body - build JSON string manually to avoid Kotlin/JS interop issues
-            val itemsJsonArray = itemsList.joinToString(",") { item ->
-                val itemDynamic = item.unsafeCast<dynamic>()
-                val unit = itemDynamic.unit?.toString() ?: "0"
-                val description = escapeJsonString((itemDynamic.description as? String) ?: "")
-                val amount = escapeJsonString((itemDynamic.amount as? String) ?: "")
-                "{\"unit\":" + unit + ",\"description\":\"" + description + "\",\"amount\":\"" + amount + "\"}"
-            }
-            
-            val lcNumberPart = if (invoiceLcNo.isNotEmpty()) {
-                "\"" + escapeJsonString(invoiceLcNo) + "\""
-                        } else {
-                "null"
-                        }
-            val clientAddressPart = if (clientAddress != null) {
-                "\"" + escapeJsonString(clientAddress) + "\""
-                    } else {
-                "null"
-                    }
-            val bankAccountPart = if (bankAccountValue.isNotEmpty()) {
-                "\"" + escapeJsonString(bankAccountValue) + "\""
-            } else {
-                "null"
-                }
-            val messagePart = if (invoiceMessage.isNotEmpty()) {
-                "\"" + escapeJsonString(invoiceMessage) + "\""
-            } else {
-                "null"
-            }
-            
-            val requestBodyJson = "{\"invoiceNumber\":\"" + escapeJsonString(invoiceNumber) + 
-                "\",\"invoiceDate\":\"" + escapeJsonString(invoiceDate) + 
-                "\",\"lcNumber\":" + lcNumberPart + 
-                ",\"clientName\":\"" + escapeJsonString(clientName) + 
-                "\",\"clientAddress\":" + clientAddressPart + 
-                ",\"vessel\":\"" + escapeJsonString(invoiceVessel) + 
-                "\",\"shippingDate\":\"" + escapeJsonString(formattedShippingDate) + 
-                "\",\"from\":\"" + escapeJsonString(invoiceFrom) + 
-                "\",\"to\":\"" + escapeJsonString(invoiceTo) + 
-                "\",\"priceType\":\"" + escapeJsonString(priceType) + 
-                "\",\"items\":[" + itemsJsonArray + 
-                "],\"totalAmount\":\"" + escapeJsonString(formattedTotal) + 
-                "\",\"bankAccount\":" + bankAccountPart + 
-                ",\"message\":" + messagePart + 
-                "}"
-            console.log("📄 Sending invoice PDF request: " + requestBodyJson)
-            
-            // Make API call to generate PDF
-            val headers = Headers()
-            headers.set("Content-Type", "application/json")
-            
-            val requestInit = RequestInit(
-                method = "POST",
-                headers = headers,
-                body = requestBodyJson
-            )
-            
-            window.fetch(apiUrl("purchases/invoice/generate-pdf"), requestInit)
-                .then { response ->
-                    if (response.ok) {
-                        response.blob()
-                            .then { blob ->
-                                // Create download link
-                                val url = js("window.URL.createObjectURL(blob)") as String
-                                val a = document.createElement("a") as HTMLAnchorElement
-                                a.href = url
-                                a.download = "invoice_" + invoiceNumber + ".pdf"
-                                document.body?.appendChild(a)
-                                a.click()
-                                document.body?.removeChild(a)
-                                // Revoke URL after download completes (short delay to ensure download starts)
-                                window.setTimeout({
-                                    try {
-                                        js("URL.revokeObjectURL(url)")
-                                    } catch (e: dynamic) {
-                                        console.warn("Failed to revoke URL:", e)
-                                    }
-                                }, 1000)
-                                
-                                console.log("✅ Invoice PDF downloaded successfully")
-                                showMessage("✅ Invoice PDF downloaded successfully", "success")
-                            }
-                            .catch { error ->
-                                console.error("❌ Error processing blob:", error)
-                                showMessage("Error processing PDF: ${error.toString()}", "error")
-                            }
-        } else {
-                        response.text().then { errorText ->
-                            console.error("❌ Invoice PDF generation failed:", errorText)
-                            showMessage("Failed to generate invoice PDF: $errorText", "error")
-                        }
-                    }
-                }
-                .catch { error ->
-                    console.error("❌ Error generating invoice PDF:", error)
-                    showMessage("Error generating invoice PDF: ${error.toString()}", "error")
-                }
-            },
-            onError = { message, _ ->
-                Logger.error("Failed to load purchases for invoice PDF: $message")
-                showMessage("Failed to load purchases: $message", "error")
-            }
-        )
-    }
-}
-
 // generateInvoiceNumber moved to Invoice.kt
 // Render Rixo Transport page content
 fun showRixoTransportPage() {
@@ -17047,7 +18184,15 @@ fun showRixoTransportPage() {
                         <h3>Details</h3>
                         <div class="field">
                             <label for="transportDate">Date</label>
-                            <input class="input" type="date" id="transportDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" aria-required="true" data-required="true" />
+                            <div style="position:relative; width:100%;">
+                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                                    <input class="input" type="text" id="transportDateText" maxlength="10" inputmode="numeric" autocomplete="off" placeholder="MM/DD/YYYY" aria-required="true" data-required="true" style="flex:1; min-width:0;" />
+                                    <button type="button" id="transportDateCalendarBtn" title="Open calendar"
+                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                </div>
+                                <input class="input" type="date" id="transportDate" aria-required="true" data-required="true" tabindex="-1" aria-hidden="true"
+                                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
+                            </div>
                             <div id="transportDateFormatted" style="margin-top: 4px; font-size: 12px; color: #6b7280; min-height: 16px;"></div>
                             <div id="transportDateError" class="error-text"></div>
                         </div>
@@ -17076,19 +18221,38 @@ fun showRixoTransportPage() {
 // New Rixo Request Generator Page (matches the image layout)
 fun showRixoRequestGeneratorPage() {
     val content = document.getElementById("content") ?: return
+    // Peek at session storage to detect edit mode BEFORE clearing it
+    val prefillPeek = window.sessionStorage.getItem(RIXO_HISTORY_EDIT_SESSION_KEY)
+    val isEditMode = !prefillPeek.isNullOrEmpty()
+    if (isEditMode && prefillPeek != null) {
+        try {
+            val peekObj: dynamic = JSON.parse(prefillPeek)
+            rixoUpdaterHistoryId = peekObj.historyId?.toString()?.trim()?.toLongOrNull()
+            rixoUpdaterHistoryRowHasBookingRequested = parseRixoHistoryPrefillHasBookingRequested(peekObj)
+        } catch (_: dynamic) {
+            rixoUpdaterHistoryId = null
+            rixoUpdaterHistoryRowHasBookingRequested = false
+        }
+    } else {
+        rixoUpdaterHistoryId = null
+        rixoUpdaterHistoryRowHasBookingRequested = false
+    }
+    val pageTitle = if (isEditMode) "Rixo Request Updater" else "Rixo Request Generator"
+    val saveHistoryButtonLabel = if (isEditMode) "Update" else "Save"
+    val updaterDeleteWrapClass = if (isEditMode) "" else "hidden"
     
     content.innerHTML = """
         <div class="rixo-request-container">
             <div class="rixo-request-layout">
                 <!-- Left Panel: Rixo Request Generator Form -->
                 <div class="rixo-request-form-panel">
-                    <h2 class="rixo-request-title">Rixo Request Generator</h2>
+                    <h2 class="rixo-request-title">$pageTitle</h2>
                     
                     <form id="rixoRequestForm">
-                        <!-- Buying Date -->
+                        <!-- Buying Date: Rixo Company–style FAB; ISO in #buyingDate -->
                         <div class="rixo-form-field">
-                            <label for="buyingDate">Buying Date</label>
-                            <input type="date" id="buyingDate" class="rixo-input" onkeydown="return false;" onpaste="return false;" ondrop="return false;">
+                            <label for="buyingDateFabTrigger">Buying Date</label>
+                            ${createRixoBuyingDateCombobox()}
                         </div>
                         
                         <!-- Rixo Company (speed-dial style; hidden select + input for existing APIs) -->
@@ -17132,16 +18296,19 @@ FAX: 047-711-0409
                             </div>
                         </div>
                         
-                        <!-- Preview + Download PDF -->
+                        <!-- Preview / Save history / PDF -->
                         <div class="rixo-print-actions">
                             <button type="button" id="previewRixoRequest" class="rixo-preview-btn">
                                 <span class="rixo-preview-icon" aria-hidden="true"></span>
                                 Preview
                             </button>
-                        <button type="button" id="printRixoRequest" class="rixo-print-btn">
-                            <span class="rixo-print-icon">🖨️</span>
-                            Download PDF
-                        </button>
+                            <button type="button" id="saveRixoRequestHistory" class="rixo-save-history-btn">
+                                $saveHistoryButtonLabel
+                            </button>
+                            <button type="button" id="printRixoRequest" class="rixo-print-btn">
+                                <span class="rixo-print-icon">🖨️</span>
+                                PDF
+                            </button>
                         </div>
                     </form>
                 </div>
@@ -17163,6 +18330,11 @@ FAX: 047-711-0409
                         <div class="rixo-empty-state">
                             Please select a buying date and Rixo company to view available rows.
                         </div>
+                    </div>
+                    <div id="rixoUpdaterDeleteWrap" class="rixo-updater-delete-wrap $updaterDeleteWrapClass">
+                        <button type="button" id="deleteRixoHistoryFromUpdater" style="padding:10px 20px;border:1px solid #b91c1c;border-radius:8px;background:#fff;color:#b91c1c;font-weight:600;font-size:14px;cursor:pointer;box-shadow:0 1px 4px rgba(185,28,28,0.12);white-space:nowrap;">
+                            Delete
+                        </button>
                     </div>
                 </div>
             </div>
@@ -17211,7 +18383,7 @@ FAX: 047-711-0409
             .rixo-table {
                 width: 100%;
                 border-collapse: collapse;
-                table-layout: auto;
+                table-layout: fixed;
             }
             
             .rixo-table th,
@@ -17237,61 +18409,26 @@ FAX: 047-711-0409
                 background: #f9fafb;
             }
             
-            /* Column width classes */
+            /* Select + Edit fixed width via <colgroup>; data columns share the rest equally */
+            .rixo-table col.rixo-col-select {
+                width: 100px;
+            }
+            .rixo-table col.rixo-col-edit {
+                width: 50px;
+            }
+            .rixo-table thead th:not(.rixo-col-select):not(.rixo-col-edit),
+            .rixo-table tbody td:not(.rixo-col-select):not(.rixo-col-edit) {
+                min-width: 0;
+            }
             .rixo-col-select {
                 width: 100px;
                 min-width: 80px;
+                max-width: 100px;
             }
-            
             .rixo-col-edit {
                 width: 50px;
                 min-width: 50px;
-            }
-            
-            .rixo-col-chassis {
-                width: 120px;
-                min-width: 100px;
-            }
-            
-            .rixo-col-auction {
-                width: 100px;
-                min-width: 80px;
-            }
-            
-            .rixo-col-year {
-                width: 100px;
-                min-width: 80px;
-            }
-            
-            .rixo-col-car {
-                width: 150px;
-                min-width: 120px;
-            }
-            
-            .rixo-col-supplier {
-                width: 120px;
-                min-width: 100px;
-            }
-            
-            .rixo-col-stock {
-                width: 80px;
-                min-width: 60px;
-            }
-            
-            .rixo-col-venue {
-                width: 100px;
-                min-width: 80px;
-            }
-            
-            .rixo-col-numbercut {
-                width: 120px;
-                min-width: 100px;
-            }
-            
-            .rixo-select-all-text {
-                margin-left: 8px;
-                font-weight: 600;
-                white-space: nowrap;
+                max-width: 50px;
             }
             
             .rixo-edit-btn {
@@ -17315,6 +18452,46 @@ FAX: 047-711-0409
             .rixo-edit-btn svg {
                 width: 14px;
                 height: 14px;
+            }
+            
+            .rixo-update-btn {
+                width: 36px;
+                height: 36px;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                border: none;
+                border-radius: 50%;
+                cursor: pointer;
+                flex-shrink: 0;
+                background: linear-gradient(145deg, #1e3a5f 0%, #2563eb 45%, #93c5fd 100%);
+                box-shadow: 0 3px 10px rgba(37, 99, 235, 0.38);
+            }
+            .rixo-update-btn:hover {
+                filter: brightness(1.06);
+            }
+            .rixo-inline-control {
+                width: 100%;
+                max-width: 100%;
+                box-sizing: border-box;
+                padding: 6px 8px;
+                border: 1px solid #cbd5e1;
+                border-radius: 8px;
+                font-size: 13px;
+                font-family: inherit;
+                background: #fff;
+            }
+            textarea.rixo-inline-control {
+                max-width: 100%;
+                min-height: 52px;
+                resize: vertical;
+                vertical-align: middle;
+            }
+            select.rixo-inline-control {
+                max-width: 100%;
+            }
+            .rixo-inline-combowrap {
+                max-width: 100%;
             }
             
             /* Rixo refresh pop-up */
@@ -17588,8 +18765,15 @@ FAX: 047-711-0409
                     height: 12px;
                 }
                 
-                .rixo-select-all-text {
-                    display: none;
+                .rixo-update-btn {
+                    width: 34px;
+                    height: 34px;
+                    min-width: 34px;
+                    min-height: 34px;
+                }
+                
+                .rixo-inline-control {
+                    max-width: 100%;
                 }
             }
         </style>
@@ -17598,10 +18782,315 @@ FAX: 047-711-0409
     // Set up event listeners
     setupRixoRequestGeneratorListeners()
     loadRixoSelectedColumnsFromStorage()
-    
-    // Set default date to today
-    val today = js("new Date().toISOString().split('T')[0]") as String
-    document.getElementById("buyingDate")?.setAttribute("value", today)
+
+    val prefillRaw = window.sessionStorage.getItem(RIXO_HISTORY_EDIT_SESSION_KEY)
+    val isHistoryEditMode = !prefillRaw.isNullOrEmpty()
+    if (prefillRaw != null && prefillRaw.isNotEmpty()) {
+        window.sessionStorage.removeItem(RIXO_HISTORY_EDIT_SESSION_KEY)
+    }
+    loadRixoBuyingDateDropdownAndInit(if (prefillRaw.isNullOrEmpty()) null else prefillRaw)
+
+    // When coming from history edit, lock Buying Date and Rixo Company fields
+    // Use setTimeout so this runs after the async prefill completes
+    if (isHistoryEditMode) {
+        js("""
+            setTimeout(function() {
+                var dateBtn = document.getElementById('buyingDateFabTrigger');
+                var companyBtn = document.getElementById('rixoCompanyFabTrigger');
+                if (dateBtn) {
+                    dateBtn.setAttribute('disabled', 'true');
+                    dateBtn.style.opacity = '0.65';
+                    dateBtn.style.pointerEvents = 'none';
+                    dateBtn.style.cursor = 'not-allowed';
+                }
+                if (companyBtn) {
+                    companyBtn.setAttribute('disabled', 'true');
+                    companyBtn.style.opacity = '0.65';
+                    companyBtn.style.pointerEvents = 'none';
+                    companyBtn.style.cursor = 'not-allowed';
+                }
+                var dateSelect = document.getElementById('buyingDate');
+                var companySelect = document.getElementById('rixoCompany');
+                if (dateSelect) dateSelect.setAttribute('disabled', 'true');
+                if (companySelect) companySelect.setAttribute('disabled', 'true');
+            }, 1200);
+        """)
+    }
+}
+
+private fun parseChassisTokensForRixoPrefill(chassisRaw: String): List<String> {
+    if (chassisRaw.isBlank()) return emptyList()
+    return chassisRaw.split(';', ',', '\n', '\r').map { it.trim() }.filter { it.isNotEmpty() }
+}
+
+/** Segment before first '-', for matching history tokens to full chassis in DB. */
+private fun rixoPrefillChassisHead(purchaseChassis: String): String =
+    purchaseChassis.trim().substringBefore('-').trim()
+
+/**
+ * History row often stores a short token (e.g. AAHH45); purchases may store AAHH45-suffix.
+ */
+private fun rixoPrefillChassisTokenMatchesPurchase(token: String, purchaseChassis: String): Boolean {
+    val t = token.trim()
+    val ch = purchaseChassis.trim()
+    if (t.isEmpty() || ch.isEmpty()) return false
+    if (ch.equals(t, ignoreCase = true)) return true
+    if (rixoPrefillChassisHead(ch).equals(t, ignoreCase = true)) return true
+    if (ch.startsWith(t, ignoreCase = true) &&
+        (ch.length == t.length || ch.getOrNull(t.length) == '-')
+    ) {
+        return true
+    }
+    return false
+}
+
+private fun rixoPrefillDateKey(raw: String): String =
+    toIsoFromLabel(raw.trim()).trim()
+
+/**
+ * When [historyBuyingDate] is non-blank, require the same purchase date (vs `purchases.date`).
+ * For Rixo company: blank history, [RIXO_UNDEFINED_COMPANY_OPTION_VALUE], or [RIXO_UNDEFINED_COMPANY_DISPLAY_LABEL]
+ * matches purchases with blank/whitespace `rixoCompany`; otherwise require trimmed equality.
+ */
+private fun rixoPrefillPurchaseMatchesHistoryFilters(
+    p: dynamic,
+    historyBuyingDate: String,
+    historyRixoCompany: String,
+): Boolean {
+    val wantDate = historyBuyingDate.isNotBlank()
+    val pDateRaw = js("p.date")?.toString()?.trim() ?: ""
+    val pRixoRaw = purchaseRixoCompanyRaw(p)
+    if (wantDate) {
+        val a = rixoPrefillDateKey(historyBuyingDate)
+        val b = rixoPrefillDateKey(pDateRaw)
+        if (a.isEmpty() || b.isEmpty() || !a.equals(b, ignoreCase = true)) return false
+    }
+    val hist = historyRixoCompany.trim()
+    val matchUndefinedBucket =
+        hist.isEmpty() ||
+            hist == RIXO_UNDEFINED_COMPANY_OPTION_VALUE ||
+            hist.equals(RIXO_UNDEFINED_COMPANY_DISPLAY_LABEL, ignoreCase = true)
+    return if (matchUndefinedBucket) {
+        pRixoRaw.isEmpty()
+    } else {
+        hist.equals(pRixoRaw, ignoreCase = true)
+    }
+}
+
+private fun parseRixoHistoryPrefillHasBookingRequested(o: dynamic): Boolean {
+    val v: dynamic = o.hasBookingRequested
+    if (v == null || v == js("undefined")) return false
+    if (v is Boolean) return v
+    val s = v.toString().trim().lowercase()
+    return s == "true" || s == "1"
+}
+
+private fun handleDeleteRixoHistoryFromUpdater() {
+    val historyId = rixoUpdaterHistoryId
+    if (historyId == null) {
+        showMessage("No Rixo history row is linked to this session. Open the row again from Rixo History.", "error")
+        return
+    }
+    if (rixoUpdaterHistoryRowHasBookingRequested) {
+        showMessage(
+            "Cannot delete: at least one car on this Rixo history row is already booking requested.",
+            "error",
+        )
+        return
+    }
+    val ok = window.confirm("Are you sure you want to delete the rixo history?")
+    if (!ok) return
+    val btn = document.getElementById("deleteRixoHistoryFromUpdater") as? HTMLButtonElement
+    btn?.disabled = true
+    MainScope().launch {
+        ApiClient.delete<dynamic>("rixo-history/$historyId").fold(
+            onSuccess = {
+                rixoUpdaterHistoryId = null
+                rixoUpdaterHistoryRowHasBookingRequested = false
+                showMessage("Rixo history row deleted.", "success")
+                window.location.hash = "#/rixo-history"
+            },
+            onError = { message, statusCode ->
+                val msg =
+                    if (statusCode == 400 && message.isNotBlank()) message
+                    else "Failed to delete Rixo history: $message"
+                showMessage(msg, "error")
+            },
+        )
+        btn?.disabled = false
+    }
+}
+
+private fun handleRemoveChassisFromRixoUpdater(purchase: dynamic) {
+    val historyId = rixoUpdaterHistoryId
+    if (historyId == null) {
+        showMessage("No Rixo history row is linked to this session.", "error")
+        return
+    }
+    if (purchaseIsBookingRequested(purchase)) {
+        showMessage("Cannot remove: this car is already booking requested.", "error")
+        return
+    }
+    val chassis = purchaseChassisFromDynamic(purchase)
+    if (chassis.isEmpty()) {
+        showMessage("Chassis is missing for this row.", "error")
+        return
+    }
+    val purchaseId = purchaseIdFromDynamic(purchase)
+    val ok = window.confirm("Are you sure you want to remove the car from Rixo?")
+    if (!ok) return
+
+    MainScope().launch {
+        val tokenJson = JSON.stringify(chassis)
+        val bodyJson = "{\"historyId\":$historyId,\"chassisToken\":$tokenJson}"
+        val body = JSON.parse<dynamic>(bodyJson)
+        ApiClient.post<dynamic>("rixo-history/remove-chassis", body).fold(
+            onSuccess = { data ->
+                val d: dynamic = (data as Any).unsafeCast<dynamic>()
+                val deletedRow = d.deletedRow == true ||
+                    d.deletedRow?.toString()?.lowercase() == "true"
+                if (deletedRow) {
+                    rixoUpdaterHistoryId = null
+                    rixoUpdaterHistoryRowHasBookingRequested = false
+                    showMessage("Rixo history row removed (no chassis remaining).", "success")
+                    window.location.hash = "#/rixo-history"
+                    return@fold
+                }
+                if (purchaseId != null) {
+                    rixoCurrentRows = rixoCurrentRows.filter { purchaseIdFromDynamic(it) != purchaseId }
+                } else {
+                    rixoCurrentRows = rixoCurrentRows.filter {
+                        purchaseChassisFromDynamic(it).equals(chassis, ignoreCase = true).not()
+                    }
+                }
+                recomputeRixoUpdaterRowHasBookingRequested()
+                if (rixoCurrentRows.isEmpty()) {
+                    setRixoRowsPreviewEmptyMessage("(No Car is Found)")
+                    document.getElementById("selectedCount")?.textContent = "Selected: 0 of 0"
+                } else {
+                    renderRixoRowsPreview(rixoCurrentRows)
+                }
+                showMessage("Car removed from Rixo.", "success")
+            },
+            onError = { message, statusCode ->
+                val msg =
+                    if (statusCode == 400 && message.isNotBlank()) message
+                    else "Failed to remove car from Rixo: $message"
+                showMessage(msg, "error")
+            },
+        )
+    }
+}
+
+private suspend fun applyRixoHistoryEditPrefillFromJson(raw: String) {
+    val o: dynamic = try {
+        JSON.parse(raw)
+    } catch (_: Throwable) {
+        return
+    }
+    rixoUpdaterHistoryId = o.historyId?.toString()?.trim()?.toLongOrNull()
+    rixoUpdaterHistoryRowHasBookingRequested = parseRixoHistoryPrefillHasBookingRequested(o)
+    val buyingDate = (o.buyingDate?.toString() ?: "").trim()
+    val rixoCompany = (o.rixoCompany?.toString() ?: "").trim()
+    val message = o.message?.toString() ?: ""
+    val chassisRaw = o.chassis?.toString() ?: ""
+
+    val dateSelect = document.getElementById("buyingDate") as? HTMLSelectElement
+    if (buyingDate.isNotEmpty()) {
+        val iso = rixoPrefillDateKey(buyingDate).ifBlank { buyingDate }
+        if (dateSelect != null) {
+            var found = false
+            for (i in 0 until dateSelect.options.length) {
+                val optEl = dateSelect.options[i] as? HTMLOptionElement ?: continue
+                if (optEl.value == iso) {
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                // Force-inject the date from history even if not in dropdown
+                val injected = document.createElement("option") as HTMLOptionElement
+                injected.value = iso
+                injected.text = iso
+                dateSelect.add(injected)
+            }
+            dateSelect.value = iso
+        }
+    } else {
+        val today = js("new Date().toISOString().split('T')[0]") as String
+        if (dateSelect != null) {
+            var foundToday = false
+            for (i in 0 until dateSelect.options.length) {
+                val optEl = dateSelect.options[i] as? HTMLOptionElement ?: continue
+                if (optEl.value == today) {
+                    dateSelect.value = today
+                    foundToday = true
+                    break
+                }
+            }
+            if (!foundToday) {
+                dateSelect.value = ""
+            }
+        }
+    }
+    js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('buyingDate')")
+    js("if (typeof window.rebuildRixoBuyingDateFabFromSelect === 'function') window.rebuildRixoBuyingDateFabFromSelect()")
+
+    (document.getElementById("extraMessage") as? HTMLTextAreaElement)?.value = message
+
+    val select = document.getElementById("rixoCompany") as? HTMLSelectElement
+    if (select != null) {
+        val desiredValue = normalizedRixoCompanyDropdownBucket(rixoCompany)
+        var found = false
+        for (i in 0 until select.options.length) {
+            val opt = select.options.item(i) as? HTMLOptionElement ?: continue
+            if (opt.value == desiredValue) {
+                found = true
+                break
+            }
+        }
+        if (!found) {
+            val opt = document.createElement("option") as HTMLOptionElement
+            opt.value = desiredValue
+            opt.text =
+                if (desiredValue == RIXO_UNDEFINED_COMPANY_OPTION_VALUE) RIXO_UNDEFINED_COMPANY_DISPLAY_LABEL else desiredValue
+            select.add(opt)
+        }
+        select.value = desiredValue
+        js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('rixoCompany')")
+        js("if (typeof window.rebuildRixoCompanyFabFromSelect === 'function') window.rebuildRixoCompanyFabFromSelect()")
+        js("if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') window.updateRixoCompanyFabTriggerLabel()")
+    }
+
+    when (val result = ApiClient.get<Array<dynamic>>("purchases")) {
+        is ApiResult.Success -> {
+            val arr = result.data
+            val tokens = parseChassisTokensForRixoPrefill(chassisRaw)
+            val matched = mutableListOf<dynamic>()
+            val seenIds = mutableSetOf<Long>()
+            for (tok in tokens) {
+                for (i in 0 until arr.size) {
+                    val p = arr[i]
+                    val id = js("p.id")?.toString()?.toLongOrNull() ?: continue
+                    if (id in seenIds) continue
+                    val ch = js("p.chassis")?.toString()?.trim() ?: ""
+                    if (!rixoPrefillChassisTokenMatchesPurchase(tok, ch)) continue
+                    if (!rixoPrefillPurchaseMatchesHistoryFilters(p, buyingDate, rixoCompany)) continue
+                    matched.add(p)
+                    seenIds.add(id)
+                }
+            }
+            renderRixoRowsPreview(matched)
+            if (matched.isEmpty() && tokens.isNotEmpty()) {
+                showMessage(
+                    "No purchases matched this history row (chassis + buying date + Rixo company). " +
+                        "Check Purchase List for the same date and Rixo company.",
+                    "warning",
+                )
+            }
+        }
+        is ApiResult.Error -> showMessage("Failed to load purchases: ${result.message}", "error")
+    }
 }
 
 /** One-time window APIs + document listeners for Rixo Company FAB (Rixo Request page). */
@@ -17612,6 +19101,7 @@ private fun ensureRixoCompanyFabApi() {
     js(
         """
         (function() {
+          window.__rixoCompanyUndefinedValue = '${RIXO_UNDEFINED_COMPANY_OPTION_VALUE}';
           function closeRixoCompanyFab() {
             var wrap = document.getElementById('rixoCompanyFabWrap');
             var actions = document.getElementById('rixoCompanyFabActions');
@@ -17622,6 +19112,7 @@ private fun ensureRixoCompanyFabApi() {
             if (trigger) trigger.setAttribute('aria-expanded', 'false');
           }
           function openRixoCompanyFab() {
+            if (typeof window.closeRixoBuyingDateFab === 'function') window.closeRixoBuyingDateFab();
             var wrap = document.getElementById('rixoCompanyFabWrap');
             var actions = document.getElementById('rixoCompanyFabActions');
             var trigger = document.getElementById('rixoCompanyFabTrigger');
@@ -17657,10 +19148,11 @@ private fun ensureRixoCompanyFabApi() {
               btn.type = 'button';
               btn.className = 'rixo-fab-action-btn';
               var val = opt.value;
-              var letter = val.length ? val.charAt(0).toUpperCase() : '?';
+              var UNDEF = window.__rixoCompanyUndefinedValue || '';
+              var letter = (val === UNDEF) ? 'U' : (val.length ? val.charAt(0).toUpperCase() : '?');
               btn.textContent = letter;
               btn.setAttribute('data-value', val);
-              btn.setAttribute('title', val);
+              btn.setAttribute('title', lbl.textContent || val);
               btn.addEventListener('click', function(e) {
                 e.stopPropagation();
                 select.value = val;
@@ -17684,12 +19176,19 @@ private fun ensureRixoCompanyFabApi() {
             }
           };
           window.updateRixoCompanyFabTriggerLabel = function() {
+            var UNDEF = window.__rixoCompanyUndefinedValue || '';
             var v = (typeof window.getComboboxValue === 'function') ? (window.getComboboxValue('rixoCompany') || '') : '';
             v = (v || '').toString().trim();
+            var display = v;
+            if (v === UNDEF) display = 'Undefined';
             var labelEl = document.getElementById('rixoCompanyFabLabel');
             var letterEl = document.getElementById('rixoCompanyFabLetter');
-            if (labelEl) labelEl.textContent = v || 'Select Rixo Company';
-            if (letterEl) letterEl.textContent = v ? v.charAt(0).toUpperCase() : 'R';
+            if (labelEl) labelEl.textContent = display || 'Select Rixo Company';
+            if (letterEl) {
+              if (!display) letterEl.textContent = 'R';
+              else if (v === UNDEF) letterEl.textContent = 'U';
+              else letterEl.textContent = display.charAt(0).toUpperCase();
+            }
           };
           window.closeRixoCompanyFab = closeRixoCompanyFab;
           window.toggleRixoCompanyFab = toggleRixoCompanyFab;
@@ -17708,9 +19207,140 @@ private fun ensureRixoCompanyFabApi() {
     )
 }
 
+/** One-time window APIs for Buying Date FAB (same UX as Rixo Company on this page). */
+private fun ensureRixoBuyingDateFabApi() {
+    val already = js("typeof window.__rixoBuyingDateFabApiInstalled !== 'undefined' && window.__rixoBuyingDateFabApiInstalled").unsafeCast<Boolean>()
+    if (already) return
+    js("window.__rixoBuyingDateFabApiInstalled = true")
+    js(
+        """
+        (function() {
+          function closeRixoBuyingDateFab() {
+            var wrap = document.getElementById('buyingDateFabWrap');
+            var actions = document.getElementById('buyingDateFabActions');
+            var trigger = document.getElementById('buyingDateFabTrigger');
+            if (!wrap) return;
+            wrap.classList.remove('rixo-company-fab--open');
+            if (actions) actions.style.display = 'none';
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+          }
+          function openRixoBuyingDateFab() {
+            if (typeof window.closeRixoCompanyFab === 'function') window.closeRixoCompanyFab();
+            var wrap = document.getElementById('buyingDateFabWrap');
+            var actions = document.getElementById('buyingDateFabActions');
+            var trigger = document.getElementById('buyingDateFabTrigger');
+            if (!wrap) return;
+            if (typeof window.rebuildRixoBuyingDateFabFromSelect === 'function') window.rebuildRixoBuyingDateFabFromSelect();
+            wrap.classList.add('rixo-company-fab--open');
+            if (actions) { actions.style.display = 'flex'; actions.style.flexDirection = 'column'; }
+            if (trigger) trigger.setAttribute('aria-expanded', 'true');
+          }
+          function toggleRixoBuyingDateFab() {
+            var wrap = document.getElementById('buyingDateFabWrap');
+            if (!wrap) return;
+            if (wrap.classList.contains('rixo-company-fab--open')) closeRixoBuyingDateFab();
+            else openRixoBuyingDateFab();
+          }
+          window.rebuildRixoBuyingDateFabFromSelect = function() {
+            var select = document.getElementById('buyingDate');
+            var actions = document.getElementById('buyingDateFabActions');
+            if (!select || !actions) return;
+            actions.innerHTML = '';
+            var opts = select.querySelectorAll('option');
+            var count = 0;
+            opts.forEach(function(opt) {
+              if (!opt.value) return;
+              count++;
+              var row = document.createElement('div');
+              row.className = 'rixo-fab-action-row';
+              row.setAttribute('role', 'option');
+              var lbl = document.createElement('span');
+              lbl.className = 'rixo-fab-action-label';
+              lbl.textContent = opt.textContent || opt.value;
+              var val = opt.value;
+              var dayNum = '?';
+              if (val.length >= 10) {
+                var d = parseInt(val.substring(8, 10), 10);
+                if (!isNaN(d)) dayNum = String(d);
+              }
+              var btn = document.createElement('button');
+              btn.type = 'button';
+              btn.className = 'rixo-fab-action-btn rixo-buying-date-fab-row-btn';
+              btn.textContent = dayNum;
+              btn.setAttribute('data-value', val);
+              btn.setAttribute('title', (opt.textContent || val));
+              row.addEventListener('click', function(e) {
+                e.stopPropagation();
+                select.value = val;
+                if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('buyingDate');
+                if (typeof window.updateRixoBuyingDateFabTriggerLabel === 'function') window.updateRixoBuyingDateFabTriggerLabel();
+                closeRixoBuyingDateFab();
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+              });
+              row.appendChild(btn);
+              row.appendChild(lbl);
+              actions.appendChild(row);
+            });
+            if (count === 0) {
+              var empty = document.createElement('div');
+              empty.className = 'rixo-fab-action-row';
+              empty.style.justifyContent = 'center';
+              empty.style.fontSize = '13px';
+              empty.style.color = '#6b7280';
+              empty.style.padding = '6px 8px';
+              empty.textContent = 'No buying dates — every chassis is already marked Rixo requested, or there are no purchase dates.';
+              actions.appendChild(empty);
+            }
+          };
+          window.updateRixoBuyingDateFabTriggerLabel = function() {
+            var select = document.getElementById('buyingDate');
+            var labelEl = document.getElementById('buyingDateFabLabel');
+            var hintEl = document.getElementById('buyingDateFabHint');
+            var letterEl = document.getElementById('buyingDateFabLetter');
+            if (!select) return;
+            var v = (select.value || '').toString().trim();
+            if (labelEl) {
+              if (v) {
+                var so = select.options[select.selectedIndex];
+                labelEl.textContent = (so && so.text) ? so.text : v;
+              } else {
+                labelEl.textContent = 'Select purchase date';
+              }
+            }
+            if (hintEl) {
+              hintEl.textContent = v ? 'Selected purchase date' : 'Tap to choose purchase date';
+            }
+            if (letterEl) {
+              if (v && v.length >= 10) {
+                var d = parseInt(v.substring(8, 10), 10);
+                letterEl.textContent = (!isNaN(d) && d > 0) ? String(d) : 'B';
+              } else {
+                letterEl.textContent = 'B';
+              }
+            }
+          };
+          window.closeRixoBuyingDateFab = closeRixoBuyingDateFab;
+          window.toggleRixoBuyingDateFab = toggleRixoBuyingDateFab;
+          document.addEventListener('click', function(e) {
+            var wrap = document.getElementById('buyingDateFabWrap');
+            if (!wrap || !wrap.classList.contains('rixo-company-fab--open')) return;
+            if (wrap.contains(e.target)) return;
+            closeRixoBuyingDateFab();
+          });
+          document.addEventListener('keydown', function(e) {
+            if (e.key !== 'Escape') return;
+            var wrap = document.getElementById('buyingDateFabWrap');
+            if (wrap && wrap.classList.contains('rixo-company-fab--open')) closeRixoBuyingDateFab();
+          });
+        })();
+        """
+    )
+}
+
 // Set up event listeners for the Rixo Request Generator page
 fun setupRixoRequestGeneratorListeners() {
     ensureRixoCompanyFabApi()
+    ensureRixoBuyingDateFabApi()
     document.getElementById("rixoColumnFilterBtn")?.addEventListener("click", { _: Event ->
         showRixoColumnFilterModal()
     })
@@ -17741,12 +19371,24 @@ fun setupRixoRequestGeneratorListeners() {
     })
     js("if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') window.updateRixoCompanyFabTriggerLabel()")
     
-    // Preview + Print (same PDF from backend; Preview opens in new tab)
+    document.getElementById("buyingDateFabTrigger")?.addEventListener("click", { event: Event ->
+        event.asDynamic().stopPropagation()
+        js("if (typeof window.toggleRixoBuyingDateFab === 'function') window.toggleRixoBuyingDateFab()")
+    })
+    js("if (typeof window.updateRixoBuyingDateFabTriggerLabel === 'function') window.updateRixoBuyingDateFabTriggerLabel()")
+    
+    // Preview (PDF only), Save (history + mark requested, no PDF), PDF (download only, no history)
     document.getElementById("previewRixoRequest")?.addEventListener("click", { _: Event ->
-        generateRixoRequestPdf(preview = true)
+        generateRixoRequestPdf(persistHistory = false, generatePdf = true, preview = true)
+    })
+    document.getElementById("saveRixoRequestHistory")?.addEventListener("click", { _: Event ->
+        generateRixoRequestPdf(persistHistory = true, generatePdf = false, preview = false)
     })
     document.getElementById("printRixoRequest")?.addEventListener("click", { _: Event ->
-        generateRixoRequestPdf(preview = false)
+        generateRixoRequestPdf(persistHistory = false, generatePdf = true, preview = false)
+    })
+    document.getElementById("deleteRixoHistoryFromUpdater")?.addEventListener("click", { _: Event ->
+        handleDeleteRixoHistoryFromUpdater()
     })
     
     // Contact Details Toggle (Mobile only)
@@ -17765,9 +19407,66 @@ fun setupRixoRequestGeneratorListeners() {
     })
 }
 
+/** ISO yyyy-MM-dd from Rixo Buying date control (select-only). */
+private fun getRixoBuyingDateValue(): String {
+    val el = document.getElementById("buyingDate") ?: return ""
+    return (el.asDynamic().value as? String)?.trim() ?: ""
+}
+
+/**
+ * Fills `#buyingDate` from [GET /purchases/distinct-purchase-dates], then history prefill or **empty** selection (no default date).
+ */
+private fun loadRixoBuyingDateDropdownAndInit(prefillJson: String?) {
+    val select = document.getElementById("buyingDate") as? HTMLSelectElement
+    if (select == null) return
+    window.fetch(apiUrl("purchases/distinct-purchase-dates")).then { response: dynamic ->
+        if (response == null || js("!response.ok") as Boolean) {
+            val opt0 = document.createElement("option") as HTMLOptionElement
+            opt0.value = ""
+            opt0.textContent = "Select purchase date"
+            select.innerHTML = ""
+            select.appendChild(opt0)
+            showMessage("Could not load purchase dates for the dropdown. Check your connection and try again.", "warning")
+            if (prefillJson != null) {
+                minimalPurchaseScope.launch { applyRixoHistoryEditPrefillFromJson(prefillJson) }
+            } else {
+                select.value = ""
+                js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('buyingDate')")
+                js("if (typeof window.updateRixoBuyingDateFabTriggerLabel === 'function') window.updateRixoBuyingDateFabTriggerLabel()")
+            }
+            return@then
+        }
+        response.json().then { data: dynamic ->
+            val arr = (data as? Array<dynamic>) ?: arrayOf<dynamic>()
+            select.innerHTML = ""
+            val opt0 = document.createElement("option") as HTMLOptionElement
+            opt0.value = ""
+            opt0.textContent = "Select purchase date"
+            select.appendChild(opt0)
+            for (i in 0 until arr.size) {
+                val iso = arr[i]?.toString()?.trim() ?: continue
+                if (iso.isEmpty()) continue
+                val o = document.createElement("option") as HTMLOptionElement
+                o.value = iso
+                o.textContent = formatWithWeekday(iso)
+                select.add(o)
+            }
+            if (prefillJson != null) {
+                minimalPurchaseScope.launch { applyRixoHistoryEditPrefillFromJson(prefillJson) }
+            } else {
+                select.value = ""
+                js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('buyingDate')")
+                js("if (typeof window.updateRixoBuyingDateFabTriggerLabel === 'function') window.updateRixoBuyingDateFabTriggerLabel()")
+                js("if (typeof window.rebuildRixoBuyingDateFabFromSelect === 'function') window.rebuildRixoBuyingDateFabFromSelect()")
+            }
+            Unit
+        }
+    }
+}
+
 // Load Rixo companies for the selected date
 fun loadRixoCompaniesForDate() {
-    val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
+    val buyingDate = getRixoBuyingDateValue()
     if (buyingDate.isEmpty()) return
     
     // Convert ISO date to database format (e.g., "2025-04-24" -> "April24, 2025(Thursday)")
@@ -17782,13 +19481,13 @@ fun loadRixoCompaniesForDate() {
                 
                 for (purchase in purchasesArray) {
                     val date = js("purchase.date")?.toString() ?: ""
-                    val rixoRequested = js("purchase.rixoRequested")?.toString() ?: "FALSE"
-                    val rixoCompany = js("purchase.rixoCompany")?.toString() ?: ""
+                    val rixoRequestedRaw = js("purchase.rixoRequested")?.toString()
+                    val bucket = normalizedRixoCompanyDropdownBucket(purchaseRixoCompanyRaw(purchase))
                     
-                    // Only include purchases from the selected date where rixoRequested is FALSE
-                    if (date == formattedDate && rixoRequested == "FALSE" && rixoCompany.isNotEmpty()) {
-                        rixoCompanies.add(rixoCompany)
-                        console.log("Found matching purchase with rixoCompany:", rixoCompany)
+                    // Same rule as GET /purchases/distinct-purchase-dates (rixo_requested not 1/true)
+                    if (date == formattedDate && isRixoRequestedPendingForTransportGenerator(rixoRequestedRaw)) {
+                        rixoCompanies.add(bucket)
+                        console.log("Found matching purchase Rixo company bucket:", bucket)
                     }
                 }
                 
@@ -17799,33 +19498,47 @@ fun loadRixoCompaniesForDate() {
                 if (select != null) {
                     // Clear existing options except the first empty one
                     select.innerHTML = "<option value=\"\">▼</option>"
-                
-                rixoCompanies.sorted().forEach { company ->
+                    val sortedNamed =
+                        rixoCompanies.filter { it != RIXO_UNDEFINED_COMPANY_OPTION_VALUE }.sorted()
+                    if (rixoCompanies.contains(RIXO_UNDEFINED_COMPANY_OPTION_VALUE)) {
+                        val u = document.createElement("option") as HTMLOptionElement
+                        u.value = RIXO_UNDEFINED_COMPANY_OPTION_VALUE
+                        u.textContent = RIXO_UNDEFINED_COMPANY_DISPLAY_LABEL
+                        select.appendChild(u)
+                    }
+                    sortedNamed.forEach { company ->
                         val option = js("new Option(company, company)")
                         select.add(option)
+                    }
+                    // Auto-select first available company
+                    if (select.options.length > 1) {
+                        select.selectedIndex = 1
+                        js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('rixoCompany')")
                     }
                 }
                 js("if (typeof window.rebuildRixoCompanyFabFromSelect === 'function') window.rebuildRixoCompanyFabFromSelect()")
                 js("if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') window.updateRixoCompanyFabTriggerLabel()")
+                // Trigger row load for the auto-selected company
+                loadRowsForDateAndCompany()
             }
         }
     }
 }
 
 private fun setRixoRowsPreviewEmptyMessage(message: String) {
+    rixoCloseFloatingComboboxDropdowns()
     document.getElementById("rixoRowsPreview")?.innerHTML = """
         <div class="rixo-empty-state">$message</div>
     """
     document.getElementById("selectedCount")?.textContent = "Selected: 0 of 0"
 }
 
-/** True if there is at least one purchase on [formattedDate] with Rixo pending (rixoRequested FALSE and rixo company set). */
+/** True if there is at least one purchase on [formattedDate] with Rixo still pending (same rule as distinct-purchase-dates). */
 private fun hasAnyRixoPendingPurchaseForDate(allPurchases: Array<dynamic>, formattedDate: String): Boolean {
     for (purchase in allPurchases) {
         val date = js("purchase.date")?.toString() ?: ""
-        val rixoRequested = js("purchase.rixoRequested")?.toString() ?: "FALSE"
-        val rc = js("purchase.rixoCompany")?.toString() ?: ""
-        if (date == formattedDate && rixoRequested == "FALSE" && rc.isNotEmpty()) {
+        val rixoRequestedRaw = js("purchase.rixoRequested")?.toString()
+        if (date == formattedDate && isRixoRequestedPendingForTransportGenerator(rixoRequestedRaw)) {
             return true
         }
     }
@@ -17834,7 +19547,7 @@ private fun hasAnyRixoPendingPurchaseForDate(allPurchases: Array<dynamic>, forma
 
 // Load rows for the selected date and company
 fun loadRowsForDateAndCompany() {
-    val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
+    val buyingDate = getRixoBuyingDateValue()
     val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
     
     if (buyingDate.isEmpty()) {
@@ -17870,11 +19583,13 @@ fun loadRowsForDateAndCompany() {
                 
                 for (purchase in purchasesArray) {
                     val date = js("purchase.date")?.toString() ?: ""
-                    val rixoRequested = js("purchase.rixoRequested")?.toString() ?: "FALSE"
-                    val company = js("purchase.rixoCompany")?.toString() ?: ""
+                    val rixoRequestedRaw = js("purchase.rixoRequested")?.toString()
+                    val companyRaw = purchaseRixoCompanyRaw(purchase)
                     
-                    // Only include purchases from the selected date and company where rixoRequested is FALSE
-                    if (date == formattedDate && company == rixoCompany && rixoRequested == "FALSE") {
+                    if (date == formattedDate &&
+                        selectedRixoCompanyMatchesPurchase(companyRaw, rixoCompany) &&
+                        isRixoRequestedPendingForTransportGenerator(rixoRequestedRaw)
+                    ) {
                         matchingPurchases.add(purchase)
                     }
                 }
@@ -17887,11 +19602,60 @@ fun loadRowsForDateAndCompany() {
 
 private val rixoFixedColumns: List<String> = listOf("select", "edit")
 private val rixoDefaultDataColumns: List<String> = listOf(
-    "chassis", "auctionNo", "carModelYear", "carName", "auctionHouse", "stockLocation", "venueId", "numberCut"
+    "chassis", "numberCut", "carModelYear", "rixoCompany", "auctionHouse",
 )
+
+private val RIXO_RELOAD_HINT_COLUMNS: Set<String> = setOf("chassis", "rixoCompany", "date")
 private var rixoCurrentRows: List<dynamic> = emptyList()
+/** Set when opening #/rixo-updater from Rixo History edit; used by Delete on that page. */
+private var rixoUpdaterHistoryId: Long? = null
+private var rixoUpdaterHistoryRowHasBookingRequested: Boolean = false
+private var rixoInlineEditingId: Long? = null
+
+private fun isRixoUpdaterEditSession(): Boolean = rixoUpdaterHistoryId != null
+
+private fun purchaseIsBookingRequested(purchase: dynamic): Boolean {
+    val v: dynamic = js("purchase.bookingRequested")
+    if (v == true) return true
+    if (v is Number) return v.toInt() != 0
+    val s = v?.toString()?.trim()?.lowercase() ?: ""
+    return s == "true" || s == "1"
+}
+
+private fun purchaseIdFromDynamic(purchase: dynamic): Long? {
+    val pid = asDynamicRow(purchase).id
+    return when (pid) {
+        is Number -> pid.toLong()
+        else -> pid?.toString()?.trim()?.toLongOrNull()
+    }
+}
+
+private fun purchaseChassisFromDynamic(purchase: dynamic): String =
+    asDynamicRow(purchase).chassis?.toString()?.trim() ?: ""
+
+private fun rixoSelectedPurchaseIdsForActions(): List<Long> {
+    if (isRixoUpdaterEditSession()) {
+        return rixoCurrentRows.mapNotNull { purchaseIdFromDynamic(it) }
+    }
+    val selectedIds = mutableListOf<Long>()
+    val rowCheckboxes = document.querySelectorAll(".rixo-row-check")
+    for (i in 0 until rowCheckboxes.length) {
+        val checkbox = rowCheckboxes.item(i) as HTMLInputElement
+        if (checkbox.checked) {
+            checkbox.getAttribute("data-id")?.toLongOrNull()?.let { selectedIds.add(it) }
+        }
+    }
+    return selectedIds
+}
+
+private fun recomputeRixoUpdaterRowHasBookingRequested() {
+    if (!isRixoUpdaterEditSession()) {
+        rixoUpdaterHistoryRowHasBookingRequested = false
+        return
+    }
+    rixoUpdaterHistoryRowHasBookingRequested = rixoCurrentRows.any { purchaseIsBookingRequested(it) }
+}
 private var rixoSelectedDataColumns: MutableList<String> = mutableListOf()
-private const val RIXO_MAX_FILTER_COLUMNS: Int = 8
 
 private fun rixoStorageKey(): String = "rixoSelectedColumns"
 
@@ -17900,18 +19664,40 @@ private fun normalizeRixoSelectedDataColumns(cols: List<String>): MutableList<St
     val dedup = linkedSetOf<String>()
     cols.forEach { c ->
         val k = c.trim()
-        if (k.isNotEmpty() && available.contains(k)) dedup.add(k)
+        if (k.isNotEmpty() && k != "shaken" && available.contains(k)) dedup.add(k)
     }
-    // Chassis is always fixed right after Edit.
     dedup.remove("chassis")
+    val picked = dedup.toList().toMutableList()
+    while (picked.size > RIXO_MAX_NON_CHASSIS_COLUMNS_USER) {
+        picked.removeAt(picked.size - 1)
+    }
+    if (picked.size < RIXO_MIN_NON_CHASSIS_COLUMNS_USER) {
+        val fill = rixoDefaultDataColumns.filter { it != "chassis" && available.contains(it) }
+        for (key in fill) {
+            if (picked.size >= RIXO_MIN_NON_CHASSIS_COLUMNS_USER) break
+            if (!picked.contains(key)) picked.add(key)
+        }
+        if (picked.size < RIXO_MIN_NON_CHASSIS_COLUMNS_USER) {
+            for (key in rixoAvailableDataColumns()) {
+                if (key == "chassis" || key == "shaken") continue
+                if (picked.size >= RIXO_MIN_NON_CHASSIS_COLUMNS_USER) break
+                if (available.contains(key) && !picked.contains(key)) picked.add(key)
+            }
+        }
+    }
     val ordered = mutableListOf("chassis")
-    ordered.addAll(dedup)
-    return ordered.take(RIXO_MAX_FILTER_COLUMNS).toMutableList()
+    ordered.addAll(picked.take(RIXO_MAX_NON_CHASSIS_COLUMNS_USER))
+    return ordered
+}
+
+private fun rixoResolvedDataColumnsForTable(): List<String> {
+    val normalized = normalizeRixoSelectedDataColumns(rixoSelectedDataColumns).toList()
+    return rixoCapDataColumnsAfterEffective(rixoEffectiveDataColumns(normalized))
 }
 
 private fun rixoAvailableDataColumns(): List<String> =
     purchaseListColumnLabels().keys
-        .filter { it != "id" && it != "createdAt" && it != "updatedAt" && it != "vesselNo" }
+        .filter { it != "id" && it != "createdAt" && it != "updatedAt" && it != "vesselNo" && it != "shaken" }
 
 private fun rixoColumnLabel(key: String): String = when (key) {
     "carName" -> "Car"
@@ -17932,7 +19718,7 @@ private fun loadRixoSelectedColumnsFromStorage() {
     } else {
         emptyList()
     }
-    val chosen = parsed.filter { available.contains(it) }
+    val chosen = parsed.filter { available.contains(it) && it != "shaken" }
     rixoSelectedDataColumns = if (chosen.isNotEmpty()) normalizeRixoSelectedDataColumns(chosen) else normalizeRixoSelectedDataColumns(rixoDefaultDataColumns)
 }
 
@@ -17967,7 +19753,7 @@ private fun showRixoColumnFilterModal() {
                 <h3 style="margin:0;font-size:18px;font-weight:700;color:#111827;">Select Columns to Display</h3>
                 <button id="rixoColFilterClose" type="button" style="border:none;background:transparent;font-size:22px;cursor:pointer;color:#6b7280;">&times;</button>
             </div>
-            <div id="rixoColFilterCount" style="font-size:12px;color:#6b7280;margin-bottom:10px;">Select up to $RIXO_MAX_FILTER_COLUMNS columns. Chassis stays fixed after Edit.</div>
+            <div id="rixoColFilterCount" style="font-size:12px;color:#6b7280;margin-bottom:10px;">Choose $RIXO_MIN_NON_CHASSIS_COLUMNS_USER–$RIXO_MAX_NON_CHASSIS_COLUMNS_USER optional columns plus Chassis ($RIXO_MIN_DATA_COLUMNS_INCLUDING_CHASSIS–$RIXO_MAX_DATA_COLUMNS_INCLUDING_CHASSIS data columns total). Chassis is always shown.</div>
             <div id="rixoColChecksWrap" style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:2px;">
                 $checks
             </div>
@@ -17997,26 +19783,53 @@ private fun showRixoColumnFilterModal() {
     })
     fun updateRixoColFilterChecks() {
         val checksNode = document.querySelectorAll("#rixoColChecksWrap .rixo-col-check")
-        var checkedCount = 0
+        var nonChassisChecked = 0
         for (i in 0 until checksNode.length) {
             val cb = checksNode.item(i) as? HTMLInputElement ?: continue
-            if (cb.checked) checkedCount++
+            if (cb.checked && cb.value != "chassis") nonChassisChecked++
         }
         for (i in 0 until checksNode.length) {
             val cb = checksNode.item(i) as? HTMLInputElement ?: continue
+            if (cb.value == "chassis") {
+                cb.disabled = true
+                continue
+            }
             cb.disabled = false
-            if (!cb.checked && checkedCount >= RIXO_MAX_FILTER_COLUMNS) cb.disabled = true
-            if (cb.value == "chassis") cb.disabled = true
+            if (cb.checked && nonChassisChecked <= RIXO_MIN_NON_CHASSIS_COLUMNS_USER) {
+                cb.disabled = true
+                continue
+            }
+            if (!cb.checked && nonChassisChecked >= RIXO_MAX_NON_CHASSIS_COLUMNS_USER) cb.disabled = true
         }
-        (document.getElementById("rixoColFilterCount") as? HTMLElement)?.textContent = "Selected: $checkedCount/$RIXO_MAX_FILTER_COLUMNS (Chassis is fixed)"
+        val totalData = nonChassisChecked + 1
+        (document.getElementById("rixoColFilterCount") as? HTMLElement)?.textContent =
+            "Optional: $nonChassisChecked / $RIXO_MIN_NON_CHASSIS_COLUMNS_USER–$RIXO_MAX_NON_CHASSIS_COLUMNS_USER (+ Chassis = $totalData data columns; target $RIXO_MIN_DATA_COLUMNS_INCLUDING_CHASSIS–$RIXO_MAX_DATA_COLUMNS_INCLUDING_CHASSIS total)"
     }
 
     val checksNodeInit = document.querySelectorAll("#rixoColChecksWrap .rixo-col-check")
     for (i in 0 until checksNodeInit.length) {
         val cb = checksNodeInit.item(i) as? HTMLInputElement ?: continue
         cb.addEventListener("change", { _: Event ->
-            if (cb.value == "chassis") cb.checked = true
+            if (cb.value == "chassis") {
+                cb.checked = true
+                updateRixoColFilterChecks()
+                return@addEventListener
+            }
             updateRixoColFilterChecks()
+            val all = document.querySelectorAll("#rixoColChecksWrap .rixo-col-check")
+            var n = 0
+            for (j in 0 until all.length) {
+                val c2 = all.item(j) as? HTMLInputElement ?: continue
+                if (c2.checked && c2.value != "chassis") n++
+            }
+            if (n < RIXO_MIN_NON_CHASSIS_COLUMNS_USER) {
+                cb.checked = true
+                updateRixoColFilterChecks()
+                showMessage(
+                    "At least $RIXO_MIN_NON_CHASSIS_COLUMNS_USER columns besides Chassis are required ($RIXO_MIN_DATA_COLUMNS_INCLUDING_CHASSIS–$RIXO_MAX_DATA_COLUMNS_INCLUDING_CHASSIS data columns including Chassis).",
+                    "warning",
+                )
+            }
         })
     }
     updateRixoColFilterChecks()
@@ -18035,11 +19848,632 @@ private fun showRixoColumnFilterModal() {
     })
 }
 
+private fun rixoPurchaseShakenChecked(purchase: dynamic): Boolean {
+    if (purchase == null || purchase == js("undefined")) return false
+    val v: dynamic = purchase.shaken
+    return when {
+        v == null || v == js("undefined") -> false
+        v is Boolean -> v
+        v is Number -> (v as Number).toInt() != 0
+        else -> {
+            val s = v.toString().lowercase()
+            s == "true" || s == "1" || s == "yes"
+        }
+    }
+}
+
+private fun purchaseValueForRixoCompare(purchase: dynamic, columnKey: String): String {
+    if (purchase == null || purchase == js("undefined")) return ""
+    return when (columnKey) {
+        "carModelYear" ->
+            carModelYearToMonthInputValue(purchaseInlineEditSeed(purchase, columnKey)).ifEmpty {
+                purchaseInlineEditSeed(purchase, columnKey).trim()
+            }
+        "shaken" -> if (rixoPurchaseShakenChecked(purchase)) "1" else "0"
+        "bookingRequested", "sold", "invoiceConfirmed", "isPackageMode" -> {
+            val v: dynamic = js("(function(o,k){ return o ? o[k] : null; })")(purchase, columnKey)
+            val b = when {
+                v == true || v == 1 -> true
+                v == false || v == 0 -> false
+                v == null || v == js("undefined") -> false
+                else -> {
+                    val s = v.toString().lowercase()
+                    s == "true" || s == "1" || s == "yes"
+                }
+            }
+            if (b) "true" else "false"
+        }
+        "rixoRequested", "rixoConfirmed" -> purchaseInlineEditSeed(purchase, columnKey)
+        else -> purchaseInlineEditSeed(purchase, columnKey).trim()
+    }
+}
+
+private fun rixoReadInlineComboboxText(row: HTMLElement, columnKey: String): String {
+    val wrap = row.querySelector(".rixo-inline-combowrap[data-col=\"$columnKey\"]") as? HTMLElement
+        ?: return ""
+    val inp = wrap.querySelector(".rixo-inline-combo-txt") as? HTMLInputElement ?: return ""
+    return inp.value.trim()
+}
+
+private fun readRixoControlCompareString(columnKey: String, row: HTMLElement): String {
+    if (RIXO_INLINE_COMBO_FETCH.containsKey(columnKey) || RIXO_INLINE_STATIC_COMBO.containsKey(columnKey)) {
+        return rixoReadInlineComboboxText(row, columnKey)
+    }
+    val el = row.querySelector("[data-col=\"$columnKey\"]") as? HTMLElement ?: return ""
+    return when (columnKey) {
+        "shaken" -> if ((el as HTMLInputElement).checked) "1" else "0"
+        "bookingRequested", "sold", "invoiceConfirmed", "isPackageMode" -> (el as HTMLSelectElement).value
+        "rixoRequested", "rixoConfirmed" -> (el as HTMLSelectElement).value
+        else -> when (el) {
+            is HTMLTextAreaElement -> el.value.trim()
+            is HTMLInputElement -> el.value.trim()
+            else -> ""
+        }
+    }
+}
+
+private fun readRixoCommitTypedValue(columnKey: String, row: HTMLElement): Any? {
+    if (RIXO_INLINE_COMBO_FETCH.containsKey(columnKey) || RIXO_INLINE_STATIC_COMBO.containsKey(columnKey)) {
+        val t = rixoReadInlineComboboxText(row, columnKey)
+        return t
+    }
+    val el = row.querySelector("[data-col=\"$columnKey\"]") ?: return null
+    return when (columnKey) {
+        "shaken" -> (el as HTMLInputElement).checked
+        "bookingRequested", "sold", "invoiceConfirmed", "isPackageMode" ->
+            (el as HTMLSelectElement).value == "true"
+        "rixoRequested", "rixoConfirmed" -> (el as HTMLSelectElement).value
+        "cc" -> {
+            val t = (el as HTMLInputElement).value.trim()
+            val n = t.toIntOrNull()
+            if (n != null) n else t
+        }
+        else -> when (el) {
+            is HTMLTextAreaElement -> el.value.trim()
+            is HTMLInputElement -> el.value.trim()
+            else -> null
+        }
+    }
+}
+
+private fun rixoComposeNumberCut(place: String, n1: String, h: String, n2: String): String {
+    if (place.isEmpty() || n1.isEmpty() || h.isEmpty() || n2.isEmpty()) return ""
+    return place + n1 + h + n2
+}
+
+private fun rixoInlineComboboxMarkup(columnKey: String, purchase: dynamic): String {
+    val row = asDynamicRow(purchase)
+    val rawId = row.id
+    val pid = when (rawId) {
+        is Number -> rawId.toLong().toString()
+        else -> rawId?.toString()?.replace(Regex("[^0-9-]"), "") ?: "0"
+    }
+    val sid = "rixoIc_${columnKey}_$pid"
+    val cur = purchaseInlineEditSeed(purchase, columnKey)
+    val escCur = escapeAttr(cur)
+    val fetchUrl = RIXO_INLINE_COMBO_FETCH[columnKey]
+    val staticList = RIXO_INLINE_STATIC_COMBO[columnKey]
+    val dataFetch = when {
+        staticList != null -> escapeAttr("static:" + staticList.joinToString("|"))
+        fetchUrl != null -> escapeAttr(fetchUrl)
+        else -> ""
+    }
+    return """
+        <div class="rixo-inline-combowrap" data-col="$columnKey" style="position:relative;width:100%;min-width:0;max-width:100%;">
+            <input type="text" id="${sid}Input" class="rixo-inline-combo-txt" value="$escCur" autocomplete="off"
+                style="width:100%;padding:4px 28px 4px 6px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;font-size:13px;"
+                onfocus="this.select();">
+            <select id="$sid" class="rixo-inline-fetch rixo-inline-combo-sel" data-fetch-url="$dataFetch" data-current-value="$escCur"
+                style="position:absolute;top:0;right:0;width:26px;height:100%;border:none;border-left:1px solid #ddd;background:#f5f5f5;cursor:pointer;border-radius:0 4px 4px 0;appearance:none;-webkit-appearance:none;opacity:0;z-index:2;font-size:12px;"
+                onmousedown="event.preventDefault();event.stopPropagation();openComboboxDropdown('$sid');"
+                onchange="syncComboboxInput('$sid');">
+                <option value="">▼</option>
+            </select>
+            <div id="${sid}Button" onclick="openComboboxDropdown('$sid')"
+                style="position:absolute;top:0;right:0;width:26px;height:100%;border-left:1px solid #ddd;background:#f5f5f5;cursor:pointer;border-radius:0 4px 4px 0;z-index:3;display:flex;align-items:center;justify-content:center;font-size:11px;color:#666;user-select:none;">▼</div>
+        </div>
+    """.trimIndent()
+}
+
+private fun rixoInlineNumberCutMarkup(purchase: dynamic): String {
+    val row = asDynamicRow(purchase)
+    val rawId = row.id
+    val pid = when (rawId) {
+        is Number -> rawId.toLong().toString()
+        else -> rawId?.toString()?.replace(Regex("[^0-9-]"), "") ?: "0"
+    }
+    val shakenChecked = if (rixoPurchaseShakenChecked(purchase)) " checked" else ""
+    val seed = purchaseInlineEditSeed(purchase, "numberCut")
+    val hiddenVal = escapeAttr(seed)
+    val parts = parseRixoNumberCutParts(seed)
+    val placeId = "rixoNcP_$pid"
+    val hiraId = "rixoNcH_$pid"
+    val n1Id = "rixoNcN1_$pid"
+    val n2Id = "rixoNcN2_$pid"
+    val collapsedText = escapeHtml(if (seed.isNotBlank()) seed else "—")
+    val placeComb = createEditableComboboxWithOptions(placeId, "Place", getNumberCutPlaceOptions(), parts.place)
+    val hiraComb = createEditableComboboxWithOptions(hiraId, "字", getNumberCutHiraganaOptions(), parts.hiragana)
+    val escN1 = escapeAttr(parts.num1)
+    val escN2 = escapeAttr(parts.num2)
+    return """
+        <div class="rixo-nc-cell" data-nc-pid="$pid" style="min-width:140px;">
+            <input type="hidden" class="rixo-inline-control rixo-nc-hidden" data-col="numberCut" value="$hiddenVal">
+            <div class="rixo-nc-shaken-edit" style="margin-bottom:6px;">
+                <label style="font-size:12px;color:#374151;display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" class="rixo-inline-control rixo-inline-shaken" data-col="shaken"$shakenChecked style="width:18px;height:18px;accent-color:#2563eb;">
+                    <span style="font-weight:600;">SHAKEN</span>
+                </label>
+            </div>
+            <div class="rixo-nc-collapsed" style="font-size:13px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;background:#f9fafb;">$collapsedText</div>
+            <div class="rixo-nc-expanded" style="display:none;margin-top:4px;">
+                <div style="display:grid;grid-template-columns:1fr 48px;gap:4px;margin-bottom:4px;">
+                    <div style="grid-column:1/-1;">$placeComb</div>
+                    <input type="number" id="$n1Id" class="rixo-nc-n1" placeholder="#" value="$escN1" style="width:100%;padding:4px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;">
+                    <div style="grid-column:1/-1;">$hiraComb</div>
+                    <input type="number" id="$n2Id" class="rixo-nc-n2" placeholder="#" value="$escN2" style="width:100%;padding:4px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;">
+                </div>
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+private fun rixoInlineControlMarkup(columnKey: String, purchase: dynamic): String {
+    fun escAttrLocal(s: String) = escapeAttr(s)
+    fun escTextarea(s: String) = escapeHtml(s)
+    if (RIXO_INLINE_COMBO_FETCH.containsKey(columnKey) || RIXO_INLINE_STATIC_COMBO.containsKey(columnKey)) {
+        return rixoInlineComboboxMarkup(columnKey, purchase)
+    }
+    return when (columnKey) {
+        "numberCut" -> rixoInlineNumberCutMarkup(purchase)
+        "rixoRequested", "rixoConfirmed" -> {
+            val t = purchaseInlineEditSeed(purchase, columnKey)
+            val tSel = if (t == "TRUE") " selected" else ""
+            val fSel = if (t != "TRUE") " selected" else ""
+            """<select class="rixo-inline-control" data-col="$columnKey"><option value="TRUE"$tSel>TRUE</option><option value="FALSE"$fSel>FALSE</option></select>"""
+        }
+        "bookingRequested", "sold", "invoiceConfirmed", "isPackageMode" -> {
+            val low = purchaseInlineEditSeed(purchase, columnKey).lowercase()
+            val isT = low == "true" || low == "1"
+            val tSel = if (isT) " selected" else ""
+            val fSel = if (!isT) " selected" else ""
+            """<select class="rixo-inline-control" data-col="$columnKey"><option value="true"$tSel>TRUE</option><option value="false"$fSel>FALSE</option></select>"""
+        }
+        "date", "paymentDate", "shipmentDate" -> {
+            val seed = purchaseInlineEditSeed(purchase, columnKey)
+            val iso = toIsoFromLabel(seed).trim().takeIf { it.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) } ?: ""
+            val display = if (iso.isNotBlank()) isoToMmDdYyyy(iso) else ""
+            val pid = purchase.id?.toString()?.replace(Regex("[^0-9-]"), "") ?: "0"
+            val base = "rixoInlineDate_${columnKey}_$pid"
+            """
+            <div style="position:relative; width:100%;">
+                <div style="display:flex; gap:6px; align-items:center; width:100%;">
+                    <input type="text" id="${base}Text" class="rixo-inline-date-text" value="${escAttrLocal(display)}" maxlength="10" inputmode="numeric" autocomplete="off"
+                           style="flex:1; min-width:0; padding:4px 6px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-size:13px;">
+                    <button type="button" id="${base}CalendarBtn" title="Open calendar"
+                            style="padding:4px 6px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                </div>
+                <input type="date" id="$base" class="rixo-inline-control rixo-inline-date-hidden" data-base="$base" data-col="$columnKey" value="${escAttrLocal(iso)}" tabindex="-1" aria-hidden="true"
+                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+            </div>
+            """
+        }
+        "carModelYear" -> {
+            val seed = purchaseInlineEditSeed(purchase, columnKey)
+            val iso = carModelYearToMonthInputValue(seed)
+            val display = isoMonthToMmYyyy(iso)
+            val pid = purchase.id?.toString()?.replace(Regex("[^0-9-]"), "") ?: "0"
+            val base = "rixoInlineMonth_${columnKey}_$pid"
+            """
+            <div style="position:relative; width:100%;">
+                <div style="display:flex; gap:6px; align-items:center; width:100%;">
+                    <input type="text" id="${base}Text" class="rixo-inline-month-text" value="${escAttrLocal(display)}" maxlength="7" inputmode="numeric" autocomplete="off"
+                           style="flex:1; min-width:0; padding:4px 6px; border:1px solid #ccc; border-radius:4px; box-sizing:border-box; font-size:13px;">
+                    <button type="button" id="${base}CalendarBtn" title="Open month picker"
+                            style="padding:4px 6px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                </div>
+                <input type="month" id="$base" class="rixo-inline-control rixo-inline-month-hidden" data-base="$base" data-col="$columnKey" value="${escAttrLocal(iso)}" tabindex="-1" aria-hidden="true"
+                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+            </div>
+            """
+        }
+        "options", "notes", "carPictures" -> {
+            val inner = escTextarea(purchaseInlineEditSeed(purchase, columnKey))
+            val rows = if (columnKey == "carPictures") 4 else 2
+            """<textarea class="rixo-inline-control" data-col="$columnKey" rows="$rows">$inner</textarea>"""
+        }
+        else -> {
+            val v = escAttrLocal(purchaseInlineEditSeed(purchase, columnKey))
+            """<input type="text" class="rixo-inline-control" data-col="$columnKey" value="$v">"""
+        }
+    }
+}
+
+private fun rixoReadNcPlace(pid: String): String {
+    val inp = document.getElementById("rixoNcP_${pid}Input") as? HTMLInputElement
+    val fromInp = inp?.value?.trim().orEmpty()
+    if (fromInp.isNotEmpty()) return fromInp
+    return (document.getElementById("rixoNcP_$pid") as? HTMLSelectElement)?.value?.trim().orEmpty()
+}
+
+private fun rixoReadNcHiragana(pid: String): String {
+    val inp = document.getElementById("rixoNcH_${pid}Input") as? HTMLInputElement
+    val fromInp = inp?.value?.trim().orEmpty()
+    if (fromInp.isNotEmpty()) return fromInp
+    return (document.getElementById("rixoNcH_$pid") as? HTMLSelectElement)?.value?.trim().orEmpty()
+}
+
+private fun rixoClearNcFields(pid: String) {
+    (document.getElementById("rixoNcP_$pid") as? HTMLSelectElement)?.let { it.value = "" }
+    (document.getElementById("rixoNcP_${pid}Input") as? HTMLInputElement)?.let { it.value = "" }
+    (document.getElementById("rixoNcH_$pid") as? HTMLSelectElement)?.let { it.value = "" }
+    (document.getElementById("rixoNcH_${pid}Input") as? HTMLInputElement)?.let { it.value = "" }
+    (document.getElementById("rixoNcN1_$pid") as? HTMLInputElement)?.let { it.value = "" }
+    (document.getElementById("rixoNcN2_$pid") as? HTMLInputElement)?.let { it.value = "" }
+}
+
+/** Place/Hiragana combos render overlays at `#rixoNcP_{pid}_dropdown` / `#rixoNcH_{pid}_dropdown` on `body`; focus there must not trigger collapse. */
+private fun rixoNumberCutFloatingDropdownActive(pid: String): Boolean {
+    if (pid.isEmpty()) return false
+    if (document.getElementById("rixoNcP_${pid}_dropdown") != null) return true
+    if (document.getElementById("rixoNcH_${pid}_dropdown") != null) return true
+    val ae = document.activeElement as? HTMLElement ?: return false
+    var cur: HTMLElement? = ae
+    while (cur != null) {
+        val id = cur.id ?: ""
+        if (id == "rixoNcP_${pid}_dropdown" || id == "rixoNcH_${pid}_dropdown") return true
+        cur = cur.parentElement as? HTMLElement
+    }
+    return false
+}
+
+private fun rixoCloseFloatingComboboxDropdowns() {
+    js("if (typeof window.closeAllComboboxDropdowns === 'function') window.closeAllComboboxDropdowns();")
+}
+
+/** Before save: dismiss fixed-position combobox overlays (Place/Hiragana) and hide Number Cut expanded UI. */
+private fun rixoFinalizeNcInlineUiForCommit(tr: HTMLElement) {
+    rixoCloseFloatingComboboxDropdowns()
+    val shaken = tr.querySelector("input.rixo-inline-shaken") as? HTMLInputElement
+    val nc = tr.querySelector(".rixo-nc-cell") as? HTMLElement ?: return
+    val exp = nc.querySelector(".rixo-nc-expanded") as? HTMLElement ?: return
+    val coll = nc.querySelector(".rixo-nc-collapsed") as? HTMLElement ?: return
+    if (shaken?.checked == true) {
+        rixoCollapseNcExpanded(tr)
+    } else {
+        exp.style.display = "none"
+        coll.style.display = ""
+    }
+}
+
+private fun rixoCollapseNcExpanded(tr: HTMLElement) {
+    val shaken = tr.querySelector("input.rixo-inline-shaken") as? HTMLInputElement ?: return
+    if (!shaken.checked) return
+    val nc = tr.querySelector(".rixo-nc-cell") as? HTMLElement ?: return
+    val hidden = nc.querySelector("input.rixo-nc-hidden") as? HTMLInputElement ?: return
+    val pid = nc.getAttribute("data-nc-pid") ?: return
+    val exp = nc.querySelector(".rixo-nc-expanded") as? HTMLElement ?: return
+    val coll = nc.querySelector(".rixo-nc-collapsed") as? HTMLElement ?: return
+    val place = rixoReadNcPlace(pid)
+    val h = rixoReadNcHiragana(pid)
+    val n1 = (document.getElementById("rixoNcN1_$pid") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val n2 = (document.getElementById("rixoNcN2_$pid") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val s = rixoComposeNumberCut(place, n1, h, n2)
+    if (s.isNotEmpty()) {
+        hidden.value = s
+        coll.textContent = s
+    }
+    exp.style.display = "none"
+    coll.style.display = ""
+}
+
+private fun rixoOnShakenToggled(tr: HTMLElement) {
+    val shaken = tr.querySelector("input.rixo-inline-shaken") as? HTMLInputElement ?: return
+    val nc = tr.querySelector(".rixo-nc-cell") as? HTMLElement ?: return
+    val hidden = nc.querySelector("input.rixo-nc-hidden") as? HTMLInputElement ?: return
+    val pid = nc.getAttribute("data-nc-pid") ?: return
+    val exp = nc.querySelector(".rixo-nc-expanded") as? HTMLElement ?: return
+    val coll = nc.querySelector(".rixo-nc-collapsed") as? HTMLElement ?: return
+    if (!shaken.checked) {
+        tr.setAttribute("data-nc-reopen", "1")
+        exp.style.display = "none"
+        coll.style.display = ""
+        return
+    }
+    val reopen = tr.getAttribute("data-nc-reopen") == "1"
+    tr.removeAttribute("data-nc-reopen")
+    val hadValue = hidden.value.isNotBlank()
+    if (reopen || !hadValue) {
+        rixoClearNcFields(pid)
+        hidden.value = ""
+        coll.textContent = "—"
+        exp.style.display = "block"
+        coll.style.display = "none"
+    } else {
+        exp.style.display = "none"
+        coll.style.display = ""
+    }
+}
+
+private fun rixoSyncNcVisualState(tr: HTMLElement) {
+    val shaken = tr.querySelector("input.rixo-inline-shaken") as? HTMLInputElement ?: return
+    val nc = tr.querySelector(".rixo-nc-cell") as? HTMLElement ?: return
+    val hidden = nc.querySelector("input.rixo-nc-hidden") as? HTMLInputElement ?: return
+    val exp = nc.querySelector(".rixo-nc-expanded") as? HTMLElement ?: return
+    val coll = nc.querySelector(".rixo-nc-collapsed") as? HTMLElement ?: return
+    if (!shaken.checked) {
+        exp.style.display = "none"
+        coll.style.display = ""
+        return
+    }
+    if (hidden.value.isBlank()) {
+        exp.style.display = "block"
+        coll.style.display = "none"
+    } else {
+        exp.style.display = "none"
+        coll.style.display = ""
+    }
+}
+
+private fun setupRixoInlineNumberCutAndShaken() {
+    val preview = document.getElementById("rixoRowsPreview") ?: return
+    if (rixoInlineEditingId == null) return
+    val rows = preview.querySelectorAll("tbody tr")
+    for (i in 0 until rows.length) {
+        val tr = rows.item(i) as HTMLElement
+        if (tr.querySelector(".rixo-update-btn") == null) continue
+        val shaken = tr.querySelector("input.rixo-inline-shaken[data-col=\"shaken\"]") as? HTMLInputElement
+        val ncCell = tr.querySelector(".rixo-nc-cell") as? HTMLElement
+        if (shaken != null && ncCell != null) {
+            rixoSyncNcVisualState(tr)
+            shaken.addEventListener("change", { rixoOnShakenToggled(tr) })
+            val exp = ncCell.querySelector(".rixo-nc-expanded") as? HTMLElement
+            val pidLocal = ncCell.getAttribute("data-nc-pid").orEmpty()
+            exp?.addEventListener("focusout", {
+                window.setTimeout({
+                    val ae = document.activeElement as? HTMLElement
+                    if (ae != null && ncCell.contains(ae)) return@setTimeout
+                    if (rixoNumberCutFloatingDropdownActive(pidLocal)) return@setTimeout
+                    rixoCollapseNcExpanded(tr)
+                }, 200)
+            })
+        }
+    }
+}
+
+private fun rixoFillInlineComboSelect(sel: HTMLSelectElement, currentValue: String, names: List<String>) {
+    sel.innerHTML = ""
+    val def = document.createElement("option") as HTMLOptionElement
+    def.value = ""
+    def.textContent = "▼"
+    sel.appendChild(def)
+    val seen = mutableSetOf<String>()
+    val curTrim = currentValue.trim()
+    if (curTrim.isNotEmpty()) {
+        seen.add(curTrim.lowercase())
+        val o = document.createElement("option") as HTMLOptionElement
+        o.value = curTrim
+        o.textContent = curTrim
+        sel.appendChild(o)
+    }
+    val sorted = names.map { it.trim() }.filter { it.isNotEmpty() }
+        .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it })
+    if (sorted.isNotEmpty()) {
+        if (curTrim.isNotEmpty()) {
+            val div = document.createElement("option") as HTMLOptionElement
+            div.disabled = true
+            div.value = "__rixo_div__"
+            div.textContent = "Other options"
+            sel.appendChild(div)
+        }
+        for (t in sorted) {
+            val low = t.lowercase()
+            if (!seen.contains(low)) {
+                seen.add(low)
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = t
+                opt.textContent = t
+                sel.appendChild(opt)
+            }
+        }
+    }
+    if (curTrim.isNotEmpty()) {
+        for (j in 0 until sel.options.length) {
+            val o = sel.options[j] as HTMLOptionElement
+            if (o.disabled) continue
+            if (o.value.isNotEmpty() && o.value.equals(curTrim, ignoreCase = true)) {
+                sel.selectedIndex = j
+                return
+            }
+        }
+    }
+}
+
+private fun populateRixoInlineApiComboboxes() {
+    val preview = document.getElementById("rixoRowsPreview") ?: return
+    if (rixoInlineEditingId == null) return
+    val selects = preview.querySelectorAll("select.rixo-inline-fetch")
+    for (i in 0 until selects.length) {
+        val sel = selects.item(i) as HTMLSelectElement
+        val spec = sel.getAttribute("data-fetch-url") ?: continue
+        val currentValue = sel.getAttribute("data-current-value") ?: ""
+        if (spec.startsWith("static:")) {
+            val parts = spec.removePrefix("static:").split("|").map { it.trim() }.filter { it.isNotEmpty() }
+            rixoFillInlineComboSelect(sel, currentValue, parts)
+            val sid = sel.id
+            js("(function(id){ if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(id); })")(sid)
+            continue
+        }
+        val url = spec
+        window.fetch(apiUrl(url)).then { r: dynamic -> r.json() }.then { raw: dynamic ->
+            val names = parseApiDataStringArray(raw)
+            rixoFillInlineComboSelect(sel, currentValue, names)
+            val sid = sel.id
+            js("(function(id){ if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(id); })")(sid)
+            Unit
+        }.catch { _: dynamic ->
+            console.error("Rixo inline combo failed:", url)
+        }
+    }
+}
+
+private fun showRixoStructuralChangeReloadModal() {
+    val modal = document.createElement("div")
+    modal.id = "rixoStructuralReloadModal"
+    modal.asDynamic().style.cssText =
+        "position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10002;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;"
+    modal.innerHTML = """
+        <div style="background:#fff;border-radius:12px;padding:22px;max-width:440px;width:100%;box-shadow:0 18px 40px rgba(0,0,0,0.2);">
+            <h3 style="margin:0 0 10px 0;font-size:18px;color:#111827;">Reload recommended</h3>
+            <p style="margin:0 0 18px 0;font-size:14px;color:#374151;line-height:1.55;">
+                You updated chassis, Rixo company, and/or purchase date on this row. Reload the page so filters
+                and the purchase list stay in sync with the saved record.
+            </p>
+            <div style="display:flex;justify-content:flex-end;gap:10px;">
+                <button type="button" id="rixoStructuralReloadLater" style="padding:9px 16px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;">Dismiss</button>
+                <button type="button" id="rixoStructuralReloadNow" style="padding:9px 16px;border:none;background:#2563eb;color:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Reload page</button>
+            </div>
+        </div>
+    """.trimIndent()
+    document.body?.appendChild(modal)
+
+    fun close() {
+        document.getElementById("rixoStructuralReloadModal")?.remove()
+    }
+
+    document.getElementById("rixoStructuralReloadLater")?.addEventListener("click", { _: Event -> close() })
+    modal.addEventListener("click", { e: Event ->
+        if ((e.target as? HTMLElement)?.id == "rixoStructuralReloadModal") close()
+    })
+    document.getElementById("rixoStructuralReloadNow")?.addEventListener("click", { _: Event ->
+        window.location.reload()
+    })
+}
+
+private fun commitRixoInlineRow(tr: HTMLElement, purchase: dynamic) {
+    val row = asDynamicRow(purchase as Any?)
+    val id = row.id
+    val idLong = when (id) {
+        is Number -> id.toLong()
+        else -> id?.toString()?.toLongOrNull()
+    } ?: return
+
+    rixoFinalizeNcInlineUiForCommit(tr)
+
+    val dataColumns = rixoResolvedDataColumnsForTable()
+
+    fun structuralChangePending(): Boolean {
+        for (col in dataColumns) {
+            if (col !in RIXO_RELOAD_HINT_COLUMNS) continue
+            val oldS = purchaseValueForRixoCompare(row, col)
+            val newS = readRixoControlCompareString(col, tr)
+            if (oldS != newS) return true
+        }
+        return false
+    }
+
+    val needsReloadHint = structuralChangePending()
+
+    val payload = js("{}")
+    var changeCount = 0
+    for (col in dataColumns) {
+        val oldS = purchaseValueForRixoCompare(row, col)
+        val newS = readRixoControlCompareString(col, tr)
+        if (oldS != newS) {
+            val v = readRixoCommitTypedValue(col, tr)
+            if (v != null) {
+                payload[col] = v
+                changeCount++
+            }
+        }
+    }
+    if (dataColumns.contains("numberCut")) {
+        val oldS = purchaseValueForRixoCompare(row, "shaken")
+        val newS = readRixoControlCompareString("shaken", tr)
+        if (oldS != newS) {
+            val v = readRixoCommitTypedValue("shaken", tr)
+            if (v != null) {
+                payload["shaken"] = v
+                changeCount++
+            }
+        }
+    }
+    if (changeCount == 0) {
+        rixoInlineEditingId = null
+        renderRixoRowsPreview(rixoCurrentRows)
+        return
+    }
+    val init = js("{}")
+    init.method = "PUT"
+    init.headers = js("({ 'Content-Type': 'application/json' })")
+    init.body = js("JSON.stringify")(payload)
+    window.fetch(apiUrl("purchases/$idLong"), init.unsafeCast<RequestInit>()).then { response: dynamic ->
+        if (js("!response.ok") as Boolean) {
+            showMessage("Could not save changes. Please try again.", "error")
+            return@then Unit
+        }
+        response.json().then { updated: dynamic ->
+            val updatedRow = updated.unsafeCast<dynamic>()
+            val newRows = rixoCurrentRows.map { p ->
+                val pid = asDynamicRow(p).id
+                val pLong = when (pid) {
+                    is Number -> pid.toLong()
+                    else -> pid?.toString()?.toLongOrNull()
+                }
+                if (pLong == idLong) updatedRow else p
+            }
+            rixoCurrentRows = newRows
+            rixoInlineEditingId = null
+            renderRixoRowsPreview(rixoCurrentRows)
+            if (needsReloadHint) {
+                showRixoStructuralChangeReloadModal()
+            } else {
+                showMessage("Row updated.", "success")
+            }
+            Unit
+        }
+        Unit
+    }
+}
+
+fun restrictRixoInlineMoneyInputs() {
+    // List of money field IDs that need restriction
+    val moneyFields = listOf(
+        "auctionFee", "auctionPenaltyFee", "carPrice", "freight", "inspectionFee",
+        "miscCharges", "profit", "recycleFee", "repairCharges", "rixoPrice",
+        "shipmentCharges", "storageCharges", "taxTotal", "totalPrice", "roadTax"
+    )
+    
+    // Find all inline control inputs that are for money fields
+    val inlineControls = document.querySelectorAll(".rixo-inline-control")
+    for (i in 0 until inlineControls.length) {
+        val input = inlineControls.item(i) as? HTMLInputElement ?: continue
+        val colKey = input.getAttribute("data-col") ?: continue
+        if (!moneyFields.contains(colKey)) continue
+        if (input.type == "hidden" || input.type == "date" || input.type == "month") continue
+        
+        // Prevent paste and drop
+        input.addEventListener("paste", { ev -> ev.preventDefault() })
+        input.addEventListener("drop", { ev -> ev.preventDefault() })
+    }
+}
+
 // Render the rows preview table
 fun renderRixoRowsPreview(purchases: List<dynamic>) {
     val preview = document.getElementById("rixoRowsPreview") ?: return
     val selectedCount = document.getElementById("selectedCount") ?: return
     rixoCurrentRows = purchases
+    val editingId = rixoInlineEditingId
+    if (editingId != null) {
+        val stillPresent = purchases.any { p ->
+            val pid = asDynamicRow(p).id
+            val pLong = when (pid) {
+                is Number -> pid.toLong()
+                else -> pid?.toString()?.toLongOrNull()
+            }
+            pLong == editingId
+        }
+        if (!stillPresent) rixoInlineEditingId = null
+    }
     
     if (purchases.isEmpty()) {
         setRixoRowsPreviewEmptyMessage("(No Car is Found)")
@@ -18048,7 +20482,8 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
     if (rixoSelectedDataColumns.isEmpty()) loadRixoSelectedColumnsFromStorage()
     
     val tableHTML = StringBuilder()
-    val dataColumns = normalizeRixoSelectedDataColumns(rixoSelectedDataColumns).toList()
+    val dataColumns = rixoResolvedDataColumnsForTable()
+    val updaterEditSession = isRixoUpdaterEditSession()
 
     fun columnClassFor(key: String): String = when (key) {
         "chassis" -> "rixo-col-chassis"
@@ -18062,16 +20497,21 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
         else -> "rixo-col-generic"
     }
 
+    val dataColgroup = dataColumns.joinToString("") { """<col class="rixo-col-data" />""" }
     tableHTML.append("""
         <table class="rixo-table">
+            <colgroup>
+                <col class="rixo-col-select" />
+                <col class="rixo-col-edit" />
+                $dataColgroup
+            </colgroup>
             <thead>
                 <tr>
-                    <th class="rixo-col-select">
+                    <th class="rixo-col-select">${if (updaterEditSession) "" else """
                         <label class="rixo-checkwrap">
-                            <input type="checkbox" id="selectAllRixo" class="rixo-check">
-                            <span class="rixo-select-all-text">Select All</span>
+                            <input type="checkbox" id="selectAllRixo" class="rixo-check" aria-label="Select all rows">
                         </label>
-                    </th>
+                    """.trimIndent()}</th>
                     <th class="rixo-col-edit"></th>
                     ${dataColumns.joinToString("") { """<th class="${columnClassFor(it)}">${escapeHtml(rixoColumnLabel(it))}</th>""" }}
                 </tr>
@@ -18079,29 +20519,67 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
             <tbody>
     """)
     
-    purchases.forEach { purchase ->
-        val id = js("purchase.id").toString()
-        
-        tableHTML.append("""
-            <tr>
-                <td class="rixo-col-select" data-label="">
-                    <label class="rixo-checkwrap">
-                        <input type="checkbox" class="rixo-check rixo-row-check" data-id="$id" checked>
-                    </label>
-                </td>
-                <td class="rixo-col-edit" data-label="">
-                    <button class="rixo-edit-btn" data-id="$id" title="Edit">
+    purchases.forEach { purchaseAny ->
+        val row = asDynamicRow(purchaseAny)
+        val rawId = row.id
+        val id = when (rawId) {
+            is Number -> rawId.toLong().toString()
+            else -> rawId?.toString() ?: ""
+        }
+        val rowIdLong = id.toLongOrNull()
+        val isEditing = rowIdLong != null && rowIdLong == rixoInlineEditingId
+        val editButtonHtml = if (isEditing) {
+            """
+                    <button type="button" class="rixo-update-btn" data-id="$id" title="Update">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <polyline points="6,5 12,12 6,19" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                            <polyline points="12,5 18,12 12,19" fill="none" stroke="white" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+            """.trimIndent()
+        } else {
+            """
+                    <button type="button" class="rixo-edit-btn" data-id="$id" title="Edit">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                             <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
                         </svg>
                     </button>
+            """.trimIndent()
+        }
+        val chassisRaw = row.chassis?.toString()?.trim() ?: ""
+        val chassisAttr = escapeHtml(chassisRaw)
+        val selectOrRemoveCell = if (updaterEditSession) {
+            """<button type="button" class="rixo-row-remove-btn" data-id="$id" data-chassis="$chassisAttr" title="Remove from Rixo" aria-label="Remove from Rixo" style="flex-shrink:0;width:28px;height:28px;border:none;border-radius:6px;background:#fee2e2;color:#b91c1c;cursor:pointer;line-height:1;font-size:18px;font-weight:700;padding:0;display:inline-flex;align-items:center;justify-content:center;">×</button>"""
+        } else {
+            """
+                    <label class="rixo-checkwrap">
+                        <input type="checkbox" class="rixo-check rixo-row-check" data-id="$id" checked>
+                    </label>
+            """.trimIndent()
+        }
+        tableHTML.append("""
+            <tr>
+                <td class="rixo-col-select" data-label="">
+                    $selectOrRemoveCell
+                </td>
+                <td class="rixo-col-edit" data-label="">
+                    $editButtonHtml
                 </td>
                 ${dataColumns.joinToString("") { key ->
                     val label = escapeHtml(rixoColumnLabel(key))
-                    val raw = if (key == "carModelYear") carModelYearToYearOnly(js("purchase.carModelYear")?.toString() ?: "") else purchaseTableCellValue(purchase, key)
-                    val display = escapeHtml(raw)
-                    """<td class="${columnClassFor(key)}" data-label="$label:">$display</td>"""
+                    val cellInner = if (isEditing) {
+                        rixoInlineControlMarkup(key, row)
+                    } else {
+                        val raw = if (key == "carModelYear") {
+                            val r = row.carModelYear?.toString() ?: ""
+                            carModelYearToMonthInputValue(r).ifEmpty { carModelYearToYearOnly(r) }
+                        } else {
+                            purchaseTableCellValue(row, key)
+                        }
+                        escapeHtml(raw)
+                    }
+                    """<td class="${columnClassFor(key)}" data-label="$label:">$cellInner</td>"""
                 }}
             </tr>
         """)
@@ -18112,50 +20590,126 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
         </table>
     """)
     
+    rixoCloseFloatingComboboxDropdowns()
     preview.innerHTML = tableHTML.toString()
-    selectedCount.textContent = "Selected: ${purchases.size} of ${purchases.size}"
+    if (updaterEditSession) {
+        selectedCount.textContent = "Cars: ${purchases.size}"
+        recomputeRixoUpdaterRowHasBookingRequested()
+    } else {
+        selectedCount.textContent = "Selected: ${purchases.size} of ${purchases.size}"
+    }
     
-    // Set up checkbox listeners
+    // Set up checkbox / remove listeners
     setupRixoCheckboxListeners()
+    setupRixoInlineNumberCutAndShaken()
+    populateRixoInlineApiComboboxes()
+    window.setTimeout({
+        restrictRixoInlineMoneyInputs()
+    }, 100)
 }
 
 // Set up checkbox event listeners for the Rixo rows
 fun setupRixoCheckboxListeners() {
-    // Select All checkbox
-    val selectAllCheckbox = document.getElementById("selectAllRixo") as HTMLInputElement?
-    val rowCheckboxes = document.querySelectorAll(".rixo-row-check")
-    
-    selectAllCheckbox?.addEventListener("change", { _: Event ->
-        val isChecked = selectAllCheckbox.checked
+    if (!isRixoUpdaterEditSession()) {
+        // Select All checkbox
+        val selectAllCheckbox = document.getElementById("selectAllRixo") as HTMLInputElement?
+        val rowCheckboxes = document.querySelectorAll(".rixo-row-check")
+
+        selectAllCheckbox?.addEventListener("change", { _: Event ->
+            val isChecked = selectAllCheckbox.checked
+            for (i in 0 until rowCheckboxes.length) {
+                val checkbox = rowCheckboxes.item(i) as HTMLInputElement
+                checkbox.checked = isChecked
+            }
+            updateRixoSelectedCount()
+        })
+
+        // Individual row checkboxes
         for (i in 0 until rowCheckboxes.length) {
             val checkbox = rowCheckboxes.item(i) as HTMLInputElement
-            checkbox.checked = isChecked
+            checkbox.addEventListener("change", { _: Event ->
+                updateRixoSelectedCount()
+                updateSelectAllRixoCheckbox()
+            })
         }
-        updateRixoSelectedCount()
-    })
-    
-    // Individual row checkboxes
-    for (i in 0 until rowCheckboxes.length) {
-        val checkbox = rowCheckboxes.item(i) as HTMLInputElement
-        checkbox.addEventListener("change", { _: Event ->
-            updateRixoSelectedCount()
-            updateSelectAllRixoCheckbox()
-        })
+    } else {
+        val removeButtons = document.querySelectorAll(".rixo-row-remove-btn")
+        for (i in 0 until removeButtons.length) {
+            val button = removeButtons.item(i) as HTMLElement
+            button.addEventListener("click", { event ->
+                event.preventDefault()
+                event.stopPropagation()
+                val btn = event.currentTarget as HTMLElement
+                val id = btn.getAttribute("data-id")?.toLongOrNull()
+                val purchase = rixoCurrentRows.firstOrNull { purchaseIdFromDynamic(it) == id }
+                    ?: rixoCurrentRows.firstOrNull {
+                        purchaseChassisFromDynamic(it).equals(
+                            btn.getAttribute("data-chassis")?.trim().orEmpty(),
+                            ignoreCase = true,
+                        )
+                    }
+                if (purchase != null) {
+                    handleRemoveChassisFromRixoUpdater(purchase)
+                }
+            })
+        }
     }
-    
-    // Edit button: open Edit Purchase page in new tab and show refresh pop-up
+
+    // Edit: inline mode on this row; Update: save partial PUT then refresh row from response
     val editButtons = document.querySelectorAll(".rixo-edit-btn")
     for (i in 0 until editButtons.length) {
         val button = editButtons.item(i) as HTMLElement
         button.addEventListener("click", { event ->
+            event.preventDefault()
+            event.stopPropagation()
             val btn = event.currentTarget as HTMLElement
             val id = btn.getAttribute("data-id")?.toLongOrNull()
             if (id != null) {
-                val baseUrl = window.location.origin + window.location.pathname + (window.location.search ?: "")
-                window.open("$baseUrl#/edit/$id", "_blank")
-                showRixoRefreshPopup()
+                rixoInlineEditingId = id
+                renderRixoRowsPreview(rixoCurrentRows)
             }
         })
+    }
+    val updateButtons = document.querySelectorAll(".rixo-update-btn")
+    for (i in 0 until updateButtons.length) {
+        val button = updateButtons.item(i) as HTMLElement
+        button.addEventListener("click", { event ->
+            event.preventDefault()
+            event.stopPropagation()
+            val btn = event.currentTarget as HTMLElement
+            val id = btn.getAttribute("data-id")?.toLongOrNull() ?: return@addEventListener
+            val tr = btn.closest("tr") as? HTMLElement ?: return@addEventListener
+            var rowPurchase: dynamic = null
+            for (p in rixoCurrentRows) {
+                val pd = asDynamicRow(p)
+                val pid = pd.id
+                val pLong = when (pid) {
+                    is Number -> pid.toLong()
+                    else -> pid?.toString()?.toLongOrNull()
+                }
+                if (pLong == id) {
+                    rowPurchase = pd
+                    break
+                }
+            }
+            if (rowPurchase != null) {
+                commitRixoInlineRow(tr, rowPurchase)
+            }
+        })
+    }
+
+    // Strict mask/calendar binding for RIXO inline date + month fields
+    val inlineDateHiddens = document.querySelectorAll(".rixo-inline-date-hidden")
+    for (i in 0 until inlineDateHiddens.length) {
+        val el = inlineDateHiddens.item(i) as? HTMLElement ?: continue
+        val base = el.getAttribute("data-base") ?: continue
+        bindStrictDateTextMask(base)
+    }
+    val inlineMonthHiddens = document.querySelectorAll(".rixo-inline-month-hidden")
+    for (i in 0 until inlineMonthHiddens.length) {
+        val el = inlineMonthHiddens.item(i) as? HTMLElement ?: continue
+        val base = el.getAttribute("data-base") ?: continue
+        bindStrictMonthYearTextMask(base)
     }
 }
 
@@ -18215,9 +20769,13 @@ fun updateSelectAllRixoCheckbox() {
     }
 }
 
-// Generate Rixo Request PDF (preview = open same PDF in new tab; false = download)
-fun generateRixoRequestPdf(preview: Boolean = false) {
-    val buyingDate = (document.getElementById("buyingDate") as HTMLInputElement).value
+// Rixo transport: [persistHistory] writes Rixo history + marks rows requested; [generatePdf] skips PDF body (204); [preview] opens blob in new tab vs download.
+fun generateRixoRequestPdf(
+    persistHistory: Boolean = false,
+    generatePdf: Boolean = true,
+    preview: Boolean = false,
+) {
+    val buyingDate = getRixoBuyingDateValue()
     val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
     val headMessage = (document.getElementById("headMessage") as HTMLTextAreaElement).value
     val footerMessage = (document.getElementById("footerMessage") as HTMLTextAreaElement).value
@@ -18229,21 +20787,13 @@ fun generateRixoRequestPdf(preview: Boolean = false) {
         return
     }
     
-    // Get selected purchase IDs
-    val selectedIds = mutableListOf<Long>()
-    val rowCheckboxes = document.querySelectorAll(".rixo-row-check")
-    for (i in 0 until rowCheckboxes.length) {
-        val checkbox = rowCheckboxes.item(i) as HTMLInputElement
-        if (checkbox.checked) {
-            val id = checkbox.getAttribute("data-id")?.toLongOrNull()
-            if (id != null) {
-                selectedIds.add(id)
-            }
-        }
-    }
-    
+    val selectedIds = rixoSelectedPurchaseIdsForActions()
+
     if (selectedIds.isEmpty()) {
-        showMessage("Please select at least one row to generate the PDF", "error")
+        val emptyMsg =
+            if (isRixoUpdaterEditSession()) "No cars remain on this Rixo request."
+            else "Please select at least one row to generate the PDF"
+        showMessage(emptyMsg, "error")
         return
     }
     
@@ -18261,10 +20811,18 @@ fun generateRixoRequestPdf(preview: Boolean = false) {
                     }
                 }
                 
-                // Generate PDF using backend API
                 generateRixoRequestPdfViaBackend(
-                    selectedPurchases, buyingDate, rixoCompany, headMessage, footerMessage, extraMessage, contactDetails, selectedIds,
-                    preview = preview
+                    selectedPurchases,
+                    buyingDate,
+                    rixoCompany,
+                    headMessage,
+                    footerMessage,
+                    extraMessage,
+                    contactDetails,
+                    selectedIds,
+                    persistHistory = persistHistory,
+                    generatePdf = generatePdf,
+                    preview = preview,
                 )
             }
         }
@@ -18281,13 +20839,15 @@ fun generateRixoRequestPdfViaBackend(
     extraMessage: String,
     contactDetails: String,
     selectedIds: List<Long>,
+    persistHistory: Boolean = false,
+    generatePdf: Boolean = true,
     preview: Boolean = false,
 ) {
     console.log("🔧 [DEBUG] generateRixoRequestPdfViaBackend called with selectedIds:", selectedIds)
     
     // Prepare transport data
     val transportData = js("{}")
-    transportData.rixoCompany = rixoCompany
+    transportData.rixoCompany = persistableRixoCompanyFromCombobox(rixoCompany)
     transportData.buyingDate = buyingDate
     transportData.headMessage = headMessage
     transportData.footerMessage = footerMessage
@@ -18302,8 +20862,9 @@ fun generateRixoRequestPdfViaBackend(
     }
     requestBody.ids = jsArray
     requestBody.transportData = transportData
-    requestBody.persistHistory = !preview
-    
+    requestBody.persistHistory = persistHistory
+    requestBody.generatePdf = generatePdf
+
     val requestInit = js("{}")
     requestInit.method = "POST"
     val headers = js("{}")
@@ -18316,55 +20877,61 @@ fun generateRixoRequestPdfViaBackend(
     // Call backend API — response is PDF bytes only; no server-side file/S3 storage for this endpoint.
     // Preview: blob + createObjectURL stays in the browser tab; revoke after use. Do not upload this Blob to S3 or any bucket.
     window.fetch(apiUrl("purchases/rixo-transport-pdf"), requestInit).then { response ->
-        if (response.ok) {
-            response.blob().then { blob ->
-                val url = js("URL.createObjectURL(blob)") as String
-                if (preview) {
-                    val opened = window.open(url, "_blank")
-                    val blocked = js("(opened == null || typeof opened === 'undefined')") as Boolean
-                    if (blocked) {
-                        showMessage("Could not open preview. Allow pop-ups for this site, or use Download PDF to save the PDF.", "error")
-                        try {
-                            js("URL.revokeObjectURL(url)")
-                        } catch (_: dynamic) {
-                        }
-                    } else {
-                        window.setTimeout({
-                            try {
-                                js("URL.revokeObjectURL(url)")
-                            } catch (e: dynamic) {
-                                Logger.warn("Failed to revoke preview URL: ${e.toString()}")
-                            }
-                        }, 120000)
-                        showMessage("PDF preview opened in a new tab.", "success")
+        if (js("!response.ok") as Boolean) {
+            console.error("❌ Rixo transport request failed:", response.status, response.statusText)
+            showMessage("Request failed: ${response.status} ${response.statusText}", "error")
+            return@then Unit
+        }
+        if (!generatePdf) {
+            showMessage("Rixo history saved.", "success")
+            return@then Unit
+        }
+        response.blob().then { blob ->
+            val url = js("URL.createObjectURL(blob)") as String
+            if (preview) {
+                val opened = window.open(url, "_blank")
+                val blocked = js("(opened == null || typeof opened === 'undefined')") as Boolean
+                if (blocked) {
+                    showMessage("Could not open preview. Allow pop-ups for this site, or use PDF to download.", "error")
+                    try {
+                        js("URL.revokeObjectURL(url)")
+                    } catch (_: dynamic) {
                     }
                 } else {
+                    window.setTimeout({
+                        try {
+                            js("URL.revokeObjectURL(url)")
+                        } catch (e: dynamic) {
+                            Logger.warn("Failed to revoke preview URL: ${e.toString()}")
+                        }
+                    }, 120000)
+                    showMessage("PDF preview opened in a new tab.", "success")
+                }
+            } else {
                 val a = document.createElement("a") as HTMLAnchorElement
                 a.href = url
                 a.setAttribute("download", "rixo-transport-${js("Date.now()")}.pdf")
                 document.body?.appendChild(a)
                 a.click()
                 document.body?.removeChild(a)
-                        window.setTimeout({
-                            try {
-                js("URL.revokeObjectURL(url)")
-                            } catch (e: dynamic) {
-                                Logger.warn("Failed to revoke URL: ${e.toString()}")
-                            }
-                        }, AppConstants.URL_REVOKE_DELAY_SHORT)
-                showMessage("Rixo history saved. PDF downloaded. Set Rixo Requested to TRUE manually when you have faxed the PDF.", "success")
-                }
-            }.catch { error ->
-                console.error("❌ Error processing blob:", error)
-                showMessage("Error processing PDF: ${error.toString()}", "error")
+                window.setTimeout({
+                    try {
+                        js("URL.revokeObjectURL(url)")
+                    } catch (e: dynamic) {
+                        Logger.warn("Failed to revoke URL: ${e.toString()}")
+                    }
+                }, AppConstants.URL_REVOKE_DELAY_SHORT)
+                showMessage("PDF downloaded.", "success")
             }
-        } else {
-            console.error("❌ PDF generation failed:", response.status, response.statusText)
-            showMessage("PDF generation failed: ${response.status} ${response.statusText}", "error")
+            Unit
+        }.catch { error ->
+            console.error("❌ Error processing blob:", error)
+            showMessage("Error processing PDF: ${error.toString()}", "error")
         }
+        Unit
     }.catch { error ->
-        console.error("❌ PDF generation error:", error)
-        showMessage("PDF generation error: $error", "error")
+        console.error("❌ Rixo transport error:", error)
+        showMessage("Rixo transport error: $error", "error")
     }
 }
 
@@ -18532,21 +21099,22 @@ fun generateRixoRequestPdfDocument(purchases: List<dynamic>, buyingDate: String,
         printWindow?.close()
     }, 3000)
     
-    showMessage("PDF generated successfully for ${purchases.size} vehicles. Set Rixo Requested to TRUE manually after faxing.", "success")
+    showMessage("PDF generated successfully for ${purchases.size} vehicles.", "success")
 }
 
 // Generate table rows for the PDF (year column shows only the year from car_model_year)
 fun generateTableRows(purchases: List<dynamic>, formattedDate: String): String {
     val rows = StringBuilder()
     
-    for (purchase in purchases) {
-        val chassis = js("purchase.chassis")?.toString() ?: ""
-        val yearOnly = carModelYearToYearOnly(js("purchase.carModelYear")?.toString() ?: "")
-        val carName = js("purchase.carName")?.toString() ?: ""
-        val clientName = js("purchase.clientName")?.toString() ?: ""
-        val stockLocation = js("purchase.stockLocation")?.toString() ?: ""
-        val venueId = js("purchase.venueId")?.toString() ?: ""
-        val numberCut = js("purchase.numberCut")?.toString() ?: ""
+    for (purchaseAny in purchases) {
+        val p = asDynamicRow(purchaseAny)
+        val chassis = p.chassis?.toString() ?: ""
+        val yearOnly = carModelYearToYearOnly(p.carModelYear?.toString() ?: "")
+        val carName = p.carName?.toString() ?: ""
+        val clientName = p.clientName?.toString() ?: ""
+        val stockLocation = p.stockLocation?.toString() ?: ""
+        val venueId = p.venueId?.toString() ?: ""
+        val numberCut = p.numberCut?.toString() ?: ""
         
         rows.append("""
             <tr>
@@ -18807,6 +21375,7 @@ fun renderMissingDataForRixoTransport(missingPurchases: List<dynamic>) {
                     sb.append("<option value=\"愛媛\">愛媛 (Ehime)</option>")
                     sb.append("<option value=\"高知\">高知 (Kochi)</option>")
                     sb.append("<option value=\"福岡\">福岡 (Fukuoka)</option>")
+                    sb.append("<option value=\"北九州\">北九州(KITA-KYUSHU)</option>")
                     sb.append("<option value=\"佐賀\">佐賀 (Saga)</option>")
                     sb.append("<option value=\"長崎\">長崎 (Nagasaki)</option>")
                     sb.append("<option value=\"熊本\">熊本 (Kumamoto)</option>")
@@ -18958,6 +21527,7 @@ fun setupRixoTransportPageListeners() {
     })
     
     // Date formatting for transportDate field
+    bindStrictDateTextMask("transportDate")
     document.getElementById("transportDate")?.addEventListener("change", { ev: Event ->
         val input = ev.target as HTMLInputElement
         val dateValue = input.value
@@ -20423,15 +22993,19 @@ fun populateColumnCheckboxes(selectedColumns: Set<String>) {
     if (container == null) return
     
     val allColumns = purchaseListColumnLabels().entries.sortedBy { it.value.lowercase() }
+    val mandatory = purchaseListMandatoryColumnKeys()
     
     container.innerHTML = allColumns.map { (key, label) ->
-        val isChecked = selectedColumns.contains(key)
+        val isMandatory = mandatory.contains(key)
+        val isChecked = isMandatory || selectedColumns.contains(key)
+        val disabledAttr = if (isMandatory) "disabled" else ""
+        val labelSuffix = if (isMandatory) " <span style=\"font-size:12px;color:#6b7280;\">(always on)</span>" else ""
         """
         <label style="display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
                onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='transparent'">
-            <input type="checkbox" value="$key" ${if (isChecked) "checked" else ""} 
+            <input type="checkbox" value="$key" ${if (isChecked) "checked" else ""} $disabledAttr
                    style="transform: scale(1.1);" onchange="updateColumnSelection()">
-            <span style="font-size: 14px;">$label</span>
+            <span style="font-size: 14px;">$label$labelSuffix</span>
         </label>
         """
     }.joinToString("")
@@ -20456,9 +23030,16 @@ fun updateColumnSelection() {
         countElement.textContent = "$count/$maxColumns"
     }
     
-    // Disable checkboxes if device limit is reached
+    // Disable optional checkboxes when device limit is reached (mandatory stay checked/disabled)
     for (i in 0 until selectedCount) {
         val checkbox = checkboxes.item(i) as HTMLInputElement
+        val isMandatory = purchaseListMandatoryColumnKeys().contains(checkbox.value)
+        if (isMandatory) {
+            checkbox.disabled = true
+            checkbox.checked = true
+            checkbox.parentElement?.asDynamic()?.style?.setProperty("opacity", "1")
+            continue
+        }
         if (!checkbox.checked && count >= maxColumns) {
             checkbox.disabled = true
             checkbox.parentElement?.asDynamic()?.style?.setProperty("opacity", "0.5")
@@ -20482,7 +23063,9 @@ fun saveSelectedColumns(columns: List<String>) {
 }
 
 fun resetToDefaultColumns() {
-    val ordered = prioritizePurchaseListDateAndChassis(getDefaultColumnsForDevice())
+    val deviceType = getDeviceType()
+    val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
+    val ordered = ensurePurchaseListPinnedColumns(prioritizePurchaseListDateAndChassis(getDefaultColumnsForDevice()), maxColumns)
     saveSelectedColumns(ordered)
     populateColumnCheckboxes(ordered.toSet())
     updateColumnSelection()
@@ -20499,11 +23082,12 @@ fun applyColumnChanges() {
         }
     }
     
-    val ordered = prioritizePurchaseListDateAndChassis(selectedColumns)
-    
-    // Get current device type and max columns
     val deviceType = getDeviceType()
     val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
+    val ordered = ensurePurchaseListPinnedColumns(
+        prioritizePurchaseListDateAndChassis(selectedColumns),
+        maxColumns,
+    )
     
     // Validate against device-specific limit
     if (ordered.size > maxColumns) {
@@ -20568,8 +23152,9 @@ fun setupResponsiveFormSections() {
             val allContentDivs = document.querySelectorAll(".form-section-content[data-section='$sectionName']")
 
             if (allContentDivs.length > 0) {
-                // On mobile: initially collapse all sections except Basic Information. On desktop/tablet: all expanded.
-                val shouldCollapse = isMobile && sectionName != "basic"
+                // On mobile: initially collapse all sections except Basic. On desktop/tablet: all expanded
+                // except Change History (edit purchase), which starts collapsed on every device.
+                val shouldCollapse = (isMobile && sectionName != "basic") || sectionName == "changeHistory"
 
                 for (j in 0 until allContentDivs.length) {
                     val contentDiv = allContentDivs.item(j) as HTMLElement
@@ -20606,6 +23191,46 @@ fun exposeColumnFilterFunctions() {
 
 // Setup event listeners for Car Booking page
 // setupCarBookingPageListeners moved to CarBooking.kt
+
+/** FOB vs C&F math for [computeTotalCnfOrFobForChassis] when building shipping PDF payloads. */
+private fun pdfShippingUsesFobMode(): Boolean =
+    when {
+        lastCalculationMode.equals("FOB", ignoreCase = true) -> true
+        lastCalculationMode.equals("C&F", ignoreCase = true) ||
+            lastCalculationMode.equals("CNF", ignoreCase = true) -> false
+        else -> cnfPageIsFobMode
+    }
+
+/** Per-chassis yen totals from the same logic as the FOB/C&F calculator table. */
+private fun buildFrontendTotalYenByChassisForShippingPdf(carsForPdf: List<dynamic>): dynamic {
+    val out = js("{}")
+    val isFob = pdfShippingUsesFobMode()
+    for (row in carsForPdf) {
+        val chassisRaw = js("row && row.chassis")
+        if (chassisRaw == null || chassisRaw === js("undefined")) continue
+        val chassis = chassisRaw.toString().trim()
+        if (chassis.isEmpty() || chassis == "N/A") continue
+        val enriched = cnfPageSelectedCars.firstOrNull { ca ->
+            val c = js("ca.chassis")?.toString()?.trim().orEmpty()
+            c.equals(chassis, ignoreCase = true)
+        }
+        val car = enriched ?: row
+        val total = computeTotalCnfOrFobForChassis(car, chassis, isFob)
+        if (!total.isNaN() && total.isFinite()) {
+            js("(function(o,k,v){ o[k]=v; })")(out, chassis, total)
+        }
+    }
+    return out
+}
+
+private fun attachFrontendTotalsToShippingPdfRequest(pdfRequest: dynamic, carsForPdf: List<dynamic>) {
+    val totals = buildFrontendTotalYenByChassisForShippingPdf(carsForPdf)
+    val n = (js("(function(o){ try { return Object.keys(o).length; } catch(e) { return 0; } })")(totals) as Number).toInt()
+    if (n > 0) {
+        pdfRequest.frontendTotalYenByChassis = totals
+        console.log("📋 PDF frontend calculator totals by chassis:", JSON.stringify(totals))
+    }
+}
 
 // Generate shipping schedule PDF from BOOKING DETAILS page or C&F/FOB calculation page
 fun generateShippingSchedulePdf() {
@@ -20658,6 +23283,7 @@ fun generateShippingSchedulePdf() {
     pdfRequest.chassisNumbers = carsForPdf.map { it.chassis }
     // Pass calculation mode so backend can set PDF column header (C&F Price or FOB Price)
     pdfRequest.calculationMode = lastCalculationMode
+    attachFrontendTotalsToShippingPdfRequest(pdfRequest, carsForPdf)
     
     console.log("📋 PDF Request data:", JSON.stringify(pdfRequest))
     console.log("📋 Booking No:", pdfRequest.bookingNo)
@@ -20769,6 +23395,7 @@ fun generateShippingSchedulePdfPreview() {
     pdfRequest.chassisNumbers = carsForPdf.map { it.chassis }
     // Pass calculation mode so backend can set PDF column header (C&F Price or FOB Price)
     pdfRequest.calculationMode = lastCalculationMode
+    attachFrontendTotalsToShippingPdfRequest(pdfRequest, carsForPdf)
     
     console.log("📋 PDF Preview Request data:", JSON.stringify(pdfRequest))
     console.log("📋 Calculation Mode:", pdfRequest.calculationMode)
@@ -21205,11 +23832,12 @@ fun confirmCarCostDetails() {
     val freight = (document.getElementById("freight") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
     val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
     val repairFee = (document.getElementById("repairFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
+    val auctionPenaltyFee = (document.getElementById("auctionPenaltyFee") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
     val mscCharges = (document.getElementById("mscCharges") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
     val profit = (document.getElementById("profit") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
     
     // Calculate total C&F price
-    val totalCnfPrice = carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+    val totalCnfPrice = carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + auctionPenaltyFee + mscCharges + profit
     
     // Update the display
     document.getElementById("totalCnfPrice")?.textContent = "¥${totalCnfPrice.toInt()}"
@@ -21226,6 +23854,7 @@ fun confirmCarCostDetails() {
     costData.freight = freight
     costData.inspectionFee = inspectionFee
     costData.repairFee = repairFee
+    costData.auctionPenaltyFee = auctionPenaltyFee
     costData.mscCharges = mscCharges
     costData.profit = profit
     
@@ -21293,7 +23922,18 @@ fun validateAndFormatCurrencyInputForCnf(field: HTMLInputElement) {
 
 // Add input validation to all cost fields
 fun addCostFieldValidation() {
-    val costFields = listOf("carPrice", "auctionFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
+    val costFields = listOf(
+        "carPrice",
+        "auctionFee",
+        "rixoPrice",
+        "shippingCharge",
+        "freight",
+        "inspectionFee",
+        "repairFee",
+        "auctionPenaltyFee",
+        "mscCharges",
+        "profit",
+    )
     
     for (fieldId in costFields) {
         val field = document.getElementById(fieldId) as HTMLInputElement
@@ -21346,6 +23986,7 @@ fun saveCarCostDetailsAndNavigate() {
     val freight = (document.getElementById("freight") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val repairFee = (document.getElementById("repairFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    val auctionPenaltyFee = (document.getElementById("auctionPenaltyFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val mscCharges = (document.getElementById("mscCharges") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     val profit = (document.getElementById("profit") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
     
@@ -21360,6 +24001,7 @@ fun saveCarCostDetailsAndNavigate() {
     costData.freight = freight
     costData.inspectionFee = inspectionFee
     costData.repairFee = repairFee
+    costData.auctionPenaltyFee = auctionPenaltyFee
     costData.mscCharges = mscCharges
     costData.profit = profit
     costData.packagePrice = 0.0
