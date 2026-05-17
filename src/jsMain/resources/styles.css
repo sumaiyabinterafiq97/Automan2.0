@@ -5758,11 +5758,10 @@ button.shipping-history-invoice-btn:active {
     margin-top: 16px;
 }
 
-/* Invoice Table Container - grows to fill available space */
+/* Invoice Table Container - grows only as needed for content, scrolls if too large */
 .invoice-table-container {
-    flex: 1;
     overflow-y: auto;
-    min-height: 0;
+    max-height: 50vh;
 }
 
 .invoice-list-table th,
@@ -5780,7 +5779,7 @@ button.shipping-history-invoice-btn:active {
 
 /* Invoice Total */
 .invoice-total {
-    margin-top: 16px;
+    margin-top: 0;
     padding: 16px;
     background: #059669;
     color: white;
