@@ -2,6 +2,7 @@ package com.automan.backend.service
 
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
+import com.automan.backend.repository.BookingMappingRepository
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.util.Logger
 import org.springframework.stereotype.Service
@@ -11,7 +12,8 @@ import org.springframework.web.multipart.MultipartFile
 @Service
 class PurchaseService(
     private val purchaseRepository: PurchaseRepository,
-    private val pdfService: PdfService
+    private val pdfService: PdfService,
+    private val bookingMappingRepository: BookingMappingRepository
 ) {
     
     /**
@@ -1223,7 +1225,34 @@ class PurchaseService(
     }
     
     fun getPolByCountry(country: String): List<String> {
-        return purchaseRepository.findDistinctPolByCountry(country)
+        val directPols = purchaseRepository.findDistinctPolByCountry(country)
+        val mappedPols = purchaseRepository.findDistinctStockLocationsMissingPolByCountry(country)
+            .flatMap { stockLocation -> resolvePolsForStockLocation(stockLocation) }
+
+        return (directPols + mappedPols)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.uppercase() }
+            .sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
+
+    private fun resolvePolsForStockLocation(stockLocation: String?): List<String> {
+        val normalizedStockLocation = stockLocation?.trim()
+        if (normalizedStockLocation.isNullOrEmpty()) {
+            return emptyList()
+        }
+
+        return bookingMappingRepository.findByStockLocationIgnoreCase(normalizedStockLocation)
+            .flatMap { mapping -> splitPols(mapping.pols) }
+            .distinctBy { it.uppercase() }
+    }
+
+    private fun splitPols(pols: String?): List<String> {
+        return pols
+            ?.split(',')
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?: emptyList()
     }
     
     fun getUniqueRixoCompanies(): List<String> {

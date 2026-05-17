@@ -84,6 +84,9 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     // POL by country (from purchases only) - used for booking page POL dropdown
     @Query("SELECT DISTINCT p.pol FROM Purchase p WHERE p.country = :country AND p.pol IS NOT NULL AND p.pol != '' ORDER BY p.pol")
     fun findDistinctPolByCountry(@Param("country") country: String): List<String>
+
+    @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.country = :country AND (p.pol IS NULL OR p.pol = '') AND p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
+    fun findDistinctStockLocationsMissingPolByCountry(@Param("country") country: String): List<String>
     
     // Rixo company (from purchases only)
     @Query("SELECT DISTINCT p.rixoCompany FROM Purchase p WHERE p.rixoCompany IS NOT NULL AND p.rixoCompany != '' ORDER BY p.rixoCompany")
@@ -97,12 +100,61 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT DISTINCT p.venueId FROM Purchase p WHERE p.venueId IS NOT NULL AND p.venueId != '' ORDER BY p.venueId")
     fun findDistinctVenueIds(): List<String>
     
-    // Filtered chassis methods - filter by shipped=0 (unshipped cars only)
-    // Filter by POL field instead of stock_location for booking page
-    @Query(value = "SELECT DISTINCT p.chassis FROM purchases p WHERE p.country = :country AND p.pol = :polPort AND p.chassis IS NOT NULL AND p.chassis != '' AND (p.shipped IS NULL OR p.shipped = 0) ORDER BY p.chassis", nativeQuery = true)
+    // Filtered chassis methods - filter by shipped=0 (unshipped cars only).
+    // Prefer the explicit POL field, but keep legacy/imported rows with only stock_location visible
+    // by resolving stock_location through booking_mappings.pols.
+    @Query(value = """
+        SELECT DISTINCT p.chassis
+        FROM purchases p
+        WHERE p.country = :country
+          AND p.chassis IS NOT NULL
+          AND p.chassis != ''
+          AND (p.shipped IS NULL OR p.shipped = 0)
+          AND (
+              UPPER(TRIM(p.pol)) = UPPER(TRIM(:polPort))
+              OR (
+                  (p.pol IS NULL OR p.pol = '')
+                  AND EXISTS (
+                      SELECT 1
+                      FROM booking_mappings bm
+                      WHERE bm.stock_location IS NOT NULL
+                        AND UPPER(TRIM(bm.stock_location)) = UPPER(TRIM(p.stock_location))
+                        AND bm.pols IS NOT NULL
+                        AND FIND_IN_SET(
+                            UPPER(REPLACE(TRIM(:polPort), ' ', '')),
+                            UPPER(REPLACE(bm.pols, ' ', ''))
+                        ) > 0
+                  )
+              )
+          )
+        ORDER BY p.chassis
+        """, nativeQuery = true)
     fun findFilteredChassis(@Param("country") country: String, @Param("polPort") polPort: String): List<String>
 
-    @Query("SELECT p FROM Purchase p WHERE p.country = :country AND p.pol = :polPort AND (p.shipped IS NULL OR p.shipped = false) ORDER BY p.chassis")
+    @Query(value = """
+        SELECT DISTINCT p.*
+        FROM purchases p
+        WHERE p.country = :country
+          AND (p.shipped IS NULL OR p.shipped = 0)
+          AND (
+              UPPER(TRIM(p.pol)) = UPPER(TRIM(:polPort))
+              OR (
+                  (p.pol IS NULL OR p.pol = '')
+                  AND EXISTS (
+                      SELECT 1
+                      FROM booking_mappings bm
+                      WHERE bm.stock_location IS NOT NULL
+                        AND UPPER(TRIM(bm.stock_location)) = UPPER(TRIM(p.stock_location))
+                        AND bm.pols IS NOT NULL
+                        AND FIND_IN_SET(
+                            UPPER(REPLACE(TRIM(:polPort), ' ', '')),
+                            UPPER(REPLACE(bm.pols, ' ', ''))
+                        ) > 0
+                  )
+              )
+          )
+        ORDER BY p.chassis
+        """, nativeQuery = true)
     fun findFilteredPurchasesByCountryAndPol(
         @Param("country") country: String,
         @Param("polPort") polPort: String
@@ -111,7 +163,31 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     // Unshipped chassis by POL (using shipped field: null or 0 = unshipped)
     // Note: shipped is stored as TINYINT(1) in MySQL, so we check for 0 or NULL
     // Using native query to avoid Boolean/Integer comparison issues
-    @Query(value = "SELECT DISTINCT p.chassis FROM purchases p WHERE p.pol = :polPort AND (p.shipped IS NULL OR p.shipped = 0) AND p.chassis IS NOT NULL AND p.chassis != '' ORDER BY p.chassis", nativeQuery = true)
+    @Query(value = """
+        SELECT DISTINCT p.chassis
+        FROM purchases p
+        WHERE (p.shipped IS NULL OR p.shipped = 0)
+          AND p.chassis IS NOT NULL
+          AND p.chassis != ''
+          AND (
+              UPPER(TRIM(p.pol)) = UPPER(TRIM(:polPort))
+              OR (
+                  (p.pol IS NULL OR p.pol = '')
+                  AND EXISTS (
+                      SELECT 1
+                      FROM booking_mappings bm
+                      WHERE bm.stock_location IS NOT NULL
+                        AND UPPER(TRIM(bm.stock_location)) = UPPER(TRIM(p.stock_location))
+                        AND bm.pols IS NOT NULL
+                        AND FIND_IN_SET(
+                            UPPER(REPLACE(TRIM(:polPort), ' ', '')),
+                            UPPER(REPLACE(bm.pols, ' ', ''))
+                        ) > 0
+                  )
+              )
+          )
+        ORDER BY p.chassis
+        """, nativeQuery = true)
     fun findUnshippedChassisByPolPort(@Param("polPort") polPort: String): List<String>
     
     // Invoice filtering: Find purchases by consignee, vessel, and shipment_date
