@@ -114,6 +114,7 @@ class EventService(
         if (existingEvent == null) {
             return null
         }
+        val startingBalance = calculateStartingBalance(existingEvent.clientId)
         
         // Create updated event with new data
         val updatedEvent = existingEvent.copy(
@@ -128,10 +129,9 @@ class EventService(
             paymentReceived = (updateData["paymentReceived"] as? Number)?.toDouble() ?: existingEvent.paymentReceived
         )
         
-        // Recalculate running balance for this event and all subsequent events
-        recalculateBalancesFromEvent(existingEvent.clientId, existingEvent.eventDate)
-        
-        return eventRepository.save(updatedEvent)
+        eventRepository.save(updatedEvent)
+        return recalculateAllBalances(existingEvent.clientId, startingBalance)
+            .firstOrNull { it.id == id }
     }
     
     @Transactional
@@ -142,12 +142,11 @@ class EventService(
         }
         
         val clientId = event.clientId
-        val eventDate = event.eventDate
+        val startingBalance = calculateStartingBalance(clientId)
         
         eventRepository.deleteById(id)
         
-        // Recalculate balances for all events after the deleted one
-        recalculateBalancesFromEvent(clientId, eventDate)
+        recalculateAllBalances(clientId, startingBalance)
         
         return true
     }
@@ -189,34 +188,25 @@ class EventService(
         }
     }
     
-    @Transactional
-    private fun recalculateBalancesFromEvent(clientId: Long, fromDate: LocalDate) {
-        val events = eventRepository.findByClientIdOrderByEventDateDesc(clientId)
-            .filter { it.eventDate >= fromDate }
-            .sortedBy { it.eventDate }
+    private fun calculateStartingBalance(clientId: Long): Double {
+        val client = clientRepository.findById(clientId).orElse(null) ?: return 0.0
+        val eventDelta = eventRepository.findByClientIdOrderByEventDateAscCreatedAtAsc(clientId)
+            .sumOf { (it.paymentReceived ?: 0.0) - (it.transactionPrice ?: 0.0) }
+        return client.currentBalance - eventDelta
+    }
+    
+    private fun recalculateAllBalances(clientId: Long, startingBalance: Double): List<Event> {
+        var runningBalance = startingBalance
+        val savedEvents = mutableListOf<Event>()
         
-        var runningBalance = 0.0
-        
-        // Find the balance before the fromDate
-        val previousEvents = eventRepository.findByClientIdOrderByEventDateDesc(clientId)
-            .filter { it.eventDate < fromDate }
-            .maxByOrNull { it.eventDate }
-        
-        if (previousEvents != null) {
-            runningBalance = previousEvents.runningBalance
+        for (event in eventRepository.findByClientIdOrderByEventDateAscCreatedAtAsc(clientId)) {
+            runningBalance += (event.paymentReceived ?: 0.0) - (event.transactionPrice ?: 0.0)
+            val updatedEvent = event.copy(runningBalance = runningBalance)
+            savedEvents.add(eventRepository.save(updatedEvent))
         }
         
-        // Recalculate balances for all events from the fromDate onwards
-        for (event in events) {
-            val newBalance = runningBalance + (event.paymentReceived ?: 0.0) - (event.transactionPrice ?: 0.0)
-            
-            val updatedEvent = event.copy(runningBalance = newBalance)
-            eventRepository.save(updatedEvent)
-            runningBalance = newBalance
-        }
-        
-        // Update client's current balance
         updateClientBalance(clientId, runningBalance)
+        return savedEvents
     }
     
     @Transactional
