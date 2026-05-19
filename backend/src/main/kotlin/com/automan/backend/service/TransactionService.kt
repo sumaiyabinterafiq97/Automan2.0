@@ -26,10 +26,11 @@ class TransactionService(
                 ?: throw IllegalArgumentException("Client not found: ${request.clientId}")
             Logger.debug("Client found: ${client.clientName}")
             
-            // Calculate running balance
-            val currentBalance = client.currentBalance
-            val newBalance = currentBalance + (request.paymentReceived ?: 0.0) - (request.transactionPrice ?: 0.0)
-            Logger.debug("Current balance: $currentBalance, New balance: $newBalance")
+            val existingEvents = eventRepository.findByClientIdOrderByEventDateAscCreatedAtAsc(request.clientId)
+            val existingEventDelta = existingEvents.sumOf { (it.paymentReceived ?: 0.0) - (it.transactionPrice ?: 0.0) }
+            val startingBalance = client.currentBalance - existingEventDelta
+            val provisionalBalance = client.currentBalance + (request.paymentReceived ?: 0.0) - (request.transactionPrice ?: 0.0)
+            Logger.debug("Current balance: ${client.currentBalance}, Provisional balance: $provisionalBalance")
             
             // Create Event object
             val event = Event(
@@ -41,22 +42,27 @@ class TransactionService(
                 billNumber = request.billNumber,
                 transactionPrice = request.transactionPrice,
                 paymentReceived = request.paymentReceived,
-                runningBalance = newBalance
+                runningBalance = provisionalBalance
             )
             
             // Save the event
             val savedEvent = eventRepository.save(event)
             Logger.debug("Event saved with ID: ${savedEvent.id}")
             
-            // Update client balance
-            clientService.updateClientBalance(request.clientId, newBalance)
-            Logger.debug("Client balance updated to: $newBalance")
+            val recalculatedEvents = recalculateClientBalances(request.clientId, startingBalance)
+            val savedRunningBalance = recalculatedEvents
+                .firstOrNull { it.id == savedEvent.id }
+                ?.runningBalance
+                ?: savedEvent.runningBalance
+            val finalBalance = recalculatedEvents.lastOrNull()?.runningBalance ?: startingBalance
+            clientService.updateClientBalance(request.clientId, finalBalance)
+            Logger.debug("Client balance updated to: $finalBalance")
             
             TransactionResponse(
                 success = true,
                 transactionId = savedEvent.id,
                 message = "Transaction created successfully",
-                runningBalance = newBalance
+                runningBalance = savedRunningBalance
             )
             
         } catch (e: Exception) {
@@ -66,5 +72,18 @@ class TransactionService(
                 message = "Failed to create transaction: ${e.message}"
             )
         }
+    }
+    
+    private fun recalculateClientBalances(clientId: Long, startingBalance: Double): List<Event> {
+        var runningBalance = startingBalance
+        val savedEvents = mutableListOf<Event>()
+        
+        for (event in eventRepository.findByClientIdOrderByEventDateAscCreatedAtAsc(clientId)) {
+            runningBalance += (event.paymentReceived ?: 0.0) - (event.transactionPrice ?: 0.0)
+            val updatedEvent = event.copy(runningBalance = runningBalance)
+            savedEvents.add(eventRepository.save(updatedEvent))
+        }
+        
+        return savedEvents
     }
 }
