@@ -8,6 +8,9 @@ FROM nginx:alpine
 # The build output should be in: build/dist/js/productionExecutable/
 COPY build/dist/js/productionExecutable/ /usr/share/nginx/html/
 
+# AWS / production: flip auto-login meta so users land as seeded admin (override in index.html sources with false for local)
+RUN sed -i 's/name="automan-prod-auto-login" content="false"/name="automan-prod-auto-login" content="true"/' /usr/share/nginx/html/index.html
+
 # Copy production nginx configuration
 COPY docker/nginx/nginx-prod.conf /etc/nginx/conf.d/default.conf
 

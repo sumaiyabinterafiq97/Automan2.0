@@ -81,13 +81,15 @@ interface CarBrandMappingRepository : JpaRepository<CarBrandMapping, Long> {
             SELECT c FROM CarBrandMapping c WHERE
             LOWER(COALESCE(c.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
             LOWER(COALESCE(c.carBrand,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
-            LOWER(COALESCE(c.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            LOWER(COALESCE(c.carName,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(c.recycleFee,'')) LIKE LOWER(CONCAT('%', :q, '%'))
             """,
         countQuery = """
             SELECT count(c) FROM CarBrandMapping c WHERE
             LOWER(COALESCE(c.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
             LOWER(COALESCE(c.carBrand,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
-            LOWER(COALESCE(c.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+            LOWER(COALESCE(c.carName,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(c.recycleFee,'')) LIKE LOWER(CONCAT('%', :q, '%'))
             """
     )
     fun searchCarBrandMappingKeyFieldsContains(@Param("q") q: String, pageable: Pageable): Page<CarBrandMapping>

@@ -54,9 +54,25 @@ object ApiClient {
                 ApiResult.Success(data)
             } else {
                 val errorText = response.text().await()
-                val errorMessage = ErrorHandler.extractErrorMessage(errorText)
+                val status = response.status.toInt()
+                val errorMessage = when {
+                    status == 502 || status == 503 || status == 504 -> {
+                        val isGateway =
+                            errorText.contains("Bad Gateway", ignoreCase = true) ||
+                            errorText.contains("Gateway", ignoreCase = true) ||
+                            errorText.contains("Service Unavailable", ignoreCase = true)
+                        if (isGateway) {
+                            "The API server is not reachable (HTTP $status). " +
+                            "If you use Docker, ensure the stack is up: e.g. docker compose -f docker/docker-compose.multiplatform.yml up -d, " +
+                            "and check the backend: docker logs automan_backend_multiplatform"
+                        } else {
+                            ErrorHandler.extractErrorMessage(errorText)
+                        }
+                    }
+                    else -> ErrorHandler.extractErrorMessage(errorText)
+                }
                 Logger.error("API error: $endpoint - $errorMessage")
-                ApiResult.Error(errorMessage, response.status.toInt())
+                ApiResult.Error(errorMessage, status)
             }
         } catch (e: dynamic) {
             val errorMessage = ErrorHandler.handleNetworkError(e, endpoint)

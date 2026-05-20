@@ -4,6 +4,7 @@ import jakarta.persistence.*
 import java.time.LocalDateTime
 import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonProperty
 
 @Entity
 @Table(name = "purchases")
@@ -147,11 +148,22 @@ data class Purchase(
     @Column(name = "vessel")
     val vessel: String? = null,
     
-    @Column(name = "shipped")
-    val shipped: Boolean? = null,
+    @field:JsonProperty("bookingRequested")
+    @field:JsonAlias("booking_requested")
+    @Column(name = "booking_requested", nullable = false)
+    val bookingRequested: Boolean = false,
+
+
 
     @Column(name = "invoice_confirmed")
     val invoiceConfirmed: Boolean? = null,
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "workflow_status", length = 32)
+    val workflowStatus: WorkflowStatus? = null,
+
+    @Column(name = "workflow_status_updated_at")
+    val workflowStatusUpdatedAt: LocalDateTime? = null,
     
     @Column(name = "shipment_charges")
     val shipmentCharges: String? = null,

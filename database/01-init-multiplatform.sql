@@ -65,6 +65,25 @@ CREATE TABLE `client_map` (
   KEY `idx_client_map_client_name` (`client_name`(191))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Shipping charge map: per stock location, price per car by cars-per-container tier (Flyway V32)
+CREATE TABLE IF NOT EXISTS `shipping_charge_map` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `stock_location` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `cars_per_container` int NOT NULL,
+  `shipping_price_per_car` decimal(18,2) NOT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_shipping_charge_stock_cars` (`stock_location`(64), `cars_per_container`),
+  KEY `idx_shipping_charge_stock` (`stock_location`(64))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO `shipping_charge_map` (`stock_location`, `cars_per_container`, `shipping_price_per_car`) VALUES
+('KLC', 2, 17000.00),
+('KLC', 3, 15000.00),
+('KLC', 4, 14000.00),
+('KLC', 5, 12000.00);
+
 -- Events table: Client transaction events
 CREATE TABLE events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -130,8 +149,11 @@ CREATE TABLE purchases (
     shippment_date VARCHAR(50),
     `B/L_no` VARCHAR(100),
     vessel VARCHAR(255) DEFAULT NULL,
-    shipped BOOLEAN DEFAULT FALSE,
+    booking_requested BOOLEAN NOT NULL DEFAULT FALSE,
+    sold BOOLEAN DEFAULT FALSE,
     invoice_confirmed BOOLEAN DEFAULT FALSE,
+    workflow_status VARCHAR(32) NULL,
+    workflow_status_updated_at TIMESTAMP NULL,
     shipment_charges VARCHAR(50),
     freight VARCHAR(50),
     storage_charges VARCHAR(50),
@@ -159,6 +181,21 @@ CREATE TABLE purchases (
     INDEX idx_purchase_booking_id (booking_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Purchase field-level audit (Flyway V30); fed by PUT /purchases/{id} partial updates.
+CREATE TABLE purchase_change_history (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    purchase_id BIGINT NOT NULL,
+    chassis VARCHAR(100) NOT NULL,
+    field_name VARCHAR(128) NOT NULL,
+    old_value TEXT NULL,
+    new_value TEXT NULL,
+    changed_by VARCHAR(256) NULL,
+    changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_purchase_change_history_purchase FOREIGN KEY (purchase_id) REFERENCES purchases (id) ON DELETE CASCADE,
+    INDEX idx_pch_purchase_id (purchase_id),
+    INDEX idx_pch_changed_at (changed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Shipping history: rows from C&F/FOB calculation + car booking (Flyway V18 + V19: one row per chassis).
 CREATE TABLE shipping_history (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -179,18 +216,31 @@ CREATE TABLE shipping_history (
     INDEX idx_shipping_history_shipment_date (shipment_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Invoice history: saved from Create Customer Invoice — Confirm and Download PDF (Flyway V20).
+-- Invoice history: header + one line row per chassis (Flyway V20 + V25).
 CREATE TABLE invoice_history (
-    invoice_number VARCHAR(64) NOT NULL PRIMARY KEY,
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    invoice_number VARCHAR(64) NOT NULL,
     vessel VARCHAR(255),
     client_name VARCHAR(512),
     shipping_date DATE NULL,
+    pol VARCHAR(512),
+    pod VARCHAR(512),
     lc_no VARCHAR(512),
+    price_type VARCHAR(32) NULL,
     bank TEXT,
     messages TEXT,
-    chassis TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_invoice_history_invoice_number (invoice_number)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE invoice_history_line (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    invoice_history_id BIGINT NOT NULL,
+    chassis VARCHAR(512) NOT NULL,
+    line_amount VARCHAR(128) NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    CONSTRAINT fk_invoice_history_line_header FOREIGN KEY (invoice_history_id) REFERENCES invoice_history (id) ON DELETE CASCADE,
+    INDEX idx_invoice_history_line_header (invoice_history_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Rixo history: Rixo Request Generator Download PDF (Flyway V21).
@@ -230,6 +280,7 @@ CREATE TABLE car_brand_mapping (
     `rank` VARCHAR(50) NULL,
     color VARCHAR(100) NULL,
     drive_type VARCHAR(20) NULL,
+    recycle_fee VARCHAR(100) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_car_brand (car_brand),

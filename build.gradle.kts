@@ -65,11 +65,14 @@ tasks.named("jsBrowserDevelopmentWebpack") {
                 }
             }
             
-            // Copy index.html
-            val indexHtml = file("src/jsMain/resources/index.html")
-            if (indexHtml.exists()) {
-                indexHtml.copyTo(targetDir.resolve("index.html"), overwrite = true)
-                println("✅ Copied index.html")
+            // Copy index.html and static assets
+            val resourcesDir = file("src/jsMain/resources")
+            listOf("index.html", "invoice-history-pdf-btn.jpeg").forEach { name ->
+                val f = resourcesDir.resolve(name)
+                if (f.exists()) {
+                    f.copyTo(targetDir.resolve(name), overwrite = true)
+                    println("✅ Copied $name")
+                }
             }
         }
     }
@@ -82,7 +85,7 @@ tasks.named("jsBrowserProductionWebpack") {
         val resourcesDir = file("src/jsMain/resources")
         if (resourcesDir.exists()) {
             targetDir.mkdirs()
-            listOf("index.html", "styles.css", "rixo-price-mapping.js", "booking-mapping.js", "booking-mapping-modal.js").forEach { name ->
+            listOf("index.html", "styles.css", "rixo-price-mapping.js", "booking-mapping.js", "booking-mapping-modal.js", "invoice-history-pdf-btn.jpeg").forEach { name ->
                 val f = resourcesDir.resolve(name)
                 if (f.exists()) {
                     f.copyTo(targetDir.resolve(name), overwrite = true)

@@ -32,6 +32,9 @@ data class Event(
     @Column(name = "bill_number")
     val billNumber: String? = null,
 
+    @Column(name = "invoice_number", length = 64)
+    val invoiceNumber: String? = null,
+
     @Column(name = "transaction_price")
     val transactionPrice: Double? = null,
 
@@ -49,5 +52,9 @@ enum class EventType {
     PAYMENT_RECEIVED,
     SHIPMENT,
     ADJUSTMENT,
-    OTHER
+    OTHER,
+    /** Customer invoice confirmed (AR); use with [invoiceNumber] for idempotency. */
+    INVOICE_ISSUED,
+    /** Reverses a prior [INVOICE_ISSUED] when an invoice is deleted or re-saved with a new total. */
+    INVOICE_REVERSAL,
 }

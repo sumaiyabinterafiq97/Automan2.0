@@ -1,15 +1,33 @@
 package com.automan.backend.repository
 
 import com.automan.backend.model.Event
-import com.automan.backend.model.Client
+import com.automan.backend.model.EventType
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 import org.springframework.stereotype.Repository
 import java.time.LocalDate
+import java.util.Optional
 
 @Repository
 interface EventRepository : JpaRepository<Event, Long> {
+
+    fun existsByClientIdAndInvoiceNumberAndEventType(
+        clientId: Long,
+        invoiceNumber: String,
+        eventType: EventType,
+    ): Boolean
+
+    fun findFirstByClientIdAndInvoiceNumberAndEventTypeOrderByIdDesc(
+        clientId: Long,
+        invoiceNumber: String,
+        eventType: EventType,
+    ): Optional<Event>
+
+    fun findByClientIdAndInvoiceNumberOrderByIdDesc(
+        clientId: Long,
+        invoiceNumber: String,
+    ): List<Event>
     
     // Find all events for a specific client
     fun findByClientIdOrderByEventDateDesc(clientId: Long): List<Event>

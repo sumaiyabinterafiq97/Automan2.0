@@ -14,4 +14,7 @@ data class ShippingHistoryRowDto(
     val clientName: String? = null,
     val amount: String,
     val createdAt: String? = null,
+    /** True when this chassis already has at least one entry in invoice_history_lines. */
+    val invoiceCreated: Boolean = false,
 )
+

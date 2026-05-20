@@ -4,11 +4,32 @@ import kotlinx.browser.document
 import kotlinx.browser.window
 import org.w3c.dom.*
 import org.w3c.dom.events.Event
+import kotlin.math.abs
 
 // C&F/FOB Calculation Functions
 // Note: Global variables (cnfPageIsFobMode, cnfPageSelectedCars, etc.) are defined in MinimalPurchaseApp.kt
 
-fun showCnfCalculationPage(selectedChassis: String? = null, selectedCars: List<dynamic>? = null, selectedCountry: String = "PAKISTAN", isFobMode: Boolean = false) {
+/** Blank when zero so money-empty-as-zero inputs stay empty; totals still treat blank as 0 via [parseCurrency]. */
+fun cnfMoneyFieldDisplay(amount: Double): String {
+    if (amount == 0.0) return ""
+    val whole = amount.toInt().toDouble()
+    return if (abs(amount - whole) < 1e-9) amount.toInt().toString() else amount.toString()
+}
+
+/** Saved session strings: show blank when numeric value is zero. */
+fun cnfRestoreMoneyDisplay(saved: String?): String {
+    val s = saved?.trim().orEmpty()
+    if (s.isEmpty()) return ""
+    return if (parseCurrency(s) == 0.0) "" else s
+}
+
+fun showCnfCalculationPage(
+    selectedChassis: String? = null,
+    selectedCars: List<dynamic>? = null,
+    selectedCountry: String = "PAKISTAN",
+    isFobMode: Boolean = false,
+    isRecreateCalculation: Boolean = isCarBookingRecreateCalculationSession(),
+) {
     // Store FOB mode flag globally
     cnfPageIsFobMode = isFobMode
     
@@ -25,7 +46,7 @@ fun showCnfCalculationPage(selectedChassis: String? = null, selectedCars: List<d
     console.log("🌍 Stored selected country:", selectedCountry)
     console.log("🔧 FOB Mode:", isFobMode)
     
-    val cnfPageHTML = createCnfCalculationHTML(isFobMode)
+    val cnfPageHTML = createCnfCalculationHTML(isFobMode, isRecreateCalculation)
     
     // Replace the main content with C&F calculation page
     val mainContent = document.getElementById("content")
@@ -43,24 +64,21 @@ fun showCnfCalculationPage(selectedChassis: String? = null, selectedCars: List<d
     }
 }
 
-fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
+fun createCnfCalculationHTML(isFobMode: Boolean = false, isRecreateCalculation: Boolean = false): String {
     val pageTitle = if (isFobMode) "FOB CALCULATION" else "C&F CALCULATION"
-    val totalPriceLabel = if (isFobMode) "TOTAL FOB PRICE (¥):" else "TOTAL C&F PRICE (¥):"
-    val calculateFreightButton = if (isFobMode) "" else """
-                    <!-- Calculate Freight Button -->
-                    <div style="margin-top: 15px;">
-                        <button id="calculateFreightBtn" class="cnf-btn cnf-btn-freight">CALCULATE FREIGHT</button>
-                    </div>
-"""
-    val freightField = if (isFobMode) "" else """
-                            <div class="cnf-cost-field" id="cnfFreightFieldWrap">
-                                <label>FREIGHT (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="number" id="freight" value="0" min="0" step="1">
-                                </div>
-                            </div>
-"""
+    val saveButtonLabel = if (isRecreateCalculation) "Update" else "Save"
+    val calculateFreightButton = if (isFobMode) """
+        <!-- Calculate Shipping Charge Button (FOB only) -->
+        <div style="margin: 20px 0;">
+            <button id="calculateShippingChargeBtn" class="cnf-btn cnf-btn-freight" style="width: 100%; padding: 14px; font-size: 16px; font-weight: 600;">CALCULATE SHIPPING CHARGE</button>
+        </div>
+    """ else """
+        <!-- Calculate Freight Button -->
+        <div style="margin: 20px 0;">
+            <button id="calculateFreightBtn" class="cnf-btn cnf-btn-freight" style="width: 100%; padding: 14px; font-size: 16px; font-weight: 600;">CALCULATE FREIGHT</button>
+        </div>
+    """
+    
     return """
         <div class="cnf-calculation-container">
             <!-- Back Button -->
@@ -76,25 +94,87 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                     <h1>$pageTitle</h1>
                 </div>
                 
-                <!-- Car Selection -->
-                <div class="cnf-chassis-selector">
-                    <label>SELECT CAR CHASSIS :</label>
-                    <select id="chassisSelect">
-                        <option value="">Select a car chassis...</option>
-                    </select>
-                    $calculateFreightButton
+                $calculateFreightButton
+                
+                <!-- Cars Table Section -->
+                <div class="cnf-cars-table-wrapper">
+                    <table id="cnfCarsTable" class="cnf-cars-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 30px; text-align: center;">▼</th>
+                                <th style="width: 36px; text-align: center;" title="Saved">●</th>
+                                <th style="width: 160px;">Chassis</th>
+                                <th style="width: 200px;">Car Name</th>
+                                <th style="width: 140px; text-align: right;">Car Price (¥)</th>
+                                <th id="totalPriceHeader" style="width: 160px; text-align: right;">Total C&F Price (¥)</th>
+                                <th style="width: 80px; text-align: center;">Save</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cnfCarsTableBody">
+                            <!-- Rows will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Batch PDF actions (unchanged backend payload: full selected batch) -->
+                <div class="cnf-action-buttons" style="margin-top: 24px; display: flex; gap: 10px; justify-content: center;">
+                    <button id="previewPdfBtn" class="cnf-btn cnf-btn-preview">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        Preview
+                    </button>
+                    <button id="saveCnfBtn" class="cnf-btn cnf-btn-save" style="background-color: #059669; color: white;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                            <polyline points="7 3 7 8 15 8"></polyline>
+                        </svg>
+                        $saveButtonLabel
+                    </button>
+                    <button id="downloadPdfBtn" class="cnf-btn cnf-btn-download">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14,2 14,8 20,8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                        </svg>
+                        PDF
+                    </button>
                 </div>
                 
-                <!-- Cost Fields -->
-                <div class="cnf-cost-fields">
-                    <div class="cnf-cost-grid">
+            </div>
+        </div>
+    """
+}
+
+/** Inner HTML for expanded detail row: single &lt;td colspan="7"&gt; only (parent &lt;tr&gt; is created in JS). */
+fun createCnfCarExpandedRowInnerHTML(chassis: String, isFobMode: Boolean = false): String {
+    val freightFieldHTML = if (isFobMode) "" else """
+        <div class="cnf-cost-field">
+            <label>FREIGHT (¥):</label>
+            <div class="input-with-prefix">
+                <span>¥</span>
+                <input type="text" data-field="freight" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
+            </div>
+        </div>
+"""
+    
+    val totalLabel = if (isFobMode) "TOTAL FOB PRICE (¥):" else "TOTAL C&F PRICE (¥):"
+    
+    return """
+                <td colspan="7">
+                <div class="cnf-expanded-content">
+                    <!-- Cost Fields Grid -->
+                    <div class="cnf-expanded-grid">
                         <!-- Left Column -->
-                        <div>
+                        <div class="cnf-expanded-column">
                             <div class="cnf-cost-field">
                                 <label>CAR PRICE (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
-                                    <input type="number" id="carPrice" value="0" min="0" step="1">
+                                    <input type="text" data-field="carPrice" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
                                 </div>
                             </div>
                             
@@ -102,34 +182,36 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                                 <label>RIXO PRICE (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
-                                    <input type="number" id="rixoPrice" value="0" min="0" step="1">
+                                    <input type="text" data-field="rixoPrice" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
                                 </div>
                             </div>
-                            $freightField
+                            
+                            $freightFieldHTML
+                            
                             <div class="cnf-cost-field">
                                 <label>REPAIR FEE (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
-                                    <input type="number" id="repairFee" value="0" min="0" step="1">
+                                    <input type="text" data-field="repairFee" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
                                 </div>
                             </div>
                             
                             <div class="cnf-cost-field">
-                                <label>PROFIT (¥):</label>
+                                <label>AUCTION PENALTY FEE (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
-                                    <input type="number" id="profit" value="0" min="0" step="1">
+                                    <input type="text" data-field="auctionPenaltyFee" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
                                 </div>
                             </div>
                         </div>
                         
                         <!-- Right Column -->
-                        <div>
+                        <div class="cnf-expanded-column">
                             <div class="cnf-cost-field">
                                 <label>AUCTION FEE (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
-                                    <input type="number" id="auctionFee" value="0" min="0" step="1">
+                                    <input type="text" data-field="auctionFee" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
                                 </div>
                             </div>
                             
@@ -137,7 +219,7 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                                 <label>SHIPPING CHARGE (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
-                                    <input type="number" id="shippingCharge" value="0" min="0" step="1">
+                                    <input type="text" data-field="shippingCharge" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
                                 </div>
                             </div>
                             
@@ -145,7 +227,7 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                                 <label>INSPECTION FEE (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
-                                    <input type="number" id="inspectionFee" value="0" min="0" step="1">
+                                    <input type="text" data-field="inspectionFee" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
                                 </div>
                             </div>
                             
@@ -153,87 +235,88 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false): String {
                                 <label>MSC. CHARGES (¥):</label>
                                 <div class="input-with-prefix">
                                     <span>¥</span>
-                                    <input type="number" id="mscCharges" value="0" min="0" step="1">
+                                    <input type="text" data-field="mscCharges" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
+                                </div>
+                            </div>
+                            
+                            <div class="cnf-cost-field">
+                                <label>PROFIT (¥):</label>
+                                <div class="input-with-prefix">
+                                    <span>¥</span>
+                                    <input type="text" data-field="profit" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero allow-negative">
                                 </div>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Total Calculations -->
-                    <div class="cnf-totals">
+                    <!-- Totals Summary -->
+                    <div class="cnf-expanded-totals">
                         <div class="cnf-totals-grid">
-                            <!-- Total C&F/FOB Price -->
                             <div class="cnf-total-box">
-                                <label id="totalPriceLabel">$totalPriceLabel</label>
-                                <div id="totalCnfPrice" class="cnf-total-value green">0</div>
+                                <label>$totalLabel</label>
+                                <div class="cnf-expanded-total-value green" data-chassis="$chassis" data-type="total">¥0</div>
                             </div>
-                            
-                            <!-- Total Expense -->
                             <div class="cnf-total-box">
                                 <label>TOTAL EXPENSE (¥):</label>
-                                <div id="totalExpense" class="cnf-total-value red">0</div>
+                                <div class="cnf-expanded-total-value red" data-chassis="$chassis" data-type="expense">¥0</div>
                             </div>
                         </div>
                     </div>
-                    
-                    <!-- Action Buttons -->
-                    <div class="cnf-action-buttons">
-                        <button id="previewPdfBtn" class="cnf-btn cnf-btn-preview">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                                <circle cx="12" cy="12" r="3"></circle>
-                            </svg>
-                            PREVIEW
-                        </button>
-                        <button id="downloadPdfBtn" class="cnf-btn cnf-btn-download">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                <polyline points="14,2 14,8 20,8"></polyline>
-                                <line x1="16" y1="13" x2="8" y2="13"></line>
-                                <line x1="16" y1="17" x2="8" y2="17"></line>
-                            </svg>
-                            Save and Download PDF
-                        </button>
-                    </div>
                 </div>
-            </div>
-        </div>
+            </td>
     """
 }
 
-/** Keep FREIGHT (¥) visible in C&F mode; default remains 0 until freight is calculated. */
+/** Keep FREIGHT (¥) visible in C&F mode; leave blank when unset (numeric zero for totals). */
 fun updateCnfFreightFieldVisibility() {
     if (cnfPageIsFobMode) return
     val wrap = document.getElementById("cnfFreightFieldWrap") as? HTMLElement
     if (wrap == null) return
     wrap.style.display = ""
-    val freightInput = document.getElementById("freight") as? HTMLInputElement
-    if (freightInput != null && freightInput.value.trim().isEmpty()) {
-        freightInput.value = "0"
-    }
 }
 
 fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: List<dynamic>? = null, isFobMode: Boolean = false) {
-    console.log("🔧 Setting up C&F calculation listeners...")
+    console.log("🔧 Setting up C&F table-based UI...")
     
-    // Back to booking — refresh purchases like former FINISH, sync LIST price column from freight
+    val carsToUse = selectedCars ?: cnfPageSelectedCars
+    if (carsToUse.isEmpty()) {
+        showMessage("No cars selected for calculation", "warning")
+        return
+    }
+    
+    // Update the table header based on FOB mode
+    val headerEl = document.getElementById("totalPriceHeader")
+    if (headerEl != null) {
+        headerEl.textContent = if (isFobMode) "Total Fob Price (¥)" else "Total C&F Price (¥)"
+    }
+    
+    // Populate table with cars
+    renderCnfCarsTable(carsToUse, isFobMode)
+    
+    // Back to booking button
     document.getElementById("backToBookingBtn")?.addEventListener("click", { _: Event ->
         js("if (window.saveCnfFormState) window.saveCnfFormState()")
         js("if (window.saveCarBookingState) window.saveCarBookingState()")
         val mode = if (globalFreightValues.isNotEmpty()) "C&F" else "FOB"
         lastCalculationMode = mode
         js("window.lastCalculationMode = mode")
-        console.log("💾 Back to booking: lastCalculationMode = $mode (freight map size: ${globalFreightValues.size})")
+        console.log("💾 Back to booking: lastCalculationMode = $mode")
+        val backHash = if (isCarBookingRecreateCalculationSession() || isCarBookingRecreateSession()) {
+            "#/recalculate-booking"
+        } else {
+            "#/booking"
+        }
         val purchaseIdsToRefresh = if (cnfPageSelectedPurchaseIds.isNotEmpty()) {
             cnfPageSelectedPurchaseIds
         } else {
-            cnfPageSelectedCars.mapNotNull { car ->
+            carsToUse.mapNotNull { car ->
                 val purchaseId = js("(car.purchaseId != null && car.purchaseId !== undefined) ? car.purchaseId : car.id")
                 if (purchaseId != null && purchaseId != js("undefined")) {
                     (purchaseId as? Number)?.toLong()
                 } else null
             }
         }
+        window.location.hash = backHash
         if (purchaseIdsToRefresh.isNotEmpty()) {
             refreshPurchasesByIds(purchaseIdsToRefresh)
         } else {
@@ -241,174 +324,524 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
         }
     })
     
-    // Load chassis dropdown with available cars
-    loadChassisDropdownForCnf(selectedCars)
-    
-    // Track previous chassis to save state before switching (declared before use)
-    var previousChassis: String = ""
-    
-    // Auto-select first chassis if available and no specific chassis provided
-    window.setTimeout({
-        val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
-        if (chassisSelect != null && chassisSelect.options.length > 1) {
-            if (!selectedChassis.isNullOrEmpty()) {
-                // Use provided chassis
-                chassisSelect.value = selectedChassis
-                previousChassis = selectedChassis // Initialize previous chassis tracker
-                console.log("📋 Setting chassis to:", selectedChassis)
-            } else {
-                // Auto-select first available car
-                chassisSelect.selectedIndex = 1 // Select first actual option (skip "Select Chassis")
-                previousChassis = chassisSelect.value // Initialize previous chassis tracker
-                console.log("📋 Auto-selecting first chassis:", chassisSelect.value)
-            }
-            // Load car cost details for the selected chassis
-            loadCarCostDetails()
-        } else {
-            console.log("⚠️ No chassis options available in dropdown")
-        }
-    }, 300) // Delay to ensure dropdown is populated
-    
-    // Chassis selection dropdown - load car cost details
-    document.getElementById("chassisSelect")?.addEventListener("change", { event: Event ->
-        val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
-        val selectedChassis = chassisSelect?.value ?: ""
-        
-        // Save state for PREVIOUS chassis before switching (if it exists and is different)
-        if (previousChassis.isNotEmpty() && previousChassis != selectedChassis) {
-            console.log("💾 Saving state for previous chassis before switching: $previousChassis")
-            // Get current form values before they're cleared
-            val currentCarPrice = (document.getElementById("carPrice") as? HTMLInputElement)?.value ?: "0"
-            val currentAuctionFee = (document.getElementById("auctionFee") as? HTMLInputElement)?.value ?: "0"
-            val currentRixoPrice = (document.getElementById("rixoPrice") as? HTMLInputElement)?.value ?: "0"
-            val currentShippingCharge = (document.getElementById("shippingCharge") as? HTMLInputElement)?.value ?: "0"
-            val currentFreight = (document.getElementById("freight") as? HTMLInputElement)?.value ?: "0"
-            val currentInspectionFee = (document.getElementById("inspectionFee") as? HTMLInputElement)?.value ?: "0"
-            val currentRepairFee = (document.getElementById("repairFee") as? HTMLInputElement)?.value ?: "0"
-            val currentMscCharges = (document.getElementById("mscCharges") as? HTMLInputElement)?.value ?: "0"
-            val currentProfit = (document.getElementById("profit") as? HTMLInputElement)?.value ?: "0"
-            
-            // Save state for previous chassis directly
-            val windowCnfFormState = js("window.cnfFormState")
-            if (windowCnfFormState == null || js("typeof window.cnfFormState") == "undefined") {
-                js("window.cnfFormState = {}")
-            }
-            val previousChassisState = js("{}")
-            previousChassisState.carPrice = currentCarPrice
-            previousChassisState.auctionFee = currentAuctionFee
-            previousChassisState.rixoPrice = currentRixoPrice
-            previousChassisState.shippingCharge = currentShippingCharge
-            previousChassisState.freight = currentFreight
-            previousChassisState.inspectionFee = currentInspectionFee
-            previousChassisState.repairFee = currentRepairFee
-            previousChassisState.mscCharges = currentMscCharges
-            previousChassisState.profit = currentProfit
-            js("window.cnfFormState[previousChassis] = previousChassisState")
-            console.log("✅ Saved state for previous chassis $previousChassis:", previousChassisState)
-        }
-        
-        // Update previous chassis tracker
-        previousChassis = selectedChassis
-        
-        if (selectedChassis.isNotEmpty()) {
-            loadCarCostDetails()
-            // Populate freight from globalFreightValues after loading other fields
-            window.setTimeout({
-                val freightField = document.getElementById("freight") as? HTMLInputElement
-                if (freightField != null && !isFobMode) {
-                    val freightFromGlobal = globalFreightValues[selectedChassis] ?: 0.0
-                    freightField.value = freightFromGlobal.toInt().toString()
-                    if (freightFromGlobal > 0.0) {
-                        console.log("🚢 Populated freight from globalFreightValues for chassis $selectedChassis: ¥${freightFromGlobal.toInt()}")
-                    } else {
-                        console.log("🚢 No freight value in globalFreightValues for chassis $selectedChassis, leaving as 0")
-                    }
-                    calculateCnfTotal()
-                }
-                // Restore saved state for THIS SPECIFIC chassis after loading database values
-                window.setTimeout({
-                    console.log("🔄 Restoring state for chassis: $selectedChassis")
-                    js("if (window.restoreCnfFormState) window.restoreCnfFormState()")
-                }, 500)
-            }, 100)
-        } else {
-            clearCostFields()
-        }
-    })
-    
-    // Add event listeners to save state on field changes
-    val fieldIds = listOf("carPrice", "auctionFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
-    fieldIds.forEach { fieldId ->
-        document.getElementById(fieldId)?.addEventListener("input", { _: Event ->
-            // Debounce: save state after user stops typing (500ms delay)
-            window.clearTimeout(js("window.cnfFormStateSaveTimeout"))
-            js("window.cnfFormStateSaveTimeout = setTimeout(function() { if (window.saveCnfFormState) window.saveCnfFormState(); }, 500)")
-        })
-    }
-    
-    // After page loads, check if there are freight values and populate them (only in C&F mode)
-    if (!isFobMode) {
-        window.setTimeout({
-            val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
-            val currentChassis = chassisSelect?.value ?: ""
-            // Access globalFreightValues from MinimalPurchaseApp.kt
-            if (currentChassis.isNotEmpty() && globalFreightValues.containsKey(currentChassis)) {
-                val freightValue = globalFreightValues[currentChassis] ?: 0.0
-                val freightField = document.getElementById("freight") as HTMLInputElement?
-                if (freightField != null) {
-                    freightField.value = freightValue.toDouble().toInt().toString()
-                    console.log("🚢 Auto-populated freight field from globalFreightValues: ¥${freightValue.toDouble().toInt()}")
-                    // Recalculate total with freight
-                    calculateCnfTotal()
-                    updateCnfFreightFieldVisibility()
-                }
-            } else if (currentChassis.isNotEmpty()) {
-                console.log("🚢 No freight value found in globalFreightValues for chassis $currentChassis")
-                updateCnfFreightFieldVisibility()
-            }
-        }, 800) // Delay to ensure fields are loaded
-    }
-    
-    // Restore C&F form state after page loads - with longer delay to ensure database values are loaded first
-    // Then restore edited values on top of database values
-    window.setTimeout({
-        js("if (window.restoreCnfFormState) window.restoreCnfFormState()")
-        updateCnfFreightFieldVisibility()
-        calculateCnfTotal()
-    }, 1500) // Increased delay to ensure loadCarCostDetails completes first
-    
-    // Calculate Freight (C&F page only): save state then open freight allocation UI
+    // Calculate Freight / Calculate Shipping Charge button
     if (!isFobMode) {
         document.getElementById("calculateFreightBtn")?.addEventListener("click", { _: Event ->
             js("if (window.saveCnfFormState) window.saveCnfFormState()")
             showCalculateFreightPage()
         })
+    } else {
+        document.getElementById("calculateShippingChargeBtn")?.addEventListener("click", { _: Event ->
+            js("if (window.saveCnfFormState) window.saveCnfFormState()")
+            showCalculateShippingChargePage()
+        })
     }
-    
-    // Add input listeners for real-time calculation
-    val costFields = listOf("carPrice", "auctionFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
-    for (fieldId in costFields) {
-        val field = document.getElementById(fieldId) as? HTMLInputElement
-        if (field != null) {
-            field.addEventListener("input", { _: Event ->
-                calculateCnfTotal()
-            })
-        }
-    }
-    
-    // Preview PDF: same as Save and Download (shipping_history + client_name on server), then open preview tab
+
     document.getElementById("previewPdfBtn")?.addEventListener("click", { _: Event ->
+        js("if (window.saveCnfFormState) window.saveCnfFormState()")
         console.log("📄 Preview PDF button clicked")
-        saveShippingHistoryThenPreviewPdf()
+        generateShippingSchedulePdfPreview()
     })
-    
-    // Save shipping history (all batch chassis) then download PDF (same frontend payload as before)
+    document.getElementById("saveCnfBtn")?.addEventListener("click", { _: Event ->
+        js("if (window.saveCnfFormState) window.saveCnfFormState()")
+        console.log("💾 Save C&F button clicked")
+        saveShippingHistoryAndBooking()
+    })
     document.getElementById("downloadPdfBtn")?.addEventListener("click", { _: Event ->
-        console.log("📥 Save and Download PDF clicked")
-        saveShippingHistoryThenDownloadPdf()
+        js("if (window.saveCnfFormState) window.saveCnfFormState()")
+        console.log("📥 Download PDF clicked")
+        generateShippingSchedulePdf()
     })
     
-    updateCnfFreightFieldVisibility()
+    // Restrict money inputs
+    window.setTimeout({
+        val moneyInputs = document.querySelectorAll(".cnf-expanded-input.money-input")
+        for (i in 0 until moneyInputs.length) {
+            val input = moneyInputs.item(i) as? HTMLInputElement ?: continue
+            input.addEventListener("paste", { ev -> ev.preventDefault() })
+            input.addEventListener("drop", { ev -> ev.preventDefault() })
+        }
+        setupMoneyInputFormattingOnce()
+    }, 150)
+    
+    console.log("✅ C&F table UI setup complete")
+}
+
+private fun mergeSavedCostsIntoCnfPageCar(
+    chassis: String,
+    carPrice: Double,
+    auctionFee: Double,
+    auctionPenaltyFee: Double,
+    rixoPrice: Double,
+    shippingCharge: Double,
+    freight: Double,
+    inspectionFee: Double,
+    repairFee: Double,
+    mscCharges: Double,
+    profit: Double,
+    isFobMode: Boolean,
+) {
+    val idx = cnfPageSelectedCars.indexOfFirst { it.chassis?.toString() == chassis }
+    if (idx < 0) return
+    val p = cnfPageSelectedCars[idx]
+    p.price = carPrice
+    p.carPrice = carPrice
+    p.auctionFee = auctionFee
+    p.auction_fee = auctionFee
+    p.auctionPenaltyFee = auctionPenaltyFee
+    p.auction_penalty_fee = auctionPenaltyFee
+    p.rixoPrice = rixoPrice
+    p.rixo_price = rixoPrice
+    p.shipmentCharges = shippingCharge
+    p.shipment_charges = shippingCharge
+    p.shippingCharge = shippingCharge
+    if (!isFobMode) {
+        p.freight = freight
+    }
+    p.inspectionFee = inspectionFee
+    p.inspection_fee = inspectionFee
+    p.repairCharges = repairFee
+    p.repair_charges = repairFee
+    p.miscCharges = mscCharges
+    p.misc_charges = mscCharges
+    p.profit = profit
+}
+
+fun setCnfRowSavedIndicator(chassis: String, saved: Boolean) {
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return
+    val indicator = tbody.querySelector("tr.cnf-table-row[data-chassis=\"$chassis\"] .cnf-row-saved-indicator") as? HTMLElement
+        ?: return
+    if (saved) {
+        indicator.classList.add("cnf-row-saved-indicator--on")
+        indicator.setAttribute("aria-checked", "true")
+    } else {
+        indicator.classList.remove("cnf-row-saved-indicator--on")
+        indicator.setAttribute("aria-checked", "false")
+    }
+}
+
+fun markAllCnfRowSavedIndicators() {
+    val nodes = document.querySelectorAll(".cnf-row-saved-indicator")
+    for (i in 0 until nodes.length) {
+        val indicator = nodes.item(i) as? HTMLElement ?: continue
+        indicator.classList.add("cnf-row-saved-indicator--on")
+        indicator.setAttribute("aria-checked", "true")
+    }
+}
+
+private fun updateCnfMainRowCarPriceCell(chassis: String, carPrice: Double) {
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return
+    val row = tbody.querySelector("tr.cnf-table-row[data-chassis=\"$chassis\"]") ?: return
+    val cell = row.querySelector(".cnf-car-price-cell") as? HTMLElement ?: return
+    cell.textContent = "¥${formatYenDisplay(carPrice)}"
+}
+
+/** Parse numeric fields from costs-by-chassis JSON (Number or numeric string). */
+private fun cnfNumericFromPayload(raw: dynamic): Double {
+    if (raw == null || raw == js("undefined")) return 0.0
+    val asNum = raw as? Number
+    if (asNum != null) {
+        val d = asNum.toDouble()
+        if (!d.isNaN()) return d
+    }
+    return parseCurrency(raw.toString())
+}
+
+fun renderCnfCarsTable(cars: List<dynamic>, isFobMode: Boolean = false) {
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return
+    tbody.innerHTML = ""
+    
+    for (idx in cars.indices) {
+        val car = cars[idx]
+        val chassis = car.chassis?.toString() ?: "N/A"
+        val carName = car.name?.toString() ?: car.carName?.toString() ?: "N/A"
+        // Booking list rows often omit price; costs-by-chassis later fills cnfPageSelectedCars + main-row cell.
+        val carPrice = cnfNumericFromPayload(car.price)
+            .takeIf { it > 0.0 }
+            ?: cnfNumericFromPayload(car.carPrice)
+            .takeIf { it > 0.0 }
+            ?: parseCurrency((car.price ?: car.carPrice)?.toString() ?: "0")
+        
+        // Main row
+        val mainRow = document.createElement("tr") as HTMLTableRowElement
+        mainRow.setAttribute("data-chassis", chassis)
+        mainRow.className = "cnf-table-row"
+        (mainRow as HTMLElement).style.cssText = "background-color: #f8f9fa; border-bottom: 1px solid #e0e0e0;"
+        
+        mainRow.innerHTML = """
+            <td style="width: 30px; text-align: center; padding: 12px;"><button type="button" class="cnf-expand-btn" data-chassis="$chassis" style="background: none; border: none; cursor: pointer; font-size: 14px;">▼</button></td>
+            <td style="width: 36px; text-align: center; padding: 12px 4px; vertical-align: middle;"><span class="cnf-row-saved-indicator" data-chassis="$chassis" role="checkbox" aria-checked="false" title="Saved to purchases"></span></td>
+            <td style="width: 160px; padding: 12px;">$chassis</td>
+            <td style="width: 200px; padding: 12px;">$carName</td>
+            <td class="cnf-car-price-cell" style="width: 140px; text-align: right; padding: 12px;">¥${formatYenDisplay(carPrice)}</td>
+            <td style="width: 160px; text-align: right; padding: 12px;"><strong data-chassis="$chassis" class="cnf-total-display">¥0</strong></td>
+            <td style="width: 80px; text-align: center; padding: 12px;"><button type="button" class="cnf-quick-save-btn" data-chassis="$chassis" style="width: 32px; height: 32px; padding: 0; border: 2px solid #1e3a8a; border-radius: 50%; background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%); color: white; cursor: pointer; font-weight: 600; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.2); font-size: 16px; transition: all 0.2s ease;">💾</button></td>
+        """
+        
+        tbody.appendChild(mainRow)
+        
+        val expandedRow = document.createElement("tr") as HTMLTableRowElement
+        expandedRow.setAttribute("data-chassis", chassis)
+        expandedRow.className = "cnf-detail-row"
+        expandedRow.innerHTML = createCnfCarExpandedRowInnerHTML(chassis, isFobMode)
+        (expandedRow as HTMLElement).style.display = "none"
+        tbody.appendChild(expandedRow)
+        
+        // Setup expand button
+        val expandBtnEl = mainRow.querySelector(".cnf-expand-btn") as? HTMLButtonElement
+        expandBtnEl?.addEventListener("click", { _: Event ->
+            toggleCnfRowExpanded(chassis, isFobMode)
+        })
+        
+        // Setup quick save — do NOT call populateCnfExpandedFields here; it overwrites in-memory edits with stale purchase data.
+        val quickSaveBtn = mainRow.querySelector(".cnf-quick-save-btn") as? HTMLButtonElement
+        quickSaveBtn?.addEventListener("click", { _: Event ->
+            saveCnfCarCosts(chassis, isFobMode)
+        })
+        
+        // Load cost data for this car
+        loadCnfCarCostData(car, chassis, isFobMode)
+    }
+    
+    console.log("✅ Rendered ${cars.size} cars in table")
+}
+
+fun toggleCnfRowExpanded(chassis: String, isFobMode: Boolean) {
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return
+    val expandedRow = tbody.querySelector("tr.cnf-detail-row[data-chassis=\"$chassis\"]") as? HTMLTableRowElement
+        ?: return
+    
+    val rowEl = expandedRow as HTMLElement
+    val isHidden = rowEl.style.display == "none"
+    
+    if (!isHidden) {
+        // Close current row
+        rowEl.style.display = "none"
+        val btn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$chassis\"]") as? HTMLButtonElement
+        btn?.textContent = "▼"
+    } else {
+        // Close all other expanded rows first (accordion behavior)
+        val allDetailRows = tbody.querySelectorAll("tr.cnf-detail-row")
+        for (i in 0 until allDetailRows.length) {
+            val row = allDetailRows.item(i) as HTMLElement
+            if (row.style.display != "none") {
+                row.style.display = "none"
+                val otherChassis = row.getAttribute("data-chassis")
+                val otherBtn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$otherChassis\"]") as? HTMLButtonElement
+                otherBtn?.textContent = "▼"
+            }
+        }
+        
+        // Open the current row
+        rowEl.style.display = "table-row"
+        val btn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$chassis\"]") as? HTMLButtonElement
+        btn?.textContent = "▲"
+        populateCnfExpandedFields(chassis, isFobMode)
+        setupCnfExpandedFieldListeners(chassis, isFobMode)
+    }
+}
+
+/** Hide the detail row and reset the expand arrow (no-op if already collapsed). */
+fun collapseCnfExpandedRow(chassis: String) {
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return
+    val expandedRow = tbody.querySelector("tr.cnf-detail-row[data-chassis=\"$chassis\"]") as? HTMLElement ?: return
+    expandedRow.style.display = "none"
+    val btn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$chassis\"]") as? HTMLButtonElement
+    btn?.textContent = "▼"
+}
+
+fun populateCnfExpandedFields(chassis: String, isFobMode: Boolean) {
+    val expandedRow = cnfDetailRowForChassis(chassis) ?: return
+    
+    // Find the purchase data in cnfPageSelectedCars
+    val purchase = cnfPageSelectedCars.find { it.chassis == chassis } ?: return
+    
+    // Get cost data
+    val carPrice = parseCurrency((purchase.price ?: purchase.carPrice)?.toString() ?: "0")
+    val auctionFee = parseCurrency((purchase.auctionFee ?: purchase.auction_fee)?.toString() ?: "0")
+    val auctionPenaltyFee = parseCurrency((purchase.auctionPenaltyFee ?: purchase.auction_penalty_fee)?.toString() ?: "0")
+    val rixoPrice = parseCurrency((purchase.rixoPrice ?: purchase.rixo_price)?.toString() ?: "0")
+    val shippingCharge =
+        if (globalShippingChargeValues.containsKey(chassis)) {
+            globalShippingChargeValues[chassis] ?: 0.0
+        } else {
+            parseCurrency((purchase.shipmentCharges ?: purchase.shipment_charges)?.toString() ?: "0")
+        }
+    val freight = if (isFobMode) 0.0 else (globalFreightValues[chassis] ?: parseCurrency((purchase.freight)?.toString() ?: "0"))
+    val inspectionFee = parseCurrency((purchase.inspectionFee ?: purchase.inspection_fee)?.toString() ?: "0")
+    val repairFee = parseCurrency((purchase.repairCharges ?: purchase.repair_charges)?.toString() ?: "0")
+    val mscCharges = parseCurrency((purchase.miscCharges ?: purchase.misc_charges)?.toString() ?: "0")
+    val profit = parseCurrency((purchase.profit)?.toString() ?: "0")
+    
+    // Populate fields
+    val fieldMap = mapOf(
+        "carPrice" to carPrice,
+        "auctionFee" to auctionFee,
+        "auctionPenaltyFee" to auctionPenaltyFee,
+        "rixoPrice" to rixoPrice,
+        "shippingCharge" to shippingCharge,
+        "freight" to freight,
+        "inspectionFee" to inspectionFee,
+        "repairFee" to repairFee,
+        "mscCharges" to mscCharges,
+        "profit" to profit,
+    )
+    
+    for ((fieldName, value) in fieldMap) {
+        val input = expandedRow.querySelector("input[data-field=\"$fieldName\"]") as? HTMLInputElement
+        input?.value = cnfMoneyFieldDisplay(value)
+    }
+    
+    // Update totals
+    updateCnfExpandedTotals(chassis, isFobMode)
+}
+
+fun setupCnfExpandedFieldListeners(chassis: String, isFobMode: Boolean) {
+    val expandedRow = cnfDetailRowForChassis(chassis) ?: return
+    if (expandedRow.getAttribute("data-cnf-listeners") == "1") return
+    expandedRow.setAttribute("data-cnf-listeners", "1")
+    val inputs = expandedRow.querySelectorAll(".cnf-expanded-input")
+    
+    for (i in 0 until inputs.length) {
+        val input = inputs.item(i) as? HTMLInputElement ?: continue
+        input.addEventListener("input", { _: Event ->
+            updateCnfExpandedTotals(chassis, isFobMode)
+        })
+    }
+}
+
+fun updateCnfExpandedTotals(chassis: String, isFobMode: Boolean) {
+    val expandedRow = cnfDetailRowForChassis(chassis) ?: return
+    
+    // Get all field values
+    val fieldIds = listOf("carPrice", "auctionFee", "auctionPenaltyFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
+    val values = mutableMapOf<String, Double>()
+    
+    for (fieldId in fieldIds) {
+        val input = expandedRow.querySelector("input[data-field=\"$fieldId\"]") as? HTMLInputElement
+        val value = input?.value?.let { parseCurrency(it) } ?: 0.0
+        values[fieldId] = value
+    }
+    
+    // Calculate totals
+    val carPrice = values["carPrice"] ?: 0.0
+    val auctionFee = values["auctionFee"] ?: 0.0
+    val auctionPenaltyFee = values["auctionPenaltyFee"] ?: 0.0
+    val rixoPrice = values["rixoPrice"] ?: 0.0
+    val shippingCharge = values["shippingCharge"] ?: 0.0
+    val freight = if (isFobMode) 0.0 else (values["freight"] ?: 0.0)
+    val inspectionFee = values["inspectionFee"] ?: 0.0
+    val repairFee = values["repairFee"] ?: 0.0
+    val mscCharges = values["mscCharges"] ?: 0.0
+    val profit = values["profit"] ?: 0.0
+    
+    val totalPrice = if (isFobMode) {
+        carPrice + auctionFee + auctionPenaltyFee + rixoPrice + shippingCharge + inspectionFee + repairFee + mscCharges + profit
+    } else {
+        carPrice + auctionFee + auctionPenaltyFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+    }
+    
+    val totalExpense = if (isFobMode) {
+        auctionFee + auctionPenaltyFee + rixoPrice + shippingCharge + inspectionFee + repairFee + mscCharges + profit
+    } else {
+        auctionFee + auctionPenaltyFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+    }
+    
+    // Update display
+    val totalDisplay = expandedRow.querySelector(".cnf-expanded-total-value[data-type=\"total\"]")
+    totalDisplay?.textContent = formatYenTotal(totalPrice)
+    
+    val expenseDisplay = expandedRow.querySelector(".cnf-expanded-total-value[data-type=\"expense\"]")
+    expenseDisplay?.textContent = formatYenTotal(totalExpense)
+    
+    // Update main table row total
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement
+    val mainRow = tbody?.querySelector("tr.cnf-table-row[data-chassis=\"$chassis\"]")
+    val mainTotal = mainRow?.querySelector(".cnf-total-display")
+    mainTotal?.textContent = formatYenTotal(totalPrice)
+}
+
+fun saveCnfCarCosts(chassis: String, isFobMode: Boolean) {
+    val expandedRow = cnfDetailRowForChassis(chassis)
+    
+    if (expandedRow == null) {
+        showMessage("Cannot find car details to save", "error")
+        return
+    }
+    
+    fun fieldDouble(name: String): Double {
+        val input = expandedRow.querySelector("input[data-field=\"$name\"]") as? HTMLInputElement
+        return input?.value?.let { parseCurrency(it) } ?: 0.0
+    }
+    
+    val carPrice = fieldDouble("carPrice")
+    val auctionFee = fieldDouble("auctionFee")
+    val auctionPenaltyFee = fieldDouble("auctionPenaltyFee")
+    val rixoPrice = fieldDouble("rixoPrice")
+    val shippingCharge = fieldDouble("shippingCharge")
+    val freight = if (isFobMode) 0.0 else fieldDouble("freight")
+    val inspectionFee = fieldDouble("inspectionFee")
+    val repairFee = fieldDouble("repairFee")
+    val mscCharges = fieldDouble("mscCharges")
+    val profit = fieldDouble("profit")
+    
+    val url = if (isFobMode) apiUrl("purchases/save-fob-costs") else apiUrl("purchases/save-costs")
+    
+    val bodyObj = js("{}")
+    bodyObj.chassis = chassis
+    bodyObj.carPrice = carPrice
+    bodyObj.auctionFee = auctionFee
+    bodyObj.auctionPenaltyFee = auctionPenaltyFee
+    bodyObj.rixoPrice = rixoPrice
+    bodyObj.shippingCharge = shippingCharge
+    bodyObj.inspectionFee = inspectionFee
+    bodyObj.repairFee = repairFee
+    bodyObj.mscCharges = mscCharges
+    bodyObj.profit = profit
+    if (!isFobMode) {
+        bodyObj.freight = freight
+    }
+    
+    val requestInit = js("{}")
+    requestInit.method = "PUT"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(bodyObj)
+    
+    console.log("💾 Saving costs for chassis $chassis (FOB=$isFobMode):", bodyObj)
+    
+    window.fetch(url, requestInit)
+        .then { response: dynamic ->
+            if (response.ok) {
+                response.json()
+            } else {
+                throw js("Error('Failed to save')")
+            }
+        }
+        .then { _: dynamic ->
+            mergeSavedCostsIntoCnfPageCar(
+                chassis,
+                carPrice,
+                auctionFee,
+                auctionPenaltyFee,
+                rixoPrice,
+                shippingCharge,
+                freight,
+                inspectionFee,
+                repairFee,
+                mscCharges,
+                profit,
+                isFobMode,
+            )
+            saveCnfFormStateForChassis(chassis)
+            updateCnfMainRowCarPriceCell(chassis, carPrice)
+            updateCnfExpandedTotals(chassis, isFobMode)
+            setCnfRowSavedIndicator(chassis, true)
+            collapseCnfExpandedRow(chassis)
+            showMessage("✅ Costs saved for chassis $chassis", "success")
+            console.log("✅ Saved successfully")
+        }
+        .catch { error: dynamic ->
+            console.error("❌ Error saving:", error)
+            showMessage("❌ Failed to save costs", "error")
+        }
+}
+
+fun saveCnfCarCostsThenPreview(chassis: String) {
+    saveCnfFormStateForChassis(chassis)
+    console.log("💾 Preparing to preview PDF for chassis $chassis")
+    // TODO: Implement PDF preview logic
+    showMessage("PDF preview coming soon...", "info")
+}
+
+fun saveCnfCarCostsThenDownload(chassis: String) {
+    saveCnfFormStateForChassis(chassis)
+    console.log("💾 Preparing to download PDF for chassis $chassis")
+    // TODO: Implement PDF download logic
+    showMessage("PDF download coming soon...", "info")
+}
+
+fun saveCnfFormStateForChassis(chassis: String) {
+    val expandedRow = cnfDetailRowForChassis(chassis) ?: return
+    val windowCnfFormState = js("window.cnfFormState")
+    if (windowCnfFormState == null || js("typeof window.cnfFormState") == "undefined") {
+        js("window.cnfFormState = {}")
+    }
+    
+    val chassisState = js("{}")
+    val fieldIds = listOf("carPrice", "auctionFee", "auctionPenaltyFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
+    
+    for (fieldId in fieldIds) {
+        val input = expandedRow.querySelector("input[data-field=\"$fieldId\"]") as? HTMLInputElement
+        chassisState[fieldId] = input?.value ?: ""
+    }
+    
+    js("window.cnfFormState[chassis] = chassisState")
+    console.log("✅ Saved form state for $chassis")
+}
+
+fun loadCnfCarCostData(car: dynamic, chassis: String, isFobMode: Boolean) {
+    val encodedChassis = js("encodeURIComponent")(chassis) as String
+    val url = apiUrl("purchases/costs-by-chassis/$encodedChassis")
+    
+    window.fetch(url)
+        .then { response: dynamic ->
+            if (response.ok) response.json() else null
+        }
+        .then { costData: dynamic ->
+            if (costData != null) {
+                // Update cnfPageSelectedCars with cost data
+                val idx = cnfPageSelectedCars.indexOfFirst { it.chassis == chassis }
+                if (idx >= 0) {
+                    val updated = cnfPageSelectedCars[idx]
+                    updated.price = costData.carPrice
+                    updated.carPrice = costData.carPrice
+                    updated.auctionFee = costData.auctionFee
+                    updated.auctionPenaltyFee = costData.auctionPenaltyFee
+                    updated.rixoPrice = costData.rixoPrice
+                    updated.shipmentCharges =
+                        if (globalShippingChargeValues.containsKey(chassis)) {
+                            globalShippingChargeValues[chassis]
+                        } else {
+                            costData.shippingCharge
+                        }
+                    updated.inspectionFee = costData.inspectionFee
+                    updated.repairCharges = costData.repairFee
+                    updated.miscCharges = costData.mscCharges
+                    updated.profit = costData.profit
+                    val loadedCarPrice = cnfNumericFromPayload(costData.carPrice)
+                    updateCnfMainRowCarPriceCell(chassis, loadedCarPrice)
+                    val detailRow = cnfDetailRowForChassis(chassis) as? HTMLElement
+                    val collapsed = detailRow == null || detailRow.style.display == "none"
+                    if (collapsed) {
+                        populateCnfExpandedFields(chassis, isFobMode)
+                    } else {
+                        updateCnfExpandedTotals(chassis, isFobMode)
+                    }
+                }
+            }
+        }
+        .catch { _: dynamic ->
+            console.warn("⚠️ Could not load cost data for $chassis")
+        }
+}
+
+fun formatYenDisplay(amount: Double): String {
+    return amount.toLong().toString().reversed().chunked(3).joinToString(",").reversed()
+}
+
+fun formatYenTotal(amount: Double): String {
+    val v = amount.toLong()
+    val neg = v < 0L
+    val abs = kotlin.math.abs(v)
+    val grouped = abs.toString().reversed().chunked(3).joinToString(",").reversed()
+    return "¥${if (neg) "-" else ""}$grouped"
+}
+
+fun cnfDetailRowForChassis(chassis: String): HTMLElement? {
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return null
+    return tbody.querySelector("tr.cnf-detail-row[data-chassis=\"$chassis\"]") as? HTMLElement
 }
 
 fun loadChassisDropdownForCnf(selectedCars: List<dynamic>? = null) {
@@ -433,6 +866,9 @@ fun loadChassisDropdownForCnf(selectedCars: List<dynamic>? = null) {
 }
 
 fun calculateCnfTotal() {
+    if (document.getElementById("totalCnfPrice") == null) {
+        return
+    }
     console.log("🔢 calculateCnfTotal() called")
     // Get current cost values from the form - use parseCurrency to handle formatted values (with commas)
     // Check if we're in FOB mode - if so, exclude freight from calculations
@@ -446,30 +882,39 @@ fun calculateCnfTotal() {
     val freight = if (isFobMode) 0.0 else parseCurrency((document.getElementById("freight") as HTMLInputElement?)?.value ?: "0")
     val inspectionFee = parseCurrency((document.getElementById("inspectionFee") as HTMLInputElement?)?.value ?: "0")
     val repairFee = parseCurrency((document.getElementById("repairFee") as HTMLInputElement?)?.value ?: "0")
+    val auctionPenaltyFee = parseCurrency((document.getElementById("auctionPenaltyFee") as HTMLInputElement?)?.value ?: "0")
     val mscCharges = parseCurrency((document.getElementById("mscCharges") as HTMLInputElement?)?.value ?: "0")
     val profit = parseCurrency((document.getElementById("profit") as HTMLInputElement?)?.value ?: "0")
     
     // TOTAL C&F/FOB PRICE = sum of all fields (excluding freight in FOB mode)
     val totalCnfPrice = if (isFobMode) {
         // FOB: sum of all fields EXCEPT freight
-        carPrice + auctionFee + rixoPrice + shippingCharge + inspectionFee + repairFee + mscCharges + profit
+        carPrice + auctionFee + rixoPrice + shippingCharge + inspectionFee + repairFee + auctionPenaltyFee + mscCharges + profit
     } else {
         // C&F: sum of all fields INCLUDING freight
-        carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+        carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + auctionPenaltyFee + mscCharges + profit
     }
     
     // TOTAL EXPENSE = sum of all fields EXCEPT Car Price
     val totalExpense = if (isFobMode) {
         // FOB: sum of all fields EXCEPT Car Price and Freight
-        auctionFee + rixoPrice + shippingCharge + inspectionFee + repairFee + mscCharges + profit
+        auctionFee + rixoPrice + shippingCharge + inspectionFee + repairFee + auctionPenaltyFee + mscCharges + profit
     } else {
         // C&F: sum of all fields EXCEPT Car Price (includes Freight)
-        auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+        auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + auctionPenaltyFee + mscCharges + profit
     }
         
-    // Update display
-    document.getElementById("totalCnfPrice")?.textContent = "¥${totalCnfPrice.toInt()}"
-    document.getElementById("totalExpense")?.textContent = "¥${totalExpense.toInt()}"
+    // Update display (support negative totals with grouped digits)
+    fun formatYenTotal(amount: Double): String {
+        val v = amount.toLong()
+        val neg = v < 0L
+        val abs = kotlin.math.abs(v)
+        val grouped = abs.toString().reversed().chunked(3).joinToString(",").reversed()
+        return "¥${if (neg) "-" else ""}$grouped"
+    }
+
+    document.getElementById("totalCnfPrice")?.textContent = formatYenTotal(totalCnfPrice)
+    document.getElementById("totalExpense")?.textContent = formatYenTotal(totalExpense)
         
     // Update label based on mode
     val totalPriceLabelElement = document.getElementById("totalPriceLabel")
@@ -537,6 +982,7 @@ fun loadCarCostDetails() {
                 // Map backend response to costData format
                 costData.carPrice = toDoubleValue(costDetailsData.carPrice)
                 costData.auctionFee = toDoubleValue(costDetailsData.auctionFee)
+                costData.auctionPenaltyFee = toDoubleValue(costDetailsData.auctionPenaltyFee)
                 costData.rixoPrice = toDoubleValue(costDetailsData.rixoPrice)
                 costData.shippingCharge = toDoubleValue(costDetailsData.shippingCharge)
                 costData.freight = 0.0  // Freight comes from globalFreightValues, not database
@@ -561,13 +1007,14 @@ fun loadCarCostDetails() {
                 val freightField = document.getElementById("freight") as? HTMLInputElement
                 if (freightField != null && !cnfPageIsFobMode) {
                     val freightFromGlobal = globalFreightValues[selectedChassis] ?: 0.0
-                    freightField.value = freightFromGlobal.toInt().toString()
+                    freightField.value = cnfMoneyFieldDisplay(freightFromGlobal)
                     if (freightFromGlobal > 0.0) {
                         console.log("🚢 Populated freight from globalFreightValues: ¥${freightFromGlobal.toInt()}")
                     } else {
-                        console.log("🚢 No freight value in globalFreightValues for chassis $selectedChassis, leaving as 0")
+                        console.log("🚢 No freight value in globalFreightValues for chassis $selectedChassis, leaving freight blank")
                     }
                 }
+                applyGlobalShippingChargeToExpandedForm(selectedChassis)
                 
                 // Recalculate total after loading
                 calculateCnfTotal()
@@ -668,6 +1115,7 @@ fun processPurchaseCostData(purchase: dynamic, chassis: String) {
     // Use 'price' column from database (not 'carPrice')
     costData.carPrice = toDoubleValue(purchase.price ?: purchase.carPrice)
     costData.auctionFee = toDoubleValue(purchase.auctionFee ?: purchase.auction_fee)
+    costData.auctionPenaltyFee = toDoubleValue(purchase.auctionPenaltyFee ?: purchase.auction_penalty_fee)
     costData.rixoPrice = toDoubleValue(purchase.rixoPrice ?: purchase.rixo_price)
     costData.shippingCharge = toDoubleValue(purchase.shipmentCharges ?: purchase.shipment_charges ?: purchase.shippingCharge)
     // Freight should NOT come from database - only from globalFreightValues
@@ -697,13 +1145,14 @@ fun processPurchaseCostData(purchase: dynamic, chassis: String) {
     val freightField = document.getElementById("freight") as? HTMLInputElement
     if (freightField != null && !cnfPageIsFobMode) {
         val freightFromGlobal = globalFreightValues[chassis] ?: 0.0
-        freightField.value = freightFromGlobal.toInt().toString()
+        freightField.value = cnfMoneyFieldDisplay(freightFromGlobal)
         if (freightFromGlobal > 0.0) {
             console.log("🚢 Populated freight from globalFreightValues: ¥${freightFromGlobal.toInt()}")
         } else {
-            console.log("🚢 No freight value in globalFreightValues for chassis $chassis, leaving as 0")
+            console.log("🚢 No freight value in globalFreightValues for chassis $chassis, leaving freight blank")
         }
     }
+    applyGlobalShippingChargeToExpandedForm(chassis)
     
     // Recalculate total after loading
     calculateCnfTotal()
@@ -732,6 +1181,7 @@ fun loadCarCostDetailsFromSelectedCars(chassis: String) {
         // Use 'price' column from database (not 'carPrice')
         costData.carPrice = toDoubleValue(purchase.price ?: purchase.carPrice)
         costData.auctionFee = toDoubleValue(purchase.auctionFee ?: purchase.auction_fee)
+        costData.auctionPenaltyFee = toDoubleValue(purchase.auctionPenaltyFee ?: purchase.auction_penalty_fee)
         costData.rixoPrice = toDoubleValue(purchase.rixoPrice ?: purchase.rixo_price)
         costData.shippingCharge = toDoubleValue(purchase.shipmentCharges ?: purchase.shipment_charges ?: purchase.shippingCharge)
         // Freight should NOT come from database - only from globalFreightValues
@@ -757,13 +1207,14 @@ fun loadCarCostDetailsFromSelectedCars(chassis: String) {
         val freightField = document.getElementById("freight") as? HTMLInputElement
         if (freightField != null && !cnfPageIsFobMode) {
             val freightFromGlobal = globalFreightValues[chassis] ?: 0.0
-            freightField.value = freightFromGlobal.toInt().toString()
+            freightField.value = cnfMoneyFieldDisplay(freightFromGlobal)
             if (freightFromGlobal > 0.0) {
                 console.log("🚢 Populated freight from globalFreightValues: ¥${freightFromGlobal.toInt()}")
             } else {
-                console.log("🚢 No freight value in globalFreightValues for chassis $chassis, leaving as 0")
+                console.log("🚢 No freight value in globalFreightValues for chassis $chassis, leaving freight blank")
             }
         }
+        applyGlobalShippingChargeToExpandedForm(chassis)
         
         calculateCnfTotal()
         updateCnfFreightFieldVisibility()
@@ -777,6 +1228,7 @@ fun loadCarCostDetailsFromSelectedCars(chassis: String) {
 fun populateCostFields(costData: dynamic) {
     val carPrice = (costData.carPrice as? Number)?.toDouble() ?: 0.0
     val auctionFee = (costData.auctionFee as? Number)?.toDouble() ?: 0.0
+    val auctionPenaltyFee = (costData.auctionPenaltyFee as? Number)?.toDouble() ?: 0.0
     val rixoPrice = (costData.rixoPrice as? Number)?.toDouble() ?: 0.0
     val shippingCharge = (costData.shippingCharge as? Number)?.toDouble() ?: 0.0
     // Note: Freight is handled separately - NOT populated from database
@@ -788,35 +1240,41 @@ fun populateCostFields(costData: dynamic) {
     
     console.log("📊 Populating cost fields:", "carPrice=$carPrice", "auctionFee=$auctionFee", "etc.")
     
-    (document.getElementById("carPrice") as? HTMLInputElement)?.value = carPrice.toInt().toString()
-    (document.getElementById("auctionFee") as? HTMLInputElement)?.value = auctionFee.toInt().toString()
-    (document.getElementById("rixoPrice") as? HTMLInputElement)?.value = rixoPrice.toInt().toString()
-    (document.getElementById("shippingCharge") as? HTMLInputElement)?.value = shippingCharge.toInt().toString()
+    (document.getElementById("carPrice") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(carPrice)
+    (document.getElementById("auctionFee") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(auctionFee)
+    (document.getElementById("auctionPenaltyFee") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(auctionPenaltyFee)
+    (document.getElementById("rixoPrice") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(rixoPrice)
+    (document.getElementById("shippingCharge") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(shippingCharge)
     // Freight field is NOT populated here - handled separately after this function
-    (document.getElementById("inspectionFee") as? HTMLInputElement)?.value = inspectionFee.toInt().toString()
-    (document.getElementById("repairFee") as? HTMLInputElement)?.value = repairFee.toInt().toString()
-    (document.getElementById("mscCharges") as? HTMLInputElement)?.value = mscCharges.toInt().toString()
-    (document.getElementById("profit") as? HTMLInputElement)?.value = profit.toInt().toString()
-    
+    (document.getElementById("inspectionFee") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(inspectionFee)
+    (document.getElementById("repairFee") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(repairFee)
+    (document.getElementById("mscCharges") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(mscCharges)
+    (document.getElementById("profit") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(profit)
+
     console.log("✅ Cost fields populated (excluding freight), values:", 
         "carPrice=${(document.getElementById("carPrice") as? HTMLInputElement)?.value}",
         "auctionFee=${(document.getElementById("auctionFee") as? HTMLInputElement)?.value}")
 }
 
 fun clearCostFields() {
-    (document.getElementById("carPrice") as? HTMLInputElement)?.value = "0"
-    (document.getElementById("auctionFee") as? HTMLInputElement)?.value = "0"
-    (document.getElementById("rixoPrice") as? HTMLInputElement)?.value = "0"
-    (document.getElementById("shippingCharge") as? HTMLInputElement)?.value = "0"
-    (document.getElementById("freight") as? HTMLInputElement)?.value = "0"
-    (document.getElementById("inspectionFee") as? HTMLInputElement)?.value = "0"
-    (document.getElementById("repairFee") as? HTMLInputElement)?.value = "0"
-    (document.getElementById("mscCharges") as? HTMLInputElement)?.value = "0"
-    (document.getElementById("profit") as? HTMLInputElement)?.value = "0"
+    (document.getElementById("carPrice") as? HTMLInputElement)?.value = ""
+    (document.getElementById("auctionFee") as? HTMLInputElement)?.value = ""
+    (document.getElementById("rixoPrice") as? HTMLInputElement)?.value = ""
+    (document.getElementById("shippingCharge") as? HTMLInputElement)?.value = ""
+    (document.getElementById("freight") as? HTMLInputElement)?.value = ""
+    (document.getElementById("inspectionFee") as? HTMLInputElement)?.value = ""
+    (document.getElementById("repairFee") as? HTMLInputElement)?.value = ""
+    (document.getElementById("auctionPenaltyFee") as? HTMLInputElement)?.value = ""
+    (document.getElementById("mscCharges") as? HTMLInputElement)?.value = ""
+    (document.getElementById("profit") as? HTMLInputElement)?.value = ""
     calculateCnfTotal()
 }
 
 fun saveCarCostDetails() {
+    if (document.getElementById("cnfCarsTableBody") != null) {
+        showMessage("Use the ✓ or Save button on each row to save costs.", "info")
+        return
+    }
     val chassisSelect = document.getElementById("chassisSelect") as HTMLSelectElement?
     val selectedChassis = chassisSelect?.value ?: ""
     
@@ -827,16 +1285,17 @@ fun saveCarCostDetails() {
     
     console.log("💾 Saving cost details for chassis:", selectedChassis)
     
-    // Get all cost values from the form
-    val carPrice = (document.getElementById("carPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
-    val auctionFee = (document.getElementById("auctionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
-    val rixoPrice = (document.getElementById("rixoPrice") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
-    val shippingCharge = (document.getElementById("shippingCharge") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
-    val freight = (document.getElementById("freight") as HTMLInputElement?)?.value?.toDoubleOrNull() ?: 0.0
-    val inspectionFee = (document.getElementById("inspectionFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
-    val repairFee = (document.getElementById("repairFee") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
-    val mscCharges = (document.getElementById("mscCharges") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
-    val profit = (document.getElementById("profit") as HTMLInputElement).value.toDoubleOrNull() ?: 0.0
+    // Get all cost values from the form (comma-formatted money inputs need parseCurrency)
+    val carPrice = parseCurrency((document.getElementById("carPrice") as HTMLInputElement).value)
+    val auctionFee = parseCurrency((document.getElementById("auctionFee") as HTMLInputElement).value)
+    val rixoPrice = parseCurrency((document.getElementById("rixoPrice") as HTMLInputElement).value)
+    val shippingCharge = parseCurrency((document.getElementById("shippingCharge") as HTMLInputElement).value)
+    val freight = (document.getElementById("freight") as HTMLInputElement?)?.value?.let { parseCurrency(it) } ?: 0.0
+    val inspectionFee = parseCurrency((document.getElementById("inspectionFee") as HTMLInputElement).value)
+    val repairFee = parseCurrency((document.getElementById("repairFee") as HTMLInputElement).value)
+    val auctionPenaltyFee = parseCurrency((document.getElementById("auctionPenaltyFee") as HTMLInputElement).value)
+    val mscCharges = parseCurrency((document.getElementById("mscCharges") as HTMLInputElement).value)
+    val profit = parseCurrency((document.getElementById("profit") as HTMLInputElement).value)
     
     // Create cost data object
     val costData = js("{}")
@@ -848,6 +1307,7 @@ fun saveCarCostDetails() {
     costData.freight = freight
     costData.inspectionFee = inspectionFee
     costData.repairFee = repairFee
+    costData.auctionPenaltyFee = auctionPenaltyFee
     costData.mscCharges = mscCharges
     costData.profit = profit
     
@@ -1008,6 +1468,14 @@ fun calculateTotalCnfPrice() {
     calculateCnfTotal()
 }
 
+/** When set by Calculate Freight + shipping charge map, overrides DB for the expanded form. */
+private fun applyGlobalShippingChargeToExpandedForm(chassis: String) {
+    if (chassis.isBlank()) return
+    if (!globalShippingChargeValues.containsKey(chassis)) return
+    val v = globalShippingChargeValues[chassis] ?: 0.0
+    (document.getElementById("shippingCharge") as? HTMLInputElement)?.value = cnfMoneyFieldDisplay(v)
+}
+
 private fun getCnfFormStateForChassis(chassis: String): dynamic {
     val fs = window.asDynamic().cnfFormState ?: return null
     return js("(function(o, k) { return (o && o[k] != null && typeof o[k] !== 'undefined') ? o[k] : null; })")(fs, chassis)
@@ -1038,12 +1506,19 @@ fun computeTotalCnfOrFobForChassis(car: dynamic, chassis: String, isFobMode: Boo
     val st = getCnfFormStateForChassis(chassis)
     val carPrice = mergedCostField(st, purchaseFieldDouble(car, arrayOf("price", "carPrice")), "carPrice")
     val auctionFee = mergedCostField(st, purchaseFieldDouble(car, arrayOf("auctionFee", "auction_fee")), "auctionFee")
-    val rixoPrice = mergedCostField(st, purchaseFieldDouble(car, arrayOf("rixoPrice", "rixo_price")), "rixoPrice")
-    val shippingCharge = mergedCostField(
+    val auctionPenaltyFee = mergedCostField(
         st,
-        purchaseFieldDouble(car, arrayOf("shipmentCharges", "shipment_charges", "shippingCharge")),
-        "shippingCharge",
+        purchaseFieldDouble(car, arrayOf("auctionPenaltyFee", "auction_penalty_fee")),
+        "auctionPenaltyFee",
     )
+    val rixoPrice = mergedCostField(st, purchaseFieldDouble(car, arrayOf("rixoPrice", "rixo_price")), "rixoPrice")
+    val shippingBaseline =
+        if (globalShippingChargeValues.containsKey(chassis)) {
+            globalShippingChargeValues[chassis] ?: 0.0
+        } else {
+            purchaseFieldDouble(car, arrayOf("shipmentCharges", "shipment_charges", "shippingCharge"))
+        }
+    val shippingCharge = mergedCostField(st, shippingBaseline, "shippingCharge")
     val freightFromGlobal = if (isFobMode) 0.0 else (globalFreightValues[chassis] ?: 0.0)
     val freight = if (isFobMode) 0.0 else mergedCostField(st, freightFromGlobal, "freight")
     val inspectionFee = mergedCostField(st, purchaseFieldDouble(car, arrayOf("inspectionFee", "inspection_fee")), "inspectionFee")
@@ -1052,13 +1527,13 @@ fun computeTotalCnfOrFobForChassis(car: dynamic, chassis: String, isFobMode: Boo
     val profit = mergedCostField(st, purchaseFieldDouble(car, arrayOf("profit")), "profit")
 
     return if (isFobMode) {
-        carPrice + auctionFee + rixoPrice + shippingCharge + inspectionFee + repairFee + mscCharges + profit
+        carPrice + auctionFee + rixoPrice + shippingCharge + inspectionFee + repairFee + auctionPenaltyFee + mscCharges + profit
     } else {
-        carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+        carPrice + auctionFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + auctionPenaltyFee + mscCharges + profit
     }
 }
 
-private fun extractClientNameFromCar(car: dynamic): String {
+fun extractClientNameFromCar(car: dynamic): String {
     val a = car.clientName
     val b = car.client_name
     val fromA = a?.toString()?.trim().orEmpty()
@@ -1070,7 +1545,7 @@ private fun extractClientNameFromCar(car: dynamic): String {
 /**
  * Loads numeric cost fields from DB so totals are correct even when the user never opened this chassis in the dropdown.
  */
-private fun enrichCarWithCostsFromApi(car: dynamic, chassis: String): dynamic {
+fun enrichCarWithCostsFromApi(car: dynamic, chassis: String): dynamic {
     val enc = js("encodeURIComponent")(chassis) as String
     val url = apiUrl("purchases/costs-by-chassis/$enc")
     return window.fetch(url)
@@ -1086,9 +1561,14 @@ private fun enrichCarWithCostsFromApi(car: dynamic, chassis: String): dynamic {
             js("Object.assign")(out, car)
             out.chassis = chassis
             if (cost != null && js("typeof cost !== 'undefined'") as Boolean) {
+                val pid = cost.id
+                if (pid != null && pid != js("undefined")) {
+                    out.id = pid
+                }
                 out.price = cost.carPrice
                 out.carPrice = cost.carPrice
                 out.auctionFee = cost.auctionFee
+                out.auctionPenaltyFee = cost.auctionPenaltyFee
                 out.rixoPrice = cost.rixoPrice
                 out.shipmentCharges = cost.shippingCharge
                 out.shippingCharge = cost.shippingCharge
@@ -1103,24 +1583,65 @@ private fun enrichCarWithCostsFromApi(car: dynamic, chassis: String): dynamic {
 }
 
 /**
- * Persists [shipping_history] (server fills [client_name] from [purchases]), then downloads the PDF.
+ * Purchase rows to flag as booking-requested after a successful shipping-history save from C&F/FOB.
+ * Prefer IDs from Car Booking "Calculate", then enriched API rows, then selected car objects.
  */
-fun saveShippingHistoryThenDownloadPdf() {
-    saveShippingHistoryThenPdf(openPreview = false)
+private fun resolvePurchaseIdsForBookingBatch(enrichedArr: dynamic, enrichedCount: Int): List<Long> {
+    val out = linkedSetOf<Long>()
+    for (pid in cnfPageSelectedPurchaseIds) {
+        if (pid > 0L) out.add(pid)
+    }
+    if (out.isNotEmpty()) return out.toList()
+    for (i in 0 until enrichedCount) {
+        val enriched = js("(function(a, idx) { return a[idx]; })")(enrichedArr, i)
+        val id = (enriched.id as? Number)?.toLong() ?: continue
+        if (id > 0L) out.add(id)
+    }
+    if (out.isNotEmpty()) return out.toList()
+    for (car in cnfPageSelectedCars) {
+        val id = (car.id as? Number)?.toLong() ?: continue
+        if (id > 0L) out.add(id)
+    }
+    return out.toList()
+}
+
+private fun postBookingRequestedThen(
+    purchaseIds: List<Long>,
+    onDone: () -> Unit,
+    onFailed: (String) -> Unit,
+) {
+    if (purchaseIds.isEmpty()) {
+        onDone()
+        return
+    }
+    val bodyJson = "{\"purchaseIds\":[" + purchaseIds.joinToString(",") + "]}"
+    val req = js("{}")
+    req.method = "POST"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    req.headers = headers
+    req.body = bodyJson
+    window.fetch(apiUrl("purchases/booking-requested"), req)
+        .then { response: dynamic ->
+            if (js("response.ok") as Boolean) {
+                onDone()
+            } else {
+                response.text().then { err: dynamic ->
+                    onFailed(err?.toString() ?: "HTTP ${js("response.status")}")
+                }
+            }
+            Unit
+        }
+        .catch { e: dynamic ->
+            onFailed(e?.toString() ?: "Network error")
+        }
 }
 
 /**
- * Same as [saveShippingHistoryThenDownloadPdf], but opens the PDF in a new tab instead of downloading.
+ * Persists [shipping_history] (server fills [client_name] from [purchases]), and makes Booking-Requested.
  */
-fun saveShippingHistoryThenPreviewPdf() {
-    saveShippingHistoryThenPdf(openPreview = true)
-}
-
-private fun saveShippingHistoryThenPdf(openPreview: Boolean) {
-    console.log(
-        if (openPreview) "💾 Saving shipping history then opening PDF preview..."
-        else "💾 Saving shipping history then downloading PDF...",
-    )
+fun saveShippingHistoryAndBooking() {
+    console.log("💾 Saving shipping history and booking requested...")
     saveCnfFormState()
 
     if (cnfPageSelectedCars.isEmpty()) {
@@ -1189,18 +1710,42 @@ private fun saveShippingHistoryThenPdf(openPreview: Boolean) {
                 window.fetch(apiUrl("shipping-history/batch"), requestInit)
                     .then { response: dynamic ->
                         if (!(js("response.ok") as Boolean)) {
-                            val hint = if (openPreview) "Preview was not opened." else "PDF was not downloaded."
-                            showMessage("Failed to save shipping history (HTTP ${js("response.status")}). $hint", "error")
+                            showMessage("Failed to save shipping history (HTTP ${js("response.status")}).", "error")
                             throw js("Error('shipping-history save failed')")
                         }
                         response.json()
                     }
                     .then { _: dynamic ->
-                        showMessage("Shipping history saved.", "success")
-                        if (openPreview) {
-                            generateShippingSchedulePdfPreview()
+                        val idsToMark = resolvePurchaseIdsForBookingBatch(enrichedArr, pc)
+                        fun finalizeSave() {
+                            markAllCnfRowSavedIndicators()
+                        }
+                        if (idsToMark.isEmpty()) {
+                            console.warn("⚠️ Shipping history saved but no purchase IDs found to set booking_requested")
+                            showMessage(
+                                "Shipping history saved. Could not determine purchase IDs for booking requested.",
+                                "warning",
+                            )
+                            finalizeSave()
                         } else {
-                            generateShippingSchedulePdf()
+                            postBookingRequestedThen(
+                                purchaseIds = idsToMark,
+                                onDone = {
+                                    showMessage(
+                                        "Shipping history saved; booking requested updated for selected cars.",
+                                        "success",
+                                    )
+                                    finalizeSave()
+                                },
+                                onFailed = { msg ->
+                                    console.error("❌ booking-requested after shipping save:", msg)
+                                    showMessage(
+                                        "Shipping history saved, but booking requested could not be updated: $msg",
+                                        "warning",
+                                    )
+                                    finalizeSave()
+                                },
+                            )
                         }
                     }
                     .catch { err: dynamic ->

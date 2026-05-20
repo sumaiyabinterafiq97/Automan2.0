@@ -284,14 +284,8 @@ fun loadClientMapsWithTable() {
     val end = kotlin.math.min(start + clientMapItemsPerPage, orderedForDisplay.size)
     val pageRows = orderedForDisplay.subList(start, end)
     val selectedColumns = getSelectedClientMapColumns()
-    var html = """<div class="client-map-table-wrap"><table class="client-map-table"><colgroup><col class="client-map-col-actions">"""
-    for (ck in selectedColumns) {
-        html += when (ck) {
-            "bankInfo" -> """<col class="client-map-col-bank">"""
-            else -> """<col class="client-map-col-default">"""
-        }
-    }
-    html += """</colgroup><thead><tr><th class="client-map-th-actions"></th>"""
+    val colCount = 1 + selectedColumns.size
+    var html = """<div class="client-map-table-wrap"><table class="client-map-table" style="table-layout: fixed; width: 100%;">${htmlTableColgroupNarrowActionEqualRest(colCount)}<thead><tr><th class="client-map-th-actions"></th>"""
     for (ck in selectedColumns) {
         val label = clientMapColumnLabels[ck] ?: ck
         html += if (ck in clientMapSortableCols) {
@@ -650,11 +644,11 @@ fun showClientMapModal(mappingId: Long?, duplicateFromId: Long? = null) {
                         <div class="car-brand-modal-grid">
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Bank Info</label>
-                                ${createChipMultiSelectCombobox("clientMapMmBankInfo", "Select Bank Info")}
+                                ${createChipMultiSelectCombobox("clientMapMmBankInfo", "Select or type Bank Info", allowAnyTypedToken = true)}
                             </div>
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Consignee</label>
-                                ${createChipMultiSelectCombobox("clientMapMmConsignee", "Select Consignee")}
+                                ${createChipMultiSelectCombobox("clientMapMmConsignee", "Select or type Consignee", allowAnyTypedToken = true)}
                             </div>
                         </div>
                         <div style="margin-bottom: 20px;">

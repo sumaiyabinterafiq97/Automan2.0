@@ -5,7 +5,7 @@ import org.springframework.transaction.annotation.Transactional
 
 @Service
 @Transactional(readOnly = true)
-class CountryRulesService {
+open class CountryRulesService {
     
     fun getCountryRules(country: String): Map<String, Double> {
         val normalizedCountry = country.uppercase()

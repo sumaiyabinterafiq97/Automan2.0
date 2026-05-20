@@ -5,7 +5,8 @@
 #   docker build --platform linux/amd64 -f Dockerfile.prebuilt -t YOUR_USER/automan-backend:latest .
 #   docker push YOUR_USER/automan-backend:latest
 #
-FROM eclipse-temurin:17-jre-jammy
+ARG JAVA_BASE_IMAGE=eclipse-temurin:17-jre-jammy
+FROM ${JAVA_BASE_IMAGE}
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 COPY build/libs/automan-backend-1.0-SNAPSHOT.jar app.jar

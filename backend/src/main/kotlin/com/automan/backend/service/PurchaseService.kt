@@ -5,9 +5,12 @@ import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
 import com.automan.backend.model.BookingMapping
 import com.automan.backend.repository.BookingMappingRepository
+import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.ShippingHistoryRepository
+import com.automan.backend.util.CarModelYearUtils
 import com.automan.backend.util.Logger
+import com.automan.backend.util.PurchaseDateParseUtils
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -21,7 +24,18 @@ class PurchaseService(
     private val pdfService: PdfService,
     private val bookingMappingRepository: BookingMappingRepository,
     private val shippingHistoryRepository: ShippingHistoryRepository,
+    private val purchaseWorkflowService: PurchaseWorkflowService,
+    private val purchaseChangeHistoryService: PurchaseChangeHistoryService,
+    private val clientRepository: ClientRepository,
 ) {
+    /** Links [Purchase.clientId] when [clientName] matches exactly one row in clients (case-insensitive). */
+    private fun resolveClientIdFromName(clientName: String?): Long? {
+        val name = clientName?.trim().orEmpty()
+        if (name.isEmpty()) return null
+        val matches = clientRepository.findByClientNameIgnoreCase(name)
+        return if (matches.size == 1) matches.first().id else null
+    }
+
     /** POL from stock_location mapping (same mapping used in Rixo import). */
     private fun polFromStockLocation(stockLocation: String?): String? {
         val s = stockLocation?.trim() ?: return null
@@ -76,6 +90,17 @@ class PurchaseService(
     fun getAllPurchases(): List<Purchase> {
         return purchaseRepository.findAll()
     }
+
+    /**
+     * Unique purchase dates from [Purchase.date] as ISO [yyyy-MM-dd], newest first, for Rixo Buying Date.
+     * Only includes dates that still have at least one purchase with rixo_requested not TRUE/1.
+     * Unparseable date strings are skipped.
+     */
+    fun getDistinctPurchaseDatesIso(): List<String> {
+        val raw = purchaseRepository.findDistinctPurchaseDateStrings()
+        val dates = raw.mapNotNull { PurchaseDateParseUtils.parseToLocalDate(it) }
+        return dates.distinct().sortedDescending().map { it.toString() }
+    }
     
     fun getPurchaseById(id: Long): Purchase? {
         return purchaseRepository.findById(id).orElse(null)
@@ -101,11 +126,19 @@ class PurchaseService(
             purchase.shaken == false -> false
             else -> false
         }
-        val purchaseToSave = purchase.copy(shaken = shakenValue)
+        val purchaseToSave = purchase.copy(
+            shaken = shakenValue,
+            clientId = purchase.clientId ?: resolveClientIdFromName(purchase.clientName),
+        )
         
         Logger.debug("Creating purchase - received shaken=${purchase.shaken}, saving shaken=${purchaseToSave.shaken}")
         val savedPurchase = purchaseRepository.save(purchaseToSave)
         Logger.debug("Saved purchase - shaken=${savedPurchase.shaken}")
+        val newId = savedPurchase.id
+        if (newId != null) {
+            purchaseWorkflowService.recomputeByPurchaseId(newId)
+            return purchaseRepository.findById(newId).orElse(savedPurchase)
+        }
         return savedPurchase
     }
     
@@ -146,6 +179,9 @@ class PurchaseService(
                 pod = purchase.pod ?: existingPurchase.pod,
                 rixoCompany = purchase.rixoCompany ?: existingPurchase.rixoCompany,
                 clientName = purchase.clientName ?: existingPurchase.clientName,
+                clientId = purchase.clientId
+                    ?: resolveClientIdFromName(purchase.clientName ?: existingPurchase.clientName)
+                    ?: existingPurchase.clientId,
                 consignee = purchase.consignee ?: existingPurchase.consignee,
                 country = purchase.country ?: existingPurchase.country,
                 price = purchase.price ?: existingPurchase.price,
@@ -162,6 +198,10 @@ class PurchaseService(
                 shipmentDate = purchase.shipmentDate ?: existingPurchase.shipmentDate,
                 blNo = purchase.blNo ?: existingPurchase.blNo,
                 vessel = purchase.vessel ?: existingPurchase.vessel,
+                bookingRequested = purchase.bookingRequested,
+                invoiceConfirmed = purchase.invoiceConfirmed ?: existingPurchase.invoiceConfirmed,
+                workflowStatus = existingPurchase.workflowStatus,
+                workflowStatusUpdatedAt = existingPurchase.workflowStatusUpdatedAt,
                 shipmentCharges = purchase.shipmentCharges ?: existingPurchase.shipmentCharges,
                 freight = purchase.freight ?: existingPurchase.freight,
                 storageCharges = purchase.storageCharges ?: existingPurchase.storageCharges,
@@ -193,7 +233,8 @@ class PurchaseService(
             Logger.debug("🔍 [Service] Saving updated purchase: $updatedPurchase")
             val savedPurchase = purchaseRepository.save(updatedPurchase)
             Logger.log("✅ [Service] Successfully saved purchase: $savedPurchase")
-            return savedPurchase
+            purchaseWorkflowService.recomputeByPurchaseId(id)
+            return purchaseRepository.findById(id).orElse(savedPurchase)
         } else {
             Logger.error("Purchase with ID $id not found")
         }
@@ -284,6 +325,15 @@ class PurchaseService(
                 },
                 rixoCompany = updateData["rixoCompany"] as? String ?: existingPurchase.rixoCompany,
                 clientName = updateData["clientName"] as? String ?: existingPurchase.clientName,
+                clientId = run {
+                    val explicit = (updateData["clientId"] as? Number)?.toLong()
+                    if (explicit != null) {
+                        explicit
+                    } else {
+                        val name = updateData["clientName"] as? String ?: existingPurchase.clientName
+                        resolveClientIdFromName(name) ?: existingPurchase.clientId
+                    }
+                },
                 consignee = run {
                     val consigneeValue = updateData["consignee"] as? String
                     if (consigneeValue != null) {
@@ -446,13 +496,17 @@ class PurchaseService(
                         }
                     }
                 },
-                shipped = run {
-                    val shippedValue = updateData["shipped"]
+                bookingRequested = run {
+                    val raw = when {
+                        updateData.containsKey("bookingRequested") -> updateData["bookingRequested"]
+                        updateData.containsKey("booking_requested") -> updateData["booking_requested"]
+                        else -> null
+                    }
                     when {
-                        shippedValue is Boolean -> shippedValue
-                        shippedValue is String -> shippedValue.toBoolean()
-                        shippedValue is Number -> shippedValue.toInt() != 0
-                        else -> existingPurchase.shipped
+                        raw is Boolean -> raw
+                        raw is String -> raw.toBoolean()
+                        raw is Number -> raw.toInt() != 0
+                        else -> existingPurchase.bookingRequested
                     }
                 },
                 invoiceConfirmed = run {
@@ -468,6 +522,8 @@ class PurchaseService(
                         else -> existingPurchase.invoiceConfirmed
                     }
                 },
+                workflowStatus = existingPurchase.workflowStatus,
+                workflowStatusUpdatedAt = existingPurchase.workflowStatusUpdatedAt,
                 updatedAt = java.time.LocalDateTime.now()
             )
             
@@ -481,6 +537,10 @@ class PurchaseService(
             }
             
             Logger.debug("Entity ID before save: ${purchaseToSave.id}")
+            purchaseChangeHistoryService.recordPurchasePartialEdit(
+                existingPurchase,
+                purchaseToSave,
+            )
             val savedPurchase = purchaseRepository.saveAndFlush(purchaseToSave)
             // CRITICAL: Fetch fresh entity from database to ensure we get the actual saved value
             // This prevents JPA from returning a cached/stale entity
@@ -495,8 +555,9 @@ class PurchaseService(
             } else {
                 Logger.debug("Verified: Saved bookingId matches intended value")
             }
-            
-            return purchaseToReturn
+
+            purchaseWorkflowService.recomputeByPurchaseId(id)
+            return purchaseRepository.findById(id).orElse(purchaseToReturn)
         } else {
             Logger.error("Purchase with ID $id not found")
         }
@@ -514,30 +575,72 @@ class PurchaseService(
     }
     
     @Transactional
-    fun markPurchasesAsShipped(purchaseIds: List<Long>): List<Purchase> {
-        Logger.log("Marking ${purchaseIds.size} purchases as shipped: $purchaseIds")
+    fun markPurchasesAsBookingRequested(purchaseIds: List<Long>): List<Purchase> {
+        Logger.log("Marking ${purchaseIds.size} purchases as booking_requested: $purchaseIds")
         val updatedPurchases = mutableListOf<Purchase>()
         
         for (id in purchaseIds) {
             val existingPurchase = purchaseRepository.findById(id).orElse(null)
             if (existingPurchase != null) {
                 val updatedPurchase = existingPurchase.copy(
-                    shipped = true,
+                    bookingRequested = true,
                     updatedAt = java.time.LocalDateTime.now()
                 )
                 val savedPurchase = purchaseRepository.save(updatedPurchase)
                 updatedPurchases.add(savedPurchase)
-                Logger.debug("Marked purchase $id as shipped")
+                Logger.debug("Marked purchase $id as booking_requested")
             } else {
                 Logger.warn("Purchase $id not found, skipping")
             }
         }
         
-        Logger.debug("Successfully marked ${updatedPurchases.size} purchases as shipped")
-        return updatedPurchases
+        Logger.debug("Successfully marked ${updatedPurchases.size} purchases as booking_requested")
+        purchaseWorkflowService.recomputeByPurchaseIds(purchaseIds)
+        return updatedPurchases.map { up ->
+            val oid = up.id ?: return@map up
+            purchaseRepository.findById(oid).orElse(up)
+        }
     }
 
+    /**
+     * Resets [Purchase.bookingRequested] to `false` for all purchases whose chassis
+     * matches any value in [chassisValues]. Called when shipping-history rows are deleted.
+     */
     @Transactional
+    fun unmarkBookingRequestedForChassis(chassisValues: List<String>): Int {
+        if (chassisValues.isEmpty()) return 0
+        val affectedIds = mutableListOf<Long>()
+        var count = 0
+        for (chassis in chassisValues) {
+            val purchases = purchaseRepository.findByChassis(chassis)
+            for (p in purchases) {
+                purchaseRepository.save(p.copy(bookingRequested = false, updatedAt = java.time.LocalDateTime.now()))
+                count++
+                p.id?.let { affectedIds.add(it) }
+            }
+        }
+        if (affectedIds.isNotEmpty()) {
+            purchaseWorkflowService.recomputeByPurchaseIds(affectedIds.distinct())
+        }
+        Logger.log("Unset booking_requested for $count purchase(s) across ${chassisValues.size} chassis values")
+        return count
+    }
+
+    /** Sets [Purchase.clientId] and [Purchase.clientName] on invoice purchases (Phase 2b). */
+    @Transactional
+    fun linkPurchasesToClient(purchaseIds: List<Long>, clientId: Long, clientName: String) {
+        val name = clientName.trim()
+        for (id in purchaseIds) {
+            val existing = purchaseRepository.findById(id).orElse(null) ?: continue
+            val updated = existing.copy(
+                clientId = clientId,
+                clientName = if (name.isNotEmpty()) name else existing.clientName,
+                updatedAt = java.time.LocalDateTime.now(),
+            )
+            purchaseRepository.save(updated)
+        }
+    }
+
     fun markPurchasesAsInvoiceConfirmed(purchaseIds: List<Long>): List<Purchase> {
         Logger.log("Marking ${purchaseIds.size} purchases as invoice_confirmed: $purchaseIds")
         val updatedPurchases = mutableListOf<Purchase>()
@@ -558,7 +661,91 @@ class PurchaseService(
         }
 
         Logger.debug("Successfully marked ${updatedPurchases.size} purchases as invoice_confirmed")
-        return updatedPurchases
+        purchaseWorkflowService.recomputeByPurchaseIds(purchaseIds)
+        return updatedPurchases.map { up ->
+            val oid = up.id ?: return@map up
+            purchaseRepository.findById(oid).orElse(up)
+        }
+    }
+
+    /**
+     * Marks all purchases whose chassis matches any value in [chassisValues] as invoice_confirmed.
+     * Used by batch invoice creation when purchase IDs are not available.
+     */
+    @Transactional
+    fun markPurchasesAsInvoiceConfirmedByChassis(chassisValues: List<String>) {
+        if (chassisValues.isEmpty()) return
+        val markedIds = mutableListOf<Long>()
+        for (chassis in chassisValues) {
+            val purchases = purchaseRepository.findByChassis(chassis)
+            for (p in purchases) {
+                if (p.invoiceConfirmed != true) {
+                    purchaseRepository.save(p.copy(invoiceConfirmed = true, updatedAt = java.time.LocalDateTime.now()))
+                    p.id?.let { markedIds.add(it) }
+                    Logger.debug("Marked purchase (chassis=$chassis) as invoice_confirmed")
+                }
+            }
+        }
+        if (markedIds.isNotEmpty()) purchaseWorkflowService.recomputeByPurchaseIds(markedIds)
+        Logger.log("Marked ${markedIds.size} purchase(s) as invoice_confirmed by chassis")
+    }
+
+    /**
+     * Sets [Purchase.invoiceConfirmed] to false for purchases matching each chassis in [chassisValues]
+     * ([PurchaseRepository.findByChassis]). Only updates rows currently true.
+     * Called when invoice history rows for those chassis are removed and no other invoice line references them.
+     */
+    @Transactional
+    fun unmarkInvoiceConfirmedForChassis(chassisValues: List<String>): Int {
+        if (chassisValues.isEmpty()) return 0
+        val affectedIds = mutableListOf<Long>()
+        var updatedRows = 0
+        for (raw in chassisValues) {
+            val chassis = raw.trim()
+            if (chassis.isEmpty()) continue
+            val purchases = purchaseRepository.findByChassis(chassis)
+            for (p in purchases) {
+                if (p.invoiceConfirmed != true) continue
+                val saved = purchaseRepository.save(
+                    p.copy(invoiceConfirmed = false, updatedAt = java.time.LocalDateTime.now()),
+                )
+                updatedRows++
+                saved.id?.let { affectedIds.add(it) }
+            }
+        }
+        if (affectedIds.isNotEmpty()) {
+            purchaseWorkflowService.recomputeByPurchaseIds(affectedIds.distinct())
+        }
+        Logger.log("Cleared invoice_confirmed on $updatedRows purchase row(s) for ${chassisValues.size} chassis token(s)")
+        return updatedRows
+    }
+
+    @Transactional
+    fun markPurchasesAsRixoRequestedTrue(purchaseIds: List<Long>): List<Purchase> {
+        Logger.log("Marking ${purchaseIds.size} purchases as rixo_requested=TRUE: $purchaseIds")
+        val updatedPurchases = mutableListOf<Purchase>()
+
+        for (id in purchaseIds) {
+            val existingPurchase = purchaseRepository.findById(id).orElse(null)
+            if (existingPurchase != null) {
+                val updatedPurchase = existingPurchase.copy(
+                    rixoRequested = "TRUE",
+                    updatedAt = java.time.LocalDateTime.now()
+                )
+                val savedPurchase = purchaseRepository.save(updatedPurchase)
+                updatedPurchases.add(savedPurchase)
+                Logger.debug("Marked purchase $id as rixo_requested=TRUE")
+            } else {
+                Logger.warn("Purchase $id not found, skipping rixo_requested update")
+            }
+        }
+
+        Logger.debug("Successfully marked ${updatedPurchases.size} purchases as rixo_requested=TRUE")
+        purchaseWorkflowService.recomputeByPurchaseIds(purchaseIds)
+        return updatedPurchases.map { up ->
+            val oid = up.id ?: return@map up
+            purchaseRepository.findById(oid).orElse(up)
+        }
     }
     
     fun searchPurchases(searchTerm: String): List<Purchase> {
@@ -603,8 +790,8 @@ class PurchaseService(
         raw.trim().replace("%", "").replace("_", "").take(120)
 
     /**
-     * Car booking "SEARCH CHASSIS": prefer prefix matches (uses [com.automan.backend.repository.PurchaseRepository.searchByChassisPrefix] → `idx_chassis`),
-     * then fill with chassis-only substring matches up to [maxResults].
+     * Car booking "SEARCH CHASSIS": prefix/substring on chassis for rows that are Rixo-confirmed
+     * (`rixoConfirmed` `1`/`TRUE`) and booking not requested yet.
      */
     fun searchChassisForBooking(rawQuery: String, maxResults: Int = 50): List<Purchase> {
         val q = sanitizeChassisSearchToken(rawQuery)
@@ -770,15 +957,23 @@ class PurchaseService(
                         // - country (from "Target Country")
                         // This prevents "re-import" from leaving those columns blank.
                         val existing = purchaseRepository.findByChassis(purchase.chassis).firstOrNull()
+                        val resolvedClientId = purchase.clientId ?: resolveClientIdFromName(purchase.clientName)
+                        val purchaseToPersist = purchase.copy(clientId = resolvedClientId)
                         val savedPurchase = if (existing != null) {
                             val updated = existing.copy(
                                 date = if (!purchase.date.isNullOrBlank()) purchase.date else existing.date,
                                 auctionHouse = if (!purchase.auctionHouse.isNullOrBlank()) purchase.auctionHouse else existing.auctionHouse,
-                                country = if (!purchase.country.isNullOrBlank()) purchase.country else existing.country
+                                country = if (!purchase.country.isNullOrBlank()) purchase.country else existing.country,
+                                clientName = if (!purchase.clientName.isNullOrBlank()) purchase.clientName else existing.clientName,
+                                clientId = if (!purchase.clientName.isNullOrBlank()) {
+                                    resolveClientIdFromName(purchase.clientName) ?: existing.clientId
+                                } else {
+                                    existing.clientId
+                                },
                             )
                             purchaseRepository.save(updated)
                         } else {
-                            purchaseRepository.save(purchase)
+                            purchaseRepository.save(purchaseToPersist)
                         }
                         savedPurchases.add(savedPurchase)
                         Logger.debug("✅ Saved: ${purchase.carName} (Chassis: ${purchase.chassis})")
@@ -810,6 +1005,7 @@ class PurchaseService(
                 // For now, we allow partial success which is typically desired for CSV imports
                 
                 Logger.log("✅ Successfully saved ${savedPurchases.size} purchases to database")
+                purchaseWorkflowService.recomputeByPurchaseIds(savedPurchases.mapNotNull { it.id })
                 if (duplicateCount > 0) {
                     Logger.warn("⚠️ Skipped $duplicateCount duplicate purchases")
                 }
@@ -1358,8 +1554,9 @@ class PurchaseService(
         return purchaseRepository.findByChassis(chassis).firstOrNull()
     }
     
+    /** Used by Car Booking country dropdown: at least one chassis Rixo-confirmed and booking not requested yet. */
     fun getUniqueCountries(): List<String> {
-        return purchaseRepository.findDistinctCountries()
+        return purchaseRepository.findDistinctCountriesWithPendingBooking()
     }
     
     fun getUniqueStockLocations(): List<String> {
@@ -1371,8 +1568,8 @@ class PurchaseService(
     }
     
     /**
-     * Distinct POL values for unshipped purchases in [country], in **first-seen order**
-     * (table order is by chassis), so the first entry matches the first qualifying row — not alphabetical.
+     * Distinct POL values for purchases eligible for booking (Rixo confirmed, booking not requested) in [country],
+     * in **first-seen order** (table order is by chassis), so the first entry matches the first qualifying row — not alphabetical.
      */
     fun getPolByCountry(country: String): List<String> {
         val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
@@ -1431,7 +1628,7 @@ class PurchaseService(
             .sortedBy { it.chassis }
     }
     
-    fun getUnshippedChassisByPolPort(polPort: String): List<String> {
+    fun getChassisWithoutBookingRequestByPol(polPort: String): List<String> {
         return purchaseRepository.findUnshippedChassisByPolPort(polPort)
     }
     
@@ -1439,6 +1636,7 @@ class PurchaseService(
         chassis: String,
         carPrice: Double,
         auctionFee: Double,
+        auctionPenaltyFee: Double,
         rixoPrice: Double,
         shippingCharge: Double,
         freight: Double,
@@ -1456,6 +1654,7 @@ class PurchaseService(
                 val updatedPurchase = existingPurchase.copy(
                     price = carPrice.toString(),
                     auctionFee = auctionFee.toString(),
+                    auctionPenaltyFee = auctionPenaltyFee.toString(),
                     rixoPrice = rixoPrice.toString(),
                     shipmentCharges = shippingCharge.toString(),
                     freight = freight.toString(),
@@ -1469,6 +1668,7 @@ class PurchaseService(
                 
                 purchaseRepository.save(updatedPurchase)
             }
+            purchaseWorkflowService.recomputeByPurchaseIds(existingPurchases.mapNotNull { it.id })
             Logger.debug("Updated cost details for chassis: $chassis (${existingPurchases.size} purchase(s))")
         } else {
             throw RuntimeException("Purchase not found for chassis: $chassis")
@@ -1479,6 +1679,7 @@ class PurchaseService(
         chassis: String,
         carPrice: Double,
         auctionFee: Double,
+        auctionPenaltyFee: Double,
         rixoPrice: Double,
         shippingCharge: Double,
         inspectionFee: Double,
@@ -1494,6 +1695,7 @@ class PurchaseService(
                 val updatedPurchase = existingPurchase.copy(
                     price = carPrice.toString(),
                     auctionFee = auctionFee.toString(),
+                    auctionPenaltyFee = auctionPenaltyFee.toString(),
                     rixoPrice = rixoPrice.toString(),
                     shipmentCharges = shippingCharge.toString(),
                     inspectionFee = inspectionFee.toString(),
@@ -1505,6 +1707,7 @@ class PurchaseService(
                 
                 purchaseRepository.save(updatedPurchase)
             }
+            purchaseWorkflowService.recomputeByPurchaseIds(existingPurchases.mapNotNull { it.id })
             Logger.debug("Updated FOB cost details for chassis: $chassis (${existingPurchases.size} purchase(s))")
         } else {
             throw RuntimeException("Purchase not found for chassis: $chassis")
@@ -1580,19 +1783,40 @@ class PurchaseService(
             address = addressFromMap.ifEmpty { addressFallback }
         )
         
-        // Fetch car details for each chassis — price column uses shipping_history.amount (one row per chassis)
+        // Fetch car details for each chassis — price column prefers FOB/C&F calculator totals from the client,
+        // then shipping_history.amount, then sums from purchase fields.
         val carList = request.chassisNumbers.mapIndexed { index, chassisRaw ->
             val chassis = chassisRaw.trim()
+            val frontendYen = resolveFrontendYenForShippingPdf(request.frontendTotalYenByChassis, chassis)
             val historyRow = shippingHistoryRepository.findFirstByChassisOrderByIdDesc(chassis)
             val purchases = purchaseRepository.findByChassis(chassis)
             val purchase = purchases.firstOrNull() // Use first purchase if multiple exist
-            if (purchase != null) {
+
+            if (frontendYen != null) {
+                if (purchase != null) {
+                    com.automan.backend.dto.CarPdfDto(
+                        no = index + 1,
+                        name = purchase.carName ?: "Unknown",
+                        chassisNumber = purchase.chassis,
+                        year = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear),
+                        cnfPrice = "¥${frontendYen.toInt()}",
+                    )
+                } else {
+                    com.automan.backend.dto.CarPdfDto(
+                        no = index + 1,
+                        name = "Unknown",
+                        chassisNumber = chassis,
+                        year = "",
+                        cnfPrice = "¥${frontendYen.toInt()}",
+                    )
+                }
+            } else if (purchase != null) {
                 val totalCnfPrice = if (historyRow != null) {
                     historyRow.amount
                 } else {
                     val carPrice = try { java.math.BigDecimal(purchase.price ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
                     val isPackageMode = purchase.isPackageMode ?: false
-                    
+
                     if (isPackageMode) {
                         carPrice
                     } else {
@@ -1604,18 +1828,18 @@ class PurchaseService(
                         val repairCharges = try { java.math.BigDecimal(purchase.repairCharges ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
                         val miscCharges = try { java.math.BigDecimal(purchase.miscCharges ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
                         val profit = purchase.profit ?: java.math.BigDecimal.ZERO
-                        
+
                         carPrice.add(auctionFee).add(rixoPrice).add(shipmentCharges)
                             .add(freight).add(inspectionFee).add(repairCharges).add(miscCharges).add(profit)
                     }
                 }
-                
+
                 com.automan.backend.dto.CarPdfDto(
                     no = index + 1,
                     name = purchase.carName ?: "Unknown",
                     chassisNumber = purchase.chassis,
-                    year = purchase.carModelYear?.trim()?.takeIf { it.isNotEmpty() } ?: "",
-                    cnfPrice = "¥${totalCnfPrice.toInt()}"
+                    year = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear),
+                    cnfPrice = "¥${totalCnfPrice.toInt()}",
                 )
             } else {
                 val amountFromHistory = historyRow?.amount
@@ -1624,7 +1848,7 @@ class PurchaseService(
                     name = "Unknown",
                     chassisNumber = chassis,
                     year = "",
-                    cnfPrice = if (amountFromHistory != null) "¥${amountFromHistory.toInt()}" else "¥0"
+                    cnfPrice = if (amountFromHistory != null) "¥${amountFromHistory.toInt()}" else "¥0",
                 )
             }
         }
@@ -1640,6 +1864,17 @@ class PurchaseService(
             carList = carList,
             calculationMode = request.calculationMode // Pass calculation mode to PDF data
         )
+    }
+
+    /** Lookup yen total from FOB/C&F calculator map (case-insensitive chassis match). */
+    private fun resolveFrontendYenForShippingPdf(
+        map: Map<String, java.math.BigDecimal>?,
+        chassis: String,
+    ): java.math.BigDecimal? {
+        if (map.isNullOrEmpty()) return null
+        val c = chassis.trim()
+        map[c]?.let { return it }
+        return map.entries.firstOrNull { it.key.trim().equals(c, ignoreCase = true) }?.value
     }
     
 }

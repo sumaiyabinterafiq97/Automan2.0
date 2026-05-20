@@ -1,43 +1,37 @@
 package com.automan.backend.util
 
-import com.automan.backend.config.AppConstants
+import org.slf4j.LoggerFactory
 
 /**
  * Logger utility for backend
- * Conditionally logs based on DEBUG_LOGGING flag
+ * Wraps SLF4J for standard Spring Boot logging
  */
 object Logger {
+    private val log = LoggerFactory.getLogger(Logger::class.java)
+
     fun log(message: String, vararg args: Any?) {
-        if (AppConstants.DEBUG_LOGGING) {
-            val formattedMessage = formatMessage(message, *args)
-            println(formattedMessage)
-        }
+        val formattedMessage = formatMessage(message, *args)
+        log.info(formattedMessage)
     }
     
     fun warn(message: String, vararg args: Any?) {
-        // Always log warnings
         val formattedMessage = formatMessage(message, *args)
-        println("⚠️ WARNING: $formattedMessage")
+        log.warn(formattedMessage)
     }
     
     fun error(message: String, vararg args: Any?) {
-        // Always log errors
         val formattedMessage = formatMessage(message, *args)
-        System.err.println("❌ ERROR: $formattedMessage")
+        log.error(formattedMessage)
     }
     
     fun error(message: String, throwable: Throwable, vararg args: Any?) {
-        // Always log errors with stack trace
         val formattedMessage = formatMessage(message, *args)
-        System.err.println("❌ ERROR: $formattedMessage")
-        throwable.printStackTrace()
+        log.error(formattedMessage, throwable)
     }
     
     fun debug(message: String, vararg args: Any?) {
-        if (AppConstants.DEBUG_LOGGING) {
-            val formattedMessage = formatMessage(message, *args)
-            println("🔍 DEBUG: $formattedMessage")
-        }
+        val formattedMessage = formatMessage(message, *args)
+        log.debug(formattedMessage)
     }
     
     private fun formatMessage(message: String, vararg args: Any?): String {

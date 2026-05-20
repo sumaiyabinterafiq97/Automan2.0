@@ -4,6 +4,7 @@ import com.automan.backend.dto.CreateTransactionRequest
 import com.automan.backend.model.Client
 import com.automan.backend.model.ClientStatus
 import com.automan.backend.service.ClientService
+import com.automan.backend.service.InvoiceHistoryService
 import com.automan.backend.service.TransactionService
 import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
@@ -23,7 +24,8 @@ import java.time.LocalDate
 ])
 class ClientController(
     private val clientService: ClientService,
-    private val transactionService: TransactionService
+    private val transactionService: TransactionService,
+    private val invoiceHistoryService: InvoiceHistoryService,
 ) {
     
     @GetMapping
@@ -32,6 +34,15 @@ class ClientController(
         return ResponseEntity.ok(clients)
     }
     
+    @GetMapping("/resolve-ledger")
+    fun resolveLedgerClient(
+        @RequestParam name: String,
+        @RequestParam(required = false) purchaseIds: List<Long>?,
+    ): ResponseEntity<Map<String, Any?>> {
+        val result = invoiceHistoryService.previewLedgerClient(name, purchaseIds.orEmpty())
+        return ResponseEntity.ok(result)
+    }
+
     @GetMapping("/search")
     fun searchClients(@RequestParam query: String): ResponseEntity<List<Client>> {
         val clients = clientService.searchClients(query)
@@ -69,7 +80,7 @@ class ClientController(
     }
     
     @PutMapping("/{id}")
-    fun updateClient(@PathVariable id: Long, @RequestBody updateData: Map<String, Any>): ResponseEntity<Client> {
+    fun updateClient(@PathVariable id: Long, @RequestBody updateData: Map<String, Any?>): ResponseEntity<Client> {
         val updatedClient = clientService.updateClient(id, updateData)
         return if (updatedClient != null) {
             ResponseEntity.ok(updatedClient)
@@ -192,11 +203,12 @@ class ClientController(
                 clientId = (transactionData["clientId"] as? Number)?.toLong()
                     ?: throw IllegalArgumentException("Client ID is required"),
                 eventDate = transactionData["eventDate"] as String,
-                eventDescription = transactionData["eventDescription"] as? String ?: "",
+                eventType = TransactionService.parseManualEventType(transactionData),
+                eventDescription = transactionData["eventDescription"] as? String,
                 quantity = (transactionData["quantity"] as? Number)?.toInt(),
                 billNumber = transactionData["billNumber"] as? String,
                 transactionPrice = (transactionData["transactionPrice"] as? Number)?.toDouble(),
-                paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble()
+                paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble(),
             )
             val response = transactionService.createTransaction(request)
             if (response.success) {

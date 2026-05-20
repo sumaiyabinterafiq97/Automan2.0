@@ -1,5 +1,17 @@
-# Integration tests use @ActiveProfiles("test"). Disable Flyway so V1 is not applied
-# against the shared dev MySQL (avoids duplicate CREATE errors).
+# Integration tests (@ActiveProfiles("test")): no external MySQL, no Flyway replay.
+# Hibernate maintains schema including new entities (e.g. purchase_change_history).
 spring:
   flyway:
     enabled: false
+  datasource:
+    url: jdbc:h2:mem:automan_integration_test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect

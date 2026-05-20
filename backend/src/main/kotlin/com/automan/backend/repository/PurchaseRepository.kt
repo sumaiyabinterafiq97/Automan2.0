@@ -29,17 +29,25 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     fun searchPurchases(@Param("searchTerm") searchTerm: String): List<Purchase>
 
     /**
-     * Prefix match on chassis — uses `idx_chassis` (range scan on `chassis LIKE prefix%`).
-     * For booking “SEARCH CHASSIS” autocomplete performance.
+     * Prefix match on chassis — booking flow only: [bookingRequested] false/null and Rixo confirmed (`1`/`TRUE`).
      */
-    @Query("SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT(:prefix, '%') ORDER BY p.chassis ASC")
+    @Query(
+        "SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT(:prefix, '%') " +
+            "AND (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
+            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+            "ORDER BY p.chassis ASC",
+    )
     fun searchByChassisPrefix(@Param("prefix") prefix: String, pageable: Pageable): List<Purchase>
 
     /**
-     * Substring match on chassis only (narrower than [searchPurchases]). Leading `%` limits index use;
-     * still cheaper than OR across many columns. Limit via [Pageable].
+     * Substring match on chassis — same eligibility as [searchByChassisPrefix] (Car Booking search).
      */
-    @Query("SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT('%', :q, '%') ORDER BY p.chassis ASC")
+    @Query(
+        "SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT('%', :q, '%') " +
+            "AND (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
+            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+            "ORDER BY p.chassis ASC",
+    )
     fun searchByChassisContains(@Param("q") q: String, pageable: Pageable): List<Purchase>
 
     /** Paged search: chassis, car name, brand, client, supplier — substring match on each (OR). */
@@ -138,9 +146,15 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT p FROM Purchase p WHERE p.chassis = :chassis")
     fun findCostDetailsByChassis(@Param("chassis") chassis: String): Purchase?
     
-    // Country-related methods
-    @Query("SELECT DISTINCT p.country FROM Purchase p WHERE p.country IS NOT NULL AND p.country != '' ORDER BY p.country")
-    fun findDistinctCountries(): List<String>
+    // Country-related methods (Car Booking): countries with at least one chassis Rixo-confirmed and booking not requested yet.
+    @Query(
+        "SELECT DISTINCT p.country FROM Purchase p " +
+            "WHERE p.country IS NOT NULL AND p.country != '' " +
+            "AND (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
+            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+            "ORDER BY p.country",
+    )
+    fun findDistinctCountriesWithPendingBooking(): List<String>
     
     // Stock location-related methods
     @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
@@ -149,12 +163,13 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.country = :country AND p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
     fun findDistinctStockLocationsByCountry(@Param("country") country: String): List<String>
     
-    // For booking-page filtering: fetch unshipped purchases for a country so we can derive POL from stock_location when pol is blank.
+    // For booking-page filtering: booking not requested yet and Rixo confirmed.
     @Query(
         "SELECT p FROM Purchase p " +
-            "WHERE (p.shipped IS NULL OR p.shipped = false) " +
+            "WHERE (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
+            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
             "AND LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
-            "ORDER BY p.chassis"
+            "ORDER BY p.chassis",
     )
     fun findUnshippedPurchasesByCountryForPolFiltering(@Param("country") country: String): List<Purchase>
 
@@ -177,41 +192,41 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT DISTINCT p.venueId FROM Purchase p WHERE p.venueId IS NOT NULL AND p.venueId != '' ORDER BY p.venueId")
     fun findDistinctVenueIds(): List<String>
     
-    // Filtered chassis methods - filter by shipped=0 (unshipped cars only)
-    // Filter by POL field instead of stock_location for booking page
+    // Filtered chassis: booking not requested and Rixo confirmed (native query for raw table).
     @Query(
         value = "SELECT DISTINCT p.chassis FROM purchases p " +
-                "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
-                "AND LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
-                "AND p.chassis IS NOT NULL AND p.chassis != '' " +
-                "AND (p.shipped IS NULL OR p.shipped = 0) " +
-                "ORDER BY p.chassis",
-        nativeQuery = true
+            "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
+            "AND LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
+            "AND p.chassis IS NOT NULL AND p.chassis != '' " +
+            "AND (p.booking_requested IS NULL OR p.booking_requested = 0) " +
+            "AND UPPER(TRIM(COALESCE(p.rixo_confirmed, ''))) IN ('TRUE', '1') " +
+            "ORDER BY p.chassis",
+        nativeQuery = true,
     )
     fun findFilteredChassis(@Param("country") country: String, @Param("polPort") polPort: String): List<String>
 
     @Query(
         "SELECT p FROM Purchase p " +
-        "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
-        "AND LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
-        "AND (p.shipped IS NULL OR p.shipped = false) " +
-        "ORDER BY p.chassis"
+            "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
+            "AND LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
+            "AND (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
+            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+            "ORDER BY p.chassis",
     )
     fun findFilteredPurchasesByCountryAndPol(
         @Param("country") country: String,
-        @Param("polPort") polPort: String
+        @Param("polPort") polPort: String,
     ): List<Purchase>
-    
-    // Unshipped chassis by POL (using shipped field: null or 0 = unshipped)
-    // Note: shipped is stored as TINYINT(1) in MySQL, so we check for 0 or NULL
-    // Using native query to avoid Boolean/Integer comparison issues
+
+    // Chassis by POL where booking not requested and Rixo confirmed
     @Query(
         value = "SELECT DISTINCT p.chassis FROM purchases p " +
-                "WHERE LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
-                "AND (p.shipped IS NULL OR p.shipped = 0) " +
-                "AND p.chassis IS NOT NULL AND p.chassis != '' " +
-                "ORDER BY p.chassis",
-        nativeQuery = true
+            "WHERE LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
+            "AND (p.booking_requested IS NULL OR p.booking_requested = 0) " +
+            "AND UPPER(TRIM(COALESCE(p.rixo_confirmed, ''))) IN ('TRUE', '1') " +
+            "AND p.chassis IS NOT NULL AND p.chassis != '' " +
+            "ORDER BY p.chassis",
+        nativeQuery = true,
     )
     fun findUnshippedChassisByPolPort(@Param("polPort") polPort: String): List<String>
     
@@ -220,7 +235,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
            "(:consignee IS NULL OR TRIM(:consignee) = '' OR LOWER(TRIM(COALESCE(p.consignee, ''))) = LOWER(TRIM(:consignee))) AND " +
            "(:vessel IS NULL OR TRIM(:vessel) = '' OR LOWER(TRIM(COALESCE(p.vessel, ''))) = LOWER(TRIM(:vessel))) AND " +
            "(:shipmentDate IS NULL OR TRIM(:shipmentDate) = '' OR TRIM(COALESCE(p.shipmentDate, '')) = TRIM(:shipmentDate)) AND " +
-           "(p.shipped IS NULL OR p.shipped = false) AND " +
+           "(p.bookingRequested IS NULL OR p.bookingRequested = false) AND " +
            "(p.invoiceConfirmed IS NULL OR p.invoiceConfirmed = false)")
     fun findByConsigneeAndVesselAndShipmentDate(
         @Param("consignee") consignee: String?,
@@ -233,11 +248,35 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
            "(:clientName IS NULL OR TRIM(:clientName) = '' OR LOWER(TRIM(COALESCE(p.clientName, ''))) = LOWER(TRIM(:clientName))) AND " +
            "(:vessel IS NULL OR TRIM(:vessel) = '' OR LOWER(TRIM(COALESCE(p.vessel, ''))) = LOWER(TRIM(:vessel))) AND " +
            "(:shipmentDate IS NULL OR TRIM(:shipmentDate) = '' OR TRIM(COALESCE(p.shipmentDate, '')) = TRIM(:shipmentDate)) AND " +
-           "(p.shipped IS NULL OR p.shipped = false) AND " +
+           "(p.bookingRequested IS NULL OR p.bookingRequested = false) AND " +
            "(p.invoiceConfirmed IS NULL OR p.invoiceConfirmed = false)")
     fun findByClientNameAndVesselAndShipmentDate(
         @Param("clientName") clientName: String?,
         @Param("vessel") vessel: String?,
         @Param("shipmentDate") shipmentDate: String?
     ): List<Purchase>
+
+    /**
+     * Distinct non-blank [Purchase.date] (VARCHAR) for Rixo "Buying date", including only rows
+     * where rixo_requested is not TRUE/1 (i.e., pending requests still exist on that date).
+     */
+    @Query(
+        "SELECT DISTINCT p.date FROM Purchase p " +
+            "WHERE p.date IS NOT NULL AND p.date <> '' " +
+            "AND (p.rixoRequested IS NULL OR TRIM(p.rixoRequested) = '' " +
+            "OR LOWER(p.rixoRequested) NOT IN ('1', 'true'))"
+    )
+    fun findDistinctPurchaseDateStrings(): List<String>
+
+    /** Match a history chassis token to purchases: exact chassis match only. */
+    @Query(
+        "SELECT p FROM Purchase p WHERE " +
+            "LOWER(TRIM(COALESCE(p.chassis, ''))) = LOWER(TRIM(:token))"
+    )
+    fun findByChassisToken(@Param("token") token: String): List<Purchase>
+
+    @Query(
+        "SELECT p FROM Purchase p WHERE UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1')"
+    )
+    fun findPurchasesWhereRixoConfirmedPositive(): List<Purchase>
 }

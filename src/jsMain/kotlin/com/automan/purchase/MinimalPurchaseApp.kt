@@ -8640,6 +8640,7 @@ fun setupMoneyInputFormattingOnce() {
                 if (!(el.classList.contains('money-input') || el.classList.contains('comma-int-input'))) return;
                 if (e.ctrlKey || e.metaKey || e.altKey) return;
                 var k = e.key;
+                if (!k) return;
                 if (k === 'Backspace' || k === 'Delete' || k === 'Tab' || k === 'Enter' || k === 'Escape') return;
                 if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown' || k === 'Home' || k === 'End') return;
                 // mileage wants digits only; money allows dot (and optional leading minus on allow-negative)

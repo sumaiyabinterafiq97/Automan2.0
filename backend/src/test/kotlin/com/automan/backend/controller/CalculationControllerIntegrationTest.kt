@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureWebMvc
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.http.MediaType
 import org.springframework.test.context.ActiveProfiles
@@ -15,7 +15,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.*
 import org.springframework.transaction.annotation.Transactional
 
 @SpringBootTest
-@AutoConfigureWebMvc
+@AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Transactional
 class CalculationControllerIntegrationTest {
@@ -32,7 +32,7 @@ class CalculationControllerIntegrationTest {
     }
 
     @Test
-    fun `POST /api/calculations/freight should calculate freight successfully`() {
+    fun `POST api calculations freight should calculate freight successfully`() {
         // Given
         val calculationRequest = CalculationRequest(
             country = null,
@@ -67,7 +67,7 @@ class CalculationControllerIntegrationTest {
     }
 
     @Test
-    fun `POST /api/calculations/caf should calculate CAF with country rules`() {
+    fun `POST api calculations caf should calculate CAF with country rules`() {
         // Given
         val calculationRequest = CalculationRequest(
             country = "Pakistan",
@@ -96,7 +96,7 @@ class CalculationControllerIntegrationTest {
     }
 
     @Test
-    fun `POST /api/calculations/fob should calculate FOB successfully`() {
+    fun `POST api calculations fob should calculate FOB successfully`() {
         // Given
         val calculationRequest = CalculationRequest(
             country = null,
@@ -124,7 +124,7 @@ class CalculationControllerIntegrationTest {
     }
 
     @Test
-    fun `POST /api/calculations/pakistan should calculate Pakistan charges successfully`() {
+    fun `POST api calculations pakistan should calculate Pakistan charges successfully`() {
         // Given
         val calculationRequest = CalculationRequest(
             country = "Pakistan",
@@ -155,7 +155,7 @@ class CalculationControllerIntegrationTest {
     }
 
     @Test
-    fun `POST /api/calculations/pakistan should return error when package option is false`() {
+    fun `POST api calculations pakistan should return error when package option is false`() {
         // Given
         val calculationRequest = CalculationRequest(
             country = "Pakistan",
@@ -175,11 +175,12 @@ class CalculationControllerIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(calculationRequest))
         )
-            .andExpect(status().isInternalServerError) // Service throws IllegalArgumentException
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.success").value(false))
     }
 
     @Test
-    fun `POST /api/calculations/caf should apply different country rules`() {
+    fun `POST api calculations caf should apply different country rules`() {
         // Test Pakistan (1.15 multiplier)
         val pakistanRequest = CalculationRequest(
             country = "Pakistan",
@@ -223,7 +224,7 @@ class CalculationControllerIntegrationTest {
     }
 
     @Test
-    fun `POST /api/calculations/caf should handle unsupported country with default rules`() {
+    fun `POST api calculations caf should handle unsupported country with default rules`() {
         // Given
         val calculationRequest = CalculationRequest(
             country = "Unknown Country",

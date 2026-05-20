@@ -52,7 +52,8 @@ class CarBrandMappingService(
             "vehicleType" to (firstRow.vehicleType ?: ""),
             "rank" to (firstRow.rank ?: ""),
             "color" to (firstRow.color ?: ""),
-            "driveType" to (firstRow.driveType ?: "")
+            "driveType" to (firstRow.driveType ?: ""),
+            "recycleFee" to (firstRow.recycleFee ?: "")
         )
         val chassisList = carBrandMappingRepository.findDistinctChassisByCarBrand(brandName)
         val carNameList = carBrandMappingRepository.findDistinctCarNameByCarBrand(brandName)
@@ -103,7 +104,8 @@ class CarBrandMappingService(
             "vehicleType" to (firstMatch.vehicleType ?: ""),
             "rank" to (firstMatch.rank ?: ""),
             "color" to (firstMatch.color ?: ""),
-            "driveType" to (firstMatch.driveType ?: "")
+            "driveType" to (firstMatch.driveType ?: ""),
+            "recycleFee" to (firstMatch.recycleFee ?: "")
         )
         return mapOf("found" to true, "data" to data)
     }
@@ -131,7 +133,8 @@ class CarBrandMappingService(
             "vehicleType" to (firstRow.vehicleType ?: ""),
             "rank" to (firstRow.rank ?: ""),
             "color" to (firstRow.color ?: ""),
-            "driveType" to (firstRow.driveType ?: "")
+            "driveType" to (firstRow.driveType ?: ""),
+            "recycleFee" to (firstRow.recycleFee ?: "")
         )
         return mapOf("found" to true, "chassisList" to chassisList, "firstRow" to firstRowData)
     }
@@ -164,7 +167,8 @@ class CarBrandMappingService(
                     "vehicleTypes" to emptyList<String>(),
                     "ranks" to emptyList<String>(),
                     "colors" to emptyList<String>(),
-                    "driveTypes" to emptyList<String>()
+                    "driveTypes" to emptyList<String>(),
+                    "recycleFees" to emptyList<String>()
                 )
             )
         }
@@ -184,7 +188,8 @@ class CarBrandMappingService(
             "vehicleType" to (firstMatch.vehicleType ?: ""),
             "rank" to (firstMatch.rank ?: ""),
             "color" to (firstMatch.color ?: ""),
-            "driveType" to (firstMatch.driveType ?: "")
+            "driveType" to (firstMatch.driveType ?: ""),
+            "recycleFee" to (firstMatch.recycleFee ?: "")
         )
         val allRows = mappings.map { m -> toMapWithBrand(m) }
         val uniqueValues = mapOf(
@@ -200,7 +205,8 @@ class CarBrandMappingService(
             "vehicleTypes" to mappings.mapNotNull { it.vehicleType }.distinct().sorted(),
             "ranks" to mappings.mapNotNull { it.rank }.distinct().sorted(),
             "colors" to mappings.mapNotNull { it.color }.distinct().sorted(),
-            "driveTypes" to mappings.mapNotNull { it.driveType }.distinct().sorted()
+            "driveTypes" to mappings.mapNotNull { it.driveType }.distinct().sorted(),
+            "recycleFees" to mappings.mapNotNull { m -> m.recycleFee?.takeIf { rf -> rf.isNotBlank() } }.distinct().sorted()
         )
         return mapOf(
             "found" to true,
@@ -216,6 +222,7 @@ class CarBrandMappingService(
             "rank" to (firstMatch.rank ?: ""),
             "color" to (firstMatch.color ?: ""),
             "driveType" to (firstMatch.driveType ?: ""),
+            "recycleFee" to (firstMatch.recycleFee ?: ""),
             "firstRow" to firstRowData,
             "allRows" to allRows,
             "uniqueValues" to uniqueValues,
@@ -262,7 +269,8 @@ class CarBrandMappingService(
             "vehicleType" to (row.vehicleType ?: ""),
             "rank" to (row.rank ?: ""),
             "color" to (row.color ?: ""),
-            "driveType" to (row.driveType ?: "")
+            "driveType" to (row.driveType ?: ""),
+            "recycleFee" to (row.recycleFee ?: "")
         )
         return mapOf("found" to true, "match" to matchData, "isFallback" to (match == null))
     }
@@ -368,7 +376,8 @@ class CarBrandMappingService(
                 "vehicleType" to (saved.vehicleType ?: ""),
                 "rank" to (saved.rank ?: ""),
                 "color" to (saved.color ?: ""),
-                "driveType" to (saved.driveType ?: "")
+                "driveType" to (saved.driveType ?: ""),
+                "recycleFee" to (saved.recycleFee ?: "")
             )
         )
     }
@@ -416,7 +425,8 @@ class CarBrandMappingService(
                 "vehicleType" to (merged.vehicleType ?: ""),
                 "rank" to (merged.rank ?: ""),
                 "color" to (merged.color ?: ""),
-                "driveType" to (merged.driveType ?: "")
+                "driveType" to (merged.driveType ?: ""),
+                "recycleFee" to (merged.recycleFee ?: "")
             )
         )
     }
@@ -440,7 +450,8 @@ class CarBrandMappingService(
                 "vehicleType" to (mapping.vehicleType ?: ""),
                 "rank" to (mapping.rank ?: ""),
                 "color" to (mapping.color ?: ""),
-                "driveType" to (mapping.driveType ?: "")
+                "driveType" to (mapping.driveType ?: ""),
+                "recycleFee" to (mapping.recycleFee ?: "")
             )
         )
     }
@@ -466,7 +477,8 @@ class CarBrandMappingService(
         "vehicleType" to (m.vehicleType ?: ""),
         "rank" to (m.rank ?: ""),
         "color" to (m.color ?: ""),
-        "driveType" to (m.driveType ?: "")
+        "driveType" to (m.driveType ?: ""),
+        "recycleFee" to (m.recycleFee ?: "")
     )
 
     private fun toMapWithBrand(m: CarBrandMapping): Map<String, Any> = mapOf(
@@ -484,7 +496,8 @@ class CarBrandMappingService(
         "vehicleType" to (m.vehicleType ?: ""),
         "rank" to (m.rank ?: ""),
         "color" to (m.color ?: ""),
-        "driveType" to (m.driveType ?: "")
+        "driveType" to (m.driveType ?: ""),
+        "recycleFee" to (m.recycleFee ?: "")
     )
 
     private fun parseString(value: Any?): String? = when {
@@ -514,6 +527,7 @@ class CarBrandMappingService(
         val requestCc = if (request.containsKey("cc")) parseString(request["cc"]) else null
         val requestDoor = if (request.containsKey("door")) parseString(request["door"]) else null
         val requestSeat = if (request.containsKey("seat")) parseString(request["seat"]) else null
+        val requestRecycleFee = if (request.containsKey("recycleFee")) parseString(request["recycleFee"]) else null
 
         val carBrand = mergeField(base?.carBrand, requestBrand, replaceExistingValues, request.containsKey("carBrand"))
             ?: throw IllegalArgumentException("carBrand is required")
@@ -534,6 +548,7 @@ class CarBrandMappingService(
             rank = mergeField(base?.rank, requestRank, replaceExistingValues, request.containsKey("rank")),
             color = mergeField(base?.color, requestColor, replaceExistingValues, request.containsKey("color")),
             driveType = mergeField(base?.driveType, requestDriveType, replaceExistingValues, request.containsKey("driveType")),
+            recycleFee = mergeField(base?.recycleFee, requestRecycleFee, replaceExistingValues, request.containsKey("recycleFee")),
             createdAt = base?.createdAt ?: now,
             updatedAt = now
         )

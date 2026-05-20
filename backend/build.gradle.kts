@@ -44,6 +44,7 @@ dependencies {
     implementation("org.springframework.security:spring-security-crypto:6.2.0")
     
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation(kotlin("test-junit5"))
 }
 
 tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
@@ -62,6 +63,8 @@ java {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Mockito inline mock-maker + newer JDKs (e.g. Java 24 preview): Byte Buddy experimental mode
+    jvmArgs("-Dnet.bytebuddy.experimental=true")
 }
 
 // Performance optimizations

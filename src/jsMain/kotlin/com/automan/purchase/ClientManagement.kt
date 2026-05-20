@@ -10,6 +10,54 @@ import com.automan.purchase.models.ClientResponse
 import com.automan.purchase.models.TransactionResponse
 // Client Management Functions
 
+/** Option A: positive balance = prepaid credit; negative = amount owed. */
+private fun formatClientBalanceAmount(balance: Double): String = when {
+    balance < 0 -> "−¥${kotlin.math.abs(balance).toLong()}"
+    balance > 0 -> "+¥${balance.toLong()}"
+    else -> "¥0"
+}
+
+private fun clientBalanceColor(balance: Double): String =
+    if (balance < 0) "#e74c3c" else if (balance > 0) "#27ae60" else "#666"
+
+private fun clientBalanceStatusLabel(balance: Double): String = when {
+    balance > 0 -> "Prepaid credit"
+    balance < 0 -> "Amount owed"
+    else -> "Settled"
+}
+
+private fun formatAvailableCredit(balance: Double, creditLimit: Double?): String? {
+    if (creditLimit == null) return null
+    val available = creditLimit + balance
+    return formatClientBalanceAmount(available)
+}
+
+private fun eventTypeBadgeLabel(eventType: String?): String = when (eventType?.uppercase()) {
+    "INVOICE_ISSUED" -> "Invoice"
+    "INVOICE_REVERSAL" -> "Reversal"
+    "PAYMENT_RECEIVED" -> "Payment"
+    "ADJUSTMENT" -> "Adjustment"
+    "SHIPMENT" -> "Shipment"
+    else -> "Other (legacy)"
+}
+
+private fun eventTypeBadgeClass(eventType: String?): String = when (eventType?.uppercase()) {
+    "INVOICE_ISSUED" -> "ledger-type-badge ledger-type-invoice"
+    "INVOICE_REVERSAL" -> "ledger-type-badge ledger-type-reversal"
+    "PAYMENT_RECEIVED" -> "ledger-type-badge ledger-type-payment"
+    "ADJUSTMENT" -> "ledger-type-badge ledger-type-adjustment"
+    "SHIPMENT" -> "ledger-type-badge ledger-type-shipment"
+    else -> "ledger-type-badge ledger-type-legacy"
+}
+
+private fun fmtLedgerAmount(value: dynamic?): String {
+    if (value == null) return ""
+    val v = (value as Number).toDouble()
+    if (v == 0.0) return ""
+    val sign = if (v < 0) "−" else ""
+    return "$sign¥${kotlin.math.abs(v).toLong()}"
+}
+
 fun showClientDetailsPage(clientId: Long) {
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -107,6 +155,10 @@ fun showClientAccountsPage() {
     
     // Load clients
     loadClients()
+
+    if (!isEditor()) {
+        document.getElementById("addClientBtn")?.asDynamic()?.style?.display = "none"
+    }
 }
 
 fun loadClients() {
@@ -147,45 +199,72 @@ fun displayClients(clients: dynamic) {
     }
     
     val clientsArray = clients as Array<dynamic>
+    val showCreditLimitActions = isEditor()
     val clientsHtml = clientsArray.map { client ->
+        val clientId = js("client.id")?.toString()?.toLongOrNull()
         val balance = (client.currentBalance as Number).toDouble()
-        val balanceColor = if (balance < 0) "#e74c3c" else if (balance > 0) "#27ae60" else "#666"
-        val balanceText = if (balance < 0) "¥${kotlin.math.abs(balance).toInt()}" else if (balance > 0) "+¥${balance.toInt()}" else "¥0"
+        val balanceColor = clientBalanceColor(balance)
+        val balanceText = formatClientBalanceAmount(balance)
+        val statusLabel = clientBalanceStatusLabel(balance)
         
         // Credit limit alert color logic (Green / Orange / Red)
         val creditLimit = (client.creditLimit as Number?)?.toDouble()
+        val alertThreshold = (client.alertThreshold as Number?)?.toDouble()
         val usedPct: Double? = if (creditLimit != null && creditLimit > 0.0) {
             (kotlin.math.abs(balance) / creditLimit) * 100.0
         } else null
-        val (alertIcon, alertStyle) = when {
-            usedPct == null -> Pair("", "")
-            usedPct >= 100.0 -> Pair("⚠️", "border-left: 4px solid #e74c3c;") // Red - exceeded
-            usedPct >= 90.0 -> Pair("⚠️", "border-left: 4px solid #ffc107;") // Orange - approaching (changed from 80% to 90%)
-            else -> Pair("", "") // Green/normal - no alert border
+        val (alertIcon, alertStyle, overLimitBadge) = when {
+            usedPct == null -> Triple("", "", "")
+            usedPct >= 100.0 -> Triple("⚠️", "border-left: 4px solid #e74c3c;", """<div class="client-limit-badge client-limit-over">OVER LIMIT (${usedPct.toInt()}%)</div>""")
+            usedPct >= 90.0 -> Triple("⚠️", "border-left: 4px solid #ffc107;", "")
+            else -> Triple("", "", "")
+        }
+        val limitSummary = when {
+            creditLimit != null && creditLimit > 0.0 -> {
+                val avail = formatAvailableCredit(balance, creditLimit) ?: "—"
+                """<div class="client-limit-summary">Limit ¥${creditLimit.toLong()} · Available $avail</div>"""
+            }
+            else -> ""
+        }
+        val creditLimitBtn = if (showCreditLimitActions && clientId != null) {
+            val btnLabel = if (creditLimit != null) "Edit limit" else "Set limit"
+            """<button type="button" class="client-btn client-btn-secondary client-credit-limit-btn"
+                data-client-id="$clientId"
+                data-client-name="${(client.clientName as? String)?.replace("\"", "&quot;") ?: ""}"
+                data-balance="$balance"
+                data-credit-limit="${creditLimit ?: ""}"
+                data-alert-threshold="${alertThreshold ?: ""}"
+                title="Set or change credit limit">$btnLabel</button>"""
+        } else {
+            ""
         }
         
         """
         <div class="client-item" style="$alertStyle">
             <div class="client-item-content">
-                <!-- Client Info (clickable for details) -->
-                <div class="client-info" onclick="window.location.hash='#/client/${client.id}'">
+                <div class="client-info client-info-flex" onclick="window.location.hash='#/client/${client.id}'">
                     <div class="client-info-row">
                         <div>
                             <div class="client-name">$alertIcon ${client.clientName}</div>
                             <div class="client-number">#${client.clientNumber}</div>
+                            $overLimitBadge
+                            $limitSummary
                         </div>
-                        <div>
+                        <div style="text-align: right;">
                             <div class="client-balance" style="color: $balanceColor;">$balanceText</div>
+                            <div class="client-balance-sub">${statusLabel}</div>
                             <div class="client-status">${client.status}</div>
                         </div>
                     </div>
                 </div>
+                $creditLimitBtn
             </div>
         </div>
         """
     }.joinToString("")
     
     clientListTable.innerHTML = clientsHtml
+    wireClientListCreditLimitButtons()
 }
 
 fun selectClient(clientId: Long) {
@@ -201,8 +280,7 @@ fun loadClientDetails(clientId: Long) {
         .then { response ->
             if (response.ok) {
                 response.json().then { client ->
-                    displayClientDetails(client.unsafeCast<ClientResponse>())
-                    loadClientEvents(clientId)
+                    displayClientDetails(clientId, client)
                 }
             } else {
                 document.getElementById("clientDetailsContent")?.innerHTML = """
@@ -221,31 +299,67 @@ fun loadClientDetails(clientId: Long) {
         }
 }
 
-fun displayClientDetails(client: ClientResponse) {
+fun displayClientDetails(clientId: Long, raw: dynamic) {
     val clientDetailsContent = document.getElementById("clientDetailsContent")
     if (clientDetailsContent == null) return
-    
-    val balance = client.currentBalance
-    val balanceColor = if (balance < 0) "#e74c3c" else if (balance > 0) "#27ae60" else "#666"
-    val balanceText = if (balance < 0) "¥${kotlin.math.abs(balance).toInt()}" else if (balance > 0) "+¥${balance.toInt()}" else "¥0"
+
+    val clientName = raw.clientName as? String ?: "—"
+    val clientNumber = raw.clientNumber as? String ?: "—"
+    val status = raw.status as? String ?: "N/A"
+    val currency = raw.currency as? String ?: "JPY"
+    val creditLimit = (raw.creditLimit as? Number)?.toDouble()
+    val alertThreshold = (raw.alertThreshold as? Number)?.toDouble()
+    val balance = (raw.currentBalance as? Number)?.toDouble() ?: 0.0
+    val balanceColor = clientBalanceColor(balance)
+    val balanceText = formatClientBalanceAmount(balance)
+    val statusLabel = clientBalanceStatusLabel(balance)
+    val creditLimitText = creditLimit?.let { "¥${it.toLong()}" } ?: "—"
+    val availableCreditText = formatAvailableCredit(balance, creditLimit) ?: "—"
+    val creditLimitBtnLabel = if (creditLimit != null) "Edit credit limit" else "Set credit limit"
+    val addTxBtn = if (isEditor()) {
+        """<button id="addClientTransactionBtn" type="button" class="client-btn client-btn-success">Add Transaction</button>"""
+    } else {
+        ""
+    }
+    val creditLimitBtn = if (isEditor()) {
+        """<button id="editCreditLimitBtn" type="button" class="client-btn client-btn-secondary">$creditLimitBtnLabel</button>"""
+    } else {
+        ""
+    }
     
     clientDetailsContent.innerHTML = """
         <div class="client-info-card">
-            <h4 class="client-info-name">${client.clientName}</h4>
+            <h4 class="client-info-name">${clientName}</h4>
             <div class="client-info-grid">
-                <div class="client-info-item"><strong>Client #:</strong> ${client.clientNumber}</div>
-                <div class="client-info-item"><strong>Status:</strong> ${client.status ?: "N/A"}</div>
-                <div class="client-info-item"><strong>Currency:</strong> ${client.currency ?: "JPY"}</div>
+                <div class="client-info-item"><strong>Client #:</strong> ${clientNumber}</div>
+                <div class="client-info-item"><strong>Status:</strong> ${status}</div>
+                <div class="client-info-item"><strong>Currency:</strong> ${currency}</div>
+                <div class="client-info-item"><strong>Credit limit:</strong> $creditLimitText</div>
+                <div class="client-info-item"><strong>Available credit:</strong> $availableCreditText</div>
             </div>
             <div class="client-balance-card">
                 <div id="currentBalanceValue" class="client-balance-amount" style="color: $balanceColor;">$balanceText</div>
-                <div class="client-balance-label">Current Balance</div>
+                <div class="client-balance-label">$statusLabel</div>
             </div>
             <div class="client-action-buttons">
-                <button onclick="addClientTransaction(${client.id})" class="client-btn client-btn-success">Add Transaction</button>
+                $addTxBtn
+                $creditLimitBtn
             </div>
         </div>
     """
+
+    document.getElementById("addClientTransactionBtn")?.addEventListener("click", { _: Event ->
+        addClientTransaction(clientId)
+    })
+    document.getElementById("editCreditLimitBtn")?.addEventListener("click", { _: Event ->
+        openCreditLimitModal(
+            clientId = clientId,
+            clientName = clientName,
+            currentBalance = balance,
+            creditLimit = creditLimit,
+            alertThreshold = alertThreshold,
+        )
+    })
 }
 
 fun loadClientEvents(clientId: Long) {
@@ -282,9 +396,9 @@ fun displayClientEvents(events: dynamic) {
     
     if (js("Array.isArray(events)") as Boolean && (events as Array<dynamic>).isEmpty()) {
         clientEventsTable.innerHTML = """
-            <h3>Transactions</h3>
+            <h3>Ledger</h3>
             <div style="text-align: center; color: #666; padding: 20px;">
-                No transactions found
+                No ledger entries yet. Invoices post automatically when confirmed in Invoice.
             </div>
         """
         return
@@ -292,80 +406,67 @@ fun displayClientEvents(events: dynamic) {
     
     val eventsArray = events as Array<dynamic>
 
-    fun fmtAmount(value: dynamic?): String {
-        if (value == null) return ""
-        val n = (value as Number).toInt()
-        return "¥${n}"
-    }
-
     val rowsHtml = eventsArray.map { event ->
-        val qtyRaw = event.quantity
-        val qty = if (qtyRaw != null) (qtyRaw as Number).toInt() else null
-        val qtyText = if (qty != null) "${qty} UNITS" else ""
+        val eventType = event.eventType?.toString()
+        val typeLabel = eventTypeBadgeLabel(eventType)
+        val typeClass = eventTypeBadgeClass(eventType)
+        val desc = event.eventDescription?.toString()?.trim().orEmpty()
         val tPrice = event.transactionPrice
         val payment = event.paymentReceived
         val balance = (event.runningBalance as Number).toDouble()
-        val tPriceColor = if (tPrice != null) {
-            val v = (tPrice as Number).toDouble()
-            if (v < 0) "#e74c3c" else if (v > 0) "#27ae60" else "#666"
-        } else "#666"
-        val paymentColor = if (payment != null) {
-            val v = (payment as Number).toDouble()
-            if (v < 0) "#e74c3c" else if (v > 0) "#27ae60" else "#666"
-        } else "#666"
-        val balanceColor = if (balance < 0) "#e74c3c" else if (balance > 0) "#27ae60" else "#666"
-        val balanceText = if (balance < 0) "¥${kotlin.math.abs(balance).toInt()}" else if (balance > 0) "+¥${balance.toInt()}" else "¥0"
+        val balanceColor = clientBalanceColor(balance)
+        val balanceText = formatClientBalanceAmount(balance)
+        val ref = event.billNumber?.toString()?.trim().orEmpty()
+            .ifEmpty { event.invoiceNumber?.toString()?.trim().orEmpty() }
         
         """
         <tr>
             <td>${event.eventDate}</td>
-            <td>${event.eventDescription}</td>
-            <td style="text-align: right;">$qtyText</td>
-            <td>${event.billNumber ?: ""}</td>
-            <td style="text-align: right; color: $tPriceColor;">${fmtAmount(tPrice)}</td>
-            <td style="text-align: right; color: $paymentColor;">${fmtAmount(payment)}</td>
+            <td><span class="$typeClass">$typeLabel</span></td>
+            <td>${if (desc.isEmpty()) "—" else desc}</td>
+            <td>${if (ref.isEmpty()) "—" else ref}</td>
+            <td style="text-align: right;">${fmtLedgerAmount(tPrice)}</td>
+            <td style="text-align: right;">${fmtLedgerAmount(payment)}</td>
             <td style="text-align: right; color: $balanceColor; font-weight: bold;">$balanceText</td>
         </tr>
         """
     }.joinToString("")
     
-    // Mobile cards HTML
     val cardsHtml = eventsArray.map { event ->
-        val qtyRaw = event.quantity
-        val qty = if (qtyRaw != null) (qtyRaw as Number).toInt() else null
-        val qtyText = if (qty != null) "${qty} UNITS" else "-"
+        val eventType = event.eventType?.toString()
+        val typeLabel = eventTypeBadgeLabel(eventType)
+        val typeClass = eventTypeBadgeClass(eventType)
+        val desc = event.eventDescription?.toString()?.trim().orEmpty()
         val tPrice = event.transactionPrice
         val payment = event.paymentReceived
         val balance = (event.runningBalance as Number).toDouble()
-        val tPriceColor = if (tPrice != null) {
-            val v = (tPrice as Number).toDouble()
-            if (v < 0) "#e74c3c" else if (v > 0) "#27ae60" else "#666"
-        } else "#666"
-        val paymentColor = if (payment != null) {
-            val v = (payment as Number).toDouble()
-            if (v < 0) "#e74c3c" else if (v > 0) "#27ae60" else "#666"
-        } else "#666"
-        val balanceColor = if (balance < 0) "#e74c3c" else if (balance > 0) "#27ae60" else "#666"
-        val balanceText = if (balance < 0) "¥${kotlin.math.abs(balance).toInt()}" else if (balance > 0) "+¥${balance.toInt()}" else "¥0"
+        val balanceColor = clientBalanceColor(balance)
+        val balanceText = formatClientBalanceAmount(balance)
+        val ref = event.billNumber?.toString()?.trim().orEmpty()
+            .ifEmpty { event.invoiceNumber?.toString()?.trim().orEmpty() }
         
         """
         <div class="transaction-card">
             <div class="transaction-card-header">
                 <span class="transaction-date">${event.eventDate}</span>
-                <span class="transaction-event">${event.eventDescription}</span>
+                <span class="$typeClass">$typeLabel</span>
             </div>
             <div class="transaction-card-body">
                 <div class="transaction-card-row">
-                    <span class="transaction-card-label">Quantity</span>
-                    <span class="transaction-card-value">$qtyText</span>
+                    <span class="transaction-card-label">Description</span>
+                    <span class="transaction-card-value">${if (desc.isEmpty()) "—" else desc}</span>
                 </div>
                 <div class="transaction-card-row">
-                    <span class="transaction-card-label">Shipment Price</span>
-                    <span class="transaction-card-value" style="color: $tPriceColor;">${fmtAmount(tPrice)}</span>
+                    <span class="transaction-card-label">Reference</span>
+                    <span class="transaction-card-value">${if (ref.isEmpty()) "—" else ref}</span>
                 </div>
                 <div class="transaction-card-row">
-                    <span class="transaction-card-label">Payment</span>
-                    <span class="transaction-card-value" style="color: $paymentColor;">${fmtAmount(payment)}</span>
+                    <span class="transaction-card-label">Debit</span>
+                    <span class="transaction-card-value">${fmtLedgerAmount(tPrice)}</span>
+                </div>
+                <div class="transaction-card-row">
+                    <span class="transaction-card-label">Credit</span>
+                    <span class="transaction-card-value">${fmtLedgerAmount(payment)}</span>
                 </div>
                 <div class="transaction-balance" style="color: $balanceColor;">Balance: $balanceText</div>
             </div>
@@ -374,7 +475,8 @@ fun displayClientEvents(events: dynamic) {
     }.joinToString("")
     
     clientEventsTable.innerHTML = """
-        <h3>Transactions</h3>
+        <h3>Ledger</h3>
+        <p class="client-ledger-hint">Invoices post here automatically. Add payments and adjustments manually.</p>
         
         <!-- Table for Tablet/Desktop -->
         <div class="transactions-table-container">
@@ -382,11 +484,11 @@ fun displayClientEvents(events: dynamic) {
                 <thead>
                     <tr>
                         <th>DATE</th>
-                        <th>Event</th>
-                        <th style="text-align: right;">QUANTITY</th>
-                        <th>BILL. NO</th>
-                        <th style="text-align: right;">SHIPMENT PRICE</th>
-                        <th style="text-align: right;">PAYMENT</th>
+                        <th>TYPE</th>
+                        <th>DESCRIPTION</th>
+                        <th>REFERENCE</th>
+                        <th style="text-align: right;">DEBIT</th>
+                        <th style="text-align: right;">CREDIT</th>
                         <th style="text-align: right;">BALANCE</th>
                     </tr>
                 </thead>
@@ -563,6 +665,195 @@ fun closeAddClientModal() {
     document.getElementById("addClientModal")?.remove()
 }
 
+private fun wireClientListCreditLimitButtons() {
+    if (!isEditor()) return
+    val buttons = document.querySelectorAll(".client-credit-limit-btn")
+    for (i in 0 until buttons.length) {
+        val btn = buttons.item(i) as? HTMLElement ?: continue
+        btn.addEventListener("click", { event: Event ->
+            event.stopPropagation()
+            event.preventDefault()
+            val id = btn.getAttribute("data-client-id")?.toLongOrNull() ?: return@addEventListener
+            val name = btn.getAttribute("data-client-name") ?: "—"
+            val balance = btn.getAttribute("data-balance")?.toDoubleOrNull() ?: 0.0
+            val limitRaw = btn.getAttribute("data-credit-limit")?.trim().orEmpty()
+            val thresholdRaw = btn.getAttribute("data-alert-threshold")?.trim().orEmpty()
+            openCreditLimitModal(
+                clientId = id,
+                clientName = name,
+                currentBalance = balance,
+                creditLimit = limitRaw.toDoubleOrNull(),
+                alertThreshold = thresholdRaw.toDoubleOrNull(),
+            )
+        })
+    }
+}
+
+fun openCreditLimitModal(
+    clientId: Long,
+    clientName: String,
+    currentBalance: Double,
+    creditLimit: Double?,
+    alertThreshold: Double?,
+) {
+    if (!isEditor()) {
+        showMessage("You do not have permission to change credit limits.", "error")
+        return
+    }
+    val title = if (creditLimit != null) "Edit credit limit" else "Set credit limit"
+    val limitValue = creditLimit?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: ""
+    val thresholdValue = alertThreshold?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: ""
+    val balanceText = formatClientBalanceAmount(currentBalance)
+    val availableText = formatAvailableCredit(currentBalance, creditLimit) ?: "— (set a limit)"
+
+    val modalHTML = """
+        <div id="creditLimitModal" class="client-modal">
+            <div class="client-modal-content">
+                <div class="client-modal-header">
+                    <h2>$title</h2>
+                    <button id="closeCreditLimitModalBtn" class="client-modal-close">&times;</button>
+                </div>
+                <p class="client-ledger-hint" style="margin: 0 0 12px;">Client: <strong>${clientName}</strong></p>
+                <form id="creditLimitForm" class="client-form">
+                    <input type="hidden" id="clClientId" value="$clientId">
+                    <input type="hidden" id="clCurrentBalance" value="$currentBalance">
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label class="client-form-label">Current balance</label>
+                            <div class="client-form-readonly">$balanceText</div>
+                        </div>
+                        <div class="client-form-field">
+                            <label class="client-form-label">Available credit (now)</label>
+                            <div id="clAvailablePreview" class="client-form-readonly">$availableText</div>
+                        </div>
+                    </div>
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="clCreditLimit" class="client-form-label">Credit limit (¥)</label>
+                            <input type="number" id="clCreditLimit" name="clCreditLimit" step="1" min="0"
+                                   class="client-form-input" placeholder="e.g. 50000000" value="$limitValue">
+                            <div class="client-form-hint">Leave blank to remove credit limit.</div>
+                        </div>
+                        <div class="client-form-field">
+                            <label for="clAlertThreshold" class="client-form-label">Alert threshold (¥)</label>
+                            <input type="number" id="clAlertThreshold" name="clAlertThreshold" step="1" min="0"
+                                   class="client-form-input" placeholder="Auto: 90% of limit if blank" value="$thresholdValue">
+                        </div>
+                    </div>
+                    <div class="client-modal-actions">
+                        <button type="button" id="cancelCreditLimitBtn" class="client-btn client-btn-secondary">Cancel</button>
+                        <button type="submit" class="client-btn client-btn-primary">Save credit limit</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    """
+
+    document.getElementById("creditLimitModal")?.remove()
+    document.body?.insertAdjacentHTML("beforeend", modalHTML)
+
+    fun refreshAvailablePreview() {
+        val balance = (document.getElementById("clCurrentBalance") as? HTMLInputElement)?.value?.toDoubleOrNull() ?: currentBalance
+        val limit = (document.getElementById("clCreditLimit") as? HTMLInputElement)?.value?.trim()?.toDoubleOrNull()
+        val preview = document.getElementById("clAvailablePreview")
+        preview?.textContent = if (limit != null) {
+            formatAvailableCredit(balance, limit) ?: "—"
+        } else {
+            "— (no limit set)"
+        }
+    }
+
+    document.getElementById("clCreditLimit")?.addEventListener("input", { _: Event -> refreshAvailablePreview() })
+
+    document.getElementById("cancelCreditLimitBtn")?.addEventListener("click", { _: Event -> closeCreditLimitModal() })
+    document.getElementById("closeCreditLimitModalBtn")?.addEventListener("click", { _: Event -> closeCreditLimitModal() })
+    document.getElementById("creditLimitModal")?.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "creditLimitModal") closeCreditLimitModal()
+    })
+
+    document.getElementById("creditLimitForm")?.addEventListener("submit", { event: Event ->
+        event.preventDefault()
+        handleCreditLimitSubmit(clientName)
+    })
+}
+
+private fun handleCreditLimitSubmit(clientName: String) {
+    val clientId = (document.getElementById("clClientId") as? HTMLInputElement)?.value?.trim()?.toLongOrNull()
+    if (clientId == null) {
+        showMessage("Could not determine client.", "error")
+        return
+    }
+
+    val limitRaw = (document.getElementById("clCreditLimit") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val thresholdRaw = (document.getElementById("clAlertThreshold") as? HTMLInputElement)?.value?.trim().orEmpty()
+
+    val creditLimit: Double?
+    val alertThreshold: Double?
+
+    if (limitRaw.isEmpty()) {
+        creditLimit = null
+        alertThreshold = null
+    } else {
+        creditLimit = limitRaw.toDoubleOrNull()
+        if (creditLimit == null || creditLimit < 0.0) {
+            showMessage("Credit limit must be a number ≥ 0.", "error")
+            return
+        }
+        alertThreshold = if (thresholdRaw.isEmpty()) {
+            creditLimit * 0.9
+        } else {
+            val t = thresholdRaw.toDoubleOrNull()
+            if (t == null || t < 0.0) {
+                showMessage("Alert threshold must be a number ≥ 0.", "error")
+                return
+            }
+            t
+        }
+    }
+
+    val payload = js("({})")
+    payload["creditLimit"] = creditLimit
+    payload["alertThreshold"] = alertThreshold
+
+    val submitBtn = document.querySelector("#creditLimitForm button[type='submit']") as? HTMLButtonElement
+    submitBtn?.disabled = true
+    submitBtn?.textContent = "Saving..."
+
+    val req = js("({})")
+    req.method = "PUT"
+    req.headers = js("{\"Content-Type\": \"application/json\"}")
+    req.body = JSON.stringify(payload)
+
+    window.fetch(apiUrl("clients/$clientId"), req).then { response ->
+        if (response.ok) {
+            showMessage("Credit limit updated for $clientName.", "success")
+            closeCreditLimitModal()
+            val onListPage = document.getElementById("clientListTable") != null
+            val onDetailPage = document.getElementById("clientDetailsContent") != null
+            if (onListPage) loadClients()
+            if (onDetailPage) {
+                loadClientDetails(clientId)
+                loadClientEvents(clientId)
+            }
+            Unit
+        } else {
+            response.text().then { errorText ->
+                showMessage("Failed to update credit limit: $errorText", "error")
+            }
+        }
+    }.catch { error ->
+        showMessage("Error updating credit limit: $error", "error")
+    }.finally {
+        submitBtn?.disabled = false
+        submitBtn?.textContent = "Save credit limit"
+    }
+}
+
+@JsName("closeCreditLimitModal")
+fun closeCreditLimitModal() {
+    document.getElementById("creditLimitModal")?.remove()
+}
+
 private fun parseMasterClientNameList(raw: dynamic): List<String> {
     val arr: dynamic = when {
         raw != null && js("Array.isArray(raw)") as Boolean -> raw
@@ -627,137 +918,81 @@ private fun populateClientNameOptions(selectId: String, selectedValue: String?) 
     }
 }
 
-fun addClientTransaction(clientId: Long) {
-    openAddTransactionModal(clientId)
+fun addClientTransaction(clientId: dynamic) {
+    if (!isEditor()) {
+        showMessage("You do not have permission to add transactions.", "error")
+        return
+    }
+    val id = when (clientId) {
+        is Number -> clientId.toLong()
+        else -> clientId?.toString()?.toLongOrNull()
+    }
+    if (id == null) {
+        showMessage("Could not determine client. Open the client from Client Transactions again.", "error")
+        return
+    }
+    openAddTransactionModal(id)
 }
 
 fun openAddTransactionModal(clientId: Long) {
     val modalHTML = """
-        <div id="addTransactionModal" class="client-modal">
+        <div id="addTransactionModal" class="client-modal" data-client-id="$clientId">
             <div class="client-modal-content">
                 <div class="client-modal-header">
-                    <h2>Add Transaction</h2>
+                    <h2>Add Ledger Entry</h2>
                     <button id="closeTxModalBtn" class="client-modal-close">&times;</button>
                 </div>
+                <p class="client-ledger-hint" style="margin: 0 0 16px;">Invoices post automatically. Enter bank payments or adjustments here.</p>
                 <form id="addTransactionForm" class="client-form">
+                    <input type="hidden" id="txClientId" value="$clientId">
                     <div class="client-form-row">
                         <div class="client-form-field">
                             <label for="txDate" class="client-form-label">DATE *</label>
-                            <input type="date" id="txDate" name="txDate" onkeydown="return false;" onpaste="return false;" ondrop="return false;" required class="client-form-input">
+                            <div style="position:relative; width:100%;">
+                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                                    <input type="text" id="txDateText" maxlength="10" inputmode="numeric" autocomplete="off" required class="client-form-input" placeholder="MM/DD/YYYY">
+                                    <button type="button" id="txDateCalendarBtn" title="Open calendar"
+                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                </div>
+                                <input type="date" id="txDate" name="txDate" required class="client-form-input" tabindex="-1" aria-hidden="true"
+                                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                            </div>
                         </div>
                         <div class="client-form-field">
-                            <label for="txEvent" class="client-form-label">Event *</label>
-                            <select id="txEvent" name="txEvent" required class="client-form-select">
-                                <option value="">Select Event</option>
+                            <label for="txEventType" class="client-form-label">TYPE *</label>
+                            <select id="txEventType" name="txEventType" required class="client-form-select">
+                                <option value="">Select type</option>
+                                <option value="PAYMENT_RECEIVED">Payment received</option>
+                                <option value="ADJUSTMENT">Adjustment</option>
                             </select>
-                        </div>
-                    </div>
-                    <div id="txQtyWrap" class="client-form-row">
-                        <div class="client-form-field">
-                            <label for="txQuantity" class="client-form-label">QUANTITY</label>
-                            <input type="number" id="txQuantity" name="txQuantity" step="1" class="client-form-input">
-                        </div>
-                        <div class="client-form-field">
-                            <label for="txBillNo" class="client-form-label">BILL. NO</label>
-                            <input type="text" id="txBillNo" name="txBillNo" class="client-form-input">
-                        </div>
-                    </div>
-                    <div id="txPriceWrap" class="client-form-row">
-                        <div class="client-form-field">
-                            <label for="txTransactionPrice" class="client-form-label">Total Shipment PRICE</label>
-                            <input type="text" id="txTransactionPrice" name="txTransactionPrice" 
-                                   placeholder="e.g. ¥5,000 or -¥5,000" class="client-form-input">
-                        </div>
-                        <div class="client-form-field">
-                            <label for="txPaymentReceived" class="client-form-label">PAYMENT RECEIVED</label>
-                            <input type="text" id="txPaymentReceived" name="txPaymentReceived" 
-                                   placeholder="e.g. ¥10,000 or -¥10,000" class="client-form-input">
                         </div>
                     </div>
                     <div class="client-form-row">
                         <div class="client-form-field">
-                            <label for="txRunningBalance" class="client-form-label">Total BALANCE</label>
-                            <input type="text" id="txRunningBalance" name="txRunningBalance" 
-                                   placeholder="Auto-calculated" readonly
-                                   class="client-form-input" style="background-color: #f5f5f5;">
+                            <label for="txBillNo" class="client-form-label">REFERENCE (TT slip, bank ref)</label>
+                            <input type="text" id="txBillNo" name="txBillNo" class="client-form-input" placeholder="Optional">
                         </div>
                         <div class="client-form-field">
-                            <!-- Empty div for spacing -->
+                            <label for="txDescription" class="client-form-label">DESCRIPTION / NOTE</label>
+                            <input type="text" id="txDescription" name="txDescription" class="client-form-input" placeholder="Required for adjustments">
+                        </div>
+                    </div>
+                    <div class="client-form-row">
+                        <div class="client-form-field full-width">
+                            <label for="txAmount" class="client-form-label">AMOUNT (¥) *</label>
+                            <input type="text" id="txAmount" name="txAmount" required
+                                   placeholder="Payment: positive. Adjustment: use − for debit"
+                                   class="client-form-input" inputmode="decimal">
                         </div>
                     </div>
                     <div class="client-modal-actions">
                         <button type="button" id="cancelTxBtn" class="client-btn client-btn-secondary">Cancel</button>
-                        <button type="submit" class="client-btn client-btn-primary">Save Transaction</button>
+                        <button type="submit" class="client-btn client-btn-primary">Save Entry</button>
                     </div>
                 </form>
             </div>
         </div>
     """
-    
-    // Remove existing modal if any
-    document.getElementById("addTransactionModal")?.remove()
-    
-    // Add modal to body
-    document.body?.insertAdjacentHTML("beforeend", modalHTML)
-
-    // Add event listeners for cancel and close buttons
-    document.getElementById("cancelTxBtn")?.addEventListener("click", { _: Event ->
-        closeAddTransactionModal()
-    })
-    
-    document.getElementById("closeTxModalBtn")?.addEventListener("click", { _: Event ->
-        closeAddTransactionModal()
-    })
-    
-    // Close modal when clicking outside
-    document.getElementById("addTransactionModal")?.addEventListener("click", { event: Event ->
-        val target = event.target as? HTMLElement
-        if (target?.id == "addTransactionModal") {
-            closeAddTransactionModal()
-        }
-    })
-
-    // Populate event dropdown
-    val events = arrayOf(
-        "TT RECIEVED",
-        "MSC BASIL-HI513A",
-        "CAPTAIN THANASIS I-HG514A",
-        "MSC MANHATTAN V-HI515A",
-        "MSC GENERAL IV-HI516A",
-        "MSC AUDREY-GS512S",
-        "MSC PRECISION V HI517A",
-        "TT RECIEVED(CASH 5-7)",
-        "MSC FORTUNE F-XA518A",
-        "CAPTHAIN THANASIS I-HG518A",
-        "MAERSK VIRGINIA 520S",
-        "VIRGO V.520W",
-        "NAVIOS TEMPO V.521S"
-    )
-    val eventSelect = document.getElementById("txEvent") as? HTMLSelectElement
-    eventSelect?.let {
-        for (ev in events) {
-            val opt = document.createElement("option") as HTMLOptionElement
-            opt.value = ev
-            opt.text = ev
-            it.appendChild(opt)
-        }
-    }
-
-    fun toggleByEvent(value: String) {
-        val hide = value == "TT RECIEVED" || value == "TT RECIEVED(CASH 5-7)"
-        (document.getElementById("txQtyWrap") as? HTMLElement)?.let {
-            it.style.display = if (hide) "none" else ""
-        }
-        // Only hide the first part of txPriceWrap (Total Shipment PRICE), keep PAYMENT RECEIVED visible
-        val txPriceWrap = document.getElementById("txPriceWrap") as? HTMLElement
-        txPriceWrap?.let {
-            val firstChild = it.firstElementChild as? HTMLElement
-            firstChild?.style?.display = if (hide) "none" else ""
-        }
-    }
-    eventSelect?.addEventListener("change", { _: Event ->
-        toggleByEvent(eventSelect.value)
-    })
 
     fun parseCurrency(input: String?): Double? {
         if (input == null) return null
@@ -767,147 +1002,139 @@ fun openAddTransactionModal(clientId: Long) {
         return cleaned.toDoubleOrNull()
     }
 
+    fun isValidMoneyInput(raw: String): Boolean {
+        if (raw.isBlank()) return true
+        val v = raw.trim()
+        if (!v.matches(Regex("^-?\\d{1,15}(\\.\\d{0,2})?$"))) return false
+        if (v.startsWith("0") && v.length > 1 && v[1] != '.') return false
+        return true
+    }
+
+    fun restrictMoneyInput(fieldId: String) {
+        val input = document.getElementById(fieldId) as? HTMLInputElement ?: return
+        input.addEventListener("keydown", { ev ->
+            val event = ev as? org.w3c.dom.events.KeyboardEvent ?: return@addEventListener
+            val key = event.asDynamic().key as? String ?: return@addEventListener
+            val isDigit = key.length == 1 && key[0] in '0'..'9'
+            val isDecimal = key == "."
+            val isMinus = key == "-"
+            val isNav = setOf("Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab", "Enter", "Home", "End").contains(key)
+            if (!(isDigit || isDecimal || isMinus || isNav || event.ctrlKey || event.metaKey)) {
+                event.preventDefault()
+            }
+        })
+        input.addEventListener("input", { ev ->
+            val el = ev.target as? HTMLInputElement ?: return@addEventListener
+            if (!isValidMoneyInput(el.value)) {
+                el.value = el.value.replace(Regex("[^0-9.-]"), "")
+            }
+        })
+    }
+
+    document.getElementById("addTransactionModal")?.remove()
+    document.body?.insertAdjacentHTML("beforeend", modalHTML)
+    bindStrictDateTextMask("txDate")
+    window.setTimeout({ restrictMoneyInput("txAmount") }, 100)
+
+    document.getElementById("cancelTxBtn")?.addEventListener("click", { _: Event -> closeAddTransactionModal() })
+    document.getElementById("closeTxModalBtn")?.addEventListener("click", { _: Event -> closeAddTransactionModal() })
+    document.getElementById("addTransactionModal")?.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "addTransactionModal") closeAddTransactionModal()
+    })
+
+    val typeSelect = document.getElementById("txEventType") as? HTMLSelectElement
+    typeSelect?.addEventListener("change", { _: Event ->
+        val isAdj = typeSelect.value == "ADJUSTMENT"
+        val desc = document.getElementById("txDescription") as? HTMLInputElement
+        desc?.placeholder = if (isAdj) "Required — reason for adjustment" else "Optional note"
+    })
+
     document.getElementById("addTransactionForm")?.addEventListener("submit", { event: Event ->
         event.preventDefault()
-        
-        val dateIso = (document.getElementById("txDate") as? HTMLInputElement)?.value ?: ""
-        val eventDesc = (document.getElementById("txEvent") as? HTMLSelectElement)?.value ?: ""
-        val qtyStr = (document.getElementById("txQuantity") as? HTMLInputElement)?.value ?: ""
-        val billNo = (document.getElementById("txBillNo") as? HTMLInputElement)?.value ?: ""
-        val tPriceStr = (document.getElementById("txTransactionPrice") as? HTMLInputElement)?.value ?: ""
-        val payStr = (document.getElementById("txPaymentReceived") as? HTMLInputElement)?.value ?: ""
 
-        if (dateIso.isBlank() || eventDesc.isBlank()) {
-            showMessage("Please fill DATE and Event.", "error")
+        val dateIso = (document.getElementById("txDate") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val eventType = (document.getElementById("txEventType") as? HTMLSelectElement)?.value?.trim().orEmpty()
+        val billNo = (document.getElementById("txBillNo") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val description = (document.getElementById("txDescription") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val amount = parseCurrency((document.getElementById("txAmount") as? HTMLInputElement)?.value)
+
+        if (dateIso.isBlank() || eventType.isBlank()) {
+            showMessage("Please select date and type.", "error")
+            return@addEventListener
+        }
+        if (amount == null || amount == 0.0) {
+            showMessage("Please enter a non-zero amount.", "error")
+            return@addEventListener
+        }
+        if (eventType == "PAYMENT_RECEIVED" && amount <= 0.0) {
+            showMessage("Payment amount must be positive.", "error")
+            return@addEventListener
+        }
+        if (eventType == "ADJUSTMENT" && description.isEmpty()) {
+            showMessage("Adjustment requires a description/reason.", "error")
             return@addEventListener
         }
 
-        val quantity = qtyStr.trim().let { if (it.isEmpty()) null else it.toIntOrNull() }
-        val transactionPrice = parseCurrency(tPriceStr) ?: 0.0
-        val paymentReceived = parseCurrency(payStr) ?: 0.0
+        val paymentReceived: Double?
+        val transactionPrice: Double?
+        when (eventType) {
+            "PAYMENT_RECEIVED" -> {
+                paymentReceived = amount
+                transactionPrice = null
+            }
+            "ADJUSTMENT" -> if (amount > 0) {
+                paymentReceived = amount
+                transactionPrice = null
+            } else {
+                paymentReceived = null
+                transactionPrice = kotlin.math.abs(amount)
+            }
+            else -> {
+                showMessage("Invalid transaction type.", "error")
+                return@addEventListener
+            }
+        }
 
-        // Send payload to backend transaction endpoint
+        val eventDesc = when {
+            description.isNotEmpty() -> description
+            eventType == "PAYMENT_RECEIVED" -> "Payment received"
+            else -> "Adjustment"
+        }
+
+        val txClientIdRaw = (document.getElementById("txClientId") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val resolvedClientId = txClientIdRaw.toLongOrNull() ?: clientId
+
         val payload = js("({})")
-        payload["clientId"] = clientId
+        payload["clientId"] = resolvedClientId.toDouble()
         payload["eventDate"] = dateIso
+        payload["eventType"] = eventType
         payload["eventDescription"] = eventDesc
-        payload["quantity"] = quantity
-        payload["billNumber"] = if (billNo.trim().isEmpty()) null else billNo.trim()
-        payload["transactionPrice"] = transactionPrice
+        payload["billNumber"] = if (billNo.isEmpty()) null else billNo
         payload["paymentReceived"] = paymentReceived
+        payload["transactionPrice"] = transactionPrice
 
         val req = js("({})")
         req.method = "POST"
-        val headers = js("({})")
-        headers["Content-Type"] = "application/json"
-        req.headers = headers
+        req.headers = js("{\"Content-Type\": \"application/json\"}")
         req.body = JSON.stringify(payload)
-
-        Logger.debug("Sending transaction payload")
 
         window.fetch(apiUrl("clients/add-transaction"), req).then { response ->
             if (response.ok) {
-                response.json().then { result ->
-                    Logger.debug("Transaction response received")
-                    showMessage("Transaction added successfully!", "success")
-                    document.getElementById("addTransactionModal")?.remove()
-                    // Optimistic UI update: insert row and update balance immediately
-                    try {
-                        val tx = result.asDynamic()
-                        val running = (tx.runningBalance as Number?)?.toDouble()
-                        if (running != null) {
-                            val balanceColor = if (running < 0) "#e74c3c" else if (running > 0) "#27ae60" else "#666"
-                            val balanceText = if (running < 0) "¥${kotlin.math.abs(running).toInt()}" else if (running > 0) "+¥${running.toInt()}" else "¥0"
-                            val balEl = document.getElementById("currentBalanceValue")
-                            balEl?.let {
-                                it.asDynamic().style.color = balanceColor
-                                it.textContent = balanceText
-                            }
-                        }
-                        // Find the table tbody - try multiple selectors
-                        var table = document.querySelector("#clientEventsTable tbody") as? HTMLElement
-                        if (table == null) {
-                            // Try finding table first, then tbody
-                            val tableElement = document.querySelector("#clientEventsTable table") as? HTMLElement
-                            table = tableElement?.querySelector("tbody") as? HTMLElement
-                        }
-                        if (table == null) {
-                            // If still not found, reload the events to rebuild the table
-                            loadClientEvents(clientId)
-                        } else {
-                            val row = document.createElement("tr")
-                            row.setAttribute("style", "border-bottom: 1px solid #f1f3f4; transition: background-color 0.2s;")
-                            row.setAttribute("onmouseover", "this.style.backgroundColor='#f8f9fa'")
-                            row.setAttribute("onmouseout", "this.style.backgroundColor='white'")
-                            val runningBalance = (result.asDynamic().runningBalance as? Number)?.toDouble() ?: 0.0
-                            val qtyText = if (quantity != null) "${quantity} UNITS" else ""
-                            val billNoText = if (billNo.trim().isEmpty()) "" else billNo.trim()
-                            val tPriceColor = if (transactionPrice < 0) "#e74c3c" else if (transactionPrice > 0) "#27ae60" else "#666"
-                            val paymentColor = if (paymentReceived < 0) "#e74c3c" else if (paymentReceived > 0) "#27ae60" else "#666"
-                            val balanceColor = if (runningBalance < 0) "#e74c3c" else if (runningBalance > 0) "#27ae60" else "#666"
-                            val balanceText = if (runningBalance < 0) "¥${kotlin.math.abs(runningBalance).toInt()}" else if (runningBalance > 0) "+¥${runningBalance.toInt()}" else "¥0"
-                            
-                            row.innerHTML = """
-                                <td style="padding: 12px;">$dateIso</td>
-                                <td style="padding: 12px;">$eventDesc</td>
-                                <td style="padding: 12px; text-align: right;">$qtyText</td>
-                                <td style="padding: 12px;">$billNoText</td>
-                                <td style="padding: 12px; text-align: right; color: $tPriceColor;">¥${transactionPrice.toInt()}</td>
-                                <td style="padding: 12px; text-align: right; color: $paymentColor;">¥${paymentReceived.toInt()}</td>
-                                <td style="padding: 12px; text-align: right; color: $balanceColor; font-weight: bold;">$balanceText</td>
-                            """
-                            // Prepend new row to top of tbody (first row)
-                            val first = table.firstChild
-                            if (first != null) {
-                                table.insertBefore(row, first)
-                            } else {
-                                table.appendChild(row)
-                            }
-                        }
-                    } catch (e: dynamic) {
-                        Logger.error("Error updating UI: ${e.toString()}")
-                    }
-                    // Also trigger a fresh reload shortly after to confirm state
-                    window.setTimeout({
-                        loadClientDetails(clientId)
-                        loadClientEvents(clientId)
-                    }, 300)
+                response.json().then { _ ->
+                    showMessage("Ledger entry saved.", "success")
+                    closeAddTransactionModal()
+                    loadClientDetails(resolvedClientId)
+                    loadClientEvents(resolvedClientId)
                 }
             } else {
                 response.text().then { errorText ->
-                    Logger.error("Backend error: $errorText")
-                    ErrorHandler.showError("Failed to add transaction: $errorText")
+                    ErrorHandler.showError("Failed to save entry: $errorText")
                 }
             }
         }.catch { error ->
-            val errorMsg = ErrorHandler.handleNetworkError(error, "clients/add-transaction")
-            Logger.error("Network error: $errorMsg")
-            ErrorHandler.showError("Failed to add transaction: $errorMsg")
+            ErrorHandler.showError(ErrorHandler.handleNetworkError(error, "clients/add-transaction"))
         }
     })
-
-    // Initialize visibility
-    toggleByEvent("")
-    
-    // Add real-time calculation for Total BALANCE
-    fun updateTotalBalance() {
-        val transactionPrice = parseCurrency((document.getElementById("txTransactionPrice") as? HTMLInputElement)?.value) ?: 0.0
-        val paymentReceived = parseCurrency((document.getElementById("txPaymentReceived") as? HTMLInputElement)?.value) ?: 0.0
-        
-        // For new transactions, start from 0 and calculate: payment - transaction
-        val newBalance = paymentReceived - transactionPrice
-        
-        // Update the Total BALANCE field
-        val balanceField = document.getElementById("txRunningBalance") as? HTMLInputElement
-        balanceField?.value = "¥${newBalance.toInt()}"
-    }
-    
-    // Add event listeners for real-time calculation
-    document.getElementById("txTransactionPrice")?.addEventListener("input", { updateTotalBalance() })
-    document.getElementById("txPaymentReceived")?.addEventListener("input", { updateTotalBalance() })
-    
-    // Initial calculation
-    updateTotalBalance()
 }
 
 @JsName("closeAddTransactionModal")

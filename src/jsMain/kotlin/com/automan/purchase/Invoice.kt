@@ -877,6 +877,7 @@ fun setupInvoicePageListeners() {
         }
         loadInvoiceVesselOptionsForClient(client)
         handleInvoiceClientVesselChange()
+        checkInvoiceLedgerClient(client)
     })
     
     document.getElementById("invoiceVessel")?.addEventListener("change", { _: Event ->
@@ -1389,6 +1390,38 @@ private fun escapeJsonStringForInvoice(str: String): String =
         .replace("\r", "\\r")
         .replace("\t", "\\t")
 
+private fun checkInvoiceLedgerClient(clientName: String) {
+    val name = clientName.trim()
+    if (name.isEmpty()) return
+    val encoded = js("encodeURIComponent(name)") as String
+    val currentIds = js("window.currentInvoicePurchaseIds") as? Array<dynamic>
+    val idsQuery = if (currentIds != null && currentIds.isNotEmpty()) {
+        currentIds.mapNotNull { id ->
+            when (id) {
+                is Number -> id.toLong()
+                is String -> id.toLongOrNull()
+                else -> null
+            }
+        }.joinToString("") { id -> "&purchaseIds=$id" }
+    } else {
+        ""
+    }
+    window.fetch(apiUrl("clients/resolve-ledger?name=$encoded$idsQuery")).then { response ->
+        if (!response.ok) return@then
+        response.json().then { json ->
+            val warning = js("json.warning")?.toString()?.trim().orEmpty()
+            if (warning.isNotEmpty()) {
+                showMessage(warning, "warning")
+                return@then
+            }
+            val info = js("json.info")?.toString()?.trim().orEmpty()
+            if (info.isNotEmpty()) {
+                showMessage(info, "info")
+            }
+        }
+    }
+}
+
 /**
  * Loads purchases, builds invoice JSON. [mode]: `"save"` → POST `/invoice/save`;
  * `"preview"` / `"pdf"` → POST `/invoice/generate-pdf` (open vs download).
@@ -1588,8 +1621,16 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
                     window.fetch(apiUrl("purchases/invoice/save"), requestInit).then { response ->
                         val status = response.status.toInt()
                         if (response.ok) {
-                            response.json().then {
+                            response.json().then { json ->
                                 Logger.debug("Invoice saved successfully")
+                                val warning = js("json.ledgerWarning")?.toString()?.trim().orEmpty()
+                                if (warning.isNotEmpty()) {
+                                    showMessage(warning, "warning")
+                                }
+                                val info = js("json.ledgerInfo")?.toString()?.trim().orEmpty()
+                                if (info.isNotEmpty()) {
+                                    showMessage(info, "info")
+                                }
                                 showMessage("Invoice saved successfully", "success")
                             }
                         } else {

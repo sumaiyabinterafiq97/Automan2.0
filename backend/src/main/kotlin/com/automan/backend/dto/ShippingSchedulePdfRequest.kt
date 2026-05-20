@@ -1,5 +1,7 @@
 package com.automan.backend.dto
 
+import java.math.BigDecimal
+
 data class ShippingSchedulePdfRequest(
     val bookingNo: String,
     val vesselName: String,
@@ -11,5 +13,10 @@ data class ShippingSchedulePdfRequest(
     /** Consignee country selected on booking form — used with POD to pick the right `booking_mappings` row when names repeat. */
     val consigneeCountry: String? = null,
     val chassisNumbers: List<String>,
-    val calculationMode: String? = null // "C&F" or "FOB" - determines PDF column header
+    val calculationMode: String? = null, // "C&F" or "FOB" - determines PDF column header
+    /**
+     * Optional yen totals from the FOB/C&F calculator (per chassis). When present for a chassis,
+     * the PDF price column uses this value instead of recomputing from DB / shipping_history.
+     */
+    val frontendTotalYenByChassis: Map<String, BigDecimal>? = null,
 )

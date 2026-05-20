@@ -52,6 +52,9 @@ data class CarBrandMapping(
     @Column(name = "drive_type", length = 20)
     val driveType: String? = null,
 
+    @Column(name = "recycle_fee", length = 100)
+    val recycleFee: String? = null,
+
     @Column(name = "created_at")
     val createdAt: LocalDateTime = LocalDateTime.now(),
 

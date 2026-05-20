@@ -201,6 +201,7 @@ class RixoImportController(
             val stockLocation = (request["stockLocation"] as? String)?.trim()
             val rixoCompany = (request["rixoCompany"] as? String)?.trim()
             val venueId = (request["venueId"] as? String)?.trim()
+            val pol = (request["pol"] as? String)?.trim()
 
             if (auctionHouse.isNullOrBlank()) {
                 return ResponseEntity.badRequest().body(mapOf(
@@ -219,7 +220,8 @@ class RixoImportController(
                 auctionHouse = auctionHouse.trim(),
                 stockLocation = finalStockLocation,
                 rixoCompany = finalRixoCompany,
-                venueId = venueId?.takeIf { it.isNotBlank() }
+                venueId = venueId?.takeIf { it.isNotBlank() },
+                pol = pol?.takeIf { it.isNotBlank() }
             )
 
             val message = if (result.merged) {
@@ -260,13 +262,14 @@ class RixoImportController(
             val createdAtValue = existingMapping.createdAt ?: java.time.LocalDateTime.now()
             
             val newStock = (request["stockLocation"] as? String)?.trim() ?: existingMapping.stockLocation
+            val newPol = (request["pol"] as? String)?.trim()
             val updatedMapping = existingMapping.copy(
                 id = existingMapping.id, // CRITICAL: Explicitly preserve ID
                 auctionHouse = request["auctionHouse"] as? String ?: existingMapping.auctionHouse,
                 stockLocation = newStock,
                 rixoCompany = request["rixoCompany"] as? String ?: existingMapping.rixoCompany,
                 venueId = request["venueId"] as? String ?: existingMapping.venueId,
-                pol = RixoPolFromStockLocation.derivePol(newStock),
+                pol = if (!newPol.isNullOrBlank()) newPol else RixoPolFromStockLocation.derivePol(newStock),
                 createdAt = createdAtValue // Preserve createdAt (never null)
             )
             

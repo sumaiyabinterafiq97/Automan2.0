@@ -9,6 +9,12 @@ A comprehensive car purchase management system built with Kotlin JS Compose for 
   - Switched from SendGrid to **Resend** for signup approval emails
   - Admin approval workflow: signup requests → admin approves/rejects → verification emails sent via Resend
   - `pending_signups` table for email verification tokens
+- **Calculations & UI Enhancements**:
+  - **FOB Shipping Charge Calculator**: Added dedicated calculator for FOB mode that reuses the Shipping Charge Map (SCM) tier system (allocates cars to containers) but strips out freight and yen-rate fields.
+  - **Table UI Standardization**:
+    - **Shipping History**: Delete button is now permanently visible; fixed column order for "Invoice Created" and "Booking ID"; added image-matching status circles for invoices.
+    - **Invoice History**: Implemented bulk-select checkboxes and "Delete Selected" batch removal (`DELETE /batch-delete`).
+    - **Car Booking**: Fixed table alignment by removing orphan price columns.
 - **Master Data & UI**:
   - **Supplier Master** fully implemented (add/edit/delete/duplicate, column filters, pagination)
   - Supplier dropdown auto-refresh when suppliers are added/edited in master tab
@@ -300,10 +306,10 @@ All endpoints are prefixed with `/api` (backend context-path). Base URL: `http:/
 - `PATCH /api/purchases/{id}` - Partial update purchase
 - `DELETE /api/purchases/{id}` - Delete purchase
 - `GET /api/purchases/search?query={term}` - Search purchases
-- `GET /api/purchases/unshipped-chassis?pol={port}` - Get unshipped chassis
-- `GET /api/purchases/filtered-chassis?country={country}&polPort={pol}` - Get filtered unshipped chassis
+- `GET /api/purchases/unbooked-chassis?pol={port}` - Chassis at POL where `booking_requested` is not true (alias: `/unshipped-chassis`)
+- `GET /api/purchases/filtered-chassis?country={country}&polPort={pol}` - Filtered chassis where `booking_requested` is not true
 - `GET /api/purchases/filter/invoice?consignee={client}&vessel={vessel}&shipmentDate={date}` - Filter purchases for invoice
-- `POST /api/purchases/ship` - Mark purchases as shipped
+- `POST /api/purchases/booking-requested` - Set `booking_requested = true` for purchase IDs (alias: `POST /ship`)
 - `POST /api/purchases/save-total-cnf` - Save total C&F price
 - `POST /api/purchases/save-total-cnf-by-ids` - Save total C&F price by purchase IDs
 - `GET /api/purchases/costs-by-chassis/{chassis}` - Get cost details by chassis
@@ -411,7 +417,7 @@ All endpoints are prefixed with `/api` (backend context-path). Base URL: `http:/
    - Enter VESSEL name
    - System automatically fetches matching purchases and fills shipping details
    - Generate PDF invoice with all details
-   - Mark cars as shipped after invoice generation
+   - Mark cars as booking requested from the car booking screen when appropriate
 
 ### Adding a New Purchase
 
@@ -719,7 +725,7 @@ Backend will use `application.yml` (localhost:3306). For Docker profile: `SPRING
 - **Database Schema**: 
   - Main tables: `purchases`, `clients`, `events`, `users`, `pending_signups`
   - Mapping tables: `car_brand_mapping`, `booking_mappings`, `rixo_prices`
-  - Key columns: `drive_type` (VARCHAR(50) NULL), `booking_id` (BIGINT NULL, no FK constraint), `total_fob_price` (DECIMAL(15,2) NULL), `shipped` (BOOLEAN DEFAULT FALSE), `vessel` (VARCHAR(255) NULL)
+  - Key columns: `drive_type` (VARCHAR(50) NULL), `booking_id` (BIGINT NULL, no FK constraint), `total_fob_price` (DECIMAL(15,2) NULL), `booking_requested` (BOOLEAN NOT NULL DEFAULT FALSE), `vessel` (VARCHAR(255) NULL)
 - **Invoice Page**: Uses CLIENT (consignee) dropdown and VESSEL input to dynamically fetch matching purchases by shipment date.
 - **Client Accounts**: Full client management with balance tracking, credit limits, alerts, and transaction history.
 - **Security**: 

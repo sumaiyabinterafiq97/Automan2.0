@@ -2581,12 +2581,26 @@ window.fetchPolsByStockLocationAndUpdate = function(auctionHouse, stockLocation,
         })
         .then(function(res) {
             var prices = (res && res.data && Array.isArray(res.data)) ? res.data : [];
-            // Filter by stockLocation then extract distinct non-empty POLs
+            // Filter by stockLocation then extract distinct non-empty POLs.
+            // DB cells often store multiple yards as "A; B"; match if the selected yard equals any token.
+            function rowStockMatchesSelected(slRaw, selectedRaw) {
+                var sel = selectedRaw != null ? String(selectedRaw).trim() : '';
+                if (!sel) return false;
+                var sl = slRaw != null ? String(slRaw).trim() : '';
+                if (!sl) return false;
+                if (sl === sel) return true;
+                var parts = sl.split(/[;,]/).map(function(x) { return x.trim(); }).filter(function(x) { return x.length > 0; });
+                var u = sel.toUpperCase();
+                for (var k = 0; k < parts.length; k++) {
+                    if (parts[k].toUpperCase() === u) return true;
+                }
+                return false;
+            }
             var list = [];
             var seen = {};
             prices.forEach(function(p) {
                 var sl = (p && p.stockLocation != null) ? String(p.stockLocation).trim() : '';
-                if (sl !== String(stockLocation).trim()) return;
+                if (!rowStockMatchesSelected(sl, stockLocation)) return;
                 var pol = (p && p.pol != null) ? String(p.pol).trim() : '';
                 if (!pol) return;
                 var key = pol.toUpperCase();
@@ -4334,15 +4348,20 @@ window.refreshRixoDropdowns = function() {
 
 /**
  * Expand one supplier_price row into atomic mapping rows so each dropdown option is a single value
- * (not "YAMAZAKI;KLC;LOGICO"). Cartesian product across split dimensions; same rixo price/venue repeated.
+ * (not "YAMAZAKI;KLC;LOGICO").
+ *
+ * When stock / POL / venue have multiple ';'-split branches (Supplier Map rows), those dimensions are
+ * paired by index (shorter lists padded by repeating the last token). Vehicle type × rixo price still
+ * combine per branch (Cartesian) so single-stock multi-company + multi-vehicle rows keep working.
+ * Otherwise the legacy full Cartesian product is used (e.g. multiple Rixo companies on one yard).
  */
 function expandSupplierPriceRowToMappings(price) {
-    let types = window.splitMasterListTokens(price.shipmentSize);
-    let stocks = window.splitMasterListTokens(price.stockLocation);
-    let companies = window.splitMasterListTokens(price.rixoCompany);
-    let venues = window.splitMasterListTokens(price.venueId);
+    const typesSplit = window.splitMasterListTokens(price.shipmentSize);
+    const stocksSplit = window.splitMasterListTokens(price.stockLocation);
+    const companiesSplit = window.splitMasterListTokens(price.rixoCompany);
+    const venuesSplit = window.splitMasterListTokens(price.venueId);
     let priceTokens = window.splitMasterListTokens(price.rixoPrice);
-    let pols = window.splitMasterListTokens(price.pol);
+    const polsSplit = window.splitMasterListTokens(price.pol);
 
     function orSingleton(tokens, fallback) {
         if (tokens.length > 0) return tokens;
@@ -4350,41 +4369,88 @@ function expandSupplierPriceRowToMappings(price) {
         return f ? [f] : [''];
     }
 
-    types = orSingleton(types, price.shipmentSize);
-    stocks = orSingleton(stocks, price.stockLocation);
-    companies = orSingleton(companies, price.rixoCompany);
-    venues = orSingleton(venues, price.venueId);
-    pols = orSingleton(pols, price.pol);
+    const parallelBranches =
+        stocksSplit.length > 1 ||
+        polsSplit.length > 1 ||
+        venuesSplit.length > 1;
+
+    let types = orSingleton(typesSplit, price.shipmentSize);
+    let stocks = orSingleton(stocksSplit, price.stockLocation);
+    let companies = orSingleton(companiesSplit, price.rixoCompany);
+    let venues = orSingleton(venuesSplit, price.venueId);
+    let pols = orSingleton(polsSplit, price.pol);
     if (priceTokens.length === 0) {
         const rp = price.rixoPrice != null ? String(price.rixoPrice).trim() : '';
         priceTokens = rp ? [rp] : [''];
     }
 
+    function padBranchList(arr, n) {
+        if (n <= 0) return [];
+        if (!arr || arr.length === 0) return Array(n).fill('');
+        const out = arr.slice();
+        while (out.length < n) {
+            out.push(out[out.length - 1]);
+        }
+        return out.slice(0, n);
+    }
+
     const out = [];
-    for (let ti = 0; ti < types.length; ti++) {
-        for (let si = 0; si < stocks.length; si++) {
-            for (let ci = 0; ci < companies.length; ci++) {
-                for (let vi = 0; vi < venues.length; vi++) {
-                    for (let pi = 0; pi < priceTokens.length; pi++) {
-                        for (let poli = 0; poli < pols.length; poli++) {
-                            const t = (types[ti] || '').trim();
-                            const s = (stocks[si] || '').trim();
-                            const c = (companies[ci] || '').trim();
-                            const v = (venues[vi] || '').trim();
-                            const p = (priceTokens[pi] || '').trim();
-                            const polVal = (pols[poli] || '').trim();
-                            if (!t && !s && !c && !v && !p) continue;
-                            out.push({
-                                typeOfVehicle: t,
-                                stockLocation: s,
-                                rixoCompany: c,
-                                rixoPrice: p,
-                                venueId: v,
-                                pol: polVal
-                            });
+
+    if (!parallelBranches) {
+        for (let ti = 0; ti < types.length; ti++) {
+            for (let si = 0; si < stocks.length; si++) {
+                for (let ci = 0; ci < companies.length; ci++) {
+                    for (let vi = 0; vi < venues.length; vi++) {
+                        for (let pi = 0; pi < priceTokens.length; pi++) {
+                            for (let poli = 0; poli < pols.length; poli++) {
+                                const t = (types[ti] || '').trim();
+                                const s = (stocks[si] || '').trim();
+                                const c = (companies[ci] || '').trim();
+                                const v = (venues[vi] || '').trim();
+                                const p = (priceTokens[pi] || '').trim();
+                                const polVal = (pols[poli] || '').trim();
+                                if (!t && !s && !c && !v && !p) continue;
+                                out.push({
+                                    typeOfVehicle: t,
+                                    stockLocation: s,
+                                    rixoCompany: c,
+                                    rixoPrice: p,
+                                    venueId: v,
+                                    pol: polVal
+                                });
+                            }
                         }
                     }
                 }
+            }
+        }
+        return out;
+    }
+
+    const n = Math.max(stocks.length, pols.length, venues.length, companies.length);
+    const stocksP = padBranchList(stocks, n);
+    const polsP = padBranchList(pols, n);
+    const venuesP = padBranchList(venues, n);
+    const companiesP = padBranchList(companies, n);
+
+    for (let i = 0; i < n; i++) {
+        const s = (stocksP[i] || '').trim();
+        const polVal = (polsP[i] || '').trim();
+        const v = (venuesP[i] || '').trim();
+        const c = (companiesP[i] || '').trim();
+        for (let ti = 0; ti < types.length; ti++) {
+            for (let pi = 0; pi < priceTokens.length; pi++) {
+                const t = (types[ti] || '').trim();
+                const p = (priceTokens[pi] || '').trim();
+                if (!t && !s && !c && !v && !p) continue;
+                out.push({
+                    typeOfVehicle: t,
+                    stockLocation: s,
+                    rixoCompany: c,
+                    rixoPrice: p,
+                    venueId: v,
+                    pol: polVal
+                });
             }
         }
     }

@@ -230,15 +230,18 @@ class RixoImportService(
     
     /**
      * Inserts a new row or, if [auctionHouse] already exists (case-insensitive), merges
-     * stock / company / venue tokens into the existing row (semicolon/comma-separated, deduped).
-     * [pol] is always derived from merged stock locations via [RixoPolFromStockLocation].
+     * stock / company / venue / POL tokens into the existing row (semicolon/comma-separated, deduped).
+     * Explicit non-blank [pol] from the client is merged with existing POL (Supplier Map branches).
+     * When the merged POL string is still blank, it falls back to [RixoPolFromStockLocation.derivePol]
+     * on the merged stock locations.
      */
     @Transactional
     fun saveRixoPriceWithAuctionHouse(
         auctionHouse: String,
         stockLocation: String,
         rixoCompany: String,
-        venueId: String?
+        venueId: String?,
+        pol: String? = null
     ): SaveRixoMappingResult {
         val auction = auctionHouse.trim()
         val incomingStock = stockLocation.trim().ifBlank { "-" }
@@ -252,7 +255,8 @@ class RixoImportService(
             val mergedStock = mergeSemicolonRequired(existing.stockLocation, incomingStock)
             val mergedRixo = mergeSemicolonRequired(existing.rixoCompany, incomingRixo)
             val mergedVenue = mergeSemicolonNullable(existing.venueId, incomingVenue)
-            val derivedPol = RixoPolFromStockLocation.derivePol(mergedStock)
+            val mergedPol = mergeSemicolonNullable(existing.pol, pol)
+            val derivedPol = if (!mergedPol.isNullOrBlank()) mergedPol else RixoPolFromStockLocation.derivePol(mergedStock)
             val updated = existing.copy(
                 stockLocation = mergedStock,
                 rixoCompany = mergedRixo,
@@ -270,7 +274,7 @@ class RixoImportService(
                 stockLocation = incomingStock,
                 rixoCompany = incomingRixo,
                 venueId = incomingVenue,
-                pol = RixoPolFromStockLocation.derivePol(incomingStock)
+                pol = if (!pol.isNullOrBlank()) pol else RixoPolFromStockLocation.derivePol(incomingStock)
             )
         )
         return SaveRixoMappingResult(price = saved, merged = false)

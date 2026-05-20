@@ -27,9 +27,20 @@ interface ClientRepository : JpaRepository<Client, Long> {
     @Query("SELECT c FROM Client c WHERE c.currentBalance > 0")
     fun findClientsWithCredit(): List<Client>
     
-    // Method to find clients approaching credit limit
-    @Query("SELECT c FROM Client c WHERE c.creditLimit IS NOT NULL AND c.currentBalance <= c.alertThreshold")
+    // Method to find clients approaching credit limit (Option A: balance ≤ −90% of limit, not yet over)
+    @Query(
+        "SELECT c FROM Client c WHERE c.creditLimit IS NOT NULL AND c.creditLimit > 0 " +
+            "AND c.currentBalance < 0 AND c.currentBalance > -c.creditLimit " +
+            "AND c.currentBalance <= -(0.9 * c.creditLimit)",
+    )
     fun findClientsNearCreditLimit(): List<Client>
+
+    // Method to find clients over credit limit (Option A: balance < −limit)
+    @Query(
+        "SELECT c FROM Client c WHERE c.creditLimit IS NOT NULL AND c.creditLimit > 0 " +
+            "AND c.currentBalance < -c.creditLimit",
+    )
+    fun findClientsOverCreditLimit(): List<Client>
     
     // Method to find clients by balance range
     @Query("SELECT c FROM Client c WHERE c.currentBalance BETWEEN :minBalance AND :maxBalance")
@@ -40,6 +51,9 @@ interface ClientRepository : JpaRepository<Client, Long> {
     
     // Method to find client by client number
     fun findByClientNumber(clientNumber: String): Client?
+
+    /** Exact match, case-insensitive (for resolving invoice PDF client name to ledger client). */
+    fun findByClientNameIgnoreCase(clientName: String): List<Client>
     
     // Method to get total outstanding balance
     @Query("SELECT SUM(c.currentBalance) FROM Client c")

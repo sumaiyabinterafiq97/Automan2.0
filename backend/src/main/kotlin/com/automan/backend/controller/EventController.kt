@@ -184,6 +184,7 @@ class EventController(
                 eventDescription = eventData["eventDescription"] as? String,
                 quantity = (eventData["quantity"] as? Number)?.toInt(),
                 billNumber = eventData["billNumber"] as? String,
+                invoiceNumber = eventData["invoiceNumber"] as? String,
                 transactionPrice = (eventData["transactionPrice"] as? Number)?.toDouble(),
                 paymentReceived = (eventData["paymentReceived"] as? Number)?.toDouble(),
                 runningBalance = (eventData["runningBalance"] as? Number)?.toDouble() ?: 0.0

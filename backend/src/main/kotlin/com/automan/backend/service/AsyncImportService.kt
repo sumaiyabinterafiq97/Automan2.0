@@ -153,6 +153,7 @@ class AsyncImportService(
             eventDescription = eventDescription,
             quantity = quantity,
             billNumber = row["BILL. NO"]?.takeIf { it.isNotBlank() },
+            invoiceNumber = null,
             transactionPrice = transactionPrice,
             paymentReceived = paymentReceived,
             runningBalance = runningBalance

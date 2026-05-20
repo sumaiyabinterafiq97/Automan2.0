@@ -11,6 +11,16 @@ interface ShippingHistoryRepository : JpaRepository<ShippingHistory, Long> {
     fun findFirstByChassisOrderByIdDesc(chassis: String): ShippingHistory?
 
     @Query(
+        value = (
+            "SELECT DISTINCT TRIM(client_name) FROM shipping_history " +
+                "WHERE client_name IS NOT NULL AND TRIM(client_name) <> '' " +
+                "ORDER BY TRIM(client_name) ASC"
+        ),
+        nativeQuery = true,
+    )
+    fun findDistinctClientNamesForInvoice(): List<String>
+
+    @Query(
         "SELECT DISTINCT sh.vessel FROM ShippingHistory sh WHERE " +
             "TRIM(COALESCE(sh.clientName, '')) = TRIM(:clientName) AND " +
             "sh.vessel IS NOT NULL AND TRIM(sh.vessel) <> '' " +

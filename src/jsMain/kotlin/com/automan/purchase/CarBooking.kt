@@ -1776,14 +1776,7 @@ fun showCalculateFreightPage() {
             return
         }
 
-        fetchFreightScmTiersForStockLocation(stockLoc) { ok ->
-            if (!ok) {
-                showMessage(
-                    "No shipping charge tiers for \"$stockLoc\". Add them under Master → Shipping Charge Map.",
-                    "error",
-                )
-                return@fetchFreightScmTiersForStockLocation
-            }
+        fetchFreightScmTiersForStockLocation(stockLoc) { _ ->
             val freightPageHTML = createFreightCalculationHTML(selectedCars)
             val mainContent = document.getElementById("content")
             if (mainContent != null) {

@@ -1,5 +1,6 @@
 package com.automan.backend.dto
 
+import com.automan.backend.model.EventType
 import java.time.LocalDate
 
 data class CreateEventRequest(
@@ -9,7 +10,9 @@ data class CreateEventRequest(
     val quantity: Int? = null,
     val billNumber: String? = null,
     val transactionPrice: Double? = null,
-    val paymentReceived: Double? = null
+    val paymentReceived: Double? = null,
+    val eventType: EventType = EventType.OTHER,
+    val invoiceNumber: String? = null,
 )
 
 

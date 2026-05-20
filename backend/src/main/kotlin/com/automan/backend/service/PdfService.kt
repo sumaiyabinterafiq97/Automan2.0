@@ -16,11 +16,14 @@ import com.itextpdf.layout.properties.UnitValue
 import com.itextpdf.io.font.PdfEncodings
 import com.itextpdf.kernel.font.PdfFont
 import com.itextpdf.kernel.font.PdfFontFactory
+import com.automan.backend.util.CarModelYearUtils
 import com.automan.backend.util.Logger
 import java.io.InputStream
 import org.springframework.stereotype.Service
 import java.io.ByteArrayOutputStream
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Service
@@ -28,38 +31,38 @@ class PdfService {
 
     private fun getJapaneseFont(): PdfFont {
         return try {
-            println("🎌 Font: Trying Noto Sans CJK Japanese font")
+            Logger.debug("🎌 Font: Trying Noto Sans CJK Japanese font")
             val fontStream: InputStream = javaClass.classLoader.getResourceAsStream("fonts/NotoSansCJKjp-Regular.otf")
             if (fontStream != null) {
                 val font = PdfFontFactory.createFont(fontStream.readBytes(), PdfEncodings.IDENTITY_H)
                 fontStream.close()
-                println("🎌 Font: Successfully created Noto Sans CJK Japanese font")
+                Logger.debug("🎌 Font: Successfully created Noto Sans CJK Japanese font")
                 font
             } else {
                 throw Exception("Font file not found")
             }
         } catch (e: Exception) {
-            println("🎌 Font: Noto Sans CJK failed: ${e.message}")
+            Logger.warn("🎌 Font: Noto Sans CJK failed: ${e.message}")
             try {
-                println("🎌 Font: Trying Noto Sans CJK TTC font")
+                Logger.debug("🎌 Font: Trying Noto Sans CJK TTC font")
                 val fontStream: InputStream = javaClass.classLoader.getResourceAsStream("fonts/NotoSansCJK-Regular.ttc")
                 if (fontStream != null) {
                     val font = PdfFontFactory.createFont(fontStream.readBytes(), PdfEncodings.IDENTITY_H)
                     fontStream.close()
-                    println("🎌 Font: Successfully created Noto Sans CJK TTC font")
+                    Logger.debug("🎌 Font: Successfully created Noto Sans CJK TTC font")
                     font
                 } else {
                     throw Exception("TTC font file not found")
                 }
             } catch (e2: Exception) {
-                println("🎌 Font: TTC font failed: ${e2.message}")
+                Logger.warn("🎌 Font: TTC font failed: ${e2.message}")
                 try {
-                    println("🎌 Font: Trying default font as fallback")
+                    Logger.debug("🎌 Font: Trying default font as fallback")
                     val font = PdfFontFactory.createFont()
-                    println("🎌 Font: Using default font (Japanese may not display correctly)")
+                    Logger.warn("🎌 Font: Using default font (Japanese may not display correctly)")
                     font
                 } catch (e3: Exception) {
-                    println("🎌 Font: All attempts failed: ${e3.message}")
+                    Logger.error("🎌 Font: All attempts failed: ${e3.message}")
                     PdfFontFactory.createFont()
                 }
             }
@@ -317,12 +320,12 @@ class PdfService {
         val rixoCompany = transportData["rixoCompany"] ?: "KLC"
         titleTable.addCell(createTitleCellLeft("陸送 $rixoCompany 様", japaneseFont))
         
-        // Date on right
+        // Date on right: always "today" in Japan (document locale), e.g. 2026年4月27日月曜日
         Logger.debug("PDF Service: transportData keys: ${transportData.keys}")
         val transportDate = transportData["buyingDate"] ?: ""
-        // Header wants full date with year and weekday in Japanese, e.g. 2025年9月30日火曜日
-        val formattedDateWithWeekday = formatDateToJapanese(transportDate, includeYear = true)
-        Logger.debug("PDF Service: Original date: '$transportDate' -> Formatted: '$formattedDateWithWeekday'")
+        val todayJapan = LocalDate.now(ZoneId.of("Asia/Tokyo"))
+        val formattedDateWithWeekday = formatDateToJapanese(todayJapan.toString(), includeYear = true)
+        Logger.debug("PDF Service: Header 日付 (today JST): '$formattedDateWithWeekday'; table buyingDate raw: '$transportDate'")
         
         val dateCell = Cell()
             .add(Paragraph()
@@ -386,7 +389,7 @@ class PdfService {
             table.addCell(createCell(purchase.chassis ?: "", japaneseFont))
             
             // Car Model Year - Japanese calendar (e.g. 令和8年)
-            val yearOnly = extractYearFromCarModelYear(purchase.carModelYear?.toString())
+            val yearOnly = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear?.toString())
             val japaneseEraYear = westernYearToJapaneseEra(yearOnly)
             table.addCell(createCell(japaneseEraYear, japaneseFont))
             
@@ -650,31 +653,6 @@ class PdfService {
         } catch (e: Exception) {
             return yearStr
         }
-    }
-
-    /** Extracts only the 4-digit year from car_model_year (e.g. "July 2026" -> "2026", "2025-07" -> "2025"). */
-    private fun extractYearFromCarModelYear(yearStr: String?): String {
-        if (yearStr == null || yearStr.isBlank()) return ""
-        if (yearStr.contains("-")) {
-            val parts = yearStr.split("-")
-            if (parts.isNotEmpty()) {
-                val y = parts[0].trim()
-                if (y.length == 4 && y.all { it.isDigit() }) return y
-            }
-        }
-        if (yearStr.contains("/")) {
-            val parts = yearStr.split("/")
-            if (parts.size >= 2) {
-                val y = parts[1].trim()
-                if (y.length == 4 && y.all { it.isDigit() }) return y
-            }
-        }
-        val tokens = yearStr.trim().split(Regex("\\s+"))
-        for (t in tokens.reversed()) {
-            if (t.length == 4 && t.all { it.isDigit() }) return t
-        }
-        if (yearStr.length == 4 && yearStr.all { it.isDigit() }) return yearStr
-        return yearStr
     }
 
     /** Converts Gregorian year to Japanese era (令和X年, 平成X年, 昭和X年). First year of era uses 元年. */

@@ -1,10 +1,15 @@
 package com.automan.backend.controller
 
+import com.automan.backend.dto.PurchaseChangeHistoryPageRequest
+import com.automan.backend.dto.PurchaseChangeHistoryPageResponse
+import com.automan.backend.dto.PurchaseChangeHistorySingleRowDto
 import com.automan.backend.dto.CreateTransactionRequest
 import com.automan.backend.dto.InvoiceConfirmAndDownloadRequest
+import com.automan.backend.dto.InvoiceLedgerResult
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
 import com.automan.backend.service.PurchaseService
+import com.automan.backend.service.PurchaseChangeHistoryService
 import com.automan.backend.service.ClientService
 import com.automan.backend.service.TransactionService
 import com.automan.backend.util.Logger
@@ -20,6 +25,7 @@ import java.math.BigDecimal
 @CrossOrigin(origins = ["http://localhost:8080", "http://localhost:8084", "http://localhost:8085", "http://localhost:8089", "http://localhost:8090", "http://localhost:9090"])
 class PurchaseController(
     private val purchaseService: PurchaseService,
+    private val purchaseChangeHistoryService: PurchaseChangeHistoryService,
     private val clientService: ClientService,
     private val transactionService: TransactionService,
     private val pdfService: com.automan.backend.service.PdfService,
@@ -31,6 +37,12 @@ class PurchaseController(
     fun getAllPurchases(): ResponseEntity<List<Purchase>> {
         val purchases = purchaseService.getAllPurchases()
         return ResponseEntity.ok(purchases)
+    }
+
+    /** Unique purchase dates (as ISO yyyy-MM-dd) for Rixo Request Generator "Buying date" select. */
+    @GetMapping("/distinct-purchase-dates")
+    fun getDistinctPurchaseDates(): ResponseEntity<List<String>> {
+        return ResponseEntity.ok(purchaseService.getDistinctPurchaseDatesIso())
     }
     
     @GetMapping("/search")
@@ -44,6 +56,26 @@ class PurchaseController(
      * @param q non-blank search text
      * @param field `all` | `chassis` (prefix) | `carName` | `brand` | `clientName` | `supplier`
      */
+    /**
+     * Paginated audit rows for edits to purchases visible on the current list page.
+     * Frontend sends IDs from the rendered page slice; history pagination is independent of purchase pagination.
+     */
+    @PostMapping("/change-history/page-scope")
+    fun purchaseChangeHistoryPageScope(
+        @RequestBody body: PurchaseChangeHistoryPageRequest,
+    ): ResponseEntity<PurchaseChangeHistoryPageResponse> {
+        return ResponseEntity.ok(purchaseChangeHistoryService.pageScoped(body))
+    }
+
+    /** Change audit rows for one purchase only (most recent first). */
+    @GetMapping("/{id}/change-history")
+    fun purchaseChangeHistoryForPurchase(
+        @PathVariable id: Long,
+    ): ResponseEntity<List<PurchaseChangeHistorySingleRowDto>> {
+        if (id <= 0L) return ResponseEntity.badRequest().build()
+        return ResponseEntity.ok(purchaseChangeHistoryService.listForSinglePurchase(id))
+    }
+
     @GetMapping("/page-search")
     fun searchPurchasesPage(
         @RequestParam q: String,
@@ -58,7 +90,7 @@ class PurchaseController(
         }
     }
 
-    /** Chassis-only search for car booking autocomplete; uses `idx_chassis` for prefix matches. */
+    /** Chassis-only search for car booking autocomplete (Rixo-confirmed, booking not requested yet). */
     @GetMapping("/search-chassis")
     fun searchPurchasesByChassisForBooking(@RequestParam query: String): ResponseEntity<List<Purchase>> {
         val purchases = purchaseService.searchChassisForBooking(query)
@@ -80,6 +112,10 @@ class PurchaseController(
         }
     }
     
+    /**
+     * Distinct countries with at least one purchase eligible for booking: Rixo confirmed (`1`/`TRUE`)
+     * and booking not requested yet.
+     */
     @GetMapping("/countries")
     fun getCountries(): ResponseEntity<List<String>> {
         val countries = purchaseService.getUniqueCountries()
@@ -147,11 +183,12 @@ class PurchaseController(
         return ResponseEntity.ok(purchases)
     }
     
-    @GetMapping("/unshipped-chassis")
-    fun getUnshippedChassisByPol(
+    /** Chassis at this POL where `booking_requested` is not true (legacy path: `/unshipped-chassis`). */
+    @GetMapping("/unbooked-chassis", "/unshipped-chassis")
+    fun getChassisWithoutBookingRequestByPol(
         @RequestParam pol: String
     ): ResponseEntity<List<String>> {
-        val chassis = purchaseService.getUnshippedChassisByPolPort(pol)
+        val chassis = purchaseService.getChassisWithoutBookingRequestByPol(pol)
         return ResponseEntity.ok(chassis)
     }
     
@@ -161,6 +198,7 @@ class PurchaseController(
             val chassis = costData["chassis"] as String
             val carPrice = (costData["carPrice"] as? Number)?.toDouble() ?: 0.0
             val auctionFee = (costData["auctionFee"] as? Number)?.toDouble() ?: 0.0
+            val auctionPenaltyFee = (costData["auctionPenaltyFee"] as? Number)?.toDouble() ?: 0.0
             val rixoPrice = (costData["rixoPrice"] as? Number)?.toDouble() ?: 0.0
             val shippingCharge = (costData["shippingCharge"] as? Number)?.toDouble() ?: 0.0
             val freight = (costData["freight"] as? Number)?.toDouble() ?: 0.0
@@ -174,7 +212,7 @@ class PurchaseController(
             Logger.debug("Full costData: $costData")
             
             purchaseService.saveCarCostDetails(
-                chassis, carPrice, auctionFee, rixoPrice, shippingCharge, 
+                chassis, carPrice, auctionFee, auctionPenaltyFee, rixoPrice, shippingCharge,
                 freight, inspectionFee, repairFee, mscCharges, profit, isPackageMode
             )
             
@@ -190,6 +228,7 @@ class PurchaseController(
             val chassis = costData["chassis"] as String
             val carPrice = (costData["carPrice"] as? Number)?.toDouble() ?: 0.0
             val auctionFee = (costData["auctionFee"] as? Number)?.toDouble() ?: 0.0
+            val auctionPenaltyFee = (costData["auctionPenaltyFee"] as? Number)?.toDouble() ?: 0.0
             val rixoPrice = (costData["rixoPrice"] as? Number)?.toDouble() ?: 0.0
             val shippingCharge = (costData["shippingCharge"] as? Number)?.toDouble() ?: 0.0
             val inspectionFee = (costData["inspectionFee"] as? Number)?.toDouble() ?: 0.0
@@ -198,7 +237,7 @@ class PurchaseController(
             val profit = (costData["profit"] as? Number)?.toDouble() ?: 0.0
             
             purchaseService.saveFobCarCostDetails(
-                chassis, carPrice, auctionFee, rixoPrice, shippingCharge, 
+                chassis, carPrice, auctionFee, auctionPenaltyFee, rixoPrice, shippingCharge,
                 inspectionFee, repairFee, mscCharges, profit
             )
             
@@ -240,6 +279,7 @@ class PurchaseController(
                     "chassis" to (purchase.chassis ?: ""),
                     "carPrice" to parsePrice(purchase.price),
                     "auctionFee" to parsePrice(purchase.auctionFee),
+                    "auctionPenaltyFee" to parsePrice(purchase.auctionPenaltyFee),
                     "rixoPrice" to parsePrice(purchase.rixoPrice),
                     "shippingCharge" to parsePrice(purchase.shipmentCharges),
                     "freight" to parsePrice(purchase.freight),
@@ -340,9 +380,10 @@ class PurchaseController(
         }
     }
     
-    @PostMapping("/ship")
-    fun shipPurchases(@RequestBody request: Map<String, Any>): ResponseEntity<Map<String, Any>> {
-        Logger.debug("[Controller] Ship purchases request received")
+    /** Sets `booking_requested = true` for the given purchases (legacy alias: `POST /ship`). */
+    @PostMapping("/booking-requested", "/ship")
+    fun setBookingRequested(@RequestBody request: Map<String, Any>): ResponseEntity<Map<String, Any>> {
+        Logger.debug("[Controller] Set booking_requested request received")
         val purchaseIds = (request["purchaseIds"] as? List<*>)?.mapNotNull { 
             when (it) {
                 is Number -> it.toLong()
@@ -356,12 +397,12 @@ class PurchaseController(
             return ResponseEntity.badRequest().body(mapOf("error" to "No purchase IDs provided"))
         }
         
-        Logger.debug("[Controller] Marking ${purchaseIds.size} purchases as shipped")
-        val updatedPurchases = purchaseService.markPurchasesAsShipped(purchaseIds)
+        Logger.debug("[Controller] Marking ${purchaseIds.size} purchases as booking_requested")
+        val updatedPurchases = purchaseService.markPurchasesAsBookingRequested(purchaseIds)
         
         return ResponseEntity.ok(mapOf(
             "success" to true,
-            "message" to "Successfully marked ${updatedPurchases.size} purchase(s) as shipped",
+            "message" to "Successfully marked ${updatedPurchases.size} purchase(s) as booking requested",
             "updatedCount" to updatedPurchases.size,
             "purchaseIds" to purchaseIds
         ))
@@ -397,21 +438,22 @@ class PurchaseController(
     }
     
     /**
-     * Saves [com.automan.backend.model.InvoiceHistory], sets invoice_confirmed on purchases, returns PDF.
-     * 409 if invoice number already exists.
+     * Saves [com.automan.backend.model.InvoiceHistory] (insert or update by invoice number),
+     * sets invoice_confirmed on purchases, returns PDF.
      */
     @PostMapping("/invoice/confirm-and-download")
     fun confirmAndDownloadInvoice(@RequestBody request: InvoiceConfirmAndDownloadRequest): ResponseEntity<ByteArray> {
         return try {
-            val pdfBytes = invoiceHistoryService.confirmAndDownload(request)
+            val result = invoiceHistoryService.confirmAndDownload(request)
             val headers = org.springframework.http.HttpHeaders()
             headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
             headers.set(
                 org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
                 "attachment; filename=\"invoice_${request.pdf.invoiceNumber}.pdf\"",
             )
-            headers.contentLength = pdfBytes.size.toLong()
-            ResponseEntity.ok().headers(headers).body(pdfBytes)
+            headers.contentLength = result.pdfBytes.size.toLong()
+            applyLedgerHeaders(headers, result.ledger)
+            ResponseEntity.ok().headers(headers).body(result.pdfBytes)
         } catch (e: IllegalArgumentException) {
             val msg = e.message ?: "Invalid request"
             if (msg.contains("already exists", ignoreCase = true)) {
@@ -419,6 +461,119 @@ class PurchaseController(
             }
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, msg)
         }
+    }
+
+    private fun applyLedgerHeaders(headers: org.springframework.http.HttpHeaders, ledger: InvoiceLedgerResult) {
+        headers.set("X-Ledger-Posted", ledger.posted.toString())
+        headers.set("X-Ledger-Reversed", ledger.reversed.toString())
+        ledger.clientId?.let { headers.set("X-Ledger-Client-Id", it.toString()) }
+        ledger.warning?.let { headers.set("X-Ledger-Warning", it) }
+    }
+
+    /**
+     * Same persistence as [confirmAndDownloadInvoice] ([InvoiceHistoryService.saveOnly]): invoice_history,
+     * marks purchases invoice_confirmed, ledger — **no** PDF generation or download.
+     */
+    @PostMapping("/invoice/save")
+    fun saveInvoice(@RequestBody request: InvoiceConfirmAndDownloadRequest): ResponseEntity<Map<String, Any?>> {
+        return try {
+            val ledger = invoiceHistoryService.saveOnly(request)
+            ResponseEntity.ok(
+                linkedMapOf<String, Any?>(
+                    "success" to true,
+                    "message" to "Invoice saved successfully",
+                ).apply { putAll(ledger.toResponseMap()) },
+            )
+        } catch (e: IllegalArgumentException) {
+            val msg = e.message ?: "Invalid request"
+            if (msg.contains("already exists", ignoreCase = true)) {
+                throw ResponseStatusException(HttpStatus.CONFLICT, msg)
+            }
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, msg)
+        }
+    }
+
+    /**
+     * Batch-creates invoices from shipping history — one per client group.
+     * No PDF is generated; invoice records are saved directly to invoice_history.
+     * Returns { saved: N, invoiceNumbers: [...], skipped: [...] }
+     */
+    @PostMapping("/invoice/batch-confirm")
+    fun batchConfirmInvoices(@RequestBody body: Map<String, Any>): ResponseEntity<Map<String, Any>> {
+        @Suppress("UNCHECKED_CAST")
+        val rawInvoices = body["invoices"] as? List<Map<String, Any>> ?: emptyList()
+        if (rawInvoices.isEmpty()) {
+            return ResponseEntity.badRequest().body(mapOf("error" to "No invoices provided"))
+        }
+
+        val savedNumbers = mutableListOf<String>()
+        val skippedNumbers = mutableListOf<String>()
+        val errors = mutableListOf<String>()
+
+        for (raw in rawInvoices) {
+            try {
+                val purchaseIds = (raw["purchaseIds"] as? List<*>)?.mapNotNull {
+                    when (it) {
+                        is Number -> it.toLong()
+                        is String -> it.toLongOrNull()
+                        else -> null
+                    }
+                } ?: emptyList()
+                val chassisJoined = raw["chassisJoined"]?.toString() ?: ""
+                val shippingDateIso = raw["shippingDateIso"]?.toString()
+
+                @Suppress("UNCHECKED_CAST")
+                val pdfRaw = raw["pdf"] as? Map<String, Any> ?: continue
+                val items = (pdfRaw["items"] as? List<Map<String, Any>> ?: emptyList()).mapIndexed { idx, item ->
+                    com.automan.backend.dto.InvoiceItem(
+                        unit = (item["unit"] as? Number)?.toInt() ?: (idx + 1),
+                        description = item["description"]?.toString() ?: "",
+                        amount = item["amount"]?.toString() ?: "",
+                    )
+                }
+                val pdfReq = com.automan.backend.dto.InvoicePdfRequest(
+                    invoiceNumber = pdfRaw["invoiceNumber"]?.toString() ?: "",
+                    invoiceDate = pdfRaw["invoiceDate"]?.toString() ?: "",
+                    lcNumber = pdfRaw["lcNumber"]?.toString(),
+                    clientName = pdfRaw["clientName"]?.toString() ?: "",
+                    clientAddress = pdfRaw["clientAddress"]?.toString(),
+                    vessel = pdfRaw["vessel"]?.toString() ?: "",
+                    shippingDate = pdfRaw["shippingDate"]?.toString() ?: "",
+                    from = pdfRaw["from"]?.toString() ?: "",
+                    to = pdfRaw["to"]?.toString() ?: "",
+                    priceType = pdfRaw["priceType"]?.toString() ?: "C&F",
+                    items = items,
+                    totalAmount = pdfRaw["totalAmount"]?.toString() ?: "",
+                    bankAccount = pdfRaw["bankAccount"]?.toString(),
+                    message = pdfRaw["message"]?.toString(),
+                )
+                val request = InvoiceConfirmAndDownloadRequest(
+                    purchaseIds = purchaseIds,
+                    chassisJoined = chassisJoined,
+                    shippingDateIso = shippingDateIso,
+                    pdf = pdfReq,
+                )
+                invoiceHistoryService.saveOnly(request)
+                savedNumbers.add(pdfReq.invoiceNumber)
+            } catch (e: IllegalArgumentException) {
+                val msg = e.message ?: "Invalid invoice"
+                Logger.warn("[batch-confirm] Skipped: $msg")
+                skippedNumbers.add(msg)
+            } catch (e: Exception) {
+                val msg = e.message ?: e.javaClass.simpleName
+                Logger.error("[batch-confirm] Error saving invoice: $msg", e)
+                errors.add(msg)
+            }
+        }
+
+        return ResponseEntity.ok(
+            mapOf(
+                "saved" to savedNumbers.size,
+                "invoiceNumbers" to savedNumbers,
+                "skipped" to skippedNumbers,
+                "errors" to errors,
+            )
+        )
     }
 
     @PostMapping("/invoice/generate-pdf")
@@ -595,12 +750,24 @@ class PurchaseController(
                 is String -> p.equals("true", ignoreCase = true)
                 else -> false
             }
+            val generatePdf = when (val g = request["generatePdf"]) {
+                is Boolean -> g
+                is String -> g.equals("true", ignoreCase = true)
+                else -> true
+            }
             if (persistHistory && selectedIds.isNotEmpty()) {
                 rixoHistoryService.saveFromTransport(selectedIds, transportData)
             }
+            if (persistHistory && selectedIds.isNotEmpty()) {
+                purchaseService.markPurchasesAsRixoRequestedTrue(selectedIds)
+            }
+
+            if (!generatePdf) {
+                return ResponseEntity.noContent().build()
+            }
 
             val pdfBytes = purchaseService.generateRixoTransportPdf(selectedIds, transportData, purchaseData)
-            
+
             return ResponseEntity.ok()
                 .header("Content-Type", "application/pdf")
                 .header("Content-Disposition", "attachment; filename=\"rixo-transport.pdf\"")
@@ -680,11 +847,12 @@ class PurchaseController(
                 clientId = (transactionData["clientId"] as? Number)?.toLong()
                     ?: throw IllegalArgumentException("Client ID is required"),
                 eventDate = transactionData["eventDate"] as String,
+                eventType = TransactionService.parseManualEventType(transactionData),
                 eventDescription = transactionData["eventDescription"] as? String ?: "",
                 quantity = (transactionData["quantity"] as? Number)?.toInt(),
                 billNumber = transactionData["billNumber"] as? String,
                 transactionPrice = (transactionData["transactionPrice"] as? Number)?.toDouble(),
-                paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble()
+                paymentReceived = (transactionData["paymentReceived"] as? Number)?.toDouble(),
             )
             val response = transactionService.createTransaction(request)
             if (response.success) {
@@ -906,13 +1074,18 @@ class PurchaseController(
         Logger.debug("PDF Generation - Using column header: '$priceColumnHeader'")
         carTable.addHeaderCell(createHeaderCell(priceColumnHeader))
         
-        // Add car data rows
+        // Add car data rows (YEAR + price columns right-aligned)
         pdfData.carList.forEach { car ->
             carTable.addCell(createCell(car.no.toString(), false))
             carTable.addCell(createCell(car.name, false))
             carTable.addCell(createCell(car.chassisNumber, false))
-            carTable.addCell(createCell(car.year, false))
-            carTable.addCell(createCell(car.cnfPrice, false))
+            carTable.addCell(
+                createCell(car.year, false).setTextAlignment(com.itextpdf.layout.properties.TextAlignment.RIGHT),
+            )
+            carTable.addCell(
+                createCell(formatPriceWithCommas(car.cnfPrice), false)
+                    .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.RIGHT),
+            )
         }
         
         document.add(carTable)
@@ -1008,12 +1181,12 @@ class PurchaseController(
             carListTable.addCell(createCellWithBorder((index + 1).toString(), false))
             carListTable.addCell(createCellWithBorder(car.name, false))
             carListTable.addCell(createCellWithBorder(car.chassisNumber, false))
-            carListTable.addCell(createCellWithBorder(car.year, false))
-            // Remove any existing ¥ symbol and add single ¥ with right alignment
-            val priceWithoutSymbol = car.cnfPrice.toString().replace("¥", "").trim()
-            val priceCell = createCellWithBorder("¥$priceWithoutSymbol", false)
+            val yearCell = createCellWithBorder(car.year, false)
+            yearCell.setTextAlignment(com.itextpdf.layout.properties.TextAlignment.RIGHT)
+            carListTable.addCell(yearCell)
+            val priceCell = createCellWithBorder(formatPriceWithCommas(car.cnfPrice), false)
             priceCell.setTextAlignment(com.itextpdf.layout.properties.TextAlignment.RIGHT)
-            carListTable.addCell(priceCell) // Single ¥ symbol for FOB price with right alignment
+            carListTable.addCell(priceCell)
         }
         
         document.add(carListTable)
@@ -1129,6 +1302,26 @@ class PurchaseController(
             .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
             .setPadding(8f)
             .setMargin(0f)
+    }
+    
+    /**
+     * Formats a price (Long) or price string with thousand separators (commas).
+     * Examples: 16500 -> "¥16,500", "¥16500" -> "¥16,500", "abc" -> "¥0"
+     */
+    private fun formatPriceWithCommas(price: Any?): String {
+        if (price == null) return "¥0"
+        
+        val priceStr = price.toString().trim()
+            .replace("¥", "")  // Remove existing ¥ symbol
+            .replace(",", "")  // Remove existing commas
+            .trim()
+        
+        return try {
+            val longValue = priceStr.toLong()
+            "¥${String.format("%,d", longValue)}"  // Format with thousand separators
+        } catch (e: NumberFormatException) {
+            "¥0"  // Default to ¥0 if parsing fails
+        }
     }
     
     private fun createHeaderCell(text: String): com.itextpdf.layout.element.Cell {

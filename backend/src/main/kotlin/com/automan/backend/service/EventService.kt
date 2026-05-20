@@ -1,7 +1,10 @@
 package com.automan.backend.service
 
+import com.automan.backend.dto.CreateEventRequest
+import com.automan.backend.dto.InvoiceLedgerResult
 import com.automan.backend.model.Event
 import com.automan.backend.model.Client
+import com.automan.backend.model.EventType
 import com.automan.backend.repository.EventRepository
 import com.automan.backend.repository.ClientRepository
 import com.automan.backend.util.Logger
@@ -39,30 +42,19 @@ class EventService(
     @Transactional
     fun createEvent(event: Event): Event {
         Logger.debug("createEvent called for client ID: ${event.clientId}")
-        try {
-            val client = clientRepository.findById(event.clientId).orElse(null)
-                ?: throw IllegalArgumentException("Client not found: ${event.clientId}")
-            Logger.debug("Client found: ${client.clientName}")
-
-            // Use client's current balance as the starting point
-            val currentBalance = client.currentBalance
-            Logger.debug("Current client balance: $currentBalance")
-
-            val newBalance = currentBalance + (event.paymentReceived ?: 0.0) - (event.transactionPrice ?: 0.0)
-            Logger.debug("New balance: $newBalance")
-
-            val eventWithBalance = event.copy(runningBalance = newBalance)
-            Logger.debug("Saving event...")
-            val saved = eventRepository.save(eventWithBalance)
-            Logger.debug("Event saved with ID: ${saved.id}")
-            Logger.debug("Skipping client balance update for now...")
-            // updateClientBalance(event.clientId, newBalance)
-            Logger.debug("Event creation completed successfully")
-            return saved
-        } catch (e: Exception) {
-            Logger.error("Exception in createEvent: ${e.message}", e)
-            throw e
-        }
+        return createEventFromDto(
+            CreateEventRequest(
+                clientId = event.clientId,
+                eventDate = event.eventDate,
+                eventType = event.eventType,
+                eventDescription = event.eventDescription,
+                quantity = event.quantity,
+                billNumber = event.billNumber,
+                invoiceNumber = event.invoiceNumber,
+                transactionPrice = event.transactionPrice,
+                paymentReceived = event.paymentReceived,
+            ),
+        )
     }
 
     @Transactional
@@ -87,12 +79,14 @@ class EventService(
             val event = Event(
                 clientId = client.id!!,
                 eventDate = req.eventDate,
+                eventType = req.eventType,
                 eventDescription = req.eventDescription,
                 quantity = req.quantity,
                 billNumber = req.billNumber,
+                invoiceNumber = req.invoiceNumber,
                 transactionPrice = req.transactionPrice,
                 paymentReceived = req.paymentReceived,
-                runningBalance = newBalance
+                runningBalance = newBalance,
             )
 
             Logger.debug("Saving event...")
@@ -106,6 +100,159 @@ class EventService(
             Logger.error("Exception in createEventFromDto: ${e.message}", e)
             throw e
         }
+    }
+
+    /**
+     * Posts one INVOICE_ISSUED ledger line when a customer invoice is confirmed.
+     * Skips when the latest invoice ledger state already reflects [transactionPriceTotal].
+     */
+    @Transactional
+    fun postInvoiceIssuedLedger(
+        clientId: Long,
+        invoiceNumber: String,
+        eventDate: LocalDate,
+        transactionPriceTotal: Double,
+        lineCount: Int,
+        vessel: String?,
+    ): Event? {
+        val inv = invoiceNumber.trim()
+        if (inv.isEmpty()) return null
+        if (transactionPriceTotal <= 0.0) {
+            Logger.warn("Ledger: skip invoice $inv — zero or negative total ($transactionPriceTotal)")
+            return null
+        }
+        if (isInvoiceLedgerBalancedTo(clientId, inv, transactionPriceTotal)) {
+            Logger.debug("Ledger: invoice $inv already at target amount $transactionPriceTotal for client $clientId")
+            return findLatestInvoiceIssued(clientId, inv)
+        }
+        val desc = buildString {
+            append("Invoice ").append(inv)
+            if (!vessel.isNullOrBlank()) {
+                append(" · ").append(vessel.trim())
+            }
+        }
+        return createEventFromDto(
+            CreateEventRequest(
+                clientId = clientId,
+                eventDate = eventDate,
+                eventDescription = desc,
+                quantity = lineCount,
+                billNumber = inv,
+                transactionPrice = transactionPriceTotal,
+                paymentReceived = null,
+                eventType = EventType.INVOICE_ISSUED,
+                invoiceNumber = inv,
+            ),
+        )
+    }
+
+    /**
+     * Credits back an active [INVOICE_ISSUED] amount (Option A). Idempotent while an issued amount remains open.
+     */
+    @Transactional
+    fun reverseActiveInvoiceLedger(
+        clientId: Long,
+        invoiceNumber: String,
+        eventDate: LocalDate,
+        vessel: String?,
+    ): Event? {
+        val inv = invoiceNumber.trim()
+        if (inv.isEmpty()) return null
+        val openAmount = openInvoiceLedgerCharge(clientId, inv)
+        if (openAmount <= 0.0) {
+            Logger.debug("Ledger: no open invoice charge to reverse for $inv (client $clientId)")
+            return null
+        }
+        val desc = buildString {
+            append("Reversal · Invoice ").append(inv)
+            if (!vessel.isNullOrBlank()) {
+                append(" · ").append(vessel.trim())
+            }
+        }
+        return createEventFromDto(
+            CreateEventRequest(
+                clientId = clientId,
+                eventDate = eventDate,
+                eventDescription = desc,
+                quantity = null,
+                billNumber = inv,
+                transactionPrice = null,
+                paymentReceived = openAmount,
+                eventType = EventType.INVOICE_REVERSAL,
+                invoiceNumber = inv,
+            ),
+        )
+    }
+
+    /** Net invoice charge still on the ledger: issued debits minus reversal credits. */
+    internal fun openInvoiceLedgerCharge(clientId: Long, invoiceNumber: String): Double {
+        val inv = invoiceNumber.trim()
+        if (inv.isEmpty()) return 0.0
+        val events = eventRepository.findByClientIdAndInvoiceNumberOrderByIdDesc(clientId, inv)
+        var issued = 0.0
+        var reversed = 0.0
+        for (e in events) {
+            when (e.eventType) {
+                EventType.INVOICE_ISSUED -> issued += e.transactionPrice ?: 0.0
+                EventType.INVOICE_REVERSAL -> reversed += e.paymentReceived ?: 0.0
+                else -> { }
+            }
+        }
+        return (issued - reversed).coerceAtLeast(0.0)
+    }
+
+    private fun isInvoiceLedgerBalancedTo(clientId: Long, invoiceNumber: String, targetCharge: Double): Boolean {
+        val open = openInvoiceLedgerCharge(clientId, invoiceNumber)
+        return kotlin.math.abs(open - targetCharge) < 0.01
+    }
+
+    private fun findLatestInvoiceIssued(clientId: Long, invoiceNumber: String): Event? =
+        eventRepository.findFirstByClientIdAndInvoiceNumberAndEventTypeOrderByIdDesc(
+            clientId, invoiceNumber.trim(), EventType.INVOICE_ISSUED,
+        ).orElse(null)
+
+    /**
+     * Re-sync ledger for invoice save/confirm: no-op when already at [transactionPriceTotal];
+     * otherwise reverse open charge and post the new total.
+     */
+    @Transactional
+    fun syncInvoiceLedger(
+        clientId: Long,
+        invoiceNumber: String,
+        eventDate: LocalDate,
+        transactionPriceTotal: Double,
+        lineCount: Int,
+        vessel: String?,
+    ): InvoiceLedgerResult {
+        if (transactionPriceTotal <= 0.0) {
+            val reversed = reverseActiveInvoiceLedger(clientId, invoiceNumber, eventDate, vessel)
+            return InvoiceLedgerResult(
+                reversed = reversed != null,
+                clientId = clientId,
+                warning = "Invoice total is zero; any open ledger charge was reversed.",
+            )
+        }
+        if (isInvoiceLedgerBalancedTo(clientId, invoiceNumber, transactionPriceTotal)) {
+            return InvoiceLedgerResult(clientId = clientId)
+        }
+        val reversed = if (openInvoiceLedgerCharge(clientId, invoiceNumber) > 0.0) {
+            reverseActiveInvoiceLedger(clientId, invoiceNumber, eventDate, vessel)
+        } else {
+            null
+        }
+        val posted = postInvoiceIssuedLedger(
+            clientId = clientId,
+            invoiceNumber = invoiceNumber,
+            eventDate = eventDate,
+            transactionPriceTotal = transactionPriceTotal,
+            lineCount = lineCount,
+            vessel = vessel,
+        )
+        return InvoiceLedgerResult(
+            posted = posted != null,
+            reversed = reversed != null,
+            clientId = clientId,
+        )
     }
     
     @Transactional
@@ -124,6 +271,7 @@ class EventService(
             eventDescription = updateData["eventDescription"] as? String ?: existingEvent.eventDescription,
             quantity = (updateData["quantity"] as? Number)?.toInt() ?: existingEvent.quantity,
             billNumber = updateData["billNumber"] as? String ?: existingEvent.billNumber,
+            invoiceNumber = updateData["invoiceNumber"] as? String ?: existingEvent.invoiceNumber,
             transactionPrice = (updateData["transactionPrice"] as? Number)?.toDouble() ?: existingEvent.transactionPrice,
             paymentReceived = (updateData["paymentReceived"] as? Number)?.toDouble() ?: existingEvent.paymentReceived
         )
@@ -307,6 +455,7 @@ class EventService(
             eventDescription = eventDescription,
             quantity = quantity,
             billNumber = row["BILL. NO"]?.takeIf { it.isNotBlank() },
+            invoiceNumber = null,
             transactionPrice = transactionPrice,
             paymentReceived = paymentReceived,
             runningBalance = runningBalance,

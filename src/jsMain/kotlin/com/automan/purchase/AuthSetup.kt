@@ -5,6 +5,71 @@ import kotlinx.browser.window
 import org.w3c.dom.*
 import org.w3c.dom.events.Event
 
+/**
+ * Production-only auto-login driven by `<meta name="automan-prod-auto-login" content="true">` in index.html.
+ * Local/dev builds ship `false` so users still use the login screen.
+ * Dockerfile.frontend.prod flips this to true for AWS images.
+ *
+ * Credentials default to Flyway/V1 seeded admin (`admin@automan.com` / `password`).
+ * Optional metas override email/password if the seeded admin password was rotated.
+ */
+fun isProdAutoLoginEnabled(): Boolean {
+    val meta = document.querySelector("meta[name=\"automan-prod-auto-login\"]") as? HTMLMetaElement
+    return meta?.getAttribute("content")?.trim()?.equals("true", ignoreCase = true) == true
+}
+
+fun prodAutoLoginEmail(): String {
+    val meta = document.querySelector("meta[name=\"automan-prod-auto-login-email\"]") as? HTMLMetaElement
+    return meta?.getAttribute("content")?.trim()?.takeIf { it.isNotEmpty() } ?: "admin@automan.com"
+}
+
+fun prodAutoLoginPassword(): String {
+    val meta = document.querySelector("meta[name=\"automan-prod-auto-login-password\"]") as? HTMLMetaElement
+    val raw = meta?.getAttribute("content")?.trim()
+    return raw?.takeIf { it.isNotEmpty() } ?: "password"
+}
+
+/**
+ * Calls POST /api/auth/login when no token exists and prod auto-login meta is enabled.
+ */
+suspend fun prodAutoLoginIfNeeded() {
+    val existing = safeLocalStorageGet("authToken")
+    if (!existing.isNullOrBlank()) return
+    if (!isProdAutoLoginEnabled()) return
+    val email = prodAutoLoginEmail()
+    val password = prodAutoLoginPassword()
+    val body = js("{}")
+    body.email = email
+    body.password = password
+    when (val r = ApiClient.post<dynamic>("auth/login", body)) {
+        is ApiResult.Success -> {
+            val d = r.data.asDynamic()
+            val token = d.token as? String
+            val role = d.role as? String
+            val nameResp = d.name as? String
+            val userId = d.id as? Number
+            if (token.isNullOrBlank()) {
+                Logger.warn("Prod auto-login: login response had no token")
+                return
+            }
+            safeLocalStorageSet("authToken", token)
+            if (!role.isNullOrBlank()) safeLocalStorageSet("authUserRole", role)
+            if (!nameResp.isNullOrBlank()) safeLocalStorageSet("authUserName", nameResp)
+            if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
+            Logger.debug("Prod auto-login succeeded for ${email}")
+            applyRoleBasedRestrictions()
+            updateUserInfoInSidebar()
+            val h = window.location.hash
+            if (h.isEmpty() || h == "#" || h == "#/") {
+                window.location.hash = "#/purchase"
+            }
+        }
+        is ApiResult.Error -> {
+            Logger.warn("Prod auto-login failed (${r.statusCode}): ${r.message}")
+        }
+    }
+}
+
 // Authentication Functions (sign in / sign up only; no setup page)
 
 fun logout() {

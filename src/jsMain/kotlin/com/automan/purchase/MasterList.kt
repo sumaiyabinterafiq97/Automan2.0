@@ -56,6 +56,35 @@ private val consigneeMapSortOrderByField: MutableMap<String, String> = mutableMa
 /** Notes field removed from Consignee Map modal; snapshot keeps DB value on edit/duplicate saves. */
 private var consigneeModalNotesSnapshot: String? = null
 
+/** Supplier Map tree (`rixo_prices`): one UI row per DB row; grouped visually by supplier → stock. */
+private data class SupplierPriceRowLite(
+    val id: Long,
+    val supplier: String,
+    val stock: String,
+    val rixoCompany: String,
+    val venueId: String,
+    val pol: String,
+)
+
+private var supplierMapTreeRowsCache: List<SupplierPriceRowLite> = emptyList()
+private var supplierTreeSelectedSupplier: String? = null
+private var supplierTreeSelectedStock: String? = null
+private var supplierTreePolEditRowId: Long? = null
+private var supplierTreePolEditBranchIdx: Int? = null
+private var supplierTreeVenueEditRowId: Long? = null
+private var supplierTreeVenueEditBranchIdx: Int? = null
+private var supplierTreeSelectedStockRowId: Long? = null
+private var supplierTreeSelectedStockBranchIdx: Int? = null
+private var supplierTreeLeafAddRowId: Long? = null
+private var supplierTreeLeafAddBranchIdx: Int? = null
+private var supplierTreeInlineAddLevel: String? = null
+private var supplierTreeInlineSupplier: String = ""
+private var supplierTreeInlineStock: String = ""
+/** Full parallel-branch inline edit (stock + venue + POL + Rixo); one >> commits all. */
+private var supplierTreeBranchEditRowId: Long? = null
+private var supplierTreeBranchEditBranchIdx: Int? = null
+private var supplierTreeSupplierEditName: String? = null
+
 /** Matches `CarBrandMapping.carName` / DB column `car_name` length. */
 private const val CAR_BRAND_CAR_NAME_MAX_LEN = 100
 
@@ -235,6 +264,7 @@ private fun groupCarBrandMappingsForView(mappings: List<dynamic>): List<dynamic>
         groupedObj.rank = joinDistinctNonBlank(list.map { (it.rank ?: "").toString() })
         groupedObj.color = joinDistinctNonBlank(list.map { (it.color ?: "").toString() })
         groupedObj.driveType = joinDistinctNonBlank(list.map { (it.driveType ?: "").toString() })
+        groupedObj.recycleFee = joinDistinctNonBlank(list.map { (it.recycleFee ?: "").toString() })
 
         grouped.add(groupedObj)
     }
@@ -297,6 +327,7 @@ private fun tryPrefillCarBrandModalFromGroupedRow() {
     val rankVal = (row.rank ?: "").toString()
     val colorVal = (row.color ?: "").toString()
     val driveType = (row.driveType ?: "").toString()
+    val recycleFeeVal = (row.recycleFee ?: "").toString()
 
     (document.getElementById("carBrandChassis") as? HTMLInputElement)?.value = chassis
     setChipFieldValue("carBrandBrand", carBrand)
@@ -312,6 +343,16 @@ private fun tryPrefillCarBrandModalFromGroupedRow() {
     setChipFieldValue("carBrandRank", rankVal)
     setChipFieldValue("carBrandColor", colorVal)
     setChipFieldValue("carBrandDriveType", driveType)
+    val recycleFeeInput = document.getElementById("carBrandRecycleFee") as? HTMLInputElement
+    if (recycleFeeInput != null) {
+        recycleFeeInput.value = recycleFeeVal
+        // Format it using the global money formatter if available
+        window.setTimeout({
+            if (js("typeof window._moneyFormat === 'function'").unsafeCast<Boolean>()) {
+                recycleFeeInput.value = js("window._moneyFormat(recycleFeeInput.value)").unsafeCast<String>()
+            }
+        }, 0)
+    }
 
     js("window.__carBrandRowData = null")
 }
@@ -394,10 +435,82 @@ fun populateEditableComboboxFromMasterMenu(selectId: String, fieldName: String) 
         }
 }
 
+/** Consignee Map distinct names — same source as Consignee Map list (`GET booking/mappings/consignee-names`). */
+fun populateEditableComboboxFromBookingConsigneeNames(selectId: String) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    window.fetch(apiUrl("booking/mappings/consignee-names"))
+        .then { resp: dynamic ->
+            if (resp.ok) resp.json() else js("Promise.resolve({})")
+        }
+        .then { raw: dynamic ->
+            val list = parseConsigneeNamesApiResponse(raw).distinct().sorted()
+            while (select.options.length > 1) {
+                select.remove(1)
+            }
+            for (v in list) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = v
+                opt.text = v
+                select.add(opt)
+            }
+            val current = (document.getElementById("${selectId}Input") as? HTMLInputElement)?.value?.trim() ?: ""
+            if (current.isNotEmpty()) {
+                setEditableComboboxValue(selectId, current)
+            }
+        }
+        .catch { _: dynamic -> }
+}
+
+private fun parseConsigneeNamesApiResponse(raw: dynamic): List<String> {
+    return try {
+        val data = js("raw && raw.data")
+        if (js("Array.isArray(data)") as Boolean) {
+            data.unsafeCast<Array<dynamic>>().mapNotNull { it?.toString()?.trim() }.filter { it.isNotEmpty() }
+        } else if (js("Array.isArray(raw)") as Boolean) {
+            raw.unsafeCast<Array<dynamic>>().mapNotNull { it?.toString()?.trim() }.filter { it.isNotEmpty() }
+        } else {
+            emptyList()
+        }
+    } catch (_: dynamic) {
+        emptyList()
+    }
+}
+
+/** Rixo Price Mapping distinct rixo companies (`GET rixo-mapping/distinct-rixo-companies` — raw JSON array). */
+fun populateEditableComboboxFromRixoMappingDistinctCompanies(selectId: String) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    window.fetch(apiUrl("rixo-mapping/distinct-rixo-companies"))
+        .then { resp: dynamic ->
+            if (resp.ok) resp.json() else js("Promise.resolve([])")
+        }
+        .then { raw: dynamic ->
+            val list = when {
+                js("Array.isArray(raw)") as Boolean ->
+                    raw.unsafeCast<Array<dynamic>>().mapNotNull { it?.toString()?.trim() }.filter { it.isNotEmpty() }
+                else ->
+                    parseConsigneeNamesApiResponse(raw)
+            }.distinct().sorted()
+            while (select.options.length > 1) {
+                select.remove(1)
+            }
+            for (v in list) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = v
+                opt.text = v
+                select.add(opt)
+            }
+            val current = (document.getElementById("${selectId}Input") as? HTMLInputElement)?.value?.trim() ?: ""
+            if (current.isNotEmpty()) {
+                setEditableComboboxValue(selectId, current)
+            }
+        }
+        .catch { _: dynamic -> }
+}
+
 private fun populateSupplierMapModalComboboxes(isDuplicate: Boolean) {
     val prefix = if (isDuplicate) "dupSupplier" else "supplier"
     populateEditableComboboxFromMasterMenu("${prefix}StockLocation", "stock_location")
-    populateEditableComboboxFromMasterMenu("${prefix}RixoCompany", "rixo_company")
+    populateEditableComboboxFromRixoMappingDistinctCompanies("${prefix}RixoCompany")
     populateEditableComboboxFromMasterMenu("${prefix}VenueId", "venue_id")
     populateEditableComboboxFromMasterMenu("${prefix}Pol", "pol")
     // DB field is 'type_of_vehicle' (label: Vehicle type)
@@ -409,13 +522,13 @@ private fun populateConsigneeMapModalComboboxes() {
     populateEditableComboboxFromMasterMenu("consigneeMapPod", "pod")
 }
 
-/** Client Map modal: chip multi-selects + single client combobox from master_menu (see wireClientMapModalComboboxes). */
+/** Client Map modal: Bank Info from master bank_accounts; Consignee from Consignee Map (booking consignee-names). Bank/Consignee allow typed values not only in the list. */
 fun wireClientMapModalComboboxes() {
     ensureSupplierChipJs()
     populateEditableComboboxFromMasterMenu("clientMapMmCountry", "country")
     populateEditableComboboxFromMasterMenu("clientMapMmPod", "pod")
     populateEditableComboboxFromMasterMenu("clientMapMmBankInfo", "bank_accounts")
-    populateEditableComboboxFromMasterMenu("clientMapMmConsignee", "consignee")
+    populateEditableComboboxFromBookingConsigneeNames("clientMapMmConsignee")
 }
 
 /** DB / legacy rows may use commas or semicolons; chip UI expects ';'-joined tokens. */
@@ -430,7 +543,9 @@ fun normalizeStoredListForChips(raw: String): String {
 private fun splitConsigneeChipTokens(hiddenJoined: String): List<String> =
     hiddenJoined.split(';').map { it.trim() }.filter { it.isNotEmpty() }
 
-fun createChipMultiSelectCombobox(id: String, placeholder: String): String {
+fun createChipMultiSelectCombobox(id: String, placeholder: String, allowAnyTypedToken: Boolean = false): String {
+    val allowAttr =
+        if (allowAnyTypedToken) """ data-supplier-chip-allow-any="true"""" else ""
     // Structure intentionally mirrors editable combobox IDs:
     // - input:  ${id}Input
     // - select: ${id}
@@ -439,7 +554,7 @@ fun createChipMultiSelectCombobox(id: String, placeholder: String): String {
     // - hidden: ${id}Hidden  (stores ';'-joined values for saving)
     return """
         <div style="position: relative; width: 100%;">
-            <div id="${id}Wrap" style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; width:100%; min-height:42px; padding:6px 44px 6px 8px; border:1px solid #d1d5db; border-radius:6px; box-sizing:border-box; background:white;">
+            <div id="${id}Wrap" style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; width:100%; min-height:42px; padding:6px 44px 6px 8px; border:1px solid #d1d5db; border-radius:6px; box-sizing:border-box; background:white;"$allowAttr>
                 <div id="${id}Chips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
                 <input type="text" id="${id}Input" placeholder="$placeholder"
                        style="flex:1; min-width:120px; border:none; outline:none; font-size:14px; padding:6px 0; background:transparent;"
@@ -480,7 +595,7 @@ fun createChipInput(id: String, placeholder: String, maxLength: Int? = null): St
     """.trimIndent()
 }
 
-private fun ensureSupplierChipJs() {
+fun ensureSupplierChipJs() {
     js("""
         if (!window.__supplierChipJsReady) {
           window.__supplierChipJsReady = true;
@@ -512,12 +627,18 @@ private fun ensureSupplierChipJs() {
           function _getInput(id) { return document.getElementById(id + 'Input'); }
           function _normalize(v) { return (v || '').toString().trim().toUpperCase(); }
           function _isNumericChipField(id) {
-            return id === 'carBrandCc' || id === 'carBrandSeat' || id === 'carBrandDoor';
+            return id === 'carBrandCc' || id === 'carBrandSeat' || id === 'carBrandDoor'
+              || id === 'scmCarsPerContainer' || id === 'dupScmCarsPerContainer';
           }
           function _isValidNumericToken(v) {
             return /^[0-9]+$/.test((v || '').toString().trim());
           }
           function _isAllowedToken(id, value) {
+            var wrap = document.getElementById(id + 'Wrap');
+            if (wrap && wrap.getAttribute && wrap.getAttribute('data-supplier-chip-allow-any') === 'true') {
+              var fs = (value || '').toString().trim();
+              return fs.length > 0;
+            }
             var select = document.getElementById(id);
             // Free-text chip inputs (no select element) should accept typed values.
             if (!select) return true;
@@ -554,12 +675,77 @@ private fun ensureSupplierChipJs() {
                 window.supplierChipRemove(id, t);
               });
               var label = document.createElement('span');
-              label.textContent = t;
+              var labelText = t;
+              if ((id === 'scmShippingPricePerCar' || id === 'dupScmShippingPricePerCar')
+                  && typeof window._moneySanitize === 'function' && typeof window._moneyFormat === 'function') {
+                labelText = window._moneyFormat(window._moneySanitize(t));
+              }
+              label.textContent = labelText;
               chip.appendChild(x);
               chip.appendChild(label);
               chips.appendChild(chip);
               })(tokens[i]);
             }
+            if (id.startsWith('scm') || id.startsWith('dupScm')) {
+              var prefix = id.startsWith('dupScm') ? 'dupScm' : 'scm';
+              _updateScmCombinedPreview(prefix);
+            }
+          }
+
+          function _updateScmCombinedPreview(prefix) {
+             var carsHidden = _getHidden(prefix + 'CarsPerContainer');
+             var priceHidden = _getHidden(prefix + 'ShippingPricePerCar');
+             var previewChips = document.getElementById(prefix + 'CombinedPreviewChips');
+             if (!carsHidden || !priceHidden || !previewChips) return;
+             
+             var cars = _splitTokens(carsHidden.value);
+             var prices = _splitTokens(priceHidden.value);
+             
+             previewChips.innerHTML = '';
+             var maxLen = Math.max(cars.length, prices.length);
+             if (maxLen === 0) {
+                 previewChips.innerHTML = '<span style="color:#9ca3af;font-size:13px;font-style:italic;">No tiers added yet</span>';
+                 return;
+             }
+             for (var i = 0; i < maxLen; i++) {
+                var c = i < cars.length ? cars[i] : '?';
+                var rawP = i < prices.length ? prices[i] : '?';
+                var p = rawP;
+                if (typeof window._moneySanitize === 'function' && typeof window._moneyFormat === 'function' && p !== '?') {
+                   p = window._moneyFormat(window._moneySanitize(p));
+                } else if (p !== '?') {
+                   p = '$' + p;
+                }
+                
+                var chip = document.createElement('span');
+                chip.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:#4f46e5; color:white; border-radius:9999px; padding:6px 10px; font-size:12px; font-weight:600; line-height:1;';
+                
+                var x = document.createElement('button');
+                x.type = 'button';
+                x.textContent = '×';
+                x.setAttribute('aria-label', 'Remove');
+                x.style.cssText = 'border:none; background:rgba(255,255,255,0.20); color:white; width:18px; height:18px; border-radius:9999px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; padding:0; line-height:1;';
+                
+                (function(rawCar, rawPrice) {
+                    x.addEventListener('click', function(ev) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        if (rawCar !== '?') {
+                            window.supplierChipRemove(prefix + 'CarsPerContainer', rawCar);
+                        }
+                        if (rawPrice !== '?') {
+                            window.supplierChipRemove(prefix + 'ShippingPricePerCar', rawPrice);
+                        }
+                    });
+                })(c, rawP);
+
+                var label = document.createElement('span');
+                label.textContent = c + ' / ' + p;
+
+                chip.appendChild(x);
+                chip.appendChild(label);
+                previewChips.appendChild(chip);
+             }
           }
 
           // Prefill from server / grouped row: show all tokens as chips even before async
@@ -591,6 +777,10 @@ private fun ensureSupplierChipJs() {
           window.supplierChipAdd = function(id, value) {
             var v = (value || '').toString().trim();
             if (!v) return;
+            if ((id === 'scmShippingPricePerCar' || id === 'dupScmShippingPricePerCar')
+                && typeof window._moneySanitize === 'function') {
+              v = window._moneySanitize(v);
+            }
             if (_isNumericChipField(id) && !_isValidNumericToken(v)) {
               var invalidNumberInput = _getInput(id);
               if (invalidNumberInput) invalidNumberInput.value = '';
@@ -783,9 +973,9 @@ fun getDefaultSupplierColumnsForDevice(deviceType: String? = null): List<String>
     val device = deviceType ?: getDeviceType()
     return when (device) {
         "mobile" -> listOf("supplierName", "stockLocation", "rixoCompany")
-        "tablet" -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
-        "desktop" -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
-        else -> listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
+        "tablet" -> listOf("supplierName", "stockLocation", "rixoCompany", "pol", "venueId")
+        "desktop" -> listOf("supplierName", "stockLocation", "rixoCompany", "pol", "venueId")
+        else -> listOf("supplierName", "stockLocation", "rixoCompany", "pol", "venueId")
     }
 }
 
@@ -2063,45 +2253,46 @@ private fun buildConsigneeTableUi(
     if (orderedForDisplay.isEmpty()) {
         val message = if (filterLabel.isNotEmpty()) {
             "No consignee data found for: $filterLabel"
-        } else {
+            } else {
             "No consignee data found."
         }
-        tableDiv.innerHTML = """
-            <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+    tableDiv.innerHTML = """
+        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
                 <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
                 <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search or filter</div>
-            </div>
-        """
+        </div>
+    """
         return
     }
 
     if (paginatedMappings.isEmpty()) {
-        tableDiv.innerHTML = """
-            <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
+                tableDiv.innerHTML = """
+                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
                 <div style="font-size: 16px; margin-bottom: 8px;">No rows on this page.</div>
-            </div>
-        """
+                    </div>
+                """
         return
     }
 
-    val selectedColumns = getSelectedConsigneeColumns()
-    val columnLabels = mapOf(
-        "country" to "Country",
-        "consigneeName" to "Consignee Name",
-        "consigneeAddress" to "Consignee Address",
+            val selectedColumns = getSelectedConsigneeColumns()
+            val columnLabels = mapOf(
+                "country" to "Country",
+                "consigneeName" to "Consignee Name",
+                "consigneeAddress" to "Consignee Address",
         "pod" to "POD"
-    )
-
-    var html = """
+            )
+            
+            val consigneeColCount = 1 + selectedColumns.size
+            var html = """
                 <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #d1d5db;">
-                    <table style="width: 100%; border-collapse: collapse; border: 1px solid #d1d5db; background: #fff;" class="consignee-table">
+                    <table style="width: 100%; border-collapse: collapse; border: 1px solid #d1d5db; background: #fff; table-layout: fixed;" class="consignee-table">${htmlTableColgroupNarrowActionEqualRest(consigneeColCount)}
                         <thead>
                             <tr>
                                 <th style="padding: 12px 14px; text-align: left; min-width: 72px; border: 1px solid #e5e7eb; background-color: #f3f4f6;"></th>
             """
-
-    for (columnKey in selectedColumns) {
-        val label = columnLabels[columnKey] ?: columnKey
+            
+            for (columnKey in selectedColumns) {
+                val label = columnLabels[columnKey] ?: columnKey
         val thStyle = "padding: 12px 16px; text-align: left; font-weight: 700; color: #111827; font-size: 13px; letter-spacing: 0.02em; border: 1px solid #e5e7eb; background-color: #f3f4f6;"
         html += if (columnKey in consigneeSortable) {
             val tip = masterMapColumnSortTooltip(consigneeMapSortOrderByField, columnKey)
@@ -2110,23 +2301,23 @@ private fun buildConsigneeTableUi(
         } else {
             """<th style="$thStyle">$label</th>"""
         }
-    }
-
-    html += """
+            }
+            
+            html += """
                             </tr>
                         </thead>
                         <tbody>
             """
-
-    for (mapping in paginatedMappings) {
-        val id = (mapping.id ?: "").toString()
-        val country = (mapping.country ?: "").toString()
-        val consigneeName = (mapping.consigneeName ?: "").toString()
-        val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
-        val consigneeAddressShort = if (consigneeAddress.length > 60) consigneeAddress.take(60) + "..." else consigneeAddress
-        val pod = (mapping.pod ?: "").toString()
-
-        html += """
+            
+            for (mapping in paginatedMappings) {
+                val id = (mapping.id ?: "").toString()
+                val country = (mapping.country ?: "").toString()
+                val consigneeName = (mapping.consigneeName ?: "").toString()
+                val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
+                val consigneeAddressShort = if (consigneeAddress.length > 60) consigneeAddress.take(60) + "..." else consigneeAddress
+                val pod = (mapping.pod ?: "").toString()
+                
+                html += """
                     <tr>
                         <td style="padding: 10px 12px; border: 1px solid #e5e7eb; background-color: #ffffff; vertical-align: middle;">
                             <div style="display:flex; gap:6px; align-items:center;">
@@ -2146,16 +2337,16 @@ private fun buildConsigneeTableUi(
                             </div>
                         </td>
                 """
-
-        for (columnKey in selectedColumns) {
-            val value = when (columnKey) {
-                "country" -> country
-                "consigneeName" -> consigneeName
-                "consigneeAddress" -> consigneeAddressShort
-                "pod" -> pod
-                else -> ""
-            }
-            val cellStyle = when (columnKey) {
+                
+                for (columnKey in selectedColumns) {
+                    val value = when (columnKey) {
+                        "country" -> country
+                        "consigneeName" -> consigneeName
+                        "consigneeAddress" -> consigneeAddressShort
+                        "pod" -> pod
+                        else -> ""
+                    }
+                    val cellStyle = when (columnKey) {
                 "country", "consigneeName" -> "padding: 12px 16px; color: #111827; font-size: 14px; font-weight: 500; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
                 "consigneeAddress" -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
                 else -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
@@ -2165,25 +2356,25 @@ private fun buildConsigneeTableUi(
                 if (columnKey == "consigneeAddress") formatConsigneeMapAddressChipHtml(value)
                 else formatConsigneeMapValueChipHtml(value)
             html += """<td style="$cellStyle"$titleAttr>$cellInner</td>"""
-        }
-
-        html += """</tr>"""
-    }
-
-    html += """
+                }
+                
+                html += """</tr>"""
+            }
+            
+            html += """
                         </tbody>
                     </table>
                 </div>
             """
-
+            
     val footerSummary = if (isServerSearch) {
         "Page $consigneesCurrentPage of $totalPages (search) · ${consigneeMapSearchTotal} matching row(s) · ${paginatedMappings.size} on this page"
     } else {
         "Showing $footerStart to $footerEnd of ${orderedForDisplay.size} consignee${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"
     }
 
-    if (totalPages > 1) {
-        html += """
+            if (totalPages > 1) {
+                html += """
                     <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
                         <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
                             $footerSummary
@@ -2199,17 +2390,17 @@ private fun buildConsigneeTableUi(
                         </div>
                     </div>
                 """
-    } else {
-        html += """
+            } else {
+                html += """
                     <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
                         ${if (isServerSearch) footerSummary else "Total: ${orderedForDisplay.size} consignee${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"}
                     </div>
                 """
-    }
-
-    tableDiv.innerHTML = html
-
-    document.getElementById("consigneesPrevPage")?.addEventListener("click", { _: Event ->
+            }
+            
+            tableDiv.innerHTML = html
+            
+            document.getElementById("consigneesPrevPage")?.addEventListener("click", { _: Event ->
         if (isServerSearch) {
             if (consigneeMapSearchPageZeroBased > 0) {
                 consigneeMapSearchPageZeroBased--
@@ -2217,12 +2408,12 @@ private fun buildConsigneeTableUi(
                 loadMasterConsignee()
             }
         } else if (consigneesCurrentPage > 1) {
-            consigneesCurrentPage--
-            loadMasterConsignee()
-        }
-    })
-
-    document.getElementById("consigneesNextPage")?.addEventListener("click", { _: Event ->
+                    consigneesCurrentPage--
+                    loadMasterConsignee()
+                }
+            })
+            
+            document.getElementById("consigneesNextPage")?.addEventListener("click", { _: Event ->
         if (isServerSearch) {
             if (consigneeMapSearchPageZeroBased < consigneeMapSearchTotalPages - 1) {
                 consigneeMapSearchPageZeroBased++
@@ -2232,8 +2423,8 @@ private fun buildConsigneeTableUi(
         } else {
             val tp = kotlin.math.ceil(allConsignees.size.toDouble() / consigneesItemsPerPage).toInt()
             if (consigneesCurrentPage < tp) {
-                consigneesCurrentPage++
-                loadMasterConsignee()
+                    consigneesCurrentPage++
+                    loadMasterConsignee()
             }
         }
     })
@@ -2520,8 +2711,8 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
     val paginatedMappings = if (isServerSearch) {
         filteredMappings
     } else {
-        val startIndex = (consigneesCurrentPage - 1) * consigneesItemsPerPage
-        val endIndex = kotlin.math.min(startIndex + consigneesItemsPerPage, filteredMappings.size)
+    val startIndex = (consigneesCurrentPage - 1) * consigneesItemsPerPage
+    val endIndex = kotlin.math.min(startIndex + consigneesItemsPerPage, filteredMappings.size)
         filteredMappings.subList(startIndex, endIndex)
     }
     
@@ -2651,8 +2842,8 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
         } else {
             val tp = kotlin.math.ceil(allConsignees.size.toDouble() / consigneesItemsPerPage).toInt()
             if (consigneesCurrentPage < tp) {
-                consigneesCurrentPage++
-                loadMasterConsignee()
+            consigneesCurrentPage++
+            loadMasterConsignee()
             }
         }
     })
@@ -2875,7 +3066,7 @@ fun showConsigneeModal(mappingId: Long?, duplicateFromId: Long? = null) {
     """
     
     document.body?.insertAdjacentHTML("beforeend", modalHtml)
-
+    
     ensureSupplierChipJs()
     populateConsigneeMapModalComboboxes()
 
@@ -2883,7 +3074,7 @@ fun showConsigneeModal(mappingId: Long?, duplicateFromId: Long? = null) {
         isDuplicate && duplicateFromId != null -> loadConsigneeDataForEdit(duplicateFromId, clearConsigneeNameAndAddressForDuplicate = true)
         isEdit && mappingId != null -> loadConsigneeDataForEdit(mappingId)
     }
-
+    
     // Event listeners
     document.getElementById("closeConsigneeModal")?.addEventListener("click", { _: Event ->
         closeConsigneeModal()
@@ -2896,7 +3087,7 @@ fun showConsigneeModal(mappingId: Long?, duplicateFromId: Long? = null) {
     // Delete button (only shown in edit mode); confirmation is inside deleteMasterConsignee only
     if (isEdit && mappingId != null) {
         document.getElementById("deleteConsigneeBtn")?.addEventListener("click", { _: Event ->
-            deleteMasterConsignee(mappingId)
+                deleteMasterConsignee(mappingId)
         })
     }
     
@@ -2957,12 +3148,12 @@ fun closeConsigneeModal() {
 fun saveConsignee(mappingId: Long?) {
     val country = getChipFieldValue("consigneeMapCountry")
     val consigneeName = getEditableComboboxValue("consigneeMapConsigneeName")
-
+    
     if (consigneeName.isEmpty()) {
         showMessage("Consignee Name is required", "error")
         return
     }
-
+    
     val pod = getChipFieldValue("consigneeMapPod")
     
     val saveButton = document.getElementById("saveConsigneeBtn") as? HTMLButtonElement
@@ -2988,7 +3179,7 @@ fun validateConsigneeMasterFields(
     callback: (List<Pair<String, String>>) -> Unit
 ) {
     // Master-menu membership checks removed — always allow save; backend may still validate.
-    callback(emptyList())
+            callback(emptyList())
 }
 
 fun parseMasterListArray(raw: dynamic): List<String> {
@@ -3041,7 +3232,7 @@ fun showConsigneeMasterFieldsErrorModal(missingFields: List<Pair<String, String>
 
 fun performConsigneeSave(mappingId: Long?) {
     val country = getChipFieldValue("consigneeMapCountry")
-
+    
     val consigneeData = js("{}")
     consigneeData.country = country
     consigneeData.clientName = null
@@ -3051,7 +3242,7 @@ fun performConsigneeSave(mappingId: Long?) {
     consigneeData.stockLocation = null
     consigneeData.pols = null
     consigneeData.notes = consigneeModalNotesSnapshot?.takeUnless { it.isBlank() }
-
+    
     val saveButton = document.getElementById("saveConsigneeBtn") as? HTMLButtonElement
     saveButton?.disabled = true
     saveButton?.textContent = if (mappingId != null) "Updating..." else "Saving..."
@@ -3662,7 +3853,7 @@ fun showCarBrandsMapPage() {
     content.innerHTML = """
         <div id="carBrandList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Car Brands Map</h2>
+                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Chassis Map</h2>
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <button id="carBrandColumnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -3739,7 +3930,7 @@ fun showCarBrandsMapPage() {
     updateCarBrandSearchFilterMenuActive("all")
     refreshCarBrandSearchScopeUi()
     setupCarBrandSearchBarListeners()
-
+    
     // Load initial data
     loadMasterCarBrands()
     
@@ -3833,16 +4024,16 @@ fun loadMasterCarBrands() {
 
 fun loadMasterCarBrandsWithCards() {
     val tableDiv = document.getElementById("carBrandTable") as? HTMLElement ?: return
-
+    
     val searchQ = getCarBrandSearchQuery()
-
+    
     tableDiv.innerHTML = """
         <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
             <div style="font-size: 16px; margin-bottom: 8px;">Loading car brand data...</div>
             <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
         </div>
     """
-
+    
     if (searchQ.isNotEmpty()) {
         carBrandMapSearchServerMode = true
         val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
@@ -3850,7 +4041,7 @@ fun loadMasterCarBrandsWithCards() {
         val p = carBrandMapSearchPageZeroBased
         val url = apiUrl("car-brand-mapping/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$carBrandsItemsPerPage")
         window.fetch(url)
-            .then { response: dynamic ->
+        .then { response: dynamic ->
                 if (response.ok) response.json() else throw js("Error('Search failed')")
             }
             .then { body: dynamic ->
@@ -3878,16 +4069,16 @@ fun loadMasterCarBrandsWithCards() {
                 val groupedMappings = groupCarBrandMappingsForView(mappingsArray.toList())
                 allCarBrands = groupedMappings
                 displayCarBrandsAsCards(groupedMappings, searchQ, true)
-            }
-            .catch { error: dynamic ->
+        }
+        .catch { error: dynamic ->
                 Logger.error("Error searching car brands: ${error.toString()}")
-                tableDiv.innerHTML = """
-                    <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
-                        <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading car brand data</div>
+            tableDiv.innerHTML = """
+                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
+                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading car brand data</div>
                         <div style="font-size: 14px; color: #9ca3af;">${error.asDynamic().message}</div>
-                    </div>
-                """
-            }
+                </div>
+            """
+        }
         return
     }
 
@@ -3905,7 +4096,7 @@ fun loadMasterCarBrandsWithCards() {
             if (!success) {
                 throw js("Error(result.message || 'Failed to load car brands')")
             }
-
+            
             val mappings = result.data ?: js("[]")
             val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
             val mappingsList = mappingsArray.toList()
@@ -3924,7 +4115,7 @@ fun loadMasterCarBrandsWithCards() {
                     0.0
                 }
             }
-
+            
             val groupedMappings = groupCarBrandMappingsForView(sortedMappings)
             val carBrandSortable = setOf("chassis", "carBrand", "carName", "fuel", "vehicleType")
             var orderedForDisplay = groupedMappings
@@ -3933,7 +4124,7 @@ fun loadMasterCarBrandsWithCards() {
                 val ord = carBrandMapSortOrderByField[cbsf] ?: "desc"
                 orderedForDisplay = if (ord == "asc") {
                     groupedMappings.sortedBy { extractCarBrandSortKey(it, cbsf) }
-                } else {
+            } else {
                     groupedMappings.sortedByDescending { extractCarBrandSortKey(it, cbsf) }
                 }
             }
@@ -4005,12 +4196,14 @@ private fun buildCarBrandTableUi(
                 "vehicleType" to "Vehicle type",
                 "rank" to "Rank",
                 "color" to "Color",
-                "driveType" to "Drive Type"
+                "driveType" to "Drive Type",
+                "recycleFee" to "Recycle Fees"
             )
             
+            val carBrandColCount = 1 + selectedColumns.size
             var html = """
                 <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
-                    <table style="width: 100%; border-collapse: collapse;" class="car-brand-table">
+                    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;" class="car-brand-table">${htmlTableColgroupNarrowActionEqualRest(carBrandColCount)}
                         <thead>
                             <tr>
                                 <th style="padding: 12px 14px; text-align: left; min-width: 72px;"></th>
@@ -4052,9 +4245,10 @@ private fun buildCarBrandTableUi(
                 val rankVal = (mapping.rank ?: "").toString()
                 val colorVal = (mapping.color ?: "").toString()
                 val driveTypeVal = (mapping.driveType ?: "").toString()
+                val recycleFeeVal = (mapping.recycleFee ?: "").toString()
 
                 val rowDataJs =
-                    "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}'};"
+                    "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}'};"
                 
                 html += """
                     <tr>
@@ -4094,6 +4288,7 @@ private fun buildCarBrandTableUi(
                         "rank" -> rankVal
                         "color" -> colorVal
                         "driveType" -> driveTypeVal
+                        "recycleFee" -> recycleFeeVal
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
@@ -4101,7 +4296,11 @@ private fun buildCarBrandTableUi(
                         "chassis", "carName" -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top;"
                         else -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top;"
                     }
-                    val cellInner = formatCarBrandMapValueChipHtml(value)
+                    val cellInner = if (columnKey == "recycleFee") {
+                        formatNumericValueChipHtml(value)
+                    } else {
+                        formatCarBrandMapValueChipHtml(value)
+                    }
                     html += """<td style="$cellStyle">$cellInner</td>"""
                 }
                 
@@ -4170,8 +4369,8 @@ private fun buildCarBrandTableUi(
                 } else {
                     val tp = kotlin.math.ceil(allCarBrands.size.toDouble() / carBrandsItemsPerPage).toInt()
                     if (carBrandsCurrentPage < tp) {
-                        carBrandsCurrentPage++
-                        loadMasterCarBrands()
+                    carBrandsCurrentPage++
+                    loadMasterCarBrands()
                     }
                 }
             })
@@ -4385,8 +4584,8 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
     val paginatedMappings = if (isServerSearch) {
         filteredMappings
     } else {
-        val startIndex = (carBrandsCurrentPage - 1) * carBrandsItemsPerPage
-        val endIndex = kotlin.math.min(startIndex + carBrandsItemsPerPage, filteredMappings.size)
+    val startIndex = (carBrandsCurrentPage - 1) * carBrandsItemsPerPage
+    val endIndex = kotlin.math.min(startIndex + carBrandsItemsPerPage, filteredMappings.size)
         filteredMappings.subList(startIndex, endIndex)
     }
     
@@ -4405,7 +4604,8 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         "vehicleType" to "Vehicle type",
         "rank" to "Rank",
         "color" to "Color",
-        "driveType" to "Drive Type"
+        "driveType" to "Drive Type",
+        "recycleFee" to "Recycle Fees"
     )
     
     val cardsHTML = StringBuilder()
@@ -4427,9 +4627,10 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         val rankVal = (mapping.rank ?: "").toString()
         val colorVal = (mapping.color ?: "").toString()
         val driveTypeVal = (mapping.driveType ?: "").toString()
+        val recycleFeeVal = (mapping.recycleFee ?: "").toString()
 
         val rowDataJs =
-            "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}'};"
+            "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}'};"
         
         // Build card content based on selected columns
         val cardFields = StringBuilder()
@@ -4450,11 +4651,16 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
                 "rank" -> rankVal
                 "color" -> colorVal
                 "driveType" -> driveTypeVal
+                "recycleFee" -> recycleFeeVal
                 else -> ""
             }
             
             if (value.isNotEmpty()) {
-                val displayValue = formatCarBrandMapValueChipHtml(value)
+                val displayValue = if (columnKey == "recycleFee") {
+                    formatNumericValueChipHtml(value)
+                } else {
+                    formatCarBrandMapValueChipHtml(value)
+                }
                 cardFields.append("""
                     <div style="margin-bottom: 8px;">
                         <span style="font-weight: 600; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">$label:</span>
@@ -4542,8 +4748,8 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         } else {
             val tp = kotlin.math.ceil(allCarBrands.size.toDouble() / carBrandsItemsPerPage).toInt()
             if (carBrandsCurrentPage < tp) {
-                carBrandsCurrentPage++
-                loadMasterCarBrands()
+            carBrandsCurrentPage++
+            loadMasterCarBrands()
             }
         }
     })
@@ -4610,7 +4816,8 @@ fun showCarBrandColumnFilterModal() {
         "vehicleType" to "Vehicle type",
         "rank" to "Rank",
         "color" to "Color",
-        "driveType" to "Drive Type"
+        "driveType" to "Drive Type",
+        "recycleFee" to "Recycle Fees"
     )
     
     val checkboxesDiv = document.getElementById("carBrandColumnCheckboxes")
@@ -4817,6 +5024,11 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                             </div>
                             <div style="visibility:hidden;"></div>
                         </div>
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Recycle Fees</label>
+                            <input type="text" id="carBrandRecycleFee" class="money-input" inputmode="decimal" autocomplete="off" placeholder="e.g. 6550 (yen amount)"
+                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                        </div>
                         <div class="car-brand-modal-actions">
                             <button type="button" id="cancelCarBrandBtn" class="car-brand-modal-btn car-brand-modal-btn-cancel">Cancel</button>
                             ${if (isEdit) """
@@ -4852,7 +5064,7 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
         if (hasGrouped) {
             tryPrefillCarBrandModalFromGroupedRow()
         } else {
-            loadCarBrandDataForEdit(mappingId)
+        loadCarBrandDataForEdit(mappingId)
         }
     }
     
@@ -4919,6 +5131,17 @@ fun loadCarBrandDataForEdit(mappingId: Long, clearChassisForDuplicate: Boolean =
                 setChipFieldValue("carBrandRank", (data.rank ?: "").toString())
                 setChipFieldValue("carBrandColor", (data.color ?: "").toString())
                 setChipFieldValue("carBrandDriveType", (data.driveType ?: "").toString())
+                val recycleFeeInput = document.getElementById("carBrandRecycleFee") as? HTMLInputElement
+                if (recycleFeeInput != null) {
+                    val rawValue = (data.recycleFee ?: "").toString()
+                    recycleFeeInput.value = rawValue
+                    // Format it using the global money formatter if available
+                    window.setTimeout({
+                        if (js("typeof window._moneyFormat === 'function'").unsafeCast<Boolean>()) {
+                            recycleFeeInput.value = js("window._moneyFormat(recycleFeeInput.value)").unsafeCast<String>()
+                        }
+                    }, 0)
+                }
             } else {
                 throw js("Error(result.message || 'Failed to load car brand data')")
             }
@@ -4973,7 +5196,7 @@ fun validateCarBrandMasterFields(
     callback: (List<Pair<String, String>>) -> Unit
 ) {
     // Master-menu membership checks removed — always allow save.
-    callback(emptyList())
+            callback(emptyList())
 }
 
 fun showCarBrandMasterFieldsErrorModal(missingFields: List<Pair<String, String>>) {
@@ -5029,6 +5252,8 @@ fun performCarBrandSave(mappingId: Long?, replaceExistingValues: Boolean = false
     carBrandData.rank = getChipFieldValue("carBrandRank").takeIf { it.isNotEmpty() } ?: null
     carBrandData.color = getChipFieldValue("carBrandColor").takeIf { it.isNotEmpty() } ?: null
     carBrandData.driveType = getChipFieldValue("carBrandDriveType").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.recycleFee = js("window.getMoneyRawValue ? window.getMoneyRawValue('carBrandRecycleFee') : ''").unsafeCast<String>()
+        .trim().takeIf { it.isNotEmpty() } ?: null
     carBrandData.replaceExistingValues = replaceExistingValues
     
     val saveButton = document.getElementById("saveCarBrandBtn") as? HTMLButtonElement
@@ -6124,17 +6349,9 @@ fun setupSupplierMapSearchBarListeners() {
 fun showSupplierMapPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div id="supplierList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
+        <div id="supplierList" class="rixo-tree-page" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Supplier Map</h2>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="supplierColumnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
-                        </svg>
-                        Column Filter
-                    </button>
-                </div>
             </div>
             
             <style>
@@ -6176,19 +6393,8 @@ fun showSupplierMapPage() {
                 </div>
             </div>
             
-            <!-- Action Buttons -->
-            <div style="margin-bottom: 20px;">
-                <button id="addSupplierBtn" style="padding: 12px 24px; background-color: #059669; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    ➕ Add New Supplier
-                </button>
-            </div>
-            
-            <!-- Supplier Table/Cards Container -->
-            <div id="supplierTable" style="margin-top: 20px;">
-                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px;">Loading supplier data...</div>
-                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-                </div>
+            <div id="supplierMapTreeRoot" class="rixo-tree-root supplier-map-tree" style="margin-top: 12px;">
+                <div class="rixo-tree-loading">Loading supplier map…</div>
             </div>
         </div>
     """
@@ -6206,20 +6412,1303 @@ fun showSupplierMapPage() {
     // Load initial data
     loadMasterSuppliers()
     
-    // Event listeners
-    document.getElementById("addSupplierBtn")?.addEventListener("click", { _: Event ->
-        showAddSupplierModal()
-    })
+}
+
+private fun supplierStockIsReal(st: String): Boolean {
+    val t = st.trim()
+    return t.isNotEmpty() && t != "-"
+}
+
+/** One visual branch under a supplier: token-split stock + aligned venue/POL + one or more Rixo leaves. */
+private data class SupplierStockBranchView(
+    val supplier: String,
+    val stockToken: String,
+    val venueToken: String,
+    val polToken: String,
+    val row: SupplierPriceRowLite,
+    val stockBranchIndex: Int,
+    /** Pairs of (index in `rixo_company` semicolon list, label). */
+    val rixoLeaves: List<Pair<Int, String>>,
+)
+
+private fun splitSupplierSemicolonTokens(raw: String): List<String> =
+    raw.split(';').map { it.trim() }
+
+private fun joinSupplierSemicolonParts(parts: List<String>): String =
+    parts.joinToString(";")
+
+/** Strip grouping/currency so inputs like `15,000` or `¥60,000` parse as numbers. */
+private fun parseMoneyNumericInput(raw: String): Double? {
+    val t = raw.trim().replace(",", "").replace(Regex("[¥₩£€\\s]"), "").trim()
+    if (t.isEmpty()) return null
+    return t.toDoubleOrNull()
+}
+
+private fun replaceSupplierSemicolonSegment(raw: String, branchIdx: Int, newSegment: String): String {
+    val p = splitSupplierSemicolonTokens(raw).toMutableList()
+    val nv = newSegment.trim()
+    while (p.size <= branchIdx) p.add("")
+    if (branchIdx < p.size) p[branchIdx] = nv else p.add(nv)
+    return joinSupplierSemicolonParts(p)
+}
+
+private fun computeRixoLeavesForBranch(
+    numStockBranches: Int,
+    rixosAll: List<String>,
+    stockBranchIdx: Int,
+): List<Pair<Int, String>> {
+    if (numStockBranches <= 1) {
+        val leaves = mutableListOf<Pair<Int, String>>()
+        for ((j, t) in rixosAll.withIndex()) {
+            val tt = t.trim()
+            if (tt.isEmpty() || tt == "-") continue
+            leaves.add(j to tt)
+        }
+        return leaves.ifEmpty { listOf(0 to "") }
+    }
+    val tt = rixosAll.getOrNull(stockBranchIdx)?.trim().orEmpty()
+    return listOf(stockBranchIdx to tt)
+}
+
+private fun expandStockBranchesForSupplier(rows: List<SupplierPriceRowLite>, supplier: String): List<SupplierStockBranchView> {
+    val out = mutableListOf<SupplierStockBranchView>()
+    for (row in rows.filter { it.supplier.equals(supplier, ignoreCase = true) }) {
+        val stocksRaw = splitSupplierSemicolonTokens(row.stock)
+        val stocks = stocksRaw.filter { it.isNotBlank() && it != "-" }
+        val stockBranches = if (stocks.isEmpty()) listOf("-") else stocks
+        val venues = splitSupplierSemicolonTokens(row.venueId)
+        val pols = splitSupplierSemicolonTokens(row.pol)
+        val rixosAll = splitSupplierSemicolonTokens(row.rixoCompany)
+        val n = stockBranches.size
+        for ((i, stTok) in stockBranches.withIndex()) {
+            val venueTok = venues.getOrNull(i)?.trim().orEmpty()
+            val polTok = pols.getOrNull(i)?.trim().orEmpty()
+            val rixoLeaves = computeRixoLeavesForBranch(n, rixosAll, i)
+            out.add(
+                SupplierStockBranchView(
+                    supplier = row.supplier,
+                    stockToken = stTok,
+                    venueToken = venueTok,
+                    polToken = polTok,
+                    row = row,
+                    stockBranchIndex = i,
+                    rixoLeaves = rixoLeaves,
+                )
+            )
+        }
+    }
+    return out.sortedWith(
+        compareBy(
+            { it.stockToken.lowercase() },
+            { it.row.id },
+            { it.stockBranchIndex },
+        ),
+    )
+}
+
+private fun parseSupplierPriceRows(rows: List<dynamic>): List<SupplierPriceRowLite> {
+    val out = mutableListOf<SupplierPriceRowLite>()
+    for (r in rows) {
+        val idAny = r.id ?: continue
+        val id = when (idAny) {
+            is Number -> idAny.toLong()
+            else -> idAny.toString().toLongOrNull() ?: continue
+        }
+        val supplier = (r.auctionHouse ?: "").toString().trim()
+        if (supplier.isEmpty()) continue
+        out.add(
+            SupplierPriceRowLite(
+                id = id,
+                supplier = supplier,
+                stock = (r.stockLocation ?: "").toString().trim(),
+                rixoCompany = (r.rixoCompany ?: "").toString().trim(),
+                venueId = (r.venueId ?: "").toString().trim(),
+                pol = (r.pol ?: "").toString().trim(),
+            )
+        )
+    }
+    return out
+}
+
+private fun supplierTreeRowsForSearch(): List<SupplierPriceRowLite> {
+    val q = getSupplierMapSearchQuery().trim().lowercase()
+    val all = supplierMapTreeRowsCache
+    if (q.isEmpty()) return all
+    val field = supplierMapSearchFieldChoice.lowercase().replace("_", "")
+    return all.filter { row ->
+        when (field) {
+            "suppliername" -> row.supplier.lowercase().contains(q)
+            "stocklocation" -> row.stock.lowercase().contains(q)
+            "rixocompany" -> row.rixoCompany.lowercase().contains(q)
+            else ->
+                listOf(row.supplier, row.stock, row.rixoCompany, row.venueId, row.pol)
+                    .any { it.lowercase().contains(q) }
+        }
+    }
+}
+
+private fun distinctSuppliersSorted(rows: List<SupplierPriceRowLite>): List<String> =
+    rows.map { it.supplier }.distinct().sortedBy { it.lowercase() }
+
+private fun supplierTreeAddButtonHtml(level: String, supplier: String?, stock: String?, rowId: Long?, branchIdx: Int?): String {
+    val c = escapeHtml(supplier ?: "")
+    val s = escapeHtml(stock ?: "")
+    val rid = rowId?.toString() ?: ""
+    val bidx = branchIdx?.toString() ?: ""
+    return """<div class="rixo-tree-add-wrap"><button type="button" class="rixo-tree-add-btn" data-smap-add="$level" data-smap-supplier="$c" data-smap-stock="$s" data-smap-row-id="$rid" data-smap-branch-idx="$bidx">+ Add</button></div>"""
+}
+
+private fun buildSupplierTreeCardHtml(
+    level: String,
+    label: String,
+    selected: Boolean,
+    pathSupplier: String,
+    pathStock: String,
+    rowId: Long?,
+    branchIdx: Int?,
+    branchEditActive: Boolean = false,
+): String {
+    val selectedClass = if (selected) " rixo-tree-card--selected" else ""
+    val levelClass = if (level == "supplier") " rixo-tree-card--company" else " rixo-tree-card--auction"
+    val wrapperClass = if (level == "supplier") "rixo-tree-card-wrapper--company" else "rixo-tree-card-wrapper--auction"
+    val ariaExpanded = if (selected) "true" else "false"
+    val ps = escapeHtml(pathSupplier)
+    val pst = escapeHtml(pathStock)
+    val rid = rowId?.toString() ?: ""
+    val bidx = branchIdx?.toString() ?: ""
+
+    if (level == "supplier" && supplierTreeSupplierEditName == pathSupplier) {
+        return """
+            <div class="rixo-tree-card-wrapper $wrapperClass" data-smap-path-supplier="$ps" data-smap-path-stock="$pst" data-smap-card-level="$level" data-smap-row-id="$rid" data-smap-branch-idx="$bidx">
+                <div class="rixo-tree-card$levelClass$selectedClass rixo-tree-card--inline-editing" data-smap-card-level="$level" aria-expanded="$ariaExpanded" style="cursor: default;">
+                    <span class="rixo-tree-exp-indicator" aria-hidden="true"></span>
+                    <span class="rixo-tree-label-wrap" style="display:flex;flex-direction:row;align-items:center;min-width:0;text-align:left;width:100%;gap:10px;">
+                        <input type="text" id="supTreeSupplierInlineEditInput" value="$ps" style="flex:1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; box-sizing: border-box;" />
+                        <button type="button" class="rixo-tree-card-inline-cancel" data-smap-supplier-cancel="1">Cancel</button>
+                        <button type="button" class="rixo-tree-card-inline-save" data-smap-supplier-save="1">Save</button>
+                    </span>
+                </div>
+            </div>
+        """.trimIndent()
+    }
+
+    if (level == "stock" && branchEditActive) {
+        return """
+            <div class="rixo-tree-card-wrapper $wrapperClass" data-smap-path-supplier="$ps" data-smap-path-stock="$pst" data-smap-card-level="$level" data-smap-row-id="$rid" data-smap-branch-idx="$bidx">
+                <div class="rixo-tree-card$levelClass$selectedClass rixo-tree-card--inline-editing" data-smap-card-level="$level" aria-expanded="$ariaExpanded" style="cursor: default;">
+                    <span class="rixo-tree-exp-indicator" aria-hidden="true"></span>
+                    <span class="rixo-tree-label-wrap" style="display:flex;flex-direction:column;align-items:flex-start;min-width:0;text-align:left;width:100%;">
+                        ${createEditableCombobox("supTreeBranchEditStock", "Select Stock Location", required = true)}
+                    </span>
+                </div>
+                <div class="rixo-tree-card-menu-wrap">
+                    <button type="button" class="rixo-tree-card-menu-btn" aria-label="More actions" aria-haspopup="true">&#8942;</button>
+                    <div class="rixo-tree-card-menu-panel" role="menu">
+                        <button type="button" class="rixo-tree-card-menu-item" data-smap-menu="edit" role="menuitem">Edit…</button>
+                        <button type="button" class="rixo-tree-card-menu-item rixo-tree-card-menu-item--danger" data-smap-menu="delete" role="menuitem">Delete</button>
+                    </div>
+                </div>
+            </div>
+        """.trimIndent()
+    }
+    return """
+        <div class="rixo-tree-card-wrapper $wrapperClass" data-smap-path-supplier="$ps" data-smap-path-stock="$pst" data-smap-card-level="$level" data-smap-row-id="$rid" data-smap-branch-idx="$bidx">
+            <button type="button" class="rixo-tree-card$levelClass$selectedClass" data-smap-card-level="$level" data-smap-card-value="${escapeHtml(label)}" aria-expanded="$ariaExpanded">
+                <span class="rixo-tree-exp-indicator" aria-hidden="true"></span>
+                <span class="rixo-tree-label-wrap" style="display:flex;flex-direction:column;align-items:flex-start;min-width:0;text-align:left;">
+                    <span class="rixo-tree-label">${escapeHtml(label)}</span>
+                </span>
+            </button>
+            <div class="rixo-tree-card-menu-wrap">
+                <button type="button" class="rixo-tree-card-menu-btn" aria-label="More actions" aria-haspopup="true">&#8942;</button>
+                <div class="rixo-tree-card-menu-panel" role="menu">
+                    <button type="button" class="rixo-tree-card-menu-item" data-smap-menu="edit" role="menuitem">Edit…</button>
+                    <button type="button" class="rixo-tree-card-menu-item rixo-tree-card-menu-item--danger" data-smap-menu="delete" role="menuitem">Delete</button>
+                </div>
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+private fun buildSupplierVenueStripHtml(venue: String, rowId: Long, branchIdx: Int, branchEditing: Boolean = false): String {
+    val editing = supplierTreeVenueEditRowId == rowId && supplierTreeVenueEditBranchIdx == branchIdx
+    val rid = rowId.toString()
+    val bi = branchIdx.toString()
+    if (branchEditing) {
+        return """
+            <div class="supplier-tree-venue-strip supplier-tree-pol-strip--editing" data-smap-venue-row="$rid" data-smap-venue-idx="$bi">
+                <span class="supplier-tree-pol-label">Venue ID</span>
+                <div class="supplier-tree-pol-combo">${createEditableCombobox("supTreeBranchEditVenue", "Select Venue ID")}</div>
+            </div>
+        """.trimIndent()
+    }
+    if (editing) {
+        return """
+            <div class="supplier-tree-venue-strip supplier-tree-pol-strip--editing" data-smap-venue-row="$rid" data-smap-venue-idx="$bi">
+                <span class="supplier-tree-pol-label">Venue ID</span>
+                <div class="supplier-tree-pol-combo">${createEditableCombobox("supTreeVenueEditCombo", "Select Venue ID")}</div>
+                <button type="button" class="rixo-tree-card-inline-cancel" data-smap-venue-cancel="1">Cancel</button>
+                <button type="button" class="rixo-tree-card-inline-save" data-smap-venue-save="1">Save</button>
+            </div>
+        """.trimIndent()
+    }
+    return """
+        <div class="supplier-tree-venue-strip supplier-tree-pol-strip" data-smap-venue-row="$rid" data-smap-venue-idx="$bi">
+            <span class="supplier-tree-pol-label">Venue ID</span>
+            <span class="supplier-tree-pol-value">${escapeHtml(venue.ifBlank { "—" })}</span>
+            <button type="button" class="supplier-tree-pol-edit-btn" data-smap-venue-edit="1" title="Edit venue">✎</button>
+        </div>
+    """.trimIndent()
+}
+
+private fun buildSupplierPolStripHtml(rowId: Long, branchIdx: Int, pol: String, branchEditing: Boolean = false): String {
+    val editing = supplierTreePolEditRowId == rowId && supplierTreePolEditBranchIdx == branchIdx
+    val rid = rowId.toString()
+    val bi = branchIdx.toString()
+    if (branchEditing) {
+        return """
+            <div class="supplier-tree-pol-strip supplier-tree-pol-strip--editing" data-smap-pol-row="$rid" data-smap-pol-idx="$bi">
+                <span class="supplier-tree-pol-label">POL</span>
+                <div class="supplier-tree-pol-combo">${createEditableCombobox("supTreeBranchEditPol", "Select POL")}</div>
+            </div>
+        """.trimIndent()
+    }
+    if (editing) {
+        return """
+            <div class="supplier-tree-pol-strip supplier-tree-pol-strip--editing" data-smap-pol-row="$rid" data-smap-pol-idx="$bi">
+                <span class="supplier-tree-pol-label">POL</span>
+                <div class="supplier-tree-pol-combo">${createEditableCombobox("supTreePolEditCombo", "Select POL")}</div>
+                <button type="button" class="rixo-tree-card-inline-cancel" data-smap-pol-cancel="1">Cancel</button>
+                <button type="button" class="rixo-tree-card-inline-save" data-smap-pol-save="1">Save</button>
+            </div>
+        """.trimIndent()
+    }
+    return """
+        <div class="supplier-tree-pol-strip" data-smap-pol-row="$rid" data-smap-pol-idx="$bi">
+            <span class="supplier-tree-pol-label">POL</span>
+            <span class="supplier-tree-pol-value">${escapeHtml(pol.ifBlank { "—" })}</span>
+            <button type="button" class="supplier-tree-pol-edit-btn" data-smap-pol-edit="1" title="Edit POL">✎</button>
+        </div>
+    """.trimIndent()
+}
+
+private fun buildSupplierRixoLeafRowHtml(
+    rowId: Long,
+    stockBranchIdx: Int,
+    rixoSegIdx: Int,
+    rixoToken: String,
+    branchEditing: Boolean,
+): String {
+    val chip = formatSupplierMapValueChipHtml(rixoToken.ifBlank { "—" })
+    val pencilSvg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 0 0 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>"""
+    val trashSvg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>"""
+    val sbi = stockBranchIdx.toString()
+    val comboId = "supTreeBranchEditRixo_${rowId}_${rixoSegIdx}"
+    if (branchEditing) {
+        return """
+            <div class="rixo-tree-leaf-row rixo-tree-leaf-row--selectable rixo-tree-leaf-row--inline-editing" data-smap-leaf-id="$rowId" data-smap-stock-branch-idx="$sbi" data-smap-rixo-idx="$rixoSegIdx">
+                <div class="rixo-tree-leaf-cells">
+                    <div class="rixo-tree-leaf-edit" style="display:flex !important;align-items:center;gap:8px;width:100%;">
+                        <div class="rixo-tree-leaf-vtype-wrap" style="flex:1;min-width:120px;">${createEditableCombobox(comboId, "Select Rixo Company", required = true)}</div>
+                    </div>
+                </div>
+            </div>
+        """.trimIndent()
+    }
+    return """
+        <div class="rixo-tree-leaf-row rixo-tree-leaf-row--selectable" data-smap-leaf-id="$rowId" data-smap-stock-branch-idx="$sbi" data-smap-rixo-idx="$rixoSegIdx">
+            <div class="rixo-tree-leaf-cells">
+                <div class="rixo-tree-leaf-view">
+                    <div style="flex:1;min-width:0;">$chip</div>
+                    <div class="rixo-tree-leaf-price-cell" style="max-width:none;">
+                        <button type="button" class="rixo-tree-leaf-edit-btn" data-smap-rixo-edit="1" aria-label="Edit">$pencilSvg</button>
+                        <button type="button" class="rixo-tree-leaf-delete-btn" data-smap-rixo-branch-delete="$rowId" data-smap-branch-idx="$sbi" aria-label="Delete">$trashSvg</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+private fun buildSupplierSupplierInlineAddHtml(): String = """
+    <div class="rixo-tree-card-wrapper rixo-tree-card-wrapper--company">
+        <div class="rixo-tree-inline-add-outer rixo-tree-inline-add-outer--company rixo-tree-card--inline-editing" data-smap-supplier-inline-add="1">
+            <div class="rixo-tree-inline-add-box">
+                <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--inputs">
+                    <div class="rixo-tree-inline-add-field-primary rixo-tree-inline-add-plain">${createPlainTextInput("supTreeSupplierInlineAddName", "Enter Supplier Name", required = true)}</div>
+                </div>
+                <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--actions">
+                    <button type="button" class="rixo-tree-card-inline-add-cancel" data-smap-supplier-add-cancel="1">Cancel</button>
+                    <button type="button" class="rixo-tree-card-inline-add-save" data-smap-supplier-add-save="1">Add</button>
+                </div>
+            </div>
+        </div>
+    </div>
+""".trimIndent()
+
+private fun buildSupplierLeafInlineAddHtml(): String = """
+    <div class="rixo-tree-inline-add-outer" style="width:100%;max-width:520px;">
+        <div class="rixo-tree-inline-add-box">
+            <div class="rixo-tree-inline-add-row--inputs">
+                <div class="rixo-tree-inline-add-field-primary rixo-tree-card-combobox-wrap">${createEditableCombobox("supTreeLeafAddRixo", "Select Rixo Company", required = true)}</div>
+            </div>
+            <div class="rixo-tree-inline-add-row--actions">
+                <button type="button" class="rixo-tree-card-inline-cancel" data-smap-leaf-add-cancel="1">Cancel</button>
+                <button type="button" class="rixo-tree-card-inline-save" data-smap-leaf-add-save="1">Add</button>
+            </div>
+        </div>
+    </div>
+""".trimIndent()
+
+private fun buildSupplierStockInlineAddHtml(): String = """
+    <div class="rixo-tree-node">
+        <div class="rixo-tree-inline-add-outer rixo-tree-inline-add-outer--auction">
+            <div class="rixo-tree-inline-add-box">
+                <div class="rixo-tree-inline-add-row--inputs">
+                    <div class="rixo-tree-inline-add-field-primary rixo-tree-card-combobox-wrap">${createEditableCombobox("supTreeStockAddCombo", "Select Stock Location", required = true)}</div>
+                </div>
+                <div class="rixo-tree-inline-add-row--actions">
+                    <button type="button" class="rixo-tree-card-inline-cancel" data-smap-stock-add-cancel="1">Cancel</button>
+                    <button type="button" class="rixo-tree-card-inline-save" data-smap-stock-add-save="1">Add</button>
+                </div>
+            </div>
+        </div>
+    </div>
+""".trimIndent()
+
+private fun supplierBranchIsSelected(br: SupplierStockBranchView): Boolean =
+    supplierTreeSelectedStockRowId == br.row.id &&
+        supplierTreeSelectedStockBranchIdx == br.stockBranchIndex
+
+private fun buildSupplierMapTreeHtmlFromCache(): String {
+    val rows = supplierTreeRowsForSearch()
+    if (rows.isEmpty()) {
+        return """
+            <div class="rixo-tree supplier-map-tree">
+                <div class="rixo-tree-headers">
+                    <div class="rixo-tree-header">Supplier</div>
+                    <div class="rixo-tree-header">Stock location</div>
+                    <div class="rixo-tree-header">POL</div>
+                    <div class="rixo-tree-header">Venue ID</div>
+                    <div class="rixo-tree-header rixo-tree-header--price">Rixo company</div>
+                </div>
+                <div class="rixo-tree-note">No matching rows. Add a supplier or adjust search.</div>
+                ${if (supplierTreeInlineAddLevel == "supplier") """<div class="rixo-tree-node">${buildSupplierSupplierInlineAddHtml()}</div>""" else ""}
+                ${supplierTreeAddButtonHtml("supplier", null, null, null, null)}
+            </div>
+        """.trimIndent()
+    }
+
+    val suppliers = distinctSuppliersSorted(rows)
+    if (supplierTreeSelectedSupplier != null && suppliers.none { it.equals(supplierTreeSelectedSupplier, ignoreCase = true) }) {
+        supplierTreeSelectedSupplier = null
+        supplierTreeSelectedStock = null
+        supplierTreeSelectedStockRowId = null
+        supplierTreeSelectedStockBranchIdx = null
+    }
+    val selSup = supplierTreeSelectedSupplier
+
+    val sb = StringBuilder()
+    sb.append("""<div class="rixo-tree supplier-map-tree">""")
+    sb.append(
+        """<div class="rixo-tree-headers"><div class="rixo-tree-header">Supplier</div><div class="rixo-tree-header">Stock location</div><div class="rixo-tree-header">POL</div><div class="rixo-tree-header">Venue ID</div><div class="rixo-tree-header rixo-tree-header--price">Rixo company</div></div>""",
+    )
+
+    for (supplier in suppliers) {
+        val isSupOpen = supplier.equals(selSup, ignoreCase = true)
+        sb.append("""<div class="rixo-tree-node">""")
+        sb.append(buildSupplierTreeCardHtml("supplier", supplier, isSupOpen, supplier, "", null, null))
+        if (isSupOpen) {
+            val branches = expandStockBranchesForSupplier(rows, supplier)
+            sb.append("""<div class="rixo-tree-children">""")
+            if (branches.isEmpty()) {
+                sb.append(supplierTreeAddButtonHtml("stock", supplier, null, null, null))
+            } else {
+                for (br in branches) {
+                    val isStockOpen = supplierBranchIsSelected(br)
+                    val branchEditing =
+                        supplierTreeBranchEditRowId == br.row.id &&
+                            supplierTreeBranchEditBranchIdx == br.stockBranchIndex
+                    sb.append("""<div class="rixo-tree-node">""")
+                    sb.append(
+                        buildSupplierTreeCardHtml(
+                            "stock",
+                            br.stockToken,
+                            isStockOpen,
+                            supplier,
+                            br.stockToken,
+                            br.row.id,
+                            br.stockBranchIndex,
+                            branchEditActive = branchEditing,
+                        ),
+                    )
+                    if (isStockOpen) {
+                        sb.append("""<div class="rixo-tree-children supplier-tree-branch-columns">""")
+                        sb.append("""<div class="supplier-tree-branch-grid">""")
+                        sb.append("""<div class="supplier-tree-branch-col supplier-tree-branch-col--pol">""")
+                        sb.append(buildSupplierPolStripHtml(br.row.id, br.stockBranchIndex, br.polToken, branchEditing = branchEditing))
+                        sb.append("""</div>""")
+                        sb.append("""<div class="supplier-tree-branch-col supplier-tree-branch-col--venue">""")
+                        sb.append(buildSupplierVenueStripHtml(br.venueToken, br.row.id, br.stockBranchIndex, branchEditing = branchEditing))
+                        sb.append("""</div>""")
+                        sb.append("""<div class="supplier-tree-branch-col supplier-tree-branch-col--rixo">""")
+                        for ((rixIdx, tok) in br.rixoLeaves) {
+                            sb.append(
+                                buildSupplierRixoLeafRowHtml(
+                                    br.row.id,
+                                    br.stockBranchIndex,
+                                    rixIdx,
+                                    tok,
+                                    branchEditing = branchEditing,
+                                ),
+                            )
+                        }
+                        if (branchEditing) {
+                            sb.append(
+                                """<div class="supplier-tree-branch-update-wrap" style="margin-top:8px;"><button type="button" class="rixo-tree-leaf-update-btn" data-smap-supplier-branch-save="${br.row.id}" data-smap-branch-idx="${br.stockBranchIndex}" aria-label="Update branch"><span class="rixo-tree-leaf-update-icon">&gt;&gt;</span></button></div>""",
+                            )
+                        }
+                        if (supplierTreeInlineAddLevel == "leaf" &&
+                            supplierTreeInlineSupplier.equals(supplier, ignoreCase = true) &&
+                            supplierTreeInlineStock.equals(br.stockToken, ignoreCase = true) &&
+                            supplierTreeLeafAddRowId == br.row.id &&
+                            supplierTreeLeafAddBranchIdx == br.stockBranchIndex
+                        ) {
+                            sb.append(buildSupplierLeafInlineAddHtml())
+                        }
+                        sb.append(
+                            supplierTreeAddButtonHtml(
+                                "leaf",
+                                supplier,
+                                br.stockToken,
+                                br.row.id,
+                                br.stockBranchIndex,
+                            ),
+                        )
+                        sb.append("""</div></div></div>""")
+                    }
+                    sb.append("""</div>""")
+                }
+                if (supplierTreeInlineAddLevel == "stock" &&
+                    supplierTreeInlineSupplier.equals(supplier, ignoreCase = true)
+                ) {
+                    sb.append(buildSupplierStockInlineAddHtml())
+                }
+                sb.append(supplierTreeAddButtonHtml("stock", supplier, null, null, null))
+            }
+            sb.append("""</div>""")
+        }
+        sb.append("""</div>""")
+    }
+    if (supplierTreeInlineAddLevel == "supplier") {
+        sb.append("""<div class="rixo-tree-node">""")
+        sb.append(buildSupplierSupplierInlineAddHtml())
+        sb.append("""</div>""")
+    }
+    sb.append(supplierTreeAddButtonHtml("supplier", null, null, null, null))
+    sb.append("""</div>""")
+    return sb.toString()
+}
+
+private fun wireSupplierMapTreeComboboxes() {
+    if (supplierTreePolEditRowId != null && supplierTreePolEditBranchIdx != null) {
+        populateEditableComboboxFromMasterMenu("supTreePolEditCombo", "pol")
+        val row = supplierRowById(supplierTreePolEditRowId!!)
+        val parts = splitSupplierSemicolonTokens(row?.pol ?: "")
+        val pv = parts.getOrNull(supplierTreePolEditBranchIdx!!).orEmpty()
+        setEditableComboboxValue("supTreePolEditCombo", pv)
+    }
+    if (supplierTreeVenueEditRowId != null && supplierTreeVenueEditBranchIdx != null) {
+        populateEditableComboboxFromMasterMenu("supTreeVenueEditCombo", "venue_id")
+        val row = supplierRowById(supplierTreeVenueEditRowId!!)
+        val parts = splitSupplierSemicolonTokens(row?.venueId ?: "")
+        val vv = parts.getOrNull(supplierTreeVenueEditBranchIdx!!).orEmpty()
+        setEditableComboboxValue("supTreeVenueEditCombo", vv)
+    }
+    if (supplierTreeInlineAddLevel == "stock" && supplierTreeInlineSupplier.isNotBlank()) {
+        populateEditableComboboxFromMasterMenu("supTreeStockAddCombo", "stock_location")
+    }
+    if (supplierTreeInlineAddLevel == "leaf") {
+        populateEditableComboboxFromRixoMappingDistinctCompanies("supTreeLeafAddRixo")
+    }
+    if (supplierTreeBranchEditRowId != null && supplierTreeBranchEditBranchIdx != null) {
+        val rid = supplierTreeBranchEditRowId!!
+        val bidx = supplierTreeBranchEditBranchIdx!!
+        populateEditableComboboxFromMasterMenu("supTreeBranchEditStock", "stock_location")
+        populateEditableComboboxFromMasterMenu("supTreeBranchEditVenue", "venue_id")
+        populateEditableComboboxFromMasterMenu("supTreeBranchEditPol", "pol")
+        val row = supplierRowById(rid)
+        if (row != null) {
+            val stocks = splitSupplierSemicolonTokens(row.stock)
+            setEditableComboboxValue("supTreeBranchEditStock", stocks.getOrNull(bidx).orEmpty())
+            val venues = splitSupplierSemicolonTokens(row.venueId)
+            setEditableComboboxValue("supTreeBranchEditVenue", venues.getOrNull(bidx).orEmpty())
+            val pols = splitSupplierSemicolonTokens(row.pol)
+            setEditableComboboxValue("supTreeBranchEditPol", pols.getOrNull(bidx).orEmpty())
+            val branches = expandStockBranchesForSupplier(supplierMapTreeRowsCache, row.supplier)
+            val br = branches.firstOrNull { it.row.id == rid && it.stockBranchIndex == bidx }
+            if (br != null) {
+                for ((rixIdx, _) in br.rixoLeaves) {
+                    val cid = "supTreeBranchEditRixo_${rid}_${rixIdx}"
+                    populateEditableComboboxFromRixoMappingDistinctCompanies(cid)
+                    val rp = splitSupplierSemicolonTokens(row.rixoCompany)
+                    setEditableComboboxValue(cid, rp.getOrNull(rixIdx).orEmpty())
+                }
+            }
+        }
+    }
+}
+
+private fun closeAllSupplierCardMenus(root: HTMLElement) {
+    val wraps = root.querySelectorAll(".rixo-tree-card-menu-wrap")
+    for (i in 0 until wraps.length) {
+        (wraps.item(i) as? HTMLElement)?.classList?.remove("is-open")
+    }
+}
+
+private fun refreshSupplierMapTreeData() {
+    val root = document.getElementById("supplierMapTreeRoot") as? HTMLElement ?: return
+    val searchQ = getSupplierMapSearchQuery().trim()
+    if (searchQ.isNotEmpty()) {
+        fetchSupplierMapTreeRowsSearch { ok ->
+            if (ok) {
+                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                bindSupplierMapTreeClicks(root)
+                window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+            }
+        }
+    } else {
+        window.fetch(apiUrl("rixo/prices"))
+            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('load')") }
+            .then { result: dynamic ->
+                val ok = result.success as? Boolean ?: false
+                if (!ok) throw js("Error('bad')")
+                val prices = result.data ?: js("[]")
+                val arr = js("Array.isArray(prices) ? prices : []") as Array<dynamic>
+                supplierMapTreeRowsCache = parseSupplierPriceRows(arr.toList())
+                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                bindSupplierMapTreeClicks(root)
+                window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+            }
+            .catch { _: dynamic ->
+                showMessage("Failed to refresh supplier map", "error")
+            }
+    }
+}
+
+private fun fetchSupplierMapTreeRowsSearch(done: (Boolean) -> Unit) {
+    val encQ = js("encodeURIComponent")(getSupplierMapSearchQuery().trim()).unsafeCast<String>()
+    val encF = js("encodeURIComponent")(supplierMapSearchFieldChoice).unsafeCast<String>()
+    val url = apiUrl("rixo/prices/page-search?q=$encQ&field=$encF&page=0&size=500")
+    window.fetch(url)
+        .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('search')") }
+        .then { body: dynamic ->
+            val err = js("body.error")?.toString()?.trim()
+            if (!err.isNullOrEmpty()) throw js("Error(err)")
+            val content = js("body.content") ?: js("[]")
+            val arr = js("Array.isArray(content) ? content : []") as Array<dynamic>
+            supplierMapTreeRowsCache = parseSupplierPriceRows(arr.toList())
+            supplierMapSearchTotal = js("body.totalElements")?.toString()?.toLongOrNull() ?: 0L
+            supplierMapSearchTotalPages = js("body.totalPages")?.toString()?.toIntOrNull() ?: 1
+            done(true)
+        }
+        .catch { _: dynamic ->
+            showMessage("Supplier map search failed", "error")
+            done(false)
+        }
+}
+
+private fun loadSupplierMapTree() {
+    val root = document.getElementById("supplierMapTreeRoot") as? HTMLElement ?: return
+    root.innerHTML = """<div class="rixo-tree-loading">Loading…</div>"""
+    val searchQ = getSupplierMapSearchQuery().trim()
+    if (searchQ.isNotEmpty()) {
+        supplierMapSearchServerMode = true
+        fetchSupplierMapTreeRowsSearch { ok ->
+            if (!ok) {
+                root.innerHTML = """<div class="rixo-tree-note">Search failed.</div>"""
+                return@fetchSupplierMapTreeRowsSearch
+            }
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+        }
+        return
+    }
+    supplierMapSearchServerMode = false
+    supplierMapSearchTotal = 0
+    supplierMapSearchTotalPages = 0
+    supplierMapSearchPageZeroBased = 0
+    window.fetch(apiUrl("rixo/prices"))
+        .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('load')") }
+        .then { result: dynamic ->
+            val ok = result.success as? Boolean ?: false
+            if (!ok) throw js("Error(result.message||'')")
+            val prices = result.data ?: js("[]")
+            val arr = js("Array.isArray(prices) ? prices : []") as Array<dynamic>
+            supplierMapTreeRowsCache = parseSupplierPriceRows(arr.toList())
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+        }
+        .catch { _: dynamic ->
+            root.innerHTML = """<div class="rixo-tree-note">Failed to load supplier map.</div>"""
+        }
+}
+
+private fun supplierRowsBySupplierKey(supplier: String): List<SupplierPriceRowLite> =
+    supplierMapTreeRowsCache.filter { it.supplier.equals(supplier, ignoreCase = true) }
+
+private fun supplierRowById(id: Long): SupplierPriceRowLite? =
+    supplierMapTreeRowsCache.firstOrNull { it.id == id }
+
+private fun notifySupplierRixoPricesChanged() {
+    try {
+        val timestamp = js("Date.now()").toString()
+        safeLocalStorageSet("supplierUpdated", timestamp)
+        val supplierEvent = js("new CustomEvent('supplierUpdated', { detail: { timestamp: timestamp } })")
+        window.dispatchEvent(supplierEvent)
+    } catch (_: dynamic) { }
+}
+
+private fun deleteSupplierPriceIds(ids: List<Long>, _root: HTMLElement, onDone: () -> Unit) {
+    if (ids.isEmpty()) {
+        onDone()
+        return
+    }
+    val id = ids.first()
+    val rest = ids.drop(1)
+    window.fetch(apiUrl("rixo/mappings/$id"), js("""{ method:'DELETE', headers:{'Content-Type':'application/json'} }"""))
+        .then { r: dynamic -> r.json().then { _: dynamic -> r } }
+        .then { _: dynamic ->
+            deleteSupplierPriceIds(rest, _root, onDone)
+        }
+        .catch { _: dynamic ->
+            showMessage("Delete failed partway", "error")
+            refreshSupplierMapTreeData()
+        }
+}
+
+private fun putSupplierMappingRow(row: SupplierPriceRowLite, successMessage: String = "Updated") {
+    val payload = js("{}")
+    payload.auctionHouse = row.supplier
+    payload.stockLocation = row.stock
+    payload.rixoCompany = row.rixoCompany
+    payload.venueId = row.venueId
+    payload.pol = row.pol
+    window.fetch(apiUrl("rixo/mappings/${row.id}"), js("""{ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
+        .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('put')") }
+        .then { _: dynamic ->
+            supplierTreePolEditRowId = null
+            supplierTreePolEditBranchIdx = null
+            supplierTreeVenueEditRowId = null
+            supplierTreeVenueEditBranchIdx = null
+            supplierTreeBranchEditRowId = null
+            supplierTreeBranchEditBranchIdx = null
+            supplierTreeSupplierEditName = null
+            showMessage(successMessage, "success")
+            notifySupplierRixoPricesChanged()
+            refreshSupplierMapTreeData()
+        }
+        .catch { _: dynamic ->
+            showMessage("Update failed", "error")
+            refreshSupplierMapTreeData()
+        }
+}
+
+private fun updateSupplierRowsSequentially(rows: List<SupplierPriceRowLite>, newSupplierName: String, root: HTMLElement) {
+    if (rows.isEmpty()) {
+        supplierTreeSupplierEditName = null
+        supplierTreeSelectedSupplier = newSupplierName
+        showMessage("Supplier name updated", "success")
+        notifySupplierRixoPricesChanged()
+        refreshSupplierMapTreeData()
+        return
+    }
     
-    document.getElementById("supplierColumnFilterBtn")?.addEventListener("click", { _: Event ->
-        showSupplierColumnFilterModal()
-    })
+    val row = rows.first()
+    val rest = rows.drop(1)
     
-    // Setup device change listener for Supplier page
-    setupSupplierDeviceChangeListener()
-    
-    // Check for device change and reload if needed
-    checkSupplierDeviceChange()
+    val payload = js("{}")
+    payload.auctionHouse = newSupplierName
+    payload.stockLocation = row.stock
+    payload.rixoCompany = row.rixoCompany
+    payload.venueId = row.venueId
+    payload.pol = row.pol
+    window.fetch(apiUrl("rixo/mappings/${row.id}"), js("""{ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
+        .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('put')") }
+        .then { _: dynamic ->
+            updateSupplierRowsSequentially(rest, newSupplierName, root)
+        }
+        .catch { _: dynamic ->
+            showMessage("Update failed partway", "error")
+            supplierTreeSupplierEditName = null
+            refreshSupplierMapTreeData()
+        }
+}
+
+/** Replace one semicolon segment for POL or venue_id on a single mapping row. */
+private fun putSupplierFieldSegment(
+    rowId: Long,
+    branchIdx: Int,
+    field: String,
+    newValue: String,
+    successMessage: String,
+) {
+    val row = supplierRowById(rowId) ?: return
+    val nv = newValue.trim()
+    val parts = when (field) {
+        "pol" -> splitSupplierSemicolonTokens(row.pol).toMutableList()
+        "venueId" -> splitSupplierSemicolonTokens(row.venueId).toMutableList()
+        else -> return
+    }
+    while (parts.size <= branchIdx) parts.add("")
+    if (branchIdx < parts.size) parts[branchIdx] = nv
+    else parts.add(nv)
+    val joined = joinSupplierSemicolonParts(parts)
+    val updated = when (field) {
+        "pol" -> row.copy(pol = joined)
+        "venueId" -> row.copy(venueId = joined)
+        else -> row
+    }
+    putSupplierMappingRow(updated, successMessage)
+}
+
+private fun applySupplierBranchInlineEdit(rowId: Long, branchIdx: Int) {
+    val row = supplierRowById(rowId) ?: return
+    val newStock = getEditableComboboxValue("supTreeBranchEditStock").trim()
+    val newVenue = getEditableComboboxValue("supTreeBranchEditVenue").trim()
+    val newPol = getEditableComboboxValue("supTreeBranchEditPol").trim()
+    if (newStock.isEmpty() || newStock == "-") {
+        showMessage("Stock location is required", "error")
+        return
+    }
+    val branches = expandStockBranchesForSupplier(supplierMapTreeRowsCache, row.supplier)
+    val br = branches.firstOrNull { it.row.id == rowId && it.stockBranchIndex == branchIdx } ?: run {
+        showMessage("Branch not found", "error")
+        return
+    }
+    val rixSegs = splitSupplierSemicolonTokens(row.rixoCompany).toMutableList()
+    for ((rixIdx, _) in br.rixoLeaves) {
+        val v = getEditableComboboxValue("supTreeBranchEditRixo_${rowId}_${rixIdx}").trim()
+        if (v.isEmpty()) {
+            showMessage("Rixo company is required", "error")
+            return
+        }
+        while (rixSegs.size <= rixIdx) rixSegs.add("")
+        if (rixIdx < rixSegs.size) rixSegs[rixIdx] = v else rixSegs.add(v)
+    }
+    val newRixoJoined = joinSupplierSemicolonParts(rixSegs)
+    val updated = row.copy(
+        stock = replaceSupplierSemicolonSegment(row.stock, branchIdx, newStock),
+        venueId = replaceSupplierSemicolonSegment(row.venueId, branchIdx, newVenue),
+        pol = replaceSupplierSemicolonSegment(row.pol, branchIdx, newPol),
+        rixoCompany = newRixoJoined.ifBlank { "-" },
+    )
+    putSupplierMappingRow(updated, "Mapping updated")
+}
+
+private fun supplierStockBranchCount(row: SupplierPriceRowLite): Int {
+    val stocks = splitSupplierSemicolonTokens(row.stock).filter { it.isNotBlank() && it != "-" }
+    return if (stocks.isEmpty()) 1 else stocks.size
+}
+
+/** Add a Rixo token for this branch: multiple leaves when one stock branch; one segment per branch when stock is split. */
+private fun mergeNewRixoIntoRow(row: SupplierPriceRowLite, branchIdx: Int, newTok: String): SupplierPriceRowLite {
+    val nt = newTok.trim()
+    val nBranches = supplierStockBranchCount(row)
+    val rixosAll = splitSupplierSemicolonTokens(row.rixoCompany).toMutableList()
+    if (nBranches <= 1) {
+        val nonBlank = rixosAll.map { it.trim() }.filter { it.isNotEmpty() && it != "-" }.toMutableList()
+        nonBlank.add(nt)
+        return row.copy(rixoCompany = joinSupplierSemicolonParts(nonBlank))
+    }
+    while (rixosAll.size <= branchIdx) rixosAll.add("")
+    val cur = rixosAll.getOrNull(branchIdx)?.trim().orEmpty()
+    rixosAll[branchIdx] = if (cur.isEmpty() || cur == "-") nt else "$cur;$nt"
+    return row.copy(rixoCompany = joinSupplierSemicolonParts(rixosAll))
+}
+
+private fun removeParallelBranchFromRow(rowId: Long, branchIdx: Int, _root: HTMLElement) {
+    val row = supplierRowById(rowId) ?: return
+    fun rm(raw: String): String {
+        val p = splitSupplierSemicolonTokens(raw).toMutableList()
+        if (branchIdx in p.indices) p.removeAt(branchIdx)
+        return joinSupplierSemicolonParts(p)
+    }
+    val ns = rm(row.stock)
+    val nv = rm(row.venueId)
+    val np = rm(row.pol)
+    val nr = rm(row.rixoCompany)
+    val stocksAfter = splitSupplierSemicolonTokens(ns).filter { it.isNotBlank() && it != "-" }
+    if (stocksAfter.isEmpty()) {
+        deleteSupplierPriceIds(listOf(rowId), _root) {
+            supplierTreeSelectedStockRowId = null
+            supplierTreeSelectedStockBranchIdx = null
+            supplierTreeSelectedStock = null
+            showMessage("Mapping deleted", "success")
+            notifySupplierRixoPricesChanged()
+            refreshSupplierMapTreeData()
+        }
+        return
+    }
+    putSupplierMappingRow(row.copy(stock = ns, venueId = nv, pol = np, rixoCompany = nr), "Branch removed")
+}
+
+private fun bindSupplierMapTreeClicks(root: HTMLElement) {
+    val prev = root.asDynamic().__supplierTreeClickHandler.unsafeCast<((Event) -> Unit)?>()
+    if (prev != null) root.removeEventListener("click", prev)
+
+    val handler: (Event) -> Unit = click@{ ev ->
+        val target = ev.target.asDynamic() as? Element ?: return@click
+        if (target.closest(".rixo-tree-card-menu-wrap") == null) closeAllSupplierCardMenus(root)
+
+        val addBtn = target.closest(".rixo-tree-add-btn") as? HTMLElement
+        if (addBtn != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            val lvl = addBtn.getAttribute("data-smap-add").orEmpty()
+            val sup = addBtn.getAttribute("data-smap-supplier")?.trim().orEmpty()
+            val stk = addBtn.getAttribute("data-smap-stock")?.trim().orEmpty()
+            when (lvl) {
+                "supplier" -> {
+                    supplierTreeInlineAddLevel = "supplier"
+                    supplierTreeBranchEditRowId = null
+                    supplierTreeBranchEditBranchIdx = null
+                    supplierTreePolEditRowId = null
+                    supplierTreePolEditBranchIdx = null
+                    supplierTreeVenueEditRowId = null
+                    supplierTreeVenueEditBranchIdx = null
+                    root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                    bindSupplierMapTreeClicks(root)
+                    window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+                }
+                "stock" -> {
+                    supplierTreeInlineAddLevel = "stock"
+                    supplierTreeInlineSupplier = sup
+                    supplierTreeInlineStock = ""
+                    supplierTreeBranchEditRowId = null
+                    supplierTreeBranchEditBranchIdx = null
+                    supplierTreeSelectedSupplier = sup
+                    supplierTreeSelectedStock = null
+                    root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                    bindSupplierMapTreeClicks(root)
+                    window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+                }
+                "leaf" -> {
+                    supplierTreeInlineAddLevel = "leaf"
+                    supplierTreeInlineSupplier = sup
+                    supplierTreeInlineStock = stk
+                    supplierTreeLeafAddRowId = addBtn.getAttribute("data-smap-row-id")?.toLongOrNull()
+                    supplierTreeLeafAddBranchIdx = addBtn.getAttribute("data-smap-branch-idx")?.toIntOrNull()
+                    supplierTreeBranchEditRowId = null
+                    supplierTreeBranchEditBranchIdx = null
+                    supplierTreeSelectedSupplier = sup
+                    supplierTreeSelectedStock = stk
+                    supplierTreeSelectedStockRowId = supplierTreeLeafAddRowId
+                    supplierTreeSelectedStockBranchIdx = supplierTreeLeafAddBranchIdx
+                    root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                    bindSupplierMapTreeClicks(root)
+                    window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+                }
+            }
+            return@click
+        }
+
+        val menuBtn = target.closest(".rixo-tree-card-menu-btn") as? HTMLElement
+        if (menuBtn != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            val wrap = menuBtn.closest(".rixo-tree-card-menu-wrap") as? HTMLElement ?: return@click
+            val wasOpen = wrap.classList.contains("is-open")
+            closeAllSupplierCardMenus(root)
+            if (!wasOpen) wrap.classList.add("is-open")
+            return@click
+        }
+
+        val menuItem = target.closest("[data-smap-menu]") as? HTMLElement
+        if (menuItem != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            closeAllSupplierCardMenus(root)
+            val action = menuItem.getAttribute("data-smap-menu").orEmpty()
+            val wrap = menuItem.closest(".rixo-tree-card-wrapper") as? HTMLElement ?: return@click
+            val level = wrap.getAttribute("data-smap-card-level").orEmpty()
+            val ps = wrap.getAttribute("data-smap-path-supplier")?.trim().orEmpty()
+            when (action) {
+                "edit" -> {
+                    when (level) {
+                        "supplier" -> {
+                            supplierTreeSupplierEditName = ps
+                            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                            bindSupplierMapTreeClicks(root)
+                        }
+                        "stock" -> {
+                            val id = wrap.getAttribute("data-smap-row-id")?.toLongOrNull()
+                            if (id != null) editMasterSupplier(id)
+                            else showMessage("No row for stock branch", "error")
+                        }
+                    }
+                }
+                "delete" -> {
+                    when (level) {
+                        "supplier" -> {
+                            val ids = supplierRowsBySupplierKey(ps).map { it.id }
+                            if (ids.isEmpty()) return@click
+                            if (js("window.confirm")("Delete all mappings for this supplier?") as Boolean) {
+                                deleteSupplierPriceIds(ids, root) {
+                                    showMessage("Deleted", "success")
+                                    notifySupplierRixoPricesChanged()
+                                    refreshSupplierMapTreeData()
+                                }
+                            }
+                        }
+                        "stock" -> {
+                            val rid = wrap.getAttribute("data-smap-row-id")?.toLongOrNull()
+                            val bidx = wrap.getAttribute("data-smap-branch-idx")?.toIntOrNull()
+                            if (rid == null || bidx == null) return@click
+                            if (js("window.confirm")("Remove this stock branch and aligned venue / POL / Rixo slots?") as Boolean) {
+                                removeParallelBranchFromRow(rid, bidx, root)
+                            }
+                        }
+                    }
+                }
+            }
+            return@click
+        }
+
+        val cardBtn = target.closest(".rixo-tree-card[data-smap-card-level]") as? HTMLElement
+        if (cardBtn != null && target.closest(".rixo-tree-card-menu-wrap") == null) {
+            if (cardBtn.classList.contains("rixo-tree-card--inline-editing")) return@click
+            ev.preventDefault()
+            val level = cardBtn.getAttribute("data-smap-card-level").orEmpty()
+            val wrap = cardBtn.closest(".rixo-tree-card-wrapper") as? HTMLElement ?: return@click
+            val ps = wrap.getAttribute("data-smap-path-supplier")?.trim().orEmpty()
+            val pst = wrap.getAttribute("data-smap-path-stock")?.trim().orEmpty()
+            when (level) {
+                "supplier" -> {
+                    supplierTreeBranchEditRowId = null
+                    supplierTreeBranchEditBranchIdx = null
+                    supplierTreeSelectedSupplier = ps
+                    supplierTreeSelectedStock = null
+                    supplierTreeSelectedStockRowId = null
+                    supplierTreeSelectedStockBranchIdx = null
+                }
+                "stock" -> {
+                    supplierTreeBranchEditRowId = null
+                    supplierTreeBranchEditBranchIdx = null
+                    supplierTreeSelectedSupplier = ps
+                    supplierTreeSelectedStock = pst
+                    supplierTreeSelectedStockRowId = wrap.getAttribute("data-smap-row-id")?.toLongOrNull()
+                    supplierTreeSelectedStockBranchIdx = wrap.getAttribute("data-smap-branch-idx")?.toIntOrNull()
+                }
+            }
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+            return@click
+        }
+
+        val polEdit = target.closest("[data-smap-pol-edit]") as? HTMLElement
+        if (polEdit != null) {
+            ev.preventDefault()
+            val strip = polEdit.closest(".supplier-tree-pol-strip") as? HTMLElement ?: return@click
+            supplierTreeBranchEditRowId = null
+            supplierTreeBranchEditBranchIdx = null
+            supplierTreePolEditRowId = strip.getAttribute("data-smap-pol-row")?.toLongOrNull()
+            supplierTreePolEditBranchIdx = strip.getAttribute("data-smap-pol-idx")?.toIntOrNull()
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+            return@click
+        }
+
+        val polCancel = target.closest("[data-smap-pol-cancel]") as? HTMLElement
+        if (polCancel != null) {
+            ev.preventDefault()
+            supplierTreePolEditRowId = null
+            supplierTreePolEditBranchIdx = null
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            return@click
+        }
+
+        val polSave = target.closest("[data-smap-pol-save]") as? HTMLElement
+        if (polSave != null) {
+            ev.preventDefault()
+            val rid = supplierTreePolEditRowId ?: return@click
+            val bidx = supplierTreePolEditBranchIdx ?: return@click
+            val np = getEditableComboboxValue("supTreePolEditCombo").trim()
+            putSupplierFieldSegment(rid, bidx, "pol", np, "POL updated")
+            return@click
+        }
+
+        val venueEdit = target.closest("[data-smap-venue-edit]") as? HTMLElement
+        if (venueEdit != null) {
+            ev.preventDefault()
+            val strip = venueEdit.closest(".supplier-tree-venue-strip") as? HTMLElement ?: return@click
+            supplierTreeBranchEditRowId = null
+            supplierTreeBranchEditBranchIdx = null
+            supplierTreeVenueEditRowId = strip.getAttribute("data-smap-venue-row")?.toLongOrNull()
+            supplierTreeVenueEditBranchIdx = strip.getAttribute("data-smap-venue-idx")?.toIntOrNull()
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+            return@click
+        }
+
+        val venueCancel = target.closest("[data-smap-venue-cancel]") as? HTMLElement
+        if (venueCancel != null) {
+            ev.preventDefault()
+            supplierTreeVenueEditRowId = null
+            supplierTreeVenueEditBranchIdx = null
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            return@click
+        }
+
+        val venueSave = target.closest("[data-smap-venue-save]") as? HTMLElement
+        if (venueSave != null) {
+            ev.preventDefault()
+            val rid = supplierTreeVenueEditRowId ?: return@click
+            val bidx = supplierTreeVenueEditBranchIdx ?: return@click
+            val nv = getEditableComboboxValue("supTreeVenueEditCombo").trim()
+            putSupplierFieldSegment(rid, bidx, "venueId", nv, "Venue ID updated")
+            return@click
+        }
+
+        val supplierCancel = target.closest("[data-smap-supplier-cancel]") as? HTMLElement
+        if (supplierCancel != null) {
+            ev.preventDefault()
+            supplierTreeSupplierEditName = null
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            return@click
+        }
+
+        val supplierSave = target.closest("[data-smap-supplier-save]") as? HTMLElement
+        if (supplierSave != null) {
+            ev.preventDefault()
+            val oldName = supplierTreeSupplierEditName ?: return@click
+            val newName = (document.getElementById("supTreeSupplierInlineEditInput") as? HTMLInputElement)?.value?.trim().orEmpty()
+            if (newName.isEmpty()) {
+                showMessage("Supplier name is required", "error")
+                return@click
+            }
+            if (newName == oldName) {
+                supplierTreeSupplierEditName = null
+                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                bindSupplierMapTreeClicks(root)
+                return@click
+            }
+            val rows = supplierRowsBySupplierKey(oldName)
+            if (rows.isEmpty()) {
+                supplierTreeSupplierEditName = null
+                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                bindSupplierMapTreeClicks(root)
+                return@click
+            }
+            updateSupplierRowsSequentially(rows, newName, root)
+            return@click
+        }
+
+        val supplierBranchSaveBtn = target.closest("[data-smap-supplier-branch-save]") as? HTMLElement
+        if (supplierBranchSaveBtn != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            val rid = supplierBranchSaveBtn.getAttribute("data-smap-supplier-branch-save")?.toLongOrNull() ?: return@click
+            val bidx = supplierBranchSaveBtn.getAttribute("data-smap-branch-idx")?.toIntOrNull() ?: return@click
+            applySupplierBranchInlineEdit(rid, bidx)
+            return@click
+        }
+
+        val leafEdit = target.closest("[data-smap-rixo-edit]") as? HTMLElement
+        if (leafEdit != null) {
+            ev.preventDefault()
+            val row = leafEdit.closest(".rixo-tree-leaf-row") as? HTMLElement ?: return@click
+            val id = row.getAttribute("data-smap-leaf-id")?.toLongOrNull() ?: return@click
+            val stockBranchIdx = row.getAttribute("data-smap-stock-branch-idx")?.toIntOrNull() ?: return@click
+            if (supplierTreeBranchEditRowId == id && supplierTreeBranchEditBranchIdx == stockBranchIdx) {
+                supplierTreeBranchEditRowId = null
+                supplierTreeBranchEditBranchIdx = null
+            } else {
+                supplierTreeBranchEditRowId = id
+                supplierTreeBranchEditBranchIdx = stockBranchIdx
+                supplierTreePolEditRowId = null
+                supplierTreePolEditBranchIdx = null
+                supplierTreeVenueEditRowId = null
+                supplierTreeVenueEditBranchIdx = null
+            }
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
+            return@click
+        }
+
+        val rixoBranchDel = target.closest("[data-smap-rixo-branch-delete]") as? HTMLElement
+        if (rixoBranchDel != null) {
+            ev.preventDefault()
+            val id = rixoBranchDel.getAttribute("data-smap-rixo-branch-delete")?.toLongOrNull() ?: return@click
+            val bidx = rixoBranchDel.getAttribute("data-smap-branch-idx")?.toIntOrNull() ?: return@click
+            if (!window.confirm("Remove this branch (stock, venue, POL, and Rixo slots)?") as Boolean) return@click
+            removeParallelBranchFromRow(id, bidx, root)
+            return@click
+        }
+
+        val supplierAddCancel = target.closest("[data-smap-supplier-add-cancel]") as? HTMLElement
+        if (supplierAddCancel != null) {
+            ev.preventDefault()
+            supplierTreeInlineAddLevel = null
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            return@click
+        }
+
+        val supplierAddSave = target.closest("[data-smap-supplier-add-save]") as? HTMLElement
+        if (supplierAddSave != null) {
+            ev.preventDefault()
+            val name = (document.getElementById("supTreeSupplierInlineAddNameInput") as? HTMLInputElement)?.value?.trim().orEmpty()
+            if (name.isEmpty()) {
+                showMessage("Supplier name is required", "error")
+                return@click
+            }
+            val payload = js("{}")
+            payload.auctionHouse = name
+            payload.stockLocation = "-"
+            payload.rixoCompany = "-"
+            payload.venueId = ""
+            payload.pol = ""
+            window.fetch(apiUrl("rixo/mappings/add"), js("""{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
+                .then { r: dynamic ->
+                    r.json().then { res: dynamic ->
+                        if (r.ok && (res.success as? Boolean == true)) {
+                            supplierTreeInlineAddLevel = null
+                            supplierTreeSelectedSupplier = name
+                            supplierTreeSelectedStock = null
+                            supplierTreeSelectedStockRowId = null
+                            supplierTreeSelectedStockBranchIdx = null
+                            showMessage((res.message as? String) ?: "Supplier added", "success")
+                            notifySupplierRixoPricesChanged()
+                            refreshSupplierMapTreeData()
+                        } else {
+                            showMessage((res.message as? String) ?: "Add failed", "error")
+                        }
+                        Unit
+                    }
+                }
+                .catch { _: dynamic -> showMessage("Add failed", "error") }
+            return@click
+        }
+
+        val stockAddCancel = target.closest("[data-smap-stock-add-cancel]") as? HTMLElement
+        if (stockAddCancel != null) {
+            ev.preventDefault()
+            supplierTreeInlineAddLevel = null
+            supplierTreeInlineSupplier = ""
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            return@click
+        }
+
+        val stockAddSave = target.closest("[data-smap-stock-add-save]") as? HTMLElement
+        if (stockAddSave != null) {
+            ev.preventDefault()
+            val sup = supplierTreeInlineSupplier.trim()
+            val st = getEditableComboboxValue("supTreeStockAddCombo").trim()
+            if (sup.isEmpty() || st.isEmpty()) {
+                showMessage("Stock location is required", "error")
+                return@click
+            }
+            val venue = supplierRowsBySupplierKey(sup).firstOrNull()?.venueId ?: ""
+            val payload = js("{}")
+            payload.auctionHouse = sup
+            payload.stockLocation = st
+            payload.rixoCompany = "-"
+            payload.venueId = venue
+            payload.pol = ""
+            window.fetch(apiUrl("rixo/mappings/add"), js("""{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
+                .then { r: dynamic ->
+                    r.json().then { res: dynamic ->
+                        if (r.ok && (res.success as? Boolean == true)) {
+                            supplierTreeInlineAddLevel = null
+                            supplierTreeInlineSupplier = ""
+                            supplierTreeSelectedSupplier = sup
+                            supplierTreeSelectedStock = st
+                            showMessage((res.message as? String) ?: "Stock added", "success")
+                            notifySupplierRixoPricesChanged()
+                            refreshSupplierMapTreeData()
+                        } else {
+                            showMessage((res.message as? String) ?: "Add failed", "error")
+                        }
+                        Unit
+                    }
+                }
+                .catch { _: dynamic -> showMessage("Add failed", "error") }
+            return@click
+        }
+
+        val leafAddCancel = target.closest("[data-smap-leaf-add-cancel]") as? HTMLElement
+        if (leafAddCancel != null) {
+            ev.preventDefault()
+            supplierTreeInlineAddLevel = null
+            supplierTreeLeafAddRowId = null
+            supplierTreeLeafAddBranchIdx = null
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            return@click
+        }
+
+        val leafAddSave = target.closest("[data-smap-leaf-add-save]") as? HTMLElement
+        if (leafAddSave != null) {
+            ev.preventDefault()
+            val sup = supplierTreeInlineSupplier.trim()
+            val stk = supplierTreeInlineStock.trim()
+            val rixo = getEditableComboboxValue("supTreeLeafAddRixo").trim()
+            if (sup.isEmpty() || stk.isEmpty() || rixo.isEmpty()) {
+                showMessage("Rixo company is required", "error")
+                return@click
+            }
+            val rid = supplierTreeLeafAddRowId
+            val bidx = supplierTreeLeafAddBranchIdx ?: 0
+            if (rid != null) {
+                val row = supplierRowById(rid) ?: return@click
+                supplierTreeInlineAddLevel = null
+                supplierTreeLeafAddRowId = null
+                supplierTreeLeafAddBranchIdx = null
+                val updated = mergeNewRixoIntoRow(row, bidx, rixo)
+                putSupplierMappingRow(updated, "Rixo company added")
+                return@click
+            }
+            val venue = supplierRowsBySupplierKey(sup).firstOrNull()?.venueId ?: ""
+            val payload = js("{}")
+            payload.auctionHouse = sup
+            payload.stockLocation = stk
+            payload.rixoCompany = rixo
+            payload.venueId = venue
+            payload.pol = ""
+            window.fetch(apiUrl("rixo/mappings/add"), js("""{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
+                .then { r: dynamic ->
+                    r.json().then { res: dynamic ->
+                        if (r.ok && (res.success as? Boolean == true)) {
+                            supplierTreeInlineAddLevel = null
+                            supplierTreeLeafAddRowId = null
+                            supplierTreeLeafAddBranchIdx = null
+                            showMessage((res.message as? String) ?: "Mapping added", "success")
+                            notifySupplierRixoPricesChanged()
+                            refreshSupplierMapTreeData()
+                        } else {
+                            showMessage((res.message as? String) ?: "Add failed", "error")
+                        }
+                        Unit
+                    }
+                }
+                .catch { _: dynamic -> showMessage("Add failed", "error") }
+            return@click
+        }
+    }
+
+    root.asDynamic().__supplierTreeClickHandler = handler
+    root.addEventListener("click", handler)
 }
 
 private val rixoCanonicalVehicleTypes = listOf(
@@ -6415,753 +7904,6 @@ fun showRixoMappingTreePage() {
                 <div class="rixo-tree-loading">Loading…</div>
             </div>
         </div>
-        <style>
-            .rixo-tree-page {
-                max-width: 1280px;
-                margin: 0 auto;
-                width: 100%;
-                box-sizing: border-box;
-                padding: 8px 12px 32px;
-            }
-            .rixo-tree-topbar {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 12px;
-                margin-bottom: 14px;
-            }
-            .rixo-tree-title {
-                margin: 0;
-                color: #0f172a;
-                font-size: 26px;
-                font-weight: 700;
-                letter-spacing: -0.02em;
-            }
-            .rixo-tree-btn {
-                border: 1px solid #cbd5e1;
-                background: #fff;
-                color: #334155;
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-size: 13px;
-                font-weight: 600;
-                cursor: pointer;
-            }
-            .rixo-tree-btn:disabled {
-                opacity: 0.5;
-                cursor: not-allowed;
-            }
-            .rixo-tree-btn--add {
-                background: #10b981;
-                border-color: #10b981;
-                color: #fff;
-            }
-            .rixo-tree-btn--danger {
-                background: #ef4444;
-                border-color: #ef4444;
-                color: #fff;
-            }
-            .rixo-tree-root {
-                background: linear-gradient(180deg, #eef2f7 0%, #e8edf5 100%);
-                border: 1px solid #e2e8f0;
-                border-radius: 16px;
-                padding: 18px 16px 24px;
-                box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
-                overflow-x: auto;
-            }
-            .rixo-tree-loading {
-                text-align: center;
-                color: #64748b;
-                padding: 48px 16px;
-                font-size: 15px;
-            }
-            .rixo-tree {
-                display: flex;
-                flex-direction: column;
-                gap: 10px;
-                min-width: 1020px;
-            }
-            /* Header row uses the same column widths as cards; nested tree rows add 8px margin + 30px
-               padding per level, so we pad each header cell to line up with the left edge of cards below. */
-            .rixo-tree-headers {
-                display: grid;
-                grid-template-columns: 270px 240px 240px minmax(180px, 1fr) minmax(120px, 1fr);
-                gap: 18px;
-                padding: 0 0 10px 0;
-                margin: 0 0 12px 0;
-                border-bottom: 1px solid #cbd5e1;
-                align-items: end;
-            }
-            .rixo-tree-header {
-                font-size: 11px;
-                font-weight: 700;
-                text-transform: uppercase;
-                letter-spacing: 0.07em;
-                color: #64748b;
-                box-sizing: border-box;
-            }
-            /* Company card: match card padding-left (10px) so label lines up with the card content */
-            .rixo-tree-header:nth-child(1) { padding-left: 10px; }
-            /* Nested columns: card starts 34px right of the plain grid column start per nesting level
-               (tree uses node gap 14 + .rixo-tree-children margin 8 + padding 30; grid gap is 18). */
-            .rixo-tree-header:nth-child(2) { padding-left: 34px; }
-            .rixo-tree-header:nth-child(3) { padding-left: 68px; }
-            .rixo-tree-header:nth-child(4) { padding-left: 102px; }
-            /* Price sits in the right part of the leaf row (with >>); center over value + control */
-            .rixo-tree-header--price {
-                text-align: center;
-                padding-left: 0;
-                padding-right: 8px;
-            }
-            .rixo-tree-node {
-                position: relative;
-                display: flex;
-                align-items: flex-start;
-                gap: 14px;
-            }
-            .rixo-tree-children {
-                position: relative;
-                margin-left: 8px;
-                padding-left: 30px;
-                padding-bottom: 8px;
-                display: flex;
-                flex-direction: column;
-                gap: 12px;
-            }
-            /* Main vertical spine for this branch column */
-            .rixo-tree-children::before {
-                content: "";
-                position: absolute;
-                left: 10px;
-                top: 0;
-                bottom: 0;
-                width: 2px;
-                background: linear-gradient(180deg, #94a3b8 0%, #cbd5e1 100%);
-                border-radius: 1px;
-                pointer-events: none;
-            }
-            /* Horizontal branch from spine to each row card (does not overlap the color ball) */
-            .rixo-tree-children > .rixo-tree-node::before {
-                content: "";
-                position: absolute;
-                left: -20px;
-                top: 26px;
-                width: 20px;
-                height: 2px;
-                background: linear-gradient(90deg, #94a3b8 0%, #cbd5e1 100%);
-                border-radius: 1px;
-                z-index: 0;
-                pointer-events: none;
-            }
-            .rixo-tree-card {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                min-height: 46px;
-                padding: 8px 12px 8px 10px;
-                background: #fff;
-                border-radius: 10px;
-                border: 1px solid rgba(226, 232, 240, 0.95);
-                box-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
-                cursor: pointer;
-                user-select: none;
-                position: relative;
-                z-index: 1;
-            }
-            .rixo-tree-card-wrapper {
-                display: flex;
-                align-items: stretch;
-                gap: 2px;
-                flex-shrink: 0;
-                box-sizing: border-box;
-            }
-            .rixo-tree-card-wrapper .rixo-tree-card:not(.rixo-tree-card--inline-editing) {
-                flex: 1;
-                min-width: 0;
-                width: auto !important;
-            }
-            .rixo-tree-card-wrapper--company { width: 270px; }
-            .rixo-tree-card-wrapper--auction { width: 240px; }
-            .rixo-tree-card-wrapper--stock { width: 240px; }
-            .rixo-tree-card-menu-wrap {
-                position: relative;
-                flex-shrink: 0;
-                align-self: center;
-                z-index: 20;
-            }
-            .rixo-tree-card-menu-btn {
-                width: 28px;
-                height: 32px;
-                padding: 0;
-                border: none;
-                border-radius: 8px;
-                background: transparent;
-                color: #64748b;
-                font-size: 16px;
-                font-weight: 700;
-                line-height: 1;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            .rixo-tree-card-menu-btn:hover {
-                background: rgba(148, 163, 184, 0.2);
-                color: #0f172a;
-            }
-            .rixo-tree-card-menu-panel {
-                display: none;
-                position: absolute;
-                right: 0;
-                top: calc(100% + 4px);
-                min-width: 148px;
-                padding: 4px 0;
-                background: #fff;
-                border: 1px solid #e2e8f0;
-                border-radius: 8px;
-                box-shadow: 0 10px 28px rgba(15, 23, 42, 0.14);
-                z-index: 200;
-            }
-            .rixo-tree-card-menu-wrap.is-open .rixo-tree-card-menu-panel {
-                display: block;
-            }
-            .rixo-tree-card-menu-item {
-                display: block;
-                width: 100%;
-                text-align: left;
-                padding: 9px 14px;
-                border: none;
-                background: none;
-                font-size: 13px;
-                font-weight: 600;
-                color: #1e293b;
-                cursor: pointer;
-            }
-            .rixo-tree-card-menu-item:hover {
-                background: #f1f5f9;
-            }
-            .rixo-tree-card-menu-item--danger {
-                color: #b91c1c;
-            }
-            .rixo-tree-card-menu-item--danger:hover {
-                background: #fef2f2;
-            }
-            .rixo-tree-card--company { width: 270px; }
-            .rixo-tree-card--auction { width: 240px; }
-            .rixo-tree-card--stock { width: 240px; }
-            .rixo-tree-card--inline-editing {
-                cursor: default;
-                flex-wrap: nowrap;
-                align-items: center;
-                gap: 8px;
-                box-sizing: border-box;
-                position: relative;
-                z-index: 40;
-                isolation: isolate;
-            }
-            .rixo-tree-card--inline-editing-with-actions {
-                flex-wrap: wrap;
-                align-items: stretch;
-            }
-            .rixo-tree-card-inline-actions {
-                width: 100%;
-                display: flex;
-                justify-content: flex-end;
-                align-items: center;
-                gap: 8px;
-                margin-top: 2px;
-            }
-            .rixo-tree-card-inline-cancel {
-                padding: 6px 12px;
-                border: 1px solid #d1d5db;
-                background: #fff;
-                color: #374151;
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
-                cursor: pointer;
-            }
-            .rixo-tree-card-inline-save {
-                padding: 6px 14px;
-                border: none;
-                background: #58B98C;
-                color: #fff;
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
-                cursor: pointer;
-            }
-            /* Inline "+ Add" for company / auction / stock: compact sizing aligned with card inline edit */
-            .rixo-tree-inline-add-outer {
-                flex-shrink: 0;
-                cursor: default;
-                position: relative;
-                z-index: 40;
-                isolation: isolate;
-                box-sizing: border-box;
-            }
-            .rixo-tree-inline-add-outer--company { width: 270px; }
-            .rixo-tree-inline-add-outer--auction,
-            .rixo-tree-inline-add-outer--stock { width: 240px; }
-            .rixo-tree-inline-add-box {
-                display: flex;
-                flex-direction: column;
-                gap: 6px;
-                width: 100%;
-                background: #fff;
-                border: 1px solid rgba(226, 232, 240, 0.95);
-                border-radius: 10px;
-                padding: 8px 10px;
-                box-shadow: 0 1px 5px rgba(15, 23, 42, 0.08);
-                box-sizing: border-box;
-            }
-            .rixo-tree-inline-add-box:focus-within {
-                border-color: #4CC9FF;
-                box-shadow: 0 0 0 3px rgba(76, 201, 255, 0.2);
-            }
-            .rixo-tree-inline-add-row--inputs {
-                display: flex;
-                flex-direction: row;
-                align-items: stretch;
-                gap: 8px;
-                width: 100%;
-            }
-            .rixo-tree-inline-add-field-primary {
-                flex: 1;
-                min-width: 0;
-                position: relative;
-                z-index: 50;
-            }
-            .rixo-tree-inline-add-field-primary.rixo-tree-card-combobox-wrap {
-                flex: 1 1 100%;
-                min-width: 0;
-                width: 100%;
-                max-width: 100%;
-            }
-            .rixo-tree-inline-add-row--inputs > .rixo-tree-inline-add-field-primary:only-child {
-                flex: 1 1 100%;
-                width: 100%;
-                max-width: 100%;
-            }
-            .rixo-tree-inline-add-box .rixo-tree-inline-add-field-primary input[type="text"] {
-                width: 100% !important;
-                box-sizing: border-box !important;
-            }
-            .rixo-tree-inline-add-plain input[type="text"] {
-                min-height: 34px !important;
-                font-size: 12px !important;
-                font-weight: 600 !important;
-                color: #0f172a !important;
-                padding: 8px 10px !important;
-                border-radius: 8px !important;
-                border: 1px solid #d1d5db !important;
-            }
-            .rixo-tree-inline-add-plain input[type="text"]:focus {
-                outline: none !important;
-                border-color: #4CC9FF !important;
-                box-shadow: 0 0 0 3px rgba(76, 201, 255, 0.2) !important;
-            }
-            .rixo-tree-inline-add-box .rixo-tree-card-combobox-wrap input[type="text"] {
-                min-height: 34px !important;
-                padding: 8px 40px 8px 10px !important;
-            }
-            .rixo-tree-inline-add-row--actions {
-                display: flex;
-                flex-direction: row;
-                justify-content: flex-end;
-                align-items: center;
-                gap: 6px;
-                width: 100%;
-                margin-top: 2px;
-            }
-            .rixo-tree-inline-add-box .rixo-tree-card-inline-add-cancel {
-                padding: 6px 12px;
-                border: 1px solid #d1d5db;
-                background: #fff;
-                color: #374151;
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
-                cursor: pointer;
-            }
-            .rixo-tree-inline-add-box .rixo-tree-card-inline-add-cancel:hover {
-                background: #f9fafb;
-            }
-            .rixo-tree-inline-add-box .rixo-tree-card-inline-add-save {
-                padding: 6px 14px;
-                border: none;
-                background: #58B98C;
-                color: #fff;
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 12px;
-                cursor: pointer;
-            }
-            .rixo-tree-inline-add-box .rixo-tree-card-inline-add-save:hover {
-                filter: brightness(0.95);
-            }
-            .rixo-tree-leaf-inline-add-cancel {
-                padding: 8px 12px;
-                border: 1px solid #d1d5db;
-                background: #fff;
-                color: #111827;
-                border-radius: 8px;
-                font-weight: 600;
-                cursor: pointer;
-                font-size: 13px;
-            }
-            .rixo-tree-leaf-inline-add-cancel:hover {
-                background: #f9fafb;
-            }
-            .rixo-tree-leaf-inline-add-save {
-                padding: 8px 12px;
-                border: none;
-                background: #58B98C;
-                color: #fff;
-                border-radius: 8px;
-                font-weight: 600;
-                cursor: pointer;
-                font-size: 13px;
-            }
-            .rixo-tree-leaf-inline-add-save:hover {
-                filter: brightness(0.95);
-            }
-            .rixo-tree-leaf-edit--inline-add-stack {
-                display: flex !important;
-                flex-direction: column;
-                align-items: stretch;
-                gap: 10px;
-                width: 100%;
-            }
-            .rixo-tree-leaf-edit--inline-add-stack .rixo-tree-leaf-vtype-wrap {
-                flex: 1;
-                min-width: 0;
-                max-width: none;
-            }
-            .rixo-tree-card-combobox-wrap {
-                flex: 1;
-                min-width: 0;
-                max-width: 100%;
-                position: relative;
-                z-index: 50;
-                pointer-events: auto;
-            }
-            .rixo-tree-card-combobox-wrap > div[style*="position: relative"] {
-                width: 100% !important;
-                z-index: 1;
-            }
-            /* Editable combobox: input below hit targets (select + ▼); styling matches inline-edit cards */
-            .rixo-tree-card-combobox-wrap input[type="text"] {
-                position: relative;
-                z-index: 1 !important;
-                border-radius: 8px !important;
-                border: 1px solid #d1d5db !important;
-                font-size: 12px !important;
-                font-weight: 600 !important;
-                color: #0f172a !important;
-                padding: 8px 40px 8px 10px !important;
-                min-height: 36px !important;
-                box-sizing: border-box !important;
-            }
-            .rixo-tree-card-combobox-wrap select {
-                z-index: 12 !important;
-            }
-            .rixo-tree-card-combobox-wrap div[id$="Button"] {
-                z-index: 13 !important;
-                pointer-events: auto !important;
-                touch-action: manipulation;
-            }
-            .rixo-tree-card-combobox-wrap input[type="text"]:focus {
-                outline: none !important;
-                border-color: #4CC9FF !important;
-                box-shadow: 0 0 0 3px rgba(76,201,255,0.2) !important;
-            }
-            .rixo-tree-leaf-vtype-wrap {
-                flex: 1;
-                min-width: 0;
-                max-width: 220px;
-                position: relative;
-                z-index: 50;
-                pointer-events: auto;
-            }
-            .rixo-tree-leaf-vtype-wrap > div[style*="position: relative"] {
-                width: 100% !important;
-                z-index: 1;
-            }
-            .rixo-tree-leaf-vtype-wrap input[type="text"] {
-                position: relative;
-                z-index: 1 !important;
-                border-radius: 8px !important;
-                border: 1px solid #d1d5db !important;
-                font-size: 12px !important;
-                font-weight: 600 !important;
-                min-height: 34px !important;
-                box-sizing: border-box !important;
-            }
-            .rixo-tree-leaf-vtype-wrap select {
-                z-index: 12 !important;
-            }
-            .rixo-tree-leaf-vtype-wrap div[id$="Button"] {
-                z-index: 13 !important;
-                pointer-events: auto !important;
-                touch-action: manipulation;
-            }
-            .rixo-tree-leaf-vtype-wrap input[type="text"]:focus {
-                outline: none !important;
-                border-color: #4CC9FF !important;
-                box-shadow: 0 0 0 3px rgba(76,201,255,0.2) !important;
-            }
-            .rixo-tree-card:hover {
-                box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
-                border-color: #cbd5e1;
-            }
-            .rixo-tree-card.rixo-tree-card--selected {
-                border-color: #6478d7;
-                box-shadow: 0 0 0 2px rgba(100, 120, 215, 0.22);
-                background: linear-gradient(180deg, #fafbff 0%, #f4f6ff 100%);
-            }
-            .rixo-tree-exp-indicator {
-                width: 12px;
-                height: 12px;
-                border-radius: 999px;
-                flex-shrink: 0;
-                background: #cbd5e1;
-                box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.45);
-                transition: background 0.15s ease, box-shadow 0.15s ease;
-                font-size: 0;
-                line-height: 0;
-                overflow: hidden;
-            }
-            .rixo-tree-card--selected .rixo-tree-exp-indicator {
-                background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-                box-shadow: 0 1px 4px rgba(37, 99, 235, 0.45);
-            }
-            .rixo-tree-label {
-                flex: 1;
-                min-width: 0;
-                font-size: 13px;
-                font-weight: 600;
-                color: #0f172a;
-                line-height: 1.35;
-                word-break: break-word;
-            }
-            .rixo-tree-leaf-wrap {
-                min-width: 320px;
-                max-width: 580px;
-            }
-            .rixo-tree-leaf-grid {
-                display: flex;
-                flex-direction: column;
-                gap: 8px;
-            }
-            .rixo-tree-leaf-row {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                gap: 10px;
-                background: #fff;
-                border: 1px solid #e2e8f0;
-                border-radius: 10px;
-                padding: 9px 10px;
-                box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
-            }
-            .rixo-tree-leaf-cells {
-                width: 100%;
-                min-width: 0;
-            }
-            .rixo-tree-leaf-view {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                gap: 10px;
-                width: 100%;
-            }
-            .rixo-tree-leaf-price-cell {
-                display: flex;
-                align-items: center;
-                justify-content: flex-end;
-                gap: 8px;
-                flex-shrink: 0;
-                max-width: 58%;
-            }
-            .rixo-tree-leaf-edit {
-                display: none;
-                flex-wrap: wrap;
-                align-items: center;
-                gap: 8px;
-                width: 100%;
-            }
-            .rixo-tree-leaf-row--inline-editing .rixo-tree-leaf-view {
-                display: none !important;
-            }
-            .rixo-tree-leaf-row--inline-editing .rixo-tree-leaf-edit {
-                display: flex !important;
-                position: relative;
-                z-index: 35;
-                isolation: isolate;
-            }
-            .rixo-tree-leaf-inline-price {
-                width: 104px;
-                height: 34px;
-                padding: 4px 8px;
-                border: 1px solid #d1d5db;
-                border-radius: 8px;
-                font-size: 13px;
-                box-sizing: border-box;
-            }
-            .rixo-tree-leaf-inline-price:focus {
-                outline: none;
-                border-color: #4CC9FF;
-                box-shadow: 0 0 0 3px rgba(76,201,255,0.2);
-            }
-            .rixo-tree-leaf-edit-btn {
-                flex-shrink: 0;
-                width: 32px;
-                height: 32px;
-                border: none;
-                border-radius: 999px;
-                padding: 0;
-                cursor: pointer;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                background: linear-gradient(180deg, #7dd3fc 0%, #4cc9ff 100%);
-                box-shadow: 0 1px 4px rgba(14, 165, 233, 0.45);
-                color: #fff;
-            }
-            .rixo-tree-leaf-edit-btn:hover {
-                filter: brightness(1.05);
-            }
-            .rixo-tree-leaf-edit-btn:active {
-                transform: scale(0.96);
-            }
-            .rixo-tree-leaf-delete-btn {
-                flex-shrink: 0;
-                width: 32px;
-                height: 32px;
-                border: none;
-                border-radius: 999px;
-                padding: 0;
-                cursor: pointer;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                background: linear-gradient(180deg, #fecaca 0%, #f87171 100%);
-                box-shadow: 0 1px 4px rgba(220, 38, 38, 0.35);
-                color: #fff;
-            }
-            .rixo-tree-leaf-delete-btn:hover {
-                filter: brightness(1.06);
-            }
-            .rixo-tree-leaf-delete-btn:active {
-                transform: scale(0.96);
-            }
-            .rixo-tree-leaf-update-btn {
-                flex-shrink: 0;
-                width: 34px;
-                height: 34px;
-                border: none;
-                border-radius: 999px;
-                padding: 0;
-                cursor: pointer;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                background: radial-gradient(circle at 30% 25%, #f8fafc 0%, #cbd5e1 38%, #94a3b8 100%);
-                box-shadow:
-                    inset 0 1px 1px rgba(255,255,255,0.85),
-                    inset 0 -2px 3px rgba(15, 23, 42, 0.18),
-                    0 2px 4px rgba(15, 23, 42, 0.2);
-                color: #1e3a8a;
-                font-size: 14px;
-                font-weight: 800;
-                line-height: 1;
-            }
-            .rixo-tree-leaf-update-btn:hover {
-                filter: brightness(1.04);
-            }
-            .rixo-tree-leaf-update-icon {
-                display: block;
-                letter-spacing: -0.12em;
-                text-shadow: 0 1px 0 rgba(255,255,255,0.5);
-            }
-            .rixo-tree-leaf-row--selectable {
-                cursor: pointer;
-            }
-            .rixo-tree-leaf-row--selected {
-                border-color: #8ea2f2;
-                box-shadow: 0 0 0 2px rgba(100, 120, 215, 0.20);
-                background: linear-gradient(180deg, #fafbff 0%, #f4f6ff 100%);
-            }
-            .rixo-tree-leaf-type {
-                font-size: 12px;
-                font-weight: 600;
-                color: #334155;
-                min-width: 0;
-                flex: 1;
-            }
-            .rixo-tree-leaf-price {
-                font-size: 13px;
-                color: #0f172a;
-                text-align: right;
-                word-break: break-all;
-            }
-            .rixo-tree-note {
-                width: 320px;
-                background: rgba(255,255,255,0.75);
-                border: 1px dashed #cbd5e1;
-                border-radius: 10px;
-                color: #64748b;
-                font-size: 12px;
-                padding: 12px;
-            }
-            .rixo-tree-add-wrap {
-                position: relative;
-                margin-top: 10px;
-                padding-top: 4px;
-                padding-left: 0;
-            }
-            .rixo-tree-add-wrap--leaf {
-                margin-top: 10px;
-                padding-top: 4px;
-            }
-            .rixo-tree-col-footer {
-                margin-top: 14px;
-                padding-top: 8px;
-                position: relative;
-            }
-            .rixo-tree-children > .rixo-tree-col-footer::before {
-                content: "";
-                position: absolute;
-                left: -20px;
-                top: 50%;
-                transform: translateY(-50%);
-                width: 20px;
-                height: 2px;
-                background: linear-gradient(90deg, #94a3b8 0%, #cbd5e1 100%);
-                border-radius: 1px;
-                z-index: 0;
-                pointer-events: none;
-            }
-            .rixo-tree-add-btn {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-                padding: 8px 12px;
-                font-size: 12px;
-                font-weight: 600;
-                color: #111827;
-                background: #fff;
-                border: 1px solid #7dd3fc;
-                border-radius: 8px;
-                cursor: pointer;
-                user-select: none;
-            }
-            .rixo-tree-add-btn:hover {
-                background: #f8fafc;
-                border-color: #38bdf8;
-            }
-        </style>
     """.trimIndent()
     loadRixoMappingTree()
 }
@@ -7275,7 +8017,7 @@ private fun buildRixoLeafInlineAddHtml(): String {
                 <div class="rixo-tree-leaf-edit rixo-tree-leaf-edit--inline-add-stack">
                     <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--inputs">
                         <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("rixoCardInlineAddLeafType", "Select Vehicle Type", required = true)}</div>
-                        <input id="rixoCardInlineAddLeafPrice" class="rixo-tree-leaf-inline-price" type="number" step="any" min="0" value="">
+                        <input id="rixoCardInlineAddLeafPrice" class="rixo-tree-leaf-inline-price money-input" type="text" step="any" min="0" value="" placeholder="0" inputmode="decimal">
                     </div>
                     <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--actions">
                         <button type="button" class="rixo-tree-leaf-inline-add-cancel">Cancel</button>
@@ -7438,31 +8180,12 @@ private fun mergeRixoVehicleTypeForLineEdit(
     return replaced.joinToString("; ")
 }
 
-/** Remove one vehicle-type segment from a list (first matching lineType). */
-private fun removeFirstMatchingVehicleType(types: List<String>, lineType: String): List<String> {
-    val lineNorm = lineType.trim()
-    var removed = false
-    return types.filter { t ->
-        if (!removed && rixoLeafLineTypesMatch(t, lineNorm)) {
-            removed = true
-            false
-        } else {
-            true
-        }
-    }
-}
-
-/**
- * Delete one leaf line: DELETE whole DB row when it is the only type / price-only row;
- * otherwise PUT with remaining semicolon-separated types.
- */
-private fun executeRixoLeafLineDelete(mappingId: Long, lineTypeRaw: String) {
-    val baseRow = rixoTreeRowsCache.firstOrNull { it.id.toLongOrNull() == mappingId } ?: run {
+/** Delete the entire `rixo_mapping` row (whole branch / DB row). */
+private fun executeRixoLeafLineDelete(mappingId: Long, @Suppress("UNUSED_PARAMETER") lineTypeRaw: String) {
+    if (rixoTreeRowsCache.none { it.id.toLongOrNull() == mappingId }) {
         showMessage("Mapping row not found", "error")
         return
     }
-    val lineType = lineTypeRaw.trim()
-    val types = rixoSplitVehicleTypes(baseRow.vType)
 
     fun clearSelectionIfRow() {
         if (rixoSelectedMappingId == mappingId) {
@@ -7475,93 +8198,30 @@ private fun executeRixoLeafLineDelete(mappingId: Long, lineTypeRaw: String) {
         }
     }
 
-    fun afterSuccess(msg: String) {
-        showMessage(msg, "success")
-        clearSelectionIfRow()
-        refreshRixoMappingTreeData()
-    }
-
-    fun deleteWholeRow() {
-        window.fetch(apiUrl("rixo-mapping/$mappingId"), js("""{ method:'DELETE', headers:{'Content-Type':'application/json'} }"""))
-            .then { resp: dynamic ->
-                resp.json().then { result: dynamic ->
-                    val p = js("{}")
-                    p.resp = resp
-                    p.result = result
-                    p
-                }
+    window.fetch(apiUrl("rixo-mapping/$mappingId"), js("""{ method:'DELETE', headers:{'Content-Type':'application/json'} }"""))
+        .then { resp: dynamic ->
+            resp.json().then { result: dynamic ->
+                val p = js("{}")
+                p.resp = resp
+                p.result = result
+                p
             }
-            .then { pair: dynamic ->
-                val resp = pair.resp
-                val result = pair.result
-                if (resp.ok && (result.success as? Boolean == true)) {
-                    afterSuccess("Line removed")
-                } else {
-                    showMessage(result.message?.toString() ?: "Failed to delete", "error")
-                }
-            }
-            .catch { err: dynamic ->
-                Logger.error("Delete rixo mapping failed: ${err.toString()}")
-                showMessage("Failed to delete mapping", "error")
-            }
-    }
-
-    fun putTrimmedTypes(mergedTypes: String) {
-        val payload = js("{}")
-        payload.rixoCompany = baseRow.company.trim()
-        payload.auctionName = baseRow.auction.trim()
-        payload.stockLocation = baseRow.stock.trim()
-        payload.supportedVehicleType = mergedTypes
-        payload.rixoPrice = baseRow.price?.trim().orEmpty()
-        window.fetch(apiUrl("rixo-mapping/$mappingId"), js("""{ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
-            .then { resp: dynamic ->
-                resp.json().then { result: dynamic ->
-                    val p = js("{}")
-                    p.resp = resp
-                    p.result = result
-                    p
-                }
-            }
-            .then { pair: dynamic ->
-                val resp = pair.resp
-                val result = pair.result
-                if (resp.ok && (result.success as? Boolean == true)) {
-                    afterSuccess("Line removed")
-                } else {
-                    showMessage(result.message?.toString() ?: "Failed to update", "error")
-                }
-            }
-            .catch { err: dynamic ->
-                Logger.error("Update rixo mapping after trim failed: ${err.toString()}")
-                showMessage("Failed to update mapping", "error")
-            }
-    }
-
-    // Price-only row (no vehicle types in DB)
-    if (types.isEmpty()) {
-        deleteWholeRow()
-        return
-    }
-
-    if (types.size == 1) {
-        if (!rixoLeafLineTypesMatch(types[0], lineType)) {
-            showMessage("Line does not match this mapping", "error")
-            return
         }
-        deleteWholeRow()
-        return
-    }
-
-    val remaining = removeFirstMatchingVehicleType(types, lineType)
-    if (remaining.size == types.size) {
-        showMessage("Vehicle type not found on this row", "error")
-        return
-    }
-    if (remaining.isEmpty()) {
-        deleteWholeRow()
-        return
-    }
-    putTrimmedTypes(remaining.joinToString("; "))
+        .then { pair: dynamic ->
+            val resp = pair.resp
+            val result = pair.result
+            if (resp.ok && (result.success as? Boolean == true)) {
+                showMessage("Mapping deleted", "success")
+                clearSelectionIfRow()
+                refreshRixoMappingTreeData()
+            } else {
+                showMessage(result.message?.toString() ?: "Failed to delete", "error")
+            }
+        }
+        .catch { err: dynamic ->
+            Logger.error("Delete rixo mapping failed: ${err.toString()}")
+            showMessage("Failed to delete mapping", "error")
+        }
 }
 
 private fun buildRixoLeafRowHtml(
@@ -7598,7 +8258,7 @@ private fun buildRixoLeafRowHtml(
                 </div>
                 <div class="rixo-tree-leaf-edit">
                     <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("${prefix}_type", "Select Vehicle Type", required = true)}</div>
-                    <input id="${prefix}_price" class="rixo-tree-leaf-inline-price" type="number" step="any" min="0" value="${escapeHtml(normalizedPrice)}">
+                    <input id="${prefix}_price" class="rixo-tree-leaf-inline-price money-input" type="text" step="any" min="0" value="${escapeHtml(normalizedPrice)}" placeholder="0" inputmode="decimal">
                     <button type="button" class="rixo-tree-leaf-update-btn" aria-label="Update mapping"><span class="rixo-tree-leaf-update-icon">&gt;&gt;</span></button>
                 </div>
             </div>
@@ -7911,7 +8571,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
             val row = leafDeleteBtn.closest(".rixo-tree-leaf-row--selectable") as? HTMLElement ?: return@treeClick
             val id = row.getAttribute("data-mapping-id")?.toLongOrNull() ?: return@treeClick
             val lineType = row.getAttribute("data-mapping-type")?.trim().orEmpty()
-            if (!window.confirm("Remove this line?")) return@treeClick
+            if (!window.confirm("Delete this mapping row?")) return@treeClick
             executeRixoLeafLineDelete(id, lineType)
             return@treeClick
         }
@@ -7946,7 +8606,12 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
                 showMessage("Please select a vehicle type from the list", "error")
                 return@treeClick
             }
-            if (price.isEmpty() || price.toDoubleOrNull() == null) {
+            if (price.isEmpty()) {
+                showMessage("Rixo price must be numeric", "error")
+                return@treeClick
+            }
+            val priceNum = parseMoneyNumericInput(price)
+            if (priceNum == null) {
                 showMessage("Rixo price must be numeric", "error")
                 return@treeClick
             }
@@ -7966,7 +8631,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
             payload.auctionName = auction
             payload.stockLocation = stock
             payload.supportedVehicleType = merged
-            payload.rixoPrice = price
+            payload.rixoPrice = price.replace(",", "").trim()
             window.fetch(apiUrl("rixo-mapping/$id"), js("""{ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
                 .then { resp: dynamic ->
                     resp.json().then { result: dynamic ->
@@ -8068,6 +8733,17 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
     }
     root.asDynamic().__rixoTreeClickHandler = clickHandler
     root.addEventListener("click", clickHandler)
+    window.setTimeout({
+        val addPriceInput = document.getElementById("rixoCardInlineAddLeafPrice") as? HTMLInputElement
+        addPriceInput?.addEventListener("paste", { ev -> ev.preventDefault() })
+        addPriceInput?.addEventListener("drop", { ev -> ev.preventDefault() })
+        val priceInputs = document.querySelectorAll("input.rixo-tree-leaf-inline-price.money-input")
+        for (i in 0 until priceInputs.length) {
+            val input = priceInputs.item(i) as? HTMLInputElement ?: continue
+            input.addEventListener("paste", { ev -> ev.preventDefault() })
+            input.addEventListener("drop", { ev -> ev.preventDefault() })
+        }
+    }, 100)
 }
 
 fun loadRixoMappingTree() {
@@ -8488,7 +9164,7 @@ private fun postRixoMappingBulkOneRow(
                 showMessage("Please select a supported vehicle type from the list", "error")
                 return
             }
-            if (p.isNotEmpty() && p.toDoubleOrNull() == null) {
+            if (p.isNotEmpty() && parseMoneyNumericInput(p) == null) {
                 showMessage("Rixo price must be numeric", "error")
                 return
             }
@@ -8923,8 +9599,13 @@ fun setupSupplierDeviceChangeListener() {
 }
 
 fun loadMasterSuppliers() {
-    val tableDiv = document.getElementById("supplierTable")
-    if (tableDiv == null) return
+    val treeRoot = document.getElementById("supplierMapTreeRoot") as? HTMLElement
+    if (treeRoot != null) {
+        loadSupplierMapTree()
+        return
+    }
+
+    val tableDiv = document.getElementById("supplierTable") as? HTMLElement ?: return
     
     val deviceType = getDeviceType()
     
@@ -8950,7 +9631,7 @@ private fun buildSupplierTableUi(
     footerStart: Int,
     footerEnd: Int,
 ) {
-    val supplierSortable = setOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
+    val supplierSortable = setOf("supplierName", "stockLocation", "rixoCompany", "pol", "venueId")
     if (orderedForDisplay.isEmpty()) {
         val message = if (filterLabel.isNotEmpty()) {
             "No supplier data found for: $filterLabel"
@@ -8984,9 +9665,10 @@ private fun buildSupplierTableUi(
         "pol" to "POL"
     )
 
+    val supplierColCount = 1 + selectedColumns.size
     var html = """
                 <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
-                    <table style="width: 100%; border-collapse: collapse;" class="supplier-table">
+                    <table style="width: 100%; border-collapse: collapse; table-layout: fixed;" class="supplier-table">${htmlTableColgroupNarrowActionEqualRest(supplierColCount)}
                         <thead>
                             <tr>
                                 <th style="padding: 12px 14px; text-align: left; min-width: 72px;"></th>
@@ -9129,7 +9811,7 @@ private fun buildSupplierTableUi(
             }
         }
     })
-    val supplierSortKeys = listOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
+    val supplierSortKeys = listOf("supplierName", "stockLocation", "rixoCompany", "pol", "venueId")
     for (key in supplierSortKeys) {
         if (key in selectedColumns) {
             document.getElementById("supplierMapSort_$key")?.addEventListener("click", { _: Event ->
@@ -9141,16 +9823,16 @@ private fun buildSupplierTableUi(
 
 fun loadMasterSuppliersWithCards() {
     val tableDiv = document.getElementById("supplierTable") as? HTMLElement ?: return
-
+    
     val searchQ = getSupplierMapSearchQuery()
-
+    
     tableDiv.innerHTML = """
         <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
             <div style="font-size: 16px; margin-bottom: 8px;">Loading supplier data...</div>
             <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
         </div>
     """
-
+    
     if (searchQ.isNotEmpty()) {
         supplierMapSearchServerMode = true
         val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
@@ -9213,10 +9895,10 @@ fun loadMasterSuppliersWithCards() {
             if (!success) {
                 throw js("Error(result.message || 'Failed to load suppliers')")
             }
-
+            
             val prices = result.data ?: js("[]")
             val pricesArray = js("Array.isArray(prices) ? prices : []") as Array<dynamic>
-
+            
             val pricesList = pricesArray.toList()
             val sortedPrices = pricesList.sortedByDescending { price ->
                 val id = price.id
@@ -9233,20 +9915,20 @@ fun loadMasterSuppliersWithCards() {
                     0.0
                 }
             }
-
+            
             val groupedPrices = groupSupplierPricesForView(sortedPrices)
-            val supplierSortable = setOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
+            val supplierSortable = setOf("supplierName", "stockLocation", "rixoCompany", "pol", "venueId")
             var orderedForDisplay = groupedPrices
             val smsf = supplierMapSortField
             if (smsf != null && smsf in supplierSortable) {
                 val ord = supplierMapSortOrderByField[smsf] ?: "desc"
                 orderedForDisplay = if (ord == "asc") {
                     groupedPrices.sortedBy { extractSupplierSortKey(it, smsf) }
-                } else {
+            } else {
                     groupedPrices.sortedByDescending { extractSupplierSortKey(it, smsf) }
-                }
             }
-
+            }
+            
             allSuppliers = orderedForDisplay
             displaySuppliersAsCards(orderedForDisplay, "", false)
         }
@@ -9287,8 +9969,8 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, filterLabel: String, 
     val paginatedPrices = if (isServerSearch) {
         filteredPrices
     } else {
-        val startIndex = (suppliersCurrentPage - 1) * suppliersItemsPerPage
-        val endIndex = kotlin.math.min(startIndex + suppliersItemsPerPage, filteredPrices.size)
+    val startIndex = (suppliersCurrentPage - 1) * suppliersItemsPerPage
+    val endIndex = kotlin.math.min(startIndex + suppliersItemsPerPage, filteredPrices.size)
         filteredPrices.subList(startIndex, endIndex)
     }
     
@@ -9417,8 +10099,8 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, filterLabel: String, 
         } else {
             val tp = kotlin.math.ceil(allSuppliers.size.toDouble() / suppliersItemsPerPage).toInt()
             if (suppliersCurrentPage < tp) {
-                suppliersCurrentPage++
-                loadMasterSuppliers()
+            suppliersCurrentPage++
+            loadMasterSuppliers()
             }
         }
     })
@@ -9426,16 +10108,16 @@ fun displaySuppliersAsCards(filteredPrices: List<dynamic>, filterLabel: String, 
 
 fun loadMasterSuppliersWithTable() {
     val tableDiv = document.getElementById("supplierTable") as? HTMLElement ?: return
-
+    
     val searchQ = getSupplierMapSearchQuery()
-
+    
     tableDiv.innerHTML = """
         <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
             <div style="font-size: 16px; margin-bottom: 8px;">Loading supplier data...</div>
             <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
         </div>
     """
-
+    
     if (searchQ.isNotEmpty()) {
         supplierMapSearchServerMode = true
         val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
@@ -9520,10 +10202,10 @@ fun loadMasterSuppliersWithTable() {
             if (!success) {
                 throw js("Error(result.message || 'Failed to load suppliers')")
             }
-
+            
             val prices = result.data ?: js("[]")
             val pricesArray = js("Array.isArray(prices) ? prices : []") as Array<dynamic>
-
+            
             val pricesList = pricesArray.toList()
             val sortedPrices = pricesList.sortedByDescending { price ->
                 val id = price.id
@@ -9540,16 +10222,16 @@ fun loadMasterSuppliersWithTable() {
                     0.0
                 }
             }
-
+            
             val groupedPrices = groupSupplierPricesForView(sortedPrices)
-            val supplierSortable = setOf("supplierName", "stockLocation", "rixoCompany", "venueId", "pol")
+            val supplierSortable = setOf("supplierName", "stockLocation", "rixoCompany", "pol", "venueId")
             var orderedForDisplay = groupedPrices
             val smsf = supplierMapSortField
             if (smsf != null && smsf in supplierSortable) {
                 val ord = supplierMapSortOrderByField[smsf] ?: "desc"
                 orderedForDisplay = if (ord == "asc") {
                     groupedPrices.sortedBy { extractSupplierSortKey(it, smsf) }
-                } else {
+            } else {
                     groupedPrices.sortedByDescending { extractSupplierSortKey(it, smsf) }
                 }
             }
@@ -9564,7 +10246,7 @@ fun loadMasterSuppliersWithTable() {
                 """
                 return@then
             }
-
+            
             val totalPages = kotlin.math.max(1, kotlin.math.ceil(orderedForDisplay.size.toDouble() / suppliersItemsPerPage).toInt())
             val startIndex = (suppliersCurrentPage - 1) * suppliersItemsPerPage
             val endIndex = kotlin.math.min(startIndex + suppliersItemsPerPage, orderedForDisplay.size)
@@ -9834,7 +10516,7 @@ fun showSupplierModal(priceId: Long?) {
         if (hasGrouped) {
             tryPrefillSupplierModalFromGroupedRow(prefix = "supplier")
         } else {
-            loadSupplierDataForEdit(priceId)
+        loadSupplierDataForEdit(priceId)
         }
     }
     
@@ -9929,37 +10611,37 @@ fun showDuplicateSupplierModal(priceId: Long) {
         tryPrefillSupplierModalFromGroupedRow(prefix = "dupSupplier")
         setEditableComboboxValue("dupSupplierAuctionHouse", "")
     } else {
-        // Load row data and fill form
-        window.fetch(apiUrl("rixo/prices"))
-            .then { response: dynamic ->
-                if (response.ok) response.json() else throw js("Error('Failed to load supplier data')")
+    // Load row data and fill form
+    window.fetch(apiUrl("rixo/prices"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load supplier data')")
+        }
+        .then { result: dynamic ->
+            val success = result.success as? Boolean ?: false
+            if (!success) {
+                val msg = (result.message as? String) ?: "Failed to load supplier data"
+                throw Exception(msg)
             }
-            .then { result: dynamic ->
-                val success = result.success as? Boolean ?: false
-                if (!success) {
-                    val msg = (result.message as? String) ?: "Failed to load supplier data"
-                    throw Exception(msg)
-                }
-                val prices = result.data ?: js("[]")
-                val pricesArray = js("Array.isArray(prices) ? prices : []") as Array<dynamic>
-                val price = pricesArray.find { it.id == priceId }
-                if (price != null) {
+            val prices = result.data ?: js("[]")
+            val pricesArray = js("Array.isArray(prices) ? prices : []") as Array<dynamic>
+            val price = pricesArray.find { it.id == priceId }
+            if (price != null) {
                     setChipFieldValue("dupSupplierStockLocation", (price.stockLocation ?: "").toString())
                     setChipFieldValue("dupSupplierRixoCompany", (price.rixoCompany ?: "").toString())
                     setChipFieldValue("dupSupplierVenueId", (price.venueId ?: "").toString())
                     setChipFieldValue("dupSupplierPol", (price.pol ?: "").toString())
                     setEditableComboboxValue("dupSupplierAuctionHouse", "")
-                } else {
-                    closeDuplicateSupplierModal()
-                    showMessage("Supplier not found", "error")
-                }
-            }
-            .catch { error: dynamic ->
+            } else {
                 closeDuplicateSupplierModal()
-                Logger.error("Error loading supplier for duplicate: ${error.toString()}")
-                showMessage("Failed to load supplier data", "error")
+                showMessage("Supplier not found", "error")
             }
-    }
+        }
+        .catch { error: dynamic ->
+            closeDuplicateSupplierModal()
+            Logger.error("Error loading supplier for duplicate: ${error.toString()}")
+            showMessage("Failed to load supplier data", "error")
+            }
+        }
 
     document.getElementById("closeDuplicateSupplierModal")?.addEventListener("click", { _: Event ->
         closeDuplicateSupplierModal()
@@ -10103,7 +10785,7 @@ fun validateSupplierMasterFields(
     callback: (List<Pair<String, String>>) -> Unit
 ) {
     // Master-menu membership checks removed — always allow save; backend may still validate.
-    callback(emptyList())
+            callback(emptyList())
 }
 
 fun showSupplierMasterFieldsErrorModal(missingFields: List<Pair<String, String>>) {

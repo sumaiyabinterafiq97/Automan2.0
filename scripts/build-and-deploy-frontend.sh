@@ -69,13 +69,22 @@ COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-automan_local}"
 
 # Do not use --no-deps: frontend depends_on backend (healthy). With --no-deps, nginx serves the SPA
 # but /api/* returns 502 if MySQL/backend were never started (common after Docker Desktop restart).
-docker stop automan_frontend_multiplatform 2>/dev/null || true
-docker rm -f automan_frontend_multiplatform 2>/dev/null || true
-docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate frontend
+compose_up_frontend() {
+  docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate frontend
+}
 
-if [ $? -ne 0 ]; then
-    echo "❌ Container start failed!"
-    exit 1
+if ! compose_up_frontend; then
+    echo ""
+    echo "⚠️  Compose up failed — often stale network after Docker Desktop restart or network prune:"
+    echo "   (network ... not found)"
+    echo "   Bringing the project down to drop stale refs, then starting frontend (+ mysql/backend deps) again..."
+    echo ""
+    # down does NOT remove mysql_data_v2 volumes; recreates bridge network automan_local_automan_network
+    docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" down --remove-orphans || true
+    if ! compose_up_frontend; then
+        echo "❌ Container start failed after network recovery!"
+        exit 1
+    fi
 fi
 echo "✅ Frontend container started"
 echo ""

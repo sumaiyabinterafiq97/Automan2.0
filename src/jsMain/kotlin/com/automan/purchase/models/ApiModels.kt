@@ -53,8 +53,11 @@ data class PurchaseResponse(
     val totalCostAfterTax: String? = null,
     val totalExpense: String? = null,
     val bookingId: Long? = null,
-    val shipped: Boolean? = null,
+    val bookingRequested: Boolean? = null,
+    val sold: Boolean? = null,
     val invoiceConfirmed: Boolean? = null,
+    val workflowStatus: String? = null,
+    val workflowStatusUpdatedAt: String? = null,
     val carModelYear: String? = null,
     val consignee: String? = null
 )
