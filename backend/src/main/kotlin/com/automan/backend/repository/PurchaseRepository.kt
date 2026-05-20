@@ -43,10 +43,27 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND p.country = :country")
     fun findUnshippedCarsByCountry(@Param("country") country: String): List<Purchase>
     
-    @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND COALESCE(NULLIF(p.pol, ''), p.stockLocation) = :polPort")
+    @Query(
+        value = """
+            SELECT p.*
+            FROM purchases p
+            WHERE p.booking_id IS NULL
+              AND COALESCE(NULLIF(p.pol, ''), p.stock_location) = :polPort
+        """,
+        nativeQuery = true
+    )
     fun findUnshippedCarsByPolPort(@Param("polPort") polPort: String): List<Purchase>
     
-    @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND p.country = :country AND COALESCE(NULLIF(p.pol, ''), p.stockLocation) = :polPort")
+    @Query(
+        value = """
+            SELECT p.*
+            FROM purchases p
+            WHERE p.booking_id IS NULL
+              AND p.country = :country
+              AND COALESCE(NULLIF(p.pol, ''), p.stock_location) = :polPort
+        """,
+        nativeQuery = true
+    )
     fun findUnshippedCarsByCountryAndPolPort(
         @Param("country") country: String, 
         @Param("polPort") polPort: String
