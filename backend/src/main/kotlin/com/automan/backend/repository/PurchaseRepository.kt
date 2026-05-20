@@ -43,10 +43,10 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND p.country = :country")
     fun findUnshippedCarsByCountry(@Param("country") country: String): List<Purchase>
     
-    @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND p.stockLocation = :polPort")
+    @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND COALESCE(NULLIF(p.pol, ''), p.stockLocation) = :polPort")
     fun findUnshippedCarsByPolPort(@Param("polPort") polPort: String): List<Purchase>
     
-    @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND p.country = :country AND p.stockLocation = :polPort")
+    @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND p.country = :country AND COALESCE(NULLIF(p.pol, ''), p.stockLocation) = :polPort")
     fun findUnshippedCarsByCountryAndPolPort(
         @Param("country") country: String, 
         @Param("polPort") polPort: String
@@ -81,8 +81,18 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.country = :country AND p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
     fun findDistinctStockLocationsByCountry(@Param("country") country: String): List<String>
     
-    // POL by country (from purchases only) - used for booking page POL dropdown
-    @Query("SELECT DISTINCT p.pol FROM Purchase p WHERE p.country = :country AND p.pol IS NOT NULL AND p.pol != '' ORDER BY p.pol")
+    // POL by country (from purchases only) - legacy rows may only have stock_location populated.
+    @Query(
+        value = """
+            SELECT DISTINCT COALESCE(NULLIF(p.pol, ''), p.stock_location) AS pol_value
+            FROM purchases p
+            WHERE p.country = :country
+              AND COALESCE(NULLIF(p.pol, ''), p.stock_location) IS NOT NULL
+              AND COALESCE(NULLIF(p.pol, ''), p.stock_location) != ''
+            ORDER BY pol_value
+        """,
+        nativeQuery = true
+    )
     fun findDistinctPolByCountry(@Param("country") country: String): List<String>
     
     // Rixo company (from purchases only)
@@ -98,11 +108,33 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     fun findDistinctVenueIds(): List<String>
     
     // Filtered chassis methods - filter by shipped=0 (unshipped cars only)
-    // Filter by POL field instead of stock_location for booking page
-    @Query(value = "SELECT DISTINCT p.chassis FROM purchases p WHERE p.country = :country AND p.pol = :polPort AND p.chassis IS NOT NULL AND p.chassis != '' AND (p.shipped IS NULL OR p.shipped = 0) ORDER BY p.chassis", nativeQuery = true)
+    // Use POL when present, falling back to stock_location for upgraded legacy rows.
+    @Query(
+        value = """
+            SELECT DISTINCT p.chassis
+            FROM purchases p
+            WHERE p.country = :country
+              AND COALESCE(NULLIF(p.pol, ''), p.stock_location) = :polPort
+              AND p.chassis IS NOT NULL
+              AND p.chassis != ''
+              AND (p.shipped IS NULL OR p.shipped = 0)
+            ORDER BY p.chassis
+        """,
+        nativeQuery = true
+    )
     fun findFilteredChassis(@Param("country") country: String, @Param("polPort") polPort: String): List<String>
 
-    @Query("SELECT p FROM Purchase p WHERE p.country = :country AND p.pol = :polPort AND (p.shipped IS NULL OR p.shipped = false) ORDER BY p.chassis")
+    @Query(
+        value = """
+            SELECT p.*
+            FROM purchases p
+            WHERE p.country = :country
+              AND COALESCE(NULLIF(p.pol, ''), p.stock_location) = :polPort
+              AND (p.shipped IS NULL OR p.shipped = 0)
+            ORDER BY p.chassis
+        """,
+        nativeQuery = true
+    )
     fun findFilteredPurchasesByCountryAndPol(
         @Param("country") country: String,
         @Param("polPort") polPort: String
@@ -111,7 +143,18 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     // Unshipped chassis by POL (using shipped field: null or 0 = unshipped)
     // Note: shipped is stored as TINYINT(1) in MySQL, so we check for 0 or NULL
     // Using native query to avoid Boolean/Integer comparison issues
-    @Query(value = "SELECT DISTINCT p.chassis FROM purchases p WHERE p.pol = :polPort AND (p.shipped IS NULL OR p.shipped = 0) AND p.chassis IS NOT NULL AND p.chassis != '' ORDER BY p.chassis", nativeQuery = true)
+    @Query(
+        value = """
+            SELECT DISTINCT p.chassis
+            FROM purchases p
+            WHERE COALESCE(NULLIF(p.pol, ''), p.stock_location) = :polPort
+              AND (p.shipped IS NULL OR p.shipped = 0)
+              AND p.chassis IS NOT NULL
+              AND p.chassis != ''
+            ORDER BY p.chassis
+        """,
+        nativeQuery = true
+    )
     fun findUnshippedChassisByPolPort(@Param("polPort") polPort: String): List<String>
     
     // Invoice filtering: Find purchases by consignee, vessel, and shipment_date

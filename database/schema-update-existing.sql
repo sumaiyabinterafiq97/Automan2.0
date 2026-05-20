@@ -20,6 +20,13 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- Backfill POL for existing purchases so the booking page can still find legacy rows.
+UPDATE purchases
+SET pol = stock_location
+WHERE (pol IS NULL OR pol = '')
+  AND stock_location IS NOT NULL
+  AND stock_location != '';
+
 -- Add other columns that may be missing on older RDS (idempotent; add more blocks as needed)
 SET @col_exists = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'purchases' AND COLUMN_NAME = 'total_fob_price');

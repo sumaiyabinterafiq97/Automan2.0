@@ -1462,23 +1462,6 @@ fun getSelectedPurchaseIds(): List<Long> {
     
     console.log("🔍 Selected purchase IDs: $selectedIds")
 
-    if (selectedIds.isEmpty()) {
-        console.warn("⚠️ No checkboxes selected. Falling back to all displayed cars.")
-        val fallbackIds = mutableListOf<Long>()
-        for (car in carBookingDisplayedCars) {
-            val id = (car.id as? Number)?.toLong()
-            if (id != null) {
-                fallbackIds.add(id)
-            }
-        }
-        if (fallbackIds.isNotEmpty()) {
-            selectedIds.addAll(fallbackIds)
-            console.log("✅ Defaulted to all displayed cars: $selectedIds")
-        } else {
-            console.warn("⚠️ No displayed cars available for fallback.")
-        }
-    }
-
     return selectedIds
 }
 
