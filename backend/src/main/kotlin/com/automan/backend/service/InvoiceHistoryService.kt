@@ -171,13 +171,6 @@ class InvoiceHistoryService(
         }
         val ledgerDate = resolveLedgerDate(request, pdf)
         val grandTotal = computeInvoiceGrandTotal(pdf)
-        if (grandTotal <= 0.0) {
-            return InvoiceLedgerResult(
-                clientId = clientId,
-                clientCreated = resolved.clientCreated,
-                warning = "Invoice total is zero; ledger entry was not posted.",
-            )
-        }
         val vesselForLedger = pdf.vessel.trim().takeIf { it.isNotEmpty() }
         val sync = eventService.syncInvoiceLedger(
             clientId = clientId,
@@ -515,8 +508,14 @@ class InvoiceHistoryService(
     }
 
     private fun reverseLedgerForDeletedInvoice(header: InvoiceHistory, lines: List<InvoiceHistoryLine>) {
-        val clientId = resolveClientIdForDeletedInvoice(header, lines) ?: return
         val ledgerDate = header.shippingDate ?: LocalDate.now()
+        val reversedCount = eventService.reverseOpenInvoiceLedgersForInvoice(
+            invoiceNumber = header.invoiceNumber,
+            eventDate = ledgerDate,
+            vessel = header.vessel,
+        )
+        if (reversedCount > 0) return
+        val clientId = resolveClientIdForDeletedInvoice(header, lines) ?: return
         eventService.reverseActiveInvoiceLedger(
             clientId = clientId,
             invoiceNumber = header.invoiceNumber,

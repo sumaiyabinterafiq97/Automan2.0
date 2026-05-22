@@ -1223,13 +1223,17 @@ private fun autoCreateInvoicesFromShippingHistory(gRows: List<dynamic>) {
                 // Build items list: one per chassis row in this client group
                 val itemsJs = js("[]")
                 val chassisList = mutableListOf<String>()
-                var purchaseIdsList = mutableListOf<Long>()
+                val purchaseIdsList = mutableListOf<Long>()
                 var totalYen = 0.0
 
                 for ((rowIdx, r) in sortedRows.withIndex()) {
                     val chassis = (r.chassis?.toString() ?: "").trim()
                     if (chassis.isEmpty()) continue
                     chassisList.add(chassis)
+                    val purchaseId = (r.purchaseId?.toString() ?: "").trim().toLongOrNull()
+                    if (purchaseId != null && purchaseId > 0L) {
+                        purchaseIdsList.add(purchaseId)
+                    }
 
                     // Parse amount from shipping history row (already numeric from backend)
                     val amtRaw = (r.amount?.toString() ?: "0").trim()
@@ -1263,7 +1267,13 @@ private fun autoCreateInvoicesFromShippingHistory(gRows: List<dynamic>) {
                 pdfObj.message = null
 
                 val entry = js("{}")
-                entry.purchaseIds = js("[]")
+                val purchaseIdsJs = js("[]")
+                if (purchaseIdsList.size == chassisList.size) {
+                    for (purchaseId in purchaseIdsList) {
+                        js("purchaseIdsJs.push(purchaseId)")
+                    }
+                }
+                entry.purchaseIds = purchaseIdsJs
                 entry.chassisJoined = chassisList.joinToString(";")
                 entry.shippingDateIso = shipmentDate.takeIf { it.isNotBlank() && it.length >= 8 }
                 entry.pdf = pdfObj

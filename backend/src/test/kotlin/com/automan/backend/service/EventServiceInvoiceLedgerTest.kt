@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.InjectMocks
 import org.mockito.Mock
@@ -48,6 +49,7 @@ class EventServiceInvoiceLedgerTest {
 
     @Test
     fun `syncInvoiceLedger skips when already balanced to target`() {
+        `when`(eventRepository.findByInvoiceNumberOrderByIdDesc("INV-100")).thenReturn(emptyList())
         `when`(
             eventRepository.findByClientIdAndInvoiceNumberOrderByIdDesc(2L, "INV-100"),
         ).thenReturn(
@@ -120,6 +122,7 @@ class EventServiceInvoiceLedgerTest {
 
     @Test
     fun `syncInvoiceLedger reverses and reposts when total changes`() {
+        `when`(eventRepository.findByInvoiceNumberOrderByIdDesc("INV-100")).thenReturn(emptyList())
         `when`(
             eventRepository.findByClientIdAndInvoiceNumberOrderByIdDesc(2L, "INV-100"),
         ).thenReturn(
@@ -148,5 +151,49 @@ class EventServiceInvoiceLedgerTest {
         assertTrue(result.reversed)
         assertTrue(result.posted)
         verify(eventRepository, times(2)).save(any(Event::class.java))
+    }
+
+    @Test
+    fun `syncInvoiceLedger zero total reverses invoice charge from previous client`() {
+        `when`(eventRepository.findByInvoiceNumberOrderByIdDesc("INV-100")).thenReturn(
+            listOf(
+                Event(id = 1L, clientId = 3L, eventDate = LocalDate.now(), eventType = EventType.INVOICE_ISSUED, transactionPrice = 850_000.0, runningBalance = -850_000.0),
+            ),
+        )
+        `when`(
+            eventRepository.findByClientIdAndInvoiceNumberOrderByIdDesc(3L, "INV-100"),
+        ).thenReturn(
+            listOf(
+                Event(id = 1L, clientId = 3L, eventDate = LocalDate.now(), eventType = EventType.INVOICE_ISSUED, transactionPrice = 850_000.0, runningBalance = -850_000.0),
+            ),
+        )
+        `when`(
+            eventRepository.findByClientIdAndInvoiceNumberOrderByIdDesc(2L, "INV-100"),
+        ).thenReturn(emptyList())
+        `when`(clientRepository.findById(3L)).thenReturn(
+            Optional.of(Client(id = 3L, clientNumber = "C3", clientName = "Previous Client")),
+        )
+        `when`(eventRepository.calculateTotalPaymentsByClientId(3L)).thenReturn(0.0)
+        `when`(eventRepository.calculateTotalTransactionPricesByClientId(3L)).thenReturn(850_000.0)
+        `when`(clientRepository.save(any(Client::class.java))).thenAnswer { it.arguments[0] as Client }
+        `when`(eventRepository.save(any(Event::class.java))).thenAnswer { inv ->
+            val e = inv.arguments[0] as Event
+            e.copy(id = 99L)
+        }
+
+        val result = eventService.syncInvoiceLedger(
+            clientId = 2L,
+            invoiceNumber = "INV-100",
+            eventDate = LocalDate.of(2026, 5, 20),
+            transactionPriceTotal = 0.0,
+            lineCount = 1,
+            vessel = "PACIFIC STAR",
+        )
+
+        assertTrue(result.reversed)
+        val captor = ArgumentCaptor.forClass(Event::class.java)
+        verify(eventRepository).save(captor.capture())
+        assertEquals(3L, captor.value.clientId)
+        assertEquals(EventType.INVOICE_REVERSAL, captor.value.eventType)
     }
 }
