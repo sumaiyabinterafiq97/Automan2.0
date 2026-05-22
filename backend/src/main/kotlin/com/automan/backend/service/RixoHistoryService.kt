@@ -309,6 +309,11 @@ class RixoHistoryService(
         if (rows.isEmpty()) return 0
         val affectedPurchaseIds = linkedSetOf<Long>()
         for (row in rows) {
+            if (historyRowHasAnyMatchedPurchaseBookingRequested(row)) {
+                throw IllegalArgumentException(
+                    "Cannot delete: at least one car on a selected Rixo history row is already booking requested.",
+                )
+            }
             val tokens = expandTokenSet(parseChassisTokens(row.chassis))
             affectedPurchaseIds.addAll(purchaseIdsForExpandedTokens(tokens))
         }

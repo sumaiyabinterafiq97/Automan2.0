@@ -28,6 +28,7 @@ class ShippingHistoryService(
     fun listAllRows(): List<ShippingHistoryRowDto> {
         val sort = Sort.by(Sort.Direction.DESC, "id")
         return shippingHistoryRepository.findAll(sort).map { e ->
+            val purchase = purchaseService.getPurchaseByChassis(e.chassis)
             ShippingHistoryRowDto(
                 id = e.id ?: 0L,
                 country = e.country,
@@ -39,6 +40,7 @@ class ShippingHistoryService(
                 vessel = e.vessel,
                 priceType = e.priceType,
                 chassis = e.chassis,
+                purchaseId = purchase?.id,
                 clientName = e.clientName,
                 amount = e.amount.setScale(2, RoundingMode.HALF_UP).toPlainString(),
                 createdAt = e.createdAt?.toString(),

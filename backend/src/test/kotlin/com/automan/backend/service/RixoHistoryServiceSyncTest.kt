@@ -128,6 +128,36 @@ class RixoHistoryServiceSyncTest {
     }
 
     @Test
+    fun deleteHistoryRows_throwsWhenAnyMatchedPurchaseIsBookingRequested() {
+        val purchaseRepository = mock(PurchaseRepository::class.java)
+        val rixoHistoryRepository = mock(RixoHistoryRepository::class.java)
+        val workflowService = PurchaseWorkflowService(purchaseRepository)
+        val shippingHistoryService = mock(ShippingHistoryService::class.java)
+        val invoiceHistoryService = mock(InvoiceHistoryService::class.java)
+        val service = RixoHistoryService(
+            rixoHistoryRepository,
+            purchaseRepository,
+            workflowService,
+            shippingHistoryService,
+            invoiceHistoryService,
+        )
+
+        val row = RixoHistory(id = 1L, chassis = "ABC-999")
+        `when`(rixoHistoryRepository.findAllById(listOf(1L))).thenReturn(listOf(row))
+
+        val p = Purchase(id = 10L, chassis = "ABC-999", bookingRequested = true)
+        `when`(purchaseRepository.findByChassisToken(anyString())).thenAnswer { inv ->
+            val token = inv.getArgument<String>(0)
+            if (token == "ABC-999" || token == "ABC") listOf(p) else emptyList()
+        }
+        `when`(purchaseRepository.findById(10L)).thenReturn(Optional.of(p))
+
+        assertThrows(IllegalArgumentException::class.java) {
+            service.deleteHistoryRows(listOf(1L))
+        }
+    }
+
+    @Test
     fun removeChassisTokenFromHistoryRow_throwsWhenPurchaseIsBookingRequested() {
         val purchaseRepository = mock(PurchaseRepository::class.java)
         val rixoHistoryRepository = mock(RixoHistoryRepository::class.java)

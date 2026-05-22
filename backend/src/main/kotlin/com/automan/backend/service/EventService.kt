@@ -201,6 +201,42 @@ class EventService(
         return (issued - reversed).coerceAtLeast(0.0)
     }
 
+    private fun clientIdsWithOpenInvoiceLedger(invoiceNumber: String): List<Long> {
+        val inv = invoiceNumber.trim()
+        if (inv.isEmpty()) return emptyList()
+        return eventRepository.findByInvoiceNumberOrderByIdDesc(inv)
+            .map { it.clientId }
+            .distinct()
+            .filter { clientId -> openInvoiceLedgerCharge(clientId, inv) > 0.0 }
+    }
+
+    @Transactional
+    fun reverseOpenInvoiceLedgersForInvoice(invoiceNumber: String, eventDate: LocalDate, vessel: String?): Int {
+        var reversed = 0
+        for (clientId in clientIdsWithOpenInvoiceLedger(invoiceNumber)) {
+            if (reverseActiveInvoiceLedger(clientId, invoiceNumber, eventDate, vessel) != null) {
+                reversed += 1
+            }
+        }
+        return reversed
+    }
+
+    private fun reverseOpenInvoiceLedgersForOtherClients(
+        clientId: Long,
+        invoiceNumber: String,
+        eventDate: LocalDate,
+        vessel: String?,
+    ): Int {
+        var reversed = 0
+        for (openClientId in clientIdsWithOpenInvoiceLedger(invoiceNumber)) {
+            if (openClientId == clientId) continue
+            if (reverseActiveInvoiceLedger(openClientId, invoiceNumber, eventDate, vessel) != null) {
+                reversed += 1
+            }
+        }
+        return reversed
+    }
+
     private fun isInvoiceLedgerBalancedTo(clientId: Long, invoiceNumber: String, targetCharge: Double): Boolean {
         val open = openInvoiceLedgerCharge(clientId, invoiceNumber)
         return kotlin.math.abs(open - targetCharge) < 0.01
@@ -224,25 +260,27 @@ class EventService(
         lineCount: Int,
         vessel: String?,
     ): InvoiceLedgerResult {
+        val inv = invoiceNumber.trim()
+        val otherClientReversals = reverseOpenInvoiceLedgersForOtherClients(clientId, inv, eventDate, vessel)
         if (transactionPriceTotal <= 0.0) {
-            val reversed = reverseActiveInvoiceLedger(clientId, invoiceNumber, eventDate, vessel)
+            val reversed = reverseActiveInvoiceLedger(clientId, inv, eventDate, vessel)
             return InvoiceLedgerResult(
-                reversed = reversed != null,
+                reversed = reversed != null || otherClientReversals > 0,
                 clientId = clientId,
                 warning = "Invoice total is zero; any open ledger charge was reversed.",
             )
         }
-        if (isInvoiceLedgerBalancedTo(clientId, invoiceNumber, transactionPriceTotal)) {
-            return InvoiceLedgerResult(clientId = clientId)
+        if (isInvoiceLedgerBalancedTo(clientId, inv, transactionPriceTotal)) {
+            return InvoiceLedgerResult(reversed = otherClientReversals > 0, clientId = clientId)
         }
-        val reversed = if (openInvoiceLedgerCharge(clientId, invoiceNumber) > 0.0) {
-            reverseActiveInvoiceLedger(clientId, invoiceNumber, eventDate, vessel)
+        val reversed = if (openInvoiceLedgerCharge(clientId, inv) > 0.0) {
+            reverseActiveInvoiceLedger(clientId, inv, eventDate, vessel)
         } else {
             null
         }
         val posted = postInvoiceIssuedLedger(
             clientId = clientId,
-            invoiceNumber = invoiceNumber,
+            invoiceNumber = inv,
             eventDate = eventDate,
             transactionPriceTotal = transactionPriceTotal,
             lineCount = lineCount,
@@ -250,7 +288,7 @@ class EventService(
         )
         return InvoiceLedgerResult(
             posted = posted != null,
-            reversed = reversed != null,
+            reversed = reversed != null || otherClientReversals > 0,
             clientId = clientId,
         )
     }

@@ -11,6 +11,7 @@ data class ShippingHistoryRowDto(
     val vessel: String? = null,
     val priceType: String? = null,
     val chassis: String,
+    val purchaseId: Long? = null,
     val clientName: String? = null,
     val amount: String,
     val createdAt: String? = null,
