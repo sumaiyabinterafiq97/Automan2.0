@@ -122,7 +122,6 @@ CREATE TABLE purchases (
     vessel VARCHAR(255) DEFAULT NULL,
     destination VARCHAR(100),
     shipped BOOLEAN DEFAULT FALSE,
-    invoice_confirmed BOOLEAN DEFAULT FALSE,
     shipment_charges VARCHAR(50),
     freight VARCHAR(50),
     storage_charges VARCHAR(50),
@@ -272,7 +271,7 @@ INSERT INTO booking_mappings (country, consignee_name, consignee_address, pod) V
 -- fuel type, WD, CC, door count, and grade. Without this data,
 -- chassis auto-fill will not work.
 -- ---------------------------------------------
-INSERT INTO car_brand_mapping (car_brand, chassis, car_name, fuel, wd, shift, cc, door, grade, seat, vehicle_type, rank, color, drive_type) VALUES
+INSERT INTO car_brand_mapping (car_brand, chassis, car_name, fuel, wd, shift, cc, door, grade, seat, vehicle_type, `rank`, color, drive_type) VALUES
 ('TOYOTA', 'ZN6', '86', 'GASOLINE', '2WD', NULL, 2000, 2, 'G', NULL, NULL, NULL, NULL, NULL),
 ('TOYOTA', 'NCP30', 'bB', 'GASOLINE', '2WD', NULL, 1300, 5, 'S', NULL, NULL, NULL, NULL, NULL),
 ('TOYOTA', 'NCP31', 'bB', 'GASOLINE', '2WD', NULL, 1500, 5, 'Z', NULL, NULL, NULL, NULL, NULL),

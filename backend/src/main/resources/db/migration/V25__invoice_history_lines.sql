@@ -1,8 +1,7 @@
 -- One invoice_history header row per invoice_number; chassis and per-line amounts live in invoice_history_line.
 
 ALTER TABLE invoice_history DROP INDEX uq_invoice_history_invoice_number;
-ALTER TABLE invoice_history DROP PRIMARY KEY;
-ALTER TABLE invoice_history ADD COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST;
+ALTER TABLE invoice_history DROP PRIMARY KEY, ADD COLUMN id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY FIRST;
 ALTER TABLE invoice_history ADD UNIQUE KEY uq_invoice_history_invoice_number (invoice_number);
 
 CREATE TABLE invoice_history_line (
