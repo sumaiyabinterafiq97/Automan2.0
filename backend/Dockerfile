@@ -40,5 +40,5 @@ ENV SPRING_PROFILES_ACTIVE=docker
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
   CMD curl -f http://localhost:8083/api/actuator/health || exit 1
 
-# Run the application
-CMD ["java", "-jar", "app.jar"]
+# Run the application with strict memory limits for Railway's 500MB container limit
+CMD ["java", "-Xmx300m", "-Xss512k", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
