@@ -246,6 +246,7 @@ gradle-app.setting
 **/build/
 /*.jar
 **/*.jar
+!**/gradle-wrapper.jar
 *.zip
 **/*.zip
 # Gradle caches
