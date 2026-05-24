@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/:match*",
-      "destination": "https://automan-production.up.railway.app/api/:match*"
+      "destination": "https://automan20-production.up.railway.app/api/:match*"
     },
     {
       "source": "/(.*)",
