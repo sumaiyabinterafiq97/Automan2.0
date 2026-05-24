@@ -1,6 +1,5 @@
 
 
-USE automan_car_purchase;
 
 -- ===========================================
 -- TABLE CREATION: CORE TABLES
