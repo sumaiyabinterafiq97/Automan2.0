@@ -201,6 +201,31 @@ class EventService(
         return (issued - reversed).coerceAtLeast(0.0)
     }
 
+    /**
+     * Client IDs with an unreversed INVOICE_ISSUED charge for [invoiceNumber], across all clients.
+     * Used before deleting invoice history so the original ledger owner is reversed even if current
+     * purchase/client-name links have become ambiguous.
+     */
+    internal fun findActiveInvoiceLedgerClientIds(invoiceNumber: String): List<Long> {
+        val inv = invoiceNumber.trim()
+        if (inv.isEmpty()) return emptyList()
+        val openByClient = linkedMapOf<Long, Double>()
+        for (event in eventRepository.findByInvoiceNumberOrderByIdDesc(inv)) {
+            val delta = when (event.eventType) {
+                EventType.INVOICE_ISSUED -> event.transactionPrice ?: 0.0
+                EventType.INVOICE_REVERSAL -> -(event.paymentReceived ?: 0.0)
+                else -> 0.0
+            }
+            if (delta != 0.0) {
+                openByClient[event.clientId] = (openByClient[event.clientId] ?: 0.0) + delta
+            }
+        }
+        return openByClient
+            .filterValues { it > 0.01 }
+            .keys
+            .toList()
+    }
+
     private fun isInvoiceLedgerBalancedTo(clientId: Long, invoiceNumber: String, targetCharge: Double): Boolean {
         val open = openInvoiceLedgerCharge(clientId, invoiceNumber)
         return kotlin.math.abs(open - targetCharge) < 0.01
