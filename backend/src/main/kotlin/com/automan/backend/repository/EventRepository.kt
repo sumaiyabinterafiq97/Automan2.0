@@ -28,6 +28,8 @@ interface EventRepository : JpaRepository<Event, Long> {
         clientId: Long,
         invoiceNumber: String,
     ): List<Event>
+
+    fun findByInvoiceNumberOrderByIdDesc(invoiceNumber: String): List<Event>
     
     // Find all events for a specific client
     fun findByClientIdOrderByEventDateDesc(clientId: Long): List<Event>

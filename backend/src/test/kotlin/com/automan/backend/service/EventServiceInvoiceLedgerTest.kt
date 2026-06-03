@@ -47,6 +47,36 @@ class EventServiceInvoiceLedgerTest {
     }
 
     @Test
+    fun `findActiveInvoiceLedgerClientIds returns only clients with unreversed invoice charges`() {
+        `when`(
+            eventRepository.findByInvoiceNumberOrderByIdDesc("INV-200"),
+        ).thenReturn(
+            listOf(
+                Event(id = 4L, clientId = 4L, eventDate = LocalDate.now(), eventType = EventType.INVOICE_REVERSAL, paymentReceived = 50_000.0, runningBalance = 0.0),
+                Event(id = 3L, clientId = 4L, eventDate = LocalDate.now(), eventType = EventType.INVOICE_ISSUED, transactionPrice = 50_000.0, runningBalance = -50_000.0),
+                Event(id = 2L, clientId = 3L, eventDate = LocalDate.now(), eventType = EventType.INVOICE_ISSUED, transactionPrice = 125_000.0, runningBalance = -125_000.0),
+                Event(id = 1L, clientId = 2L, eventDate = LocalDate.now(), eventType = EventType.OTHER, transactionPrice = 999_000.0, runningBalance = -999_000.0),
+            ),
+        )
+
+        assertEquals(listOf(3L), eventService.findActiveInvoiceLedgerClientIds(" INV-200 "))
+    }
+
+    @Test
+    fun `findActiveInvoiceLedgerClientIds returns all clients with open charges for ambiguous deletes`() {
+        `when`(
+            eventRepository.findByInvoiceNumberOrderByIdDesc("INV-300"),
+        ).thenReturn(
+            listOf(
+                Event(id = 2L, clientId = 3L, eventDate = LocalDate.now(), eventType = EventType.INVOICE_ISSUED, transactionPrice = 80_000.0, runningBalance = -80_000.0),
+                Event(id = 1L, clientId = 2L, eventDate = LocalDate.now(), eventType = EventType.INVOICE_ISSUED, transactionPrice = 120_000.0, runningBalance = -120_000.0),
+            ),
+        )
+
+        assertEquals(listOf(3L, 2L), eventService.findActiveInvoiceLedgerClientIds("INV-300"))
+    }
+
+    @Test
     fun `syncInvoiceLedger skips when already balanced to target`() {
         `when`(
             eventRepository.findByClientIdAndInvoiceNumberOrderByIdDesc(2L, "INV-100"),

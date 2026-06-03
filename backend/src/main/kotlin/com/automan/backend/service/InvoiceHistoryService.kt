@@ -515,7 +515,14 @@ class InvoiceHistoryService(
     }
 
     private fun reverseLedgerForDeletedInvoice(header: InvoiceHistory, lines: List<InvoiceHistoryLine>) {
-        val clientId = resolveClientIdForDeletedInvoice(header, lines) ?: return
+        val activeLedgerClients = eventService.findActiveInvoiceLedgerClientIds(header.invoiceNumber)
+        val clientId = when (activeLedgerClients.size) {
+            0 -> resolveClientIdForDeletedInvoice(header, lines)
+            1 -> activeLedgerClients.first()
+            else -> throw IllegalStateException(
+                "Invoice ${header.invoiceNumber} has open ledger charges for multiple clients; delete canceled.",
+            )
+        } ?: return
         val ledgerDate = header.shippingDate ?: LocalDate.now()
         eventService.reverseActiveInvoiceLedger(
             clientId = clientId,
