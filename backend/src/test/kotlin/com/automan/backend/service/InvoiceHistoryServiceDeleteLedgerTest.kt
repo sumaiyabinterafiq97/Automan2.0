@@ -10,13 +10,10 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
-import org.mockito.ArgumentMatchers.any
-import org.mockito.ArgumentMatchers.anyLong
-import org.mockito.ArgumentMatchers.anyString
-import org.mockito.ArgumentMatchers.nullable
 import org.mockito.Mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoMoreInteractions
 import org.mockito.Mockito.`when`
 import org.mockito.junit.jupiter.MockitoExtension
 import java.time.LocalDate
@@ -89,12 +86,8 @@ class InvoiceHistoryServiceDeleteLedgerTest {
             service.deleteByInvoiceNumbers(listOf("INV-901"))
         }
 
-        verify(eventService, never()).reverseActiveInvoiceLedger(
-            anyLong(),
-            anyString(),
-            any(LocalDate::class.java),
-            nullable(String::class.java),
-        )
+        verify(eventService).findActiveInvoiceLedgerClientIds("INV-901")
+        verifyNoMoreInteractions(eventService)
         verify(invoiceHistoryLineRepository, never()).deleteByInvoiceHistoryId(10L)
         verify(invoiceHistoryRepository, never()).deleteAll(listOf(header))
     }
