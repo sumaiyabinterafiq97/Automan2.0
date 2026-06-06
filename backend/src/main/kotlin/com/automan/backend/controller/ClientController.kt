@@ -4,9 +4,13 @@ import com.automan.backend.dto.CreateTransactionRequest
 import com.automan.backend.model.Client
 import com.automan.backend.model.ClientStatus
 import com.automan.backend.service.ClientService
+import com.automan.backend.service.ClientTransactionsReportService
 import com.automan.backend.service.InvoiceHistoryService
+import com.automan.backend.service.PdfService
 import com.automan.backend.service.TransactionService
 import com.automan.backend.util.Logger
+import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.time.LocalDate
@@ -26,6 +30,8 @@ class ClientController(
     private val clientService: ClientService,
     private val transactionService: TransactionService,
     private val invoiceHistoryService: InvoiceHistoryService,
+    private val clientTransactionsReportService: ClientTransactionsReportService,
+    private val pdfService: PdfService,
 ) {
     
     @GetMapping
@@ -38,9 +44,27 @@ class ClientController(
     fun resolveLedgerClient(
         @RequestParam name: String,
         @RequestParam(required = false) purchaseIds: List<Long>?,
+        @RequestParam(required = false) invoiceNumber: String?,
+        @RequestParam(required = false) invoiceAmount: Double?,
     ): ResponseEntity<Map<String, Any?>> {
-        val result = invoiceHistoryService.previewLedgerClient(name, purchaseIds.orEmpty())
+        val result = invoiceHistoryService.previewLedgerClient(
+            clientName = name,
+            purchaseIds = purchaseIds.orEmpty(),
+            invoiceNumber = invoiceNumber,
+            invoiceAmount = invoiceAmount,
+        )
         return ResponseEntity.ok(result)
+    }
+
+    @GetMapping("/credit-check")
+    fun creditCheck(
+        @RequestParam clientId: Long,
+        @RequestParam invoiceNumber: String,
+        @RequestParam invoiceAmount: Double,
+    ): ResponseEntity<Map<String, Any?>> {
+        val assessment = clientService.assessCreditForInvoiceCharge(clientId, invoiceNumber, invoiceAmount)
+            ?: return ResponseEntity.notFound().build()
+        return ResponseEntity.ok(assessment.toResponseMap())
     }
 
     @GetMapping("/search")
@@ -143,6 +167,28 @@ class ClientController(
         return ResponseEntity.ok(clients)
     }
     
+    @GetMapping("/{id}/statement-pdf")
+    fun clientStatementPdf(
+        @PathVariable id: Long,
+        @RequestParam(required = false) startDate: LocalDate?,
+        @RequestParam(required = false) endDate: LocalDate?,
+    ): ResponseEntity<ByteArray> {
+        return try {
+            val statement = clientTransactionsReportService.buildClientStatement(id, startDate, endDate)
+            val pdf = pdfService.generateClientStatementPdf(statement)
+            val safeName = statement.clientNumber.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(
+                    HttpHeaders.CONTENT_DISPOSITION,
+                    "attachment; filename=\"client-statement-$safeName.pdf\"",
+                )
+                .body(pdf)
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.notFound().build()
+        }
+    }
+
     @GetMapping("/{id}/balance")
     fun getClientBalance(@PathVariable id: Long): ResponseEntity<Map<String, Any>> {
         val balance = clientService.getClientBalance(id)

@@ -1,7 +1,9 @@
 package com.automan.backend.service
 
 import com.automan.backend.model.Purchase
+import com.automan.backend.dto.ClientStatementDto
 import com.automan.backend.dto.InvoicePdfRequest
+import com.automan.backend.dto.UnpaidAgingReportDto
 import com.itextpdf.kernel.pdf.PdfDocument
 import com.itextpdf.kernel.pdf.PdfWriter
 import com.itextpdf.kernel.geom.PageSize
@@ -653,6 +655,137 @@ class PdfService {
         } catch (e: Exception) {
             return yearStr
         }
+    }
+
+    fun generateClientStatementPdf(statement: ClientStatementDto): ByteArray {
+        val outputStream = ByteArrayOutputStream()
+        val pdfWriter = PdfWriter(outputStream)
+        val pdfDocument = PdfDocument(pdfWriter)
+        val document = Document(pdfDocument, PageSize.A4.rotate())
+        val font = getJapaneseFont()
+        document.setFont(font)
+
+        val periodText = when {
+            statement.periodStart != null && statement.periodEnd != null ->
+                "${statement.periodStart} – ${statement.periodEnd}"
+            statement.periodStart != null -> "From ${statement.periodStart}"
+            statement.periodEnd != null -> "Through ${statement.periodEnd}"
+            else -> "All transactions"
+        }
+
+        document.add(
+            Paragraph("CLIENT STATEMENT")
+                .setFontSize(16f)
+                .setBold()
+                .setTextAlignment(TextAlignment.CENTER)
+                .setMarginBottom(8f),
+        )
+        document.add(Paragraph("Generated: ${statement.generatedAt} · Period: $periodText").setFontSize(9f).setMarginBottom(12f))
+
+        val meta = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginBottom(10f)
+        meta.addCell(metaCell("Client: ${statement.clientName} (${statement.clientNumber})", font))
+        meta.addCell(metaCell("Currency: ${statement.currency}", font))
+        meta.addCell(metaCell("Credit limit: ${statement.creditLimit?.let { formatYenPlain(it) } ?: "—"}", font))
+        meta.addCell(metaCell("Available credit: ${statement.availableCredit?.let { formatSignedYen(it) } ?: "—"}", font))
+        meta.addCell(metaCell("Current balance: ${formatSignedYen(statement.currentBalance)} (${statement.balanceLabel})", font))
+        meta.addCell(metaCell("", font))
+        document.add(meta)
+
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(10f, 10f, 12f, 28f, 12f, 12f, 16f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+        listOf("Date", "Type", "Reference", "Description", "Credit (+)", "Debit (−)", "Balance").forEach {
+            table.addHeaderCell(createHeaderCell(it, font))
+        }
+        for (line in statement.lines) {
+            table.addCell(createCell(line.date.toString(), font))
+            table.addCell(createCell(line.typeLabel, font))
+            table.addCell(createCell(line.reference ?: "", font))
+            table.addCell(createCell(line.description ?: "", font))
+            table.addCell(createCell(line.credit?.let { formatYenPlain(it) } ?: "", font))
+            table.addCell(createCell(line.debit?.let { formatYenPlain(it) } ?: "", font))
+            table.addCell(createCell(formatSignedYen(line.balance), font))
+        }
+        document.add(table)
+        document.close()
+        return outputStream.toByteArray()
+    }
+
+    fun generateUnpaidAgingPdf(report: UnpaidAgingReportDto): ByteArray {
+        val outputStream = ByteArrayOutputStream()
+        val pdfWriter = PdfWriter(outputStream)
+        val pdfDocument = PdfDocument(pdfWriter)
+        val document = Document(pdfDocument, PageSize.A4.rotate())
+        val font = getJapaneseFont()
+        document.setFont(font)
+
+        document.add(
+            Paragraph("UNPAID INVOICE AGING")
+                .setFontSize(16f)
+                .setBold()
+                .setTextAlignment(TextAlignment.CENTER)
+                .setMarginBottom(8f),
+        )
+        document.add(
+            Paragraph("As of ${report.asOfDate} · Total open: ${formatYenPlain(report.totalOpen)}")
+                .setFontSize(9f)
+                .setMarginBottom(12f),
+        )
+
+        if (report.summaries.isNotEmpty()) {
+            document.add(Paragraph("Summary by client").setFontSize(11f).setBold().setMarginBottom(6f))
+            val summaryTable = Table(UnitValue.createPercentArray(floatArrayOf(22f, 10f, 17f, 17f, 17f, 17f)))
+                .setWidth(UnitValue.createPercentValue(100f))
+                .setMarginBottom(14f)
+            listOf("Client", "Client #", "0–30", "31–60", "61–90", "90+").forEach {
+                summaryTable.addHeaderCell(createHeaderCell(it, font))
+            }
+            for (s in report.summaries) {
+                summaryTable.addCell(createCell(s.clientName, font))
+                summaryTable.addCell(createCell(s.clientNumber, font))
+                summaryTable.addCell(createCell(formatYenPlain(s.bucket0to30), font))
+                summaryTable.addCell(createCell(formatYenPlain(s.bucket31to60), font))
+                summaryTable.addCell(createCell(formatYenPlain(s.bucket61to90), font))
+                summaryTable.addCell(createCell(formatYenPlain(s.bucket90Plus), font))
+            }
+            document.add(summaryTable)
+        }
+
+        document.add(Paragraph("Open invoices").setFontSize(11f).setBold().setMarginBottom(6f))
+        val detailTable = Table(UnitValue.createPercentArray(floatArrayOf(20f, 10f, 14f, 12f, 8f, 14f, 14f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+        listOf("Client", "Client #", "Invoice", "Invoice date", "Days", "Bucket", "Open amount").forEach {
+            detailTable.addHeaderCell(createHeaderCell(it, font))
+        }
+        for (row in report.rows) {
+            detailTable.addCell(createCell(row.clientName, font))
+            detailTable.addCell(createCell(row.clientNumber, font))
+            detailTable.addCell(createCell(row.invoiceNumber, font))
+            detailTable.addCell(createCell(row.invoiceDate.toString(), font))
+            detailTable.addCell(createCell(row.daysOutstanding.toString(), font))
+            detailTable.addCell(createCell(row.agingBucket, font))
+            detailTable.addCell(createCell(formatYenPlain(row.openAmount), font))
+        }
+        document.close()
+        return outputStream.toByteArray()
+    }
+
+    private fun metaCell(text: String, font: PdfFont): Cell =
+        Cell()
+            .add(Paragraph(text).setFont(font).setFontSize(9f))
+            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+            .setPaddingBottom(4f)
+
+    private fun formatYenPlain(amount: Double): String = "¥${kotlin.math.abs(amount).toLong()}"
+
+    private fun formatSignedYen(amount: Double): String {
+        val sign = when {
+            amount < 0 -> "−"
+            amount > 0 -> "+"
+            else -> ""
+        }
+        return "$sign¥${kotlin.math.abs(amount).toLong()}"
     }
 
     /** Converts Gregorian year to Japanese era (令和X年, 平成X年, 昭和X年). First year of era uses 元年. */

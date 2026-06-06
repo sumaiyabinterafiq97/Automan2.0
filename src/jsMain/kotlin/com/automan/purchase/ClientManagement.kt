@@ -10,6 +10,28 @@ import com.automan.purchase.models.ClientResponse
 import com.automan.purchase.models.TransactionResponse
 // Client Management Functions
 
+/** Matches backend [AppConstants.CREDIT_LIMIT_NEAR_FRACTION] — warn at 90% of limit used. */
+private const val CLIENT_CREDIT_ALERT_FRACTION = 0.9
+
+private fun alertThresholdFromCreditLimit(creditLimit: Double): Double =
+    creditLimit * CLIENT_CREDIT_ALERT_FRACTION
+
+private fun formatCreditLimitNumber(value: Double): String =
+    if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
+
+private fun syncAlertThresholdFromCreditLimit(creditLimitInputId: String, alertThresholdInputId: String) {
+    val limitInput = document.getElementById(creditLimitInputId) as? HTMLInputElement ?: return
+    val thresholdInput = document.getElementById(alertThresholdInputId) as? HTMLInputElement ?: return
+    val limitRaw = limitInput.value.trim()
+    if (limitRaw.isEmpty()) {
+        thresholdInput.value = ""
+        return
+    }
+    val limit = limitRaw.toDoubleOrNull() ?: return
+    if (limit < 0.0) return
+    thresholdInput.value = formatCreditLimitNumber(alertThresholdFromCreditLimit(limit))
+}
+
 /** Option A: positive balance = prepaid credit; negative = amount owed. */
 private fun formatClientBalanceAmount(balance: Double): String = when {
     balance < 0 -> "−¥${kotlin.math.abs(balance).toLong()}"
@@ -37,6 +59,7 @@ private fun eventTypeBadgeLabel(eventType: String?): String = when (eventType?.u
     "INVOICE_REVERSAL" -> "Reversal"
     "PAYMENT_RECEIVED" -> "Payment"
     "ADJUSTMENT" -> "Adjustment"
+    "OPENING_BALANCE" -> "Opening balance"
     "SHIPMENT" -> "Shipment"
     else -> "Other (legacy)"
 }
@@ -46,8 +69,24 @@ private fun eventTypeBadgeClass(eventType: String?): String = when (eventType?.u
     "INVOICE_REVERSAL" -> "ledger-type-badge ledger-type-reversal"
     "PAYMENT_RECEIVED" -> "ledger-type-badge ledger-type-payment"
     "ADJUSTMENT" -> "ledger-type-badge ledger-type-adjustment"
+    "OPENING_BALANCE" -> "ledger-type-badge ledger-type-opening"
     "SHIPMENT" -> "ledger-type-badge ledger-type-shipment"
     else -> "ledger-type-badge ledger-type-legacy"
+}
+
+private fun isManualEditableLedgerType(eventType: String?): Boolean = when (eventType?.uppercase()) {
+    "PAYMENT_RECEIVED", "ADJUSTMENT", "OPENING_BALANCE" -> true
+    else -> false
+}
+
+private fun ledgerSignedAmount(event: dynamic): Double? {
+    val payment = (event.paymentReceived as? Number)?.toDouble()
+    val debit = (event.transactionPrice as? Number)?.toDouble()
+    return when {
+        payment != null && payment > 0.0 -> payment
+        debit != null && debit > 0.0 -> -debit
+        else -> null
+    }
 }
 
 private fun fmtLedgerAmount(value: dynamic?): String {
@@ -61,12 +100,13 @@ private fun fmtLedgerAmount(value: dynamic?): String {
 fun showClientDetailsPage(clientId: Long) {
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div class="client-details-container">
+        <div id="clientDetailsPage" class="client-details-container">
             <div class="client-details-card">
-                <div class="client-details-header">
-                    <h2>Client Details</h2>
-                    <div class="client-details-actions">
-                        <button id="exportClientTxBtn" class="client-btn client-btn-info">Export Data</button>
+                <div class="client-details-header client-page-toolbar">
+                    <h2 class="client-page-title">Client Details</h2>
+                    <div class="client-details-actions client-toolbar-actions">
+                        <button id="clientStatementPdfBtn" class="client-btn client-btn-info">Statement PDF</button>
+                        <button id="exportClientTxBtn" class="client-btn client-btn-info">Export CSV</button>
                         <button id="backToClientsBtn" class="client-btn client-btn-secondary">Back to Client Transactions</button>
                     </div>
                 </div>
@@ -81,6 +121,9 @@ fun showClientDetailsPage(clientId: Long) {
     """
     document.getElementById("backToClientsBtn")?.addEventListener("click", { _: Event ->
         window.location.hash = "#/master/client-transactions"
+    })
+    document.getElementById("clientStatementPdfBtn")?.addEventListener("click", { _: Event ->
+        openStatementPdfModal(clientId)
     })
     document.getElementById("exportClientTxBtn")?.addEventListener("click", { _: Event ->
         exportClientTransactions(clientId)
@@ -97,14 +140,14 @@ fun showClientAccountsPage() {
     val isMasterList = window.location.hash.startsWith("#/master/client-transactions")
     val pageTitle = if (isMasterList) "Client Transactions" else "Client Accounts Management"
     content.innerHTML = """
-        <div class="client-page-container">
+        <div id="clientTransactionsPage" class="client-page-container">
             <div class="client-page-card">
-                <div class="client-page-header">
-                    <h2>$pageTitle</h2>
-                    <div class="client-action-buttons">
+                <div class="client-page-header client-page-toolbar">
+                    <h2 class="client-page-title">$pageTitle</h2>
+                    <div class="client-action-buttons client-toolbar-actions">
                         <button id="addClientBtn" class="client-btn client-btn-primary">Add New Client</button>
                         <button id="clientAlertsBtn" class="client-btn client-btn-warning">View Alerts</button>
-                        <button id="exportClientsBtn" class="client-btn client-btn-info">Export Data</button>
+                        <button id="exportClientsBtn" class="client-btn client-btn-info">Export clients CSV</button>
                     </div>
                 </div>
                 
@@ -326,6 +369,11 @@ fun displayClientDetails(clientId: Long, raw: dynamic) {
     } else {
         ""
     }
+    val editClientBtn = if (isEditor()) {
+        """<button id="editClientProfileBtn" type="button" class="client-btn client-btn-secondary">Edit client</button>"""
+    } else {
+        ""
+    }
     
     clientDetailsContent.innerHTML = """
         <div class="client-info-card">
@@ -343,6 +391,7 @@ fun displayClientDetails(clientId: Long, raw: dynamic) {
             </div>
             <div class="client-action-buttons">
                 $addTxBtn
+                $editClientBtn
                 $creditLimitBtn
             </div>
         </div>
@@ -360,6 +409,15 @@ fun displayClientDetails(clientId: Long, raw: dynamic) {
             alertThreshold = alertThreshold,
         )
     })
+    document.getElementById("editClientProfileBtn")?.addEventListener("click", { _: Event ->
+        openEditClientModal(
+            clientId = clientId,
+            clientNumber = clientNumber,
+            clientName = clientName,
+            currency = currency,
+            status = status,
+        )
+    })
 }
 
 fun loadClientEvents(clientId: Long) {
@@ -371,7 +429,7 @@ fun loadClientEvents(clientId: Long) {
         .then { response ->
             if (response.ok) {
                 response.json().then { events ->
-                    displayClientEvents(events)
+                    displayClientEvents(clientId, events)
                 }
             } else {
                 document.getElementById("clientEventsTable")?.innerHTML = """
@@ -390,7 +448,7 @@ fun loadClientEvents(clientId: Long) {
         }
 }
 
-fun displayClientEvents(events: dynamic) {
+fun displayClientEvents(clientId: Long, events: dynamic) {
     val clientEventsTable = document.getElementById("clientEventsTable")
     if (clientEventsTable == null) return
     
@@ -405,6 +463,8 @@ fun displayClientEvents(events: dynamic) {
     }
     
     val eventsArray = events as Array<dynamic>
+    val showActions = isEditor()
+    val actionsHeader = if (showActions) """<th>ACTIONS</th>""" else ""
 
     val rowsHtml = eventsArray.map { event ->
         val eventType = event.eventType?.toString()
@@ -418,6 +478,19 @@ fun displayClientEvents(events: dynamic) {
         val balanceText = formatClientBalanceAmount(balance)
         val ref = event.billNumber?.toString()?.trim().orEmpty()
             .ifEmpty { event.invoiceNumber?.toString()?.trim().orEmpty() }
+        val eventId = event.id?.toString()?.trim().orEmpty()
+        val actionsCell = if (!showActions) {
+            ""
+        } else if (isManualEditableLedgerType(eventType) && eventId.isNotEmpty()) {
+            """<td class="ledger-actions-cell">
+                <button type="button" class="client-btn client-btn-secondary ledger-edit-btn"
+                    data-event-id="$eventId" data-client-id="$clientId">Edit</button>
+                <button type="button" class="client-btn client-btn-secondary ledger-delete-btn"
+                    data-event-id="$eventId" data-client-id="$clientId">Delete</button>
+            </td>"""
+        } else {
+            """<td class="ledger-actions-cell">—</td>"""
+        }
         
         """
         <tr>
@@ -428,6 +501,7 @@ fun displayClientEvents(events: dynamic) {
             <td style="text-align: right;">${fmtLedgerAmount(tPrice)}</td>
             <td style="text-align: right;">${fmtLedgerAmount(payment)}</td>
             <td style="text-align: right; color: $balanceColor; font-weight: bold;">$balanceText</td>
+            $actionsCell
         </tr>
         """
     }.joinToString("")
@@ -490,6 +564,7 @@ fun displayClientEvents(events: dynamic) {
                         <th style="text-align: right;">DEBIT</th>
                         <th style="text-align: right;">CREDIT</th>
                         <th style="text-align: right;">BALANCE</th>
+                        $actionsHeader
                     </tr>
                 </thead>
                 <tbody>
@@ -503,6 +578,31 @@ fun displayClientEvents(events: dynamic) {
             $cardsHtml
         </div>
     """
+    wireLedgerActionButtons(clientId, eventsArray)
+}
+
+private fun wireLedgerActionButtons(clientId: Long, events: Array<dynamic>) {
+    if (!isEditor()) return
+    val eventsById = events.associateBy { it.id?.toString()?.trim().orEmpty() }
+
+    val editButtons = document.querySelectorAll(".ledger-edit-btn")
+    for (i in 0 until editButtons.length) {
+        val btn = editButtons.item(i) as? HTMLElement ?: continue
+        btn.addEventListener("click", { _: Event ->
+            val eventId = btn.getAttribute("data-event-id")?.trim().orEmpty()
+            val event = eventsById[eventId] ?: return@addEventListener
+            openEditLedgerModal(clientId, event)
+        })
+    }
+
+    val deleteButtons = document.querySelectorAll(".ledger-delete-btn")
+    for (i in 0 until deleteButtons.length) {
+        val btn = deleteButtons.item(i) as? HTMLElement ?: continue
+        btn.addEventListener("click", { _: Event ->
+            val eventId = btn.getAttribute("data-event-id")?.toLongOrNull() ?: return@addEventListener
+            deleteLedgerEntry(clientId, eventId)
+        })
+    }
 }
 
 // Note: Additional client management functions (showAddClientForm, handleAddClientSubmit, etc.) 
@@ -526,7 +626,9 @@ fun showAddClientForm() {
                         </div>
                         <div class="client-form-field">
                             <label for="clientName" class="client-form-label">Client Name *</label>
-                            ${createEditableCombobox("clientName", "Select Client Name", required = true)}
+                            <select id="clientName" name="clientName" class="client-form-select" required>
+                                <option value="">Select Client Name</option>
+                            </select>
                         </div>
                     </div>
                     
@@ -542,9 +644,10 @@ fun showAddClientForm() {
                                    class="client-form-input" placeholder="e.g., 50000000">
                         </div>
                         <div class="client-form-field">
-                            <label for="alertThreshold" class="client-form-label">Alert Threshold</label>
-                            <input type="number" id="alertThreshold" name="alertThreshold" step="0.01"
-                                   class="client-form-input" placeholder="e.g., 10000000">
+                            <label for="alertThreshold" class="client-form-label">Alert threshold (90% of limit)</label>
+                            <input type="text" id="alertThreshold" name="alertThreshold" readonly
+                                   class="client-form-input client-form-readonly" tabindex="-1"
+                                   placeholder="Filled when credit limit is entered">
                         </div>
                     </div>
                     
@@ -602,8 +705,10 @@ fun showAddClientForm() {
         closeAddClientModal()
     })
 
-    // Load combobox options from master_menu
     populateClientNameOptions("clientName", null)
+    document.getElementById("creditLimit")?.addEventListener("input", { _: Event ->
+        syncAlertThresholdFromCreditLimit("creditLimit", "alertThreshold")
+    })
 }
 
 fun handleAddClientSubmit() {
@@ -612,10 +717,11 @@ fun handleAddClientSubmit() {
     
     val clientData = js("{}")
     clientData["clientNumber"] = (document.getElementById("clientNumber") as? HTMLInputElement)?.value ?: ""
-    clientData["clientName"] = getClientModalComboboxValue("clientName")
+    clientData["clientName"] = (document.getElementById("clientName") as? HTMLSelectElement)?.value?.trim().orEmpty()
     clientData["currentBalance"] = (document.getElementById("currentBalance") as? HTMLInputElement)?.value?.toDoubleOrNull() ?: 0.0
-    clientData["creditLimit"] = (document.getElementById("creditLimit") as? HTMLInputElement)?.value?.toDoubleOrNull()
-    clientData["alertThreshold"] = (document.getElementById("alertThreshold") as? HTMLInputElement)?.value?.toDoubleOrNull()
+    val creditLimit = (document.getElementById("creditLimit") as? HTMLInputElement)?.value?.toDoubleOrNull()
+    clientData["creditLimit"] = creditLimit
+    clientData["alertThreshold"] = creditLimit?.let { alertThresholdFromCreditLimit(it) }
     clientData["currency"] = (document.getElementById("currency") as? HTMLSelectElement)?.value ?: "JPY"
     clientData["status"] = (document.getElementById("status") as? HTMLSelectElement)?.value ?: "ACTIVE"
     
@@ -701,8 +807,12 @@ fun openCreditLimitModal(
         return
     }
     val title = if (creditLimit != null) "Edit credit limit" else "Set credit limit"
-    val limitValue = creditLimit?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: ""
-    val thresholdValue = alertThreshold?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: ""
+    val limitValue = creditLimit?.let { formatCreditLimitNumber(it) } ?: ""
+    val thresholdValue = when {
+        creditLimit != null && alertThreshold != null -> formatCreditLimitNumber(alertThreshold)
+        creditLimit != null -> formatCreditLimitNumber(alertThresholdFromCreditLimit(creditLimit))
+        else -> ""
+    }
     val balanceText = formatClientBalanceAmount(currentBalance)
     val availableText = formatAvailableCredit(currentBalance, creditLimit) ?: "— (set a limit)"
 
@@ -735,9 +845,11 @@ fun openCreditLimitModal(
                             <div class="client-form-hint">Leave blank to remove credit limit.</div>
                         </div>
                         <div class="client-form-field">
-                            <label for="clAlertThreshold" class="client-form-label">Alert threshold (¥)</label>
-                            <input type="number" id="clAlertThreshold" name="clAlertThreshold" step="1" min="0"
-                                   class="client-form-input" placeholder="Auto: 90% of limit if blank" value="$thresholdValue">
+                            <label for="clAlertThreshold" class="client-form-label">Alert threshold (90% of limit)</label>
+                            <input type="text" id="clAlertThreshold" name="clAlertThreshold" readonly
+                                   class="client-form-input client-form-readonly" tabindex="-1"
+                                   value="$thresholdValue">
+                            <div class="client-form-hint">Calculated automatically from credit limit.</div>
                         </div>
                     </div>
                     <div class="client-modal-actions">
@@ -763,7 +875,10 @@ fun openCreditLimitModal(
         }
     }
 
-    document.getElementById("clCreditLimit")?.addEventListener("input", { _: Event -> refreshAvailablePreview() })
+    document.getElementById("clCreditLimit")?.addEventListener("input", { _: Event ->
+        refreshAvailablePreview()
+        syncAlertThresholdFromCreditLimit("clCreditLimit", "clAlertThreshold")
+    })
 
     document.getElementById("cancelCreditLimitBtn")?.addEventListener("click", { _: Event -> closeCreditLimitModal() })
     document.getElementById("closeCreditLimitModalBtn")?.addEventListener("click", { _: Event -> closeCreditLimitModal() })
@@ -785,7 +900,6 @@ private fun handleCreditLimitSubmit(clientName: String) {
     }
 
     val limitRaw = (document.getElementById("clCreditLimit") as? HTMLInputElement)?.value?.trim().orEmpty()
-    val thresholdRaw = (document.getElementById("clAlertThreshold") as? HTMLInputElement)?.value?.trim().orEmpty()
 
     val creditLimit: Double?
     val alertThreshold: Double?
@@ -799,16 +913,7 @@ private fun handleCreditLimitSubmit(clientName: String) {
             showMessage("Credit limit must be a number ≥ 0.", "error")
             return
         }
-        alertThreshold = if (thresholdRaw.isEmpty()) {
-            creditLimit * 0.9
-        } else {
-            val t = thresholdRaw.toDoubleOrNull()
-            if (t == null || t < 0.0) {
-                showMessage("Alert threshold must be a number ≥ 0.", "error")
-                return
-            }
-            t
-        }
+        alertThreshold = alertThresholdFromCreditLimit(creditLimit)
     }
 
     val payload = js("({})")
@@ -877,34 +982,40 @@ private fun getClientModalComboboxValue(fieldId: String): String {
 
 private fun setClientModalComboboxValue(fieldId: String, value: String?) {
     val v = value?.trim().orEmpty()
-    val select = document.getElementById(fieldId) as? HTMLSelectElement
-    val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+    val select = document.getElementById(fieldId) as? HTMLSelectElement ?: return
     if (v.isNotEmpty()) {
-        val exists = (0 until (select?.options?.length ?: 0)).any { idx ->
-            (select?.options?.item(idx) as? HTMLOptionElement)?.value?.equals(v, ignoreCase = true) == true
+        val exists = (0 until select.options.length).any { idx ->
+            (select.options.item(idx) as? HTMLOptionElement)?.value?.equals(v, ignoreCase = true) == true
         }
-        if (!exists && select != null) {
+        if (!exists) {
             val fallback = document.createElement("option") as HTMLOptionElement
             fallback.value = v
             fallback.text = v
             select.add(fallback)
         }
     }
-    if (select != null) select.value = v
-    if (input != null) input.value = v
-    js("window.__tmpClientComboboxId = fieldId")
-    js("if (typeof window.syncComboboxInput === 'function') { window.syncComboboxInput(window.__tmpClientComboboxId); }")
+    select.value = v
+    val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
+    if (input != null) {
+        input.value = v
+        js("window.__tmpClientComboboxId = fieldId")
+        js("if (typeof window.syncComboboxInput === 'function') { window.syncComboboxInput(window.__tmpClientComboboxId); }")
+    }
 }
+
+/** Distinct `client_map.client_name` from GET client-map/dropdowns/client-names (`{ success, data: string[] }`). */
+private fun parseClientMapNameList(raw: dynamic): List<String> = parseMasterClientNameList(raw)
 
 private fun populateClientNameOptions(selectId: String, selectedValue: String?) {
     val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
-    select.innerHTML = """<option value="">▼</option>"""
-    window.fetch(apiUrl("master-menu/clients"))
+    val placeholder = if (selectId == "clientName") "Select Client Name" else "▼"
+    select.innerHTML = """<option value="">$placeholder</option>"""
+    window.fetch(apiUrl("client-map/dropdowns/client-names"))
         .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load client list')")
+            if (response.ok) response.json() else throw js("Error('Failed to load client map names')")
         }
         .then { raw: dynamic ->
-            val clients = parseMasterClientNameList(raw)
+            val clients = parseClientMapNameList(raw)
             clients.forEach { name ->
                 val option = document.createElement("option") as HTMLOptionElement
                 option.value = name
@@ -914,8 +1025,24 @@ private fun populateClientNameOptions(selectId: String, selectedValue: String?) 
             setClientModalComboboxValue(selectId, selectedValue)
         }
         .catch { error: dynamic ->
-            Logger.error("Failed to populate client-name options: ${error.toString()}")
-    }
+            Logger.warn("Client map names unavailable, falling back to master menu: ${error.toString()}")
+            window.fetch(apiUrl("master-menu/clients"))
+                .then { response: dynamic ->
+                    if (response.ok) response.json() else throw js("Error('Failed to load client list')")
+                }
+                .then { raw: dynamic ->
+                    parseMasterClientNameList(raw).forEach { name ->
+                        val option = document.createElement("option") as HTMLOptionElement
+                        option.value = name
+                        option.text = name
+                        select.add(option)
+                    }
+                    setClientModalComboboxValue(selectId, selectedValue)
+                }
+                .catch { fallbackErr: dynamic ->
+                    Logger.error("Failed to populate client-name options: ${fallbackErr.toString()}")
+                }
+        }
 }
 
 fun addClientTransaction(clientId: dynamic) {
@@ -964,6 +1091,7 @@ fun openAddTransactionModal(clientId: Long) {
                                 <option value="">Select type</option>
                                 <option value="PAYMENT_RECEIVED">Payment received</option>
                                 <option value="ADJUSTMENT">Adjustment</option>
+                                <option value="OPENING_BALANCE">Opening balance</option>
                             </select>
                         </div>
                     </div>
@@ -1082,7 +1210,7 @@ fun openAddTransactionModal(clientId: Long) {
                 paymentReceived = amount
                 transactionPrice = null
             }
-            "ADJUSTMENT" -> if (amount > 0) {
+            "ADJUSTMENT", "OPENING_BALANCE" -> if (amount > 0) {
                 paymentReceived = amount
                 transactionPrice = null
             } else {
@@ -1098,6 +1226,7 @@ fun openAddTransactionModal(clientId: Long) {
         val eventDesc = when {
             description.isNotEmpty() -> description
             eventType == "PAYMENT_RECEIVED" -> "Payment received"
+            eventType == "OPENING_BALANCE" -> "Opening balance as of $dateIso"
             else -> "Adjustment"
         }
 
@@ -1342,15 +1471,16 @@ fun displayClientAlerts(alerts: dynamic) {
         // Determine alert type and color
         // Credit Limit Alerts only show when >= 90% usage
         val (alertType, borderColor, alertColor) = when {
-            balance < 0 -> Triple("Debt Alert", "#e74c3c", "#e74c3c")
             creditLimit != null && creditLimit > 0.0 -> {
                 val usedPct = (kotlin.math.abs(balance) / creditLimit) * 100.0
                 when {
-                    usedPct >= 100.0 -> Triple("Credit Limit Alert", "#e74c3c", "#e74c3c")
-                    usedPct >= 90.0 -> Triple("Credit Limit Alert", "#ffc107", "#ffc107")
-                    else -> Triple("", "", "") // No alert if < 90%
+                    balance < -creditLimit -> Triple("Over credit limit", "#e74c3c", "#e74c3c")
+                    usedPct >= 100.0 -> Triple("Over credit limit", "#e74c3c", "#e74c3c")
+                    usedPct >= 90.0 -> Triple("Near credit limit", "#ffc107", "#ffc107")
+                    else -> Triple("", "", "")
                 }
             }
+            balance < 0 -> Triple("Amount owed", "#e74c3c", "#e74c3c")
             else -> Triple("", "", "")
         }
         
@@ -1523,6 +1653,283 @@ fun loadPerformanceData() {
 
 fun displayPerformanceData(data: dynamic) {
     // Implementation will be added
+}
+
+private fun downloadPdfFromUrl(url: String, filename: String, successMessage: String) {
+    val opts = js("({})")
+    opts.method = "GET"
+    opts.cache = "no-store"
+    window.fetch(url, opts)
+        .then { response ->
+            if (response.ok) {
+                response.blob().then { blob ->
+                    val blobUrl = js("URL.createObjectURL(blob)") as String
+                    try {
+                        val link = document.createElement("a") as HTMLAnchorElement
+                        link.href = blobUrl
+                        link.download = filename
+                        link.style.display = "none"
+                        document.body?.appendChild(link)
+                        link.click()
+                        document.body?.removeChild(link)
+                        showMessage(successMessage, "success")
+                    } finally {
+                        js("URL.revokeObjectURL(blobUrl)")
+                    }
+                }
+            } else {
+                response.text().then { errorText ->
+                    showMessage("Download failed: $errorText", "error")
+                }
+            }
+        }
+        .catch { error ->
+            showMessage("Download failed: $error", "error")
+        }
+}
+
+fun openStatementPdfModal(clientId: Long) {
+    document.getElementById("statementPdfModal")?.remove()
+    val modalHTML = """
+        <div id="statementPdfModal" class="client-modal">
+            <div class="client-modal-content">
+                <div class="client-modal-header">
+                    <h2>Export statement PDF</h2>
+                    <button type="button" id="closeStatementPdfModalBtn" class="client-modal-close">&times;</button>
+                </div>
+                <p class="client-ledger-hint">Leave dates empty to include all ledger entries.</p>
+                <div class="client-form-row">
+                    <div class="client-form-field">
+                        <label for="stmtStartDate" class="client-form-label">From (optional)</label>
+                        <input type="date" id="stmtStartDate" class="client-form-input">
+                    </div>
+                    <div class="client-form-field">
+                        <label for="stmtEndDate" class="client-form-label">To (optional)</label>
+                        <input type="date" id="stmtEndDate" class="client-form-input">
+                    </div>
+                </div>
+                <div class="client-modal-actions">
+                    <button type="button" id="cancelStatementPdfBtn" class="client-btn client-btn-secondary">Cancel</button>
+                    <button type="button" id="downloadStatementPdfBtn" class="client-btn client-btn-primary">Download PDF</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.insertAdjacentHTML("beforeend", modalHTML)
+    fun close() {
+        document.getElementById("statementPdfModal")?.remove()
+    }
+    document.getElementById("closeStatementPdfModalBtn")?.addEventListener("click", { _: Event -> close() })
+    document.getElementById("cancelStatementPdfBtn")?.addEventListener("click", { _: Event -> close() })
+    document.getElementById("statementPdfModal")?.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "statementPdfModal") close()
+    })
+    document.getElementById("downloadStatementPdfBtn")?.addEventListener("click", { _: Event ->
+        val start = (document.getElementById("stmtStartDate") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val end = (document.getElementById("stmtEndDate") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val ts = js("Date.now()")
+        val params = mutableListOf("ts=$ts")
+        if (start.isNotEmpty()) params.add("startDate=$start")
+        if (end.isNotEmpty()) params.add("endDate=$end")
+        downloadPdfFromUrl(
+            apiUrl("clients/$clientId/statement-pdf?${params.joinToString("&")}"),
+            "client-statement-$clientId.pdf",
+            "Statement PDF downloaded.",
+        )
+        close()
+    })
+}
+
+fun openEditClientModal(
+    clientId: Long,
+    clientNumber: String,
+    clientName: String,
+    currency: String,
+    status: String,
+) {
+    if (!isEditor()) {
+        showMessage("You do not have permission to edit clients.", "error")
+        return
+    }
+    document.getElementById("editClientProfileModal")?.remove()
+    val modalHTML = """
+        <div id="editClientProfileModal" class="client-modal">
+            <div class="client-modal-content">
+                <div class="client-modal-header">
+                    <h2>Edit client</h2>
+                    <button type="button" id="closeEditClientProfileBtn" class="client-modal-close">&times;</button>
+                </div>
+                <form id="editClientProfileForm" class="client-form">
+                    <input type="hidden" id="editProfileClientId" value="$clientId">
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label class="client-form-label">Client #</label>
+                            <input type="text" class="client-form-input" value="$clientNumber" disabled>
+                        </div>
+                        <div class="client-form-field">
+                            <label class="client-form-label">Client name</label>
+                            <div class="client-form-readonly">${clientName.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")}</div>
+                        </div>
+                    </div>
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="editProfileCurrency" class="client-form-label">Currency</label>
+                            <select id="editProfileCurrency" class="client-form-select">
+                                <option value="JPY"${if (currency == "JPY") " selected" else ""}>JPY</option>
+                                <option value="USD"${if (currency == "USD") " selected" else ""}>USD</option>
+                                <option value="EUR"${if (currency == "EUR") " selected" else ""}>EUR</option>
+                            </select>
+                        </div>
+                        <div class="client-form-field">
+                            <label for="editProfileStatus" class="client-form-label">Status</label>
+                            <select id="editProfileStatus" class="client-form-select">
+                                <option value="ACTIVE"${if (status.equals("ACTIVE", true)) " selected" else ""}>Active</option>
+                                <option value="SUSPENDED"${if (status.equals("SUSPENDED", true)) " selected" else ""}>Suspended</option>
+                                <option value="CLOSED"${if (status.equals("CLOSED", true)) " selected" else ""}>Closed</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p class="client-ledger-hint">Balance changes via ledger entries only (payments, invoices, opening balance).</p>
+                    <div class="client-modal-actions">
+                        <button type="button" id="cancelEditClientProfileBtn" class="client-btn client-btn-secondary">Cancel</button>
+                        <button type="submit" class="client-btn client-btn-primary">Save</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    """
+    document.body?.insertAdjacentHTML("beforeend", modalHTML)
+    fun close() {
+        document.getElementById("editClientProfileModal")?.remove()
+    }
+    document.getElementById("closeEditClientProfileBtn")?.addEventListener("click", { _: Event -> close() })
+    document.getElementById("cancelEditClientProfileBtn")?.addEventListener("click", { _: Event -> close() })
+    document.getElementById("editClientProfileForm")?.addEventListener("submit", { event: Event ->
+        event.preventDefault()
+        val payload = js("({})")
+        payload["currency"] = (document.getElementById("editProfileCurrency") as? HTMLSelectElement)?.value ?: "JPY"
+        payload["status"] = (document.getElementById("editProfileStatus") as? HTMLSelectElement)?.value ?: "ACTIVE"
+        val req = js("({})")
+        req.method = "PUT"
+        req.headers = js("{\"Content-Type\": \"application/json\"}")
+        req.body = JSON.stringify(payload)
+        window.fetch(apiUrl("clients/$clientId"), req).then { response ->
+            if (response.ok) {
+                showMessage("Client updated.", "success")
+                close()
+                loadClientDetails(clientId)
+                loadClients()
+            } else {
+                response.text().then { err -> showMessage("Update failed: $err", "error") }
+            }
+        }.catch { err -> showMessage("Update failed: $err", "error") }
+    })
+}
+
+fun openEditLedgerModal(clientId: Long, event: dynamic) {
+    if (!isEditor()) return
+    val eventId = event.id?.toString()?.toLongOrNull() ?: return
+    val eventType = event.eventType?.toString()?.uppercase().orEmpty()
+    val signedAmount = ledgerSignedAmount(event) ?: 0.0
+    val dateStr = event.eventDate?.toString().orEmpty()
+    val billNo = event.billNumber?.toString().orEmpty()
+    val desc = event.eventDescription?.toString().orEmpty()
+
+    document.getElementById("editLedgerModal")?.remove()
+    val modalHTML = """
+        <div id="editLedgerModal" class="client-modal">
+            <div class="client-modal-content">
+                <div class="client-modal-header">
+                    <h2>Edit ledger entry</h2>
+                    <button type="button" id="closeEditLedgerBtn" class="client-modal-close">&times;</button>
+                </div>
+                <form id="editLedgerForm" class="client-form">
+                    <input type="hidden" id="editLedgerEventId" value="$eventId">
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label class="client-form-label">Type</label>
+                            <input type="text" class="client-form-input" value="${eventTypeBadgeLabel(eventType)}" disabled>
+                        </div>
+                        <div class="client-form-field">
+                            <label for="editLedgerDate" class="client-form-label">Date *</label>
+                            <input type="date" id="editLedgerDate" class="client-form-input" required value="$dateStr">
+                        </div>
+                    </div>
+                    <div class="client-form-row">
+                        <div class="client-form-field">
+                            <label for="editLedgerRef" class="client-form-label">Reference</label>
+                            <input type="text" id="editLedgerRef" class="client-form-input" value="${billNo.replace("\"", "&quot;")}">
+                        </div>
+                        <div class="client-form-field">
+                            <label for="editLedgerDesc" class="client-form-label">Description</label>
+                            <input type="text" id="editLedgerDesc" class="client-form-input" value="${desc.replace("\"", "&quot;")}">
+                        </div>
+                    </div>
+                    <div class="client-form-field full-width">
+                        <label for="editLedgerAmount" class="client-form-label">Amount (¥) *</label>
+                        <input type="text" id="editLedgerAmount" class="client-form-input" required value="$signedAmount">
+                    </div>
+                    <div class="client-modal-actions">
+                        <button type="button" id="cancelEditLedgerBtn" class="client-btn client-btn-secondary">Cancel</button>
+                        <button type="submit" class="client-btn client-btn-primary">Save changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    """
+    document.body?.insertAdjacentHTML("beforeend", modalHTML)
+    fun close() {
+        document.getElementById("editLedgerModal")?.remove()
+    }
+    document.getElementById("closeEditLedgerBtn")?.addEventListener("click", { _: Event -> close() })
+    document.getElementById("cancelEditLedgerBtn")?.addEventListener("click", { _: Event -> close() })
+    document.getElementById("editLedgerForm")?.addEventListener("submit", { ev: Event ->
+        ev.preventDefault()
+        val dateIso = (document.getElementById("editLedgerDate") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val amountStr = (document.getElementById("editLedgerAmount") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val amount = amountStr.replace(Regex("[^0-9.-]"), "").toDoubleOrNull()
+        if (dateIso.isEmpty() || amount == null || amount == 0.0) {
+            showMessage("Date and non-zero amount are required.", "error")
+            return@addEventListener
+        }
+        val (payment, charge) = if (amount > 0) Pair(amount, null) else Pair(null, kotlin.math.abs(amount))
+        val payload = js("({})")
+        payload["eventDate"] = dateIso
+        payload["eventDescription"] = (document.getElementById("editLedgerDesc") as? HTMLInputElement)?.value?.trim()
+        payload["billNumber"] = (document.getElementById("editLedgerRef") as? HTMLInputElement)?.value?.trim()
+        payload["paymentReceived"] = payment
+        payload["transactionPrice"] = charge
+        val req = js("({})")
+        req.method = "PUT"
+        req.headers = js("{\"Content-Type\": \"application/json\"}")
+        req.body = JSON.stringify(payload)
+        window.fetch(apiUrl("events/$eventId"), req).then { response ->
+            if (response.ok) {
+                showMessage("Ledger entry updated.", "success")
+                close()
+                loadClientDetails(clientId)
+                loadClientEvents(clientId)
+            } else {
+                response.text().then { err -> showMessage("Update failed: $err", "error") }
+            }
+        }.catch { err -> showMessage("Update failed: $err", "error") }
+    })
+}
+
+fun deleteLedgerEntry(clientId: Long, eventId: Long) {
+    if (!isEditor()) return
+    if (!js("confirm('Delete this ledger entry? Balances will be recalculated.')") as Boolean) return
+    val req = js("({})")
+    req.method = "DELETE"
+    window.fetch(apiUrl("events/$eventId"), req).then { response ->
+        if (response.ok) {
+            showMessage("Ledger entry deleted.", "success")
+            loadClientDetails(clientId)
+            loadClientEvents(clientId)
+        } else {
+            response.text().then { err -> showMessage("Delete failed: $err", "error") }
+        }
+    }.catch { err -> showMessage("Delete failed: $err", "error") }
 }
 
 fun exportClientTransactions(clientId: Long) {

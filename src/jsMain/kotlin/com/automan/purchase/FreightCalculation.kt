@@ -120,10 +120,9 @@ fun createFreightCalculationHTML(selectedCars: List<dynamic>): String {
     val totalStr = "¥${total.toString().replace(Regex("(\\d)(?=(\\d{3})+(?!\\d))"), "$1,")}"
 
     return """
-        <div class="freight-container">
-            <!-- Back Button -->
-            <div style="margin-bottom: 20px;">
-                <button id="backToCnfBtn" class="cnf-back-btn">← Back to C&F</button>
+        <div class="freight-container" id="freightCalculationRoot">
+            <div class="cnf-back-row">
+                <button id="backToCnfBtn" class="cnf-back-btn" type="button">← Back to C&F</button>
             </div>
             
             <!-- Freight Calculation Container -->
@@ -805,10 +804,9 @@ private fun createShippingChargeCalculationHTML(): String {
     val formState = window.asDynamic().shippingChargeFormState
     val ncStr = if (formState != null && formState.numberOfContainers != null) formState.numberOfContainers as String else "1"
     return """
-        <div class="freight-container">
-            <!-- Back Button -->
-            <div style="margin-bottom: 20px;">
-                <button id="backToFobBtn" class="cnf-back-btn">← Back to FOB</button>
+        <div class="freight-container" id="freightCalculationRoot">
+            <div class="cnf-back-row">
+                <button id="backToFobBtn" class="cnf-back-btn" type="button">← Back to FOB</button>
             </div>
 
             <!-- Shipping Charge Calculation Card -->

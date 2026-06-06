@@ -25,4 +25,16 @@ interface InvoiceHistoryLineRepository : JpaRepository<InvoiceHistoryLine, Long>
             "LOWER(TRIM(COALESCE(l.chassis, ''))) = LOWER(TRIM(COALESCE(:chassis, '')))",
     )
     fun countByNormalizedChassis(@Param("chassis") chassis: String): Long
+
+    /** Invoice numbers whose saved lines share any normalized chassis token. */
+    @Query(
+        """
+        SELECT DISTINCT h.invoiceNumber FROM InvoiceHistory h
+        INNER JOIN InvoiceHistoryLine l ON l.invoiceHistoryId = h.id
+        WHERE LOWER(TRIM(COALESCE(l.chassis, ''))) IN :chassisKeys
+        """,
+    )
+    fun findDistinctInvoiceNumbersByNormalizedChassisIn(
+        @Param("chassisKeys") chassisKeys: Collection<String>,
+    ): List<String>
 }

@@ -16,7 +16,9 @@ const val INVOICE_RECREATE_META_SESSION_KEY = "invoiceRecreateMeta"
 private var invoiceHistoryCachedRows: Array<dynamic> = emptyArray()
 private var invoiceHistorySortField: String = "invoiceNumber"
 private var invoiceHistorySortOrder: String = "desc"
-private val invoiceHistorySelectedIds: MutableSet<String> = mutableSetOf()
+private var invoiceHistoryResizeDebounceHandle: Int? = null
+
+private const val INVOICE_HISTORY_COMPACT_MAX_WIDTH_PX = 860
 
 fun showInvoiceHistoryPage() {
     window.location.hash = "#/invoice-history"
@@ -24,27 +26,65 @@ fun showInvoiceHistoryPage() {
     invoiceHistoryCachedRows = emptyArray()
     invoiceHistorySortField = "invoiceNumber"
     invoiceHistorySortOrder = "desc"
-    invoiceHistorySelectedIds.clear()
 
     content.innerHTML = """
-        <div id="invoiceHistoryPage" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; background: #fafbfc;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;">
-                <h2 style="margin: 0;">Invoice History</h2>
-                <div style="display: flex; flex-direction: column; align-items: stretch; gap: 10px; flex: 1; min-width: 0; max-width: 640px;">
-                    <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
-                        <div style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: all .3s ease;">
-                            <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; color: #9ca3af; display: flex;" aria-hidden="true">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                            </span>
-                            <input type="text" id="invoiceHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search invoice number, vessel, client, POL, POD, LC, price type, chassis, amount, bank…" aria-label="Search invoice history" style="width: 100%; box-sizing: border-box; padding: 12px 40px 12px 44px; border: none; font-size: 14px; background: transparent; border-radius: 999px; outline: none; transition: all .2s ease;" />
-                            <button type="button" id="invoiceHistorySearchClearBtn" title="Clear search" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: #9ca3af; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 8px;">×</button>
-                        </div>
-                    </div>
+        <style>
+            #invoiceHistoryPage{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:20px;}
+            .invoice-history-toolbar{
+                display:grid;
+                grid-template-columns:1fr;
+                grid-template-areas:"title" "search";
+                gap:12px;
+                margin-bottom:16px;
+                align-items:center;
+            }
+            .invoice-history-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;grid-area:title;text-align:center;}
+            .invoice-search{grid-area:search;width:100%;position:relative;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
+            .invoice-search input{width:100%;box-sizing:border-box;padding:11px 36px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
+            .invoice-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;}
+            .invoice-search-clear:hover{background:#f3f4f6;color:#111827;}
+            .invoice-history-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
+            table.purchase-list-table thead th{position:sticky;top:0;z-index:1;}
+            .invoice-history-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+            .invoice-history-empty strong{color:#0f172a;}
+            .invoice-cards{display:flex;flex-direction:column;gap:10px;}
+            .invoice-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
+            .invoice-card-top{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:10px;}
+            .invoice-card-actions{display:flex;align-items:center;gap:10px;}
+            .invoice-card-grid{display:grid;gap:8px;}
+            .invoice-kv{display:flex;gap:10px;align-items:flex-start;}
+            .invoice-k{min-width:120px;font-size:12px;color:#64748b;line-height:1.4;}
+            .invoice-v{flex:1;min-width:0;}
+            @media (max-width: 1024px){
+                #invoiceHistoryPage{padding:14px;border-radius:14px;}
+                .invoice-history-toolbar{gap:14px;margin-bottom:14px;}
+                .invoice-history-title{font-size:17px;}
+                .invoice-search input{font-size:13px;padding:10px 34px 10px 38px;}
+            }
+            @media (min-width: 1025px){
+                .invoice-history-toolbar{
+                    grid-template-columns:auto 1fr minmax(200px,25%);
+                    grid-template-areas:"title . search";
+                    column-gap:12px;
+                    row-gap:0;
+                }
+                .invoice-history-title{text-align:left;justify-self:start;}
+            }
+        </style>
+        <div id="invoiceHistoryPage">
+            <div class="invoice-history-toolbar">
+                <h2 class="invoice-history-title">Invoice History</h2>
+                <div class="invoice-search">
+                    <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af;display:flex;" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </span>
+                    <input type="text" id="invoiceHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search invoice number, vessel, client, POL, POD, LC, price type, chassis, amount, bank…" aria-label="Search invoice history" />
+                    <button type="button" id="invoiceHistorySearchClearBtn" class="invoice-search-clear" title="Clear search" aria-label="Clear search">×</button>
                 </div>
             </div>
             <div id="invoiceHistoryTableWrap">
                 <div id="invoiceHistoryTable" style="margin-top: 8px;">
-                    <div style="text-align: center; color: #666; padding: 40px;">Loading invoice history…</div>
+                    <div class="invoice-history-empty"><strong>Loading</strong><div>Loading invoice history…</div></div>
                 </div>
             </div>
         </div>
@@ -61,6 +101,8 @@ fun showInvoiceHistoryPage() {
         searchInput?.value = ""
         renderInvoiceHistoryTableFromCache()
     })
+
+    setupInvoiceHistoryResizeListener()
 
     val wrap = document.getElementById("invoiceHistoryTableWrap")
     if (wrap != null && !wrap.hasAttribute("data-invoice-history-sort-delegation")) {
@@ -181,9 +223,75 @@ private fun downloadInvoiceHistoryPdf(invoiceNumber: String, btn: HTMLButtonElem
     }
 }
 
+private fun invoiceHistoryIsCompactLayout(): Boolean {
+    val w = window.innerWidth
+    return w > 0 && w <= INVOICE_HISTORY_COMPACT_MAX_WIDTH_PX
+}
+
+private fun setupInvoiceHistoryResizeListener() {
+    val page = document.getElementById("invoiceHistoryPage") ?: return
+    if (page.hasAttribute("data-invoice-history-resize")) return
+    page.setAttribute("data-invoice-history-resize", "true")
+    window.addEventListener("resize", { _: Event ->
+        val prev = invoiceHistoryResizeDebounceHandle
+        if (prev != null) window.clearTimeout(prev)
+        invoiceHistoryResizeDebounceHandle = window.setTimeout({
+            if (document.getElementById("invoiceHistoryPage") == null) return@setTimeout
+            if (invoiceHistoryCachedRows.isNotEmpty()) renderInvoiceHistoryTableFromCache()
+        }, 120)
+    })
+}
+
+private fun invoiceHistoryDisplayCellHtml(row: dynamic, key: String): String {
+    val raw = invoiceHistoryCell(row, key)
+    if (raw.isEmpty()) return ""
+    return when (key) {
+        "chassis", "totalAmount" -> {
+            val tokens = raw.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+            formatCollapsibleChipsHtml(tokens)
+        }
+        "bank" -> formatClientMapBankInfoCellHtml(raw)
+        else -> formatPurchaseListNeutralChipHtml(raw)
+    }
+}
+
+private fun appendInvoiceHistoryTableRow(html: StringBuilder, row: dynamic) {
+    html.append("<tr>")
+    val invNum = invoiceHistoryCell(row, "invoiceNumber")
+    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryEditButtonHtml(invNum)}</td>""")
+    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryPdfButtonHtml(invNum)}</td>""")
+    for (key in invoiceHistoryDisplayColumnKeys()) {
+        html.append("""<td style="padding: 12px; vertical-align: top;">${invoiceHistoryDisplayCellHtml(row, key)}</td>""")
+    }
+    html.append("</tr>")
+}
+
+private fun appendInvoiceHistoryCard(html: StringBuilder, row: dynamic) {
+    val invNum = invoiceHistoryCell(row, "invoiceNumber")
+    html.append("""<div class="invoice-card">""")
+    html.append(
+        """
+        <div class="invoice-card-top">
+            <div class="invoice-card-actions">
+                ${invoiceHistoryEditButtonHtml(invNum)}
+                ${invoiceHistoryPdfButtonHtml(invNum)}
+            </div>
+        </div>
+        """
+    )
+    html.append("""<div class="invoice-card-grid">""")
+    for (key in invoiceHistoryDisplayColumnKeys()) {
+        val cellHtml = invoiceHistoryDisplayCellHtml(row, key)
+        if (cellHtml.isEmpty()) continue
+        val label = escapeHtml(invoiceHistoryColumnLabel(key))
+        html.append("""<div class="invoice-kv"><div class="invoice-k">$label</div><div class="invoice-v">$cellHtml</div></div>""")
+    }
+    html.append("""</div></div>""")
+}
+
 private fun loadInvoiceHistory() {
     val tableHost = document.getElementById("invoiceHistoryTable") ?: return
-    tableHost.innerHTML = """<div style="text-align: center; color: #666; padding: 40px;">Loading invoice history…</div>"""
+    tableHost.innerHTML = """<div class="invoice-history-empty"><strong>Loading</strong><div>Loading invoice history…</div></div>"""
 
     MainScope().launch {
         ApiClient.get<Array<dynamic>>("invoice-history").fold(
@@ -193,7 +301,12 @@ private fun loadInvoiceHistory() {
             },
             onError = { message, _ ->
                 ErrorHandler.showError("Failed to load invoice history: $message")
-                tableHost.innerHTML = """<div style="text-align: center; color: #c00; padding: 40px;">Could not load invoice history.</div>"""
+                tableHost.innerHTML = """
+                    <div class="invoice-history-empty" style="color:#b91c1c;">
+                        <strong>Could not load</strong>
+                        <div>Unable to load invoice history. Please reload and try again.</div>
+                    </div>
+                """
             },
         )
     }
@@ -300,22 +413,14 @@ private fun renderInvoiceHistoryTableFromCache() {
     val q = (document.getElementById("invoiceHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
 
     if (invoiceHistoryCachedRows.isEmpty()) {
-        tableHost.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                No invoice history records yet.
-            </div>
-        """
+        tableHost.innerHTML = """<div class="invoice-history-empty"><strong>No history yet</strong><div>No invoice history records yet.</div></div>"""
         return
     }
 
     var rows = invoiceHistoryCachedRows.filter { invoiceHistoryRowMatchesQuery(it, q) }.toTypedArray()
 
     if (rows.isEmpty()) {
-        tableHost.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                No rows match your search.
-            </div>
-        """
+        tableHost.innerHTML = """<div class="invoice-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
         return
     }
 
@@ -324,68 +429,66 @@ private fun renderInvoiceHistoryTableFromCache() {
     }
     rows = rows.sortedWith(comparator).toTypedArray()
 
-    val colCountInv = 2 + invoiceHistoryDisplayColumnKeys().size
-    val invoiceHistoryColWidthsPx = listOf(
-        56, // Edit
-        56, // PDF
-        132, // Invoice number
-        96, // Vessel
-        132, // Client name
-        104, // Date
-        96, // POL
-        104, // POD
-        72, // LC
-        96, // Price type
-        220, // Bank
-        128, // Messages
-        152, // Chassis
-        116, // Amount
-    )
+    val compact = invoiceHistoryIsCompactLayout()
     val html = StringBuilder()
-    html.append("""<div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);"><table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupFixedWidthsPx(colCountInv, invoiceHistoryColWidthsPx)}<thead><tr style="background-color: #f8f9fa;">""")
-    html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 56px;">Edit</th>""")
-    html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 56px;">PDF</th>""")
-    for (key in invoiceHistoryDisplayColumnKeys()) {
-        val label = escapeHtml(invoiceHistoryColumnLabel(key))
-        val isActive = invoiceHistorySortField == key
-        val sortOrder = if (isActive) invoiceHistorySortOrder else "desc"
-        val tooltipRaw = when {
-            !isActive -> "Sort by ${invoiceHistoryColumnLabel(key)}"
-            sortOrder == "asc" -> "Sorted ascending (click for descending)"
-            else -> "Sorted descending (click for ascending)"
-        }
-        val tooltip = escapeHtml(tooltipRaw)
-        html.append("""
-            <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
-                <button type="button" data-invoice-history-sort="$key" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
-                    <span>$label</span><span style="font-size: 14px;">↕</span>
-                </button>
-            </th>
-        """)
-    }
-    html.append("</tr></thead><tbody>")
 
-    for (row in rows) {
-        html.append("<tr>")
-        val invNum = invoiceHistoryCell(row, "invoiceNumber")
-        html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryEditButtonHtml(invNum)}</td>""")
-        html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryPdfButtonHtml(invNum)}</td>""")
+    if (!compact) {
+        val colCountInv = 2 + invoiceHistoryDisplayColumnKeys().size
+        val invoiceHistoryColWidthsPx = listOf(
+            56, // Edit
+            56, // PDF
+            132, // Invoice number
+            96, // Vessel
+            132, // Client name
+            104, // Date
+            96, // POL
+            104, // POD
+            72, // LC
+            96, // Price type
+            220, // Bank
+            128, // Messages
+            152, // Chassis
+            116, // Amount
+        )
+        html.append(
+            """<div class="invoice-history-table-shell"><table class="purchase-list-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">""" +
+                htmlTableColgroupFixedWidthsPx(colCountInv, invoiceHistoryColWidthsPx) +
+                """<thead><tr style="background-color:#f8f9fa;">"""
+        )
+        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:56px;">Edit</th>""")
+        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:56px;">PDF</th>""")
         for (key in invoiceHistoryDisplayColumnKeys()) {
-            val raw = invoiceHistoryCell(row, key)
-            val cellHtml = when {
-                raw.isEmpty() -> ""
-                key == "chassis" || key == "totalAmount" -> {
-                    val tokens = raw.split(';').map { it.trim() }.filter { it.isNotEmpty() }
-                    formatCollapsibleChipsHtml(tokens)
-                }
-                key == "bank" -> formatClientMapBankInfoCellHtml(raw)
-                else -> formatPurchaseListNeutralChipHtml(raw)
+            val label = escapeHtml(invoiceHistoryColumnLabel(key))
+            val isActive = invoiceHistorySortField == key
+            val sortOrder = if (isActive) invoiceHistorySortOrder else "desc"
+            val tooltipRaw = when {
+                !isActive -> "Sort by ${invoiceHistoryColumnLabel(key)}"
+                sortOrder == "asc" -> "Sorted ascending (click for descending)"
+                else -> "Sorted descending (click for ascending)"
             }
-            html.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
+            val tooltip = escapeHtml(tooltipRaw)
+            html.append(
+                """
+                <th style="padding:12px;text-align:left;border-bottom:1px solid #dee2e6;">
+                    <button type="button" data-invoice-history-sort="$key" title="$tooltip" style="background:none;border:none;cursor:pointer;font-weight:700;color:#0f172a;padding:0;display:inline-flex;align-items:center;gap:6px;">
+                        <span>$label</span><span style="font-size:14px;color:#64748b;">↕</span>
+                    </button>
+                </th>
+                """
+            )
         }
-        html.append("</tr>")
+        html.append("</tr></thead><tbody id='invoiceHistoryTableBody'>")
+        for (row in rows) {
+            appendInvoiceHistoryTableRow(html, row)
+        }
+        html.append("</tbody></table></div>")
+    } else {
+        html.append("""<div id="invoiceHistoryTableBody" class="invoice-cards">""")
+        for (row in rows) {
+            appendInvoiceHistoryCard(html, row)
+        }
+        html.append("</div>")
     }
-    html.append("</tbody></table></div>")
 
     tableHost.innerHTML = html.toString()
 }

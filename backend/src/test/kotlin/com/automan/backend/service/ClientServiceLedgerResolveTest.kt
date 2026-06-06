@@ -67,6 +67,19 @@ class ClientServiceLedgerResolveTest {
     }
 
     @Test
+    fun `preview uses invoice client name over purchase client id`() {
+        `when`(clientRepository.findByClientNameIgnoreCase("AUTOHANDLER")).thenReturn(
+            listOf(Client(id = 5L, clientNumber = "CL0004", clientName = "AUTOHANDLER", creditLimit = 5_000_000.0)),
+        )
+
+        val preview = clientService.previewClientNameForLedger("AUTOHANDLER", listOf(1L))
+
+        assertTrue(preview.ledgerResolvable)
+        assertEquals(5L, preview.clientId)
+        assertFalse(preview.willCreateClient)
+    }
+
+    @Test
     fun `resolve skips duplicate names`() {
         `when`(clientRepository.findByClientNameIgnoreCase("ABC TRADING")).thenReturn(
             listOf(

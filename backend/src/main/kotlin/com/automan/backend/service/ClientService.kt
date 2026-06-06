@@ -1,9 +1,13 @@
 package com.automan.backend.service
 
+import com.automan.backend.config.AppConstants
+import com.automan.backend.dto.ClientCreditLimitAssessment
 import com.automan.backend.dto.ClientLedgerPreview
 import com.automan.backend.dto.ClientNameLedgerResolution
+import com.automan.backend.dto.CreditLimitStatus
 import com.automan.backend.model.Client
 import com.automan.backend.model.ClientStatus
+import com.automan.backend.model.EventType
 import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.EventRepository
 import com.automan.backend.util.Logger
@@ -45,34 +49,36 @@ class ClientService(
                 warning = "Purchases reference multiple clients; ledger entry will not be posted. Link purchases to one client.",
             )
         }
+
+        val name = clientName.trim()
+        if (name.isNotEmpty()) {
+            val matches = clientRepository.findByClientNameIgnoreCase(name)
+            return when {
+                matches.size > 1 -> ClientLedgerPreview(
+                    ledgerResolvable = false,
+                    warning = "Multiple clients named \"$name\"; fix duplicates in Client Management before posting the ledger.",
+                )
+                matches.size == 1 -> ClientLedgerPreview(
+                    clientId = matches.first().id,
+                    ledgerResolvable = true,
+                )
+                else -> ClientLedgerPreview(
+                    ledgerResolvable = true,
+                    willCreateClient = true,
+                )
+            }
+        }
+
         if (distinctPurchaseIds.size == 1) {
             return ClientLedgerPreview(
                 clientId = distinctPurchaseIds.first(),
                 ledgerResolvable = true,
             )
         }
-        val name = clientName.trim()
-        if (name.isEmpty()) {
-            return ClientLedgerPreview(
-                ledgerResolvable = false,
-                warning = "Invoice has no client name; ledger entry will not be posted.",
-            )
-        }
-        val matches = clientRepository.findByClientNameIgnoreCase(name)
-        return when {
-            matches.size > 1 -> ClientLedgerPreview(
-                ledgerResolvable = false,
-                warning = "Multiple clients named \"$name\"; fix duplicates in Client Management before posting the ledger.",
-            )
-            matches.size == 1 -> ClientLedgerPreview(
-                clientId = matches.first().id,
-                ledgerResolvable = true,
-            )
-            else -> ClientLedgerPreview(
-                ledgerResolvable = true,
-                willCreateClient = true,
-            )
-        }
+        return ClientLedgerPreview(
+            ledgerResolvable = false,
+            warning = "Invoice has no client name; ledger entry will not be posted.",
+        )
     }
 
     /**
@@ -237,15 +243,128 @@ class ClientService(
     }
     
     fun getClientAlerts(): List<Client> {
-        val alerts = mutableListOf<Client>()
-        
-        // Add clients with debt
-        alerts.addAll(clientRepository.findClientsWithDebt())
-        
-        // Add clients near credit limit
+        val alerts = linkedSetOf<Client>()
+        alerts.addAll(clientRepository.findClientsOverCreditLimit())
         alerts.addAll(clientRepository.findClientsNearCreditLimit())
-        
-        return alerts.distinctBy { it.id }
+        alerts.addAll(
+            clientRepository.findClientsWithDebt().filter { client ->
+                val limit = client.creditLimit
+                limit == null || limit <= 0.0
+            },
+        )
+        return alerts.toList()
+    }
+
+    /** Net open invoice charge on ledger for one invoice number. */
+    fun openInvoiceLedgerCharge(clientId: Long, invoiceNumber: String): Double {
+        val inv = invoiceNumber.trim()
+        if (inv.isEmpty()) return 0.0
+        val events = eventRepository.findByClientIdAndInvoiceNumberOrderByIdDesc(clientId, inv)
+        var issued = 0.0
+        var reversed = 0.0
+        for (e in events) {
+            when (e.eventType) {
+                EventType.INVOICE_ISSUED -> issued += e.transactionPrice ?: 0.0
+                EventType.INVOICE_REVERSAL -> reversed += e.paymentReceived ?: 0.0
+                else -> { }
+            }
+        }
+        return (issued - reversed).coerceAtLeast(0.0)
+    }
+
+    /**
+     * Option A: [projectedBalance] = currentBalance − (newCharge − openChargeOnInvoice).
+     */
+    fun projectedBalanceAfterInvoiceCharge(
+        clientId: Long,
+        invoiceNumber: String,
+        newCharge: Double,
+    ): Double? {
+        val client = clientRepository.findById(clientId).orElse(null) ?: return null
+        val open = openInvoiceLedgerCharge(clientId, invoiceNumber.trim())
+        return client.currentBalance - (newCharge - open)
+    }
+
+    fun assessCreditForInvoiceCharge(
+        clientId: Long,
+        invoiceNumber: String,
+        invoiceCharge: Double,
+    ): ClientCreditLimitAssessment? {
+        if (invoiceCharge <= 0.0) return null
+        val client = clientRepository.findById(clientId).orElse(null) ?: return null
+        val limit = client.creditLimit
+        val projected = projectedBalanceAfterInvoiceCharge(clientId, invoiceNumber, invoiceCharge)
+            ?: return null
+        val availableAfter = if (limit != null) limit + projected else null
+
+        if (limit == null || limit <= 0.0) {
+            return ClientCreditLimitAssessment(
+                status = CreditLimitStatus.NO_LIMIT,
+                clientId = clientId,
+                clientName = client.clientName,
+                currentBalance = client.currentBalance,
+                projectedBalance = projected,
+                creditLimit = limit,
+                invoiceCharge = invoiceCharge,
+                availableCreditAfter = availableAfter,
+                message = null,
+                blocked = false,
+            )
+        }
+
+        val nearLine = -limit * AppConstants.CREDIT_LIMIT_NEAR_FRACTION
+        val overLine = -limit
+
+        val status = when {
+            projected < overLine -> CreditLimitStatus.OVER_LIMIT
+            projected <= nearLine -> CreditLimitStatus.NEAR_LIMIT
+            else -> CreditLimitStatus.OK
+        }
+
+        val owedAfter = kotlin.math.abs(projected.coerceAtMost(0.0))
+        val limitInt = limit.toLong()
+        val message = when (status) {
+            CreditLimitStatus.OVER_LIMIT -> {
+                val blockNote = if (AppConstants.BLOCK_INVOICE_WHEN_OVER_CREDIT_LIMIT) {
+                    " Invoice was not saved."
+                } else {
+                    " Invoice was saved; finance should review."
+                }
+                "Client \"${client.clientName}\" would exceed credit limit (¥$limitInt): " +
+                    "owed after invoice ≈ ¥${owedAfter.toLong()}.$blockNote"
+            }
+            CreditLimitStatus.NEAR_LIMIT -> {
+                "Client \"${client.clientName}\" is near credit limit (¥$limitInt): " +
+                    "≈ ${((owedAfter / limit) * 100).toInt()}% of limit used after this invoice."
+            }
+            else -> null
+        }
+
+        val blocked = status == CreditLimitStatus.OVER_LIMIT &&
+            AppConstants.BLOCK_INVOICE_WHEN_OVER_CREDIT_LIMIT
+
+        return ClientCreditLimitAssessment(
+            status = status,
+            clientId = clientId,
+            clientName = client.clientName,
+            currentBalance = client.currentBalance,
+            projectedBalance = projected,
+            creditLimit = limit,
+            invoiceCharge = invoiceCharge,
+            availableCreditAfter = availableAfter,
+            message = message,
+            blocked = blocked,
+        )
+    }
+
+    /**
+     * Throws [IllegalArgumentException] when Phase 3 block is enabled and invoice would exceed limit.
+     */
+    fun enforceInvoiceCreditLimit(clientId: Long, invoiceNumber: String, invoiceCharge: Double) {
+        val assessment = assessCreditForInvoiceCharge(clientId, invoiceNumber, invoiceCharge) ?: return
+        if (assessment.blocked) {
+            throw IllegalArgumentException(assessment.message ?: "Invoice exceeds client credit limit.")
+        }
     }
 
     @Transactional

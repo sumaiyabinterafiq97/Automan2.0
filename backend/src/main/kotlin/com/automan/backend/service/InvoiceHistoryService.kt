@@ -1,6 +1,9 @@
 package com.automan.backend.service
 
+import com.automan.backend.dto.ClientCreditLimitAssessment
 import com.automan.backend.dto.ClientNameLedgerResolution
+import com.automan.backend.dto.CreditLimitStatus
+import com.automan.backend.dto.InvoiceBatchDeleteResult
 import com.automan.backend.dto.InvoiceConfirmAndDownloadRequest
 import com.automan.backend.dto.InvoiceConfirmResult
 import com.automan.backend.dto.InvoiceHistoryRowDto
@@ -67,8 +70,10 @@ class InvoiceHistoryService(
             throw IllegalArgumentException("Invoice number is required")
         }
 
+        val creditAssessment = enforceCreditBeforeSave(request, pdf)
+        val priorLineTotal = computePersistedLineTotal(inv)
         persistInvoiceHistory(request)
-        val ledger = applyLedgerForInvoice(request, pdf)
+        val ledger = applyLedgerForInvoice(request, pdf, creditAssessment, priorLineTotal)
         return InvoiceConfirmResult(
             pdfBytes = pdfService.generateInvoicePdf(pdf),
             ledger = ledger,
@@ -87,8 +92,18 @@ class InvoiceHistoryService(
             throw IllegalArgumentException("Invoice number is required")
         }
 
+        val creditAssessment = enforceCreditBeforeSave(request, pdf)
+        val priorLineTotal = computePersistedLineTotal(inv)
         persistInvoiceHistory(request)
-        return applyLedgerForInvoice(request, pdf)
+        return applyLedgerForInvoice(request, pdf, creditAssessment, priorLineTotal)
+    }
+
+    private fun computePersistedLineTotal(invoiceNumber: String): Double? {
+        val header = invoiceHistoryRepository.findByInvoiceNumber(invoiceNumber.trim()).orElse(null) ?: return null
+        val headerId = header.id ?: return null
+        val total = invoiceHistoryLineRepository.findByInvoiceHistoryIdOrderBySortOrderAsc(headerId)
+            .sumOf { parseInvoiceYenAmount(it.lineAmount) ?: 0.0 }
+        return total.takeIf { it > 0.0 }
     }
 
     private fun persistInvoiceHistory(request: InvoiceConfirmAndDownloadRequest) {
@@ -153,16 +168,70 @@ class InvoiceHistoryService(
         }
     }
 
+    /**
+     * Phase 3: block or warn before persisting invoice when charge would exceed credit limit.
+     * Does not auto-create clients (new buyers have no limit yet).
+     */
+    private fun enforceCreditBeforeSave(
+        request: InvoiceConfirmAndDownloadRequest,
+        pdf: InvoicePdfRequest,
+    ): ClientCreditLimitAssessment? {
+        val inv = pdf.invoiceNumber.trim()
+        val grandTotal = computeInvoiceGrandTotal(pdf)
+        if (grandTotal <= 0.0) return null
+        val clientId = resolveClientIdForCreditCheck(request, pdf) ?: return null
+        clientService.enforceInvoiceCreditLimit(clientId, inv, grandTotal)
+        return clientService.assessCreditForInvoiceCharge(clientId, inv, grandTotal)
+    }
+
+    private fun resolveClientIdForCreditCheck(
+        request: InvoiceConfirmAndDownloadRequest,
+        pdf: InvoicePdfRequest,
+    ): Long? {
+        val name = pdf.clientName.trim()
+        if (name.isNotEmpty()) {
+            val matches = clientRepository.findByClientNameIgnoreCase(name)
+            return when {
+                matches.size == 1 -> matches.first().id
+                else -> null
+            }
+        }
+        val fromPurchases = request.purchaseIds.mapNotNull { purchaseService.getPurchaseById(it)?.clientId }.distinct()
+        return when {
+            fromPurchases.size > 1 -> null
+            fromPurchases.size == 1 -> fromPurchases.first()
+            else -> null
+        }
+    }
+
+    private fun mergeCreditIntoLedgerResult(
+        ledger: InvoiceLedgerResult,
+        credit: ClientCreditLimitAssessment?,
+    ): InvoiceLedgerResult {
+        if (credit == null) return ledger
+        val creditWarning = when (credit.status) {
+            CreditLimitStatus.NEAR_LIMIT, CreditLimitStatus.OVER_LIMIT -> credit.message
+            else -> null
+        }
+        val mergedWarning = listOfNotNull(ledger.warning, creditWarning).joinToString(" ").ifEmpty { null }
+        return ledger.copy(
+            warning = mergedWarning,
+            creditLimit = credit,
+        )
+    }
+
     private fun applyLedgerForInvoice(
         request: InvoiceConfirmAndDownloadRequest,
         pdf: InvoicePdfRequest,
+        creditAssessment: ClientCreditLimitAssessment? = null,
+        priorLineTotal: Double? = null,
     ): InvoiceLedgerResult {
         val inv = pdf.invoiceNumber.trim()
         val resolved = resolveClientForLedger(request, pdf)
         if (resolved.clientId == null) {
             val warning = resolved.warning ?: "Could not resolve client for ledger."
             Logger.warn("Invoice $inv: $warning")
-            return InvoiceLedgerResult(warning = warning)
+            return mergeCreditIntoLedgerResult(InvoiceLedgerResult(warning = warning), creditAssessment)
         }
         val clientId = resolved.clientId
         val clientName = pdf.clientName.trim()
@@ -172,13 +241,32 @@ class InvoiceHistoryService(
         val ledgerDate = resolveLedgerDate(request, pdf)
         val grandTotal = computeInvoiceGrandTotal(pdf)
         if (grandTotal <= 0.0) {
-            return InvoiceLedgerResult(
-                clientId = clientId,
-                clientCreated = resolved.clientCreated,
-                warning = "Invoice total is zero; ledger entry was not posted.",
+            return mergeCreditIntoLedgerResult(
+                InvoiceLedgerResult(
+                    clientId = clientId,
+                    clientCreated = resolved.clientCreated,
+                    warning = "Invoice total is zero; ledger entry was not posted.",
+                ),
+                creditAssessment,
             )
         }
         val vesselForLedger = pdf.vessel.trim().takeIf { it.isNotEmpty() }
+
+        // Metadata-only update (message, bank, etc.): skip ledger when amount unchanged and already balanced.
+        if (
+            priorLineTotal != null &&
+            kotlin.math.abs(priorLineTotal - grandTotal) < 0.01 &&
+            eventService.isInvoiceLedgerBalancedTo(clientId, inv, grandTotal)
+        ) {
+            return mergeCreditIntoLedgerResult(
+                InvoiceLedgerResult(
+                    clientId = clientId,
+                    clientCreated = resolved.clientCreated,
+                ),
+                creditAssessment,
+            )
+        }
+
         val sync = eventService.syncInvoiceLedger(
             clientId = clientId,
             invoiceNumber = inv,
@@ -192,27 +280,85 @@ class InvoiceHistoryService(
         } else {
             null
         }
-        return sync.copy(
-            clientId = clientId,
-            clientCreated = resolved.clientCreated,
-            info = info,
+        return mergeCreditIntoLedgerResult(
+            sync.copy(
+                clientId = clientId,
+                clientCreated = resolved.clientCreated,
+                info = info,
+            ),
+            creditAssessment,
         )
     }
 
-    fun previewLedgerClient(clientName: String, purchaseIds: List<Long> = emptyList()): Map<String, Any?> {
+    fun previewLedgerClient(
+        clientName: String,
+        purchaseIds: List<Long> = emptyList(),
+        invoiceNumber: String? = null,
+        invoiceAmount: Double? = null,
+    ): Map<String, Any?> {
         val purchaseClientIds = purchaseIds.mapNotNull { purchaseService.getPurchaseById(it)?.clientId }
         val preview = clientService.previewClientNameForLedger(clientName, purchaseClientIds)
-        return mapOf(
-            "clientId" to preview.clientId,
-            "ledgerResolvable" to preview.ledgerResolvable,
-            "willCreateClient" to preview.willCreateClient,
-            "warning" to preview.warning,
-            "info" to if (preview.willCreateClient) {
-                "Client \"${clientName.trim()}\" will be added to Client Transactions when you save this invoice."
-            } else {
-                null
-            },
+        val pdf = InvoicePdfRequest(
+            invoiceNumber = invoiceNumber?.trim().orEmpty(),
+            invoiceDate = LocalDate.now().toString(),
+            lcNumber = null,
+            clientName = clientName.trim(),
+            clientAddress = null,
+            vessel = "",
+            shippingDate = "",
+            from = "",
+            to = "",
+            priceType = "C&F",
+            items = emptyList(),
+            totalAmount = "",
+            bankAccount = null,
+            message = null,
         )
+        val request = InvoiceConfirmAndDownloadRequest(
+            purchaseIds = purchaseIds,
+            chassisJoined = "",
+            pdf = pdf,
+        )
+        val checkClientId = preview.clientId
+            ?: resolveClientIdForCreditCheck(request, pdf)
+
+        val credit = if (
+            checkClientId != null &&
+            invoiceAmount != null &&
+            invoiceAmount > 0.0 &&
+            !invoiceNumber.isNullOrBlank()
+        ) {
+            clientService.assessCreditForInvoiceCharge(
+                checkClientId,
+                invoiceNumber.trim(),
+                invoiceAmount,
+            )
+        } else {
+            null
+        }
+
+        val creditWarning = credit?.takeIf {
+            it.status == CreditLimitStatus.NEAR_LIMIT || it.status == CreditLimitStatus.OVER_LIMIT
+        }?.message
+
+        return buildMap {
+            put("clientId", preview.clientId ?: checkClientId)
+            put("ledgerResolvable", preview.ledgerResolvable)
+            put("willCreateClient", preview.willCreateClient)
+            put(
+                "warning",
+                listOfNotNull(preview.warning, creditWarning).joinToString(" ").ifEmpty { null },
+            )
+            put(
+                "info",
+                if (preview.willCreateClient) {
+                    "Client \"${clientName.trim()}\" will be added to Client Transactions when you save this invoice."
+                } else {
+                    null
+                },
+            )
+            credit?.toResponseMap()?.forEach { (k, v) -> put(k, v) }
+        }
     }
 
     private data class LedgerClientResolve(
@@ -226,28 +372,38 @@ class InvoiceHistoryService(
         pdf: InvoicePdfRequest,
     ): LedgerClientResolve {
         val fromPurchases = request.purchaseIds.mapNotNull { purchaseService.getPurchaseById(it)?.clientId }.distinct()
-        when {
-            fromPurchases.size > 1 -> {
-                Logger.warn(
-                    "Invoice ${pdf.invoiceNumber.trim()}: purchases reference multiple client IDs $fromPurchases; skip ledger",
+        if (fromPurchases.size > 1) {
+            Logger.warn(
+                "Invoice ${pdf.invoiceNumber.trim()}: purchases reference multiple client IDs $fromPurchases; skip ledger",
+            )
+            return LedgerClientResolve(
+                clientId = null,
+                warning = "Purchases reference multiple clients; ledger entry was not posted. Link purchases to one client.",
+            )
+        }
+
+        val name = pdf.clientName.trim()
+        if (name.isNotEmpty()) {
+            return when (val resolution = clientService.resolveClientNameForLedger(name)) {
+                is ClientNameLedgerResolution.Ok -> LedgerClientResolve(
+                    clientId = resolution.clientId,
+                    clientCreated = resolution.created,
                 )
-                return LedgerClientResolve(
+                is ClientNameLedgerResolution.Skipped -> LedgerClientResolve(
                     clientId = null,
-                    warning = "Purchases reference multiple clients; ledger entry was not posted. Link purchases to one client.",
+                    warning = resolution.warning,
                 )
             }
-            fromPurchases.size == 1 -> return LedgerClientResolve(clientId = fromPurchases.first())
         }
-        return when (val resolution = clientService.resolveClientNameForLedger(pdf.clientName)) {
-            is ClientNameLedgerResolution.Ok -> LedgerClientResolve(
-                clientId = resolution.clientId,
-                clientCreated = resolution.created,
-            )
-            is ClientNameLedgerResolution.Skipped -> LedgerClientResolve(
-                clientId = null,
-                warning = resolution.warning,
-            )
+
+        if (fromPurchases.size == 1) {
+            return LedgerClientResolve(clientId = fromPurchases.first())
         }
+
+        return LedgerClientResolve(
+            clientId = null,
+            warning = "Invoice has no client name; ledger entry was not posted.",
+        )
     }
 
     private fun resolveLedgerDate(request: InvoiceConfirmAndDownloadRequest, pdf: InvoicePdfRequest): LocalDate {
@@ -315,7 +471,7 @@ class InvoiceHistoryService(
             }
         }
         if (invoiceNumbersToDelete.isEmpty()) return 0
-        return deleteByInvoiceNumbers(invoiceNumbersToDelete)
+        return deleteByInvoiceNumbers(invoiceNumbersToDelete).deleted
     }
 
     /**
@@ -485,14 +641,18 @@ class InvoiceHistoryService(
     }
 
     @Transactional
-    fun deleteByInvoiceNumbers(invoiceNumbers: List<String>): Int {
-        if (invoiceNumbers.isEmpty()) return 0
+    fun deleteByInvoiceNumbers(invoiceNumbers: List<String>): InvoiceBatchDeleteResult {
+        if (invoiceNumbers.isEmpty()) return InvoiceBatchDeleteResult(deleted = 0)
         val rows = invoiceHistoryRepository.findAllByInvoiceNumberIn(invoiceNumbers)
         val chassisAffected = linkedSetOf<String>()
+        var ledgerReversed = 0
+        val ledgerWarnings = mutableListOf<String>()
         for (row in rows) {
             val hid = row.id ?: continue
             val lines = invoiceHistoryLineRepository.findByInvoiceHistoryIdOrderBySortOrderAsc(hid)
-            reverseLedgerForDeletedInvoice(row, lines)
+            val slice = reverseLedgerForDeletedInvoice(row, lines)
+            ledgerReversed += slice.reversedCount
+            ledgerWarnings.addAll(slice.warnings)
             for (line in lines) {
                 val c = line.chassis.trim()
                 if (c.isNotEmpty()) chassisAffected.add(c)
@@ -511,37 +671,136 @@ class InvoiceHistoryService(
             purchaseService.unmarkInvoiceConfirmedForChassis(chassisToUnmark)
         }
 
-        return rows.size
-    }
-
-    private fun reverseLedgerForDeletedInvoice(header: InvoiceHistory, lines: List<InvoiceHistoryLine>) {
-        val clientId = resolveClientIdForDeletedInvoice(header, lines) ?: return
-        val ledgerDate = header.shippingDate ?: LocalDate.now()
-        eventService.reverseActiveInvoiceLedger(
-            clientId = clientId,
-            invoiceNumber = header.invoiceNumber,
-            eventDate = ledgerDate,
-            vessel = header.vessel,
+        return InvoiceBatchDeleteResult(
+            deleted = rows.size,
+            ledgerReversed = ledgerReversed,
+            ledgerWarnings = ledgerWarnings.distinct(),
         )
     }
 
+    private data class InvoiceLedgerDeleteSlice(
+        val reversedCount: Int = 0,
+        val warnings: List<String> = emptyList(),
+    )
+
+    private fun reverseLedgerForDeletedInvoice(
+        header: InvoiceHistory,
+        lines: List<InvoiceHistoryLine>,
+    ): InvoiceLedgerDeleteSlice {
+        val clientId = resolveClientIdForDeletedInvoice(header, lines)
+        if (clientId == null) {
+            val name = header.clientName?.trim().orEmpty().ifEmpty { "unknown" }
+            return InvoiceLedgerDeleteSlice(
+                warnings = listOf(
+                    "Invoice ${header.invoiceNumber}: could not resolve client \"$name\" for ledger reversal.",
+                ),
+            )
+        }
+        val ledgerDate = header.shippingDate ?: LocalDate.now()
+        val numbers = collectInvoiceNumbersToReverseOnDelete(clientId, header, lines)
+        if (numbers.isEmpty()) {
+            return InvoiceLedgerDeleteSlice(
+                warnings = listOf(
+                    "Invoice ${header.invoiceNumber}: no invoice numbers matched for ledger reversal.",
+                ),
+            )
+        }
+        var reversedCount = 0
+        for (num in numbers) {
+            val reversed = eventService.reverseActiveInvoiceLedger(
+                clientId = clientId,
+                invoiceNumber = num,
+                eventDate = ledgerDate,
+                vessel = header.vessel,
+            )
+            if (reversed != null) reversedCount++
+        }
+        if (reversedCount == 0) {
+            return InvoiceLedgerDeleteSlice(
+                warnings = listOf(
+                    "Invoice ${header.invoiceNumber}: no open invoice charge was found on the client ledger to reverse.",
+                ),
+            )
+        }
+        return InvoiceLedgerDeleteSlice(reversedCount = reversedCount)
+    }
+
+    private fun collectInvoiceNumbersToReverseOnDelete(
+        clientId: Long,
+        header: InvoiceHistory,
+        lines: List<InvoiceHistoryLine>,
+    ): Set<String> {
+        val numbers = linkedSetOf<String>()
+        val headerNum = header.invoiceNumber.trim()
+        if (headerNum.isNotEmpty()) numbers.add(headerNum)
+
+        val chassisKeys = lines
+            .map { normalizeInvoiceChassisKey(it.chassis) }
+            .filter { it.isNotEmpty() }
+            .toSet()
+
+        if (chassisKeys.isNotEmpty()) {
+            numbers.addAll(
+                invoiceHistoryLineRepository.findDistinctInvoiceNumbersByNormalizedChassisIn(chassisKeys),
+            )
+        }
+
+        for (openNum in eventService.findOpenInvoiceNumbers(clientId)) {
+            if (openNum in numbers) continue
+            val history = invoiceHistoryRepository.findByInvoiceNumber(openNum)
+            if (history.isEmpty) {
+                // Orphan ledger charge (history already removed) — reverse when delete covers chassis lines.
+                if (chassisKeys.isNotEmpty()) numbers.add(openNum)
+            } else if (chassisKeys.isNotEmpty()) {
+                val hid = history.get().id ?: continue
+                val histLines = invoiceHistoryLineRepository.findByInvoiceHistoryIdOrderBySortOrderAsc(hid)
+                val histChassis = histLines.map { normalizeInvoiceChassisKey(it.chassis) }.toSet()
+                if (histChassis.any { it in chassisKeys }) numbers.add(openNum)
+            }
+        }
+        return numbers
+    }
+
+    private fun normalizeInvoiceChassisKey(chassis: String): String =
+        chassis.trim().lowercase(Locale.ROOT)
+
     private fun resolveClientIdForDeletedInvoice(header: InvoiceHistory, lines: List<InvoiceHistoryLine>): Long? {
+        val name = header.clientName?.trim().orEmpty()
+        if (name.isNotEmpty()) {
+            val byName = clientRepository.findByClientNameIgnoreCase(name)
+            when {
+                byName.size == 1 -> return byName.first().id
+                byName.size > 1 -> {
+                    Logger.warn(
+                        "Invoice ${header.invoiceNumber}: multiple clients named \"$name\"; skip ledger reversal",
+                    )
+                    return null
+                }
+            }
+        }
+
         val fromPurchases = lines
             .mapNotNull { purchaseService.getPurchaseByChassis(it.chassis.trim())?.clientId }
             .distinct()
         when {
             fromPurchases.size == 1 -> return fromPurchases.first()
             fromPurchases.size > 1 -> {
-                Logger.warn("Invoice ${header.invoiceNumber}: multiple client IDs on delete; skip ledger reversal")
+                Logger.warn(
+                    "Invoice ${header.invoiceNumber}: purchases reference multiple client IDs; skip ledger reversal",
+                )
                 return null
             }
         }
-        val name = header.clientName?.trim().orEmpty()
-        if (name.isEmpty()) return null
-        val matches = clientRepository.findByClientNameIgnoreCase(name)
-        return when {
-            matches.size == 1 -> matches.first().id
-            else -> null
+
+        if (name.isEmpty()) {
+            Logger.warn(
+                "Invoice ${header.invoiceNumber}: no client name and no purchase client link; skip ledger reversal",
+            )
+        } else {
+            Logger.warn(
+                "Invoice ${header.invoiceNumber}: client \"$name\" not found in Client Transactions; skip ledger reversal",
+            )
         }
+        return null
     }
 }

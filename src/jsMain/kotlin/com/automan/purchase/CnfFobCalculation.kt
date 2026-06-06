@@ -68,22 +68,19 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false, isRecreateCalculation: 
     val pageTitle = if (isFobMode) "FOB CALCULATION" else "C&F CALCULATION"
     val saveButtonLabel = if (isRecreateCalculation) "Update" else "Save"
     val calculateFreightButton = if (isFobMode) """
-        <!-- Calculate Shipping Charge Button (FOB only) -->
-        <div style="margin: 20px 0;">
-            <button id="calculateShippingChargeBtn" class="cnf-btn cnf-btn-freight" style="width: 100%; padding: 14px; font-size: 16px; font-weight: 600;">CALCULATE SHIPPING CHARGE</button>
+        <div class="cnf-freight-action-wrap">
+            <button id="calculateShippingChargeBtn" type="button" class="cnf-btn cnf-btn-freight">CALCULATE SHIPPING CHARGE</button>
         </div>
     """ else """
-        <!-- Calculate Freight Button -->
-        <div style="margin: 20px 0;">
-            <button id="calculateFreightBtn" class="cnf-btn cnf-btn-freight" style="width: 100%; padding: 14px; font-size: 16px; font-weight: 600;">CALCULATE FREIGHT</button>
+        <div class="cnf-freight-action-wrap">
+            <button id="calculateFreightBtn" type="button" class="cnf-btn cnf-btn-freight">Calculate Freight &amp; Shipping Charge</button>
         </div>
     """
     
     return """
-        <div class="cnf-calculation-container">
-            <!-- Back Button -->
-            <div style="margin-bottom: 20px;">
-                <button id="backToBookingBtn" class="cnf-back-btn">← Back to Car Booking</button>
+        <div class="cnf-calculation-container" id="cnfCalculationRoot">
+            <div class="cnf-back-row">
+                <button id="backToBookingBtn" class="cnf-back-btn" type="button">← Back to Car Booking</button>
             </div>
             
             <!-- C&F Calculation Container -->
@@ -484,7 +481,6 @@ fun renderCnfCarsTable(cars: List<dynamic>, isFobMode: Boolean = false) {
         expandedRow.setAttribute("data-chassis", chassis)
         expandedRow.className = "cnf-detail-row"
         expandedRow.innerHTML = createCnfCarExpandedRowInnerHTML(chassis, isFobMode)
-        (expandedRow as HTMLElement).style.display = "none"
         tbody.appendChild(expandedRow)
         
         // Setup expand button
@@ -512,28 +508,25 @@ fun toggleCnfRowExpanded(chassis: String, isFobMode: Boolean) {
         ?: return
     
     val rowEl = expandedRow as HTMLElement
-    val isHidden = rowEl.style.display == "none"
+    val isOpen = rowEl.classList.contains("cnf-detail-row--open")
     
-    if (!isHidden) {
-        // Close current row
-        rowEl.style.display = "none"
+    if (isOpen) {
+        rowEl.classList.remove("cnf-detail-row--open")
         val btn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$chassis\"]") as? HTMLButtonElement
         btn?.textContent = "▼"
     } else {
-        // Close all other expanded rows first (accordion behavior)
         val allDetailRows = tbody.querySelectorAll("tr.cnf-detail-row")
         for (i in 0 until allDetailRows.length) {
             val row = allDetailRows.item(i) as HTMLElement
-            if (row.style.display != "none") {
-                row.style.display = "none"
+            if (row.classList.contains("cnf-detail-row--open")) {
+                row.classList.remove("cnf-detail-row--open")
                 val otherChassis = row.getAttribute("data-chassis")
                 val otherBtn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$otherChassis\"]") as? HTMLButtonElement
                 otherBtn?.textContent = "▼"
             }
         }
         
-        // Open the current row
-        rowEl.style.display = "table-row"
+        rowEl.classList.add("cnf-detail-row--open")
         val btn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$chassis\"]") as? HTMLButtonElement
         btn?.textContent = "▲"
         populateCnfExpandedFields(chassis, isFobMode)
@@ -545,7 +538,7 @@ fun toggleCnfRowExpanded(chassis: String, isFobMode: Boolean) {
 fun collapseCnfExpandedRow(chassis: String) {
     val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return
     val expandedRow = tbody.querySelector("tr.cnf-detail-row[data-chassis=\"$chassis\"]") as? HTMLElement ?: return
-    expandedRow.style.display = "none"
+    expandedRow.classList.remove("cnf-detail-row--open")
     val btn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$chassis\"]") as? HTMLButtonElement
     btn?.textContent = "▼"
 }
@@ -813,7 +806,7 @@ fun loadCnfCarCostData(car: dynamic, chassis: String, isFobMode: Boolean) {
                     val loadedCarPrice = cnfNumericFromPayload(costData.carPrice)
                     updateCnfMainRowCarPriceCell(chassis, loadedCarPrice)
                     val detailRow = cnfDetailRowForChassis(chassis) as? HTMLElement
-                    val collapsed = detailRow == null || detailRow.style.display == "none"
+                    val collapsed = detailRow == null || !detailRow.classList.contains("cnf-detail-row--open")
                     if (collapsed) {
                         populateCnfExpandedFields(chassis, isFobMode)
                     } else {

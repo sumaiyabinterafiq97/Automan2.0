@@ -7,13 +7,15 @@ data class InvoiceLedgerResult(
     val clientCreated: Boolean = false,
     val warning: String? = null,
     val info: String? = null,
+    val creditLimit: ClientCreditLimitAssessment? = null,
 ) {
-    fun toResponseMap(): Map<String, Any?> = mapOf(
-        "ledgerPosted" to posted,
-        "ledgerReversed" to reversed,
-        "ledgerClientId" to clientId,
-        "ledgerClientCreated" to clientCreated,
-        "ledgerWarning" to warning,
-        "ledgerInfo" to info,
-    )
+    fun toResponseMap(): Map<String, Any?> = buildMap {
+        put("ledgerPosted", posted)
+        put("ledgerReversed", reversed)
+        put("ledgerClientId", clientId)
+        put("ledgerClientCreated", clientCreated)
+        put("ledgerWarning", warning)
+        put("ledgerInfo", info)
+        creditLimit?.toResponseMap()?.forEach { (k, v) -> put(k, v) }
+    }
 }

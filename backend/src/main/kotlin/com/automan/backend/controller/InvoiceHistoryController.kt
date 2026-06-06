@@ -33,7 +33,11 @@ class InvoiceHistoryController(
     }
 
     data class BatchDeleteRequest(val invoiceNumbers: List<String> = emptyList())
-    data class BatchDeleteResponse(val deleted: Int)
+    data class BatchDeleteResponse(
+        val deleted: Int,
+        val ledgerReversed: Int = 0,
+        val ledgerWarnings: List<String> = emptyList(),
+    )
 
     @DeleteMapping("/batch-delete")
     fun batchDelete(@RequestBody req: BatchDeleteRequest): BatchDeleteResponse =
@@ -45,7 +49,11 @@ class InvoiceHistoryController(
         batchDeleteInternal(req.invoiceNumbers)
 
     private fun batchDeleteInternal(invoiceNumbers: List<String>): BatchDeleteResponse {
-        val count = invoiceHistoryService.deleteByInvoiceNumbers(invoiceNumbers)
-        return BatchDeleteResponse(deleted = count)
+        val result = invoiceHistoryService.deleteByInvoiceNumbers(invoiceNumbers)
+        return BatchDeleteResponse(
+            deleted = result.deleted,
+            ledgerReversed = result.ledgerReversed,
+            ledgerWarnings = result.ledgerWarnings,
+        )
     }
 }

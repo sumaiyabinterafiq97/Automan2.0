@@ -117,8 +117,13 @@ private fun singleValueChipSpanHtml(escapedText: String): String =
     """<span style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:#eff6ff;color:#1e40af;line-height:1.35;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis;">$escapedText</span>"""
 
 private fun consigneeMapShadowChipSpanHtml(escapedText: String, wrap: Boolean = false): String {
-    val wrapStyle = if (wrap) "white-space:normal;word-break:break-word;" else "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-    return """<span style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:#f8fafc;color:#111827;line-height:1.35;max-width:100%;box-shadow:0 1px 6px rgba(15,23,42,0.18);$wrapStyle">$escapedText</span>"""
+    val shared =
+        "box-sizing:border-box;font-size:13px;font-weight:500;background:#f8fafc;color:#111827;box-shadow:0 1px 6px rgba(15,23,42,0.18);border-radius:6px;max-width:100%;"
+    return if (wrap) {
+        """<span class="consignee-map-chip consignee-map-chip--block" style="display:block;width:100%;padding:8px 10px;line-height:1.45;white-space:normal;word-break:break-word;overflow-wrap:anywhere;overflow:hidden;$shared">$escapedText</span>"""
+    } else {
+        """<span class="consignee-map-chip" style="display:inline-block;padding:6px 10px;line-height:1.35;white-space:normal;word-break:break-word;overflow-wrap:anywhere;vertical-align:top;$shared">$escapedText</span>"""
+    }
 }
 
 /** Bank info variant must occupy full cell width so very long lines wrap inside the pill on desktop table view. */
@@ -140,7 +145,7 @@ fun formatConsigneeMapValueChipHtml(raw: String): String {
     val inner = tokens.joinToString("") { t ->
         consigneeMapShadowChipSpanHtml(escapeHtml(t))
     }
-    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+    return """<span class="consignee-map-chip-wrap" style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;width:100%;max-width:100%;min-width:0;box-sizing:border-box;">$inner</span>"""
 }
 
 /** Supplier Map generic values: black text + subtle shadow for all chips, no multi-color variants. */

@@ -2011,6 +2011,207 @@ div[id$="_dropdown"] {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 20px;
+    gap: 12px;
+}
+
+.rixo-generator-col-filter-btn {
+    padding: 8px 14px;
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 40px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.rixo-generator-col-filter-btn:hover {
+    background-color: #5a6268;
+}
+
+/* Number cut inline edit (Cars to Rixo) */
+.rixo-nc-cell {
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.rixo-nc-shaken-edit label {
+    font-size: 12px;
+    color: #374151;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.rixo-nc-collapsed {
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    background: #f9fafb;
+    word-break: break-word;
+}
+
+.rixo-nc-expanded {
+    margin-top: 8px;
+}
+
+.rixo-nc-expanded-grid {
+    display: grid;
+    grid-template-columns: 1fr 56px;
+    gap: 6px;
+}
+
+.rixo-nc-expanded-grid .rixo-nc-place-row,
+.rixo-nc-expanded-grid .rixo-nc-hira-row {
+    grid-column: 1 / -1;
+}
+
+.rixo-nc-n1,
+.rixo-nc-n2 {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    box-sizing: border-box;
+    font-size: 14px;
+    min-height: 40px;
+}
+
+/* ============================================
+   Rixo Generator — compact cars list (≤860px)
+   ============================================ */
+@media (max-width: 860px) {
+    #rixoGeneratorPage .rixo-rows-content {
+        overflow-x: visible;
+        border: none;
+        background: transparent;
+    }
+
+    #rixoGeneratorPage .rixo-table {
+        font-size: 14px;
+        display: block;
+    }
+
+    #rixoGeneratorPage .rixo-table thead {
+        display: none;
+    }
+
+    #rixoGeneratorPage .rixo-table tbody {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    #rixoGeneratorPage .rixo-table tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: flex-start;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 12px 14px;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+    }
+
+    #rixoGeneratorPage .rixo-table td {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        width: 100%;
+        padding: 10px 0;
+        border: none;
+        border-bottom: 1px solid #f1f5f9;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: unset;
+    }
+
+    #rixoGeneratorPage .rixo-table td:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+    }
+
+    #rixoGeneratorPage .rixo-table td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        font-size: 12px;
+        color: #64748b;
+        text-transform: none;
+        letter-spacing: 0.02em;
+    }
+
+    #rixoGeneratorPage .rixo-table td[data-label=""]::before,
+    #rixoGeneratorPage .rixo-table td[data-label=":"]::before {
+        content: none;
+    }
+
+    #rixoGeneratorPage .rixo-table td.rixo-col-select,
+    #rixoGeneratorPage .rixo-table td.rixo-col-edit {
+        flex: 0 0 auto;
+        width: auto;
+        flex-direction: row;
+        align-items: center;
+        border-bottom: none;
+        padding: 0 12px 10px 0;
+    }
+
+    #rixoGeneratorPage .rixo-table td.rixo-col-select {
+        order: 1;
+    }
+
+    #rixoGeneratorPage .rixo-table td.rixo-col-edit {
+        order: 2;
+        margin-left: auto;
+        padding-right: 0;
+    }
+
+    #rixoGeneratorPage .rixo-table td:not(.rixo-col-select):not(.rixo-col-edit) {
+        flex: 1 1 100%;
+        order: 10;
+    }
+
+    #rixoGeneratorPage .rixo-table td .rixo-inline-control,
+    #rixoGeneratorPage .rixo-table td .rixo-inline-combowrap,
+    #rixoGeneratorPage .rixo-table td .rixo-nc-cell {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    #rixoGeneratorPage .rixo-nc-expanded-grid {
+        grid-template-columns: 1fr;
+    }
+
+    #rixoGeneratorPage .rixo-nc-n1,
+    #rixoGeneratorPage .rixo-nc-n2 {
+        grid-column: 1 / -1;
+    }
+
+    #rixoGeneratorPage .rixo-edit-btn,
+    #rixoGeneratorPage .rixo-update-btn {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        min-height: 36px;
+    }
+}
+
+@media (min-width: 861px) and (max-width: 1024px) {
+    #rixoGeneratorPage .rixo-table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
 }
 
 .rixo-selected-count {
@@ -2205,6 +2406,25 @@ div[id$="_dropdown"] {
         border-radius: 6px;
         display: inline-block;
     }
+
+    .rixo-rows-preview-panel {
+        padding-bottom: 80px;
+    }
+
+    #rixoGeneratorPage .rixo-generator-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        margin-bottom: 14px;
+    }
+
+    #rixoGeneratorPage .rixo-rows-title {
+        text-align: center;
+        margin-bottom: 0;
+    }
+
+    #rixoGeneratorPage .rixo-generator-col-filter-btn {
+        width: 100%;
+    }
 }
 
 /* ============================================
@@ -2282,6 +2502,20 @@ div[id$="_dropdown"] {
         max-height: 500px;
         overflow-x: auto;
     }
+
+    #rixoGeneratorPage .rixo-generator-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #rixoGeneratorPage .rixo-rows-title {
+        text-align: center;
+        margin-bottom: 0;
+    }
+
+    #rixoGeneratorPage .rixo-generator-col-filter-btn {
+        width: 100%;
+    }
     
     /* Table responsive on tablet */
     .rixo-table {
@@ -2321,7 +2555,18 @@ div[id$="_dropdown"] {
     
     .rixo-rows-preview-panel {
         flex: 1 1 64%;
-        min-width: 920px;
+        min-width: 0;
+    }
+
+    #rixoGeneratorPage .rixo-generator-toolbar {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    #rixoGeneratorPage .rixo-rows-title {
+        margin-bottom: 0;
+        text-align: left;
     }
     
     .rixo-request-title,
@@ -2800,14 +3045,17 @@ div[id$="_dropdown"] {
         min-height: 44px;
     }
     
-    /* Hide table on mobile - show cards instead */
-    .consignee-table {
+    /* Legacy #consigneeList only — #consigneeMapRoot uses JS breakpoint (860px) for table vs cards */
+    #consigneeList .consignee-table {
         display: none;
     }
     
-    /* Show cards container */
-    .consignee-cards-container {
+    #consigneeList .consignee-cards-container {
         display: flex;
+    }
+
+    #consigneeMapRoot .consignee-cards-container {
+        display: flex !important;
     }
     
     /* Search Section - Mobile */
@@ -2889,9 +3137,18 @@ div[id$="_dropdown"] {
         box-sizing: border-box;
     }
     
-    /* Hide cards on tablet - show table */
-    .consignee-cards-container {
+    /* Legacy #consigneeList: tablet table mode. #consigneeMapRoot keeps cards visible when rendered (≤860px). */
+    #consigneeList .consignee-cards-container {
         display: none;
+    }
+    
+    #consigneeList .consignee-table {
+        font-size: 14px;
+        display: table;
+    }
+
+    #consigneeMapRoot .consignee-cards-container {
+        display: flex !important;
     }
     
     /* Table Styles - Optimized */
@@ -2950,8 +3207,8 @@ div[id$="_dropdown"] {
         box-sizing: border-box;
     }
     
-    /* Hide cards on desktop - show table */
-    .consignee-cards-container {
+    /* Legacy #consigneeList: desktop table mode */
+    #consigneeList .consignee-cards-container {
         display: none;
     }
     
@@ -4406,61 +4663,6 @@ button.invoice-history-pdf-btn:disabled {
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
-/* BOOKING NO: text field + glossy circular search (matches classic “blue orb” look) */
-.booking-no-search-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-}
-
-.booking-no-search-input {
-    flex: 1;
-    min-width: 0;
-    width: auto !important;
-}
-
-.booking-no-search-btn {
-    flex-shrink: 0;
-    width: 44px;
-    height: 44px;
-    border: none;
-    border-radius: 50%;
-    cursor: pointer;
-    padding: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: radial-gradient(circle at 32% 28%, #a8d8ff 0%, #42a5f5 42%, #1565c0 88%, #0d47a1 100%);
-    box-shadow:
-        0 4px 10px rgba(13, 71, 161, 0.45),
-        inset 0 2px 8px rgba(255, 255, 255, 0.45),
-        inset 0 -3px 8px rgba(0, 0, 0, 0.18);
-    transition: transform 0.14s ease, box-shadow 0.14s ease;
-}
-
-.booking-no-search-btn:hover {
-    transform: scale(1.06);
-    box-shadow:
-        0 6px 14px rgba(13, 71, 161, 0.5),
-        inset 0 2px 8px rgba(255, 255, 255, 0.5),
-        inset 0 -3px 8px rgba(0, 0, 0, 0.2);
-}
-
-.booking-no-search-btn:active {
-    transform: scale(0.96);
-}
-
-.booking-no-search-btn:focus-visible {
-    outline: 2px solid #1e88e5;
-    outline-offset: 2px;
-}
-
-.booking-no-search-btn svg {
-    flex-shrink: 0;
-    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
-}
-
 .booking-chassis-search-wrap {
     position: relative;
 }
@@ -4842,6 +5044,18 @@ button.invoice-history-pdf-btn:disabled {
 .booking-chassis-table {
     width: 100%;
     border-collapse: collapse;
+    table-layout: auto;
+}
+
+.booking-chassis-table .purchase-list-cell-chip {
+    white-space: nowrap;
+    word-break: normal;
+    max-width: none;
+}
+
+.booking-chassis-table th:nth-child(3),
+.booking-chassis-table td:nth-child(3) {
+    min-width: 108px;
 }
 
 .booking-chassis-table th,
@@ -5140,17 +5354,20 @@ button.invoice-history-pdf-btn:disabled {
         padding: 20px;
     }
     
-    /* Keep two columns but reduce gap */
+    /* Stack columns — side-by-side crushes chassis table on iPad */
     .booking-columns {
+        flex-direction: column;
         gap: 20px;
+        min-height: auto;
     }
     
     .booking-details-section {
-        padding-right: 15px;
+        padding-right: 0;
+        border-right: none;
     }
     
     .booking-list-section {
-        padding-left: 15px;
+        padding-left: 0;
     }
     
     .booking-chassis-table th,
@@ -5171,6 +5388,10 @@ button.invoice-history-pdf-btn:disabled {
     min-height: 100vh;
 }
 
+.cnf-back-row {
+    margin-bottom: 20px;
+}
+
 /* Back Button */
 .cnf-back-btn {
     padding: 8px 16px;
@@ -5189,9 +5410,11 @@ button.invoice-history-pdf-btn:disabled {
     border: 2px solid #8b5cf6;
     border-radius: 12px;
     padding: 30px;
-    max-width: 800px;
+    max-width: min(1200px, calc(100vw - 40px));
     margin: 0 auto;
     box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    width: 100%;
+    box-sizing: border-box;
 }
 
 /* Header */
@@ -5364,11 +5587,24 @@ button.invoice-history-pdf-btn:disabled {
     color: white;
 }
 
+.cnf-freight-action-wrap {
+    margin: 20px 0;
+    width: 100%;
+}
+
 .cnf-btn-freight {
     background-color: #8b5cf6;
     color: white;
     width: 100%;
-    margin-top: 15px;
+    margin-top: 0;
+    padding: 14px 16px;
+    font-size: 16px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 1.35;
 }
 
 /* Mobile Styles for C&F Page */
@@ -5423,7 +5659,7 @@ button.invoice-history-pdf-btn:disabled {
 @media (min-width: 768px) and (max-width: 1024px) {
     .cnf-card {
         padding: 24px;
-        max-width: 700px;
+        max-width: min(1200px, calc(100vw - 32px));
     }
     
     .cnf-cost-grid {
@@ -5459,9 +5695,11 @@ button.invoice-history-pdf-btn:disabled {
     border: 2px solid #8b5cf6;
     border-radius: 12px;
     padding: 30px;
-    max-width: 1000px;
+    max-width: min(1200px, calc(100vw - 40px));
     margin: 0 auto;
     box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    width: 100%;
+    box-sizing: border-box;
 }
 
 /* Freight Header */
@@ -5620,15 +5858,32 @@ button.invoice-history-pdf-btn:disabled {
 @media (min-width: 768px) and (max-width: 1024px) {
     .freight-card {
         padding: 24px;
-        max-width: 90%;
+        max-width: min(1200px, calc(100vw - 32px));
     }
     
     .freight-price-row {
+        flex-direction: column;
+        align-items: stretch;
         gap: 10px;
     }
     
     .freight-price-row input {
-        width: 100px;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    .freight-price-row .operator {
+        display: none;
+    }
+    
+    .freight-container-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .freight-container-row input,
+    .freight-container-row select {
+        width: 100%;
     }
 }
 
@@ -6110,6 +6365,14 @@ button.invoice-history-pdf-btn:disabled {
     padding: 20px;
     min-height: calc(100vh - 60px);
     background: #f5f5f5;
+    box-sizing: border-box;
+}
+
+#clientTransactionsPage.client-page-container,
+#clientDetailsPage.client-details-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
 }
 
 /* Client Page Card */
@@ -6126,19 +6389,37 @@ button.invoice-history-pdf-btn:disabled {
     margin-bottom: 24px;
 }
 
-.client-page-header h2 {
-    margin: 0 0 20px 0;
+.client-page-toolbar {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+}
+
+.client-page-title,
+.client-page-header h2,
+.client-details-header h2 {
+    margin: 0;
     font-size: 24px;
     font-weight: 700;
     color: #111827;
+    letter-spacing: -0.01em;
 }
 
-/* Client Action Buttons Row */
+.client-page-header h2 {
+    margin: 0 0 20px 0;
+}
+
+.client-toolbar-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
 .client-action-buttons {
     display: flex;
     flex-wrap: wrap;
     gap: 12px;
-    margin-bottom: 20px;
 }
 
 .client-btn {
@@ -6306,6 +6587,13 @@ button.invoice-history-pdf-btn:disabled {
     color: #374151;
 }
 
+input.client-form-readonly,
+input.client-form-readonly:read-only {
+    cursor: not-allowed;
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .client-form-hint {
     font-size: 12px;
     color: #6b7280;
@@ -6382,11 +6670,10 @@ button.invoice-history-pdf-btn:disabled {
 
 .client-details-header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     margin-bottom: 24px;
-    flex-wrap: wrap;
-    gap: 12px;
+    gap: 16px;
 }
 
 .client-details-header h2 {
@@ -6398,13 +6685,49 @@ button.invoice-history-pdf-btn:disabled {
 
 .client-details-actions {
     display: flex;
-    gap: 8px;
     flex-wrap: wrap;
+    gap: 8px;
 }
 
-/* Client Info Section */
+/* Client info summary — side-by-side on tablet+ */
 .client-info-card {
     margin-bottom: 24px;
+}
+
+@media (min-width: 768px) {
+    .client-info-card {
+        display: grid;
+        grid-template-columns: 1fr minmax(220px, 300px);
+        grid-template-areas:
+            "name name"
+            "info balance"
+            "actions actions";
+        gap: 16px 24px;
+        align-items: start;
+    }
+
+    .client-info-name {
+        grid-area: name;
+    }
+
+    .client-info-grid {
+        grid-area: info;
+        margin-bottom: 0;
+    }
+
+    .client-balance-card {
+        grid-area: balance;
+        margin-bottom: 0;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }
+
+    .client-info-card > .client-action-buttons {
+        grid-area: actions;
+        margin-bottom: 0;
+    }
 }
 
 .client-info-name {
@@ -6494,6 +6817,21 @@ button.invoice-history-pdf-btn:disabled {
     color: #92400e;
 }
 
+.ledger-type-opening {
+    background: #e8f5e9;
+    color: #2e7d32;
+}
+
+.ledger-actions-cell {
+    white-space: nowrap;
+}
+
+.ledger-actions-cell .client-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    margin-right: 4px;
+}
+
 .ledger-type-shipment {
     background: #e0e7ff;
     color: #3730a3;
@@ -6532,6 +6870,9 @@ button.invoice-history-pdf-btn:disabled {
     color: white;
     font-weight: 600;
     white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 1;
 }
 
 .transactions-table td {
@@ -6543,9 +6884,12 @@ button.invoice-history-pdf-btn:disabled {
     background: #f8f9fa;
 }
 
-/* Transaction Cards for Mobile */
+/* Transaction Cards for Mobile (shown ≤860px on Client Details) */
 .transactions-cards-container {
     display: none;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .transaction-card {
@@ -6554,19 +6898,32 @@ button.invoice-history-pdf-btn:disabled {
     border-radius: 8px;
     padding: 16px;
     margin-bottom: 12px;
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .transaction-card-header {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
+    align-items: center;
+    gap: 8px;
     margin-bottom: 12px;
     padding-bottom: 8px;
     border-bottom: 1px solid #e5e7eb;
 }
 
+.transaction-card-header .ledger-type-badge {
+    flex-shrink: 0;
+}
+
 .transaction-date {
     font-weight: 600;
     color: #333;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .transaction-event {
@@ -6575,32 +6932,51 @@ button.invoice-history-pdf-btn:disabled {
 }
 
 .transaction-card-body {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
 }
 
 .transaction-card-row {
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+    width: 100%;
 }
 
 .transaction-card-label {
-    font-size: 12px;
+    font-size: 11px;
+    font-weight: 600;
     color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
 }
 
 .transaction-card-value {
     font-weight: 500;
+    font-size: 14px;
+    color: #111827;
+    width: 100%;
+    max-width: 100%;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .transaction-balance {
-    grid-column: span 2;
-    text-align: right;
-    padding-top: 8px;
-    margin-top: 8px;
+    width: 100%;
+    max-width: 100%;
+    margin-top: 4px;
+    padding-top: 10px;
     border-top: 1px solid #e5e7eb;
     font-weight: 700;
+    font-size: 15px;
+    text-align: left;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
 }
 
 /* Modal Styles */
@@ -6734,96 +7110,169 @@ button.invoice-history-pdf-btn:disabled {
     gap: 12px;
 }
 
-/* Mobile Styles for Client Pages */
-@media (max-width: 767px) {
-    .client-page-container,
-    .client-details-container {
-        padding: 12px;
+/* Mobile + tablet (≤1024px) — Client Transactions & Details */
+@media (max-width: 1024px) {
+    #clientTransactionsPage.client-page-container,
+    #clientDetailsPage.client-details-container {
+        padding: 14px;
     }
-    
-    .client-page-card,
-    .client-details-card {
-        padding: 16px;
-        border-radius: 12px;
+
+    #clientTransactionsPage .client-page-card,
+    #clientDetailsPage .client-details-card {
+        padding: 18px;
     }
-    
-    .client-page-header h2 {
-        font-size: 18px;
-        margin-bottom: 16px;
+
+    #clientTransactionsPage .client-page-title,
+    #clientDetailsPage .client-page-title,
+    #clientTransactionsPage .client-page-header h2,
+    #clientDetailsPage .client-details-header h2 {
+        font-size: 20px;
+        text-align: center;
+        width: 100%;
     }
-    
-    /* Action buttons stack and full width */
-    .client-action-buttons {
+
+    #clientTransactionsPage .client-page-toolbar,
+    #clientDetailsPage .client-details-header {
+        gap: 14px;
+    }
+
+    #clientTransactionsPage .client-toolbar-actions,
+    #clientDetailsPage .client-details-actions,
+    #clientDetailsPage .client-info-card > .client-action-buttons {
         flex-direction: column;
+        width: 100%;
         gap: 10px;
     }
-    
-    .client-btn {
+
+    #clientTransactionsPage .client-toolbar-actions .client-btn,
+    #clientDetailsPage .client-details-actions .client-btn,
+    #clientDetailsPage .client-info-card > .client-action-buttons .client-btn {
         width: 100%;
         justify-content: center;
     }
-    
-    /* Client Alerts Section */
-    .client-alerts-section {
+
+    #clientTransactionsPage .client-list-section {
         padding: 16px;
-        border-radius: 8px;
     }
-    
-    /* Client List Section */
-    .client-list-section {
-        padding: 16px;
-        border-radius: 8px;
+
+    #clientTransactionsPage .client-list-section h3 {
+        font-size: 17px;
+        text-align: center;
     }
-    
-    .client-list-section h3 {
+
+    #clientTransactionsPage .client-search-input {
         font-size: 16px;
     }
-    
-    /* Client Details Header */
-    .client-details-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    
-    .client-details-header h2 {
-        font-size: 18px;
-    }
-    
-    .client-details-actions {
-        width: 100%;
-        flex-direction: column;
-    }
-    
-    .client-details-actions .client-btn {
-        width: 100%;
-        justify-content: center;
-    }
-    
-    /* Client Info Grid */
-    .client-info-grid {
+
+    #clientDetailsPage .client-info-grid {
         grid-template-columns: 1fr;
         gap: 8px;
     }
-    
-    /* Balance Card */
-    .client-balance-card {
-        padding: 16px;
-    }
-    
-    .client-balance-amount {
-        font-size: 28px;
-    }
-    
-    /* Show cards, hide table on mobile */
-    .transactions-table-container {
+}
+
+/* Ledger cards on compact widths (≤860px) */
+@media (max-width: 860px) {
+    #clientDetailsPage .transactions-table-container {
         display: none;
     }
-    
-    .transactions-cards-container {
+
+    #clientDetailsPage .transactions-cards-container {
         display: block;
     }
-    
-    /* Modal Full Screen on Mobile */
+
+    #clientDetailsPage .client-transactions-section {
+        min-width: 0;
+        overflow: hidden;
+    }
+
+    /* Description + Reference full width; Debit/Credit side-by-side on slightly wider phones */
+    #clientDetailsPage .transaction-card-body {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    #clientDetailsPage .transaction-card-row:nth-child(1),
+    #clientDetailsPage .transaction-card-row:nth-child(2),
+    #clientDetailsPage .transaction-balance {
+        grid-column: 1 / -1;
+    }
+}
+
+@media (min-width: 480px) and (max-width: 860px) {
+    #clientDetailsPage .transaction-card-body {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    #clientDetailsPage .transaction-card-row:nth-child(3) {
+        grid-column: 1;
+    }
+
+    #clientDetailsPage .transaction-card-row:nth-child(4) {
+        grid-column: 2;
+    }
+}
+
+/* Mobile (≤767px) */
+@media (max-width: 767px) {
+    #clientTransactionsPage.client-page-container,
+    #clientDetailsPage.client-details-container {
+        padding: 12px;
+    }
+
+    #clientTransactionsPage .client-page-card,
+    #clientDetailsPage .client-details-card {
+        padding: 16px;
+    }
+
+    #clientTransactionsPage .client-page-title,
+    #clientDetailsPage .client-page-title,
+    #clientTransactionsPage .client-page-header h2,
+    #clientDetailsPage .client-details-header h2 {
+        font-size: 18px;
+    }
+
+    #clientTransactionsPage .client-item-content {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    #clientTransactionsPage .client-credit-limit-btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    #clientTransactionsPage .client-info-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    #clientTransactionsPage .client-info-row > div:last-child {
+        text-align: left;
+        width: 100%;
+    }
+
+    #clientTransactionsPage .client-balance,
+    #clientTransactionsPage .client-status {
+        text-align: left;
+    }
+
+    #clientDetailsPage .client-balance-card {
+        padding: 16px;
+    }
+
+    #clientDetailsPage .client-balance-amount {
+        font-size: 28px;
+        word-break: break-word;
+    }
+
+    #clientDetailsPage .client-info-card {
+        display: block;
+    }
+
+    /* Modal full screen on mobile */
     .client-modal-content {
         margin: 0;
         width: 100%;
@@ -6831,82 +7280,133 @@ button.invoice-history-pdf-btn:disabled {
         border-radius: 0;
         padding: 16px;
     }
-    
-    /* Form fields stack vertically */
+
     .client-form-row,
     .client-form-row-3 {
         grid-template-columns: 1fr;
     }
-    
+
     .client-form-field.full-width {
         grid-column: span 1;
     }
-    
-    /* Modal actions stack */
+
     .client-modal-actions {
         flex-direction: column;
     }
-    
+
     .client-modal-actions-split {
         flex-direction: column;
         gap: 16px;
     }
-    
+
     .client-modal-actions-right {
         flex-direction: column;
     }
-    
+
     .client-modal-actions .client-btn,
     .client-modal-actions-right .client-btn {
         width: 100%;
         justify-content: center;
     }
-    
-    /* Delete button on mobile */
+
     .client-modal-actions-split .client-btn-danger {
         order: 3;
         margin-top: 8px;
     }
 }
 
-/* Tablet Styles for Client Pages */
-@media (min-width: 768px) and (max-width: 1024px) {
-    .client-page-container,
-    .client-details-container {
-        padding: 16px;
+/* Desktop (≥1025px) — toolbar row, table ledger */
+@media (min-width: 1025px) {
+    #clientTransactionsPage .client-page-toolbar,
+    #clientDetailsPage .client-details-header {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 16px;
     }
-    
-    .client-page-card,
-    .client-details-card {
-        padding: 20px;
+
+    #clientTransactionsPage .client-page-title,
+    #clientDetailsPage .client-page-title {
+        text-align: left;
+        flex: 1;
+        min-width: 200px;
     }
-    
-    .client-page-header h2 {
-        font-size: 20px;
+
+    #clientTransactionsPage .client-toolbar-actions,
+    #clientDetailsPage .client-details-actions {
+        flex-direction: row;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        width: auto;
     }
-    
-    /* Action buttons wrap nicely */
-    .client-action-buttons {
+
+    #clientTransactionsPage .client-toolbar-actions .client-btn,
+    #clientDetailsPage .client-details-actions .client-btn {
+        width: auto;
+        min-width: 0;
+    }
+
+    #clientDetailsPage .client-info-card > .client-action-buttons {
+        flex-direction: row;
         flex-wrap: wrap;
     }
-    
-    /* Modal adjustments */
+
+    #clientDetailsPage .transactions-table-container {
+        display: block;
+    }
+
+    #clientDetailsPage .transactions-cards-container {
+        display: none;
+    }
+}
+
+/* Tablet Styles for Client Pages */
+@media (min-width: 768px) and (max-width: 1024px) {
+    #clientTransactionsPage .client-toolbar-actions {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    #clientTransactionsPage .client-toolbar-actions .client-btn {
+        flex: 1 1 calc(50% - 6px);
+        min-width: 160px;
+        width: auto;
+    }
+
+    #clientDetailsPage .client-details-actions {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    #clientDetailsPage .client-details-actions .client-btn {
+        flex: 1 1 calc(33.333% - 8px);
+        min-width: 140px;
+        width: auto;
+    }
+
+    #clientDetailsPage .client-info-card > .client-action-buttons .client-btn {
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 140px;
+    }
+
     .client-modal-content {
         width: 85%;
         margin: 10% auto;
     }
-    
-    /* 2 columns on tablet */
+
     .client-form-row-3 {
         grid-template-columns: 1fr 1fr;
     }
-    
-    /* Transaction table hide some columns */
-    .transactions-table th:nth-child(4),
-    .transactions-table td:nth-child(4) {
-        display: none; /* Hide BILL. NO */
+
+    #clientDetailsPage .transactions-table th:nth-child(4),
+    #clientDetailsPage .transactions-table td:nth-child(4) {
+        display: none;
     }
 }
+
+/* Legacy mobile block removed — rules merged above */
 
 /* ============================================
    User Management Pages - Responsive Styles
@@ -8835,4 +9335,939 @@ button.invoice-history-pdf-btn:disabled {
 .supplier-tree-pol-combo {
     flex: 1;
     min-width: 140px;
+}
+
+/* ============================================
+   Booking flow — compact layout (≤860px)
+   ============================================ */
+
+@media (max-width: 1024px) {
+    .booking-columns {
+        flex-direction: column;
+        gap: 20px;
+        min-height: auto;
+    }
+
+    .booking-details-section {
+        padding-right: 0;
+        border-right: none;
+    }
+
+    .booking-list-section {
+        padding-left: 0;
+    }
+}
+
+@media (max-width: 860px) {
+    .booking-list-section .booking-chassis-table,
+    .booking-list-section table.booking-chassis-table {
+        display: block;
+    }
+
+    .booking-list-section .booking-chassis-table thead {
+        display: none;
+    }
+
+    .booking-list-section .booking-chassis-table tbody,
+    .booking-list-section .booking-chassis-table tr {
+        display: block;
+    }
+
+    .booking-list-section .booking-chassis-table tr {
+        margin-bottom: 12px;
+        padding: 12px;
+        background: #f9fafb;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+    }
+
+    .booking-list-section .booking-chassis-table td {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 0;
+        border: none;
+        font-size: 14px;
+    }
+
+    .booking-list-section .booking-chassis-table td::before {
+        font-weight: 600;
+        color: #374151;
+        margin-right: 8px;
+        flex-shrink: 0;
+    }
+
+    .booking-list-section .booking-chassis-table td:nth-child(1)::before { content: "Select"; }
+    .booking-list-section .booking-chassis-table td:nth-child(2)::before { content: "No."; }
+    .booking-list-section .booking-chassis-table td:nth-child(3)::before { content: "Chassis"; }
+    .booking-list-section .booking-chassis-table td:nth-child(4)::before { content: "Name"; }
+    .booking-list-section .booking-chassis-table td:nth-child(5)::before { content: "Year"; }
+
+    .booking-list-section .booking-chassis-table tbody td:nth-child(5) {
+        display: none !important;
+    }
+
+    .booking-list-section .booking-chassis-table .purchase-list-cell-chip {
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    /* C&F / FOB cars table → cards */
+    .cnf-cars-table-wrapper {
+        overflow-x: visible;
+        border: none;
+        box-shadow: none;
+    }
+
+    .cnf-cars-table {
+        display: block;
+    }
+
+    .cnf-cars-table thead {
+        display: none;
+    }
+
+    .cnf-cars-table tbody {
+        display: block;
+    }
+
+    .cnf-cars-table tr.cnf-table-row {
+        display: block;
+        margin-bottom: 12px;
+        padding: 12px 14px;
+        background: #f8fafc;
+        border: 1px solid #e5e7eb;
+        border-radius: 10px;
+        box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+    }
+
+    .cnf-cars-table tr.cnf-table-row td {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        width: 100% !important;
+        border: none;
+        padding: 8px 0;
+        text-align: left !important;
+    }
+
+    .cnf-cars-table tr.cnf-table-row td::before {
+        font-weight: 600;
+        font-size: 12px;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        flex-shrink: 0;
+    }
+
+    .cnf-cars-table tr.cnf-table-row td:nth-child(1)::before { content: "Expand"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(2)::before { content: "Saved"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(3)::before { content: "Chassis"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(4)::before { content: "Car Name"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(5)::before { content: "Car Price"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(6)::before { content: "Total"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(7)::before { content: "Save"; }
+
+    .cnf-cars-table tr.cnf-detail-row {
+        display: none;
+        margin: -4px 0 16px;
+        border: 1px solid #bfdbfe;
+        border-radius: 10px;
+        background: linear-gradient(to right, #f0f7ff 0%, #ffffff 100%);
+    }
+
+    .cnf-cars-table tr.cnf-detail-row.cnf-detail-row--open {
+        display: block;
+    }
+
+    .cnf-cars-table tr.cnf-detail-row td {
+        display: block;
+        width: 100% !important;
+        padding: 16px;
+        border: none;
+    }
+
+    .cnf-back-btn {
+        width: 100%;
+        justify-content: center;
+        text-align: center;
+    }
+
+    /* Freight / shipping charge calculation */
+    .freight-price-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    .freight-price-row input {
+        width: 100% !important;
+        max-width: 100%;
+    }
+
+    .freight-price-row .operator {
+        display: none;
+    }
+
+    .freight-price-row label {
+        width: 100%;
+        white-space: normal;
+    }
+
+    .freight-container-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .freight-container-row input,
+    .freight-container-row select {
+        width: 100%;
+    }
+
+    .freight-confirm-btn {
+        width: 100%;
+    }
+}
+
+/* C&F detail row visibility (table vs card) */
+.cnf-detail-row {
+    display: none;
+}
+
+@media (min-width: 861px) {
+    .cnf-detail-row.cnf-detail-row--open {
+        display: table-row;
+    }
+}
+
+/* ============================================
+   Rixo Price Mapping — vertical tree (≤1024px)
+   Desktop keeps horizontal L→R flow; tablet/mobile T→B.
+   ============================================ */
+@media (max-width: 1024px) {
+    #rixoMappingPage.rixo-tree-page {
+        padding: 12px 12px 24px;
+    }
+
+    #rixoMappingPage .rixo-tree-topbar {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: center;
+        margin-bottom: 12px;
+    }
+
+    #rixoMappingPage .rixo-tree-title {
+        font-size: 20px;
+    }
+
+    #rixoMappingPage .rixo-tree-root--mapping {
+        overflow-x: visible;
+        overflow-y: auto;
+        max-height: calc(100vh - 160px);
+        -webkit-overflow-scrolling: touch;
+        padding: 14px 12px 20px;
+    }
+
+    #rixoMappingPage .rixo-tree {
+        min-width: 0;
+        width: 100%;
+        gap: 14px;
+    }
+
+    #rixoMappingPage .rixo-tree-headers {
+        display: none;
+    }
+
+    #rixoMappingPage .rixo-tree-note {
+        width: 100%;
+        max-width: none;
+        box-sizing: border-box;
+    }
+
+    /* Stack card above children (top → bottom) */
+    #rixoMappingPage .rixo-tree-node {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+        gap: 0;
+    }
+
+    #rixoMappingPage .rixo-tree-card-wrapper,
+    #rixoMappingPage .rixo-tree-card-wrapper--company,
+    #rixoMappingPage .rixo-tree-card-wrapper--auction,
+    #rixoMappingPage .rixo-tree-card-wrapper--stock {
+        width: 100%;
+        max-width: 100%;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        align-items: center;
+        gap: 4px 8px;
+    }
+
+    #rixoMappingPage .rixo-tree-card-wrapper[data-card-level]::before {
+        grid-column: 1 / -1;
+    }
+
+    #rixoMappingPage .rixo-tree-card-wrapper > .rixo-tree-card {
+        grid-column: 1;
+        grid-row: 2;
+        position: relative;
+    }
+
+    #rixoMappingPage .rixo-tree-card-wrapper > .rixo-tree-card-menu-wrap {
+        grid-column: 2;
+        grid-row: 2;
+        align-self: center;
+    }
+
+    #rixoMappingPage .rixo-tree-card-wrapper[data-card-level="company"]::before {
+        content: "Rixo Company";
+    }
+
+    #rixoMappingPage .rixo-tree-card-wrapper[data-card-level="auction"]::before {
+        content: "Auction House";
+    }
+
+    #rixoMappingPage .rixo-tree-card-wrapper[data-card-level="stock"]::before {
+        content: "Stock Location";
+    }
+
+    #rixoMappingPage .rixo-tree-card-wrapper[data-card-level]::before,
+    #rixoMappingPage .rixo-tree-inline-add-outer[data-level]::before {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        margin-bottom: 4px;
+        padding-left: 2px;
+    }
+
+    #rixoMappingPage .rixo-tree-inline-add-outer[data-level="company"]::before {
+        content: "Rixo Company";
+    }
+
+    #rixoMappingPage .rixo-tree-inline-add-outer[data-level="auction"]::before {
+        content: "Auction House";
+    }
+
+    #rixoMappingPage .rixo-tree-inline-add-outer[data-level="stock"]::before {
+        content: "Stock Location";
+    }
+
+    #rixoMappingPage .rixo-tree-inline-add-outer--company,
+    #rixoMappingPage .rixo-tree-inline-add-outer--auction,
+    #rixoMappingPage .rixo-tree-inline-add-outer--stock {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    #rixoMappingPage .rixo-tree-card--company,
+    #rixoMappingPage .rixo-tree-card--auction,
+    #rixoMappingPage .rixo-tree-card--stock {
+        width: 100%;
+        max-width: 100%;
+        min-height: 48px;
+        justify-content: flex-start;
+        gap: 10px;
+    }
+
+    /* Selected / open branch — light blue chip */
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--selected {
+        background: #eff6ff;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.28);
+    }
+
+    #rixoMappingPage .rixo-tree-leaf-row.rixo-tree-leaf-row--selected {
+        background: #eff6ff;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.28);
+    }
+
+    #rixoMappingPage .rixo-tree-card--inline-editing {
+        width: 100%;
+        max-width: 100%;
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #rixoMappingPage .rixo-tree-card--inline-editing[data-level="company"]::before {
+        content: "Rixo Company";
+    }
+
+    #rixoMappingPage .rixo-tree-card--inline-editing[data-level="auction"]::before {
+        content: "Auction House";
+    }
+
+    #rixoMappingPage .rixo-tree-card--inline-editing[data-level="stock"]::before {
+        content: "Stock Location";
+    }
+
+    #rixoMappingPage .rixo-tree-card--inline-editing[data-level]::before {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        margin-bottom: 6px;
+    }
+
+    /* Branch column: vertical spine + downward flow */
+    #rixoMappingPage .rixo-tree-children {
+        margin-left: 14px;
+        margin-top: 10px;
+        padding-left: 18px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        border-left: 2px solid #94a3b8;
+        width: calc(100% - 14px);
+        box-sizing: border-box;
+        position: relative;
+    }
+
+    #rixoMappingPage .rixo-tree-children::before {
+        left: -2px;
+        top: -10px;
+        width: 2px;
+        height: 10px;
+        bottom: auto;
+        background: #94a3b8;
+    }
+
+    /* Connector tick from spine to each child row */
+    #rixoMappingPage .rixo-tree-children > .rixo-tree-node::before {
+        left: -20px;
+        top: 24px;
+        width: 18px;
+        height: 2px;
+        background: linear-gradient(90deg, #94a3b8 0%, #cbd5e1 100%);
+    }
+
+    #rixoMappingPage .rixo-tree-children > .rixo-tree-col-footer::before {
+        left: -20px;
+        top: 22px;
+        width: 18px;
+        height: 2px;
+    }
+
+    /* No extra arrow under chips — expand state shown by left chevron only */
+    #rixoMappingPage .rixo-tree-node:has(> .rixo-tree-children) > .rixo-tree-card-wrapper .rixo-tree-card[aria-expanded="true"]::after,
+    #rixoMappingPage .rixo-tree-node:has(> .rixo-tree-children) > .rixo-tree-card--inline-editing[aria-expanded="true"]::after {
+        content: none;
+        display: none;
+    }
+
+    /* Blue expand chevron on the left only (company / auction / stock cards) */
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--company .rixo-tree-exp-indicator,
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--auction .rixo-tree-exp-indicator,
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--stock .rixo-tree-exp-indicator {
+        order: 0;
+        width: auto;
+        height: auto;
+        min-width: 28px;
+        min-height: 28px;
+        margin-left: 0;
+        margin-right: 4px;
+        border-radius: 6px;
+        background: transparent;
+        box-shadow: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1;
+        overflow: visible;
+        color: #2563eb;
+        flex-shrink: 0;
+    }
+
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--company .rixo-tree-exp-indicator::before,
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--auction .rixo-tree-exp-indicator::before,
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--stock .rixo-tree-exp-indicator::before {
+        content: "▼";
+    }
+
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--company[aria-expanded="false"] .rixo-tree-exp-indicator::before,
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--auction[aria-expanded="false"] .rixo-tree-exp-indicator::before,
+    #rixoMappingPage .rixo-tree-card.rixo-tree-card--stock[aria-expanded="false"] .rixo-tree-exp-indicator::before {
+        content: "▶";
+    }
+
+    #rixoMappingPage .rixo-tree-card--selected .rixo-tree-exp-indicator {
+        background: rgba(37, 99, 235, 0.12);
+        color: #1d4ed8;
+        box-shadow: none;
+    }
+
+    #rixoMappingPage .rixo-tree-label {
+        order: 0;
+        flex: 1;
+    }
+
+    /* Leaf block */
+    #rixoMappingPage .rixo-tree-leaf-wrap {
+        min-width: 0;
+        max-width: 100%;
+        width: 100%;
+    }
+
+    #rixoMappingPage .rixo-tree-leaf-wrap::before {
+        content: "Supported Vehicle Type · Rixo Price";
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        margin-bottom: 8px;
+        padding-left: 2px;
+    }
+
+    #rixoMappingPage .rixo-tree-leaf-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 12px;
+    }
+
+    #rixoMappingPage .rixo-tree-leaf-view {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    #rixoMappingPage .rixo-tree-leaf-type {
+        font-size: 13px;
+    }
+
+    #rixoMappingPage .rixo-tree-leaf-price-cell {
+        max-width: none;
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    #rixoMappingPage .rixo-tree-leaf-price {
+        text-align: left;
+    }
+
+    #rixoMappingPage .rixo-tree-leaf-edit--inline-add-stack {
+        gap: 12px;
+    }
+
+    #rixoMappingPage .rixo-tree-leaf-inline-price {
+        width: 100%;
+        max-width: none;
+    }
+
+    #rixoMappingPage .rixo-tree-add-wrap,
+    #rixoMappingPage .rixo-tree-col-footer {
+        width: 100%;
+        margin-top: 12px;
+        padding-left: 0;
+    }
+
+    #rixoMappingPage .rixo-tree-add-btn {
+        width: 100%;
+        justify-content: center;
+        min-height: 44px;
+        font-size: 13px;
+    }
+
+    #rixoMappingPage .rixo-tree-card-inline-actions {
+        display: flex;
+        gap: 8px;
+        width: 100%;
+        margin-top: 8px;
+    }
+
+    #rixoMappingPage .rixo-tree-card-inline-actions button {
+        flex: 1;
+        min-height: 40px;
+    }
+}
+
+@media (max-width: 767px) {
+    #rixoMappingPage .rixo-tree-root--mapping {
+        max-height: calc(100vh - 140px);
+        padding: 12px 10px 16px;
+    }
+
+    #rixoMappingPage .rixo-tree-title {
+        font-size: 18px;
+    }
+
+    #rixoMappingPage .rixo-tree-children {
+        margin-left: 10px;
+        padding-left: 14px;
+    }
+}
+
+/* ============================================
+   Supplier Map — vertical tree (≤1024px)
+   Mirrors Rixo Price Mapping mobile/tablet UX.
+   ============================================ */
+.supplier-map-page {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+    background: #f8fafc;
+}
+
+.supplier-map-topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.supplier-map-title {
+    margin: 0;
+    color: #111827;
+    font-size: 28px;
+    font-weight: 700;
+}
+
+.supplier-map-search-panel {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.supplier-map-search-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 720px;
+}
+
+.supplier-map-tree-root {
+    margin-top: 12px;
+}
+
+@media (max-width: 1024px) {
+    .supplier-map-page {
+        padding: 12px 12px 24px;
+    }
+
+    .supplier-map-topbar {
+        flex-direction: column;
+        align-items: stretch;
+        text-align: center;
+        margin-bottom: 12px;
+    }
+
+    .supplier-map-title {
+        font-size: 20px;
+    }
+
+    .supplier-map-search-panel {
+        padding: 14px;
+        margin-bottom: 14px;
+    }
+
+    .supplier-map-search-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        max-width: none;
+    }
+
+    .supplier-map-search-toolbar .supplier-map-search-input-wrap {
+        width: 100%;
+    }
+
+    .supplier-map-search-toolbar .supplier-map-search-filter-wrap {
+        width: 100%;
+        display: flex;
+        justify-content: center;
+    }
+
+    #supplierList #supplierMapSearchFilterBtn {
+        width: 100%;
+        max-width: 100%;
+        border-radius: 10px !important;
+        height: 44px !important;
+    }
+
+    #supplierList .supplier-map-tree-root {
+        overflow-x: visible;
+        overflow-y: auto;
+        max-height: calc(100vh - 220px);
+        -webkit-overflow-scrolling: touch;
+        padding: 14px 12px 20px;
+    }
+
+    #supplierList .supplier-map-tree {
+        min-width: 0;
+        width: 100%;
+        gap: 14px;
+    }
+
+    #supplierList .rixo-tree-headers {
+        display: none;
+    }
+
+    #supplierList .rixo-tree-note {
+        width: 100%;
+        max-width: none;
+        box-sizing: border-box;
+    }
+
+    #supplierList .rixo-tree-node {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+        gap: 0;
+    }
+
+    #supplierList .rixo-tree-card-wrapper,
+    #supplierList .rixo-tree-card-wrapper--company,
+    #supplierList .rixo-tree-card-wrapper--auction {
+        width: 100%;
+        max-width: 100%;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        align-items: center;
+        gap: 4px 8px;
+    }
+
+    #supplierList .rixo-tree-card-wrapper[data-smap-card-level]::before {
+        grid-column: 1 / -1;
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        margin-bottom: 4px;
+        padding-left: 2px;
+    }
+
+    #supplierList .rixo-tree-card-wrapper[data-smap-card-level="supplier"]::before {
+        content: "Supplier";
+    }
+
+    #supplierList .rixo-tree-card-wrapper[data-smap-card-level="stock"]::before {
+        content: "Stock location";
+    }
+
+    #supplierList .rixo-tree-card-wrapper > .rixo-tree-card,
+    #supplierList .rixo-tree-card-wrapper > .rixo-tree-card--inline-editing {
+        grid-column: 1;
+        grid-row: 2;
+        position: relative;
+        width: 100%;
+        max-width: 100%;
+        min-height: 48px;
+        justify-content: flex-start;
+        gap: 10px;
+    }
+
+    #supplierList .rixo-tree-card-wrapper > .rixo-tree-card-menu-wrap {
+        grid-column: 2;
+        grid-row: 2;
+        align-self: center;
+    }
+
+    #supplierList .rixo-tree-card.rixo-tree-card--selected {
+        background: #eff6ff;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.28);
+    }
+
+    #supplierList .rixo-tree-leaf-row.rixo-tree-leaf-row--selected {
+        background: #eff6ff;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.28);
+    }
+
+    #supplierList .rixo-tree-children {
+        margin-left: 14px;
+        margin-top: 10px;
+        padding-left: 18px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        border-left: 2px solid #94a3b8;
+        width: calc(100% - 14px);
+        box-sizing: border-box;
+        position: relative;
+    }
+
+    #supplierList .rixo-tree-children::before {
+        left: -2px;
+        top: -10px;
+        width: 2px;
+        height: 10px;
+        bottom: auto;
+        background: #94a3b8;
+    }
+
+    #supplierList .rixo-tree-children > .rixo-tree-node::before {
+        left: -20px;
+        top: 24px;
+        width: 18px;
+        height: 2px;
+        background: linear-gradient(90deg, #94a3b8 0%, #cbd5e1 100%);
+    }
+
+    #supplierList .rixo-tree-children > .rixo-tree-col-footer::before,
+    #supplierList .rixo-tree-children > .rixo-tree-add-wrap::before {
+        display: none;
+    }
+
+    #supplierList .rixo-tree-node:has(> .rixo-tree-children) .rixo-tree-card::after {
+        content: none;
+        display: none;
+    }
+
+    /* Supplier + stock branch cards use company/auction level classes */
+    #supplierList .rixo-tree-card.rixo-tree-card--company .rixo-tree-exp-indicator,
+    #supplierList .rixo-tree-card.rixo-tree-card--auction .rixo-tree-exp-indicator {
+        order: 0;
+        width: auto;
+        height: auto;
+        min-width: 28px;
+        min-height: 28px;
+        margin-right: 4px;
+        border-radius: 6px;
+        background: transparent;
+        box-shadow: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1;
+        overflow: visible;
+        color: #2563eb;
+        flex-shrink: 0;
+    }
+
+    #supplierList .rixo-tree-card.rixo-tree-card--company .rixo-tree-exp-indicator::before,
+    #supplierList .rixo-tree-card.rixo-tree-card--auction .rixo-tree-exp-indicator::before {
+        content: "▼";
+    }
+
+    #supplierList .rixo-tree-card.rixo-tree-card--company[aria-expanded="false"] .rixo-tree-exp-indicator::before,
+    #supplierList .rixo-tree-card.rixo-tree-card--auction[aria-expanded="false"] .rixo-tree-exp-indicator::before {
+        content: "▶";
+    }
+
+    #supplierList .rixo-tree-card--selected .rixo-tree-exp-indicator {
+        background: rgba(37, 99, 235, 0.12);
+        color: #1d4ed8;
+        box-shadow: none;
+    }
+
+    #supplierList .rixo-tree-label {
+        flex: 1;
+    }
+
+    /* POL / Venue / Rixo branch panel — stack vertically (keeps .rixo-tree-children spine) */
+    #supplierList .supplier-tree-branch-columns {
+        width: calc(100% - 14px);
+    }
+
+    #supplierList .supplier-tree-branch-grid {
+        grid-template-columns: 1fr;
+        gap: 14px;
+        width: 100%;
+    }
+
+    #supplierList .supplier-tree-branch-col--pol,
+    #supplierList .supplier-tree-branch-col--venue,
+    #supplierList .supplier-tree-branch-col--rixo {
+        width: 100%;
+        min-width: 0;
+    }
+
+    #supplierList .supplier-tree-branch-col--rixo::before {
+        content: "Rixo company";
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        margin-bottom: 8px;
+        padding-left: 2px;
+    }
+
+    #supplierList .supplier-tree-pol-strip,
+    #supplierList .supplier-tree-venue-sub {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    #supplierList .rixo-tree-leaf-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        padding: 12px;
+    }
+
+    #supplierList .rixo-tree-leaf-view {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+    }
+
+    #supplierList .rixo-tree-leaf-price-cell {
+        max-width: none;
+        width: 100%;
+        justify-content: flex-end;
+    }
+
+    #supplierList .rixo-tree-inline-add-outer {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+
+    #supplierList .rixo-tree-add-wrap {
+        width: 100%;
+        margin-top: 12px;
+        padding-left: 0;
+    }
+
+    #supplierList .rixo-tree-add-btn {
+        width: 100%;
+        justify-content: center;
+        min-height: 44px;
+        font-size: 13px;
+    }
+
+    #supplierList .supplier-tree-branch-update-wrap {
+        display: flex;
+        justify-content: flex-end;
+        width: 100%;
+    }
+}
+
+@media (max-width: 767px) {
+    #supplierList .supplier-map-tree-root {
+        max-height: calc(100vh - 200px);
+        padding: 12px 10px 16px;
+    }
+
+    #supplierList .supplier-map-title {
+        font-size: 18px;
+    }
+
+    #supplierList .rixo-tree-children {
+        margin-left: 10px;
+        padding-left: 14px;
+    }
 }

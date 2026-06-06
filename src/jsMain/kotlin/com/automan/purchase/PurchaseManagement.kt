@@ -77,6 +77,9 @@ private var purchaseAdvancedFilters: MutableList<PurchaseAdvancedFilter> = mutab
 private var shippingHistoryCachedRows: Array<dynamic> = emptyArray()
 private var shippingHistorySortField: String = "bookingId"
 private var shippingHistorySortOrder: String = "desc"
+private var shippingHistoryResizeDebounceHandle: Int? = null
+
+private const val SHIPPING_HISTORY_COMPACT_MAX_WIDTH_PX = 860
 
 private val purchaseColumnCategories: Map<String, List<String>> = linkedMapOf(
     "📅 Date Fields" to listOf("date", "shipmentDate", "paymentDate", "carModelYear"),
@@ -851,24 +854,63 @@ fun showShippingHistoryPage() {
     shippingHistorySortOrder = "desc"
 
     content.innerHTML = """
-        <div id="shippingHistoryPage" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; background: #fafbfc;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;">
-                <h2 style="margin: 0;">Shipping History</h2>
-                <div style="display: flex; flex-direction: column; align-items: stretch; gap: 10px; flex: 1; min-width: 0; max-width: 640px;">
-                    <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
-                        <div style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: all .3s ease;">
-                            <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; color: #9ca3af; display: flex;" aria-hidden="true">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                            </span>
-                            <input type="text" id="shippingHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search country, consignee, chassis, client…" aria-label="Search shipping history" style="width: 100%; box-sizing: border-box; padding: 12px 40px 12px 44px; border: none; font-size: 14px; background: transparent; border-radius: 999px; outline: none; transition: all .2s ease;" />
-                            <button type="button" id="shippingHistorySearchClearBtn" title="Clear search" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: #9ca3af; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 8px;">×</button>
-                        </div>
-                    </div>
+        <style>
+            #shippingHistoryPage{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:20px;}
+            .shipping-history-toolbar{
+                display:grid;
+                grid-template-columns:1fr;
+                grid-template-areas:"title" "search";
+                gap:12px;
+                margin-bottom:16px;
+                align-items:center;
+            }
+            .shipping-history-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;grid-area:title;text-align:center;}
+            .shipping-search{grid-area:search;width:100%;position:relative;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
+            .shipping-search input{width:100%;box-sizing:border-box;padding:11px 36px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
+            .shipping-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;}
+            .shipping-search-clear:hover{background:#f3f4f6;color:#111827;}
+            .shipping-history-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
+            table.purchase-list-table thead th{position:sticky;top:0;z-index:1;}
+            .shipping-history-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+            .shipping-history-empty strong{color:#0f172a;}
+            .shipping-cards{display:flex;flex-direction:column;gap:10px;}
+            .shipping-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
+            .shipping-card-top{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:10px;}
+            .shipping-card-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+            .shipping-card-grid{display:grid;gap:8px;}
+            .shipping-kv{display:flex;gap:10px;align-items:flex-start;}
+            .shipping-k{min-width:120px;font-size:12px;color:#64748b;line-height:1.4;}
+            .shipping-v{flex:1;min-width:0;}
+            @media (max-width: 1024px){
+                #shippingHistoryPage{padding:14px;border-radius:14px;}
+                .shipping-history-toolbar{gap:14px;margin-bottom:14px;}
+                .shipping-history-title{font-size:17px;}
+                .shipping-search input{font-size:13px;padding:10px 34px 10px 38px;}
+            }
+            @media (min-width: 1025px){
+                .shipping-history-toolbar{
+                    grid-template-columns:auto 1fr minmax(200px,25%);
+                    grid-template-areas:"title . search";
+                    column-gap:12px;
+                    row-gap:0;
+                }
+                .shipping-history-title{text-align:left;justify-self:start;}
+            }
+        </style>
+        <div id="shippingHistoryPage">
+            <div class="shipping-history-toolbar">
+                <h2 class="shipping-history-title">Shipping History</h2>
+                <div class="shipping-search">
+                    <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af;display:flex;" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </span>
+                    <input type="text" id="shippingHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search country, consignee, chassis, client…" aria-label="Search shipping history" />
+                    <button type="button" id="shippingHistorySearchClearBtn" class="shipping-search-clear" title="Clear search" aria-label="Clear search">×</button>
                 </div>
             </div>
             <div id="shippingHistoryTableWrap">
                 <div id="shippingHistoryTable" style="margin-top: 8px;">
-                    <div style="text-align: center; color: #666; padding: 40px;">Loading shipping history…</div>
+                    <div class="shipping-history-empty"><strong>Loading</strong><div>Loading shipping history…</div></div>
                 </div>
             </div>
         </div>
@@ -885,6 +927,8 @@ fun showShippingHistoryPage() {
         searchInput?.value = ""
         renderShippingHistoryTableFromCache()
     })
+
+    setupShippingHistoryResizeListener()
 
     val wrap = document.getElementById("shippingHistoryTableWrap")
     if (wrap != null && !wrap.hasAttribute("data-shipping-sort-delegation")) {
@@ -1311,9 +1355,105 @@ private fun autoCreateInvoicesFromShippingHistory(gRows: List<dynamic>) {
     }
 }
 
+private fun shippingHistoryIsCompactLayout(): Boolean {
+    val w = window.innerWidth
+    return w > 0 && w <= SHIPPING_HISTORY_COMPACT_MAX_WIDTH_PX
+}
+
+private fun setupShippingHistoryResizeListener() {
+    val page = document.getElementById("shippingHistoryPage") ?: return
+    if (page.hasAttribute("data-shipping-history-resize")) return
+    page.setAttribute("data-shipping-history-resize", "true")
+    window.addEventListener("resize", { _: Event ->
+        val prev = shippingHistoryResizeDebounceHandle
+        if (prev != null) window.clearTimeout(prev)
+        shippingHistoryResizeDebounceHandle = window.setTimeout({
+            if (document.getElementById("shippingHistoryPage") == null) return@setTimeout
+            if (shippingHistoryCachedRows.isNotEmpty()) renderShippingHistoryTableFromCache()
+        }, 120)
+    })
+}
+
+private fun shippingHistoryInvoiceStatusCircleHtml(gRows: List<dynamic>): String {
+    val invoicedCount = gRows.count { shippingHistoryRowInvoiceCreated(it) }
+    val totalRows = gRows.size
+    return when {
+        totalRows == 0 ->
+            """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#f3f4f6;border:2px solid #d1d5db;" title="No rows"></span>"""
+        invoicedCount == totalRows ->
+            """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#d1fae5;border:2px solid #6ee7b7;" title="All chassis invoiced"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 13l4 4L19 7" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>"""
+        invoicedCount > 0 ->
+            """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#fef3c7;border:2px solid #fcd34d;" title="Partially invoiced ($invoicedCount/$totalRows)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 13l4 4L19 7" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>"""
+        else ->
+            """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#f9fafb;border:2px solid #e5e7eb;" title="Not invoiced"></span>"""
+    }
+}
+
+private fun shippingHistoryGroupIdsCsv(gRows: List<dynamic>): String =
+    gRows.mapNotNull { shippingHistoryCell(it, "id").trim().takeIf { id -> id.isNotEmpty() } }
+        .sorted()
+        .joinToString(",")
+
+private fun shippingHistoryDisplayCellHtml(gRows: List<dynamic>, key: String): String = when (key) {
+    "country" -> formatPurchaseListNeutralChipHtml(shippingHistoryRepresentativeCountry(gRows))
+    "chassis", "clientName", "amount" ->
+        formatCollapsibleChipsHtml(shippingHistoryUniqueSortedValues(gRows, key))
+    else -> formatDistinctValueChipsHtml(shippingHistoryUniqueSortedValues(gRows, key))
+}
+
+private fun appendShippingHistoryGroupTableRow(html: StringBuilder, gRows: List<dynamic>) {
+    html.append("<tr>")
+    val groupIds = shippingHistoryGroupIdsCsv(gRows)
+    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryEditButtonHtml(groupIds)}</td>""")
+    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryPdfButtonHtml(groupIds)}</td>""")
+    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceButtonHtml(groupIds)}</td>""")
+    html.append(
+        """<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceStatusCircleHtml(gRows)}</td>"""
+    )
+    val bookingCell = escapeHtml(shippingHistoryRepresentativeBookingDisplay(gRows))
+    html.append("""<td style="padding: 12px; vertical-align: top; font-weight: 600;">$bookingCell</td>""")
+    for (key in shippingHistoryDisplayColumnKeys()) {
+        html.append("""<td style="padding: 12px; vertical-align: top;">${shippingHistoryDisplayCellHtml(gRows, key)}</td>""")
+    }
+    html.append("</tr>")
+}
+
+private fun appendShippingHistoryGroupCard(html: StringBuilder, gRows: List<dynamic>) {
+    val groupIds = shippingHistoryGroupIdsCsv(gRows)
+    html.append("""<div class="shipping-card">""")
+    html.append(
+        """
+        <div class="shipping-card-top">
+            <div class="shipping-card-actions">
+                ${shippingHistoryEditButtonHtml(groupIds)}
+                ${shippingHistoryPdfButtonHtml(groupIds)}
+                ${shippingHistoryInvoiceButtonHtml(groupIds)}
+            </div>
+        </div>
+        """
+    )
+    html.append("""<div class="shipping-card-grid">""")
+    html.append(
+        """<div class="shipping-kv"><div class="shipping-k">Invoice created</div><div class="shipping-v">${shippingHistoryInvoiceStatusCircleHtml(gRows)}</div></div>"""
+    )
+    val booking = shippingHistoryRepresentativeBookingDisplay(gRows)
+    if (booking.isNotEmpty() && booking != "—") {
+        html.append(
+            """<div class="shipping-kv"><div class="shipping-k">Booking ID</div><div class="shipping-v">${formatPurchaseListNeutralChipHtml(booking)}</div></div>"""
+        )
+    }
+    for (key in shippingHistoryDisplayColumnKeys()) {
+        val cellHtml = shippingHistoryDisplayCellHtml(gRows, key)
+        if (cellHtml.isEmpty()) continue
+        val label = escapeHtml(shippingHistoryColumnLabel(key))
+        html.append("""<div class="shipping-kv"><div class="shipping-k">$label</div><div class="shipping-v">$cellHtml</div></div>""")
+    }
+    html.append("""</div></div>""")
+}
+
 private fun loadShippingHistory() {
     val tableHost = document.getElementById("shippingHistoryTable") ?: return
-    tableHost.innerHTML = """<div style="text-align: center; color: #666; padding: 40px;">Loading shipping history…</div>"""
+    tableHost.innerHTML = """<div class="shipping-history-empty"><strong>Loading</strong><div>Loading shipping history…</div></div>"""
 
     MainScope().launch {
         ApiClient.get<Array<dynamic>>("shipping-history").fold(
@@ -1323,8 +1463,13 @@ private fun loadShippingHistory() {
             },
             onError = { message, _ ->
                 ErrorHandler.showError("Failed to load shipping history: $message")
-                tableHost.innerHTML = """<div style="text-align: center; color: #c00; padding: 40px;">Could not load shipping history.</div>"""
-            }
+                tableHost.innerHTML = """
+                    <div class="shipping-history-empty" style="color:#b91c1c;">
+                        <strong>Could not load</strong>
+                        <div>Unable to load shipping history. Please reload and try again.</div>
+                    </div>
+                """
+            },
         )
     }
 }
@@ -1523,22 +1668,14 @@ private fun renderShippingHistoryTableFromCache() {
     val q = (document.getElementById("shippingHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
 
     if (shippingHistoryCachedRows.isEmpty()) {
-        tableHost.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                No shipping history records yet.
-            </div>
-        """
+        tableHost.innerHTML = """<div class="shipping-history-empty"><strong>No history yet</strong><div>No shipping history records yet.</div></div>"""
         return
     }
 
     val rowList = shippingHistoryCachedRows.filter { shippingHistoryRowMatchesQuery(it, q) }.toList()
 
     if (rowList.isEmpty()) {
-        tableHost.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                No rows match your search.
-            </div>
-        """
+        tableHost.innerHTML = """<div class="shipping-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
         return
     }
 
@@ -1551,118 +1688,77 @@ private fun renderShippingHistoryTableFromCache() {
             compareShippingHistoryGroupRows(a, b, shippingHistorySortField, shippingHistorySortOrder == "asc")
         }
 
-    val colCountShip = 6 + shippingHistoryDisplayColumnKeys().size
+    val compact = shippingHistoryIsCompactLayout()
     val html = StringBuilder()
-    html.append(
-        """<div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);"><table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">""" +
-            htmlTableColgroupMultipleNarrowActionsEqualRest(colCountShip, 40, 56, 56, 64) +
-            """<thead><tr style="background-color: #f8f9fa;">""",
-    )
-    html.append("""<th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; width: 40px;"><input type="checkbox" id="shippingHistorySelectAll" style="cursor: pointer;"></th>""")
-    html.append("""<th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; font-weight: 600; color: #111827;">Edit</th>""")
-    html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; font-weight: 600; color: #111827;">PDF</th>""")
-    html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; font-weight: 600; color: #111827;">Invoice</th>""")
-    html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; font-weight: 600; color: #111827;" title="Invoice created status">Invoice Created</th>""")
-    run {
-        val key = "bookingId"
-        val label = escapeHtml(shippingHistoryColumnLabel(key))
-        val isActive = shippingHistorySortField == key
-        val sortOrder = if (isActive) shippingHistorySortOrder else "desc"
-        val tooltipRaw = when {
-            !isActive -> "Sort by ${shippingHistoryColumnLabel(key)}"
-            sortOrder == "asc" -> "Sorted ascending (click for descending)"
-            else -> "Sorted descending (click for ascending)"
-        }
-        val tooltip = escapeHtml(tooltipRaw)
-        html.append("""
-            <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
-                <button type="button" data-shipping-sort="$key" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
-                    <span>$label</span><span style="font-size: 14px;">↕</span>
-                </button>
-            </th>
-        """)
-    }
-    for (key in shippingHistoryDisplayColumnKeys()) {
-        val label = escapeHtml(shippingHistoryColumnLabel(key))
-        val isActive = shippingHistorySortField == key
-        val sortOrder = if (isActive) shippingHistorySortOrder else "desc"
-        val tooltipRaw = when {
-            !isActive -> "Sort by ${shippingHistoryColumnLabel(key)}"
-            sortOrder == "asc" -> "Sorted ascending (click for descending)"
-            else -> "Sorted descending (click for ascending)"
-        }
-        val tooltip = escapeHtml(tooltipRaw)
-        html.append("""
-            <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
-                <button type="button" data-shipping-sort="$key" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
-                    <span>$label</span><span style="font-size: 14px;">↕</span>
-                </button>
-            </th>
-        """)
-    }
-    html.append("</tr></thead><tbody>")
 
-    for (gRows in groups) {
-        html.append("<tr>")
-        val groupIds = gRows.mapNotNull { shippingHistoryCell(it, "id").trim().takeIf { id -> id.isNotEmpty() } }
-            .sorted()
-            .joinToString(",")
-        val safeIds = escapeHtml(groupIds)
-        html.append("""<td style="padding: 12px; vertical-align: middle;"><input type="checkbox" class="shipping-history-row-cb" data-shipping-group-ids="$safeIds" style="cursor: pointer;"></td>""")
-        html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryEditButtonHtml(groupIds)}</td>""")
-        html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryPdfButtonHtml(groupIds)}</td>""")
-        html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceButtonHtml(groupIds)}</td>""")
-        // --- Invoice status circle (rendered BEFORE Booking ID to match header order) ---
-        val invoicedCount = gRows.count { shippingHistoryRowInvoiceCreated(it) }
-        val totalRows = gRows.size
-        val invCircle = when {
-            totalRows == 0 -> """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#f3f4f6;border:2px solid #d1d5db;" title="No rows"></span>"""
-            invoicedCount == totalRows -> """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#d1fae5;border:2px solid #6ee7b7;" title="All chassis invoiced"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 13l4 4L19 7" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>"""
-            invoicedCount > 0 -> """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#fef3c7;border:2px solid #fcd34d;" title="Partially invoiced ($invoicedCount/$totalRows)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 13l4 4L19 7" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>"""
-            else -> """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#f9fafb;border:2px solid #e5e7eb;" title="Not invoiced"></span>"""
-        }
-        html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">$invCircle</td>""")
-        // --- Booking ID (rendered AFTER Inv circle to match header order) ---
-        val bookingCell = escapeHtml(shippingHistoryRepresentativeBookingDisplay(gRows))
-        html.append("""<td style="padding: 12px; vertical-align: top; font-weight: 600;">$bookingCell</td>""")
-        for (key in shippingHistoryDisplayColumnKeys()) {
-            val cellHtml = when (key) {
-                "country" -> formatPurchaseListNeutralChipHtml(shippingHistoryRepresentativeCountry(gRows))
-                "chassis", "clientName", "amount" ->
-                    formatCollapsibleChipsHtml(shippingHistoryUniqueSortedValues(gRows, key))
-                else -> formatDistinctValueChipsHtml(shippingHistoryUniqueSortedValues(gRows, key))
+    if (!compact) {
+        val colCountShip = 5 + shippingHistoryDisplayColumnKeys().size
+        html.append(
+            """<div class="shipping-history-table-shell"><table class="purchase-list-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">""" +
+                htmlTableColgroupMultipleNarrowActionsEqualRest(colCountShip, 56, 56, 56, 64) +
+                """<thead><tr style="background-color:#f8f9fa;">""",
+        )
+        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;">Edit</th>""")
+        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;">PDF</th>""")
+        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;">Invoice</th>""")
+        html.append(
+            """<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;" title="Invoice created status">Invoice Created</th>"""
+        )
+        run {
+            val key = "bookingId"
+            val label = escapeHtml(shippingHistoryColumnLabel(key))
+            val isActive = shippingHistorySortField == key
+            val sortOrder = if (isActive) shippingHistorySortOrder else "desc"
+            val tooltipRaw = when {
+                !isActive -> "Sort by ${shippingHistoryColumnLabel(key)}"
+                sortOrder == "asc" -> "Sorted ascending (click for descending)"
+                else -> "Sorted descending (click for ascending)"
             }
-            html.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
+            val tooltip = escapeHtml(tooltipRaw)
+            html.append(
+                """
+                <th style="padding:12px;text-align:left;border-bottom:1px solid #dee2e6;">
+                    <button type="button" data-shipping-sort="$key" title="$tooltip" style="background:none;border:none;cursor:pointer;font-weight:700;color:#0f172a;padding:0;display:inline-flex;align-items:center;gap:6px;">
+                        <span>$label</span><span style="font-size:14px;color:#64748b;">↕</span>
+                    </button>
+                </th>
+                """
+            )
         }
-        html.append("</tr>")
+        for (key in shippingHistoryDisplayColumnKeys()) {
+            val label = escapeHtml(shippingHistoryColumnLabel(key))
+            val isActive = shippingHistorySortField == key
+            val sortOrder = if (isActive) shippingHistorySortOrder else "desc"
+            val tooltipRaw = when {
+                !isActive -> "Sort by ${shippingHistoryColumnLabel(key)}"
+                sortOrder == "asc" -> "Sorted ascending (click for descending)"
+                else -> "Sorted descending (click for ascending)"
+            }
+            val tooltip = escapeHtml(tooltipRaw)
+            html.append(
+                """
+                <th style="padding:12px;text-align:left;border-bottom:1px solid #dee2e6;">
+                    <button type="button" data-shipping-sort="$key" title="$tooltip" style="background:none;border:none;cursor:pointer;font-weight:700;color:#0f172a;padding:0;display:inline-flex;align-items:center;gap:6px;">
+                        <span>$label</span><span style="font-size:14px;color:#64748b;">↕</span>
+                    </button>
+                </th>
+                """
+            )
+        }
+        html.append("</tr></thead><tbody id='shippingHistoryTableBody'>")
+        for (gRows in groups) {
+            appendShippingHistoryGroupTableRow(html, gRows)
+        }
+        html.append("</tbody></table></div>")
+    } else {
+        html.append("""<div id="shippingHistoryTableBody" class="shipping-cards">""")
+        for (gRows in groups) {
+            appendShippingHistoryGroupCard(html, gRows)
+        }
+        html.append("</div>")
     }
-    html.append("</tbody></table></div>")
 
     tableHost.innerHTML = html.toString()
-
-    // Add checkbox event listeners
-    val selectAll = document.getElementById("shippingHistorySelectAll") as? HTMLInputElement
-    val rowCbs = document.querySelectorAll(".shipping-history-row-cb")
-    // Shipping History delete button is always visible; wire select-all checkbox only
-    selectAll?.addEventListener("change", { _: Event ->
-        val checked = selectAll.checked
-        for (i in 0 until rowCbs.length) {
-            val cb = rowCbs.item(i) as? HTMLInputElement
-            if (cb != null) cb.checked = checked
-        }
-    })
-
-    for (i in 0 until rowCbs.length) {
-        val cb = rowCbs.item(i) as? HTMLInputElement
-        cb?.addEventListener("change", { _: Event ->
-            var allChecked = true
-            for (j in 0 until rowCbs.length) {
-                val rcb = rowCbs.item(j) as? HTMLInputElement
-                if (rcb?.checked != true) { allChecked = false; break }
-            }
-            if (selectAll != null) selectAll.checked = allChecked
-        })
-    }
 }
 
 

@@ -202,29 +202,7 @@ fun showCarBookingPage() {
             <input type="checkbox" id="selectAllCars" class="booking-select-all-cb" aria-label="Select all"> SELECT
         </th>"""
     }
-    val bookingActionButtonsHtml = if (isRecreateMode) "" else """
-                        <div class="booking-action-buttons">
-                            <a href="#" id="cancelBtn" class="booking-cancel-link">CANCEL</a>
-                            <button id="bookingRequestedBtn" class="booking-action-btn">BOOKING REQUESTED</button>
-                            <button id="emailBtn" class="booking-action-btn">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-                                    <polyline points="22,6 12,13 2,6"></polyline>
-                                </svg>
-                                EMAIL
-                            </button>
-                            <button id="exportExcelBtn" class="booking-action-btn">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                                    <polyline points="14,2 14,8 20,8"></polyline>
-                                    <line x1="16" y1="13" x2="8" y2="13"></line>
-                                    <line x1="16" y1="17" x2="8" y2="17"></line>
-                                    <polyline points="10,9 9,9 8,9"></polyline>
-                                </svg>
-                                EXPORT EXCEL
-                            </button>
-                        </div>
-    """.trimIndent()
+    val bookingActionButtonsHtml = ""
     val listFooterHtml = if (isRecreateMode) {
         """
                         <div class="booking-list-footer" style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid #e5e7eb;">
@@ -328,18 +306,10 @@ fun showCarBookingPage() {
                             <input type="text" id="podPort" placeholder="PORT OF DISCHARGE" style="color: #000000;">
                         </div>
                         
-                        <!-- BOOKING NO + search by booking_id -->
+                        <!-- BOOKING NO -->
                         <div class="booking-form-group">
                             <label>BOOKING NO:</label>
-                            <div class="booking-no-search-row">
-                                <input type="text" id="bookingNo" placeholder="" class="booking-no-search-input">
-                                <button type="button" id="bookingNoSearchBtn" class="booking-no-search-btn" title="Search purchases by this booking number" aria-label="Search by booking number">
-                                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                        <circle cx="10.5" cy="10.5" r="6.5" stroke="white" stroke-width="2.2"/>
-                                        <path d="M15 15L21 21" stroke="white" stroke-width="2.2" stroke-linecap="round"/>
-                                    </svg>
-                                </button>
-                            </div>
+                            <input type="text" id="bookingNo" placeholder="">
                         </div>
                         
                         <!-- VESSEL -->
@@ -682,49 +652,6 @@ fun setupCarBookingPageListeners() {
         showPurchaseList()
     })
     
-    // Cancel button - navigate back to purchase list
-    document.getElementById("cancelBtn")?.addEventListener("click", { event: Event ->
-        event.preventDefault()
-        showPurchaseList()
-    })
-    
-    // Sets booking_requested = true for selected purchases
-    document.getElementById("bookingRequestedBtn")?.addEventListener("click", { _: Event ->
-        val selectedIds = getSelectedPurchaseIds()
-        if (selectedIds.isEmpty()) {
-            showMessage("Please select at least one row to mark as booking requested", "error")
-            return@addEventListener
-        }
-        val count = selectedIds.size
-        val confirmed = window.confirm("Mark $count selected purchase(s) as booking requested?")
-        if (!confirmed) return@addEventListener
-        val purchaseIdsJson = selectedIds.joinToString(",", "[", "]")
-        val requestBodyJson = "{\"purchaseIds\":$purchaseIdsJson}"
-        Logger.debug("Booking-requested request body: $requestBodyJson")
-        val headers = Headers()
-        headers.set("Content-Type", "application/json")
-        val requestInit = RequestInit(
-            method = "POST",
-            headers = headers,
-            body = requestBodyJson
-        )
-        window.fetch(apiUrl("purchases/booking-requested"), requestInit).then { response: dynamic ->
-            if (response.ok) {
-                response.json().then { data: dynamic ->
-                    val updatedCount = (js("data.updatedCount") as? Number)?.toInt() ?: count
-                    showMessage("Successfully marked $updatedCount purchase(s) as booking requested", "success")
-                    loadFilteredPurchasesIntoTable()
-                }
-            } else {
-                response.text().then { errorText: dynamic ->
-                    showMessage("Failed to mark booking requested: $errorText", "error")
-                }
-            }
-        }.catch { error: dynamic ->
-            showMessage("Error marking booking requested: ${error.toString()}", "error")
-        }
-    })
-    
     // Country dropdown change - trigger filtered chassis loading and booking mappings
     document.getElementById("consigneeCountry")?.addEventListener("change", { event: Event ->
         val selectedCountry = (event.target as HTMLSelectElement).value
@@ -825,16 +752,6 @@ fun setupCarBookingPageListeners() {
         attachPodChangeListener(podPortElForListener)
     }
 
-    document.getElementById("bookingNoSearchBtn")?.addEventListener("click", { _: Event ->
-        searchPurchasesByBookingIdForCarBookingPage()
-    })
-    document.getElementById("bookingNo")?.addEventListener("keydown", { e: Event ->
-        val ke = e.asDynamic()
-        if (ke.key == "Enter") {
-            ke.preventDefault()
-            searchPurchasesByBookingIdForCarBookingPage()
-        }
-    })
 }
 
 // Helper function to attach POD change listener (can be called multiple times if element is replaced)
@@ -1343,52 +1260,6 @@ fun clearBookingListTable() {
     val tbody = document.getElementById("carSelectionTableBody")
     tbody?.innerHTML = ""
     Logger.debug("Cleared booking list table")
-}
-
-/**
- * Fetch all purchases with this [booking_id] and replace the Car Booking LIST table.
- */
-fun searchPurchasesByBookingIdForCarBookingPage() {
-    val raw = (document.getElementById("bookingNo") as? HTMLInputElement)?.value?.trim() ?: ""
-    if (raw.isEmpty()) {
-        showMessage("Enter a booking number to search", "warning")
-        return
-    }
-    val bookingId = raw.toLongOrNull()
-    if (bookingId == null) {
-        showMessage("Booking number must be numeric", "error")
-        return
-    }
-    val scope = MainScope()
-    scope.launch {
-        val result = ApiClient.get<Array<dynamic>>("purchases/by-booking/${bookingId}")
-        result.fold(
-            onSuccess = { arr ->
-                if (arr.isEmpty()) {
-                    showMessage("No purchases found for booking ID $bookingId", "info")
-                    clearBookingListTable()
-                    return@fold
-                }
-                clearBookingListTable()
-                displayPurchasesAsCarsAPPEND(arr)
-                carBookingFormState.bookingNo = raw
-                val tableBody = document.getElementById("carSelectionTableBody")
-                if (tableBody != null) {
-                    val checkboxes = tableBody.querySelectorAll("input.car-checkbox, input[type='checkbox']")
-                    for (i in 0 until checkboxes.length) {
-                        (checkboxes.item(i) as? HTMLInputElement)?.checked = true
-                    }
-                }
-                val selectAll = document.getElementById("selectAllCars") as? HTMLInputElement
-                if (selectAll != null) selectAll.checked = true
-                showMessage("Loaded ${arr.size} vehicle(s) for booking $bookingId", "success")
-            },
-            onError = { msg, status ->
-                Logger.error("by-booking search failed: $msg ($status)")
-                showMessage("Search failed: $msg", "error")
-            }
-        )
-    }
 }
 
 fun hideChassisSuggestions() {

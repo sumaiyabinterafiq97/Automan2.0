@@ -65,7 +65,7 @@ Only **finance / admin** users add manual lines.
 |------|-------------|-----------------|
 | **PAYMENT_RECEIVED** | Bank TT, cash, wire received | Date, amount, reference (TT slip / bank ref), optional note |
 | **ADJUSTMENT** | Refund, write-off, bank fee, correction | Date, amount ±, reason (required) |
-| **OPENING_BALANCE** *(one-time migration)* | Import starting balance from old Excel | Date, amount, note “Opening balance as of …” |
+| **OPENING_BALANCE** *(one-time migration)* | Import starting balance from old Excel *(CSV import + manual entry)* | Date, amount, note “Opening balance as of …” |
 
 **Removed from daily use:** Vessel names as “Event” and manual “Shipment Price” rows (those come from **Invoice**).
 
@@ -118,7 +118,7 @@ If names differ only by spelling or spacing across old data, finance may still n
 | 2026-05-10 | Payment | TT-88421 | TT received | ¥1,000,000 | | +¥1,000,000 |
 | 2026-05-15 | Invoice | INV-2026-041 | Vessel XYZ · 3 cars | | ¥850,000 | +¥150,000 |
 
-**Actions:** Add Payment · Add Adjustment · Export statement *(Phase 4)*
+**Actions:** Add Payment · Add Adjustment · Opening balance · Edit/delete manual rows · Edit client · Export statement PDF (optional date range)
 
 ---
 
@@ -150,8 +150,8 @@ Please answer so development can proceed:
 | **1** | Clean event types, balance labels, remove vessel dropdown, unify balance math |
 | **2** | Invoice ledger sync/reversal, `purchases.client_id` linking, **auto-create client on invoice** when name is new |
 | **2b** *(revision)* | Replace “warn and skip ledger” with auto-create; remove *“not in Client Management”* constraint |
-| **3** | Credit limit alerts on list page |
-| **4** | Client statement PDF + unpaid invoice report |
+| **3** | Credit limit alerts + **block invoice** when over limit (configurable) |
+| **4** | Client statement PDF + unpaid invoice aging report *(implemented)* |
 
 *Technical detail: Phase 1 → `CLIENT_TRANSACTIONS_PHASE1_PLAN.md` · Phase 2 / 2b → `CLIENT_TRANSACTIONS_PHASE2_PLAN.md`.*
 

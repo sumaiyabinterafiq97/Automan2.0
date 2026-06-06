@@ -6,6 +6,7 @@ import com.automan.backend.service.EventService
 import com.automan.backend.service.ClientService
 import com.automan.backend.service.AsyncImportService
 import com.automan.backend.service.PerformanceMonitoringService
+import com.automan.backend.service.TransactionService
 import com.automan.backend.dto.TransactionRequest
 import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
@@ -22,6 +23,7 @@ import java.util.concurrent.CompletableFuture
 class EventController(
     private val eventService: EventService,
     private val clientService: ClientService,
+    private val transactionService: TransactionService,
     private val asyncImportService: AsyncImportService,
     private val performanceMonitoringService: PerformanceMonitoringService
 ) {
@@ -148,6 +150,41 @@ class EventController(
     fun getEventsByClientId(@PathVariable clientId: Long): ResponseEntity<List<Event>> {
         val events = eventService.getEventsByClientId(clientId)
         return ResponseEntity.ok(events)
+    }
+
+    @PutMapping("/{id}")
+    fun updateManualEvent(
+        @PathVariable id: Long,
+        @RequestBody updateData: Map<String, Any>,
+    ): ResponseEntity<Map<String, Any>> {
+        val response = transactionService.updateManualTransaction(id, updateData)
+        return if (response.success) {
+            ResponseEntity.ok(
+                mapOf(
+                    "success" to true,
+                    "message" to response.message,
+                    "runningBalance" to (response.runningBalance ?: 0.0),
+                ),
+            )
+        } else {
+            ResponseEntity.badRequest().body(mapOf("success" to false, "error" to response.message))
+        }
+    }
+
+    @DeleteMapping("/{id}")
+    fun deleteManualEvent(@PathVariable id: Long): ResponseEntity<Map<String, Any>> {
+        val response = transactionService.deleteManualTransaction(id)
+        return if (response.success) {
+            ResponseEntity.ok(
+                mapOf(
+                    "success" to true,
+                    "message" to response.message,
+                    "runningBalance" to (response.runningBalance ?: 0.0),
+                ),
+            )
+        } else {
+            ResponseEntity.badRequest().body(mapOf("success" to false, "error" to response.message))
+        }
     }
     
     @GetMapping("/client/{clientId}/date-range")

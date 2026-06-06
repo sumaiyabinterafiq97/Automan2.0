@@ -892,6 +892,83 @@ var consigneeMapSearchPageZeroBased: Int = 0
 var consigneeMapSearchFieldChoice: String = "all"
 private var consigneeMapSearchDebounceTimer: dynamic = null
 
+private const val CONSIGNEE_MAP_COMPACT_MAX_WIDTH_PX = 860
+private var consigneeMapResizeDebounceHandle: Int? = null
+
+private data class ConsigneeMapRenderSlice(
+    val paginatedMappings: List<dynamic>,
+    val orderedForDisplay: List<dynamic>,
+    val filterLabel: String,
+    val totalPages: Int,
+    val isServerSearch: Boolean,
+    val footerStart: Int,
+    val footerEnd: Int,
+)
+
+private var consigneeMapLastRenderSlice: ConsigneeMapRenderSlice? = null
+
+private fun consigneeMapIsCompactLayout(): Boolean {
+    val w = window.innerWidth
+    return w > 0 && w <= CONSIGNEE_MAP_COMPACT_MAX_WIDTH_PX
+}
+
+private fun renderConsigneeMapFromCache() {
+    val slice = consigneeMapLastRenderSlice ?: return
+    val tableDiv = document.getElementById("consigneeTable") as? HTMLElement ?: return
+    if (consigneeMapIsCompactLayout()) {
+        displayConsigneesAsCards(
+            if (slice.isServerSearch) slice.paginatedMappings else slice.orderedForDisplay,
+            slice.filterLabel,
+            slice.isServerSearch,
+        )
+    } else {
+        buildConsigneeTableUi(
+            tableDiv,
+            slice.paginatedMappings,
+            slice.orderedForDisplay,
+            slice.filterLabel,
+            slice.totalPages,
+            slice.isServerSearch,
+            slice.footerStart,
+            slice.footerEnd,
+        )
+    }
+}
+
+private fun renderConsigneeMapList(
+    paginatedMappings: List<dynamic>,
+    orderedForDisplay: List<dynamic>,
+    filterLabel: String,
+    totalPages: Int,
+    isServerSearch: Boolean,
+    footerStart: Int,
+    footerEnd: Int,
+) {
+    consigneeMapLastRenderSlice = ConsigneeMapRenderSlice(
+        paginatedMappings = paginatedMappings,
+        orderedForDisplay = orderedForDisplay,
+        filterLabel = filterLabel,
+        totalPages = totalPages,
+        isServerSearch = isServerSearch,
+        footerStart = footerStart,
+        footerEnd = footerEnd,
+    )
+    renderConsigneeMapFromCache()
+}
+
+private fun setupConsigneeMapResizeListener() {
+    val root = document.getElementById("consigneeMapRoot") ?: return
+    if (root.hasAttribute("data-consignee-map-resize")) return
+    root.setAttribute("data-consignee-map-resize", "true")
+    window.addEventListener("resize", { _: Event ->
+        consigneeMapResizeDebounceHandle?.let { window.clearTimeout(it) }
+        consigneeMapResizeDebounceHandle = window.setTimeout({
+            if (document.getElementById("consigneeMapRoot") == null) return@setTimeout
+            if (consigneeMapLastRenderSlice != null) renderConsigneeMapFromCache()
+        }, 120)
+    })
+}
+
 // Global variable to track last device type for Consignee page
 var lastConsigneeDeviceType: String? = getDeviceType()
 
@@ -942,6 +1019,41 @@ var allTypeOfVehicles: List<String> = emptyList()
 var dynamicMasterSetCurrentPage: MutableMap<String, Int> = mutableMapOf()
 var dynamicMasterSetAllValues: MutableMap<String, List<String>> = mutableMapOf()
 var dynamicMasterSetSortOrder: MutableMap<String, String> = mutableMapOf()
+
+private const val SIMPLE_MASTER_COMPACT_MAX_WIDTH_PX = 860
+private var simpleMasterResizeDebounceHandle: Int? = null
+private val simpleMasterLastRenderMeta: MutableMap<String, SimpleMasterRenderMeta> = mutableMapOf()
+
+private val simpleMasterTitleOverrides = mapOf(
+    "bank_accounts" to "Bank Accounts",
+    "car_brands" to "Car Brands",
+    "shift" to "Car Shift",
+    "country" to "Country",
+    "fuel" to "Fuel",
+    "pod" to "POD",
+    "pol" to "POL",
+    "repair_company" to "Repair Company",
+    "stock_location" to "Stock Location",
+    "type_of_vehicle" to "Type of Vehicles",
+    "venue_id" to "Venue ID List",
+)
+
+private data class SimpleMasterRenderMeta(
+    val tableId: String,
+    val title: String,
+    val apiPath: String,
+    val editBtnClass: String,
+    val dataAttr: String,
+    val prevBtnId: String,
+    val nextBtnId: String,
+    val setPage: (Int) -> Unit,
+    val loadFn: () -> Unit,
+    val editModalFn: (String) -> Unit,
+    val sorted: List<String>,
+    val page: Int,
+    val itemsPerPage: Int,
+    val searchFilter: String,
+)
 
 // Global pagination variables for Client master list (from master_menu)
 var clientMasterCurrentPage = 1
@@ -2066,40 +2178,86 @@ fun setupConsigneeMapSearchBarListeners() {
 
 fun showConsigneeMapPage() {
     val content = document.getElementById("content")!!
+    consigneeMapLastRenderSlice = null
     content.innerHTML = """
-        <div id="consigneeList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Consignee Map</h2>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="consigneeColumnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
-                        </svg>
-                        Column Filter
-                    </button>
-                </div>
-            </div>
-            
+        <div id="consigneeMapRoot">
             <style>
-                #consigneeList .consignee-map-search-filter-opt:hover { background: #f3f4f6 !important; }
-                #consigneeList .consignee-map-search-filter-opt--active { background: #eef2ff !important; font-weight: 600; }
-                #consigneeList .consignee-map-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-                #consigneeList #consigneeMapSearchFilterBtn:hover { background: #e8eaed !important; box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important; }
-                #consigneeList #consigneeMapSearchFilterBtn:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+                #consigneeMapRoot{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:20px;width:100%;max-width:100%;box-sizing:border-box;}
+                .consignee-map-toolbar{display:grid;grid-template-columns:1fr 1fr;grid-template-areas:"title title" "search search" "colfilter add";gap:12px;margin-bottom:16px;align-items:center;}
+                .consignee-map-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;grid-area:title;text-align:center;letter-spacing:-0.01em;}
+                .consignee-map-col-btn{grid-area:colfilter;justify-self:start;}
+                .consignee-map-add-btn{grid-area:add;justify-self:end;}
+                .consignee-map-search-row{grid-area:search;grid-column:1/-1;display:flex;align-items:center;gap:10px;width:100%;min-width:0;}
+                .consignee-map-search{position:relative;flex:1;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
+                .consignee-map-search input{width:100%;box-sizing:border-box;padding:11px 38px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
+                .consignee-map-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:4px 8px;min-height:36px;min-width:36px;}
+                .consignee-map-search-clear:hover{background:#f3f4f6;color:#111827;}
+                .consignee-map-filter-wrap{position:relative;flex-shrink:0;}
+                .consignee-map-col-btn{padding:10px 14px;background:#6b7280;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
+                .consignee-map-add-btn{padding:10px 16px;background:#059669;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;min-height:40px;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;}
+                .consignee-map-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
+                #consigneeMapRoot table.purchase-list-table thead th{position:sticky;top:0;z-index:1;background:#f9fafb;}
+                .consignee-map-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+                .consignee-map-empty strong{color:#0f172a;}
+                .consignee-map-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:14px 4px 4px;color:#475569;font-size:14px;}
+                #consigneeMapRoot .consignee-map-search-filter-opt:hover{background:#f3f4f6!important;}
+                #consigneeMapRoot .consignee-map-search-filter-opt--active{background:#eef2ff!important;font-weight:600;}
+                #consigneeMapRoot .consignee-map-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+                #consigneeMapRoot #consigneeMapSearchFilterBtn:hover{background:#e8eaed!important;box-shadow:0 2px 8px rgba(0,0,0,0.08)!important;}
+                #consigneeMapRoot #consigneeMapSearchFilterBtn:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
+                #consigneeMapRoot .consignee-cards-container{display:flex;flex-direction:column;gap:12px;width:100%;max-width:100%;min-width:0;}
+                #consigneeMapRoot .consignee-card{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px;box-shadow:0 2px 4px rgba(0,0,0,0.08);max-width:100%;box-sizing:border-box;overflow:hidden;}
+                #consigneeMapRoot .consignee-card .card-header{display:flex;justify-content:flex-start;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #f0f0f0;gap:8px;max-width:100%;}
+                #consigneeMapRoot .consignee-card .card-title{font-size:16px;font-weight:600;color:#111827;flex:1;min-width:0;line-height:1.35;word-break:break-word;}
+                #consigneeMapRoot .consignee-card .card-body{max-width:100%;min-width:0;overflow:hidden;}
+                #consigneeMapRoot .consignee-map-field{margin-bottom:10px;max-width:100%;min-width:0;}
+                #consigneeMapRoot .consignee-map-field-label{display:block;font-weight:600;color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;}
+                #consigneeMapRoot .consignee-map-field-value{display:block;width:100%;max-width:100%;min-width:0;overflow:hidden;}
+                #consigneeMapRoot .consignee-cards-container .card-edit-btn,
+                #consigneeMapRoot .consignee-card .card-edit-btn{width:24px!important;height:24px!important;min-width:24px!important;min-height:24px!important;padding:4px!important;display:inline-flex;align-items:center;justify-content:center;background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 1px 3px rgba(76,201,255,0.25);flex-shrink:0;}
+                #consigneeMapRoot .consignee-cards-container .card-edit-btn svg,
+                #consigneeMapRoot .consignee-card .card-edit-btn svg{width:10px!important;height:10px!important;}
+                @media (max-width:1024px){
+                    #consigneeMapRoot{padding:14px;border-radius:14px;}
+                    .consignee-map-toolbar{gap:14px;margin-bottom:14px;}
+                    .consignee-map-title{font-size:17px;}
+                    .consignee-map-search input{font-size:13px;padding:10px 34px 10px 38px;}
+                }
+                @media (max-width:767px){
+                    .consignee-map-toolbar{grid-template-columns:1fr;grid-template-areas:"title" "colfilter" "search" "add";gap:12px;}
+                    .consignee-map-col-btn{justify-self:stretch;width:100%;max-width:100%;min-height:44px;}
+                    .consignee-map-add-btn{justify-self:stretch;width:100%;max-width:100%;min-height:44px;white-space:normal;text-align:center;}
+                }
+                @media (min-width:1025px){
+                    #consigneeMapRoot{max-width:1200px;margin:0 auto;}
+                    .consignee-map-toolbar{
+                        grid-template-columns:auto 1fr minmax(260px,32%);
+                        grid-template-areas:"title . search" "colfilter add .";
+                        column-gap:12px;
+                        row-gap:10px;
+                    }
+                    .consignee-map-title{text-align:left;justify-self:start;font-size:22px;}
+                    .consignee-map-col-btn,.consignee-map-add-btn{width:auto;white-space:nowrap;}
+                }
             </style>
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
-                <div style="display: flex; align-items: center; gap: 10px; width: 100%; max-width: 720px;">
-                    <div style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
-                        <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; color: #9ca3af; display: flex;" aria-hidden="true">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <div class="consignee-map-toolbar">
+                <h2 class="consignee-map-title">Consignee Map</h2>
+                <button type="button" id="consigneeColumnFilterBtn" class="consignee-map-col-btn" title="Column filter">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/></svg>
+                    Column Filter
+                </button>
+                <div class="consignee-map-search-row">
+                    <div class="consignee-map-search">
+                        <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#9ca3af;display:flex;" aria-hidden="true">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                         </span>
-                        <input type="text" id="consigneeMapSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Type to search…" aria-label="Search consignee map" style="width: 100%; box-sizing: border-box; padding: 12px 40px 12px 44px; border: none; font-size: 14px; background: transparent; border-radius: 999px; outline: none;" />
-                        <button type="button" id="consigneeMapSearchClearBtn" title="Clear search" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: #9ca3af; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 8px;">×</button>
+                        <input type="text" id="consigneeMapSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Type to search…" aria-label="Search consignee map" />
+                        <button type="button" id="consigneeMapSearchClearBtn" class="consignee-map-search-clear" title="Clear search" aria-label="Clear search">×</button>
                     </div>
-                    <div style="position: relative; flex-shrink: 0;">
+                    <div class="consignee-map-filter-wrap">
                         <span id="consigneeMapSearchFieldLabel" class="consignee-map-sr-only" aria-live="polite">All fields</span>
-                        <button type="button" id="consigneeMapSearchFilterBtn" title="Filter — search in: All fields" aria-haspopup="true" aria-expanded="false" aria-label="Open filter for which field to search. Current: All fields." style="width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e5e7eb; background: #f3f4f6; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4b5563; padding: 0;">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <button type="button" id="consigneeMapSearchFilterBtn" title="Filter — search in: All fields" aria-haspopup="true" aria-expanded="false" aria-label="Open filter for which field to search. Current: All fields." style="width:46px;height:46px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#4b5563;padding:0;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                 <line x1="3" y1="7" x2="21" y2="7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
                                 <circle cx="8" cy="7" r="2.25" fill="currentColor"/>
                                 <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
@@ -2108,28 +2266,19 @@ fun showConsigneeMapPage() {
                                 <circle cx="7" cy="17" r="2.25" fill="currentColor"/>
                             </svg>
                         </button>
-                        <div id="consigneeMapSearchFilterMenu" style="display: none; position: absolute; right: 0; top: calc(100% + 8px); z-index: 20001; min-width: 220px; background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.12); padding: 8px 0;">
-                            <div style="padding: 8px 14px 4px; font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .04em;">Search in</div>
+                        <div id="consigneeMapSearchFilterMenu" style="display:none;position:absolute;right:0;top:calc(100% + 8px);z-index:20001;min-width:220px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 10px 40px rgba(0,0,0,0.12);padding:8px 0;">
+                            <div style="padding:8px 14px 4px;font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">Search in</div>
                             <button type="button" class="consignee-map-search-filter-opt consignee-map-search-filter-opt--active" id="consigneeMapSearchOptAll" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">All fields</button>
                             <button type="button" class="consignee-map-search-filter-opt" id="consigneeMapSearchOptConsigneeName" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Consignee name</button>
                             <button type="button" class="consignee-map-search-filter-opt" id="consigneeMapSearchOptCountry" style="display:block;width:100%;text-align:left;padding:10px 16px;border:none;background:#fff;cursor:pointer;font-size:14px;color:#111827;">Country</button>
                         </div>
                     </div>
                 </div>
+                <button type="button" id="addConsigneeBtn" class="consignee-map-add-btn">+ Add New Consignee</button>
             </div>
-            
-            <!-- Action Buttons -->
-            <div style="margin-bottom: 20px;">
-                <button id="addConsigneeBtn" style="padding: 12px 24px; background-color: #059669; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    ➕ Add New Consignee
-                </button>
-            </div>
-            
-            <!-- Consignee Table/Cards Container -->
-            <div id="consigneeTable" style="margin-top: 20px;">
-                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px;">Loading consignee data...</div>
-                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
+            <div id="consigneeMapTableWrap">
+                <div id="consigneeTable">
+                    <div class="consignee-map-empty"><strong>Loading</strong><div>Loading consignee data…</div></div>
                 </div>
             </div>
         </div>
@@ -2144,25 +2293,17 @@ fun showConsigneeMapPage() {
     updateConsigneeMapSearchFilterMenuActive("all")
     refreshConsigneeMapSearchScopeUi()
     setupConsigneeMapSearchBarListeners()
+    setupConsigneeMapResizeListener()
     
-    // Load initial data
     loadMasterConsignee()
     
-    // Event listeners
     document.getElementById("addConsigneeBtn")?.addEventListener("click", { _: Event ->
         showAddConsigneeModal()
     })
     
-    // Column filter button
     document.getElementById("consigneeColumnFilterBtn")?.addEventListener("click", { _: Event ->
         showConsigneeColumnFilterModal()
     })
-    
-    // Setup device change listener for Consignee page
-    setupConsigneeDeviceChangeListener()
-    
-    // Check for device change and reload if needed
-    checkConsigneeDeviceChange()
 }
 
 /**
@@ -2222,17 +2363,7 @@ fun setupConsigneeDeviceChangeListener() {
 }
 
 fun loadMasterConsignee() {
-    val tableDiv = document.getElementById("consigneeTable")
-    if (tableDiv == null) return
-    
-    val deviceType = getDeviceType()
-    
-    // Use card layout for mobile, table for tablet/desktop
-    if (deviceType == "mobile") {
-        loadMasterConsigneesWithCards()
-        return
-    }
-    
+    if (document.getElementById("consigneeTable") == null) return
     loadMasterConsigneesWithTable()
 }
 
@@ -2252,25 +2383,16 @@ private fun buildConsigneeTableUi(
     val consigneeSortable = setOf("consigneeName", "country", "pod")
     if (orderedForDisplay.isEmpty()) {
         val message = if (filterLabel.isNotEmpty()) {
-            "No consignee data found for: $filterLabel"
-            } else {
-            "No consignee data found."
+            "No matches for your search."
+        } else {
+            "No consignee data found yet."
         }
-    tableDiv.innerHTML = """
-        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                <div style="font-size: 16px; margin-bottom: 8px;">$message</div>
-                <div style="font-size: 14px; color: #9ca3af;">Try adjusting your search or filter</div>
-        </div>
-    """
+        tableDiv.innerHTML = """<div class="consignee-map-empty"><strong>No results</strong><div>$message</div></div>"""
         return
     }
 
     if (paginatedMappings.isEmpty()) {
-                tableDiv.innerHTML = """
-                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                <div style="font-size: 16px; margin-bottom: 8px;">No rows on this page.</div>
-                    </div>
-                """
+        tableDiv.innerHTML = """<div class="consignee-map-empty"><strong>No results</strong><div>No rows on this page.</div></div>"""
         return
     }
 
@@ -2284,22 +2406,21 @@ private fun buildConsigneeTableUi(
             
             val consigneeColCount = 1 + selectedColumns.size
             var html = """
-                <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04); border: 1px solid #d1d5db;">
-                    <table style="width: 100%; border-collapse: collapse; border: 1px solid #d1d5db; background: #fff; table-layout: fixed;" class="consignee-table">${htmlTableColgroupNarrowActionEqualRest(consigneeColCount)}
+                <div class="consignee-map-table-shell">
+                    <table class="purchase-list-table consignee-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">${htmlTableColgroupNarrowActionEqualRest(consigneeColCount)}
                         <thead>
                             <tr>
-                                <th style="padding: 12px 14px; text-align: left; min-width: 72px; border: 1px solid #e5e7eb; background-color: #f3f4f6;"></th>
+                                <th style="padding:12px 14px;text-align:left;min-width:88px;"></th>
             """
             
             for (columnKey in selectedColumns) {
                 val label = columnLabels[columnKey] ?: columnKey
-        val thStyle = "padding: 12px 16px; text-align: left; font-weight: 700; color: #111827; font-size: 13px; letter-spacing: 0.02em; border: 1px solid #e5e7eb; background-color: #f3f4f6;"
         html += if (columnKey in consigneeSortable) {
             val tip = masterMapColumnSortTooltip(consigneeMapSortOrderByField, columnKey)
             val bid = "consigneeMapSort_$columnKey"
-            """<th style="$thStyle"><button type="button" id="$bid" title="$tip" style="background: none; border: none; cursor: pointer; font-weight: 700; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;"><span>$label</span><span style="font-size: 14px;">&#x2195;</span></button></th>"""
+            """<th><button type="button" id="$bid" title="$tip" style="background:none;border:none;cursor:pointer;font-weight:700;color:#111827;padding:0;display:inline-flex;align-items:center;gap:6px;"><span>${escapeHtml(label)}</span><span style="font-size:14px;">&#x2195;</span></button></th>"""
         } else {
-            """<th style="$thStyle">$label</th>"""
+            """<th>${escapeHtml(label)}</th>"""
         }
             }
             
@@ -2319,17 +2440,17 @@ private fun buildConsigneeTableUi(
                 
                 html += """
                     <tr>
-                        <td style="padding: 10px 12px; border: 1px solid #e5e7eb; background-color: #ffffff; vertical-align: middle;">
-                            <div style="display:flex; gap:6px; align-items:center;">
+                        <td style="padding:10px 12px;vertical-align:middle;">
+                            <div style="display:flex;gap:6px;align-items:center;">
                             <button onclick="window.editMasterConsignee($id)" aria-label="Edit" title="Edit"
-                                    style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(76,201,255,0.30);">
+                                    style="width:36px;height:36px;min-width:36px;min-height:36px;display:inline-flex;align-items:center;justify-content:center;background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 6px rgba(76,201,255,0.30);">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                                     <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
                                 </svg>
                             </button>
                             <button onclick="window.duplicateMasterConsignee($id)" aria-label="Duplicate" title="Duplicate"
-                                    style="width: 28px; height: 28px; display:inline-flex; align-items:center; justify-content:center; background-color:#3b82f6; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 6px rgba(59,130,246,0.30);">
+                                    style="width:36px;height:36px;min-width:36px;min-height:36px;display:inline-flex;align-items:center;justify-content:center;background-color:#3b82f6;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 6px rgba(59,130,246,0.30);">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
                                 </svg>
@@ -2374,28 +2495,20 @@ private fun buildConsigneeTableUi(
     }
 
             if (totalPages > 1) {
+                val prevDisabled = if (consigneesCurrentPage <= 1) " disabled" else ""
+                val nextDisabled = if (consigneesCurrentPage >= totalPages) " disabled" else ""
                 html += """
-                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
-                        <div style="color: #6b7280; font-size: 14px; flex: 1; min-width: 200px;">
-                            $footerSummary
-                        </div>
-                        <div class="consignee-pagination-controls">
-                            <button id="consigneesPrevPage" class="consignee-pagination-btn" ${if (consigneesCurrentPage == 1) "disabled" else ""}>
-                                Previous
-                            </button>
+                    <div class="consignee-map-pager">
+                        <span style="flex:1;min-width:200px;">$footerSummary</span>
+                        <div class="consignee-pagination-controls" style="display:flex;align-items:center;gap:10px;">
+                            <button type="button" id="consigneesPrevPage" class="consignee-pagination-btn"$prevDisabled>Prev</button>
                             <span class="consignee-pagination-page">Page $consigneesCurrentPage of $totalPages</span>
-                            <button id="consigneesNextPage" class="consignee-pagination-btn" ${if (consigneesCurrentPage >= totalPages) "disabled" else ""}>
-                                Next
-                            </button>
+                            <button type="button" id="consigneesNextPage" class="consignee-pagination-btn"$nextDisabled>Next</button>
                         </div>
                     </div>
                 """
             } else {
-                html += """
-                    <div style="padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 14px;">
-                        ${if (isServerSearch) footerSummary else "Total: ${orderedForDisplay.size} consignee${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"}
-                    </div>
-                """
+                html += """<div class="consignee-map-pager"><span>${if (isServerSearch) footerSummary else "Total: ${orderedForDisplay.size} consignee${if (orderedForDisplay.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"}</span></div>"""
             }
             
             tableDiv.innerHTML = html
@@ -2438,117 +2551,12 @@ private fun buildConsigneeTableUi(
     }
 }
 
-fun loadMasterConsigneesWithCards() {
-    val tableDiv = document.getElementById("consigneeTable") as? HTMLElement ?: return
-
-    val searchQ = getConsigneeMapSearchQuery()
-
-    tableDiv.innerHTML = """
-        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-            <div style="font-size: 16px; margin-bottom: 8px;">Loading consignee data...</div>
-            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-        </div>
-    """
-
-    if (searchQ.isNotEmpty()) {
-        consigneeMapSearchServerMode = true
-        val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
-        val encF = js("encodeURIComponent")(consigneeMapSearchFieldChoice).unsafeCast<String>()
-        val p = consigneeMapSearchPageZeroBased
-        val url = apiUrl("booking/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$consigneesItemsPerPage")
-        window.fetch(url)
-            .then { response: dynamic ->
-                if (response.ok) response.json() else throw js("Error('Search failed')")
-            }
-            .then { body: dynamic ->
-                val err = js("body.error")?.toString()?.trim()
-                if (!err.isNullOrEmpty()) throw js("Error(err)")
-                val totalEl = js("body.totalElements")
-                consigneeMapSearchTotal = when (totalEl) {
-                    is Number -> totalEl.toLong()
-                    else -> totalEl?.toString()?.toLongOrNull() ?: 0L
-                }
-                val tp = js("body.totalPages")
-                consigneeMapSearchTotalPages = kotlin.math.max(1, when (tp) {
-                    is Number -> tp.toInt()
-                    else -> tp?.toString()?.toIntOrNull() ?: 1
-                })
-                val num = js("body.page")
-                consigneeMapSearchPageZeroBased = when (num) {
-                    is Number -> num.toInt()
-                    else -> num?.toString()?.toIntOrNull() ?: 0
-                }
-                consigneesCurrentPage = consigneeMapSearchPageZeroBased + 1
-
-                val content = js("body.content") ?: js("[]")
-                val arr = js("Array.isArray(content) ? content : []") as Array<dynamic>
-                val list = arr.toList()
-                allConsignees = list
-                displayConsigneesAsCards(list, searchQ, true)
-            }
-            .catch { error: dynamic ->
-                Logger.error("Error searching consignees: ${error.toString()}")
-                tableDiv.innerHTML = """
-                    <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
-                        <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading consignee data</div>
-                        <div style="font-size: 14px; color: #9ca3af;">${error.asDynamic().message}</div>
-                    </div>
-                """
-            }
-        return
-    }
-
-    consigneeMapSearchServerMode = false
-    consigneeMapSearchTotal = 0
-    consigneeMapSearchTotalPages = 0
-    consigneeMapSearchPageZeroBased = 0
-
-    window.fetch(apiUrl("booking/mappings"))
-        .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load consignee')")
-        }
-        .then { result: dynamic ->
-            val mappings = result.data ?: js("[]")
-            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
-            val filteredMappings = mappingsArray.toList().sortedByDescending {
-                (it.id as? Number)?.toLong() ?: 0L
-            }
-            val consigneeSortable = setOf("consigneeName", "country", "pod")
-            var orderedForDisplay = filteredMappings
-            val cmsf = consigneeMapSortField
-            if (cmsf != null && cmsf in consigneeSortable) {
-                val ord = consigneeMapSortOrderByField[cmsf] ?: "desc"
-                orderedForDisplay = if (ord == "asc") {
-                    filteredMappings.sortedBy { extractConsigneeMapSortKey(it, cmsf) }
-                } else {
-                    filteredMappings.sortedByDescending { extractConsigneeMapSortKey(it, cmsf) }
-                }
-            }
-            allConsignees = orderedForDisplay
-            displayConsigneesAsCards(orderedForDisplay, "", false)
-        }
-        .catch { error: dynamic ->
-            Logger.error("Error loading consignees: ${error.toString()}")
-            tableDiv.innerHTML = """
-                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading consignee data</div>
-                    <div style="font-size: 14px; color: #9ca3af;">${error.message}</div>
-                </div>
-            """
-        }
-}
-
 fun loadMasterConsigneesWithTable() {
     val tableDiv = document.getElementById("consigneeTable") as? HTMLElement ?: return
 
     val searchQ = getConsigneeMapSearchQuery()
 
-    tableDiv.innerHTML = """
-        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-            <div style="font-size: 16px; margin-bottom: 8px;">Loading consignee data...</div>
-            <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-        </div>
-    """
+    tableDiv.innerHTML = """<div class="consignee-map-empty"><strong>Loading</strong><div>Loading consignee data…</div></div>"""
 
     if (searchQ.isNotEmpty()) {
         consigneeMapSearchServerMode = true
@@ -2586,35 +2594,26 @@ fun loadMasterConsigneesWithTable() {
                 allConsignees = list
 
                 if (list.isEmpty()) {
-                    tableDiv.innerHTML = """
-                        <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                            <div style="font-size: 16px; margin-bottom: 8px;">No consignee data found for: $searchQ</div>
-                            <div style="font-size: 14px; color: #9ca3af;">Try a different search</div>
-                        </div>
-                    """
+                    consigneeMapLastRenderSlice = null
+                    tableDiv.innerHTML = """<div class="consignee-map-empty"><strong>No results</strong><div>No matches for your search.</div></div>"""
                     return@then
                 }
 
                 val totalPages = consigneeMapSearchTotalPages
-                buildConsigneeTableUi(
-                    tableDiv,
-                    list,
-                    list,
-                    searchQ,
-                    totalPages,
-                    true,
-                    1,
-                    list.size
+                renderConsigneeMapList(
+                    paginatedMappings = list,
+                    orderedForDisplay = list,
+                    filterLabel = searchQ,
+                    totalPages = totalPages,
+                    isServerSearch = true,
+                    footerStart = 1,
+                    footerEnd = list.size,
                 )
             }
             .catch { error: dynamic ->
                 Logger.error("Error searching consignees: ${error.toString()}")
-                tableDiv.innerHTML = """
-                    <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
-                        <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading consignee data</div>
-                        <div style="font-size: 14px; color: #9ca3af;">${error.asDynamic().message}</div>
-                    </div>
-                """
+                consigneeMapLastRenderSlice = null
+                tableDiv.innerHTML = """<div class="consignee-map-empty" style="color:#dc2626;"><strong>Could not load</strong><div>${escapeHtml(error.asDynamic().message?.toString() ?: "Search failed")}</div></div>"""
             }
         return
     }
@@ -2648,11 +2647,8 @@ fun loadMasterConsigneesWithTable() {
             allConsignees = orderedForDisplay
 
             if (orderedForDisplay.isEmpty()) {
-                tableDiv.innerHTML = """
-                    <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                        <div style="font-size: 16px; margin-bottom: 8px;">No consignee data found.</div>
-                    </div>
-                """
+                consigneeMapLastRenderSlice = null
+                tableDiv.innerHTML = """<div class="consignee-map-empty"><strong>No results</strong><div>No consignee data found yet.</div></div>"""
                 return@then
             }
 
@@ -2663,25 +2659,20 @@ fun loadMasterConsigneesWithTable() {
             val footerStart = startIndex + 1
             val footerEnd = endIndex
 
-            buildConsigneeTableUi(
-                tableDiv,
-                paginatedMappings,
-                orderedForDisplay,
-                "",
-                totalPages,
-                false,
-                footerStart,
-                footerEnd
+            renderConsigneeMapList(
+                paginatedMappings = paginatedMappings,
+                orderedForDisplay = orderedForDisplay,
+                filterLabel = "",
+                totalPages = totalPages,
+                isServerSearch = false,
+                footerStart = footerStart,
+                footerEnd = footerEnd,
             )
         }
         .catch { error: dynamic ->
             Logger.error("Error loading consignee: ${error.toString()}")
-            tableDiv.innerHTML = """
-                <div style="text-align: center; color: #ef4444; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px; font-weight: 600;">Error loading consignee data</div>
-                    <div style="font-size: 14px; color: #9ca3af;">${error.message}</div>
-                </div>
-            """
+            consigneeMapLastRenderSlice = null
+            tableDiv.innerHTML = """<div class="consignee-map-empty" style="color:#dc2626;"><strong>Could not load</strong><div>${escapeHtml(error.message?.toString() ?: "Failed to load consignee data")}</div></div>"""
         }
 }
 
@@ -2690,16 +2681,8 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
     if (tableDiv == null) return
     
     if (filteredMappings.isEmpty()) {
-        val message = if (filterLabel.isNotEmpty()) {
-            "No consignee data found for: $filterLabel"
-        } else {
-            "No consignee data found."
-        }
-        tableDiv.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                $message
-            </div>
-        """
+        val message = if (filterLabel.isNotEmpty()) "No matches for your search." else "No consignee data found yet."
+        tableDiv.innerHTML = """<div class="consignee-map-empty"><strong>No results</strong><div>$message</div></div>"""
         return
     }
     
@@ -2751,35 +2734,36 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
                     if (columnKey == "consigneeAddress") formatConsigneeMapAddressChipHtml(value)
                     else formatConsigneeMapValueChipHtml(value)
                 cardFields.append("""
-                    <div style="margin-bottom: 8px;">
-                        <span style="font-weight: 600; color: #666; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">$label:</span>
-                        <div style="color: #333; font-size: 14px; margin-top: 2px;">$displayValue</div>
+                    <div class="consignee-map-field">
+                        <span class="consignee-map-field-label">${escapeHtml(label)}</span>
+                        <div class="consignee-map-field-value">$displayValue</div>
                     </div>
                 """)
             }
         }
         
+        val cardTitle = escapeHtml(
+            when {
+                consigneeName.isNotEmpty() -> consigneeName
+                country.isNotEmpty() -> country
+                else -> "Consignee #$id"
+            },
+        )
         cardsHTML.append("""
             <div class="consignee-card">
                 <div class="card-header">
-                    <div style="display:flex; gap:6px; align-items:center;">
-                    <button class="card-edit-btn" onclick="window.editMasterConsignee($id)" aria-label="Edit" title="Edit">
+                    <button type="button" class="card-edit-btn" onclick="window.editMasterConsignee($id)" aria-label="Edit" title="Edit">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                             <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
                         </svg>
                     </button>
-                    <button class="card-edit-btn" onclick="window.duplicateMasterConsignee($id)" aria-label="Duplicate" title="Duplicate" style="background-color:#3b82f6;">
+                    <button type="button" class="card-edit-btn" onclick="window.duplicateMasterConsignee($id)" aria-label="Duplicate" title="Duplicate" style="background-color:#3b82f6;">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
                         </svg>
                     </button>
-                    </div>
-                    <div class="card-title">${when {
-                        consigneeName.isNotEmpty() -> consigneeName
-                        country.isNotEmpty() -> country
-                        else -> "Consignee #$id"
-                    }}</div>
+                    <div class="card-title">$cardTitle</div>
                 </div>
                 <div class="card-body">
                     $cardFields
@@ -2792,15 +2776,15 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
     
     // Add pagination controls
     if (totalPages > 1) {
+        val prevDisabled = if (consigneesCurrentPage <= 1) " disabled" else ""
+        val nextDisabled = if (consigneesCurrentPage >= totalPages) " disabled" else ""
         cardsHTML.append("""
-            <div class="pagination-controls">
-                <button id="consigneesPrevPage" class="pagination-btn" ${if (consigneesCurrentPage == 1) "disabled" else ""}>
-                    Previous
-                </button>
-                <span class="pagination-page">Page $consigneesCurrentPage of $totalPages</span>
-                <button id="consigneesNextPage" class="pagination-btn" ${if (consigneesCurrentPage >= totalPages) "disabled" else ""}>
-                    Next
-                </button>
+            <div class="consignee-map-pager">
+                <div class="pagination-controls" style="display:flex;align-items:center;justify-content:center;gap:10px;width:100%;">
+                    <button type="button" id="consigneesPrevPage" class="pagination-btn"$prevDisabled>Prev</button>
+                    <span class="pagination-page">Page $consigneesCurrentPage of $totalPages</span>
+                    <button type="button" id="consigneesNextPage" class="pagination-btn"$nextDisabled>Next</button>
+                </div>
             </div>
         """)
     } else {
@@ -2809,11 +2793,7 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
         } else {
             "Total: ${filteredMappings.size} consignee${if (filteredMappings.size != 1) "s" else ""}${if (filterLabel.isNotEmpty()) " (filtered)" else ""}"
         }
-        cardsHTML.append("""
-            <div style="padding: 16px; text-align: center; color: #6b7280; font-size: 14px;">
-                $summary
-            </div>
-        """)
+        cardsHTML.append("""<div class="consignee-map-pager"><span>$summary</span></div>""")
     }
     
     tableDiv.innerHTML = cardsHTML.toString()
@@ -5413,44 +5393,8 @@ fun duplicateMasterCarBrand(id: dynamic) {
 
 // Placeholder functions for other master list pages
 fun showMasterCountriesPage() {
-    window.location.hash = "#/master/country"
-    val content = document.getElementById("content")!!
-    content.innerHTML = """
-        <div id="countryList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Country</h2>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button id="addCountryBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 18px; line-height: 1;">+</span>
-                        <span>Add Country</span>
-                    </button>
-                </div>
-            </div>
-            
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <div style="flex: 1; min-width: 250px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Country:</label>
-                    <input type="text" id="countryFilter" placeholder="Type country name to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
-                </div>
-            </div>
-            
-            <div id="countryTable" style="margin-top: 20px;">
-                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px;">Loading countries...</div>
-                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-                </div>
-            </div>
-        </div>
-    """
-    loadMasterCountries()
-    
-    document.getElementById("countryFilter")?.addEventListener("input", { _: Event ->
-        loadMasterCountries()
-    })
-
-    document.getElementById("addCountryBtn")?.addEventListener("click", { _: Event ->
-        showAddCountryModal()
-    })
+    window.location.hash = "#/master/set/country"
+    showDynamicMasterSetPage("country")
 }
 
 fun loadMasterCountries() {
@@ -6349,9 +6293,9 @@ fun setupSupplierMapSearchBarListeners() {
 fun showSupplierMapPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div id="supplierList" class="rixo-tree-page" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Supplier Map</h2>
+        <div id="supplierList" class="rixo-tree-page supplier-map-page">
+            <div class="supplier-map-topbar">
+                <h2 class="supplier-map-title">Supplier Map</h2>
             </div>
             
             <style>
@@ -6361,16 +6305,16 @@ fun showSupplierMapPage() {
                 #supplierList #supplierMapSearchFilterBtn:hover { background: #e8eaed !important; box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important; }
                 #supplierList #supplierMapSearchFilterBtn:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
             </style>
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
-                <div style="display: flex; align-items: center; gap: 10px; width: 100%; max-width: 720px;">
-                    <div style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+            <div class="supplier-map-search-panel">
+                <div class="supplier-map-search-toolbar">
+                    <div class="supplier-map-search-input-wrap" style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
                         <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; color: #9ca3af; display: flex;" aria-hidden="true">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                         </span>
                         <input type="text" id="supplierMapSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Type to search…" aria-label="Search supplier map" style="width: 100%; box-sizing: border-box; padding: 12px 40px 12px 44px; border: none; font-size: 14px; background: transparent; border-radius: 999px; outline: none;" />
                         <button type="button" id="supplierMapSearchClearBtn" title="Clear search" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: #9ca3af; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 8px;">×</button>
                     </div>
-                    <div style="position: relative; flex-shrink: 0;">
+                    <div class="supplier-map-search-filter-wrap" style="position: relative; flex-shrink: 0;">
                         <span id="supplierMapSearchFieldLabel" class="supplier-map-sr-only" aria-live="polite">All fields</span>
                         <button type="button" id="supplierMapSearchFilterBtn" title="Filter — search in: All fields" aria-haspopup="true" aria-expanded="false" aria-label="Open filter for which field to search. Current: All fields." style="width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e5e7eb; background: #f3f4f6; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4b5563; padding: 0;">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -6393,7 +6337,7 @@ fun showSupplierMapPage() {
                 </div>
             </div>
             
-            <div id="supplierMapTreeRoot" class="rixo-tree-root supplier-map-tree" style="margin-top: 12px;">
+            <div id="supplierMapTreeRoot" class="rixo-tree-root supplier-map-tree supplier-map-tree-root">
                 <div class="rixo-tree-loading">Loading supplier map…</div>
             </div>
         </div>
@@ -7896,11 +7840,11 @@ private var rixoCardInlineAddStock: String = ""
 fun showRixoMappingTreePage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div id="rixoMappingPage" class="rixo-tree-page">
+        <div id="rixoMappingPage" class="rixo-tree-page rixo-tree-page--mapping">
             <div class="rixo-tree-topbar">
                 <h2 class="rixo-tree-title">Rixo Price Mapping</h2>
             </div>
-            <div id="rixoMappingTreeRoot" class="rixo-tree-root">
+            <div id="rixoMappingTreeRoot" class="rixo-tree-root rixo-tree-root--mapping">
                 <div class="rixo-tree-loading">Loading…</div>
             </div>
         </div>
@@ -11644,44 +11588,8 @@ fun showEditStockLocationModal(originalName: String) {
 }
 
 fun showMasterRepairCompaniesPage() {
-    window.location.hash = "#/master/repair-company"
-    val content = document.getElementById("content")!!
-    content.innerHTML = """
-        <div id="repairCompanyList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Repair Company</h2>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button id="addRepairCompanyBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 18px; line-height: 1;">+</span>
-                        <span>Add Repair Company</span>
-                    </button>
-                </div>
-            </div>
-            
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <div style="flex: 1; min-width: 250px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Repair Company:</label>
-                    <input type="text" id="repairCompanyFilter" placeholder="Type repair company to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
-                </div>
-            </div>
-            
-            <div id="repairCompanyTable" style="margin-top: 20px;">
-                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px;">Loading repair companies...</div>
-                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-                </div>
-            </div>
-        </div>
-    """
-    loadMasterRepairCompanies()
-    
-    document.getElementById("repairCompanyFilter")?.addEventListener("input", { _: Event ->
-        loadMasterRepairCompanies()
-    })
-
-    document.getElementById("addRepairCompanyBtn")?.addEventListener("click", { _: Event ->
-        showAddRepairCompanyModal()
-    })
+    window.location.hash = "#/master/set/repair_company"
+    showDynamicMasterSetPage("repair_company")
 }
 
 fun loadMasterRepairCompanies() {
@@ -11983,44 +11891,8 @@ fun showEditRepairCompanyModal(originalName: String) {
 }
 
 fun showMasterBankAccountsPage() {
-    window.location.hash = "#/master/bank-accounts"
-    val content = document.getElementById("content")!!
-    content.innerHTML = """
-        <div id="bankAccountList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Bank Accounts</h2>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button id="addBankAccountBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 18px; line-height: 1;">+</span>
-                        <span>Add Bank Account</span>
-                    </button>
-            </div>
-            </div>
-
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <div style="flex: 1; min-width: 250px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Bank Account:</label>
-                    <input type="text" id="bankAccountFilter" placeholder="Type bank account to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
-                </div>
-            </div>
-
-            <div id="bankAccountTable" style="margin-top: 20px;">
-                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px;">Loading bank accounts...</div>
-                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-                </div>
-            </div>
-        </div>
-    """
-    loadMasterBankAccounts()
-
-    document.getElementById("bankAccountFilter")?.addEventListener("input", { _: Event ->
-        loadMasterBankAccounts()
-    })
-    
-    document.getElementById("addBankAccountBtn")?.addEventListener("click", { _: Event ->
-        showAddBankAccountModal()
-    })
+    window.location.hash = "#/master/set/bank_accounts"
+    showDynamicMasterSetPage("bank_accounts")
 }
 
 fun loadMasterBankAccounts() {
@@ -12317,44 +12189,8 @@ fun showEditBankAccountModal(originalName: String) {
 }
 
 fun showMasterVenueIdsPage() {
-    window.location.hash = "#/master/venue-ids"
-    val content = document.getElementById("content")!!
-    content.innerHTML = """
-        <div id="venueIdList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">Venue ID</h2>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button id="addVenueIdBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 18px; line-height: 1;">+</span>
-                        <span>Add Venue ID</span>
-                    </button>
-                </div>
-            </div>
-            
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <div style="flex: 1; min-width: 250px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by Venue ID:</label>
-                    <input type="text" id="venueIdFilter" placeholder="Type venue ID to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
-                </div>
-            </div>
-            
-            <div id="venueIdTable" style="margin-top: 20px;">
-                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px;">Loading venue IDs...</div>
-                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-                </div>
-            </div>
-        </div>
-    """
-    loadMasterVenueIds()
-    
-    document.getElementById("venueIdFilter")?.addEventListener("input", { _: Event ->
-        loadMasterVenueIds()
-    })
-
-    document.getElementById("addVenueIdBtn")?.addEventListener("click", { _: Event ->
-        showAddVenueIdModal()
-    })
+    window.location.hash = "#/master/set/venue_id"
+    showDynamicMasterSetPage("venue_id")
 }
 
 fun loadMasterVenueIds() {
@@ -12655,38 +12491,10 @@ fun showEditVenueIdModal(originalValue: String) {
     })
 }
 
-// --- POL master page (same UI/UX as Country, data from master_menu.pol) ---
+// --- POL master page (responsive simple-master UI via dynamic master set) ---
 fun showMasterPolPage() {
-    window.location.hash = "#/master/pol"
-    val content = document.getElementById("content")!!
-    content.innerHTML = """
-        <div id="polList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">POL</h2>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button id="addPolBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                        <span style="font-size: 18px; line-height: 1;">+</span>
-                        <span>Add POL</span>
-                    </button>
-                </div>
-            </div>
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <div style="flex: 1; min-width: 250px;">
-                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Search by POL:</label>
-                    <input type="text" id="polFilter" placeholder="Type POL to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px;">
-                </div>
-            </div>
-            <div id="polTable" style="margin-top: 20px;">
-                <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
-                    <div style="font-size: 16px; margin-bottom: 8px;">Loading POL...</div>
-                    <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
-                </div>
-            </div>
-        </div>
-    """
-    loadMasterPol()
-    document.getElementById("polFilter")?.addEventListener("input", { _: Event -> loadMasterPol() })
-    document.getElementById("addPolBtn")?.addEventListener("click", { _: Event -> showAddPolModal() })
+    window.location.hash = "#/master/set/pol"
+    showDynamicMasterSetPage("pol")
 }
 
 fun loadMasterPol() {
@@ -12862,24 +12670,8 @@ fun showEditPolModal(originalName: String) {
 }
 
 fun showMasterPodPage() {
-    window.location.hash = "#/master/pod"
-    val content = document.getElementById("content")!!
-    content.innerHTML = """
-        <div id="podList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">POD</h2>
-                <div><button id="addPodBtn" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px;">+ Add POD</button></div>
-            </div>
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Search by POD:</label>
-                <input type="text" id="podFilter" placeholder="Type POD to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px;">
-            </div>
-            <div id="podTable" style="margin-top: 20px;"><div style="text-align: center; color: #6b7280; padding: 60px 20px;">Loading POD...</div></div>
-        </div>
-    """
-    loadMasterPod()
-    document.getElementById("podFilter")?.addEventListener("input", { _: Event -> loadMasterPod() })
-    document.getElementById("addPodBtn")?.addEventListener("click", { _: Event -> showAddPodModal() })
+    window.location.hash = "#/master/set/pod"
+    showDynamicMasterSetPage("pod")
 }
 
 fun loadMasterPod() {
@@ -13017,7 +12809,10 @@ fun showEditPodModal(originalName: String) {
     })
 }
 
-fun showMasterFuelPage() { window.location.hash = "#/master/fuel"; renderSimpleMasterPage("fuel", "Fuel", "fuel", "fuelFilter", "fuelTable", "addFuelBtn", ::loadMasterFuel, ::showAddFuelModal) }
+fun showMasterFuelPage() {
+    window.location.hash = "#/master/set/fuel"
+    showDynamicMasterSetPage("fuel")
+}
 fun loadMasterFuel() { loadSimpleMaster("master-menu/fuel", "fuelFilter", "fuelTable", "Fuel", fuelCurrentPage, fuelItemsPerPage, allFuel, { fuelCurrentPage = it }, { allFuel = it }, ::showEditFuelModal, "fuel-edit-btn", "data-fuel", "fuelPrevPage", "fuelNextPage", ::loadMasterFuel) }
 fun showAddFuelModal() { addSimpleMasterModal("master-menu/fuel", "Fuel", "fuelEditModal", "fuelModalInput", "fuelModalCancelBtn", "fuelModalAddBtn", { fuelCurrentPage = 1; loadMasterFuel() }) }
 fun showEditFuelModal(originalName: String) { editSimpleMasterModal("master-menu/fuel", "Fuel", originalName, "fuelEditModal", "fuelModalInput", "fuelModalCancelBtn", "fuelModalUpdateBtn", "fuelModalDeleteBtn", { loadMasterFuel() }, { fuelCurrentPage = 1; loadMasterFuel() }) }
@@ -13034,12 +12829,18 @@ fun loadMasterCarGrade() { loadSimpleMaster("master-menu/car_grade", "carGradeFi
 fun showAddCarGradeModal() { addSimpleMasterModal("master-menu/car_grade", "Car Grade", "carGradeEditModal", "carGradeModalInput", "carGradeModalCancelBtn", "carGradeModalAddBtn", { carGradeCurrentPage = 1; loadMasterCarGrade() }) }
 fun showEditCarGradeModal(originalName: String) { editSimpleMasterModal("master-menu/car_grade", "Car Grade", originalName, "carGradeEditModal", "carGradeModalInput", "carGradeModalCancelBtn", "carGradeModalUpdateBtn", "carGradeModalDeleteBtn", { loadMasterCarGrade() }, { carGradeCurrentPage = 1; loadMasterCarGrade() }) }
 
-fun showMasterCarShiftPage() { window.location.hash = "#/master/car-shift"; renderSimpleMasterPage("car_shift", "Car Shift", "carShift", "carShiftFilter", "carShiftTable", "addCarShiftBtn", ::loadMasterCarShift, ::showAddCarShiftModal) }
+fun showMasterCarShiftPage() {
+    window.location.hash = "#/master/set/shift"
+    showDynamicMasterSetPage("shift")
+}
 fun loadMasterCarShift() { loadSimpleMaster("master-menu/shift", "carShiftFilter", "carShiftTable", "Car Shift", carShiftCurrentPage, carShiftItemsPerPage, allCarShifts, { carShiftCurrentPage = it }, { allCarShifts = it }, ::showEditCarShiftModal, "car-shift-edit-btn", "data-car-shift", "carShiftPrevPage", "carShiftNextPage", ::loadMasterCarShift) }
 fun showAddCarShiftModal() { addSimpleMasterModal("master-menu/shift", "Car Shift", "carShiftEditModal", "carShiftModalInput", "carShiftModalCancelBtn", "carShiftModalAddBtn", { carShiftCurrentPage = 1; loadMasterCarShift() }) }
 fun showEditCarShiftModal(originalName: String) { editSimpleMasterModal("master-menu/shift", "Car Shift", originalName, "carShiftEditModal", "carShiftModalInput", "carShiftModalCancelBtn", "carShiftModalUpdateBtn", "carShiftModalDeleteBtn", { loadMasterCarShift() }, { carShiftCurrentPage = 1; loadMasterCarShift() }) }
 
-fun showMasterTypeOfVehiclesPage() { window.location.hash = "#/master/type-of-vehicles"; renderSimpleMasterPage("type_of_vehicles", "Type of Vehicles", "typeOfVehicles", "typeOfVehiclesFilter", "typeOfVehiclesTable", "addTypeOfVehiclesBtn", ::loadMasterTypeOfVehicles, ::showAddTypeOfVehiclesModal) }
+fun showMasterTypeOfVehiclesPage() {
+    window.location.hash = "#/master/set/type_of_vehicle"
+    showDynamicMasterSetPage("type_of_vehicle")
+}
 fun loadMasterTypeOfVehicles() { loadSimpleMaster("master-menu/type_of_vehicle", "typeOfVehiclesFilter", "typeOfVehiclesTable", "Type of Vehicles", typeOfVehiclesCurrentPage, typeOfVehiclesItemsPerPage, allTypeOfVehicles, { typeOfVehiclesCurrentPage = it }, { allTypeOfVehicles = it }, ::showEditTypeOfVehiclesModal, "type-of-vehicles-edit-btn", "data-type-of-vehicles", "typeOfVehiclesPrevPage", "typeOfVehiclesNextPage", ::loadMasterTypeOfVehicles) }
 fun showAddTypeOfVehiclesModal() { addSimpleMasterModal("master-menu/type_of_vehicle", "Type of Vehicles", "typeOfVehiclesEditModal", "typeOfVehiclesModalInput", "typeOfVehiclesModalCancelBtn", "typeOfVehiclesModalAddBtn", { typeOfVehiclesCurrentPage = 1; loadMasterTypeOfVehicles() }) }
 fun showEditTypeOfVehiclesModal(originalName: String) { editSimpleMasterModal("master-menu/type_of_vehicle", "Type of Vehicles", originalName, "typeOfVehiclesEditModal", "typeOfVehiclesModalInput", "typeOfVehiclesModalCancelBtn", "typeOfVehiclesModalUpdateBtn", "typeOfVehiclesModalDeleteBtn", { loadMasterTypeOfVehicles() }, { typeOfVehiclesCurrentPage = 1; loadMasterTypeOfVehicles() }) }
@@ -13080,10 +12881,11 @@ fun showDynamicMasterSetPage(fieldName: String) {
 }
 
 private fun showDynamicMasterSetPageInner(normalizedField: String) {
-    val title = normalizedField
-        .split("_")
-        .filter { it.isNotBlank() }
-        .joinToString(" ") { it.replaceFirstChar { ch -> ch.uppercaseChar() } }
+    val title = simpleMasterTitleOverrides[normalizedField]
+        ?: normalizedField
+            .split("_")
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { it.replaceFirstChar { ch -> ch.uppercaseChar() } }
     val key = normalizedField.replace(Regex("[^a-z0-9]"), "")
     val listId = "dynamicMasterList$key"
     val filterId = "dynamicMasterFilter$key"
@@ -13162,30 +12964,231 @@ private fun showDynamicMasterSetPageInner(normalizedField: String) {
     )
 }
 
+private fun simpleMasterIsCompactLayout(): Boolean {
+    val w = window.innerWidth
+    return w > 0 && w <= SIMPLE_MASTER_COMPACT_MAX_WIDTH_PX
+}
+
+private fun simpleMasterEditButtonHtml(editBtnClass: String, dataAttr: String, name: String): String {
+    val safeName = escapeHtml(name)
+    return """<button type="button" class="$editBtnClass" $dataAttr="$safeName" aria-label="Edit" title="Edit"
+        style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 4px rgba(76,201,255,0.30);padding:0;">
+        <svg viewBox="0 0 24 24" fill="none" width="18" height="18"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/><path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/></svg>
+    </button>"""
+}
+
+private fun simpleMasterPagerHtml(meta: SimpleMasterRenderMeta): String {
+    val sorted = meta.sorted
+    val page = meta.page
+    val itemsPerPage = meta.itemsPerPage
+    val totalPages = kotlin.math.ceil(sorted.size.toDouble() / itemsPerPage).toInt().coerceAtLeast(1)
+    val safeTitle = escapeHtml(meta.title)
+    if (totalPages <= 1) {
+        return """<div class="simple-master-pager"><span>Total: ${sorted.size} $safeTitle</span></div>"""
+    }
+    val prevDisabled = if (page <= 1) " disabled" else ""
+    val nextDisabled = if (page >= totalPages) " disabled" else ""
+    return """
+        <div class="simple-master-pager">
+            <button type="button" id="${meta.prevBtnId}" class="simple-master-pager-btn"$prevDisabled>Prev</button>
+            <span class="simple-master-pager-meta">Page $page of $totalPages</span>
+            <button type="button" id="${meta.nextBtnId}" class="simple-master-pager-btn"$nextDisabled>Next</button>
+        </div>
+    """.trimIndent()
+}
+
+private fun renderSimpleMasterListUi(meta: SimpleMasterRenderMeta) {
+    val tableDiv = document.getElementById(meta.tableId) ?: return
+    simpleMasterLastRenderMeta[meta.tableId] = meta
+    val sorted = meta.sorted
+    val page = meta.page
+    val itemsPerPage = meta.itemsPerPage
+    val title = meta.title
+    val safeTitle = escapeHtml(title)
+    if (sorted.isEmpty()) {
+        val emptyMsg = if (meta.searchFilter.isNotEmpty()) "No matches for your search." else "No $safeTitle found yet."
+        tableDiv.innerHTML = """<div class="simple-master-empty"><strong>No results</strong><div>$emptyMsg</div></div>"""
+        return
+    }
+    val totalPages = kotlin.math.ceil(sorted.size.toDouble() / itemsPerPage).toInt().coerceAtLeast(1)
+    val startIndex = ((page - 1) * itemsPerPage).coerceIn(0, sorted.size)
+    val endIndex = kotlin.math.min(startIndex + itemsPerPage, sorted.size)
+    val pageItems = sorted.subList(startIndex, endIndex)
+    val sortOrder = dynamicMasterSetSortOrder[meta.apiPath] ?: "desc"
+    val sortArrow = if (sortOrder == "asc") "↑" else "↓"
+    val sortTooltip = if (sortOrder == "asc") "Sorted A-Z (click for Z-A)" else "Sorted Z-A (click for A-Z)"
+    val pagerHtml = simpleMasterPagerHtml(meta)
+    val compact = simpleMasterIsCompactLayout()
+    if (!compact) {
+        var rowsHtml = ""
+        for ((idx, name) in pageItems.withIndex()) {
+            val rowNum = startIndex + idx + 1
+            rowsHtml += """
+                <tr>
+                    <td><div class="simple-master-id-cell">${simpleMasterEditButtonHtml(meta.editBtnClass, meta.dataAttr, name)}<span>$rowNum</span></div></td>
+                    <td>${escapeHtml(name)}</td>
+                </tr>
+            """.trimIndent()
+        }
+        tableDiv.innerHTML = """
+            <div class="simple-master-table-shell">
+                <table class="purchase-list-table simple-master-table">
+                    <colgroup><col style="width:120px"><col></colgroup>
+                    <thead><tr>
+                        <th>ID</th>
+                        <th><button type="button" class="simple-master-sort-btn" data-sm-sort title="$sortTooltip"><span>$safeTitle</span><span aria-hidden="true">$sortArrow</span></button></th>
+                    </tr></thead>
+                    <tbody>$rowsHtml</tbody>
+                </table>
+            </div>
+            $pagerHtml
+        """.trimIndent()
+    } else {
+        var cardsHtml = """<div class="simple-master-cards">"""
+        for ((idx, name) in pageItems.withIndex()) {
+            val rowNum = startIndex + idx + 1
+            cardsHtml += """
+                <div class="simple-master-card">
+                    <div class="simple-master-card-top">
+                        <div class="simple-master-card-actions">${simpleMasterEditButtonHtml(meta.editBtnClass, meta.dataAttr, name)}</div>
+                        <span class="simple-master-card-id">#$rowNum</span>
+                    </div>
+                    <div class="simple-master-card-grid">
+                        <div class="simple-master-kv"><span class="simple-master-k">$safeTitle</span><span class="simple-master-v">${escapeHtml(name)}</span></div>
+                    </div>
+                </div>
+            """.trimIndent()
+        }
+        cardsHtml += "</div>$pagerHtml"
+        tableDiv.innerHTML = cardsHtml
+    }
+}
+
+private fun setupSimpleMasterResizeListener(pageId: String, tableId: String) {
+    val page = document.getElementById(pageId) ?: return
+    if (page.hasAttribute("data-simple-master-resize")) return
+    page.setAttribute("data-simple-master-resize", "true")
+    window.addEventListener("resize", { _: Event ->
+        simpleMasterResizeDebounceHandle?.let { window.clearTimeout(it) }
+        simpleMasterResizeDebounceHandle = window.setTimeout({
+            if (document.getElementById(pageId) == null) return@setTimeout
+            simpleMasterLastRenderMeta[tableId]?.let { renderSimpleMasterListUi(it) }
+        }, 120)
+    })
+}
+
+private fun setupSimpleMasterTableDelegation(tableWrapId: String, tableId: String) {
+    val wrap = document.getElementById(tableWrapId) ?: return
+    if (wrap.hasAttribute("data-sm-delegation")) return
+    wrap.setAttribute("data-sm-delegation", "true")
+    wrap.addEventListener("click", { e: Event ->
+        val target = e.target as? Element ?: return@addEventListener
+        val meta = simpleMasterLastRenderMeta[tableId] ?: return@addEventListener
+        val sortBtn = target.closest("button[data-sm-sort]")
+        if (sortBtn != null) {
+            e.preventDefault()
+            val current = dynamicMasterSetSortOrder[meta.apiPath] ?: "desc"
+            dynamicMasterSetSortOrder[meta.apiPath] = if (current == "asc") "desc" else "asc"
+            meta.setPage(1)
+            meta.loadFn()
+            return@addEventListener
+        }
+        val editBtn = target.closest("button.${meta.editBtnClass}")
+        if (editBtn != null) {
+            e.preventDefault()
+            val value = editBtn.getAttribute(meta.dataAttr)?.trim() ?: return@addEventListener
+            meta.editModalFn(value)
+            return@addEventListener
+        }
+        val pagerBtn = target.closest("button") as? HTMLElement ?: return@addEventListener
+        val totalPages = kotlin.math.ceil(meta.sorted.size.toDouble() / meta.itemsPerPage).toInt().coerceAtLeast(1)
+        when (pagerBtn.id) {
+            meta.prevBtnId -> if (meta.page > 1) {
+                meta.setPage(meta.page - 1)
+                meta.loadFn()
+            }
+            meta.nextBtnId -> if (meta.page < totalPages) {
+                meta.setPage(meta.page + 1)
+                meta.loadFn()
+            }
+        }
+    })
+}
+
 private fun renderSimpleMasterPage(apiPath: String, title: String, listId: String, filterId: String, tableId: String, addBtnId: String, loadFn: () -> Unit, addModalFn: () -> Unit) {
-    val content = document.getElementById("content")!!
+    val content = document.getElementById("content") ?: return
+    val pageId = "${listId}Page"
+    val tableWrapId = "${tableId}Wrap"
+    val safeTitle = escapeHtml(title)
+    val searchPlaceholder = "Search $title…"
     content.innerHTML = """
-        <div id="${listId}List" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #111827; font-size: 28px; font-weight: 700;">$title</h2>
-                <div><button id="$addBtnId" style="padding: 8px 16px; background-color: #10b981; color: white; border: none; border-radius: 9999px; cursor: pointer; font-size: 14px;">+ Add $title</button></div>
+        <style>
+            #$pageId{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:20px;max-width:1200px;margin:0 auto;width:100%;box-sizing:border-box;}
+            .simple-master-toolbar{display:grid;grid-template-columns:1fr;grid-template-areas:"title" "search" "add";gap:12px;margin-bottom:16px;align-items:center;}
+            .simple-master-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;grid-area:title;text-align:center;}
+            .simple-master-search{grid-area:search;width:100%;position:relative;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
+            .simple-master-search input{width:100%;box-sizing:border-box;padding:11px 36px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
+            .simple-master-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;}
+            .simple-master-search-clear:hover{background:#f3f4f6;color:#111827;}
+            .simple-master-add-btn{grid-area:add;justify-self:end;padding:10px 16px;background:#10b981;color:#fff;border:none;border-radius:9999px;cursor:pointer;font-size:14px;font-weight:600;min-height:40px;white-space:nowrap;}
+            .simple-master-table-shell{overflow-x:auto;border-radius:12px;background:#fff;border:1px solid #eef2f7;}
+            table.simple-master-table thead th{position:sticky;top:0;z-index:1;background:#f9fafb;}
+            .simple-master-id-cell{display:flex;align-items:center;gap:10px;}
+            .simple-master-sort-btn{background:none;border:none;cursor:pointer;font-weight:600;color:#111827;padding:0;display:inline-flex;align-items:center;gap:6px;font-size:inherit;}
+            .simple-master-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+            .simple-master-empty strong{color:#0f172a;}
+            .simple-master-cards{display:flex;flex-direction:column;gap:10px;}
+            .simple-master-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
+            .simple-master-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
+            .simple-master-card-id{font-size:12px;color:#64748b;font-weight:600;}
+            .simple-master-card-grid{display:grid;gap:8px;}
+            .simple-master-kv{display:flex;gap:10px;align-items:flex-start;}
+            .simple-master-k{min-width:120px;font-size:12px;color:#64748b;line-height:1.4;}
+            .simple-master-v{flex:1;min-width:0;font-weight:500;color:#0f172a;}
+            .simple-master-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:14px 4px 4px;color:#475569;font-size:14px;}
+            .simple-master-pager-btn{padding:8px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;min-height:36px;}
+            .simple-master-pager-btn:disabled{opacity:0.5;cursor:not-allowed;}
+            .simple-master-pager-meta{font-weight:500;color:#334155;}
+            @media (max-width:1024px){#$pageId{padding:14px;border-radius:14px;max-width:100%;}.simple-master-toolbar{gap:14px;}.simple-master-title{font-size:17px;}.simple-master-search input{font-size:13px;padding:10px 34px 10px 38px;}}
+            @media (min-width:1025px){.simple-master-toolbar{grid-template-columns:auto 1fr minmax(200px,25%) auto;grid-template-areas:"title . search add";column-gap:12px;row-gap:0;}.simple-master-title{text-align:left;justify-self:start;}}
+        </style>
+        <div id="$pageId">
+            <div class="simple-master-toolbar">
+                <h2 class="simple-master-title">$safeTitle</h2>
+                <div class="simple-master-search">
+                    <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af;display:flex;" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </span>
+                    <input type="text" id="$filterId" role="searchbox" autocomplete="off" inputmode="search" placeholder="$searchPlaceholder" aria-label="Search $safeTitle" />
+                    <button type="button" id="${filterId}Clear" class="simple-master-search-clear" title="Clear search" aria-label="Clear search">×</button>
+                </div>
+                <button type="button" id="$addBtnId" class="simple-master-add-btn">+ Add $safeTitle</button>
             </div>
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Search by $title:</label>
-                <input type="text" id="$filterId" placeholder="Type $title to filter..." style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px;">
+            <div id="$tableWrapId">
+                <div id="$tableId">
+                    <div class="simple-master-empty"><strong>Loading</strong><div>Loading $safeTitle…</div></div>
+                </div>
             </div>
-            <div id="$tableId" style="margin-top: 20px;"><div style="text-align: center; color: #6b7280; padding: 60px 20px;">Loading $title...</div></div>
         </div>
     """
-    loadFn()
-    document.getElementById(filterId)?.addEventListener("input", { _: Event -> loadFn() })
+    applyRoleBasedRestrictions()
+    ensureSidebarPresent()
+    setupSimpleMasterTableDelegation(tableWrapId, tableId)
+    setupSimpleMasterResizeListener(pageId, tableId)
+    val searchInput = document.getElementById(filterId) as? HTMLInputElement
+    searchInput?.addEventListener("input", { _: Event -> loadFn() })
+    document.getElementById("${filterId}Clear")?.addEventListener("click", { _: Event ->
+        searchInput?.value = ""
+        loadFn()
+    })
     document.getElementById(addBtnId)?.addEventListener("click", { _: Event -> addModalFn() })
+    loadFn()
 }
 
 private fun loadSimpleMaster(apiPath: String, filterId: String, tableId: String, title: String, currentPage: Int, itemsPerPage: Int, allList: List<String>, setPage: (Int) -> Unit, setList: (List<String>) -> Unit, editModalFn: (String) -> Unit, editBtnClass: String, dataAttr: String, prevBtnId: String, nextBtnId: String, loadFn: () -> Unit) {
     val tableDiv = document.getElementById(tableId) ?: return
     val searchFilter = (document.getElementById(filterId) as? HTMLInputElement)?.value?.trim()?.uppercase() ?: ""
-    tableDiv.innerHTML = "<div style=\"text-align: center; color: #6b7280; padding: 60px 20px;\">Loading $title...</div>"
+    tableDiv.innerHTML = """<div class="simple-master-empty"><strong>Loading</strong><div>Loading ${escapeHtml(title)}…</div></div>"""
     window.fetch(apiUrl(apiPath))
         .then { response: dynamic -> if (response.ok) response.json() else throw js("Error('Failed to load')") }
         .then { raw: dynamic ->
@@ -13199,65 +13202,27 @@ private fun loadSimpleMaster(apiPath: String, filterId: String, tableId: String,
             setList(sorted)
             if (searchFilter.isNotEmpty()) setPage(1)
             val page = if (searchFilter.isNotEmpty()) 1 else currentPage
-            if (sorted.isEmpty()) {
-                tableDiv.innerHTML = "<div style=\"text-align: center; color: #6b7280; padding: 60px 20px;\">No $title found.</div>"
-                return@then
-            }
-            val totalPages = kotlin.math.ceil(sorted.size.toDouble() / itemsPerPage).toInt()
-            val startIndex = ((page - 1) * itemsPerPage).coerceIn(0, sorted.size)
-            val endIndex = kotlin.math.min(startIndex + itemsPerPage, sorted.size)
-            val pageItems = sorted.subList(startIndex, endIndex)
-            val sortArrow = "↕"
-            val sortTooltip = if (sortOrder == "asc") "Sorted A-Z (click to sort Z-A)" else "Sorted Z-A (click to sort A-Z)"
-            val sortBtnId = "${tableId}SortBtn"
-            var html = """
-                <div style="overflow-x: auto;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <thead><tr style="background-color: #f9fafb; border-bottom: 2px solid #e5e7eb;">
-                            <th style="padding: 14px 16px; text-align: left; font-weight: 600;">ID</th>
-                            <th style="padding: 14px 16px; text-align: left; font-weight: 600;">
-                                <button id="$sortBtnId" title="$sortTooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
-                                    <span>$title</span><span style="font-size: 14px;">$sortArrow</span>
-                                </button>
-                            </th>
-                        </tr></thead><tbody>
-            """
-            for ((idx, name) in pageItems.withIndex()) {
-                val rowNum = startIndex + idx + 1
-                val safeName = name.replace("\"", "&quot;")
-                html += """
-                    <tr style="border-bottom: 1px solid #e5e7eb;">
-                        <td style="padding: 14px 16px;">
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <button class="$editBtnClass" $dataAttr="$safeName" style="display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer;">
-                                    <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/><path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/></svg>
-                                </button>
-                                <span>$rowNum</span>
-                            </div>
-                        </td>
-                        <td style="padding: 14px 16px; font-weight: 500;">$name</td>
-                    </tr>
-                """
-            }
-            html += "</tbody></table></div>"
-            if (totalPages > 1) html += "<div style=\"padding: 16px; background-color: #f9fafb;\"><button id=\"$prevBtnId\" ${if (page == 1) "disabled" else ""}>Previous</button> Page $page of $totalPages <button id=\"$nextBtnId\" ${if (page >= totalPages) "disabled" else ""}>Next</button></div>"
-            else html += "<div style=\"padding: 16px; background-color: #f9fafb;\">Total: ${sorted.size} $title</div>"
-            tableDiv.innerHTML = html
-            val editButtons = document.querySelectorAll(".$editBtnClass")
-            for (i in 0 until editButtons.length) {
-                val btn = editButtons.item(i) as? HTMLElement ?: continue
-                btn.addEventListener("click", { _: Event -> editModalFn(btn.getAttribute(dataAttr) ?: return@addEventListener) })
-            }
-            document.getElementById(prevBtnId)?.addEventListener("click", { _: Event -> if (page > 1) { setPage(page - 1); loadFn() } })
-            document.getElementById(nextBtnId)?.addEventListener("click", { _: Event -> if (page < totalPages) { setPage(page + 1); loadFn() } })
-            document.getElementById(sortBtnId)?.addEventListener("click", { _: Event ->
-                val current = dynamicMasterSetSortOrder[apiPath] ?: "desc"
-                dynamicMasterSetSortOrder[apiPath] = if (current == "asc") "desc" else "asc"
-                setPage(1)
-                loadFn()
-            })
+            val meta = SimpleMasterRenderMeta(
+                tableId = tableId,
+                title = title,
+                apiPath = apiPath,
+                editBtnClass = editBtnClass,
+                dataAttr = dataAttr,
+                prevBtnId = prevBtnId,
+                nextBtnId = nextBtnId,
+                setPage = setPage,
+                loadFn = loadFn,
+                editModalFn = editModalFn,
+                sorted = sorted,
+                page = page,
+                itemsPerPage = itemsPerPage,
+                searchFilter = searchFilter,
+            )
+            renderSimpleMasterListUi(meta)
         }
-        .catch { error: dynamic -> tableDiv.innerHTML = "<div style=\"text-align: center; color: #ef4444; padding: 60px 20px;\">Error loading $title</div>" }
+        .catch { _: dynamic ->
+            tableDiv.innerHTML = """<div class="simple-master-empty" style="color:#dc2626;"><strong>Could not load</strong><div>Error loading ${escapeHtml(title)}. Try again.</div></div>"""
+        }
 }
 
 private fun addSimpleMasterModal(apiPath: String, title: String, modalId: String, inputId: String, cancelBtnId: String, addBtnId: String, onSuccess: () -> Unit) {

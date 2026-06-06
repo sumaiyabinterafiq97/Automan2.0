@@ -57,4 +57,6 @@ enum class EventType {
     INVOICE_ISSUED,
     /** Reverses a prior [INVOICE_ISSUED] when an invoice is deleted or re-saved with a new total. */
     INVOICE_REVERSAL,
+    /** Starting balance from legacy Excel / migration (one per client). */
+    OPENING_BALANCE,
 }

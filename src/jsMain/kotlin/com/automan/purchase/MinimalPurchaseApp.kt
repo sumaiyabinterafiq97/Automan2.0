@@ -18243,7 +18243,7 @@ fun showRixoRequestGeneratorPage() {
     val updaterDeleteWrapClass = if (isEditMode) "" else "hidden"
     
     content.innerHTML = """
-        <div class="rixo-request-container">
+        <div class="rixo-request-container" id="rixoGeneratorPage">
             <div class="rixo-request-layout">
                 <!-- Left Panel: Rixo Request Generator Form -->
                 <div class="rixo-request-form-panel">
@@ -18316,10 +18316,10 @@ FAX: 047-711-0409
                 
                 <!-- Right Panel: Cars to Rixo -->
                 <div class="rixo-rows-preview-panel">
-                    <div class="rixo-rows-header">
+                    <div class="rixo-rows-header rixo-generator-toolbar">
                         <h2 class="rixo-rows-title">Cars to Rixo</h2>
-                        <button id="rixoColumnFilterBtn" type="button" style="padding:8px 14px;background-color:#6c757d;color:white;border:none;border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <button id="rixoColumnFilterBtn" type="button" class="rixo-generator-col-filter-btn">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                                 <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
                             </svg>
                             Column Filter
@@ -18700,83 +18700,6 @@ FAX: 047-711-0409
                 }
             }
             
-            /* Responsive table for mobile */
-            @media (max-width: 767px) {
-                .rixo-table {
-                    font-size: 12px;
-                    display: block;
-                    overflow-x: auto;
-                    -webkit-overflow-scrolling: touch;
-                }
-                
-                .rixo-table thead,
-                .rixo-table tbody,
-                .rixo-table tr {
-                    display: block;
-                }
-                
-                .rixo-table thead {
-                    display: none;
-                }
-                
-                .rixo-table tr {
-                    border: 1px solid #e5e7eb;
-                    border-radius: 8px;
-                    margin-bottom: 12px;
-                    padding: 12px;
-                    background: white;
-                }
-                
-                .rixo-table td {
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    padding: 8px 0;
-                    border: none;
-                    border-bottom: 1px solid #f3f4f6;
-                }
-                
-                .rixo-table td:last-child {
-                    border-bottom: none;
-                }
-                
-                .rixo-table td::before {
-                    content: attr(data-label);
-                    font-weight: 600;
-                    color: #6b7280;
-                    margin-right: 12px;
-                    flex-shrink: 0;
-                }
-                
-                .rixo-col-select,
-                .rixo-col-edit {
-                    display: inline-flex;
-                    width: auto;
-                }
-                
-                .rixo-edit-btn {
-                    width: 32px;
-                    height: 32px;
-                    min-width: 32px;
-                    min-height: 32px;
-                }
-                
-                .rixo-edit-btn svg {
-                    width: 12px;
-                    height: 12px;
-                }
-                
-                .rixo-update-btn {
-                    width: 34px;
-                    height: 34px;
-                    min-width: 34px;
-                    min-height: 34px;
-                }
-                
-                .rixo-inline-control {
-                    max-width: 100%;
-                }
-            }
         </style>
     """
     
@@ -19997,7 +19920,7 @@ private fun rixoInlineNumberCutMarkup(purchase: dynamic): String {
     val escN1 = escapeAttr(parts.num1)
     val escN2 = escapeAttr(parts.num2)
     return """
-        <div class="rixo-nc-cell" data-nc-pid="$pid" style="min-width:140px;">
+        <div class="rixo-nc-cell" data-nc-pid="$pid">
             <input type="hidden" class="rixo-inline-control rixo-nc-hidden" data-col="numberCut" value="$hiddenVal">
             <div class="rixo-nc-shaken-edit" style="margin-bottom:6px;">
                 <label style="font-size:12px;color:#374151;display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
@@ -20006,12 +19929,12 @@ private fun rixoInlineNumberCutMarkup(purchase: dynamic): String {
                 </label>
             </div>
             <div class="rixo-nc-collapsed" style="font-size:13px;padding:4px 6px;border:1px solid #ddd;border-radius:4px;background:#f9fafb;">$collapsedText</div>
-            <div class="rixo-nc-expanded" style="display:none;margin-top:4px;">
-                <div style="display:grid;grid-template-columns:1fr 48px;gap:4px;margin-bottom:4px;">
-                    <div style="grid-column:1/-1;">$placeComb</div>
-                    <input type="number" id="$n1Id" class="rixo-nc-n1" placeholder="#" value="$escN1" style="width:100%;padding:4px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;">
-                    <div style="grid-column:1/-1;">$hiraComb</div>
-                    <input type="number" id="$n2Id" class="rixo-nc-n2" placeholder="#" value="$escN2" style="width:100%;padding:4px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box;">
+            <div class="rixo-nc-expanded" style="display:none;">
+                <div class="rixo-nc-expanded-grid">
+                    <div class="rixo-nc-place-row">$placeComb</div>
+                    <input type="number" id="$n1Id" class="rixo-nc-n1 rixo-inline-control" placeholder="#" value="$escN1">
+                    <div class="rixo-nc-hira-row">$hiraComb</div>
+                    <input type="number" id="$n2Id" class="rixo-nc-n2 rixo-inline-control" placeholder="#" value="$escN2">
                 </div>
             </div>
         </div>

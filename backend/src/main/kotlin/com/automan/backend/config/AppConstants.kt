@@ -20,5 +20,5 @@ object AppConstants {
     const val CREDIT_LIMIT_NEAR_FRACTION = 0.9
 
     /** Phase 3: when true, reject invoice save if projected balance exceeds credit limit. */
-    const val BLOCK_INVOICE_WHEN_OVER_CREDIT_LIMIT = false
+    const val BLOCK_INVOICE_WHEN_OVER_CREDIT_LIMIT = true
 }

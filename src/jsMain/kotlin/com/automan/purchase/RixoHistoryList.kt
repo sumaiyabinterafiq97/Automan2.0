@@ -18,6 +18,9 @@ private var rixoHistoryCachedRows: Array<dynamic> = emptyArray()
 private var rixoHistorySortField: String = "buyingDate"
 private var rixoHistorySortOrder: String = "desc"
 private val rixoHistorySelectedIds: MutableSet<String> = mutableSetOf()
+private var rixoHistoryResizeDebounceHandle: Int? = null
+
+private const val RIXO_HISTORY_COMPACT_MAX_WIDTH_PX = 860
 
 fun showRixoHistoryPage() {
     window.location.hash = "#/rixo-history"
@@ -28,29 +31,83 @@ fun showRixoHistoryPage() {
     rixoHistorySelectedIds.clear()
 
     content.innerHTML = """
-        <div id="rixoHistoryPage" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; background: #fafbfc;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;">
-                <h2 style="margin: 0;">Rixo History</h2>
-                <div style="display: flex; flex-direction: column; align-items: stretch; gap: 10px; flex: 1; min-width: 0; max-width: 640px;">
-                    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap;">
-                        <button id="rixoConfirmSelectedBtn" type="button" style="padding: 9px 14px; border: 1px solid #0f766e; border-radius: 8px; background: linear-gradient(135deg, #14b8a6, #0f766e); color: #fff; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(15,118,110,0.25);">
-                            Rixo Confirm
-                        </button>
-                    </div>
-                    <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
-                        <div style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: all .3s ease;">
-                            <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; color: #9ca3af; display: flex;" aria-hidden="true">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                            </span>
-                            <input type="text" id="rixoHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search buying date, Rixo company, message, chassis…" aria-label="Search Rixo history" style="width: 100%; box-sizing: border-box; padding: 12px 40px 12px 44px; border: none; font-size: 14px; background: transparent; border-radius: 999px; outline: none; transition: all .2s ease;" />
-                            <button type="button" id="rixoHistorySearchClearBtn" title="Clear search" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: #9ca3af; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 8px;">×</button>
-                        </div>
-                    </div>
+        <style>
+            #rixoHistoryPage{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:20px;}
+            .rixo-history-toolbar{
+                display:grid;
+                grid-template-columns:1fr;
+                grid-template-areas:
+                    "title"
+                    "search"
+                    "confirm";
+                gap:12px;
+                margin-bottom:16px;
+                align-items:center;
+            }
+            .rixo-history-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;grid-area:title;text-align:center;}
+            .rixo-search{grid-area:search;width:100%;}
+            #rixoConfirmSelectedBtn{grid-area:confirm;justify-self:end;}
+            .rixo-primary-btn{padding:10px 14px;border:1px solid #0f766e;border-radius:10px;background:linear-gradient(135deg,#14b8a6,#0f766e);color:#fff;font-weight:700;cursor:pointer;box-shadow:0 2px 10px rgba(15,118,110,0.22);min-height:40px;white-space:nowrap;flex-shrink:0;}
+            .rixo-primary-btn:disabled{opacity:.6;cursor:not-allowed;box-shadow:none;}
+            .rixo-search{position:relative;flex:1;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
+            .rixo-search input{width:100%;box-sizing:border-box;padding:11px 36px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
+            .rixo-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;line-height:1;padding:6px 8px;border-radius:10px;min-height:36px;min-width:36px;}
+            .rixo-search-clear:hover{background:#f3f4f6;color:#111827;}
+            .rixo-history-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
+            table.purchase-list-table thead th{position:sticky;top:0;z-index:1;}
+            .rixo-history-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+            .rixo-history-empty strong{color:#0f172a;}
+
+            /* Card list (compact) */
+            .rixo-cards{display:flex;flex-direction:column;gap:10px;}
+            .rixo-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
+            .rixo-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
+            .rixo-card-actions{display:flex;align-items:center;gap:10px;}
+            .rixo-card-select{display:flex;align-items:center;gap:10px;}
+            .rixo-card-grid{display:grid;grid-template-columns:1fr;gap:8px;}
+            .rixo-kv{display:flex;gap:10px;align-items:flex-start;}
+            .rixo-k{min-width:132px;font-size:12px;color:#64748b;line-height:1.4;}
+            .rixo-v{flex:1;min-width:0;}
+            .rixo-divider{height:1px;background:#eef2f7;margin:10px 0;}
+            .rixo-checkbox{width:18px;height:18px;cursor:pointer;}
+
+            @media (max-width: 1024px){
+                #rixoHistoryPage{padding:14px;border-radius:14px;}
+                .rixo-history-toolbar{gap:14px;margin-bottom:14px;}
+                .rixo-history-title{font-size:17px;}
+                .rixo-search input{font-size:13px;padding:10px 34px 10px 38px;}
+            }
+            @media (min-width: 1025px){
+                .rixo-history-toolbar{
+                    grid-template-columns:auto 1fr minmax(200px,25%) auto;
+                    grid-template-areas:"title . search confirm";
+                    column-gap:12px;
+                    row-gap:0;
+                    align-items:center;
+                }
+                .rixo-history-title{text-align:left;justify-self:start;}
+                .rixo-search{width:100%;max-width:100%;justify-self:stretch;}
+                #rixoConfirmSelectedBtn{justify-self:end;}
+            }
+        </style>
+
+        <div id="rixoHistoryPage">
+            <div class="rixo-history-toolbar">
+                <h2 class="rixo-history-title">Rixo History</h2>
+                <div class="rixo-search">
+                    <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af;display:flex;" aria-hidden="true">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                    </span>
+                    <input type="text" id="rixoHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search buying date, Rixo company, message, chassis…" aria-label="Search Rixo history" />
+                    <button type="button" id="rixoHistorySearchClearBtn" class="rixo-search-clear" title="Clear search" aria-label="Clear search">×</button>
                 </div>
+                <button id="rixoConfirmSelectedBtn" type="button" class="rixo-primary-btn" disabled>
+                    Rixo Confirm
+                </button>
             </div>
             <div id="rixoHistoryTableWrap">
                 <div id="rixoHistoryTable" style="margin-top: 8px;">
-                    <div style="text-align: center; color: #666; padding: 40px;">Loading Rixo history…</div>
+                    <div class="rixo-history-empty"><strong>Loading</strong><div>Loading Rixo history…</div></div>
                 </div>
             </div>
         </div>
@@ -67,6 +124,8 @@ fun showRixoHistoryPage() {
         searchInput?.value = ""
         renderRixoHistoryTableFromCache()
     })
+
+    setupRixoHistoryResizeListener()
 
     val wrap = document.getElementById("rixoHistoryTableWrap")
     if (wrap != null && !wrap.hasAttribute("data-rixo-history-sort-delegation")) {
@@ -119,25 +178,6 @@ fun showRixoHistoryPage() {
                 }
                 return@addEventListener
             }
-            val allCb = target.closest("input[data-rixo-history-select-all]") as? HTMLInputElement
-            if (allCb != null) {
-                val body = document.getElementById("rixoHistoryTableBody")
-                val boxes = body?.querySelectorAll("input[data-rixo-history-select]") ?: return@addEventListener
-                if (allCb.checked) {
-                    for (i in 0 until boxes.length) {
-                        val cb = boxes.item(i) as? HTMLInputElement ?: continue
-                        cb.checked = true
-                        cb.getAttribute("data-history-id")?.trim()?.takeIf { it.isNotEmpty() }?.let { rixoHistorySelectedIds.add(it) }
-                    }
-                } else {
-                    for (i in 0 until boxes.length) {
-                        val cb = boxes.item(i) as? HTMLInputElement ?: continue
-                        cb.checked = false
-                        cb.getAttribute("data-history-id")?.trim()?.takeIf { it.isNotEmpty() }?.let { rixoHistorySelectedIds.remove(it) }
-                    }
-                }
-                updateRixoHistorySelectionUi()
-            }
         })
     }
 
@@ -148,15 +188,26 @@ fun showRixoHistoryPage() {
     loadRixoHistory()
 }
 
+private fun rixoHistoryIsCompactLayout(): Boolean {
+    val w = window.innerWidth
+    return w > 0 && w <= RIXO_HISTORY_COMPACT_MAX_WIDTH_PX
+}
+
+private fun setupRixoHistoryResizeListener() {
+    val page = document.getElementById("rixoHistoryPage") ?: return
+    if (page.hasAttribute("data-rixo-history-resize")) return
+    page.setAttribute("data-rixo-history-resize", "true")
+    window.addEventListener("resize", { _: Event ->
+        val prev = rixoHistoryResizeDebounceHandle
+        if (prev != null) window.clearTimeout(prev)
+        rixoHistoryResizeDebounceHandle = window.setTimeout({
+            if (document.getElementById("rixoHistoryPage") == null) return@setTimeout
+            if (rixoHistoryCachedRows.isNotEmpty()) renderRixoHistoryTableFromCache()
+        }, 120)
+    })
+}
+
 private fun updateRixoHistorySelectionUi() {
-    val body = document.getElementById("rixoHistoryTableBody")
-    val selectedVisibleCount = body?.querySelectorAll("input[data-rixo-history-select]:checked")?.length ?: 0
-    val allBoxes = body?.querySelectorAll("input[data-rixo-history-select]")?.length ?: 0
-    val allCb = document.querySelector("input[data-rixo-history-select-all]") as? HTMLInputElement
-    if (allCb != null) {
-        allCb.checked = allBoxes > 0 && selectedVisibleCount == allBoxes
-        allCb.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < allBoxes
-    }
     val confirmBtn = document.getElementById("rixoConfirmSelectedBtn") as? HTMLButtonElement
     if (confirmBtn != null) {
         val hasAny = rixoHistorySelectedIds.isNotEmpty()
@@ -297,7 +348,7 @@ private fun rixoHistoryChassisTokenMatchesPurchase(token: String, purchaseChassi
     return false
 }
 
-private fun rixoHistoryPurchaseRixoCompanyRaw(purchase: dynamic): String =
+private fun rixoHistoryPurchaseRixoCompanyRaw(@Suppress("UNUSED_PARAMETER") purchase: dynamic): String =
     js("purchase.rixoCompany")?.toString()?.trim() ?: ""
 
 private fun rixoHistoryPurchaseMatchesRowFilters(
@@ -416,6 +467,7 @@ private fun downloadRixoHistoryPdf(row: dynamic, btn: HTMLButtonElement?) {
                 ErrorHandler.showError("Failed to download PDF: ${ErrorHandler.extractErrorMessage(errorText)}")
                 return@launch
             }
+            @Suppress("UNUSED_VARIABLE")
             val blob = response.blob().await()
             val url = js("URL.createObjectURL(blob)") as String
             try {
@@ -471,7 +523,7 @@ private fun rixoHistoryConfirmedIndicatorHtml(confirmed: Boolean): String {
 
 private fun loadRixoHistory() {
     val tableHost = document.getElementById("rixoHistoryTable") ?: return
-    tableHost.innerHTML = """<div style="text-align: center; color: #666; padding: 40px;">Loading Rixo history…</div>"""
+    tableHost.innerHTML = """<div class="rixo-history-empty"><strong>Loading</strong><div>Loading Rixo history…</div></div>"""
 
     MainScope().launch {
         ApiClient.get<Array<dynamic>>("rixo-history").fold(
@@ -481,7 +533,12 @@ private fun loadRixoHistory() {
             },
             onError = { message, _ ->
                 ErrorHandler.showError("Failed to load Rixo history: $message")
-                tableHost.innerHTML = """<div style="text-align: center; color: #c00; padding: 40px;">Could not load Rixo history.</div>"""
+                tableHost.innerHTML = """
+                    <div class="rixo-history-empty" style="color:#b91c1c;">
+                        <strong>Could not load</strong>
+                        <div>Unable to load Rixo history. Please reload and try again.</div>
+                    </div>
+                """
             },
         )
     }
@@ -566,7 +623,7 @@ private fun compareRixoHistoryRows(a: dynamic, b: dynamic, field: String, asc: B
             orient(ca.compareTo(cb))
         }
         "rixoConfirmedDate" -> {
-            fun rawIso(r: dynamic): String {
+            fun rawIso(@Suppress("UNUSED_PARAMETER") r: dynamic): String {
                 val v = js("r.rixoConfirmedDate")
                 if (v == null || v === js("void 0")) return ""
                 return v.toString().trim()
@@ -627,22 +684,14 @@ private fun renderRixoHistoryTableFromCache() {
     val q = (document.getElementById("rixoHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
 
     if (rixoHistoryCachedRows.isEmpty()) {
-        tableHost.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                No Rixo history records yet.
-            </div>
-        """
+        tableHost.innerHTML = """<div class="rixo-history-empty"><strong>No history yet</strong><div>No Rixo history records yet.</div></div>"""
         return
     }
 
     var rows = rixoHistoryCachedRows.filter { rixoHistoryRowMatchesQuery(it, q) }.toTypedArray()
 
     if (rows.isEmpty()) {
-        tableHost.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                No rows match your search.
-            </div>
-        """
+        tableHost.innerHTML = """<div class="rixo-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
         return
     }
 
@@ -654,6 +703,7 @@ private fun renderRixoHistoryTableFromCache() {
     val knownIds = rows.map { rixoHistoryRowIdString(it) }.filter { it.isNotEmpty() }.toSet()
     rixoHistorySelectedIds.retainAll(knownIds)
 
+    val compact = rixoHistoryIsCompactLayout()
     val colCountRixo = 3 + rixoHistoryDisplayColumnKeys().size
     val rixoHistoryColWidthsPx = listOf(
         56, // Edit
@@ -667,54 +717,112 @@ private fun renderRixoHistoryTableFromCache() {
         200, // Chassis
     )
     val html = StringBuilder()
-    html.append("""<div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);"><table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupFixedWidthsPx(colCountRixo, rixoHistoryColWidthsPx)}<thead><tr style="background-color: #f8f9fa;">""")
-    html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 56px;">Edit</th>""")
-    html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 56px;">PDF</th>""")
-    html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 72px;"><input type="checkbox" data-rixo-history-select-all title="Select all visible rows" aria-label="Select all visible rows" style="width:16px; height:16px; cursor:pointer;" /></th>""")
-    for (key in rixoHistoryDisplayColumnKeys()) {
-        val label = escapeHtml(rixoHistoryColumnLabel(key))
-        val thAlign = if (key == "rixoConfirmed") "center" else "left"
-        val isActive = rixoHistorySortField == key
-        val sortOrder = if (isActive) rixoHistorySortOrder else "desc"
-        val tooltipRaw = when {
-            !isActive -> "Sort by ${rixoHistoryColumnLabel(key)}"
-            sortOrder == "asc" -> "Sorted ascending (click for descending)"
-            else -> "Sorted descending (click for ascending)"
-        }
-        val tooltip = escapeHtml(tooltipRaw)
-        html.append("""
-            <th style="padding: 12px; text-align: $thAlign; border-bottom: 1px solid #dee2e6;">
-                <button type="button" data-rixo-history-sort="$key" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
-                    <span>$label</span><span style="font-size: 14px;">↕</span>
-                </button>
-            </th>
-        """)
-    }
-    html.append("</tr></thead><tbody id='rixoHistoryTableBody'>")
-
-    for (row in rows) {
-        html.append("<tr>")
-        val hid = rixoHistoryRowIdString(row)
-        val checked = if (hid in rixoHistorySelectedIds) "checked" else ""
-        html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${rixoHistoryEditButtonHtml(hid)}</td>""")
-        html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${rixoHistoryPdfButtonHtml(hid)}</td>""")
-        html.append("""<td style="padding: 12px; text-align: center; vertical-align: middle;"><input type="checkbox" data-rixo-history-select data-history-id="${escapeHtml(hid)}" $checked title="Select row" aria-label="Select row ${escapeHtml(hid)}" style="width:16px; height:16px; cursor:pointer;" /></td>""")
+    if (!compact) {
         html.append(
-            """<td style="padding: 12px; text-align: center; vertical-align: middle;">${rixoHistoryConfirmedIndicatorHtml(rixoHistoryRixoConfirmedFromRow(row))}</td>"""
+            """<div class="rixo-history-table-shell"><table class="purchase-list-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">""" +
+                htmlTableColgroupFixedWidthsPx(colCountRixo, rixoHistoryColWidthsPx) +
+                """<thead><tr style="background-color:#f8f9fa;">"""
         )
+        html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 56px;">Edit</th>""")
+        html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 56px;">PDF</th>""")
+        html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 72px;">Select</th>""")
         for (key in rixoHistoryDisplayColumnKeys()) {
-            if (key == "rixoConfirmed") continue
-            val raw = rixoHistoryCell(row, key)
-            val cellHtml = when {
-                raw.isEmpty() -> ""
-                key == "chassis" -> formatRixoHistoryChassisChipsHtml(raw, hid)
-                else -> formatPurchaseListNeutralChipHtml(raw)
+            val label = escapeHtml(rixoHistoryColumnLabel(key))
+            val thAlign = if (key == "rixoConfirmed") "center" else "left"
+            val isActive = rixoHistorySortField == key
+            val sortOrder = if (isActive) rixoHistorySortOrder else "desc"
+            val tooltipRaw = when {
+                !isActive -> "Sort by ${rixoHistoryColumnLabel(key)}"
+                sortOrder == "asc" -> "Sorted ascending (click for descending)"
+                else -> "Sorted descending (click for ascending)"
             }
-            html.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
+            val tooltip = escapeHtml(tooltipRaw)
+            html.append(
+                """
+                <th style="padding: 12px; text-align: $thAlign; border-bottom: 1px solid #dee2e6;">
+                    <button type="button" data-rixo-history-sort="$key" title="$tooltip" style="background:none;border:none;cursor:pointer;font-weight:700;color:#0f172a;padding:0;display:inline-flex;align-items:center;gap:6px;">
+                        <span>$label</span><span style="font-size: 14px; color:#64748b;">↕</span>
+                    </button>
+                </th>
+                """
+            )
         }
-        html.append("</tr>")
+        html.append("</tr></thead><tbody id='rixoHistoryTableBody'>")
+
+        for (row in rows) {
+            html.append("<tr>")
+            val hid = rixoHistoryRowIdString(row)
+            val checked = if (hid in rixoHistorySelectedIds) "checked" else ""
+            html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${rixoHistoryEditButtonHtml(hid)}</td>""")
+            html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${rixoHistoryPdfButtonHtml(hid)}</td>""")
+            html.append(
+                """<td style="padding: 12px; text-align: center; vertical-align: middle;">""" +
+                    """<input type="checkbox" data-rixo-history-select data-history-id="${escapeHtml(hid)}" $checked title="Select row" aria-label="Select row ${escapeHtml(hid)}" class="rixo-checkbox" />""" +
+                    "</td>"
+            )
+            html.append(
+                """<td style="padding: 12px; text-align: center; vertical-align: middle;">${rixoHistoryConfirmedIndicatorHtml(rixoHistoryRixoConfirmedFromRow(row))}</td>"""
+            )
+            for (key in rixoHistoryDisplayColumnKeys()) {
+                if (key == "rixoConfirmed") continue
+                val raw = rixoHistoryCell(row, key)
+                val cellHtml = when {
+                    raw.isEmpty() -> ""
+                    key == "chassis" -> formatRixoHistoryChassisChipsHtml(raw, hid)
+                    else -> formatPurchaseListNeutralChipHtml(raw)
+                }
+                html.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
+            }
+            html.append("</tr>")
+        }
+        html.append("</tbody></table></div>")
+    } else {
+        html.append("""<div id="rixoHistoryTableBody" class="rixo-cards">""")
+        for (row in rows) {
+            val hid = rixoHistoryRowIdString(row)
+            val checked = if (hid in rixoHistorySelectedIds) "checked" else ""
+            val confirmed = rixoHistoryRixoConfirmedFromRow(row)
+            val confirmedDate = rixoHistoryCell(row, "rixoConfirmedDate")
+            val buyingDate = rixoHistoryCell(row, "buyingDate")
+            val rixoCompany = rixoHistoryCell(row, "rixoCompany")
+            val msg = rixoHistoryCell(row, "message")
+            val chassisRaw = rixoHistoryCell(row, "chassis")
+            html.append("""<div class="rixo-card">""")
+            html.append(
+                """
+                <div class="rixo-card-top">
+                    <div class="rixo-card-actions">
+                        ${rixoHistoryEditButtonHtml(hid)}
+                        ${rixoHistoryPdfButtonHtml(hid)}
+                    </div>
+                    <div class="rixo-card-select">
+                        <input type="checkbox" data-rixo-history-select data-history-id="${escapeHtml(hid)}" $checked
+                            aria-label="Select row ${escapeHtml(hid)}" title="Select row" class="rixo-checkbox" />
+                    </div>
+                </div>
+                """
+            )
+            html.append("""<div class="rixo-card-grid">""")
+            html.append("""<div class="rixo-kv"><div class="rixo-k">Rixo status</div><div class="rixo-v">${rixoHistoryConfirmedIndicatorHtml(confirmed)}</div></div>""")
+            if (confirmedDate.isNotEmpty()) {
+                html.append("""<div class="rixo-kv"><div class="rixo-k">Confirmed date</div><div class="rixo-v">${formatPurchaseListNeutralChipHtml(confirmedDate)}</div></div>""")
+            }
+            if (buyingDate.isNotEmpty()) {
+                html.append("""<div class="rixo-kv"><div class="rixo-k">Buying date</div><div class="rixo-v">${formatPurchaseListNeutralChipHtml(buyingDate)}</div></div>""")
+            }
+            if (rixoCompany.isNotEmpty()) {
+                html.append("""<div class="rixo-kv"><div class="rixo-k">Rixo company</div><div class="rixo-v">${formatPurchaseListNeutralChipHtml(rixoCompany)}</div></div>""")
+            }
+            if (msg.isNotEmpty()) {
+                html.append("""<div class="rixo-kv"><div class="rixo-k">Message</div><div class="rixo-v">${formatPurchaseListNeutralChipHtml(msg)}</div></div>""")
+            }
+            if (chassisRaw.isNotEmpty()) {
+                html.append("""<div class="rixo-kv"><div class="rixo-k">Chassis</div><div class="rixo-v">${formatRixoHistoryChassisChipsHtml(chassisRaw, hid)}</div></div>""")
+            }
+            html.append("""</div></div>""")
+        }
+        html.append("</div>")
     }
-    html.append("</tbody></table></div>")
 
     tableHost.innerHTML = html.toString()
     updateRixoHistorySelectionUi()

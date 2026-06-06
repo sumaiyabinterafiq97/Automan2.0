@@ -63,6 +63,8 @@ interface EventRepository : JpaRepository<Event, Long> {
     
     // Count events by client
     fun countByClientId(clientId: Long): Long
+
+    fun countByClientIdAndEventType(clientId: Long, eventType: EventType): Long
     
     // Find events with specific balance range
     @Query("SELECT e FROM Event e WHERE e.runningBalance BETWEEN :minBalance AND :maxBalance ORDER BY e.eventDate DESC")
@@ -70,6 +72,10 @@ interface EventRepository : JpaRepository<Event, Long> {
     
     // Find events by client ID ordered by event date and creation time
     fun findByClientIdOrderByEventDateAscCreatedAtAsc(clientId: Long): List<Event>
+
+    fun findByEventTypeInOrderByClientIdAscEventDateAsc(
+        eventTypes: Collection<EventType>,
+    ): List<Event>
     
     // Find events by client ID and date range
     fun findByClientIdAndEventDateBetween(clientId: Long, startDate: LocalDate, endDate: LocalDate): List<Event>

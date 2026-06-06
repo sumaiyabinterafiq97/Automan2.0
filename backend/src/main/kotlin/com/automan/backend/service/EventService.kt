@@ -184,6 +184,20 @@ class EventService(
         )
     }
 
+    /** Invoice numbers for [clientId] that still have a net charge on the ledger. */
+    fun findOpenInvoiceNumbers(clientId: Long): List<String> {
+        val numbers = eventRepository.findByClientIdOrderByEventDateAscCreatedAtAsc(clientId)
+            .mapNotNull { e ->
+                if (e.eventType == EventType.INVOICE_ISSUED) {
+                    e.invoiceNumber?.trim()?.takeIf { it.isNotEmpty() }
+                } else {
+                    null
+                }
+            }
+            .distinct()
+        return numbers.filter { openInvoiceLedgerCharge(clientId, it) > 0.01 }
+    }
+
     /** Net invoice charge still on the ledger: issued debits minus reversal credits. */
     internal fun openInvoiceLedgerCharge(clientId: Long, invoiceNumber: String): Double {
         val inv = invoiceNumber.trim()
@@ -201,7 +215,7 @@ class EventService(
         return (issued - reversed).coerceAtLeast(0.0)
     }
 
-    private fun isInvoiceLedgerBalancedTo(clientId: Long, invoiceNumber: String, targetCharge: Double): Boolean {
+    fun isInvoiceLedgerBalancedTo(clientId: Long, invoiceNumber: String, targetCharge: Double): Boolean {
         val open = openInvoiceLedgerCharge(clientId, invoiceNumber)
         return kotlin.math.abs(open - targetCharge) < 0.01
     }
@@ -255,49 +269,80 @@ class EventService(
         )
     }
     
-    @Transactional
-    fun updateEvent(id: Long, updateData: Map<String, Any>): Event? {
-        val existingEvent = eventRepository.findById(id).orElse(null)
-        if (existingEvent == null) {
-            return null
+  companion object {
+        fun isManualEditableEventType(type: EventType): Boolean = when (type) {
+            EventType.PAYMENT_RECEIVED, EventType.ADJUSTMENT, EventType.OPENING_BALANCE -> true
+            else -> false
         }
-        
-        // Create updated event with new data
+    }
+
+    @Transactional
+    fun updateManualEvent(id: Long, updateData: Map<String, Any>): Event? {
+        val existingEvent = eventRepository.findById(id).orElse(null) ?: return null
+        if (!isManualEditableEventType(existingEvent.eventType)) {
+            throw IllegalArgumentException(
+                "Only payment, adjustment, and opening balance entries can be edited. Invoice lines are managed from Invoice.",
+            )
+        }
+
         val updatedEvent = existingEvent.copy(
             eventDate = if (updateData["eventDate"] != null) {
                 LocalDate.parse(updateData["eventDate"] as String)
-            } else existingEvent.eventDate,
-            // eventType removed
-            eventDescription = updateData["eventDescription"] as? String ?: existingEvent.eventDescription,
-            quantity = (updateData["quantity"] as? Number)?.toInt() ?: existingEvent.quantity,
-            billNumber = updateData["billNumber"] as? String ?: existingEvent.billNumber,
-            invoiceNumber = updateData["invoiceNumber"] as? String ?: existingEvent.invoiceNumber,
-            transactionPrice = (updateData["transactionPrice"] as? Number)?.toDouble() ?: existingEvent.transactionPrice,
-            paymentReceived = (updateData["paymentReceived"] as? Number)?.toDouble() ?: existingEvent.paymentReceived
+            } else {
+                existingEvent.eventDate
+            },
+            eventDescription = if (updateData.containsKey("eventDescription")) {
+                updateData["eventDescription"] as? String
+            } else {
+                existingEvent.eventDescription
+            },
+            billNumber = if (updateData.containsKey("billNumber")) {
+                updateData["billNumber"] as? String
+            } else {
+                existingEvent.billNumber
+            },
+            transactionPrice = if (updateData.containsKey("transactionPrice")) {
+                (updateData["transactionPrice"] as? Number)?.toDouble()
+            } else {
+                existingEvent.transactionPrice
+            },
+            paymentReceived = if (updateData.containsKey("paymentReceived")) {
+                (updateData["paymentReceived"] as? Number)?.toDouble()
+            } else {
+                existingEvent.paymentReceived
+            },
         )
-        
-        // Recalculate running balance for this event and all subsequent events
-        recalculateBalancesFromEvent(existingEvent.clientId, existingEvent.eventDate)
-        
-        return eventRepository.save(updatedEvent)
+
+        eventRepository.save(updatedEvent)
+        recalculateAllBalancesForClient(existingEvent.clientId)
+        return eventRepository.findById(id).orElse(null)
     }
-    
+
     @Transactional
-    fun deleteEvent(id: Long): Boolean {
-        val event = eventRepository.findById(id).orElse(null)
-        if (event == null) {
-            return false
+    fun deleteManualEvent(id: Long): Boolean {
+        val event = eventRepository.findById(id).orElse(null) ?: return false
+        if (!isManualEditableEventType(event.eventType)) {
+            throw IllegalArgumentException(
+                "Only payment, adjustment, and opening balance entries can be deleted. Invoice lines are managed from Invoice.",
+            )
         }
-        
         val clientId = event.clientId
-        val eventDate = event.eventDate
-        
         eventRepository.deleteById(id)
-        
-        // Recalculate balances for all events after the deleted one
-        recalculateBalancesFromEvent(clientId, eventDate)
-        
+        recalculateAllBalancesForClient(clientId)
         return true
+    }
+
+    @Transactional
+    fun recalculateAllBalancesForClient(clientId: Long) {
+        val events = eventRepository.findByClientIdOrderByEventDateAscCreatedAtAsc(clientId)
+        var runningBalance = 0.0
+        for (event in events) {
+            runningBalance += (event.paymentReceived ?: 0.0) - (event.transactionPrice ?: 0.0)
+            if (kotlin.math.abs(event.runningBalance - runningBalance) > 0.001) {
+                eventRepository.save(event.copy(runningBalance = runningBalance))
+            }
+        }
+        updateClientBalance(clientId, runningBalance)
     }
     
     fun getTotalPaymentsByClientId(clientId: Long): Double {

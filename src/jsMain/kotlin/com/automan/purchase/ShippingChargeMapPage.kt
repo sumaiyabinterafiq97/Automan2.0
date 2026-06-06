@@ -29,6 +29,13 @@ private var scmSearchFieldChoice: String = "all"
 private var scmCurrentPage: Int = 1
 private val scmItemsPerPage: Int = 25
 private var scmSearchDebounceTimer: dynamic = null
+private var scmMapResizeDebounceHandle: Int? = null
+private var scmLastRenderSlice: List<ScmGroupRow>? = null
+private var scmLastRenderPage: Int = 1
+private var scmLastRenderTotalPages: Int = 1
+private var scmLastRenderFooter: String = ""
+
+private const val SCM_MAP_COMPACT_MAX_WIDTH_PX = 860
 
 private fun scmPriceTokenForJoin(v: Any?): String {
     if (v == null || v == js("undefined")) return ""
@@ -361,6 +368,75 @@ private fun renderScmPagerAndBind(tableDiv: HTMLElement, page: Int, totalPages: 
     )
 }
 
+private fun scmMapIsCompactLayout(): Boolean {
+    val w = window.innerWidth
+    return w > 0 && w <= SCM_MAP_COMPACT_MAX_WIDTH_PX
+}
+
+private fun setupScmMapResizeListener() {
+    val root = document.getElementById("scmMapRoot") ?: return
+    if (root.hasAttribute("data-scm-map-resize")) return
+    root.setAttribute("data-scm-map-resize", "true")
+    window.addEventListener("resize", { _: Event ->
+        val prev = scmMapResizeDebounceHandle
+        if (prev != null) window.clearTimeout(prev)
+        scmMapResizeDebounceHandle = window.setTimeout({
+            if (document.getElementById("scmMapRoot") == null) return@setTimeout
+            val slice = scmLastRenderSlice ?: return@setTimeout
+            val host = document.getElementById("scmMapTable") as? HTMLElement ?: return@setTimeout
+            renderGroupedTableUi(host, slice, scmLastRenderPage, scmLastRenderTotalPages, scmLastRenderFooter)
+        }, 120)
+    })
+}
+
+private fun scmMapActionButtonsHtml(stockEscaped: String): String =
+    """
+    <div style="display:flex;gap:8px;align-items:center;">
+        <button type="button" class="scm-edit-btn" data-scm-stock="$stockEscaped" aria-label="Edit" title="Edit" style="width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 6px rgba(76,201,255,0.30);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+            </svg>
+        </button>
+        <button type="button" class="scm-dup-btn" data-scm-stock="$stockEscaped" aria-label="Duplicate" title="Duplicate" style="width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;background-color:#3b82f6;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 6px rgba(59,130,246,0.30);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
+            </svg>
+        </button>
+    </div>
+    """.trimIndent()
+
+private fun appendScmMapTableRow(html: StringBuilder, g: ScmGroupRow) {
+    val st = escapeHtml(g.stockLocation)
+    val mergedCell = formatScmMergedTierChipsCell(g.carsJoined, g.pricesJoined)
+    html.append(
+        """
+        <tr style="border-bottom:1px solid #f3f4f6;">
+            <td style="padding:10px 12px;vertical-align:middle;">${scmMapActionButtonsHtml(st)}</td>
+            <td style="padding:12px 14px;font-size:14px;color:#111827;font-weight:600;vertical-align:top;">$st</td>
+            <td style="padding:12px 14px;font-size:14px;color:#374151;vertical-align:top;">$mergedCell</td>
+        </tr>
+        """.trimIndent()
+    )
+}
+
+private fun appendScmMapCard(html: StringBuilder, g: ScmGroupRow) {
+    val st = escapeHtml(g.stockLocation)
+    val mergedCell = formatScmMergedTierChipsCell(g.carsJoined, g.pricesJoined)
+    html.append("""<div class="scm-map-card">""")
+    html.append("""<div class="scm-map-card-top">${scmMapActionButtonsHtml(st)}</div>""")
+    html.append("""<div class="scm-map-card-grid">""")
+    html.append(
+        """<div class="scm-map-kv"><div class="scm-map-k">Stock location</div><div class="scm-map-v">${formatPurchaseListNeutralChipHtml(g.stockLocation)}</div></div>"""
+    )
+    if (mergedCell.isNotEmpty()) {
+        html.append(
+            """<div class="scm-map-kv"><div class="scm-map-k">Cars / price per car</div><div class="scm-map-v">$mergedCell</div></div>"""
+        )
+    }
+    html.append("""</div></div>""")
+}
+
 private fun renderGroupedTableUi(
     host: HTMLElement,
     pageSlice: List<ScmGroupRow>,
@@ -368,68 +444,52 @@ private fun renderGroupedTableUi(
     totalPages: Int,
     footerNote: String,
 ) {
-    val rowsHtml =
-        pageSlice.joinToString("") { g ->
-            val st = escapeHtml(g.stockLocation)
-            val mergedCell = formatScmMergedTierChipsCell(g.carsJoined, g.pricesJoined)
+    scmLastRenderSlice = pageSlice
+    scmLastRenderPage = page
+    scmLastRenderTotalPages = totalPages
+    scmLastRenderFooter = footerNote
+
+    val compact = scmMapIsCompactLayout()
+    val html = StringBuilder()
+
+    if (!compact) {
+        html.append(
             """
-            <tr style="border-bottom:1px solid #f3f4f6;">
-                <td style="padding:10px 12px;">
-                    <div style="display:flex;gap:6px;align-items:center;">
-                        <button type="button" class="scm-edit-btn" data-scm-stock="$st" aria-label="Edit" title="Edit" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 6px rgba(76,201,255,0.30);">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
-                                <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
-                            </svg>
-                        </button>
-                        <button type="button" class="scm-dup-btn" data-scm-stock="$st" aria-label="Duplicate" title="Duplicate" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;background-color:#3b82f6;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 6px rgba(59,130,246,0.30);">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" fill="white"/>
-                            </svg>
-                        </button>
-                    </div>
-                </td>
-                <td style="padding:12px 14px;font-size:14px;color:#111827;font-weight:600;">$st</td>
-                <td style="padding:12px 14px;font-size:14px;color:#374151;">$mergedCell</td>
+            <div class="scm-map-table-shell">
+            <table class="purchase-list-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">
+            <colgroup><col style="width:88px;"><col/><col/></colgroup>
+            <thead>
+            <tr style="background:#f9fafb;text-align:left;">
+            <th style="padding:12px 14px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;">Actions</th>
+            <th style="padding:12px 14px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;">Stock location</th>
+            <th style="padding:12px 14px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;">Cars per container / Shipping price per car</th>
             </tr>
+            </thead>
+            <tbody id="scmMapTableBody">
             """.trimIndent()
+        )
+        for (g in pageSlice) {
+            appendScmMapTableRow(html, g)
         }
+        html.append("</tbody></table></div>")
+    } else {
+        html.append("""<div id="scmMapTableBody" class="scm-map-cards">""")
+        for (g in pageSlice) {
+            appendScmMapCard(html, g)
+        }
+        html.append("</div>")
+    }
 
-    host.innerHTML =
-        """
-        <div style="overflow-x:auto;border-radius:10px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
-            <table style="width:100%;border-collapse:collapse;table-layout:fixed;">
-                <colgroup>
-                    <col style="width:80px;">
-                    <col/>
-                    <col/>
-                </colgroup>
-                <thead>
-                    <tr style="background:#f9fafb;text-align:left;">
-                        <th style="padding:12px 14px;min-width:72px;"></th>
-                        <th style="padding:12px 14px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Stock location</th>
-                        <th style="padding:12px 14px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Cars per container / Shipping price per car</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    $rowsHtml
-                </tbody>
-            </table>
-        </div>
-        """.trimIndent()
-
+    host.innerHTML = html.toString()
     bindScmRowActionButtons(host)
     renderScmPagerAndBind(host, page, totalPages, footerNote)
 }
 
 fun loadShippingChargeMapTable() {
     val tableDiv = document.getElementById("scmMapTable") as? HTMLElement ?: return
+    scmLastRenderSlice = null
     tableDiv.innerHTML =
-        """
-        <div style="text-align:center;color:#6b7280;padding:48px 20px;">
-            <div style="font-size:16px;margin-bottom:8px;">Loading shipping charge map…</div>
-        </div>
-        """.trimIndent()
+        """<div class="scm-map-empty"><strong>Loading</strong><div>Loading shipping charge map…</div></div>"""
 
     val q = getScmSearchQuery()
     if (q.isNotEmpty()) {
@@ -469,10 +529,12 @@ fun loadShippingChargeMapTable() {
                 val arr = js("Array.isArray(content) ? content : []").unsafeCast<Array<dynamic>>()
                 val grouped = groupShippingChargesForView(arr.toList())
                 if (grouped.isEmpty()) {
+                    scmLastRenderSlice = null
                     tableDiv.innerHTML =
                         """
-                        <div style="text-align:center;color:#6b7280;padding:48px 20px;">
-                            <div style="font-size:16px;margin-bottom:8px;">No rows match your search.</div>
+                        <div class="scm-map-empty">
+                            <strong>No matches</strong>
+                            <div>No rows match your search.</div>
                             <div style="font-size:13px;color:#9ca3af;">Edit still loads full tiers for a stock location.</div>
                         </div>
                         """.trimIndent()
@@ -485,10 +547,9 @@ fun loadShippingChargeMapTable() {
             }
             .catch { e: dynamic ->
                 Logger.error("Shipping charge map search failed: ${e.toString()}")
+                scmLastRenderSlice = null
                 tableDiv.innerHTML =
-                    """
-                    <div style="text-align:center;color:#ef4444;padding:48px 20px;font-weight:600;">Could not load results</div>
-                    """.trimIndent()
+                    """<div class="scm-map-empty" style="color:#b91c1c;"><strong>Could not load</strong><div>Could not load results.</div></div>"""
             }
         return
     }
@@ -508,11 +569,13 @@ fun loadShippingChargeMapTable() {
             scmAllFlatRows = arr.toList().toMutableList()
             val grouped = groupShippingChargesForView(scmAllFlatRows)
             if (grouped.isEmpty()) {
+                scmLastRenderSlice = null
                 tableDiv.innerHTML =
                     """
-                    <div style="text-align:center;color:#6b7280;padding:48px 20px;">
-                        <div style="font-size:16px;margin-bottom:8px;">No shipping charge rows yet.</div>
-                        <div style="font-size:13px;color:#9ca3af;">Use Add to create tiers for a stock location.</div>
+                    <div class="scm-map-empty">
+                        <strong>No tiers yet</strong>
+                        <div>No shipping charge rows yet.</div>
+                        <div style="font-size:13px;color:#9ca3af;">Use Add tiers to create tiers for a stock location.</div>
                     </div>
                     """.trimIndent()
                 return@then
@@ -527,10 +590,9 @@ fun loadShippingChargeMapTable() {
         }
         .catch { e: dynamic ->
             Logger.error("Shipping charge map load failed: ${e.toString()}")
+            scmLastRenderSlice = null
             tableDiv.innerHTML =
-                """
-                <div style="text-align:center;color:#ef4444;padding:48px 20px;font-weight:600;">Could not load shipping charge map</div>
-                """.trimIndent()
+                """<div class="scm-map-empty" style="color:#b91c1c;"><strong>Could not load</strong><div>Unable to load shipping charge map.</div></div>"""
         }
 }
 
@@ -886,27 +948,60 @@ private fun openScmModal(isDuplicate: Boolean) {
 
 fun showShippingChargeMapPage() {
     val content = document.getElementById("content") ?: return
+    scmLastRenderSlice = null
     content.innerHTML =
         """
-        <div id="scmMapRoot" style="border:1px solid #ddd;border-radius:8px;padding:20px;max-width:1200px;margin:0 auto;width:100%;box-sizing:border-box;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;flex-wrap:wrap;gap:12px;">
-                <h2 style="margin:0;color:#111827;font-size:26px;font-weight:700;">Shipping Charge Map</h2>
-            </div>
+        <div id="scmMapRoot">
             <style>
-                #scmMapRoot .scm-map-search-filter-opt:hover { background:#f3f4f6 !important; }
-                #scmMapRoot .scm-map-search-filter-opt--active { background:#eef2ff !important; font-weight:600; }
-                #scmMapRoot #scmMapSearchFilterBtn:hover { background:#e8eaed !important; box-shadow:0 2px 8px rgba(0,0,0,0.08) !important; }
+                #scmMapRoot{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:20px;width:100%;max-width:100%;box-sizing:border-box;}
+                .scm-map-toolbar{display:grid;grid-template-columns:1fr;grid-template-areas:"title" "search" "actions";gap:12px;margin-bottom:16px;align-items:center;}
+                .scm-map-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;grid-area:title;text-align:center;letter-spacing:-0.01em;}
+                .scm-map-search-row{grid-area:search;display:flex;align-items:center;gap:10px;width:100%;min-width:0;}
+                .scm-map-search{position:relative;flex:1;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
+                .scm-map-search input{width:100%;box-sizing:border-box;padding:11px 38px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
+                .scm-map-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:4px 8px;min-height:36px;min-width:36px;}
+                .scm-map-search-clear:hover{background:#f3f4f6;color:#111827;}
+                .scm-map-filter-wrap{position:relative;flex-shrink:0;}
+                .scm-map-actions{grid-area:actions;}
+                .scm-map-add-btn{padding:10px 16px;background:#059669;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;min-height:40px;}
+                .scm-map-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
+                #scmMapRoot table.purchase-list-table thead th{position:sticky;top:0;z-index:1;background:#f9fafb;}
+                .scm-map-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+                .scm-map-empty strong{color:#0f172a;}
+                .scm-map-cards{display:flex;flex-direction:column;gap:10px;}
+                .scm-map-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
+                .scm-map-card-top{margin-bottom:10px;}
+                .scm-map-card-grid{display:grid;gap:8px;}
+                .scm-map-kv{display:flex;gap:10px;align-items:flex-start;}
+                .scm-map-k{min-width:120px;font-size:12px;color:#64748b;line-height:1.4;}
+                .scm-map-v{flex:1;min-width:0;}
+                #scmMapRoot .scm-map-search-filter-opt:hover{background:#f3f4f6!important;}
+                #scmMapRoot .scm-map-search-filter-opt--active{background:#eef2ff!important;font-weight:600;}
+                #scmMapRoot #scmMapSearchFilterBtn:hover{background:#e8eaed!important;box-shadow:0 2px 8px rgba(0,0,0,0.08)!important;}
+                @media (max-width:1024px){
+                    #scmMapRoot{padding:14px;border-radius:14px;}
+                    .scm-map-toolbar{gap:14px;margin-bottom:14px;}
+                    .scm-map-title{font-size:17px;}
+                    .scm-map-search input{font-size:13px;padding:10px 34px 10px 38px;}
+                }
+                @media (min-width:1025px){
+                    #scmMapRoot{max-width:1200px;margin:0 auto;}
+                    .scm-map-toolbar{grid-template-columns:auto 1fr minmax(260px,32%);grid-template-areas:"title . search" "actions actions actions";column-gap:12px;row-gap:10px;}
+                    .scm-map-title{text-align:left;justify-self:start;font-size:22px;}
+                    .scm-map-actions{justify-self:start;}
+                }
             </style>
-            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px;margin-bottom:16px;">
-                <div style="display:flex;align-items:center;gap:10px;width:100%;max-width:720px;">
-                    <div style="position:relative;flex:1;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+            <div class="scm-map-toolbar">
+                <h2 class="scm-map-title">Shipping Charge Map</h2>
+                <div class="scm-map-search-row">
+                    <div class="scm-map-search">
                         <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#9ca3af;display:flex;" aria-hidden="true">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                         </span>
-                        <input type="search" id="scmMapSearchInput" autocomplete="off" placeholder="Search…" aria-label="Search shipping charge map" style="width:100%;box-sizing:border-box;padding:11px 38px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;" />
-                        <button type="button" id="scmMapSearchClearBtn" title="Clear" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;line-height:1;padding:4px 8px;">×</button>
+                        <input type="search" id="scmMapSearchInput" autocomplete="off" placeholder="Search…" aria-label="Search shipping charge map" />
+                        <button type="button" id="scmMapSearchClearBtn" class="scm-map-search-clear" title="Clear search" aria-label="Clear search">×</button>
                     </div>
-                    <div style="position:relative;flex-shrink:0;">
+                    <div class="scm-map-filter-wrap">
                         <span id="scmMapSearchFieldLabel" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">All fields</span>
                         <button type="button" id="scmMapSearchFilterBtn" aria-haspopup="true" aria-expanded="false" title="Search field filter" style="width:46px;height:46px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#4b5563;">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -920,9 +1015,9 @@ fun showShippingChargeMapPage() {
                         </div>
                     </div>
                 </div>
-            </div>
-            <div style="margin-bottom:14px;">
-                <button type="button" id="scmMapAddBtn" style="padding:11px 20px;background:#059669;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">＋ Add tiers</button>
+                <div class="scm-map-actions">
+                    <button type="button" id="scmMapAddBtn" class="scm-map-add-btn">＋ Add tiers</button>
+                </div>
             </div>
             <div id="scmMapTable"></div>
         </div>
@@ -936,6 +1031,7 @@ fun showShippingChargeMapPage() {
     scmCurrentPage = 1
     updateScmSearchFilterMenuActive("all")
     setupScmSearchBarListeners()
+    setupScmMapResizeListener()
 
     document.getElementById("scmMapAddBtn")?.addEventListener(
         "click",

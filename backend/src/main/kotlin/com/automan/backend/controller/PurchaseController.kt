@@ -13,12 +13,14 @@ import com.automan.backend.service.PurchaseChangeHistoryService
 import com.automan.backend.service.ClientService
 import com.automan.backend.service.TransactionService
 import com.automan.backend.util.Logger
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
-import org.springframework.web.server.ResponseStatusException
 import java.math.BigDecimal
+import java.time.LocalDateTime
 
 @RestController
 @RequestMapping("/purchases")
@@ -455,11 +457,7 @@ class PurchaseController(
             applyLedgerHeaders(headers, result.ledger)
             ResponseEntity.ok().headers(headers).body(result.pdfBytes)
         } catch (e: IllegalArgumentException) {
-            val msg = e.message ?: "Invalid request"
-            if (msg.contains("already exists", ignoreCase = true)) {
-                throw ResponseStatusException(HttpStatus.CONFLICT, msg)
-            }
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, msg)
+            invoiceErrorJsonBytesResponse(e.message ?: "Invalid request")
         }
     }
 
@@ -485,12 +483,46 @@ class PurchaseController(
                 ).apply { putAll(ledger.toResponseMap()) },
             )
         } catch (e: IllegalArgumentException) {
-            val msg = e.message ?: "Invalid request"
-            if (msg.contains("already exists", ignoreCase = true)) {
-                throw ResponseStatusException(HttpStatus.CONFLICT, msg)
-            }
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, msg)
+            val body = invoiceErrorBody(e.message ?: "Invalid request")
+            ResponseEntity.status(invoiceErrorHttpStatus(body)).body(body)
         }
+    }
+
+    private fun invoiceErrorBody(message: String): LinkedHashMap<String, Any?> {
+        val body = linkedMapOf<String, Any?>(
+            "success" to false,
+            "message" to message,
+            "timestamp" to LocalDateTime.now().toString(),
+        )
+        when {
+            message.contains("already exists", ignoreCase = true) -> {
+                body["error"] = "Conflict"
+                body["status"] = HttpStatus.CONFLICT.value()
+            }
+            message.contains("credit limit", ignoreCase = true) -> {
+                body["error"] = "Credit limit exceeded"
+                body["creditLimitBlocked"] = true
+                body["status"] = HttpStatus.BAD_REQUEST.value()
+            }
+            else -> {
+                body["error"] = "Bad Request"
+                body["status"] = HttpStatus.BAD_REQUEST.value()
+            }
+        }
+        return body
+    }
+
+    private fun invoiceErrorHttpStatus(body: Map<String, Any?>): HttpStatus = when (body["status"]) {
+        HttpStatus.CONFLICT.value() -> HttpStatus.CONFLICT
+        else -> HttpStatus.BAD_REQUEST
+    }
+
+    private fun invoiceErrorJsonBytesResponse(message: String): ResponseEntity<ByteArray> {
+        val body = invoiceErrorBody(message)
+        val json = ObjectMapper().writeValueAsString(body)
+        return ResponseEntity.status(invoiceErrorHttpStatus(body))
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(json.toByteArray(Charsets.UTF_8))
     }
 
     /**

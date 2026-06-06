@@ -17,6 +17,106 @@ import kotlin.coroutines.suspendCoroutine
 
 // Invoice Functions
 
+/** Plain-text detail for modals; never returns raw JSON blobs. */
+private fun creditLimitDetailText(raw: String): String? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    if (!trimmed.startsWith("{")) {
+        return trimmed.takeIf { !it.startsWith("{") }
+    }
+    val fromJson = try {
+        val o = JSON.parse<dynamic>(trimmed)
+        val msg = o.message?.toString()?.trim().orEmpty()
+        if (msg.isNotEmpty()) {
+            if (msg.contains("400 BAD_REQUEST", ignoreCase = true)) {
+                msg.substringAfter("\"").substringBeforeLast("\"").ifEmpty { msg }
+            } else {
+                msg
+            }
+        } else {
+            ErrorHandler.extractErrorMessage(trimmed).trim()
+        }
+    } catch (_: dynamic) {
+        ErrorHandler.extractErrorMessage(trimmed).trim()
+    }
+    return fromJson.takeIf { it.isNotEmpty() && !it.startsWith("{") }
+}
+
+private fun parseInvoiceApiError(errorText: String): Pair<String, Boolean> {
+    val trimmed = errorText.trim()
+    val detail = creditLimitDetailText(trimmed)
+    val message = detail ?: trimmed
+    var creditBlocked = message.contains("credit limit", ignoreCase = true)
+    if (trimmed.startsWith("{")) {
+        try {
+            val o = JSON.parse<dynamic>(trimmed)
+            if (o.creditLimitBlocked == true) creditBlocked = true
+            val err = o.error?.toString().orEmpty()
+            if (err.contains("credit limit", ignoreCase = true)) creditBlocked = true
+        } catch (_: dynamic) {
+        }
+    }
+    return Pair(message, creditBlocked)
+}
+
+fun showCreditLimitExceededModal(detailMessage: String) {
+    document.getElementById("creditLimitInvoiceModal")?.remove()
+    val detail = creditLimitDetailText(detailMessage)
+    val detailBlock = if (detail != null) {
+        val safeMsg = detail
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        """<p style="margin: 0 0 16px; padding: 12px; background: #fef2f2; border-left: 4px solid #e74c3c; color: #7f1d1d; font-size: 14px; line-height: 1.5;">$safeMsg</p>"""
+    } else {
+        ""
+    }
+    val modalHTML = """
+        <div id="creditLimitInvoiceModal" class="client-modal">
+            <div class="client-modal-content" style="max-width: 520px;">
+                <div class="client-modal-header">
+                    <h2>Credit limit exceeded</h2>
+                    <button type="button" id="closeCreditLimitInvoiceModalBtn" class="client-modal-close">&times;</button>
+                </div>
+                <p style="margin: 0 0 12px; color: #333; line-height: 1.5;">
+                    This invoice cannot be saved because the client would exceed their credit limit.
+                </p>
+                $detailBlock
+                <p class="client-ledger-hint" style="margin: 0 0 16px;">
+                    Update the credit limit under <strong>Master → Client Transactions</strong>, or reduce the invoice amount.
+                </p>
+                <div class="client-modal-actions">
+                    <button type="button" id="okCreditLimitInvoiceModalBtn" class="client-btn client-btn-primary">OK</button>
+                </div>
+            </div>
+        </div>
+    """
+    document.body?.insertAdjacentHTML("beforeend", modalHTML)
+    fun close() {
+        document.getElementById("creditLimitInvoiceModal")?.remove()
+    }
+    document.getElementById("closeCreditLimitInvoiceModalBtn")?.addEventListener("click", { _: Event -> close() })
+    document.getElementById("okCreditLimitInvoiceModalBtn")?.addEventListener("click", { _: Event -> close() })
+    document.getElementById("creditLimitInvoiceModal")?.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "creditLimitInvoiceModal") close()
+    })
+}
+
+private fun handleInvoiceSaveFailure(httpStatus: Int, errorText: String) {
+    val (userMsg, creditBlocked) = parseInvoiceApiError(errorText)
+    if (creditBlocked) {
+        Logger.warn("Invoice save blocked (credit limit): $userMsg")
+        showCreditLimitExceededModal(userMsg)
+        return
+    }
+    Logger.error("Invoice save failed ($httpStatus): $userMsg")
+    if (httpStatus == 409) {
+        showMessage(userMsg, "error")
+        return
+    }
+    showMessage("Failed to save invoice: $userMsg", "error")
+}
+
 /** Invoice number for the current #/recreate-invoice session (delete / upsert). */
 private var invoiceRecreateInvoiceNumber: String? = null
 
@@ -482,6 +582,7 @@ private suspend fun invoicePrefillApplyHeaderRadiosPurchasesMatch(
     podRaw: String,
     chassisRaw: String,
     priceTypeFromHistory: String,
+    historyLineAmountsRaw: String = "",
 ) {
     invoicePrefillEnsureClientDropdownAndSelect(clientName)
     if (clientName.isNotBlank() && vessel.isNotBlank()) {
@@ -582,7 +683,10 @@ private suspend fun invoicePrefillApplyHeaderRadiosPurchasesMatch(
                     seenIds.add(id)
                 }
             }
-            populateInvoiceListTable(matched.toTypedArray())
+            populateInvoiceListTable(
+                matched.toTypedArray(),
+                parseInvoiceHistoryAmountTokens(historyLineAmountsRaw),
+            )
             if (matched.isEmpty() && tokens.isNotEmpty()) {
                 showMessage(
                     "No purchases matched (chassis). Check Purchase List.",
@@ -613,6 +717,7 @@ private suspend fun applyInvoiceHistoryEditPrefillFromJson(raw: String) {
     val podRaw = (o.pod?.toString() ?: "").trim()
     val chassisRaw = (o.chassis?.toString() ?: "").trim()
     val priceTypeFromHistory = (o.priceType?.toString() ?: "").trim()
+    val historyLineAmountsRaw = (o.totalAmount?.toString() ?: "").trim()
     invoicePrefillApplyHeaderRadiosPurchasesMatch(
         clientName = clientName,
         vessel = vessel,
@@ -625,6 +730,7 @@ private suspend fun applyInvoiceHistoryEditPrefillFromJson(raw: String) {
         podRaw = podRaw,
         chassisRaw = chassisRaw,
         priceTypeFromHistory = priceTypeFromHistory,
+        historyLineAmountsRaw = historyLineAmountsRaw,
     )
 }
 
@@ -987,7 +1093,7 @@ fun loadInvoiceShippingLines(client: String, vessel: String) {
         }
 }
 
-fun populateInvoiceListTable(purchases: Array<dynamic>) {
+fun populateInvoiceListTable(purchases: Array<dynamic>, historyLineAmounts: List<Double> = emptyList()) {
     val tableBody = document.getElementById("invoiceListTableBody")
     val cardsContainer = document.getElementById("invoiceCardsContainer")
     if (tableBody == null) return
@@ -1009,6 +1115,8 @@ fun populateInvoiceListTable(purchases: Array<dynamic>) {
         tableBody.appendChild(emptyRow)
     }
 
+    val pdfLinesArr = js("[]")
+    var purchaseIndex = 0
     for (purchase in purchases) {
         val id = js("purchase.id")?.toString()?.toLongOrNull()
         if (id != null) {
@@ -1019,8 +1127,13 @@ fun populateInvoiceListTable(purchases: Array<dynamic>) {
         val carName = js("purchase.carName")?.toString() ?: "N/A"
         val year = js("purchase.carModelYear")?.toString() ?: "N/A"
         
-        val amount = purchaseInvoiceLineAmountYenFromDynamic(purchase)
+        val amount = historyLineAmounts.getOrNull(purchaseIndex)
+            ?: purchaseInvoiceLineAmountYenFromDynamic(purchase)
+        purchaseIndex++
         totalAmount += amount
+        if (id != null) {
+            js("(function(a, p, m) { a.push({ purchaseId: p, amount: m }); })")(pdfLinesArr, id, amount)
+        }
         
         // Format amount with ¥ symbol and commas
         val amountInt = amount.toInt()
@@ -1087,8 +1200,22 @@ fun populateInvoiceListTable(purchases: Array<dynamic>) {
         js("idsArray.push(id)")
     }
     js("window.currentInvoicePurchaseIds = idsArray")
-    syncWindowInvoicePdfLinesFromPurchases(purchases)
+    if (historyLineAmounts.isNotEmpty()) {
+        js("window.currentInvoicePdfLines = pdfLinesArr")
+    } else {
+        syncWindowInvoicePdfLinesFromPurchases(purchases)
+    }
     syncWindowInvoiceChassisFromPurchases(purchases)
+}
+
+/** Semicolon-separated yen amounts from invoice_history (same order as chassis tokens). */
+private fun parseInvoiceHistoryAmountTokens(raw: String): List<Double> {
+    if (raw.isBlank()) return emptyList()
+    return raw.split(';')
+        .mapNotNull { token ->
+            val cleaned = token.trim().replace(Regex("[^0-9.-]"), "")
+            cleaned.toDoubleOrNull()?.takeIf { it > 0.0 }
+        }
 }
 
 private fun formatInvoiceYenInt(amount: Double): String {
@@ -1390,10 +1517,30 @@ private fun escapeJsonStringForInvoice(str: String): String =
         .replace("\r", "\\r")
         .replace("\t", "\\t")
 
+private fun parseInvoiceTotalFromPage(): Double? {
+    val raw = (document.getElementById("invoiceTotalAmount") as? HTMLElement)?.textContent?.trim().orEmpty()
+    if (raw.isEmpty()) return null
+    val digits = raw.replace(Regex("[^0-9]"), "")
+    if (digits.isEmpty()) return null
+    return digits.toDoubleOrNull()
+}
+
 private fun checkInvoiceLedgerClient(clientName: String) {
     val name = clientName.trim()
     if (name.isEmpty()) return
-    val encoded = js("encodeURIComponent(name)") as String
+    val encodedName = js("encodeURIComponent(name)") as String
+    val invoiceNumber = (document.getElementById("invoiceNumber") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val invoiceAmount = parseInvoiceTotalFromPage()
+    val invoiceNumberPart = if (invoiceNumber.isNotEmpty()) {
+        "&invoiceNumber=${js("encodeURIComponent(invoiceNumber)")}"
+    } else {
+        ""
+    }
+    val invoiceAmountPart = if (invoiceAmount != null && invoiceAmount > 0.0) {
+        "&invoiceAmount=$invoiceAmount"
+    } else {
+        ""
+    }
     val currentIds = js("window.currentInvoicePurchaseIds") as? Array<dynamic>
     val idsQuery = if (currentIds != null && currentIds.isNotEmpty()) {
         currentIds.mapNotNull { id ->
@@ -1406,9 +1553,20 @@ private fun checkInvoiceLedgerClient(clientName: String) {
     } else {
         ""
     }
-    window.fetch(apiUrl("clients/resolve-ledger?name=$encoded$idsQuery")).then { response ->
+    window.fetch(
+        apiUrl("clients/resolve-ledger?name=$encodedName$idsQuery$invoiceNumberPart$invoiceAmountPart"),
+    ).then { response ->
         if (!response.ok) return@then
         response.json().then { json ->
+            val status = js("json.creditLimitStatus")?.toString()?.trim().orEmpty()
+            val creditMsg = js("json.creditLimitMessage")?.toString()?.trim().orEmpty()
+            if (creditMsg.isNotEmpty()) {
+                if (status == "OVER_LIMIT") {
+                    showCreditLimitExceededModal(creditMsg)
+                    return@then
+                }
+                showMessage(creditMsg, "warning")
+            }
             val warning = js("json.warning")?.toString()?.trim().orEmpty()
             if (warning.isNotEmpty()) {
                 showMessage(warning, "warning")
@@ -1623,8 +1781,13 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
                         if (response.ok) {
                             response.json().then { json ->
                                 Logger.debug("Invoice saved successfully")
+                                val creditStatus = js("json.creditLimitStatus")?.toString()?.trim().orEmpty()
+                                val creditMsg = js("json.creditLimitMessage")?.toString()?.trim().orEmpty()
+                                if (creditMsg.isNotEmpty() && creditStatus == "NEAR_LIMIT") {
+                                    showMessage(creditMsg, "warning")
+                                }
                                 val warning = js("json.ledgerWarning")?.toString()?.trim().orEmpty()
-                                if (warning.isNotEmpty()) {
+                                if (warning.isNotEmpty() && warning != creditMsg) {
                                     showMessage(warning, "warning")
                                 }
                                 val info = js("json.ledgerInfo")?.toString()?.trim().orEmpty()
@@ -1635,19 +1798,7 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
                             }
                         } else {
                             response.text().then { errorText ->
-                                Logger.error("Invoice save failed: $errorText")
-                                var userMsg = errorText
-                                if (status == 409) {
-                                    try {
-                                        val parsed = JSON.parse<dynamic>(errorText)
-                                        val m = parsed.message?.toString()
-                                        if (m != null && m.isNotEmpty()) userMsg = m
-                                    } catch (_: dynamic) {
-                                    }
-                                    showMessage(userMsg, "error")
-                                } else {
-                                    showMessage("Failed to save invoice: $errorText", "error")
-                                }
+                                handleInvoiceSaveFailure(status, errorText)
                             }
                         }
                     }.catch { error ->
@@ -1794,8 +1945,31 @@ private fun handleDeleteInvoiceFromRecreate() {
                     showMessage("Invoice could not be deleted (not found).", "warning")
                     return@fold
                 }
+                val reversedRaw = d.ledgerReversed
+                val ledgerReversed = when (reversedRaw) {
+                    is Number -> reversedRaw.toInt()
+                    else -> reversedRaw?.toString()?.toIntOrNull() ?: 0
+                }
+                val warningsRaw = d.ledgerWarnings
+                val ledgerWarnings: List<String> = if (warningsRaw != null && js("Array.isArray(warningsRaw)") as Boolean) {
+                    val arr = warningsRaw.unsafeCast<Array<*>>()
+                    (0 until arr.size).mapNotNull { arr[it]?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                } else {
+                    emptyList()
+                }
                 clearInvoiceRecreateSessionData()
-                showMessage("Invoice deleted.", "success")
+                when {
+                    ledgerWarnings.isNotEmpty() -> {
+                        showMessage(
+                            "Invoice deleted. Ledger warning: ${ledgerWarnings.joinToString(" ")}",
+                            "warning",
+                        )
+                    }
+                    ledgerReversed > 0 -> {
+                        showMessage("Invoice deleted. $ledgerReversed ledger reversal(s) posted.", "success")
+                    }
+                    else -> showMessage("Invoice deleted.", "success")
+                }
                 window.location.hash = "#/invoice-history"
             },
             onError = { message, statusCode ->
