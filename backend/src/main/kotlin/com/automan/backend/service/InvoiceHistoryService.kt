@@ -23,7 +23,6 @@ import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeParseException
-import java.util.Locale
 
 @Service
 class InvoiceHistoryService(
@@ -697,7 +696,7 @@ class InvoiceHistoryService(
             )
         }
         val ledgerDate = header.shippingDate ?: LocalDate.now()
-        val numbers = collectInvoiceNumbersToReverseOnDelete(clientId, header, lines)
+        val numbers = collectInvoiceNumbersToReverseOnDelete(header)
         if (numbers.isEmpty()) {
             return InvoiceLedgerDeleteSlice(
                 warnings = listOf(
@@ -726,43 +725,13 @@ class InvoiceHistoryService(
     }
 
     private fun collectInvoiceNumbersToReverseOnDelete(
-        clientId: Long,
         header: InvoiceHistory,
-        lines: List<InvoiceHistoryLine>,
     ): Set<String> {
         val numbers = linkedSetOf<String>()
         val headerNum = header.invoiceNumber.trim()
         if (headerNum.isNotEmpty()) numbers.add(headerNum)
-
-        val chassisKeys = lines
-            .map { normalizeInvoiceChassisKey(it.chassis) }
-            .filter { it.isNotEmpty() }
-            .toSet()
-
-        if (chassisKeys.isNotEmpty()) {
-            numbers.addAll(
-                invoiceHistoryLineRepository.findDistinctInvoiceNumbersByNormalizedChassisIn(chassisKeys),
-            )
-        }
-
-        for (openNum in eventService.findOpenInvoiceNumbers(clientId)) {
-            if (openNum in numbers) continue
-            val history = invoiceHistoryRepository.findByInvoiceNumber(openNum)
-            if (history.isEmpty) {
-                // Orphan ledger charge (history already removed) — reverse when delete covers chassis lines.
-                if (chassisKeys.isNotEmpty()) numbers.add(openNum)
-            } else if (chassisKeys.isNotEmpty()) {
-                val hid = history.get().id ?: continue
-                val histLines = invoiceHistoryLineRepository.findByInvoiceHistoryIdOrderBySortOrderAsc(hid)
-                val histChassis = histLines.map { normalizeInvoiceChassisKey(it.chassis) }.toSet()
-                if (histChassis.any { it in chassisKeys }) numbers.add(openNum)
-            }
-        }
         return numbers
     }
-
-    private fun normalizeInvoiceChassisKey(chassis: String): String =
-        chassis.trim().lowercase(Locale.ROOT)
 
     private fun resolveClientIdForDeletedInvoice(header: InvoiceHistory, lines: List<InvoiceHistoryLine>): Long? {
         val name = header.clientName?.trim().orEmpty()

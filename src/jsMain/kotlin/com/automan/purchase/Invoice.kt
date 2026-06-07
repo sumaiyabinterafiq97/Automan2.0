@@ -527,9 +527,33 @@ private suspend fun invoicePrefillLoadShippingHeader(clientName: String, vessel:
     }
 }
 
-private fun parseInvoiceHistoryChassisTokens(raw: String): List<String> {
+internal fun parseInvoiceHistoryChassisTokens(raw: String): List<String> {
     if (raw.isBlank()) return emptyList()
     return raw.split(';', ',', '\n', '\r').map { it.trim() }.filter { it.isNotEmpty() }
+}
+
+/** Semicolon-separated yen amounts from invoice_history, preserving empty slots for chassis alignment. */
+internal fun parseInvoiceHistoryAmountSlots(raw: String): List<Double?> {
+    if (raw.isBlank()) return emptyList()
+    return raw.split(';').map { token ->
+        val cleaned = token.trim().replace(Regex("[^0-9.-]"), "")
+        cleaned.toDoubleOrNull()?.takeIf { it > 0.0 }
+    }
+}
+
+internal fun invoiceHistoryAmountSlotError(
+    chassisTokens: List<String>,
+    amountSlots: List<Double?>,
+): String? {
+    if (amountSlots.size != chassisTokens.size) {
+        return "Could not recreate invoice safely: invoice history has ${chassisTokens.size} chassis lines but ${amountSlots.size} saved amounts."
+    }
+    val missingIndex = amountSlots.indexOfFirst { it == null }
+    if (missingIndex >= 0) {
+        val chassis = chassisTokens.getOrNull(missingIndex).orEmpty().ifBlank { "line ${missingIndex + 1}" }
+        return "Could not recreate invoice safely: missing or zero saved amount for chassis $chassis."
+    }
+    return null
 }
 
 private fun invoicePrefillChassisTokenMatchesPurchase(token: String, purchaseChassis: String): Boolean {
@@ -669,23 +693,74 @@ private suspend fun invoicePrefillApplyHeaderRadiosPurchasesMatch(
         is ApiResult.Success -> {
             val arr = result.data
             val tokens = parseInvoiceHistoryChassisTokens(chassisRaw)
+            val hasHistoryLineAmounts = historyLineAmountsRaw.isNotBlank()
+            val historyAmountSlots = if (hasHistoryLineAmounts) {
+                parseInvoiceHistoryAmountSlots(historyLineAmountsRaw)
+            } else {
+                emptyList()
+            }
+            if (hasHistoryLineAmounts) {
+                val error = invoiceHistoryAmountSlotError(tokens, historyAmountSlots)
+                if (error != null) {
+                    clearInvoiceListAndTotals()
+                    showMessage(error, "error")
+                    return
+                }
+            }
             val matched = mutableListOf<dynamic>()
+            val matchedHistoryAmounts = mutableListOf<Double>()
             val seenIds = mutableSetOf<Long>()
-            for (tok in tokens) {
+            val missingHistoryMatches = mutableListOf<String>()
+            val ambiguousHistoryMatches = mutableListOf<String>()
+            for ((tokenIndex, tok) in tokens.withIndex()) {
+                val tokenMatches = mutableListOf<dynamic>()
                 for (i in 0 until arr.size) {
                     val p = arr[i]
                     val id = js("p.id")?.toString()?.toLongOrNull() ?: continue
                     if (id in seenIds) continue
+                    if (!invoicePrefillPurchaseMatchesClientAndVessel(p, clientName, vessel)) continue
                     val ch = js("p.chassis")?.toString()?.trim() ?: ""
-                    // Match by chassis only — client/vessel already known from history, no need to re-filter
                     if (!invoicePrefillChassisTokenMatchesPurchase(tok, ch)) continue
-                    matched.add(p)
-                    seenIds.add(id)
+                    tokenMatches.add(p)
                 }
+                if (hasHistoryLineAmounts) {
+                    when (tokenMatches.size) {
+                        0 -> missingHistoryMatches.add(tok)
+                        1 -> {
+                            val p = tokenMatches[0]
+                            val id = js("p.id")?.toString()?.toLongOrNull() ?: continue
+                            matched.add(p)
+                            matchedHistoryAmounts.add(historyAmountSlots[tokenIndex] ?: 0.0)
+                            seenIds.add(id)
+                        }
+                        else -> ambiguousHistoryMatches.add(tok)
+                    }
+                } else {
+                    for (p in tokenMatches) {
+                        val id = js("p.id")?.toString()?.toLongOrNull() ?: continue
+                        matched.add(p)
+                        seenIds.add(id)
+                    }
+                }
+            }
+            if (hasHistoryLineAmounts && (missingHistoryMatches.isNotEmpty() || ambiguousHistoryMatches.isNotEmpty())) {
+                clearInvoiceListAndTotals()
+                val details = mutableListOf<String>()
+                if (missingHistoryMatches.isNotEmpty()) {
+                    details.add("unmatched chassis: ${missingHistoryMatches.joinToString(", ")}")
+                }
+                if (ambiguousHistoryMatches.isNotEmpty()) {
+                    details.add("duplicate purchase matches: ${ambiguousHistoryMatches.joinToString(", ")}")
+                }
+                showMessage(
+                    "Could not recreate invoice safely (${details.joinToString("; ")}). No invoice lines were loaded.",
+                    "error",
+                )
+                return
             }
             populateInvoiceListTable(
                 matched.toTypedArray(),
-                parseInvoiceHistoryAmountTokens(historyLineAmountsRaw),
+                matchedHistoryAmounts,
             )
             if (matched.isEmpty() && tokens.isNotEmpty()) {
                 showMessage(
@@ -1206,16 +1281,6 @@ fun populateInvoiceListTable(purchases: Array<dynamic>, historyLineAmounts: List
         syncWindowInvoicePdfLinesFromPurchases(purchases)
     }
     syncWindowInvoiceChassisFromPurchases(purchases)
-}
-
-/** Semicolon-separated yen amounts from invoice_history (same order as chassis tokens). */
-private fun parseInvoiceHistoryAmountTokens(raw: String): List<Double> {
-    if (raw.isBlank()) return emptyList()
-    return raw.split(';')
-        .mapNotNull { token ->
-            val cleaned = token.trim().replace(Regex("[^0-9.-]"), "")
-            cleaned.toDoubleOrNull()?.takeIf { it > 0.0 }
-        }
 }
 
 private fun formatInvoiceYenInt(amount: Double): String {

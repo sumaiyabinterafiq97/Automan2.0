@@ -4,6 +4,7 @@ import com.automan.backend.dto.CreateTransactionRequest
 import com.automan.backend.dto.OpeningBalanceImportRequest
 import com.automan.backend.dto.OpeningBalanceImportRowDto
 import com.automan.backend.model.Client
+import com.automan.backend.model.Event
 import com.automan.backend.model.EventType
 import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.EventRepository
@@ -13,8 +14,12 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.InjectMocks
 import org.mockito.Mock
+import org.mockito.Mockito.anyMap
+import org.mockito.Mockito.never
+import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
 import org.mockito.junit.jupiter.MockitoExtension
+import java.time.LocalDate
 
 @ExtendWith(MockitoExtension::class)
 class TransactionServiceOpeningBalanceTest {
@@ -75,5 +80,30 @@ class TransactionServiceOpeningBalanceTest {
         val debit = TransactionService.signedAmountToLedger(-12_000.0)
         assertEquals(null, debit.first)
         assertEquals(12_000.0, debit.second)
+    }
+
+    @Test
+    fun `update manual transaction rejects invalid merged payment before saving`() {
+        val existing = Event(
+            id = 7L,
+            clientId = 1L,
+            eventDate = LocalDate.of(2026, 1, 1),
+            eventType = EventType.PAYMENT_RECEIVED,
+            paymentReceived = 100_000.0,
+            runningBalance = 100_000.0,
+        )
+        `when`(eventService.getEventById(7L)).thenReturn(existing)
+
+        val result = transactionService.updateManualTransaction(
+            7L,
+            mapOf(
+                "paymentReceived" to 100_000.0,
+                "transactionPrice" to 50_000.0,
+            ),
+        )
+
+        assertTrue(!result.success)
+        assertTrue(result.message.contains("Payment entries cannot include"))
+        verify(eventService, never()).updateManualEvent(7L, anyMap())
     }
 }

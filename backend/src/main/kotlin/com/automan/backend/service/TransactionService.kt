@@ -5,6 +5,7 @@ import com.automan.backend.dto.OpeningBalanceImportRequest
 import com.automan.backend.dto.OpeningBalanceImportResult
 import com.automan.backend.dto.OpeningBalanceImportRowDto
 import com.automan.backend.dto.TransactionResponse
+import com.automan.backend.model.Event
 import com.automan.backend.model.EventType
 import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.EventRepository
@@ -157,6 +158,8 @@ class TransactionService(
                 throw IllegalArgumentException("This ledger entry cannot be edited.")
             }
 
+            validateManualTransaction(toValidationRequest(existing, updateData))
+
             val updated = eventService.updateManualEvent(eventId, updateData)
                 ?: throw IllegalArgumentException("Ledger entry not found: $eventId")
 
@@ -196,6 +199,34 @@ class TransactionService(
         } catch (e: Exception) {
             TransactionResponse(success = false, message = "Failed to delete: ${e.message}")
         }
+    }
+
+    private fun toValidationRequest(existing: Event, updateData: Map<String, Any>): CreateTransactionRequest {
+        return CreateTransactionRequest(
+            clientId = existing.clientId,
+            eventDate = (updateData["eventDate"] as? String) ?: existing.eventDate.toString(),
+            eventType = existing.eventType,
+            eventDescription = if (updateData.containsKey("eventDescription")) {
+                updateData["eventDescription"] as? String
+            } else {
+                existing.eventDescription
+            },
+            billNumber = if (updateData.containsKey("billNumber")) {
+                updateData["billNumber"] as? String
+            } else {
+                existing.billNumber
+            },
+            transactionPrice = if (updateData.containsKey("transactionPrice")) {
+                (updateData["transactionPrice"] as? Number)?.toDouble()
+            } else {
+                existing.transactionPrice
+            },
+            paymentReceived = if (updateData.containsKey("paymentReceived")) {
+                (updateData["paymentReceived"] as? Number)?.toDouble()
+            } else {
+                existing.paymentReceived
+            },
+        )
     }
 
     @Transactional
