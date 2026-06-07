@@ -15,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.InjectMocks
 import org.mockito.Mock
 import org.mockito.Mockito.anyMap
+import org.mockito.Mockito.eq
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Mockito.`when`
@@ -104,6 +105,6 @@ class TransactionServiceOpeningBalanceTest {
 
         assertTrue(!result.success)
         assertTrue(result.message.contains("Payment entries cannot include"))
-        verify(eventService, never()).updateManualEvent(7L, anyMap())
+        verify(eventService, never()).updateManualEvent(eq(7L), anyMap())
     }
 }
