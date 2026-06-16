@@ -2727,12 +2727,14 @@ fun displayPurchasesWithPagination() {
     
     for (purchase in paginatedPurchases) {
         val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
+        val chassisStr = (purchase.chassis ?: "").toString().trim()
+        val chassisAttr = escapeHtml(chassisStr)
         
         tableHTML.append("""
             <tr>
                 <td style="padding: 8px 12px;">
-                    ${if (isEditor() && purchaseId > 0L) """
-                    <button class="edit-btn" data-id="${purchaseId}" aria-label="Edit" title="Edit"
+                    ${if (isEditor() && purchaseId > 0L && chassisStr.isNotEmpty()) """
+                    <button class="edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit"
                             style="display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
                         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
@@ -2793,12 +2795,16 @@ fun displayPurchasesWithPagination() {
         val button = editButtons.item(i) as HTMLElement
         button.addEventListener("click", { event ->
             val btn = event.currentTarget as HTMLElement
+            val chassis = btn.getAttribute("data-chassis")?.trim() ?: ""
             val id = btn.getAttribute("data-id")
-            if (id != null && id.length > 0 && id != "0") {
+            if (chassis.isNotEmpty()) {
+                purchaseReturnPageFromEdit = currentPage
+                navigateToEditPurchase(chassis)
+            } else if (id != null && id.length > 0 && id != "0") {
                 purchaseReturnPageFromEdit = currentPage
                 window.location.hash = "#/edit/$id"
             } else {
-                showMessage("Invalid purchase ID. Cannot edit this purchase.", "error")
+                showMessage("Invalid purchase. Cannot edit this purchase.", "error")
             }
         })
     }
@@ -2973,15 +2979,15 @@ fun displayPurchasesAsCards() {
             }
         }
         
-        // Safe check for chassis (convert to string first)
-        val chassisStr = chassis.toString()
-        val hasChassis = chassisStr.length > 0 && chassisStr.trim().length > 0
+        val chassisStr = chassis.toString().trim()
+        val hasChassis = chassisStr.isNotEmpty()
+        val chassisAttr = escapeHtml(chassisStr)
         
         cardsHTML.append("""
             <div class="purchase-card">
                 <div class="card-header">
-                    ${if (isEditor() && purchaseId > 0L) """
-                    <button class="card-edit-btn" data-id="${purchaseId}" aria-label="Edit" title="Edit">
+                    ${if (isEditor() && purchaseId > 0L && hasChassis) """
+                    <button class="card-edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit">
                         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                             <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
@@ -3029,12 +3035,16 @@ fun displayPurchasesAsCards() {
         val button = editButtons.item(i) as HTMLElement
         button.addEventListener("click", { event ->
             val btn = event.currentTarget as HTMLElement
+            val chassis = btn.getAttribute("data-chassis")?.trim() ?: ""
             val id = btn.getAttribute("data-id")
-            if (id != null && id.length > 0 && id != "0") {
+            if (chassis.isNotEmpty()) {
+                purchaseReturnPageFromEdit = currentPage
+                navigateToEditPurchase(chassis)
+            } else if (id != null && id.length > 0 && id != "0") {
                 purchaseReturnPageFromEdit = currentPage
                 window.location.hash = "#/edit/$id"
             } else {
-                showMessage("Invalid purchase ID. Cannot edit this purchase.", "error")
+                showMessage("Invalid purchase. Cannot edit this purchase.", "error")
             }
         })
     }

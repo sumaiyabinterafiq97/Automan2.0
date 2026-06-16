@@ -4596,11 +4596,19 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         hash.startsWith("#/edit/") -> {
-            val id = hash.substring(7).toLongOrNull()
-            if (id != null) {
-                showEditForm(id)
-            } else {
-                showPurchaseList()
+            when {
+                isLegacyNumericEditRoute(hash) -> {
+                    val id = hash.substring(7).toLongOrNull()
+                    if (id != null) showEditForm(id) else showPurchaseList()
+                }
+                else -> {
+                    val chassis = chassisFromEditRoute(hash)
+                    if (chassis != null && chassis.isNotEmpty()) {
+                        showEditFormByChassis(chassis)
+                    } else {
+                        showPurchaseList()
+                    }
+                }
             }
             ensureSidebarPresent() // Call after content is set
             // Hide sorting bar on edit page
@@ -13219,12 +13227,19 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
 }
 
 fun showEditForm(id: Long) {
-    // First fetch the purchase data
-    window.fetch(apiUrl("purchases/purchase/$id")).then { response ->
+    loadPurchaseForEdit(apiUrl("purchases/purchase/$id"))
+}
+
+fun showEditFormByChassis(chassis: String) {
+    val encoded = js("encodeURIComponent(chassis.trim())").unsafeCast<String>()
+    loadPurchaseForEdit(apiUrl("purchases/chassis/$encoded"))
+}
+
+private fun loadPurchaseForEdit(fetchUrl: String) {
+    window.fetch(fetchUrl).then { response ->
         if (response.ok) {
             response.json().then { purchaseData ->
                 normalizeApiPurchaseForClient(purchaseData)
-                // Debug: Log the raw purchase data to see what's being received
                 console.log("🔍 [DEBUG] Raw purchase data received:", JSON.stringify(purchaseData))
                 val shakenValue = js("purchaseData.shaken").unsafeCast<Any?>()
                 console.log("🔍 [DEBUG] Shaken field in raw data:", shakenValue, "Type:", js("typeof purchaseData.shaken"))
@@ -13248,6 +13263,19 @@ fun showEditForm(id: Long) {
 fun showEditFormWithData(purchaseData: dynamic) {
     // Ensure scrolling is enabled when showing form
     js("if (typeof window.ensureScrollingRestored === 'function') { window.ensureScrollingRestored(); }")
+    val chassisForRoute = purchaseData.chassis?.toString()?.trim() ?: ""
+    if (chassisForRoute.isNotEmpty()) {
+        val route = editPurchaseRouteFromChassis(chassisForRoute)
+        if (window.location.hash != route) {
+            val base = window.location.href.substringBefore('#', window.location.href)
+            val history = window.asDynamic().history
+            if (history != undefined && history.replaceState != undefined) {
+                history.replaceState(null, "", "$base$route")
+            } else {
+                window.location.hash = route
+            }
+        }
+    }
     // Chassis mapping may store multi-value cells as "a;b;c"; show only first token in edit form defaults.
     val editBrandDisp = firstDisplayToken(purchaseData.brand)
     val editCarNameDisp = firstDisplayToken(purchaseData.carName)

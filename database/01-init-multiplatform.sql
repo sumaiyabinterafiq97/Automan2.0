@@ -37,7 +37,7 @@ CREATE TABLE pending_signups (
 
 -- Clients table: Client accounts management
 CREATE TABLE `clients` (
-  `id` bigint NOT NULL,
+  `id` bigint NOT NULL AUTO_INCREMENT,
   `client_number` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `client_name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `current_balance` double DEFAULT NULL,
@@ -46,7 +46,10 @@ CREATE TABLE `clients` (
   `currency` varchar(3) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'JPY',
   `status` enum('ACTIVE','SUSPENDED','CLOSED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT 'ACTIVE',
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_clients_client_number` (`client_number`),
+  KEY `idx_clients_client_name` (`client_name`(191))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Client map: reference data per client name (logistics / billing fields)
@@ -374,7 +377,7 @@ INSERT INTO booking_mappings (country, consignee_name, consignee_address, pod) V
 -- fuel type, WD, CC, door count, and grade. Without this data,
 -- chassis auto-fill will not work.
 -- ---------------------------------------------
-INSERT INTO car_brand_mapping (car_brand, chassis, car_name, fuel, wd, shift, cc, door, grade, seat, vehicle_type, rank, color, drive_type) VALUES
+INSERT INTO car_brand_mapping (car_brand, chassis, car_name, fuel, wd, shift, cc, door, grade, seat, vehicle_type, `rank`, color, drive_type) VALUES
 ('TOYOTA', 'ZN6', '86', 'GASOLINE', '2WD', NULL, 2000, 2, 'G', NULL, NULL, NULL, NULL, NULL),
 ('TOYOTA', 'NCP30', 'bB', 'GASOLINE', '2WD', NULL, 1300, 5, 'S', NULL, NULL, NULL, NULL, NULL),
 ('TOYOTA', 'NCP31', 'bB', 'GASOLINE', '2WD', NULL, 1500, 5, 'Z', NULL, NULL, NULL, NULL, NULL),
