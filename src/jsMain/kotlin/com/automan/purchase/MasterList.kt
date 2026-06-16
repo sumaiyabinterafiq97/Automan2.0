@@ -6388,6 +6388,13 @@ private fun parseMoneyNumericInput(raw: String): Double? {
     return t.toDoubleOrNull()
 }
 
+/** Strip commas/currency for DB storage after validation. */
+private fun normalizeRixoPriceForDb(raw: String): String? {
+    val t = raw.trim().replace(",", "").replace(Regex("[¥₩£€\\s]"), "").trim()
+    if (t.isEmpty() || t.toDoubleOrNull() == null) return null
+    return t
+}
+
 private fun replaceSupplierSemicolonSegment(raw: String, branchIdx: Int, newSegment: String): String {
     val p = splitSupplierSemicolonTokens(raw).toMutableList()
     val nv = newSegment.trim()
@@ -8575,7 +8582,7 @@ private fun bindRixoMappingTreeClicks(root: HTMLElement) {
             payload.auctionName = auction
             payload.stockLocation = stock
             payload.supportedVehicleType = merged
-            payload.rixoPrice = price.replace(",", "").trim()
+            payload.rixoPrice = normalizeRixoPriceForDb(price)
             window.fetch(apiUrl("rixo-mapping/$id"), js("""{ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
                 .then { resp: dynamic ->
                     resp.json().then { result: dynamic ->
@@ -9116,7 +9123,7 @@ private fun postRixoMappingBulkOneRow(
             obj.auctionName = a
             obj.stockLocation = s
             obj.supportedVehicleType = t
-            obj.rixoPrice = p
+            obj.rixoPrice = if (p.isEmpty()) p else normalizeRixoPriceForDb(p)
         }
     }
     val mergeId = when (mode) {
@@ -9294,11 +9301,12 @@ private fun executeRixoLeafInlineAddSave() {
         showMessage("Missing company, auction, or stock context for this row.", "error")
         return
     }
-    if (priceRaw.isEmpty() || priceRaw.toDoubleOrNull() == null) {
+    val priceForDb = normalizeRixoPriceForDb(priceRaw)
+    if (priceForDb == null) {
         showMessage("Enter a numeric Rixo price", "error")
         return
     }
-    postRixoMappingBulkOneRow(null, company, auction, stock, vtype, priceRaw) {
+    postRixoMappingBulkOneRow(null, company, auction, stock, vtype, priceForDb) {
         clearRixoCardInlineAdd()
         refreshRixoMappingTreeData()
     }
