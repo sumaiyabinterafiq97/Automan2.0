@@ -6383,14 +6383,24 @@ private fun joinSupplierSemicolonParts(parts: List<String>): String =
 
 /** Strip grouping/currency so inputs like `15,000` or `¥60,000` parse as numbers. */
 private fun parseMoneyNumericInput(raw: String): Double? {
-    val t = raw.trim().replace(",", "").replace(Regex("[¥₩£€\\s]"), "").trim()
+    // Accept multiple comma-like thousands separators (fullwidth comma, Arabic thousands separator).
+    val t = raw
+        .trim()
+        .replace(Regex("[,，٬]"), "")
+        .replace(Regex("[¥₩£€\\s]"), "")
+        .trim()
     if (t.isEmpty()) return null
     return t.toDoubleOrNull()
 }
 
 /** Strip commas/currency for DB storage after validation. */
 private fun normalizeRixoPriceForDb(raw: String): String? {
-    val t = raw.trim().replace(",", "").replace(Regex("[¥₩£€\\s]"), "").trim()
+    // Use the same normalization as parseMoneyNumericInput, but return a numeric string for DB.
+    val t = raw
+        .trim()
+        .replace(Regex("[,，٬]"), "")
+        .replace(Regex("[¥₩£€\\s]"), "")
+        .trim()
     if (t.isEmpty() || t.toDoubleOrNull() == null) return null
     return t
 }
