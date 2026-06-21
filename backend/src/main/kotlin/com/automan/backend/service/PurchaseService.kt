@@ -6,6 +6,7 @@ import com.automan.backend.model.ImportResponse
 import com.automan.backend.model.BookingMapping
 import com.automan.backend.repository.BookingMappingRepository
 import com.automan.backend.repository.ClientRepository
+import com.automan.backend.repository.InvoiceHistoryLineRepository
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.ShippingHistoryRepository
 import com.automan.backend.util.CarModelYearUtils
@@ -27,6 +28,7 @@ class PurchaseService(
     private val purchaseWorkflowService: PurchaseWorkflowService,
     private val purchaseChangeHistoryService: PurchaseChangeHistoryService,
     private val clientRepository: ClientRepository,
+    private val invoiceHistoryLineRepository: InvoiceHistoryLineRepository,
 ) {
     /** Links [Purchase.clientId] when [clientName] matches exactly one row in clients (case-insensitive). */
     private fun resolveClientIdFromName(clientName: String?): Long? {
@@ -34,6 +36,23 @@ class PurchaseService(
         if (name.isEmpty()) return null
         val matches = clientRepository.findByClientNameIgnoreCase(name)
         return if (matches.size == 1) matches.first().id else null
+    }
+
+    private fun guardedInvoiceConfirmedUpdate(
+        existingPurchase: Purchase,
+        requestedInvoiceConfirmed: Boolean?,
+    ): Boolean? {
+        if (
+            requestedInvoiceConfirmed == false &&
+            existingPurchase.invoiceConfirmed == true &&
+            invoiceHistoryLineRepository.countByNormalizedChassis(existingPurchase.chassis) > 0
+        ) {
+            throw IllegalArgumentException(
+                "Cannot clear invoice confirmation for chassis ${existingPurchase.chassis} while invoice history still references it. " +
+                    "Delete or edit the invoice history first.",
+            )
+        }
+        return requestedInvoiceConfirmed ?: existingPurchase.invoiceConfirmed
     }
 
     /** POL from stock_location mapping (same mapping used in Rixo import). */
@@ -199,7 +218,7 @@ class PurchaseService(
                 blNo = purchase.blNo ?: existingPurchase.blNo,
                 vessel = purchase.vessel ?: existingPurchase.vessel,
                 bookingRequested = purchase.bookingRequested,
-                invoiceConfirmed = purchase.invoiceConfirmed ?: existingPurchase.invoiceConfirmed,
+                invoiceConfirmed = guardedInvoiceConfirmedUpdate(existingPurchase, purchase.invoiceConfirmed),
                 workflowStatus = existingPurchase.workflowStatus,
                 workflowStatusUpdatedAt = existingPurchase.workflowStatusUpdatedAt,
                 shipmentCharges = purchase.shipmentCharges ?: existingPurchase.shipmentCharges,
@@ -515,12 +534,13 @@ class PurchaseService(
                     } else {
                         updateData["invoice_confirmed"]
                     }
-                    when {
+                    val requested = when {
                         raw is Boolean -> raw
                         raw is String -> raw.toBoolean()
                         raw is Number -> raw.toInt() != 0
-                        else -> existingPurchase.invoiceConfirmed
+                        else -> null
                     }
+                    guardedInvoiceConfirmedUpdate(existingPurchase, requested)
                 },
                 workflowStatus = existingPurchase.workflowStatus,
                 workflowStatusUpdatedAt = existingPurchase.workflowStatusUpdatedAt,
