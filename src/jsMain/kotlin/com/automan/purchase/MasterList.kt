@@ -265,6 +265,7 @@ private fun groupCarBrandMappingsForView(mappings: List<dynamic>): List<dynamic>
         groupedObj.color = joinDistinctNonBlank(list.map { (it.color ?: "").toString() })
         groupedObj.driveType = joinDistinctNonBlank(list.map { (it.driveType ?: "").toString() })
         groupedObj.recycleFee = joinDistinctNonBlank(list.map { (it.recycleFee ?: "").toString() })
+        groupedObj.carModelYear = joinDistinctNonBlank(list.map { (it.carModelYear ?: "").toString() })
 
         grouped.add(groupedObj)
     }
@@ -343,16 +344,8 @@ private fun tryPrefillCarBrandModalFromGroupedRow() {
     setChipFieldValue("carBrandRank", rankVal)
     setChipFieldValue("carBrandColor", colorVal)
     setChipFieldValue("carBrandDriveType", driveType)
-    val recycleFeeInput = document.getElementById("carBrandRecycleFee") as? HTMLInputElement
-    if (recycleFeeInput != null) {
-        recycleFeeInput.value = recycleFeeVal
-        // Format it using the global money formatter if available
-        window.setTimeout({
-            if (js("typeof window._moneyFormat === 'function'").unsafeCast<Boolean>()) {
-                recycleFeeInput.value = js("window._moneyFormat(recycleFeeInput.value)").unsafeCast<String>()
-            }
-        }, 0)
-    }
+    // Populate dynamic recycle fee rows from stored delimited string
+    js("if (typeof window.setRecycleFeeRowsValue === 'function') window.setRecycleFeeRowsValue(recycleFeeVal)")
 
     js("window.__carBrandRowData = null")
 }
@@ -4177,7 +4170,8 @@ private fun buildCarBrandTableUi(
                 "rank" to "Rank",
                 "color" to "Color",
                 "driveType" to "Drive Type",
-                "recycleFee" to "Recycle Fees"
+                "recycleFee" to "Recycle Fees",
+                "carModelYear" to "Production Date"
             )
             
             val carBrandColCount = 1 + selectedColumns.size
@@ -4226,9 +4220,14 @@ private fun buildCarBrandTableUi(
                 val colorVal = (mapping.color ?: "").toString()
                 val driveTypeVal = (mapping.driveType ?: "").toString()
                 val recycleFeeVal = (mapping.recycleFee ?: "").toString()
+                val carModelYearVal = (mapping.carModelYear ?: "").toString()
+                val carModelYearDisplay = carModelYearVal.split(";").map { token ->
+                    val m = Regex("""^(\d{4})-(\d{2})$""").find(token.trim())
+                    if (m != null) "${m.groupValues[2]}/${m.groupValues[1]}" else token.trim()
+                }.filter { it.isNotEmpty() }.joinToString(";")
 
                 val rowDataJs =
-                    "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}'};"
+                    "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}'};"
                 
                 html += """
                     <tr>
@@ -4269,6 +4268,7 @@ private fun buildCarBrandTableUi(
                         "color" -> colorVal
                         "driveType" -> driveTypeVal
                         "recycleFee" -> recycleFeeVal
+                        "carModelYear" -> carModelYearDisplay
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
@@ -4277,7 +4277,7 @@ private fun buildCarBrandTableUi(
                         else -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top;"
                     }
                     val cellInner = if (columnKey == "recycleFee") {
-                        formatNumericValueChipHtml(value)
+                        formatRecycleFeeChipHtml(value)
                     } else {
                         formatCarBrandMapValueChipHtml(value)
                     }
@@ -4585,7 +4585,8 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         "rank" to "Rank",
         "color" to "Color",
         "driveType" to "Drive Type",
-        "recycleFee" to "Recycle Fees"
+        "recycleFee" to "Recycle Fees",
+        "carModelYear" to "Production Date"
     )
     
     val cardsHTML = StringBuilder()
@@ -4608,9 +4609,14 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         val colorVal = (mapping.color ?: "").toString()
         val driveTypeVal = (mapping.driveType ?: "").toString()
         val recycleFeeVal = (mapping.recycleFee ?: "").toString()
+        val carModelYearVal = (mapping.carModelYear ?: "").toString()
+        val carModelYearDisplay = carModelYearVal.split(";").map { token ->
+            val m = Regex("""^(\d{4})-(\d{2})$""").find(token.trim())
+            if (m != null) "${m.groupValues[2]}/${m.groupValues[1]}" else token.trim()
+        }.filter { it.isNotEmpty() }.joinToString(";")
 
         val rowDataJs =
-            "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}'};"
+            "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}'};"
         
         // Build card content based on selected columns
         val cardFields = StringBuilder()
@@ -4632,12 +4638,13 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
                 "color" -> colorVal
                 "driveType" -> driveTypeVal
                 "recycleFee" -> recycleFeeVal
+                "carModelYear" -> carModelYearDisplay
                 else -> ""
             }
             
             if (value.isNotEmpty()) {
                 val displayValue = if (columnKey == "recycleFee") {
-                    formatNumericValueChipHtml(value)
+                    formatRecycleFeeChipHtml(value)
                 } else {
                     formatCarBrandMapValueChipHtml(value)
                 }
@@ -4797,7 +4804,8 @@ fun showCarBrandColumnFilterModal() {
         "rank" to "Rank",
         "color" to "Color",
         "driveType" to "Drive Type",
-        "recycleFee" to "Recycle Fees"
+        "recycleFee" to "Recycle Fees",
+        "carModelYear" to "Production Date"
     )
     
     val checkboxesDiv = document.getElementById("carBrandColumnCheckboxes")
@@ -5005,9 +5013,11 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                             <div style="visibility:hidden;"></div>
                         </div>
                         <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Recycle Fees</label>
-                            <input type="text" id="carBrandRecycleFee" class="money-input" inputmode="decimal" autocomplete="off" placeholder="e.g. 6550 (yen amount)"
-                                   style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Recycle Fees <span style="color: #6b7280; font-weight: 400; font-size: 12px;">(by Production Date)</span></label>
+                            <div id="recycleFeeRows" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;"></div>
+                            <button type="button" id="addRecycleFeeRow" style="display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; background: #f3f4f6; border: 1px dashed #d1d5db; border-radius: 6px; color: #374151; font-size: 13px; cursor: pointer; transition: background 0.15s;">
+                                <span style="font-size: 16px; line-height: 1;">+</span> Add Production Date
+                            </button>
                         </div>
                         <div class="car-brand-modal-actions">
                             <button type="button" id="cancelCarBrandBtn" class="car-brand-modal-btn car-brand-modal-btn-cancel">Cancel</button>
@@ -5025,6 +5035,193 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
     document.body?.insertAdjacentHTML("beforeend", modalHtml)
     ensureSupplierChipJs()
     populateCarBrandModalComboboxes()
+
+    // Inject JS helpers for dynamic recycle fee rows
+    js("""
+        window.addRecycleFeeRow = function(productionDate, fee) {
+            var container = document.getElementById('recycleFeeRows');
+            if (!container) return;
+            var rowIdx = container.children.length;
+            var row = document.createElement('div');
+            row.style.cssText = 'display:flex; align-items:center; gap:8px;';
+            row.innerHTML =
+                '<div style="position:relative; flex:1; display:flex; gap:6px; align-items:center;">' +
+                    '<div style="position:relative; flex:1;">' +
+                        '<input type="text" class="recycle-fee-date-input" maxlength="7" inputmode="numeric" autocomplete="off" ' +
+                            'placeholder="MM/YYYY" value="' + (productionDate || '') + '" ' +
+                            'style="width:100%; padding:9px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; box-sizing:border-box; font-family:inherit;">' +
+                        '<span class="recycle-fee-date-hint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none; font-size:13px; display:' + (productionDate ? 'none' : 'block') + ';">MM/YYYY</span>' +
+                    '</div>' +
+                    '<button type="button" class="recycle-fee-date-btn" title="Open month picker" ' +
+                        'style="flex-shrink:0; padding:9px 10px; border:1px solid #d1d5db; background:#f9fafb; border-radius:6px; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; box-sizing:border-box;">📅</button>' +
+                    '<input type="month" class="recycle-fee-month-picker" tabindex="-1" aria-hidden="true" ' +
+                        'style="position:absolute; left:0; top:0; width:0; height:0; opacity:0; border:none; padding:0; margin:0; overflow:hidden;">' +
+                '</div>' +
+                '<input type="text" class="recycle-fee-amount-input money-input" inputmode="decimal" autocomplete="off" ' +
+                    'placeholder="Fee (¥)" value="' + (fee || '') + '" ' +
+                    'style="flex:1; padding:9px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; box-sizing:border-box; font-family:inherit;">' +
+                '<button type="button" class="recycle-fee-delete-btn" style="flex-shrink:0; padding:6px 10px; background:#fee2e2; border:1px solid #fca5a5; border-radius:6px; color:#dc2626; font-size:14px; cursor:pointer; transition:background 0.15s;" title="Remove row">✕</button>';
+            // Delete row
+            row.querySelector('.recycle-fee-delete-btn').addEventListener('click', function() { row.remove(); });
+            // MM/YYYY mask on date input
+            var dateInput = row.querySelector('.recycle-fee-date-input');
+            var hint = row.querySelector('.recycle-fee-date-hint');
+            var dateBtn = row.querySelector('.recycle-fee-date-btn');
+            var monthPicker = row.querySelector('.recycle-fee-month-picker');
+
+            var lastAcceptedText = dateInput.value || '';
+            dateInput.addEventListener('input', function(e) {
+                var raw = dateInput.value;
+                var digits = raw.replace(/\D/g, '').substring(0, 6);
+                var next = '';
+                if (digits.length > 0) {
+                    var mm = digits.substring(0, 2);
+                    if (digits.length <= 2) {
+                        next = mm;
+                    } else {
+                        var yyyy = digits.substring(2);
+                        next = mm + '/' + yyyy;
+                    }
+                }
+                
+                var isValid = true;
+                if (next !== '') {
+                    if (!/^\d{0,2}(\/\d{0,4})?$/.test(next)) {
+                        isValid = false;
+                    } else {
+                        var parts = next.split('/');
+                        var mmVal = parts[0] || '';
+                        var yyyyVal = parts[1] || '';
+                        if (mmVal.length === 1) {
+                            if (mmVal[0] !== '0' && mmVal[0] !== '1') isValid = false;
+                        } else if (mmVal.length === 2) {
+                            var mNum = parseInt(mmVal, 10);
+                            if (isNaN(mNum) || mNum < 1 || mNum > 12) isValid = false;
+                        }
+                        if (yyyyVal.length > 4) isValid = false;
+                    }
+                }
+                
+                if (!isValid) {
+                    dateInput.value = lastAcceptedText;
+                    return;
+                }
+                
+                dateInput.value = next;
+                lastAcceptedText = next;
+                hint.style.display = next.length > 0 ? 'none' : 'block';
+            });
+
+            dateInput.addEventListener('keydown', function(ev) {
+                var key = ev.key;
+                var isDigit = key.length === 1 && key >= '0' && key <= '9';
+                var isSep = key === '/' || key === '-';
+                var navKeys = ['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Tab', 'Enter', 'Home', 'End'];
+                if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+                if (isDigit || isSep || navKeys.indexOf(key) !== -1) return;
+                ev.preventDefault();
+            });
+
+            dateInput.addEventListener('focus', function() { hint.style.display = 'none'; });
+
+            dateInput.addEventListener('blur', function() {
+                var current = dateInput.value.trim();
+                if (current === '') {
+                    monthPicker.value = '';
+                    hint.style.display = 'block';
+                    lastAcceptedText = '';
+                    return;
+                }
+                var match = current.match(/^(\d{1,2})\/(\d{4})$/);
+                if (match) {
+                    var mm = parseInt(match[1], 10);
+                    var yyyy = parseInt(match[2], 10);
+                    if (mm >= 1 && mm <= 12) {
+                        var paddedMm = mm < 10 ? '0' + mm : '' + mm;
+                        var formatted = paddedMm + '/' + yyyy;
+                        dateInput.value = formatted;
+                        lastAcceptedText = formatted;
+                        monthPicker.value = yyyy + '-' + paddedMm;
+                        hint.style.display = 'none';
+                        return;
+                    }
+                }
+            });
+
+            monthPicker.addEventListener('change', function() {
+                var iso = monthPicker.value.trim();
+                if (iso.match(/^\d{4}-\d{2}$/)) {
+                    var parts = iso.split('-');
+                    var formatted = parts[1] + '/' + parts[0];
+                    dateInput.value = formatted;
+                    lastAcceptedText = formatted;
+                    hint.style.display = 'none';
+                }
+            });
+
+            dateBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                var currentVal = (dateInput.value || '').trim();
+                var isoMonth = '';
+                var mmYYYY = currentVal.match(/^(\d{2})\/(\d{4})$/);
+                if (mmYYYY) {
+                    isoMonth = mmYYYY[2] + '-' + mmYYYY[1];
+                }
+                monthPicker.value = isoMonth;
+                try {
+                    monthPicker.showPicker();
+                } catch (err) {
+                    monthPicker.click();
+                }
+            });
+
+            container.appendChild(row);
+        };
+
+        window.getRecycleFeeRowsValue = function() {
+            var rows = document.querySelectorAll('#recycleFeeRows > div');
+            var pairs = [];
+            rows.forEach(function(row) {
+                var dateEl = row.querySelector('.recycle-fee-date-input');
+                var feeEl = row.querySelector('.recycle-fee-amount-input');
+                if (!dateEl || !feeEl) return;
+                var dateVal = (dateEl.value || '').trim();
+                var feeVal = (feeEl.value || '').replace(/[^0-9.]/g, '').trim();
+                if (dateVal && feeVal) {
+                    // Normalize MM/YYYY to YYYY-MM for storage
+                    var normalized = dateVal;
+                    var mmYYYY = dateVal.match(/^(\d{2})\/(\d{4})$/);
+                    if (mmYYYY) normalized = mmYYYY[2] + '-' + mmYYYY[1];
+                    pairs.push(normalized + ':' + feeVal);
+                }
+            });
+            return pairs.join(';');
+        };
+
+        window.setRecycleFeeRowsValue = function(delimitedStr) {
+            var container = document.getElementById('recycleFeeRows');
+            if (!container) return;
+            container.innerHTML = '';
+            if (!delimitedStr || !delimitedStr.trim()) return;
+            var pairs = delimitedStr.split(';');
+            pairs.forEach(function(pair) {
+                var colonIdx = pair.lastIndexOf(':');
+                if (colonIdx <= 0) return;
+                var dateToken = pair.substring(0, colonIdx).trim();
+                var feeToken = pair.substring(colonIdx + 1).trim();
+                // Convert YYYY-MM to MM/YYYY for display
+                var displayDate = dateToken;
+                var yyyyMM = dateToken.match(/^(\d{4})-(\d{2})$/);
+                if (yyyyMM) displayDate = yyyyMM[2] + '/' + yyyyMM[1];
+                if (typeof window.addRecycleFeeRow === 'function') window.addRecycleFeeRow(displayDate, feeToken);
+            });
+        };
+    """)
+
+    // Wire up "Add Production Date" button
+    document.getElementById("addRecycleFeeRow")?.addEventListener("click", { _: Event ->
+        js("window.addRecycleFeeRow('', '')")
+    })
 
     if (!isEdit && !isDuplicate) {
         js("window.__carBrandRowData = null")
@@ -5111,17 +5308,9 @@ fun loadCarBrandDataForEdit(mappingId: Long, clearChassisForDuplicate: Boolean =
                 setChipFieldValue("carBrandRank", (data.rank ?: "").toString())
                 setChipFieldValue("carBrandColor", (data.color ?: "").toString())
                 setChipFieldValue("carBrandDriveType", (data.driveType ?: "").toString())
-                val recycleFeeInput = document.getElementById("carBrandRecycleFee") as? HTMLInputElement
-                if (recycleFeeInput != null) {
-                    val rawValue = (data.recycleFee ?: "").toString()
-                    recycleFeeInput.value = rawValue
-                    // Format it using the global money formatter if available
-                    window.setTimeout({
-                        if (js("typeof window._moneyFormat === 'function'").unsafeCast<Boolean>()) {
-                            recycleFeeInput.value = js("window._moneyFormat(recycleFeeInput.value)").unsafeCast<String>()
-                        }
-                    }, 0)
-                }
+                // Populate dynamic recycle fee rows from stored delimited string
+                val recycleStr = (data.recycleFee ?: "").toString()
+                js("if (typeof window.setRecycleFeeRowsValue === 'function') window.setRecycleFeeRowsValue(recycleStr)")
             } else {
                 throw js("Error(result.message || 'Failed to load car brand data')")
             }
@@ -5232,8 +5421,12 @@ fun performCarBrandSave(mappingId: Long?, replaceExistingValues: Boolean = false
     carBrandData.rank = getChipFieldValue("carBrandRank").takeIf { it.isNotEmpty() } ?: null
     carBrandData.color = getChipFieldValue("carBrandColor").takeIf { it.isNotEmpty() } ?: null
     carBrandData.driveType = getChipFieldValue("carBrandDriveType").takeIf { it.isNotEmpty() } ?: null
-    carBrandData.recycleFee = js("window.getMoneyRawValue ? window.getMoneyRawValue('carBrandRecycleFee') : ''").unsafeCast<String>()
-        .trim().takeIf { it.isNotEmpty() } ?: null
+    val recFeeStr = js("window.getRecycleFeeRowsValue ? window.getRecycleFeeRowsValue() : ''").unsafeCast<String>().trim()
+    carBrandData.recycleFee = recFeeStr.takeIf { it.isNotEmpty() } ?: null
+    val derivedModelYears = if (recFeeStr.isNotEmpty()) {
+        recFeeStr.split(";").map { it.substringBefore(":") }.filter { it.isNotEmpty() }.joinToString(";")
+    } else ""
+    carBrandData.carModelYear = derivedModelYears.takeIf { it.isNotEmpty() } ?: null
     carBrandData.replaceExistingValues = replaceExistingValues
     
     val saveButton = document.getElementById("saveCarBrandBtn") as? HTMLButtonElement

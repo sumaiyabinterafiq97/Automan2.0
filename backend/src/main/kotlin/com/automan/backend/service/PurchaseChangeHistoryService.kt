@@ -140,6 +140,7 @@ class PurchaseChangeHistoryService(
         add("venueId", str(before.venueId), str(after.venueId))
         add("numberCut", str(before.numberCut), str(after.numberCut))
         add("shaken", normBool(before.shaken), normBool(after.shaken))
+        add("negotiate", normBool(before.negotiate), normBool(after.negotiate))
         add("repairCompany", str(before.repairCompany), str(after.repairCompany))
         add("repairCharges", str(before.repairCharges), str(after.repairCharges))
         add("bookingId", normLong(before.bookingId), normLong(after.bookingId))

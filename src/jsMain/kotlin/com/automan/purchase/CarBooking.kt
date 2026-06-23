@@ -338,7 +338,10 @@ fun showCarBookingPage() {
                     
                     <!-- Right Section: LIST -->
                     <div class="booking-list-section booking-panel">
-                        <h2 class="booking-section-header">LIST</h2>
+                        <div class="booking-list-header-row">
+                            <h2 class="booking-section-header">LIST</h2>
+                            <span id="bookingCarsSelectedCount" class="booking-cars-selected-count is-empty" aria-live="polite">0 CARS SELECTED</span>
+                        </div>
                         
                         <!-- SEARCH CHASSIS: plain input, suggestions from purchase table search (no dropdown button) -->
                         <div class="booking-form-group booking-chassis-search-wrap">
@@ -644,6 +647,15 @@ fun setupCarBookingPageListeners() {
             }
             Logger.debug("${if (isChecked) "Selected" else "Deselected"} all ${checkboxes.length} cars")
         }
+        target?.indeterminate = false
+        updateBookingCarsSelectedCount()
+    })
+
+    document.getElementById("carSelectionTableBody")?.addEventListener("change", { event: Event ->
+        val target = event.target as? HTMLInputElement ?: return@addEventListener
+        if (target.type != "checkbox" || !target.classList.contains("car-checkbox")) return@addEventListener
+        updateBookingCarsSelectedCount()
+        updateBookingSelectAllCheckbox()
     })
     
     // Purchase List button
@@ -752,6 +764,7 @@ fun setupCarBookingPageListeners() {
         attachPodChangeListener(podPortElForListener)
     }
 
+    updateBookingCarsSelectedCount()
 }
 
 // Helper function to attach POD change listener (can be called multiple times if element is replaced)
@@ -1260,6 +1273,55 @@ fun clearBookingListTable() {
     val tbody = document.getElementById("carSelectionTableBody")
     tbody?.innerHTML = ""
     Logger.debug("Cleared booking list table")
+    updateBookingCarsSelectedCount()
+    updateBookingSelectAllCheckbox()
+}
+
+fun updateBookingCarsSelectedCount() {
+    val countEl = document.getElementById("bookingCarsSelectedCount") as? HTMLElement ?: return
+    val selectedCount = if (isCarBookingRecreateSession()) {
+        document.getElementById("carSelectionTableBody")?.querySelectorAll("tr")?.length ?: 0
+    } else {
+        val tableBody = document.getElementById("carSelectionTableBody")
+        var checkboxes = tableBody?.querySelectorAll("input[type='checkbox'].car-checkbox")
+        if (checkboxes == null || checkboxes.length == 0) {
+            checkboxes = tableBody?.querySelectorAll("input[type='checkbox']")
+        }
+        var checked = 0
+        if (checkboxes != null) {
+            for (i in 0 until checkboxes.length) {
+                val checkbox = checkboxes.item(i) as? HTMLInputElement
+                if (checkbox?.checked == true) checked++
+            }
+        }
+        checked
+    }
+    countEl.textContent = if (selectedCount == 1) "1 CAR SELECTED" else "$selectedCount CARS SELECTED"
+    if (selectedCount == 0) {
+        countEl.classList.add("is-empty")
+    } else {
+        countEl.classList.remove("is-empty")
+    }
+}
+
+fun updateBookingSelectAllCheckbox() {
+    if (isCarBookingRecreateSession()) return
+    val selectAllCheckbox = document.getElementById("selectAllCars") as? HTMLInputElement ?: return
+    val tableBody = document.getElementById("carSelectionTableBody") ?: return
+    val checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
+    val total = checkboxes.length
+    if (total == 0) {
+        selectAllCheckbox.checked = false
+        selectAllCheckbox.indeterminate = false
+        return
+    }
+    var checkedCount = 0
+    for (i in 0 until total) {
+        val checkbox = checkboxes.item(i) as? HTMLInputElement
+        if (checkbox?.checked == true) checkedCount++
+    }
+    selectAllCheckbox.checked = checkedCount == total
+    selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < total
 }
 
 fun hideChassisSuggestions() {
@@ -1584,6 +1646,8 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
     }
     
     console.log("✅ Added", purchasesArray.size, "new cars to table")
+    updateBookingCarsSelectedCount()
+    updateBookingSelectAllCheckbox()
 }
 
 fun searchCarsFallback(searchTerm: String) {
@@ -2506,6 +2570,7 @@ private fun renumberBookingListTable() {
             noCell.innerHTML = formatPurchaseListCellChipHtml((i + 1).toString())
         }
     }
+    updateBookingCarsSelectedCount()
 }
 
 private fun handleDeleteShippingHistoryFromRecreate() {

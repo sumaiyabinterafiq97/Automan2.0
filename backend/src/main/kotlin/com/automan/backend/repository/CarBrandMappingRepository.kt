@@ -64,6 +64,10 @@ interface CarBrandMappingRepository : JpaRepository<CarBrandMapping, Long> {
     @Query("SELECT DISTINCT c.chassis FROM CarBrandMapping c WHERE c.chassis IS NOT NULL AND c.chassis != '' ORDER BY c.chassis")
     fun findDistinctChassisAll(): List<String>
 
+    // Find all mappings whose chassis starts with a given prefix (for recycle fee production-date lookup)
+    @Query("SELECT c FROM CarBrandMapping c WHERE c.chassis IS NOT NULL AND c.chassis LIKE CONCAT(:prefix, '%') ORDER BY c.id")
+    fun findByChassisStartingWith(@Param("prefix") prefix: String): List<CarBrandMapping>
+
     @Query(
         """
         SELECT DISTINCT c.carName

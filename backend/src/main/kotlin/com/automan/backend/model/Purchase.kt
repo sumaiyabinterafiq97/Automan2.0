@@ -195,6 +195,10 @@ data class Purchase(
     @Column(name = "shaken")
     @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
     val shaken: Boolean? = null,
+
+    @Column(name = "negotiate")
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+    val negotiate: Boolean? = null,
     
     @Column(name = "repair_company")
     val repairCompany: String? = null,

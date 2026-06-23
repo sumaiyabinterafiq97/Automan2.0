@@ -111,6 +111,43 @@ class PurchaseService(
         return purchaseRepository.findByBookingId(bookingId)
     }
     
+    private fun firstSemicolonToken(raw: String?): String {
+        val s = raw?.trim().orEmpty()
+        if (s.isEmpty()) return ""
+        val parts = s.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+        return parts.firstOrNull() ?: s
+    }
+
+    fun findDuplicatePurchase(
+        chassis: String?,
+        excludeId: Long?,
+    ): Purchase? {
+        val c = chassis?.trim().orEmpty()
+        if (c.isEmpty()) return null
+
+        val candidates = purchaseRepository.findByChassisIgnoreCaseTrim(c)
+        return candidates.firstOrNull { row ->
+            excludeId == null || row.id != excludeId
+        }
+    }
+
+    fun duplicatePurchaseErrorMessage(duplicate: Purchase): String {
+        val supplier = duplicate.auctionHouse?.trim().orEmpty()
+        val fromClause = if (supplier.isNotEmpty()) " from $supplier" else ""
+        val chassisLabel = duplicate.chassis?.trim().orEmpty()
+        return "Update failed! Chassis $chassisLabel already exists in another purchase$fromClause."
+    }
+
+    private fun assertNoDuplicatePurchase(
+        chassis: String?,
+        excludeId: Long?,
+    ) {
+        val duplicate = findDuplicatePurchase(chassis, excludeId)
+        if (duplicate != null) {
+            throw IllegalArgumentException(duplicatePurchaseErrorMessage(duplicate))
+        }
+    }
+
     @Transactional
     fun createPurchase(purchase: Purchase): Purchase {
         // Validate carModelYear (Production Date)
@@ -118,6 +155,8 @@ class PurchaseService(
         if (yearError != null) {
             throw IllegalArgumentException(yearError)
         }
+
+        assertNoDuplicatePurchase(purchase.chassis, excludeId = null)
         
         // Ensure shaken has a value (default to false if null)
         // Explicitly convert to boolean to ensure proper database storage
@@ -126,8 +165,14 @@ class PurchaseService(
             purchase.shaken == false -> false
             else -> false
         }
+        val negotiateValue = when {
+            purchase.negotiate == true -> true
+            purchase.negotiate == false -> false
+            else -> false
+        }
         val purchaseToSave = purchase.copy(
             shaken = shakenValue,
+            negotiate = negotiateValue,
             clientId = purchase.clientId ?: resolveClientIdFromName(purchase.clientName),
         )
         
@@ -224,6 +269,11 @@ class PurchaseService(
                         Logger.debug("🔍 [Service] updatePurchase - Keeping existing shaken: ${existingPurchase.shaken}")
                         existingPurchase.shaken
                     }
+                },
+                negotiate = when {
+                    purchase.negotiate == true -> true
+                    purchase.negotiate == false -> false
+                    else -> existingPurchase.negotiate
                 },
                 repairCompany = purchase.repairCompany ?: existingPurchase.repairCompany,
                 repairCharges = purchase.repairCharges ?: existingPurchase.repairCharges,
@@ -409,6 +459,17 @@ class PurchaseService(
                     Logger.debug("🔍 [Service] Final shaken value to save: $result")
                     result
                 },
+                negotiate = run {
+                    val negotiateValue = updateData["negotiate"]
+                    when {
+                        negotiateValue is Boolean -> negotiateValue
+                        negotiateValue is String -> negotiateValue.toBoolean()
+                        negotiateValue == true -> true
+                        negotiateValue == false -> false
+                        negotiateValue == null -> existingPurchase.negotiate
+                        else -> existingPurchase.negotiate
+                    }
+                },
                 repairCompany = updateData["repairCompany"] as? String ?: existingPurchase.repairCompany,
                 repairCharges = updateData["repairCharges"] as? String ?: existingPurchase.repairCharges,
                 carPictures = run {
@@ -528,6 +589,11 @@ class PurchaseService(
             )
             
             Logger.debug("Saving updated purchase - shipmentDate: ${updatedPurchase.shipmentDate}, bookingId: ${updatedPurchase.bookingId}, vessel: ${updatedPurchase.vessel}")
+
+            assertNoDuplicatePurchase(
+                updatedPurchase.chassis,
+                excludeId = id,
+            )
             
             // CRITICAL: Ensure the entity ID is set correctly for JPA to recognize it as an update
             val purchaseToSave = if (updatedPurchase.id != null) {

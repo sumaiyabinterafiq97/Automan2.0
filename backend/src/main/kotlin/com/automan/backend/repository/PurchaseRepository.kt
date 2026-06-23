@@ -109,6 +109,11 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     
     // Method to find purchases by chassis (can return multiple since chassis is no longer unique)
     fun findByChassis(chassis: String): List<Purchase>
+
+    @Query(
+        "SELECT p FROM Purchase p WHERE LOWER(TRIM(p.chassis)) = LOWER(TRIM(:chassis))",
+    )
+    fun findByChassisIgnoreCaseTrim(@Param("chassis") chassis: String): List<Purchase>
     
     // Booking-related methods
     fun findByBookingId(bookingId: Long): List<Purchase>

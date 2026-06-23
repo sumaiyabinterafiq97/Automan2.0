@@ -2747,74 +2747,30 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
         const mappings = window.rixoPriceMapping[normalizedAuctionName].mappings;
     
     if (changedField === 'auctionHouse') {
-        // When auction house is selected, auto-select stockLocation and venueId if they're consistent
         const stockLocations = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.stockLocation).filter(s => s && String(s).trim() !== ''));
         const venueIds = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.venueId).filter(v => v && String(v).trim() !== ''));
         const rixoCompanies = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.rixoCompany).filter(c => c && String(c).trim() !== ''));
-        const shipmentSizes = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.typeOfVehicle).filter(t => t && String(t).trim() !== ''));
-        const rixoPrices = window.getUniqueValuesCaseInsensitive(mappings.map(m => m.rixoPrice).filter(p => p && String(p).trim() !== ''));
         const polTokensFromMapping = window.flattenPolTokensFromMappings ? window.flattenPolTokensFromMappings(mappings) : [];
 
         console.log('Auto-selecting for auction house:', {
             stockLocations: stockLocations,
             venueIds: venueIds,
             rixoCompanies: rixoCompanies,
-            shipmentSizes: shipmentSizes,
-            rixoPrices: rixoPrices,
             polTokensFromMapping: polTokensFromMapping
         });
-        
-        // Update dropdowns with all available options for both add and edit forms FIRST (supplier rows | sep | master)
-        updateDropdown('stockLocation', 'editStockLocation', stockLocations, true);
-        updateDropdown('venueId', 'editVenueId', venueIds, true);
-        updateDropdown('rixoCompany', 'editRixoCompany', rixoCompanies, true);
-        // POL: same pattern as Stock Location — mapping POL tokens first (then async merge with rixo_prices + master)
-        if (polTokensFromMapping.length > 0) {
-            updateDropdown('pol', 'editPol', polTokensFromMapping, true);
-        } else {
-            updateDropdown('pol', 'editPol', [], true);
+
+        if (window.__supplierSkipSilentAutoSelect === true) {
+            window.__supplierSkipSilentAutoSelect = false;
+            var snapSilent = window.__rixoSupplierPreserveSnapshot;
+            window.rebuildSupplierDependentDropdowns(normalizedAuctionName, {
+                autoSelect: false,
+                preserveSnapshot: snapSilent || __getCurrentSupplierFieldValues(),
+                restoreDelay: 100
+            });
+            return;
         }
-        // Intentionally do NOT update Vehicle type or Rixo Price from mapping.
-        
-        // THEN auto-select values after dropdowns are populated
-        // Use setTimeout to ensure dropdowns are fully populated first
-        // Preserve current combobox values when still valid for this supplier (fixes edit form snapping back to [0] after refresh or remapping).
-        setTimeout(function() {
-            var cur = __getCurrentSupplierFieldValues();
-            var stockPick = stockLocations.length > 0 ? __pickPreservedOrFirst(stockLocations, cur.stock) : null;
-            var venuePick = venueIds.length > 0 ? __pickPreservedOrFirst(venueIds, cur.venue) : null;
-            var rixoPick = rixoCompanies.length > 0 ? __pickPreservedOrFirst(rixoCompanies, cur.rixo) : null;
-            var polPick = polTokensFromMapping.length > 0 ? __pickPreservedOrFirst(polTokensFromMapping, cur.pol) : null;
 
-            if (stockLocations.length > 0 && stockPick) {
-                setFieldValue('stockLocation', 'editStockLocation', stockPick);
-                if (polTokensFromMapping.length > 0 && typeof window.setFieldValue === 'function') {
-                    var polToSet = polPick || polTokensFromMapping[0];
-                    window.setFieldValue('pol', 'editPol', polToSet);
-                }
-                // Third arg false => do not overwrite POL with merged[0] after rixo_prices fetch when current POL is still valid in supplier map
-                var keepPolAfterFetch = !!(cur.pol && __listContainsTokenCaseInsensitive(polTokensFromMapping, cur.pol));
-                if (typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                    window.fetchPolsByStockLocationAndUpdate(normalizedAuctionName, stockPick, !keepPolAfterFetch, polTokensFromMapping);
-                }
-            } else if (polTokensFromMapping.length > 0) {
-                var polOne = polPick || polTokensFromMapping[0];
-                if (typeof window.setFieldValue === 'function') {
-                    window.setFieldValue('pol', 'editPol', polOne);
-                }
-            }
-
-            if (venueIds.length > 0 && venuePick) {
-                setFieldValue('venueId', 'editVenueId', venuePick);
-            }
-
-            if (rixoCompanies.length > 0 && rixoPick) {
-                setFieldValue('rixoCompany', 'editRixoCompany', rixoPick);
-            }
-            if (window.__rixoSupplierPreserveSnapshot) {
-                window.__rixoSupplierPreserveSnapshot = null;
-            }
-        }, 100);
+        window.rebuildSupplierDependentDropdowns(normalizedAuctionName, { autoSelect: true, restoreDelay: 100 });
         
     } else if (changedField === 'rixoCompany') {
         // When rixoCompany is selected, filter and update other dropdowns
@@ -2858,8 +2814,12 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
 // Helper function to update dropdown options with filtered data
 window.updateDropdownOptions = function(auctionName, typeOfVehicle, stockLocation, rixoCompany) {
     console.log('updateDropdownOptions called:', auctionName, typeOfVehicle, stockLocation, rixoCompany);
-    
-    if (!auctionName || !window.rixoPriceMapping[auctionName]) {
+    if (!auctionName) return;
+    if (typeof window.rebuildSupplierDependentDropdowns === 'function') {
+        window.rebuildSupplierDependentDropdowns(auctionName, { autoSelect: false, restoreValues: true, restoreDelay: 50 });
+        return;
+    }
+    if (!window.rixoPriceMapping[auctionName]) {
         return;
     }
     
@@ -2980,6 +2940,147 @@ function buildSupplierMappingPlusMasterSelect(selectId, supplierOptions, placeho
     }
     appendMasterAfterSeparatorForSupplierField(selectId);
 }
+
+function getCurrentAuctionNameForPurchaseForm() {
+    var isEdit = !!document.getElementById('editAuctionName');
+    var auctionId = isEdit ? 'editAuctionName' : 'auctionName';
+    if (typeof window.getComboboxValue === 'function') {
+        var v = (window.getComboboxValue(auctionId) || '').trim();
+        if (v && v !== '__add_new_supplier__') return v;
+    }
+    var sel = document.getElementById(auctionId);
+    var inp = document.getElementById(auctionId + 'Input');
+    var raw = ((inp && inp.value) || (sel && sel.value) || '').trim();
+    return (raw && raw !== '__add_new_supplier__') ? raw : '';
+}
+
+function normalizeAuctionNameForMapping(auctionName) {
+    if (!auctionName || !window.rixoPriceMapping) return '';
+    var name = String(auctionName).trim();
+    if (!name) return '';
+    if (window.rixoPriceMapping[name]) return name;
+    var keys = Object.keys(window.rixoPriceMapping);
+    for (var i = 0; i < keys.length; i++) {
+        if (keys[i].toLowerCase() === name.toLowerCase()) return keys[i];
+    }
+    return '';
+}
+
+function supplierSelectHasMasterSep(selectId) {
+    var sel = document.getElementById(selectId);
+    if (!sel) return false;
+    for (var i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === SUPPLIER_MASTER_SEP_VALUE) return true;
+    }
+    return false;
+}
+
+/** Set value on a supplier master combobox after buildSupplierMappingPlusMasterSelect. */
+function restoreSupplierMasterFieldValue(addFieldId, editFieldId, value) {
+    if (value == null || String(value).trim() === '') return;
+    var val = String(value).trim();
+    function applyOne(selectId, v) {
+        var sel = document.getElementById(selectId);
+        if (!sel) return;
+        var matched = false;
+        for (var i = 0; i < sel.options.length; i++) {
+            var ov = (sel.options[i].value || '').trim();
+            var ot = (sel.options[i].text || '').trim();
+            if (ov === v || ot === v || ov.toLowerCase() === v.toLowerCase() || ot.toLowerCase() === v.toLowerCase()) {
+                sel.value = ov || v;
+                matched = true;
+                break;
+            }
+        }
+        if (!matched) {
+            var o = document.createElement('option');
+            o.value = v;
+            o.textContent = v;
+            sel.appendChild(o);
+            sel.value = v;
+        }
+        var inp = document.getElementById(selectId + 'Input');
+        if (inp) inp.value = sel.value || v;
+        if (typeof window.syncComboboxInput === 'function') {
+            window.syncComboboxInput(selectId);
+        }
+    }
+    if (document.getElementById(addFieldId)) applyOne(addFieldId, val);
+    if (editFieldId !== addFieldId && document.getElementById(editFieldId) && !__rixoSkipAutoEditField(editFieldId)) {
+        applyOne(editFieldId, val);
+    }
+}
+
+/**
+ * Rebuild Stock / Venue / Rixo / POL dropdowns from supplier mapping (+ master menu).
+ * Call after populateDropdownOptions clears those selects.
+ */
+window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
+    options = options || {};
+    var normalized = normalizeAuctionNameForMapping(auctionName);
+    if (!normalized || !window.rixoPriceMapping[normalized] || !window.rixoPriceMapping[normalized].mappings) {
+        return false;
+    }
+    var mappings = window.rixoPriceMapping[normalized].mappings;
+    var stockLocations = window.getUniqueValuesCaseInsensitive(mappings.map(function(m) { return m.stockLocation; }).filter(function(s) { return s && String(s).trim() !== ''; }));
+    var venueIds = window.getUniqueValuesCaseInsensitive(mappings.map(function(m) { return m.venueId; }).filter(function(v) { return v && String(v).trim() !== ''; }));
+    var rixoCompanies = window.getUniqueValuesCaseInsensitive(mappings.map(function(m) { return m.rixoCompany; }).filter(function(c) { return c && String(c).trim() !== ''; }));
+    var polTokensFromMapping = window.flattenPolTokensFromMappings ? window.flattenPolTokensFromMappings(mappings) : [];
+
+    updateDropdown('stockLocation', 'editStockLocation', stockLocations, true);
+    updateDropdown('venueId', 'editVenueId', venueIds, true);
+    updateDropdown('rixoCompany', 'editRixoCompany', rixoCompanies, true);
+    if (polTokensFromMapping.length > 0) {
+        updateDropdown('pol', 'editPol', polTokensFromMapping, true);
+    } else {
+        updateDropdown('pol', 'editPol', [], true);
+    }
+
+    var restoreDelay = options.restoreDelay != null ? options.restoreDelay : 100;
+    setTimeout(function() {
+        var snap = options.preserveSnapshot;
+        var cur = snap && typeof snap === 'object' ? snap : __getCurrentSupplierFieldValues();
+        if (options.autoSelect) {
+            var stockPick = stockLocations.length > 0 ? __pickPreservedOrFirst(stockLocations, cur.stock) : null;
+            var venuePick = venueIds.length > 0 ? __pickPreservedOrFirst(venueIds, cur.venue) : null;
+            var rixoPick = rixoCompanies.length > 0 ? __pickPreservedOrFirst(rixoCompanies, cur.rixo) : null;
+            var polPick = polTokensFromMapping.length > 0 ? __pickPreservedOrFirst(polTokensFromMapping, cur.pol) : null;
+            if (stockPick) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', stockPick);
+            if (polPick || (polTokensFromMapping.length > 0 && !cur.pol)) {
+                restoreSupplierMasterFieldValue('pol', 'editPol', polPick || polTokensFromMapping[0]);
+            } else if (cur.pol) {
+                restoreSupplierMasterFieldValue('pol', 'editPol', cur.pol);
+            }
+            if (venuePick) restoreSupplierMasterFieldValue('venueId', 'editVenueId', venuePick);
+            if (rixoPick) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', rixoPick);
+            if (stockPick && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+                var keepPol = !!(cur.pol && __listContainsTokenCaseInsensitive(polTokensFromMapping, cur.pol));
+                window.fetchPolsByStockLocationAndUpdate(normalized, stockPick, !keepPol, polTokensFromMapping);
+            }
+        } else if (options.restoreValues !== false) {
+            if (cur.stock) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', cur.stock);
+            if (cur.pol) restoreSupplierMasterFieldValue('pol', 'editPol', cur.pol);
+            if (cur.venue) restoreSupplierMasterFieldValue('venueId', 'editVenueId', cur.venue);
+            if (cur.rixo) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', cur.rixo);
+            if (cur.stock && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+                window.fetchPolsByStockLocationAndUpdate(normalized, cur.stock, false, cur.pol ? [cur.pol] : polTokensFromMapping);
+            }
+        }
+        if (window.__rixoSupplierPreserveSnapshot) {
+            window.__rixoSupplierPreserveSnapshot = null;
+        }
+    }, restoreDelay);
+    return true;
+};
+
+window.ensureSupplierMasterComboboxReady = function(selectId) {
+    if (!MASTER_FIELD_IDS[selectId]) return true;
+    if (supplierSelectHasMasterSep(selectId)) return true;
+    var auction = getCurrentAuctionNameForPurchaseForm();
+    if (!auction) return false;
+    window.rebuildSupplierDependentDropdowns(auction, { restoreValues: true, restoreDelay: 0 });
+    return supplierSelectHasMasterSep(selectId);
+};
 
 function uniqueOptionsForMasterField(options) {
     return window.getUniqueValuesCaseInsensitive ? window.getUniqueValuesCaseInsensitive(options) : window.getUniqueValues(options);
@@ -4226,8 +4327,165 @@ window.closeMappingModal = function() {
 };
 
 // Refresh Rixo dropdowns after changes
-window.refreshRixoDropdowns = function() {
-    window.__rixoSupplierPreserveSnapshot = null;
+function __isOnPurchaseFormPage() {
+    var h = window.location.hash || '';
+    return h.indexOf('#/add') === 0 || h.indexOf('#/edit') === 0;
+}
+
+function __snapshotSupplierFormForPreserve() {
+    if (!__isOnPurchaseFormPage()) return null;
+    var isEdit = !!document.getElementById('editAuctionName');
+    var auctionId = isEdit ? 'editAuctionName' : 'auctionName';
+    var g = typeof window.getComboboxValue === 'function'
+        ? function(id) { return (window.getComboboxValue(id) || '').trim(); }
+        : function(id) {
+            var inp = document.getElementById(id + 'Input');
+            var sel = document.getElementById(id);
+            return ((inp && inp.value) || (sel && sel.value) || '').trim();
+        };
+    return {
+        isEdit: isEdit,
+        auction: g(auctionId),
+        stock: g(isEdit ? 'editStockLocation' : 'stockLocation'),
+        venue: g(isEdit ? 'editVenueId' : 'venueId'),
+        rixo: g(isEdit ? 'editRixoCompany' : 'rixoCompany'),
+        pol: g(isEdit ? 'editPol' : 'pol')
+    };
+}
+
+function __restoreSupplierSubFieldsFromSnap(snap) {
+    if (!snap) return;
+    if (snap.auction && typeof window.rebuildSupplierDependentDropdowns === 'function') {
+        window.rebuildSupplierDependentDropdowns(snap.auction, {
+            autoSelect: false,
+            preserveSnapshot: snap,
+            restoreDelay: 50
+        });
+        return;
+    }
+    if (snap.stock) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', snap.stock);
+    if (snap.pol) restoreSupplierMasterFieldValue('pol', 'editPol', snap.pol);
+    if (snap.venue) restoreSupplierMasterFieldValue('venueId', 'editVenueId', snap.venue);
+    if (snap.rixo) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', snap.rixo);
+    if (snap.stock && snap.auction && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+        var polHint = snap.pol ? [snap.pol] : null;
+        window.fetchPolsByStockLocationAndUpdate(snap.auction, snap.stock, false, polHint).then(function() {
+            if (snap.pol) restoreSupplierMasterFieldValue('pol', 'editPol', snap.pol);
+        }).catch(function() {});
+    }
+}
+
+function __clearSupplierMasterSyncFlags() {
+    window.__purchaseFormSyncInProgress = false;
+    window.__suppressSupplierModalFlow = false;
+    window.__supplierSkipSilentAutoSelect = false;
+}
+
+function __restoreSupplierFormFromMasterSync(snap) {
+    if (!snap) {
+        __clearSupplierMasterSyncFlags();
+        return;
+    }
+    var hasAuction = !!(snap.auction && String(snap.auction).trim());
+    var hasSubFields = !!(snap.stock || snap.pol || snap.venue || snap.rixo);
+    if (!hasAuction && !hasSubFields) {
+        __clearSupplierMasterSyncFlags();
+        return;
+    }
+    window.__suppressSupplierModalFlow = true;
+    window.__supplierSkipSilentAutoSelect = true;
+    if (hasAuction) {
+        var auction = String(snap.auction).trim();
+        var auctionId = snap.isEdit ? 'editAuctionName' : 'auctionName';
+        var aucSel = document.getElementById(auctionId);
+        var aucInp = document.getElementById(auctionId + 'Input');
+        if (aucSel) {
+            var has = false;
+            for (var i = 0; i < aucSel.options.length; i++) {
+                if (aucSel.options[i].value === auction) { has = true; break; }
+            }
+            if (!has) {
+                var o = document.createElement('option');
+                o.value = auction;
+                o.textContent = auction;
+                aucSel.appendChild(o);
+            }
+            aucSel.value = auction;
+            if (aucInp) aucInp.value = auction;
+            if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(auctionId);
+        }
+        snap.auction = auction;
+        if (typeof window.rebuildSupplierDependentDropdowns === 'function') {
+            window.rebuildSupplierDependentDropdowns(auction, {
+                autoSelect: false,
+                preserveSnapshot: snap,
+                restoreDelay: 100
+            });
+        } else if (typeof window.updateDropdownOptions === 'function') {
+            window.updateDropdownOptions(auction);
+        }
+    } else if (hasSubFields) {
+        __restoreSupplierSubFieldsFromSnap(snap);
+    }
+    setTimeout(__clearSupplierMasterSyncFlags, 400);
+}
+
+function __runPopulateThenAfter(fromMasterSync, preserveSnap) {
+    var populatePromise = (typeof window.populateDropdownOptions === 'function')
+        ? window.populateDropdownOptions()
+        : Promise.resolve();
+    Promise.resolve(populatePromise).then(function() {
+        __afterRixoDropdownsPopulated(fromMasterSync, preserveSnap);
+    }).catch(function(err) {
+        console.warn('populateDropdownOptions failed during supplier refresh:', err);
+        __afterRixoDropdownsPopulated(fromMasterSync, preserveSnap);
+    });
+}
+
+function __afterRixoDropdownsPopulated(fromMasterSync, preserveSnap) {
+    if (fromMasterSync) {
+        if (preserveSnap && (preserveSnap.auction || preserveSnap.stock || preserveSnap.pol || preserveSnap.venue || preserveSnap.rixo)) {
+            __restoreSupplierFormFromMasterSync(preserveSnap);
+        } else {
+            __clearSupplierMasterSyncFlags();
+        }
+        if (typeof window.toggleManageButtons === 'function') window.toggleManageButtons();
+        return;
+    }
+    const auctionNameSelect = document.getElementById('auctionName');
+    const editAuctionNameSelect = document.getElementById('editAuctionName');
+    let selectedAuctionName = null;
+    if (auctionNameSelect && auctionNameSelect.value && auctionNameSelect.value !== '__add_new_supplier__') {
+        selectedAuctionName = auctionNameSelect.value;
+    } else if (editAuctionNameSelect && editAuctionNameSelect.value && editAuctionNameSelect.value !== '__add_new_supplier__') {
+        selectedAuctionName = editAuctionNameSelect.value;
+    }
+    if (selectedAuctionName && window.autoSelectRelatedFields) {
+        setTimeout(function() {
+            window.autoSelectRelatedFields(selectedAuctionName, 'auctionHouse', selectedAuctionName);
+        }, 100);
+    }
+    setTimeout(function() {
+        if (window.__rixoSupplierPreserveSnapshot) {
+            window.__rixoSupplierPreserveSnapshot = null;
+        }
+    }, 500);
+    if (typeof window.toggleManageButtons === 'function') window.toggleManageButtons();
+}
+
+window.refreshRixoDropdowns = function(options) {
+    options = options || {};
+    var fromMasterSync = options.fromMasterSync === true;
+    var preserveSnap = null;
+    if (fromMasterSync || __isOnPurchaseFormPage()) {
+        preserveSnap = __snapshotSupplierFormForPreserve();
+        if (preserveSnap && (preserveSnap.auction || preserveSnap.stock || preserveSnap.pol || preserveSnap.venue || preserveSnap.rixo)) {
+            window.__rixoSupplierPreserveSnapshot = preserveSnap;
+        }
+    }
+    if (!fromMasterSync) {
+        window.__rixoSupplierPreserveSnapshot = preserveSnap || null;
+    }
     // Reload the mapping data from backend
     fetch(apiUrl('rixo/prices'))
         .then(response => {
@@ -4236,31 +4494,16 @@ window.refreshRixoDropdowns = function() {
                 // If API fails, use the static mapping data that's already loaded
                 if (typeof window.rixoPriceMapping !== 'undefined' && Object.keys(window.rixoPriceMapping).length > 0) {
                     console.log('Using existing static Rixo mapping data');
-                    var preserveSnapFail = document.getElementById('editAuctionName') ? __getCurrentSupplierFieldValues() : null;
-                    window.__rixoSupplierPreserveSnapshot = preserveSnapFail;
-                    if (typeof window.populateDropdownOptions === 'function') {
-                        window.populateDropdownOptions();
-                    }
-                    const auctionNameSelectF = document.getElementById('auctionName');
-                    const editAuctionNameSelectF = document.getElementById('editAuctionName');
-                    let selectedAuctionNameF = null;
-                    if (auctionNameSelectF && auctionNameSelectF.value && auctionNameSelectF.value !== '__add_new_supplier__') {
-                        selectedAuctionNameF = auctionNameSelectF.value;
-                    } else if (editAuctionNameSelectF && editAuctionNameSelectF.value && editAuctionNameSelectF.value !== '__add_new_supplier__') {
-                        selectedAuctionNameF = editAuctionNameSelectF.value;
-                    }
-                    if (selectedAuctionNameF && window.autoSelectRelatedFields) {
-                        setTimeout(function() {
-                            window.autoSelectRelatedFields(selectedAuctionNameF, 'auctionHouse', selectedAuctionNameF);
-                        }, 100);
-                    }
-                    setTimeout(function() {
-                        if (window.__rixoSupplierPreserveSnapshot) {
-                            window.__rixoSupplierPreserveSnapshot = null;
+                    if (!preserveSnap) {
+                        preserveSnap = __snapshotSupplierFormForPreserve();
+                        if (preserveSnap && (preserveSnap.auction || preserveSnap.stock || preserveSnap.pol || preserveSnap.venue || preserveSnap.rixo)) {
+                            window.__rixoSupplierPreserveSnapshot = preserveSnap;
                         }
-                    }, 500);
+                    }
+                    __runPopulateThenAfter(fromMasterSync, preserveSnap);
                 } else {
                     console.error('No Rixo mapping data available');
+                    __clearSupplierMasterSyncFlags();
                 }
                 return null;
             }
@@ -4268,78 +4511,31 @@ window.refreshRixoDropdowns = function() {
         })
         .then(data => {
             if (data && data.success) {
-                // Snapshot edit form supplier fields BEFORE populateDropdownOptions clears innerHTML (stock/venue/rixo/pol)
-                var preserveSnap = document.getElementById('editAuctionName') ? __getCurrentSupplierFieldValues() : null;
-                window.__rixoSupplierPreserveSnapshot = preserveSnap;
-                // Rebuild the mapping object
-                rebuildRixoMapping(data.data);
-                // Repopulate dropdowns
-                if (typeof window.populateDropdownOptions === 'function') {
-                    window.populateDropdownOptions();
-                }
-                
-                // Trigger auto-selection for currently selected supplier (if any)
-                // Check both add form and edit form
-                const auctionNameSelect = document.getElementById('auctionName');
-                const editAuctionNameSelect = document.getElementById('editAuctionName');
-                
-                let selectedAuctionName = null;
-                if (auctionNameSelect && auctionNameSelect.value && auctionNameSelect.value !== '__add_new_supplier__') {
-                    selectedAuctionName = auctionNameSelect.value;
-                } else if (editAuctionNameSelect && editAuctionNameSelect.value && editAuctionNameSelect.value !== '__add_new_supplier__') {
-                    selectedAuctionName = editAuctionNameSelect.value;
-                }
-                
-                // If a supplier is selected, trigger auto-selection to populate fields
-                if (selectedAuctionName && window.autoSelectRelatedFields) {
-                    console.log('🔄 Triggering auto-selection for supplier after refresh:', selectedAuctionName);
-                    // Small delay to ensure dropdowns are populated first
-                    setTimeout(() => {
-                        window.autoSelectRelatedFields(selectedAuctionName, 'auctionHouse', selectedAuctionName);
-                    }, 100);
-                }
-                // Safety: clear snapshot if autoSelect exited early (no mapping rows) or after async chain
-                setTimeout(function() {
-                    if (window.__rixoSupplierPreserveSnapshot) {
-                        window.__rixoSupplierPreserveSnapshot = null;
+                if (!preserveSnap) {
+                    preserveSnap = __snapshotSupplierFormForPreserve();
+                    if (preserveSnap && (preserveSnap.auction || preserveSnap.stock || preserveSnap.pol || preserveSnap.venue || preserveSnap.rixo)) {
+                        window.__rixoSupplierPreserveSnapshot = preserveSnap;
                     }
-                }, 500);
-                
-                // Trigger auto-selection if needed
-                window.toggleManageButtons();
+                }
+                rebuildRixoMapping(data.data);
+                __runPopulateThenAfter(fromMasterSync, preserveSnap);
             } else if (!data) {
-                // API failed, but we already handled it above
                 return;
             }
         })
         .catch(error => {
             console.error('Error refreshing dropdowns:', error);
-            // Fallback to static data if available
             if (typeof window.rixoPriceMapping !== 'undefined' && Object.keys(window.rixoPriceMapping).length > 0) {
                 console.log('Using existing static Rixo mapping data as fallback');
-                var preserveSnapCatch = document.getElementById('editAuctionName') ? __getCurrentSupplierFieldValues() : null;
-                window.__rixoSupplierPreserveSnapshot = preserveSnapCatch;
-                if (typeof window.populateDropdownOptions === 'function') {
-                    window.populateDropdownOptions();
-                }
-                const auctionNameSelectC = document.getElementById('auctionName');
-                const editAuctionNameSelectC = document.getElementById('editAuctionName');
-                let selectedAuctionNameC = null;
-                if (auctionNameSelectC && auctionNameSelectC.value && auctionNameSelectC.value !== '__add_new_supplier__') {
-                    selectedAuctionNameC = auctionNameSelectC.value;
-                } else if (editAuctionNameSelectC && editAuctionNameSelectC.value && editAuctionNameSelectC.value !== '__add_new_supplier__') {
-                    selectedAuctionNameC = editAuctionNameSelectC.value;
-                }
-                if (selectedAuctionNameC && window.autoSelectRelatedFields) {
-                    setTimeout(function() {
-                        window.autoSelectRelatedFields(selectedAuctionNameC, 'auctionHouse', selectedAuctionNameC);
-                    }, 100);
-                }
-                setTimeout(function() {
-                    if (window.__rixoSupplierPreserveSnapshot) {
-                        window.__rixoSupplierPreserveSnapshot = null;
+                if (!preserveSnap) {
+                    preserveSnap = __snapshotSupplierFormForPreserve();
+                    if (preserveSnap && (preserveSnap.auction || preserveSnap.stock || preserveSnap.pol || preserveSnap.venue || preserveSnap.rixo)) {
+                        window.__rixoSupplierPreserveSnapshot = preserveSnap;
                     }
-                }, 500);
+                }
+                __runPopulateThenAfter(fromMasterSync, preserveSnap);
+            } else {
+                __clearSupplierMasterSyncFlags();
             }
         });
 };

@@ -284,3 +284,4 @@ AWS-DEPLOYMENT-GUIDE.md
 
 # Cursor IDE (local only)
 .cursor/
+.vercel

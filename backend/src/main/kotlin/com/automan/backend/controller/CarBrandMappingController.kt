@@ -94,6 +94,35 @@ class CarBrandMappingController(
         }
     }
 
+    /**
+     * Look up the recycle fee for a specific production date against a chassis prefix.
+     * Query param [productionDate] must be in MM/YYYY or YYYY-MM format.
+     * Returns { found: true, fee: "12490" } or { found: false, fee: "" }.
+     */
+    @GetMapping("/chassis/{chassis}/recycle-fee")
+    fun getRecycleFeeForProductionDate(
+        @PathVariable chassis: String,
+        @RequestParam productionDate: String
+    ): ResponseEntity<Map<String, Any?>> {
+        return try {
+            // Extract prefix (everything before the first hyphen, or the full string if no hyphen)
+            val chassisPrefix = chassis.substringBefore("-").trim()
+            val fee = carBrandMappingService.getRecycleFeeForProductionDate(chassisPrefix, productionDate)
+            if (fee != null) {
+                ResponseEntity.ok(mapOf("found" to true, "fee" to fee))
+            } else {
+                ResponseEntity.ok(mapOf("found" to false, "fee" to ""))
+            }
+        } catch (e: Exception) {
+            Logger.error("Failed to look up recycle fee: ${e.message}", e)
+            ResponseEntity.status(500).body(mapOf(
+                "found" to false,
+                "fee" to "",
+                "message" to "Error: ${e.message}"
+            ))
+        }
+    }
+
     @GetMapping("/car-names/distinct")
     fun getAllDistinctCarNames(): ResponseEntity<List<String>> {
         return try {

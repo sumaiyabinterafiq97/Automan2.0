@@ -339,12 +339,36 @@ class PurchaseController(
         }
     }
     
+    @GetMapping("/check-duplicate")
+    fun checkPurchaseDuplicate(
+        @RequestParam chassis: String,
+        @RequestParam(required = false) excludeId: Long?,
+    ): ResponseEntity<Map<String, Any?>> {
+        val duplicate = purchaseService.findDuplicatePurchase(chassis, excludeId)
+        return if (duplicate != null) {
+            ResponseEntity.ok(
+                mapOf(
+                    "duplicate" to true,
+                    "message" to purchaseService.duplicatePurchaseErrorMessage(duplicate),
+                    "existingAuctionHouse" to duplicate.auctionHouse,
+                    "existingPurchaseId" to duplicate.id,
+                ),
+            )
+        } else {
+            ResponseEntity.ok(mapOf("duplicate" to false))
+        }
+    }
+
     @PostMapping
-    fun createPurchase(@RequestBody purchase: Purchase): ResponseEntity<Purchase> {
+    fun createPurchase(@RequestBody purchase: Purchase): ResponseEntity<Any> {
         Logger.debug("[Controller] Creating purchase - received shaken=${purchase.shaken}")
-        val createdPurchase = purchaseService.createPurchase(purchase)
-        Logger.debug("[Controller] Created purchase - saved shaken=${createdPurchase.shaken}")
-        return ResponseEntity.ok(createdPurchase)
+        return try {
+            val createdPurchase = purchaseService.createPurchase(purchase)
+            Logger.debug("[Controller] Created purchase - saved shaken=${createdPurchase.shaken}")
+            ResponseEntity.ok(createdPurchase)
+        } catch (e: IllegalArgumentException) {
+            purchaseValidationErrorResponse(e)
+        }
     }
     
     
@@ -365,7 +389,7 @@ class PurchaseController(
             }
         } catch (e: IllegalArgumentException) {
             Logger.error("[Controller] Validation error updating purchase: ${e.message}", e)
-            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Validation error: ${e.javaClass.simpleName}")))
+            purchaseValidationErrorResponse(e)
         } catch (e: Exception) {
             Logger.error("[Controller] Error updating purchase: ${e.message}", e)
             ResponseEntity.status(500).body(mapOf("error" to "Failed to update purchase: ${e.message ?: e.javaClass.simpleName}"))
@@ -485,6 +509,27 @@ class PurchaseController(
         } catch (e: IllegalArgumentException) {
             val body = invoiceErrorBody(e.message ?: "Invalid request")
             ResponseEntity.status(invoiceErrorHttpStatus(body)).body(body)
+        }
+    }
+
+    private fun purchaseValidationErrorResponse(e: IllegalArgumentException): ResponseEntity<Any> {
+        val message = e.message ?: "Validation error"
+        return if (message.contains("already exists", ignoreCase = true)) {
+            ResponseEntity.status(HttpStatus.CONFLICT).body(
+                mapOf(
+                    "error" to "Conflict",
+                    "message" to message,
+                    "status" to HttpStatus.CONFLICT.value(),
+                ),
+            )
+        } else {
+            ResponseEntity.badRequest().body(
+                mapOf(
+                    "error" to message,
+                    "message" to message,
+                    "status" to HttpStatus.BAD_REQUEST.value(),
+                ),
+            )
         }
     }
 

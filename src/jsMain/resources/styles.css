@@ -512,6 +512,98 @@ select:focus {
     text-overflow: clip;
 }
 
+.purchase-date-quick-filter-menu {
+    position: fixed;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+    width: 260px;
+    min-width: 260px;
+    padding: 10px;
+    box-sizing: border-box;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    z-index: 25000;
+}
+
+.purchase-date-quick-filter-menu__quick-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.purchase-date-quick-filter-menu__quick-row button {
+    padding: 6px 10px;
+    background: #f8f9fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.purchase-date-quick-filter-menu__quick-row button.is-muted {
+    background: #6c757d;
+    color: #fff;
+    border-color: #6c757d;
+}
+
+.purchase-date-quick-filter-menu__quick-row button.is-primary {
+    background: #007bff;
+    color: #fff;
+    border: none;
+}
+
+.purchase-date-quick-filter-menu__date-row {
+    border-top: 1px solid #eee;
+    padding-top: 8px;
+}
+
+.purchase-date-quick-filter-menu__date-row label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: #666;
+}
+
+.purchase-date-quick-filter-menu__date-input-wrap {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+}
+
+.purchase-date-quick-filter-menu__date-input-wrap input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    padding: 6px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+.purchase-date-quick-filter-menu__date-input-wrap button {
+    padding: 6px 8px;
+    border: 1px solid #ddd;
+    background: #f9fafb;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.purchase-date-quick-filter-menu__native-date {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    border: none;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+}
+
 #purchaseTable tbody tr:hover td {
     background-color: #fafafa;
 }
@@ -4615,6 +4707,35 @@ button.invoice-history-pdf-btn:disabled {
     display: flex;
     flex-direction: column;
     min-height: 100%;
+}
+
+.booking-list-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #dbeafe;
+}
+
+.booking-list-header-row .booking-section-header {
+    margin: 0;
+    padding: 0;
+    border: none;
+}
+
+.booking-cars-selected-count {
+    font-size: 14px;
+    font-weight: 600;
+    color: #2563eb;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.booking-cars-selected-count.is-empty {
+    color: #9ca3af;
+    font-weight: 500;
 }
 
 /* Section Headers */

@@ -657,6 +657,173 @@ private fun clearPurchaseDateFilter() {
     displayPurchasesWithPagination()
 }
 
+private const val PURCHASE_DATE_QUICK_FILTER_MENU_WIDTH_PX = 260.0
+
+private fun purchaseDateQuickFilterMenuPortalHtml(): String = """
+    <div id="purchaseDateQuickFilterMenu" class="purchase-date-quick-filter-menu" style="display: none;" role="dialog" aria-label="Filter by purchase date">
+        <div class="purchase-date-quick-filter-menu__quick-row">
+            <button type="button" id="purchaseDateQuickTodayBtn">Today</button>
+            <button type="button" id="purchaseDateQuickLast7Btn">Last 7 days</button>
+            <button type="button" id="purchaseDateQuickThisMonthBtn">This month</button>
+            <button type="button" id="purchaseDateQuickClearBtn" class="is-muted">Clear</button>
+            <button type="button" id="purchaseDateQuickFilterApplyBtn" class="is-primary">Apply</button>
+        </div>
+        <div class="purchase-date-quick-filter-menu__date-row">
+            <label for="purchaseDateQuickFilterInputText">Choose date</label>
+            <div class="purchase-date-quick-filter-menu__date-input-wrap">
+                <input type="text" id="purchaseDateQuickFilterInputText" maxlength="10" inputmode="numeric" autocomplete="off"
+                       placeholder="MM/DD/YYYY">
+                <button type="button" id="purchaseDateQuickFilterInputCalendarBtn" title="Open calendar" aria-label="Open calendar">📅</button>
+                <input type="date" id="purchaseDateQuickFilterInput" tabindex="-1" aria-hidden="true"
+                       class="purchase-date-quick-filter-menu__native-date">
+            </div>
+        </div>
+    </div>
+""".trimIndent()
+
+private fun purchaseDateQuickFilterHeaderCellHtml(label: String): String = """
+    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
+        <div style="display:flex; align-items:center; gap:8px;">
+            <span>$label</span>
+            <button type="button" id="purchaseDateQuickFilterBtn" title="Filter by purchase date" aria-haspopup="dialog" aria-expanded="false"
+                    style="background:none; border:none; cursor:pointer; font-weight:600; color:#111827; padding:0; display:inline-flex; align-items:center; justify-content:center;">
+                📅
+            </button>
+        </div>
+    </th>
+""".trimIndent()
+
+private fun closePurchaseDateQuickFilterMenu() {
+    window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+    val menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement ?: return
+    menu.style.setProperty("display", "none", "important")
+    (document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement)?.setAttribute("aria-expanded", "false")
+}
+
+private fun positionPurchaseDateQuickFilterMenu(anchor: HTMLElement) {
+    val menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement ?: return
+    val rect = anchor.getBoundingClientRect()
+    val viewportW = (window.asDynamic().innerWidth as? Number)?.toDouble() ?: 0.0
+    val viewportH = (window.asDynamic().innerHeight as? Number)?.toDouble() ?: 0.0
+    val margin = 8.0
+
+    menu.style.position = "fixed"
+    menu.style.setProperty("display", "flex", "important")
+    menu.style.visibility = "hidden"
+    val menuHeight = (menu.asDynamic().offsetHeight as? Number)?.toDouble() ?: 0.0
+    menu.style.visibility = "visible"
+
+    var top = rect.bottom + 4.0
+    var left = rect.left
+    if (top + menuHeight + margin > viewportH) {
+        top = (rect.top - menuHeight - 4.0).coerceAtLeast(margin)
+    }
+    if (left + PURCHASE_DATE_QUICK_FILTER_MENU_WIDTH_PX + margin > viewportW) {
+        left = (viewportW - PURCHASE_DATE_QUICK_FILTER_MENU_WIDTH_PX - margin).coerceAtLeast(margin)
+    }
+
+    menu.style.top = "${top}px"
+    menu.style.left = "${left}px"
+    menu.style.zIndex = "25000"
+}
+
+private fun openPurchaseDateQuickFilterMenu(anchor: HTMLElement) {
+    positionPurchaseDateQuickFilterMenu(anchor)
+    window.asDynamic().__purchaseDateQuickFilterMenuOpen = true
+    anchor.setAttribute("aria-expanded", "true")
+}
+
+private fun togglePurchaseDateQuickFilterMenu(anchor: HTMLElement) {
+    val isOpen = window.asDynamic().__purchaseDateQuickFilterMenuOpen == true
+    if (isOpen) {
+        closePurchaseDateQuickFilterMenu()
+    } else {
+        openPurchaseDateQuickFilterMenu(anchor)
+    }
+}
+
+private fun setupPurchaseDateQuickFilterMenuPortal() {
+    if (window.asDynamic().__purchaseDateQuickFilterMenuOpen == null) {
+        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+    }
+
+    val purchaseList = document.getElementById("purchaseList") ?: return
+    if (document.getElementById("purchaseDateQuickFilterMenu") == null) {
+        val wrapper = document.createElement("div")
+        wrapper.innerHTML = purchaseDateQuickFilterMenuPortalHtml()
+        val menu = wrapper.firstElementChild
+        if (menu != null) {
+            purchaseList.appendChild(menu)
+        }
+    }
+
+    if (window.asDynamic().__purchaseDateQuickFilterActionsWired == true) return
+    window.asDynamic().__purchaseDateQuickFilterActionsWired = true
+
+    bindStrictDateTextMask("purchaseDateQuickFilterInput")
+
+    val closeAfterAction = {
+        closePurchaseDateQuickFilterMenu()
+    }
+
+    document.getElementById("purchaseDateQuickFilterApplyBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
+        val selected = input?.value ?: ""
+        if (selected.trim().isNotEmpty()) {
+            applyPurchaseDateFilterRange(selected, selected)
+        }
+        closeAfterAction()
+    })
+    document.getElementById("purchaseDateQuickTodayBtn")?.addEventListener("click", { _: Event ->
+        val today = isoLocalToday()
+        (document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement)?.value = today
+        applyPurchaseDateFilterRange(today, today)
+        closeAfterAction()
+    })
+    document.getElementById("purchaseDateQuickLast7Btn")?.addEventListener("click", { _: Event ->
+        val end = isoLocalToday()
+        val start = isoLocalOffsetDays(-6)
+        applyPurchaseDateFilterRange(start, end)
+        closeAfterAction()
+    })
+    document.getElementById("purchaseDateQuickThisMonthBtn")?.addEventListener("click", { _: Event ->
+        val start = isoLocalThisMonthStart()
+        val end = isoLocalThisMonthEnd()
+        applyPurchaseDateFilterRange(start, end)
+        closeAfterAction()
+    })
+    document.getElementById("purchaseDateQuickClearBtn")?.addEventListener("click", { _: Event ->
+        clearPurchaseDateFilter()
+        closeAfterAction()
+    })
+
+    if (window.asDynamic().__purchaseDateQuickFilterDocumentWired != true) {
+        window.asDynamic().__purchaseDateQuickFilterDocumentWired = true
+        document.addEventListener("click", { event ->
+            val target = event.target as? Node ?: return@addEventListener
+            val btnEl = (target as? HTMLElement)?.closest("#purchaseDateQuickFilterBtn") as? HTMLElement
+            if (btnEl != null) {
+                event.stopPropagation()
+                togglePurchaseDateQuickFilterMenu(btnEl)
+                return@addEventListener
+            }
+            val menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement ?: return@addEventListener
+            if (!menu.contains(target)) {
+                closePurchaseDateQuickFilterMenu()
+            }
+        })
+
+        val repositionOpenMenu = {
+            if (window.asDynamic().__purchaseDateQuickFilterMenuOpen == true) {
+                val btn = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
+                if (btn != null) positionPurchaseDateQuickFilterMenu(btn)
+            }
+        }
+        window.addEventListener("resize", { _: Event -> repositionOpenMenu() })
+        window.addEventListener("scroll", { _: Event -> repositionOpenMenu() }, true)
+    }
+}
+
 // Global variable to track last device type for auto-adjustment
 var lastDeviceType: String? = getDeviceType()
 
@@ -754,6 +921,7 @@ fun showPurchaseList() {
     purchaseAdvancedFilters.clear()
     purchaseDateFilterActive = false
     purchaseSearchServerMode = false
+    window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
     
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -843,6 +1011,7 @@ fun showPurchaseList() {
     ensureSidebarPresent()
     
     setupPurchaseSearchBarListeners()
+    setupPurchaseDateQuickFilterMenuPortal()
     loadPurchases()
 }
 
@@ -2484,39 +2653,7 @@ fun displayPurchasesWithPagination() {
         for (columnKey in selectedColumns) {
             val label = columnLabels[columnKey] ?: columnKey
             if (columnKey == "date") {
-                tableHTML.append("""
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative; overflow: visible;">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <span>$label</span>
-                            <button id="purchaseDateQuickFilterBtn" title="Filter by purchase date" style="background:none; border:none; cursor:pointer; font-weight:600; color:#111827; padding:0; display:inline-flex; align-items:center; justify-content:center;">
-                                📅
-                            </button>
-                        </div>
-                        <div id="purchaseDateQuickFilterMenu" style="display:none; position:absolute; top:100%; left:0; background:white; border:1px solid #ddd; border-radius:4px; padding:10px; box-sizing:border-box; box-shadow:0 2px 8px rgba(0,0,0,0.1); z-index:20000; width:260px; min-width:260px; flex-direction:column; gap:8px;">
-                            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                                <button id="purchaseDateQuickTodayBtn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">Today</button>
-                                <button id="purchaseDateQuickLast7Btn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">Last 7 days</button>
-                                <button id="purchaseDateQuickThisMonthBtn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">This month</button>
-                                <button id="purchaseDateQuickClearBtn" style="padding:6px 10px; background:#6c757d; color:white; border:1px solid #6c757d; border-radius:4px; cursor:pointer; font-size:12px;">Clear</button>
-                                <button id="purchaseDateQuickFilterApplyBtn" style="padding:6px 10px; background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Apply</button>
-                            </div>
-                            <div style="border-top:1px solid #eee; padding-top:8px; margin:0;">
-                                <label style="display:block; margin-bottom:6px; font-size:12px; color:#666;">Choose date</label>
-                                <div style="position:relative; width:100%; margin-bottom:8px;">
-                                    <div style="display:flex; gap:6px; align-items:center; width:100%;">
-                                        <input type="text" id="purchaseDateQuickFilterInputText" maxlength="10" inputmode="numeric" autocomplete="off"
-                                               placeholder="MM/DD/YYYY"
-                                               style="flex:1; min-width:0; padding:6px; border:1px solid #ddd; border-radius:3px; font-size:12px;">
-                                        <button type="button" id="purchaseDateQuickFilterInputCalendarBtn" title="Open calendar"
-                                                style="padding:6px 8px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
-                                    </div>
-                                    <input type="date" id="purchaseDateQuickFilterInput" tabindex="-1" aria-hidden="true"
-                                           style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
-                                </div>
-                            </div>
-                        </div>
-                    </th>
-                """)
+                tableHTML.append(purchaseDateQuickFilterHeaderCellHtml(label))
             } else if (sortableFields.contains(columnKey)) {
                 val sortOrder = purchaseTableSortOrderByField[columnKey] ?: "desc"
                 val tooltip = if (sortOrder == "asc") {
@@ -2550,7 +2687,7 @@ fun displayPurchasesWithPagination() {
         
         table.innerHTML = tableHTML.toString()
         
-        // Purchase Date quick filters + calendar wiring (table header)
+        // Purchase Date quick filter trigger lives in the header; menu is portaled on #purchaseList.
         for (columnKey in selectedColumns) {
             if (columnKey != "date" && sortableFields.contains(columnKey)) {
                 val sortBtnId = "purchaseSortBtn_$columnKey"
@@ -2558,86 +2695,6 @@ fun displayPurchasesWithPagination() {
                     togglePurchaseTableSort(columnKey)
                 })
             }
-        }
-
-        val btn = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
-        val menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
-        val input = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
-        bindStrictDateTextMask("purchaseDateQuickFilterInput")
-        val applyBtn = document.getElementById("purchaseDateQuickFilterApplyBtn") as? HTMLElement
-        val todayBtn = document.getElementById("purchaseDateQuickTodayBtn") as? HTMLElement
-        val last7Btn = document.getElementById("purchaseDateQuickLast7Btn") as? HTMLElement
-        val thisMonthBtn = document.getElementById("purchaseDateQuickThisMonthBtn") as? HTMLElement
-        val clearBtn = document.getElementById("purchaseDateQuickClearBtn") as? HTMLElement
-
-        // Keep an explicit open/close flag so we never depend on style.display strings.
-        // (Some browsers + !important assignments can make style.display unreliable.)
-        if (window.asDynamic().__purchaseDateQuickFilterMenuOpen == null) {
-            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-        }
-
-        btn?.addEventListener("click", { e: Event ->
-            e.stopPropagation()
-            if (menu == null) return@addEventListener
-            val isOpen = window.asDynamic().__purchaseDateQuickFilterMenuOpen == true
-            window.asDynamic().__purchaseDateQuickFilterMenuOpen = !isOpen
-            val next = if (isOpen) "none" else "flex"
-            menu.style.setProperty("display", next, "important")
-        })
-
-        applyBtn?.addEventListener("click", { _: Event ->
-            val selected = input?.value ?: ""
-            if (selected.trim().length > 0) {
-                applyPurchaseDateFilterRange(selected, selected)
-            }
-            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-            menu?.style?.setProperty("display", "none", "important")
-        })
-
-        todayBtn?.addEventListener("click", { _: Event ->
-            val today = isoLocalToday()
-            input?.value = today
-            applyPurchaseDateFilterRange(today, today)
-            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-            menu?.style?.setProperty("display", "none", "important")
-        })
-        last7Btn?.addEventListener("click", { _: Event ->
-            val end = isoLocalToday()
-            val start = isoLocalOffsetDays(-6)
-            applyPurchaseDateFilterRange(start, end)
-            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-            menu?.style?.setProperty("display", "none", "important")
-        })
-        thisMonthBtn?.addEventListener("click", { _: Event ->
-            val start = isoLocalThisMonthStart()
-            val end = isoLocalThisMonthEnd()
-            applyPurchaseDateFilterRange(start, end)
-            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-            menu?.style?.setProperty("display", "none", "important")
-        })
-
-        clearBtn?.addEventListener("click", { _: Event ->
-            clearPurchaseDateFilter()
-            window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-            menu?.style?.setProperty("display", "none", "important")
-        })
-
-        if (window.asDynamic().__purchaseDateQuickFilterOutsideListenerAttached != true) {
-            window.asDynamic().__purchaseDateQuickFilterOutsideListenerAttached = true
-            document.addEventListener("click", { event ->
-                val target = event.target as? Node ?: return@addEventListener
-                val m = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
-                val b = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
-                if (m == null) return@addEventListener
-
-                val clickInsideMenu = m.contains(target)
-                val clickInsideBtn = b != null && b.contains(target)
-
-                if (!clickInsideMenu && !clickInsideBtn) {
-                    window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-                    m.style.setProperty("display", "none", "important")
-                }
-            })
         }
         return
     }
@@ -2664,39 +2721,7 @@ fun displayPurchasesWithPagination() {
     for (columnKey in selectedColumns) {
         val label = columnLabels[columnKey] ?: columnKey
         if (columnKey == "date") {
-            tableHTML.append("""
-                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; position: relative; overflow: visible;">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span>$label</span>
-                        <button id="purchaseDateQuickFilterBtn" title="Filter by purchase date" style="background:none; border:none; cursor:pointer; font-weight:600; color:#111827; padding:0; display:inline-flex; align-items:center; justify-content:center;">
-                            📅
-                        </button>
-                    </div>
-                    <div id="purchaseDateQuickFilterMenu" style="display:none; position:absolute; top:100%; left:0; background:white; border:1px solid #ddd; border-radius:4px; padding:10px; box-sizing:border-box; box-shadow:0 2px 8px rgba(0,0,0,0.1); z-index:20000; width:260px; min-width:260px; flex-direction:column; gap:8px;">
-                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <button id="purchaseDateQuickTodayBtn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">Today</button>
-                            <button id="purchaseDateQuickLast7Btn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">Last 7 days</button>
-                            <button id="purchaseDateQuickThisMonthBtn" style="padding:6px 10px; background:#f8f9fa; border:1px solid #e5e7eb; border-radius:4px; cursor:pointer; font-size:12px;">This month</button>
-                            <button id="purchaseDateQuickClearBtn" style="padding:6px 10px; background:#6c757d; color:white; border:1px solid #6c757d; border-radius:4px; cursor:pointer; font-size:12px;">Clear</button>
-                            <button id="purchaseDateQuickFilterApplyBtn" style="padding:6px 10px; background:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; font-size:12px;">Apply</button>
-                        </div>
-                        <div style="border-top:1px solid #eee; padding-top:8px; margin:0;">
-                            <label style="display:block; margin-bottom:6px; font-size:12px; color:#666;">Choose date</label>
-                            <div style="position:relative; width:100%; margin-bottom:8px;">
-                                <div style="display:flex; gap:6px; align-items:center; width:100%;">
-                                    <input type="text" id="purchaseDateQuickFilterInputText" maxlength="10" inputmode="numeric" autocomplete="off"
-                                           placeholder="MM/DD/YYYY"
-                                           style="flex:1; min-width:0; padding:6px; border:1px solid #ddd; border-radius:3px; font-size:12px;">
-                                    <button type="button" id="purchaseDateQuickFilterInputCalendarBtn" title="Open calendar"
-                                            style="padding:6px 8px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
-                                </div>
-                                <input type="date" id="purchaseDateQuickFilterInput" tabindex="-1" aria-hidden="true"
-                                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
-                            </div>
-                        </div>
-                    </div>
-                </th>
-            """)
+            tableHTML.append(purchaseDateQuickFilterHeaderCellHtml(label))
         } else if (sortableFields.contains(columnKey)) {
             val sortOrder = purchaseTableSortOrderByField[columnKey] ?: "desc"
             val tooltip = if (sortOrder == "asc") {
@@ -2809,84 +2834,7 @@ fun displayPurchasesWithPagination() {
         })
     }
     
-    // Purchase Date quick filters + calendar wiring (table header)
-    val btn = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
-    val menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
-    val input = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
-    bindStrictDateTextMask("purchaseDateQuickFilterInput")
-    val applyBtn = document.getElementById("purchaseDateQuickFilterApplyBtn") as? HTMLElement
-    val todayBtn = document.getElementById("purchaseDateQuickTodayBtn") as? HTMLElement
-    val last7Btn = document.getElementById("purchaseDateQuickLast7Btn") as? HTMLElement
-    val thisMonthBtn = document.getElementById("purchaseDateQuickThisMonthBtn") as? HTMLElement
-    val clearBtn = document.getElementById("purchaseDateQuickClearBtn") as? HTMLElement
-
-    // Keep an explicit open/close flag so we never depend on style.display strings.
-    if (window.asDynamic().__purchaseDateQuickFilterMenuOpen == null) {
-        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-    }
-
-    btn?.addEventListener("click", { e: Event ->
-        e.stopPropagation()
-        if (menu == null) return@addEventListener
-        val isOpen = window.asDynamic().__purchaseDateQuickFilterMenuOpen == true
-        window.asDynamic().__purchaseDateQuickFilterMenuOpen = !isOpen
-        val next = if (isOpen) "none" else "flex"
-        menu.style.setProperty("display", next, "important")
-    })
-
-    applyBtn?.addEventListener("click", { _: Event ->
-        val selected = input?.value ?: ""
-        if (selected.trim().length > 0) {
-            applyPurchaseDateFilterRange(selected, selected)
-        }
-        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-        menu?.style?.setProperty("display", "none", "important")
-    })
-
-    todayBtn?.addEventListener("click", { _: Event ->
-        val today = isoLocalToday()
-        input?.value = today
-        applyPurchaseDateFilterRange(today, today)
-        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-        menu?.style?.setProperty("display", "none", "important")
-    })
-    last7Btn?.addEventListener("click", { _: Event ->
-        val end = isoLocalToday()
-        val start = isoLocalOffsetDays(-6)
-        applyPurchaseDateFilterRange(start, end)
-        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-        menu?.style?.setProperty("display", "none", "important")
-    })
-    thisMonthBtn?.addEventListener("click", { _: Event ->
-        val start = isoLocalThisMonthStart()
-        val end = isoLocalThisMonthEnd()
-        applyPurchaseDateFilterRange(start, end)
-        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-        menu?.style?.setProperty("display", "none", "important")
-    })
-    clearBtn?.addEventListener("click", { _: Event ->
-        clearPurchaseDateFilter()
-        window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-        menu?.style?.setProperty("display", "none", "important")
-    })
-
-    if (window.asDynamic().__purchaseDateQuickFilterOutsideListenerAttached != true) {
-        window.asDynamic().__purchaseDateQuickFilterOutsideListenerAttached = true
-        document.addEventListener("click", { event ->
-            val target = event.target as? Node ?: return@addEventListener
-            val m = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
-            val b = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
-            if (m == null) return@addEventListener
-
-            val clickInsideMenu = m.contains(target)
-            val clickInsideBtn = b != null && b.contains(target)
-
-            if (!clickInsideMenu && !clickInsideBtn) {
-                window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
-                m.style.setProperty("display", "none", "important")
-            }
-        })
-    }
+    // Purchase Date quick filter trigger lives in the header; menu is portaled on #purchaseList.
     for (columnKey in selectedColumns) {
         if (columnKey != "date" && sortableFields.contains(columnKey)) {
             val sortBtnId = "purchaseSortBtn_$columnKey"

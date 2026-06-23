@@ -189,6 +189,36 @@ fun formatNumericValueChipHtml(raw: String): String {
     return formatConsigneeMapAddressChipHtml(formatted)
 }
 
+/**
+ * Format the recycle_fee delimited string as readable chips in the Chassis Map table.
+ * Input: "2019-01:10000;2020-05:12490" → chips showing "01/2019 • ¥10,000" and "05/2020 • ¥12,490".
+ * Falls back to numeric-only formatting if no colons found (backward compatibility for old single-fee values).
+ */
+fun formatRecycleFeeChipHtml(raw: String): String {
+    if (raw.isBlank()) return ""
+    val trimmed = raw.trim()
+    // Check if it contains at least one colon-delimited pair (new format)
+    if (!trimmed.contains(":")) {
+        // Old format — plain number; show as a single chip
+        return formatNumericValueChipHtml(trimmed)
+    }
+    val pairs = trimmed.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+    if (pairs.isEmpty()) return ""
+    val chips = pairs.mapNotNull { pair ->
+        val colonIdx = pair.lastIndexOf(':')
+        if (colonIdx <= 0) return@mapNotNull null
+        val dateToken = pair.substring(0, colonIdx).trim()
+        val feeToken = pair.substring(colonIdx + 1).trim()
+        if (dateToken.isBlank() || feeToken.isBlank()) return@mapNotNull null
+        val displayFee = "¥${formatNumericWithCommas(feeToken)}"
+        val label = escapeHtml(displayFee)
+        """<span style="display:inline-block;padding:4px 10px;border-radius:9999px;font-size:12px;font-weight:500;background:#f0fdf4;color:#166534;line-height:1.35;white-space:nowrap;box-shadow:0 1px 4px rgba(22,101,52,0.12);">$label</span>"""
+    }
+    if (chips.isEmpty()) return ""
+    if (chips.size == 1) return chips[0]
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;">${chips.joinToString("")}</span>"""
+}
+
 /** Client Map generic values: black text + subtle shadow for all chips, no multi-color variants. */
 fun formatClientMapValueChipHtml(raw: String): String {
     val tokens = splitMultiValueDisplayTokens(raw)
