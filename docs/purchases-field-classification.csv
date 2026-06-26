@@ -1,0 +1,68 @@
+column_name,kotlin_property,json_api_key,mysql_type,classification,target_phase,drop_candidate,indexed,query_critical,car_brand_mapping_column,cost_code_or_json_key,notes
+id,id,id,BIGINT,KEEP,N/A,NEVER,NO,NO,,,"Primary key; never metadata"
+date,date,date,VARCHAR(50),KEEP,0,NEVER,YES (idx_date),YES,,,"Rixo buying date; VARCHAR legacy; list/search"
+chassis,chassis,chassis,VARCHAR(100),KEEP,N/A,NEVER,YES (idx_chassis),YES,chassis,,"Business key; CSV upsert; not UNIQUE at DB"
+car_model_year,carModelYear,carModelYear,VARCHAR(10),VEHICLE_OVERRIDE,3,LATER,NO,NO,car_model_year,carModelYear,"Resolve from map; override if user edits"
+brand,brand,brand,VARCHAR(100),KEEP,0,NEVER,YES (idx_purchases_brand),YES,car_brand,,"Page-search; keep denorm for list performance"
+car_name,carName,carName,VARCHAR(100),KEEP,0,LATER,YES (idx_car_name),YES,car_name,,"Search + display; may mirror map default"
+shipment_size,shipmentSize,shipmentSize / vehicleType,VARCHAR(50),VEHICLE_OVERRIDE,3,LATER,NO,NO,vehicle_type,shipmentSize,"Alias vehicleType in JSON"
+grade,grade,grade,VARCHAR(100),VEHICLE_OVERRIDE,3,LATER,NO,NO,grade,grade,"Map default + override"
+rank,rank,rank,VARCHAR(100),VEHICLE_OVERRIDE,3,LATER,NO,NO,rank,rank,"Reserved word column"
+color,color,color,VARCHAR(100),VEHICLE_OVERRIDE,3,LATER,NO,NO,color,color,
+fuel,fuel,fuel,VARCHAR(100),VEHICLE_OVERRIDE,3,LATER,NO,NO,fuel,fuel,
+seat,seat,seat,VARCHAR(100),VEHICLE_OVERRIDE,3,LATER,NO,NO,seat,seat,
+door,door,door,VARCHAR(100),VEHICLE_OVERRIDE,3,LATER,NO,NO,door,door,
+distance,distance,distance,VARCHAR(100),VEHICLE_OVERRIDE,3,LATER,NO,NO,,distance,"Purchase-only; not on chassis map"
+options,options,options,TEXT,EXTENDED_JSON,4,LATER,NO,NO,,options,"Long text; bundle in extended_attributes"
+CC,cc,cc,INT,VEHICLE_OVERRIDE,3,LATER,NO,NO,cc,cc,"Map stores cc as VARCHAR; purchase as INT"
+shift,shift,shift,VARCHAR(50),VEHICLE_OVERRIDE,3,LATER,NO,NO,shift,shift,
+WD,wd,wd,VARCHAR(50),VEHICLE_OVERRIDE,3,LATER,NO,NO,wd,wd,
+drive_type,driveType,driveType,VARCHAR(50),VEHICLE_OVERRIDE,3,LATER,NO,NO,drive_type,driveType,
+auction_no,auctionNo,auctionNo,VARCHAR(100),EXTENDED_JSON,4,LATER,NO,NO,,auctionNo,"Supplier/auction reference"
+auction_house,auctionHouse,auctionHouse / auctionName,VARCHAR(100),KEEP,0,NEVER,YES (idx_purchases_auction_house),YES,,,"Page-search supplier; links to rixo_prices logically"
+stock_location,stockLocation,stockLocation,VARCHAR(100),KEEP,0,LATER,NO,YES,,,"Booking filters; distinct dropdowns"
+pol,pol,pol,VARCHAR(100),KEEP,0,NEVER,NO,YES,,,"Booking + invoice filters"
+pod,pod,pod / destination,VARCHAR(255),KEEP,0,LATER,NO,YES,,,"JSON alias destination"
+rixo_company,rixoCompany,rixoCompany,VARCHAR(100),KEEP,0,LATER,NO,YES,,,"Distinct dropdowns; Rixo flow"
+client_name,clientName,clientName,VARCHAR(100),KEEP,0,LATER,YES (idx_client_name),YES,,,"Page-search; denorm from clients"
+consignee,consignee,consignee,TEXT,RESOLVE_CLIENT_MAP,4,LATER,NO,YES,,,"Default from client_map; store override only"
+client_id,clientId,clientId,BIGINT,KEEP,N/A,NEVER,YES (idx_purchase_client_id),YES,,,"FK logical; ledger resolution"
+country,country,country,VARCHAR(100),KEEP,0,NEVER,NO,YES,,,"Booking country filter"
+price,price,price,VARCHAR(50),COST_LINE,2,LATER,NO,MEDIUM,,PRICE,"Legacy VARCHAR money"
+auction_fee,auctionFee,auctionFee,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,AUCTION_FEE,
+auction_penalty_fee,auctionPenaltyFee,auctionPenaltyFee,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,AUCTION_PENALTY_FEE,
+recycle_fee,recycleFee,recycleFee,VARCHAR(50),COST_LINE,2,LATER,NO,NO,recycle_fee,RECYCLE_FEE,"Often from map; still a cost line on purchase"
+road_tax,roadTax,roadTax,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,ROAD_TAX,
+tax_total,taxTotal,taxTotal,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,TAX_TOTAL,
+total_price,totalPrice,totalPrice,VARCHAR(50),KEEP,2,NEVER,NO,YES,,TOTAL_PRICE,"Keep as column for list sort/display; also cost line"
+payment_date,paymentDate,paymentDate,VARCHAR(50),EXTENDED_JSON,4,LATER,NO,NO,,paymentDate,
+rixo_requested,rixoRequested,rixoRequested,VARCHAR(10),WORKFLOW_CONSOLIDATE,1,YES,NO,YES,,,"Legacy VARCHAR; derive from workflow_status"
+rixo_confirmed,rixoConfirmed,rixoConfirmed,VARCHAR(10),WORKFLOW_CONSOLIDATE,1,YES,NO,YES,,,"Booking queries use IN (TRUE,1); migrate before drop"
+notes,notes,notes,TEXT,EXTENDED_JSON,4,LATER,NO,MEDIUM,,notes,
+shippment_date,shipmentDate,shipmentDate / shipmentDate,VARCHAR(50),SHIPPING_HISTORY,4,LATER,NO,YES,,,"Intentional typo preserved; canonical on shipping_history"
+B/L_no,blNo,blNo / B/L_no,VARCHAR(100),SHIPPING_HISTORY,4,LATER,NO,NO,,,"Reserved word; move to shipping_history"
+vessel,vessel,vessel / vesselNo,VARCHAR(255),SHIPPING_HISTORY,4,LATER,NO,YES,,,"Invoice filter; canonical on shipping_history"
+booking_requested,bookingRequested,bookingRequested,BOOLEAN/TINYINT,WORKFLOW_CONSOLIDATE,1,LATER,NO,YES,,,"Dual-write with workflow_status until queries migrated"
+invoice_confirmed,invoiceConfirmed,invoiceConfirmed,BOOLEAN/TINYINT,WORKFLOW_CONSOLIDATE,1,LATER,NO,YES,,,"Invoice flow filter"
+workflow_status,workflowStatus,workflowStatus,VARCHAR(32)/ENUM,KEEP,1,NEVER,NO,YES,,,"Single workflow source of truth (V29)"
+workflow_status_updated_at,workflowStatusUpdatedAt,workflowStatusUpdatedAt,TIMESTAMP,KEEP,1,NEVER,NO,NO,,,"Audit timestamp for workflow"
+shipment_charges,shipmentCharges,shipmentCharges,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,SHIPMENT_CHARGES,"C&F calculation"
+freight,freight,freight,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,FREIGHT,
+storage_charges,storageCharges,storageCharges,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,STORAGE_CHARGES,
+misc_charges,miscCharges,miscCharges,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,MISC_CHARGES,
+inspection_fee,inspectionFee,inspectionFee,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,INSPECTION_FEE,
+commission,commission,commission,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,COMMISSION,
+rixo_price,rixoPrice,rixoPrice,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,RIXO_PRICE,
+venue_id,venueId,venueId,VARCHAR(255),EXTENDED_JSON,4,LATER,NO,MEDIUM,,venueId,"Also on rixo_prices"
+number_cut,numberCut,numberCut,VARCHAR(255),EXTENDED_JSON,4,LATER,NO,NO,,numberCut,
+shaken,shaken,shaken,BOOLEAN/TINYINT,EXTENDED_JSON,4,LATER,NO,NO,,shaken,"Flag"
+negotiate,negotiate,negotiate,BOOLEAN/TINYINT,EXTENDED_JSON,4,LATER,NO,NO,,negotiate,"V40; flag"
+repair_company,repairCompany,repairCompany,VARCHAR(100),KEEP,0,LATER,NO,MEDIUM,,,"Distinct dropdown query exists"
+repair_charges,repairCharges,repairCharges,VARCHAR(50),COST_LINE,2,LATER,NO,NO,,REPAIR_CHARGES,
+profit,profit,profit,DECIMAL(15,2),COST_LINE,2,LATER,NO,NO,,PROFIT,"Calculated; DECIMAL not VARCHAR"
+is_package_mode,isPackageMode,isPackageMode,BOOLEAN/TINYINT,EXTENDED_JSON,4,LATER,NO,NO,,isPackageMode,"C&F package mode flag"
+booking_id,bookingId,bookingId,BIGINT,KEEP,N/A,NEVER,YES (idx_purchase_booking_id),YES,,,"Booking group key"
+car_pictures,carPictures,carPictures,TEXT,EXTENDED_JSON,4,LATER,NO,NO,,carPictures,"Or separate purchase_media table if blobs grow"
+created_at,createdAt,createdAt,TIMESTAMP,KEEP,N/A,NEVER,NO,NO,,,"Standard audit"
+updated_at,updatedAt,updatedAt,TIMESTAMP,KEEP,N/A,NEVER,NO,NO,,,"Standard audit"
+sold,sold,sold,BOOLEAN,DROPPED,N/A,N/A,NO,NO,,,"V33 added V34 dropped; legacy Docker init may still list — do not restore"
