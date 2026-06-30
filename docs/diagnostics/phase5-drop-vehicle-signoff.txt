@@ -1,0 +1,58 @@
+Phase 5 Drop 1 — VEHICLE spec columns removed (V53)
+Date: 2026-06-29
+Flyway: V53
+Manual QA signed off: 2026-06-29 (owner)
+
+## Backup
+backup-pre-v53-20260629.sql (344K)
+
+## Gate SQL
+vehicle_dual_write_gaps (initial): 2 (purchase ids 1, 2)
+Backfill: docs/diagnostics/backfill-v53-vehicle-gaps.sql
+vehicle_dual_write_gaps (post-backfill): 0 — PASS
+
+## Columns dropped (14)
+car_model_year, shipment_size, grade, rank, color, fuel, seat, door,
+distance, CC, shift, WD, drive_type
+
+## Code changes
+| File | Change |
+|------|--------|
+| V53__drop_vehicle_spec_columns.sql | DROP 14 spec columns |
+| Purchase.kt | Spec fields → @Transient |
+| PurchaseVehicleOverrideService.kt | applyMapBaselineForRead; override JSON-only write |
+| PurchaseVehicleOverrideIntegrationTest.kt | Map baseline + GET adapter tests |
+| PurchaseVehicleOverrideServiceTest.kt | Map baseline unit test |
+| PurchaseService.kt | Rixo PDF/text paths hydrate via applyReadAdapters (venueId fix) |
+| RixoTransportPdfServiceTest.kt | PDF hydration test |
+
+## Automated tests
+./gradlew test — PASS (137 tests)
+
+## Deploy
+./scripts/rebuild-and-restart-backend.sh --prebuilt — SUCCESS (initial + post PDF fix)
+
+## Post-deploy schema
+Flyway latest: V53 (drop vehicle spec columns)
+purchases column count: 42 (~41 expected; 55 − 14 = 41; +1 may be extended_attributes retained)
+purchase_vehicle_overrides rows: 7
+./scripts/verify-schema.sh — PASS
+
+## API smoke (automated)
+GET /api/purchases/purchase/1 — returns fuel, wd, driveType, distance (read adapters OK)
+Dropped columns absent from information_schema (fuel, grade, color, car_model_year, drive_type)
+
+## Manual QA checklist
+- [x] Edit color, fuel, grade → save → reload → values correct
+- [x] Chassis with map baseline only (no override) → map defaults on GET
+- [x] Rixo / purchase PDF shows correct specs (incl. venueId 会場ID after PDF hydration fix)
+- [x] CSV import (docs/samples/phase2-import-test-3rows.csv) — vehicle fields populated
+- [x] Purchase list/search still works
+
+## Rollback
+docs/diagnostics/rollback-v53-template.sql
+Fastest: restore backup-pre-v53-20260629.sql + redeploy pre-V53 backend
+
+## Decision
+**SIGNED OFF** — Release 1 (V53 vehicle spec drop) complete.
+Release 2 (V54 workflow flags) NOT started.

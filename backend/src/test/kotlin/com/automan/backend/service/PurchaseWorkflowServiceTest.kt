@@ -70,6 +70,24 @@ class PurchaseWorkflowServiceTest {
     }
 
     @Test
+    fun isRixoConfirmedForBooking_legacy_flag_true() {
+        val p = Purchase(chassis = "X", rixoConfirmed = "1", workflowStatus = WorkflowStatus.PURCHASED)
+        assertEquals(true, PurchaseWorkflowService.isRixoConfirmedForBooking(p))
+    }
+
+    @Test
+    fun isRixoConfirmedForBooking_workflow_at_rixo_confirmed() {
+        val p = Purchase(chassis = "X", rixoConfirmed = "0", workflowStatus = WorkflowStatus.RIXO_CONFIRMED)
+        assertEquals(true, PurchaseWorkflowService.isRixoConfirmedForBooking(p))
+    }
+
+    @Test
+    fun isRixoConfirmedForBooking_neither_legacy_nor_workflow() {
+        val p = Purchase(chassis = "X", rixoConfirmed = "0", workflowStatus = WorkflowStatus.RIXO_REQUESTED)
+        assertEquals(false, PurchaseWorkflowService.isRixoConfirmedForBooking(p))
+    }
+
+    @Test
     fun recomputeByPurchaseId_persists_when_status_changes() {
         val p = Purchase(
             id = 1L,
@@ -95,5 +113,26 @@ class PurchaseWorkflowServiceTest {
         `when`(purchaseRepository.findById(1L)).thenReturn(Optional.of(p))
         service.recomputeByPurchaseId(1L)
         verify(purchaseRepository, never()).save(any(Purchase::class.java))
+    }
+
+    @Test
+    fun applyForRead_derives_legacy_flags_from_workflow_status() {
+        val merged = service.applyForRead(
+            Purchase(id = 2L, chassis = "B", workflowStatus = WorkflowStatus.RIXO_CONFIRMED),
+        )
+        assertEquals("TRUE", merged.rixoConfirmed)
+        assertEquals("TRUE", merged.rixoRequested)
+        assertEquals(false, merged.bookingRequested)
+        assertEquals(false, merged.invoiceConfirmed)
+    }
+
+    @Test
+    fun applyForRead_invoice_confirmed_sets_all_downstream_flags() {
+        val merged = service.applyForRead(
+            Purchase(id = 3L, chassis = "C", workflowStatus = WorkflowStatus.INVOICE_CONFIRMED),
+        )
+        assertEquals(true, merged.invoiceConfirmed)
+        assertEquals(true, merged.bookingRequested)
+        assertEquals("TRUE", merged.rixoConfirmed)
     }
 }

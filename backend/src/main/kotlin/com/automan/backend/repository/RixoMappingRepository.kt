@@ -33,19 +33,37 @@ interface RixoMappingRepository : JpaRepository<RixoMapping, Long> {
         """
         SELECT rm
         FROM RixoMapping rm
-        WHERE UPPER(rm.stockLocation) = UPPER(:stockLocation)
-          AND UPPER(rm.rixoCompany) = UPPER(:rixoCompany)
+        WHERE UPPER(TRIM(rm.stockLocation)) = UPPER(TRIM(:stockLocation))
+          AND UPPER(TRIM(rm.rixoCompany)) = UPPER(TRIM(:rixoCompany))
+          AND UPPER(TRIM(COALESCE(rm.auctionName, ''))) = UPPER(TRIM(:auctionName))
           AND (
-                (:supportedVehicleType IS NULL AND rm.supportedVehicleType IS NULL)
-             OR (:supportedVehicleType IS NOT NULL AND UPPER(COALESCE(rm.supportedVehicleType, '')) = UPPER(:supportedVehicleType))
+                (:supportedVehicleType IS NULL AND (rm.supportedVehicleType IS NULL OR TRIM(rm.supportedVehicleType) = ''))
+             OR (:supportedVehicleType IS NOT NULL AND UPPER(TRIM(COALESCE(rm.supportedVehicleType, ''))) = UPPER(TRIM(:supportedVehicleType)))
           )
-        ORDER BY rm.id DESC
+        ORDER BY rm.id ASC
         """
     )
-    fun findTopMatch(
+    fun findExactMatch(
+        @Param("auctionName") auctionName: String,
         @Param("stockLocation") stockLocation: String,
         @Param("rixoCompany") rixoCompany: String,
-        @Param("supportedVehicleType") supportedVehicleType: String?
+        @Param("supportedVehicleType") supportedVehicleType: String?,
+    ): List<RixoMapping>
+
+    @Query(
+        """
+        SELECT rm
+        FROM RixoMapping rm
+        WHERE UPPER(TRIM(rm.stockLocation)) = UPPER(TRIM(:stockLocation))
+          AND UPPER(TRIM(rm.rixoCompany)) = UPPER(TRIM(:rixoCompany))
+          AND UPPER(TRIM(COALESCE(rm.auctionName, ''))) = UPPER(TRIM(:auctionName))
+          AND (rm.supportedVehicleType IS NULL OR TRIM(rm.supportedVehicleType) = '')
+        ORDER BY rm.id ASC
+        """
+    )
+    fun findMatchWithNullVehicleType(
+        @Param("auctionName") auctionName: String,
+        @Param("stockLocation") stockLocation: String,
+        @Param("rixoCompany") rixoCompany: String,
     ): List<RixoMapping>
 }
-

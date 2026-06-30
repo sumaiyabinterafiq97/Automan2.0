@@ -1,0 +1,59 @@
+Phase 5 Drop 1 — VEHICLE spec column drop audit
+Date: 2026-06-29
+Flyway (pre-drop): V52
+Grep output: docs/diagnostics/phase5-drop-vehicle-grep.txt (285 lines)
+
+Columns to DROP (14):
+  car_model_year, shipment_size, grade, rank, color, fuel, seat, door,
+  distance, CC, shift, WD, drive_type
+
+Canonical store:
+  Baseline: car_brand_mapping (by chassis / brand / car_name)
+  Overrides: purchase_vehicle_overrides.overrides JSON
+  Service: PurchaseVehicleOverrideService
+
+## Native SQL on purchases spec columns
+NONE — PurchaseRepository has no JPQL/nativeQuery referencing dropped column names.
+CarBrandMappingRepository queries car_brand_mapping only (KEEP table).
+
+## Writes to purchases spec columns (must stop after V53)
+
+| File | Role | Post-V53 fix |
+|------|------|--------------|
+| Purchase.kt | @Column on 14 spec fields | → @Transient (same as V51/V52) |
+| PurchaseService.kt | create/update/partial/import merge spec into Purchase before save | Hydrate via applyReadAdapters; merge transient before finalizePurchaseWrite |
+| PurchaseVehicleOverrideService.kt | syncFromPurchase dual-writes logic compares vs map | JSON-only write (already writes overrides; column persist removed by @Transient) |
+| PurchaseChangeHistoryService.kt | Records spec field diffs on merged Purchase objects | OK — operates on adapter-merged Purchase |
+| DataSeederService.kt | Test seed data sets spec fields | OK — transient fields still set in memory; sync writes overrides |
+| RixoImportService.kt | Sets shipmentSize in import payload | OK — flows through PurchaseService import + finalizePurchaseWrite |
+
+## Read paths (must use merged Purchase adapters)
+
+| File | Role | Post-V53 fix |
+|------|------|--------------|
+| PurchaseService.kt | applyReadAdapters → vehicle override applyForRead | Enhance applyForRead: map baseline → override JSON (comment already documents chain; baseline merge missing today) |
+| InvoiceHistoryService.kt | Reads purchase.grade, fuel, color, etc. | OK if caller passes adapter-merged Purchase |
+| CarSearchService.kt | Reads purchase.carModelYear | OK via applyReadAdapters on list paths |
+| PdfService.kt / PurchaseController.kt | PDF generation from Purchase object | OK if purchase loaded via PurchaseService (applyReadAdapters) |
+| CarBrandMappingService.kt | Separate map API | Unaffected (KEEP table) |
+
+## Frontend
+No direct DB access. API JSON keys unchanged (fuel, grade, color, etc.).
+
+## Risk items
+1. applyForRead currently applies override JSON only — does NOT merge car_brand_mapping baseline.
+   Required for QA: "Chassis with map baseline only (no override) → map defaults on GET".
+   Fix: add applyMapBaselineForRead in PurchaseVehicleOverrideService (override wins over baseline).
+2. Gate vehicle_dual_write_gaps = 2 (purchase ids 1, 2) — backfill required before Flyway DROP.
+
+## STOP condition check
+- Unmapped native SQL on spec columns: NONE ✓
+- Gate vehicle_dual_write_gaps: 2 ✗ — STOP until backfill (see phase5-drop-vehicle-gates.txt)
+
+## Planned code changes (Step 4, after gates pass)
+1. V53__drop_vehicle_spec_columns.sql — DROP 14 columns only
+2. Purchase.kt — spec fields → @Transient
+3. PurchaseVehicleOverrideService — applyMapBaselineForRead + applyForRead chain; syncFromPurchase JSON-only
+4. PurchaseService — ensure finalizePurchaseWrite receives merged transient spec (pattern from V51 extended)
+5. Tests — extend PurchaseVehicleOverrideIntegrationTest for post-drop GET/list/save + map baseline read
+6. docs/diagnostics/rollback-v53-template.sql

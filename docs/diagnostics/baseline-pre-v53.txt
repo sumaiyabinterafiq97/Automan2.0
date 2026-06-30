@@ -1,0 +1,23 @@
+# Baseline pre-V53 (vehicle spec column drop)
+# Date: 2026-06-29
+
+## Backup
+backup-pre-v53-20260629.sql (344K)
+
+## verify-schema.sh
+PASS
+
+## Flyway (latest 3)
+version	description
+52	drop purchases shipping columns
+51	drop purchases extended columns
+50	shipping history bl no
+
+## Latest Flyway version
+V52 ✓
+
+## purchases column count
+55
+
+## purchase_vehicle_overrides row count
+5

@@ -161,16 +161,19 @@ class PurchaseChangeHistoryService(
         }
 
         if (fieldNames.isNotEmpty()) {
-            val history = PurchaseChangeHistory(
-                purchaseId = purchaseId,
-                chassis = after.chassis,
-                fieldName = fieldNames.joinToString(" ; "),
-                oldValue = oldValues.joinToString(" ; "),
-                newValue = newValues.joinToString(" ; "),
-                changedBy = changedBy,
-                changedAt = now,
-            )
-            repository.save(history)
+            for (i in fieldNames.indices) {
+                repository.save(
+                    PurchaseChangeHistory(
+                        purchaseId = purchaseId,
+                        chassis = after.chassis,
+                        fieldName = fieldNames[i],
+                        oldValue = oldValues[i],
+                        newValue = newValues[i],
+                        changedBy = changedBy,
+                        changedAt = now,
+                    ),
+                )
+            }
         }
     }
 

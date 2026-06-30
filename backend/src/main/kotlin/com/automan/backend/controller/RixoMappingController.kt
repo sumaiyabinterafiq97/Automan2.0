@@ -197,20 +197,23 @@ class RixoMappingController(
 
     @GetMapping("/lookup")
     fun lookupRixoPrice(
+        @RequestParam auctionName: String,
         @RequestParam stockLocation: String,
         @RequestParam rixoCompany: String,
-        @RequestParam(required = false) supportedVehicleType: String?
+        @RequestParam(required = false) supportedVehicleType: String?,
     ): ResponseEntity<Map<String, Any?>> {
         val match = rixoMappingService.findRixoPrice(
+            auctionName = auctionName,
             stockLocation = stockLocation,
             rixoCompany = rixoCompany,
-            supportedVehicleType = supportedVehicleType
+            supportedVehicleType = supportedVehicleType,
         )
 
         return if (match == null) {
+            val vehicleLabel = supportedVehicleType?.trim().orEmpty().ifBlank { "(any)" }
             ResponseEntity.ok(mapOf(
                 "success" to false,
-                "message" to "No rixo mapping found for these values",
+                "message" to "No rixo mapping found for Supplier=$auctionName, Rixo Company=$rixoCompany, Stock=$stockLocation, Vehicle type=$vehicleLabel",
                 "data" to null
             ))
         } else {

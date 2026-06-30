@@ -259,38 +259,9 @@ class PurchaseController(
     fun getCarCostDetails(@PathVariable chassis: String): ResponseEntity<Map<String, Any>> {
         return try {
             Logger.debug("Looking for chassis: $chassis")
-            val purchase = purchaseService.getPurchaseByChassis(chassis)
-            Logger.debug("Purchase result found")
-            if (purchase != null) {
-                Logger.debug("Purchase found - chassis: ${purchase.chassis}, price: ${purchase.price}")
-                
-                // Helper function to safely parse price strings to BigDecimal
-                fun parsePrice(priceStr: String?): BigDecimal {
-                    if (priceStr == null || priceStr.isBlank()) return BigDecimal.ZERO
-                    return try {
-                        val cleaned = priceStr.replace(",", "").replace("¥", "").replace("Â¥", "").trim()
-                        if (cleaned.isEmpty()) BigDecimal.ZERO else BigDecimal(cleaned)
-                    } catch (e: Exception) {
-                        Logger.warn("Failed to parse price '$priceStr': ${e.message}")
-                        BigDecimal.ZERO
-                    }
-                }
-                
-                val costDetails: Map<String, Any> = mapOf(
-                    "id" to (purchase.id ?: 0L), // Include purchase ID for chassis uniqueness checking
-                    "chassis" to (purchase.chassis ?: ""),
-                    "carPrice" to parsePrice(purchase.price),
-                    "auctionFee" to parsePrice(purchase.auctionFee),
-                    "auctionPenaltyFee" to parsePrice(purchase.auctionPenaltyFee),
-                    "rixoPrice" to parsePrice(purchase.rixoPrice),
-                    "shippingCharge" to parsePrice(purchase.shipmentCharges),
-                    "freight" to parsePrice(purchase.freight),
-                    "inspectionFee" to parsePrice(purchase.inspectionFee),
-                    "repairFee" to parsePrice(purchase.repairCharges),
-                    "mscCharges" to parsePrice(purchase.miscCharges),
-                    "profit" to (purchase.profit ?: BigDecimal.ZERO)
-                )
-                Logger.debug("Cost details prepared")
+            val costDetails = purchaseService.getCostDetailsByChassis(chassis)
+            if (costDetails != null) {
+                Logger.debug("Cost details prepared for chassis: $chassis")
                 ResponseEntity.ok(costDetails)
             } else {
                 Logger.debug("Purchase not found for chassis: $chassis")
@@ -298,7 +269,6 @@ class PurchaseController(
             }
         } catch (e: Exception) {
             Logger.error("Exception in getCarCostDetails: ${e.message}", e)
-            e.printStackTrace()
             ResponseEntity.status(500).body(mapOf(
                 "error" to (e.message ?: "Unknown error"),
                 "stackTrace" to e.stackTraceToString()

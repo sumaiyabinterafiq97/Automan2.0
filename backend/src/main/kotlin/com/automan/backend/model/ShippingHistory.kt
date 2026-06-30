@@ -44,6 +44,9 @@ data class ShippingHistory(
     @Column(name = "vessel")
     val vessel: String? = null,
 
+    @Column(name = "bl_no")
+    val blNo: String? = null,
+
     @Column(name = "price_type")
     val priceType: String? = null,
 

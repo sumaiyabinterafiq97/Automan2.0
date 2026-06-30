@@ -2951,7 +2951,18 @@ function getCurrentAuctionNameForPurchaseForm() {
     var sel = document.getElementById(auctionId);
     var inp = document.getElementById(auctionId + 'Input');
     var raw = ((inp && inp.value) || (sel && sel.value) || '').trim();
-    return (raw && raw !== '__add_new_supplier__') ? raw : '';
+    if (raw && raw !== '__add_new_supplier__') return raw;
+    var pd = window.__editPurchaseDataForRixo;
+    if (pd && pd.auctionHouse) {
+        var fromPd = String(pd.auctionHouse).trim();
+        if (fromPd && fromPd !== '__add_new_supplier__') return fromPd;
+    }
+    var ps = window.__rixoSupplierPreserveSnapshot;
+    if (ps && ps.auction) {
+        var fromSnap = String(ps.auction).trim();
+        if (fromSnap && fromSnap !== '__add_new_supplier__') return fromSnap;
+    }
+    return '';
 }
 
 function normalizeAuctionNameForMapping(auctionName) {
@@ -3077,9 +3088,18 @@ window.ensureSupplierMasterComboboxReady = function(selectId) {
     if (!MASTER_FIELD_IDS[selectId]) return true;
     if (supplierSelectHasMasterSep(selectId)) return true;
     var auction = getCurrentAuctionNameForPurchaseForm();
-    if (!auction) return false;
-    window.rebuildSupplierDependentDropdowns(auction, { restoreValues: true, restoreDelay: 0 });
-    return supplierSelectHasMasterSep(selectId);
+    if (!auction) return true;
+    var snap = (typeof window.__snapshotSupplierFormForPreserve === 'function')
+        ? window.__snapshotSupplierFormForPreserve()
+        : null;
+    var opts = { autoSelect: false, restoreDelay: 0 };
+    if (snap && (snap.auction || snap.stock || snap.venue || snap.rixo || snap.pol)) {
+        opts.preserveSnapshot = snap;
+    } else {
+        opts.restoreValues = true;
+    }
+    window.rebuildSupplierDependentDropdowns(auction, opts);
+    return true;
 };
 
 function uniqueOptionsForMasterField(options) {
@@ -4452,6 +4472,21 @@ function __afterRixoDropdownsPopulated(fromMasterSync, preserveSnap) {
         if (typeof window.toggleManageButtons === 'function') window.toggleManageButtons();
         return;
     }
+    if (document.getElementById('editForm') && window.__editPurchaseHydrating === true) {
+        var editSnap = preserveSnap;
+        if (!editSnap && typeof __snapshotSupplierFormForPreserve === 'function') {
+            editSnap = __snapshotSupplierFormForPreserve();
+        }
+        if (!editSnap && window.__rixoSupplierPreserveSnapshot) {
+            editSnap = window.__rixoSupplierPreserveSnapshot;
+            if (editSnap) editSnap.isEdit = true;
+        }
+        if (editSnap && (editSnap.auction || editSnap.stock || editSnap.pol || editSnap.venue || editSnap.rixo)) {
+            __restoreSupplierFormFromMasterSync(editSnap);
+        }
+        if (typeof window.toggleManageButtons === 'function') window.toggleManageButtons();
+        return;
+    }
     const auctionNameSelect = document.getElementById('auctionName');
     const editAuctionNameSelect = document.getElementById('editAuctionName');
     let selectedAuctionName = null;
@@ -4460,8 +4495,9 @@ function __afterRixoDropdownsPopulated(fromMasterSync, preserveSnap) {
     } else if (editAuctionNameSelect && editAuctionNameSelect.value && editAuctionNameSelect.value !== '__add_new_supplier__') {
         selectedAuctionName = editAuctionNameSelect.value;
     }
-    if (selectedAuctionName && window.autoSelectRelatedFields) {
+    if (selectedAuctionName && window.autoSelectRelatedFields && window.__editPurchaseHydrating !== true) {
         setTimeout(function() {
+            if (window.__editPurchaseHydrating === true) return;
             window.autoSelectRelatedFields(selectedAuctionName, 'auctionHouse', selectedAuctionName);
         }, 100);
     }

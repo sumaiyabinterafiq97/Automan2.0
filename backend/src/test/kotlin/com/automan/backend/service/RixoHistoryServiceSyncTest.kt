@@ -2,6 +2,7 @@ package com.automan.backend.service
 
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.RixoHistory
+import com.automan.backend.model.WorkflowStatus
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.RixoHistoryRepository
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -20,7 +21,7 @@ import java.util.Optional
 class RixoHistoryServiceSyncTest {
 
     @Test
-    fun syncRixoConfirmedWithAllHistory_clears_true_flag_when_no_history_matches() {
+    fun syncRixoConfirmedWithAllHistory_downgrades_workflow_when_no_history_matches() {
         val purchaseRepository = mock(PurchaseRepository::class.java)
         val rixoHistoryRepository = mock(RixoHistoryRepository::class.java)
         val workflowService = PurchaseWorkflowService(purchaseRepository)
@@ -34,19 +35,18 @@ class RixoHistoryServiceSyncTest {
             invoiceHistoryService,
         )
 
+        val purchase = Purchase(id = 10L, chassis = "AA-111", workflowStatus = WorkflowStatus.RIXO_CONFIRMED)
         `when`(rixoHistoryRepository.findAll()).thenReturn(emptyList())
-        `when`(purchaseRepository.findPurchasesWhereRixoConfirmedPositive()).thenReturn(
-            listOf(
-                Purchase(id = 10L, chassis = "AA-111", rixoConfirmed = "TRUE"),
-            ),
-        )
+        `when`(purchaseRepository.findPurchasesWhereRixoConfirmedPositive()).thenReturn(listOf(purchase))
+        `when`(purchaseRepository.save(org.mockito.ArgumentMatchers.any(Purchase::class.java)))
+            .thenAnswer { it.arguments[0] as Purchase }
 
         val changedIds = service.syncRixoConfirmedWithAllHistory()
 
         assertEquals(setOf(10L), changedIds)
         val captor = ArgumentCaptor.forClass(Purchase::class.java)
         verify(purchaseRepository).save(captor.capture())
-        assertEquals("FALSE", captor.value.rixoConfirmed)
+        assertEquals(WorkflowStatus.RIXO_REQUESTED, captor.value.workflowStatus)
     }
 
     @Test
@@ -71,10 +71,7 @@ class RixoHistoryServiceSyncTest {
         val p = Purchase(
             id = 10L,
             chassis = "ABC-999",
-            rixoRequested = "TRUE",
-            rixoConfirmed = "TRUE",
-            bookingRequested = false,
-            invoiceConfirmed = true,
+            workflowStatus = WorkflowStatus.RIXO_CONFIRMED,
         )
         `when`(purchaseRepository.findByChassisToken(anyString())).thenAnswer { inv ->
             val token = inv.getArgument<String>(0)
@@ -82,17 +79,15 @@ class RixoHistoryServiceSyncTest {
         }
         `when`(purchaseRepository.findById(10L)).thenReturn(Optional.of(p))
         `when`(purchaseRepository.findPurchasesWhereRixoConfirmedPositive()).thenReturn(listOf(p))
+        `when`(purchaseRepository.save(org.mockito.ArgumentMatchers.any(Purchase::class.java)))
+            .thenAnswer { it.arguments[0] as Purchase }
 
         val ok = service.deleteHistoryRow(1L)
         assertTrue(ok)
         verify(rixoHistoryRepository).deleteById(1L)
         verify(purchaseRepository, atLeastOnce()).save(
             argThat { saved: Purchase ->
-                saved.id == 10L &&
-                    saved.rixoRequested == "FALSE" &&
-                    saved.rixoConfirmed == "FALSE" &&
-                    !saved.bookingRequested &&
-                    saved.invoiceConfirmed == false
+                saved.id == 10L && saved.workflowStatus == WorkflowStatus.PURCHASED
             },
         )
     }
@@ -115,7 +110,7 @@ class RixoHistoryServiceSyncTest {
         val row = RixoHistory(id = 1L, chassis = "ABC-999")
         `when`(rixoHistoryRepository.findById(1L)).thenReturn(Optional.of(row))
 
-        val p = Purchase(id = 10L, chassis = "ABC-999", bookingRequested = true)
+        val p = Purchase(id = 10L, chassis = "ABC-999", workflowStatus = WorkflowStatus.BOOKING_REQUESTED)
         `when`(purchaseRepository.findByChassisToken(anyString())).thenAnswer { inv ->
             val token = inv.getArgument<String>(0)
             if (token == "ABC-999" || token == "ABC") listOf(p) else emptyList()
@@ -145,7 +140,7 @@ class RixoHistoryServiceSyncTest {
         val row = RixoHistory(id = 1L, chassis = "ABC-999;OTHER")
         `when`(rixoHistoryRepository.findById(1L)).thenReturn(Optional.of(row))
 
-        val p = Purchase(id = 10L, chassis = "ABC-999", bookingRequested = true)
+        val p = Purchase(id = 10L, chassis = "ABC-999", workflowStatus = WorkflowStatus.BOOKING_REQUESTED)
         `when`(purchaseRepository.findByChassisToken(anyString())).thenAnswer { inv ->
             val token = inv.getArgument<String>(0)
             if (token == "ABC-999" || token == "ABC") listOf(p) else emptyList()

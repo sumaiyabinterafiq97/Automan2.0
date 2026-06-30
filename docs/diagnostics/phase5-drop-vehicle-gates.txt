@@ -1,0 +1,22 @@
+# Phase 5 Drop 1 — Vehicle spec gate SQL
+# Date: 2026-06-29
+# Flyway pre-drop: V52
+
+## Gate: vehicle_dual_write_gaps (initial)
+
+Result: **2** — FAIL
+
+Gap purchase ids: 1 (AAHH45), 2 (ACA31)
+
+## Backfill applied
+
+Script: docs/diagnostics/backfill-v53-vehicle-gaps.sql
+- Purchase 1: {"distance":"200","wd":"2WD","driveType":"RHD"}
+- Purchase 2: {"carModelYear":"2026-07","grade":"X","fuel":"GASOLINE","door":"5","cc":"2400","wd":"4WD","driveType":"RHD"}
+
+## Gate: vehicle_dual_write_gaps (post-backfill)
+
+Result: **0** — PASS
+
+## Decision
+**GO** — proceed to Step 4 (V53 migration + code)

@@ -1,0 +1,63 @@
+Phase: 4b — Shipping snapshot read-switch (no column drops)
+Environment: Docker local (frontend :8080, backend :8083, MySQL automan_mysql_multiplatform)
+Date: 2026-06-28
+DB backup ID: N/A (local dev)
+
+Global diagnostic pack: PASS
+- Flyway latest: V49 (unchanged from Phase 4)
+- purchases_column_count: 68
+- booked_without_shipping: 0  (gate: must be 0)
+- shipping_history_rows: 2
+
+Phase 4b implementation: PASS
+- ShippingSnapshotService: vessel + shipmentDate from shipping_history, fallback purchases
+- blNo: purchases only (no shipping_history column yet)
+- PurchaseService.applyReadAdapters: extended → vehicle overrides → shipping snapshot
+- Invoice filter: JPQL candidates by client/consignee + flags; vessel/date matched post read-adapter
+- Dual-write unchanged (PurchaseService + ShippingHistoryService.saveBatch)
+
+Automated tests: PASS (2026-06-28)
+- ShippingSnapshotServiceTest (5 tests)
+- ShippingSnapshotIntegrationTest (3 tests)
+  - GET purchase canonical from shipping_history
+  - GET purchase fallback when no shipping row
+  - GET /purchases/filter/invoice matches shipping_history vessel when purchase columns empty
+
+Spot-check (booked chassis with shipping_history):
+- ACR50: vessel/date aligned (purchase = shipping_history)
+- ACA21: shipping_history canonical (sh_date 2025-09-27 vs purchase shippment_date 2026-06-28 — read-switch returns shipping_history)
+
+Phase 2/3/4 regression (unchanged):
+- dual_write_gaps_price: not re-run (Phase 4 sign-off baseline)
+- extended_attributes backfill: V49
+- cost lines + vehicle overrides: unchanged
+
+verify-schema.sh: PASS (2026-06-28)
+Backend deploy: ./scripts/rebuild-and-restart-backend.sh --prebuilt — PASS
+
+Manual QA: completed by owner (2026-06-28)
+- Purchase GET/list returns canonical vessel/shipmentDate from shipping_history (fallback when no row)
+- Invoice filter by client + vessel + date (shipping_history when purchase columns empty)
+- C&F save dual-write to purchases + shipping_history
+- Shipping history recreate prefills from GET purchase
+- blNo still on purchases only (expected)
+- Phase 4 extended attributes + Phase 2/3 regression unchanged
+
+Known regressions: none
+
+Decision: GO — Phase 4b read-switch complete. Column drops NOT approved (separate gated sub-releases after ≥30-day soak).
+
+Sign-off: Phase 4b shipping snapshot read adapter verified. Dual-write continues; do not drop purchases shipment columns until soak + explicit drop gate.
+
+---
+
+Phase 4 FULL sign-off (4 + 4b): COMPLETE (2026-06-28)
+- Phase 4: extended_attributes read-switch — docs/diagnostics/phase4-signoff.txt
+- Phase 4b: shipping snapshot read-switch — this file
+- Combined: all Phase 4 read-switches signed off. Soak/drop planning may proceed per playbook; no column drops until ≥30-day soak + gated sub-releases.
+
+Diagnostic command log:
+  docker exec automan_mysql_multiplatform mysql -u automan_user -pautoman_password automan_car_purchase -e "SELECT COUNT(*) AS booked_without_shipping ..."
+  cd backend && ./gradlew test --tests ShippingSnapshotServiceTest --tests ShippingSnapshotIntegrationTest
+  ./scripts/rebuild-and-restart-backend.sh --prebuilt
+  ./scripts/verify-schema.sh

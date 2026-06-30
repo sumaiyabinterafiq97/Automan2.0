@@ -1,0 +1,19 @@
+# Phase 5 Drop 2 — Workflow gate SQL
+# Date: 2026-06-29
+# Flyway pre-drop: V53
+
+## Gate: null_workflow_status
+
+Result: **0** — PASS
+
+## workflow_status distribution
+
+| workflow_status   | cnt |
+|-------------------|-----|
+| PURCHASED         | 6   |
+| RIXO_CONFIRMED    | 2   |
+| RIXO_REQUESTED    | 1   |
+| INVOICE_CONFIRMED | 1   |
+
+## Decision
+**GO** — proceed to Step 4 (V54 migration + code)

@@ -1,0 +1,32 @@
+Phase: 3 — Vehicle spec overrides
+Environment: Docker local (frontend :8080, backend :8083, MySQL automan_mysql_multiplatform)
+Date: 2026-06-28
+DB backup ID: N/A (local dev)
+
+Global diagnostic pack: PASS
+- Flyway latest: V47 (purchase vehicle overrides)
+- null_workflow_status: 0
+- Duplicate chassis: 0
+
+Phase diagnostic SQL: PASS
+- override_rows: 3 (QA purchases with spec deltas vs map)
+- null_fuel_but_has_override: 0  (gate: must be 0)
+- purchases without car_brand_mapping prefix: IMPORT-QA-* only (expected test data)
+
+Manual QA: 8 / 8 steps passed (owner sign-off 2026-06-28)
+- Chassis → specs auto-fill
+- Manual fuel override → save → reload
+- Map-only defaults → minimal/empty overrides JSON
+- Brand → car name → chassis cascade
+- Old purchase spec fields visible
+- Edit spec → change history field_name correct
+- Rixo PDF vehicle attributes
+- Rixo / Invoice / Shipping recreate prefills form
+
+Dual-write verified: YES (create, update, partial update, CSV import)
+Read-switch active: YES (override JSON applied on GET/list paths; columns dual-written during soak)
+Known regressions: none
+
+Decision: GO Phase 4
+
+Sign-off: Phase 3 complete — proceed to purchases.extended_attributes (extended JSON cold fields)

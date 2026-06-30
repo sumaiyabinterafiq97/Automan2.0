@@ -51,11 +51,11 @@ class DataSeederService(
         val adminUser = User(
             email = "admin@automan.com",
             name = "System Administrator",
-            passwordHash = passwordEncoder.encode("admin123"),
+            passwordHash = passwordEncoder.encode("Automan!Ship26Tokyo"),
             role = UserRole.ADMIN
         )
         userRepository.save(adminUser)
-        Logger.debug("Created admin user: admin@automan.com (password: admin123)")
+        Logger.debug("Created admin user: admin@automan.com")
     }
 
     private fun seedClients() {

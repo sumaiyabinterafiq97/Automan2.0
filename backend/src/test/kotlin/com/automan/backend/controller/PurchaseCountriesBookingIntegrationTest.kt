@@ -67,12 +67,35 @@ class PurchaseCountriesBookingIntegrationTest {
             .andExpect(jsonPath("$.length()").value(0))
     }
 
+    @Test
+    fun `GET purchases countries includes country when workflow_status is RIXO_CONFIRMED but legacy flag false`() {
+        purchase(
+            chassis = "CH-WF",
+            country = "Germany",
+            bookingRequested = false,
+            rixoConfirmed = "0",
+            workflowStatus = com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED,
+        )
+
+        mockMvc.perform(get("/purchases/countries"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.length()").value(1))
+            .andExpect(jsonPath("$[0]").value("Germany"))
+    }
+
     private fun purchase(
         chassis: String,
         country: String,
         bookingRequested: Boolean,
         rixoConfirmed: String = "1",
+        workflowStatus: com.automan.backend.model.WorkflowStatus? = null,
     ): Purchase {
+        val resolvedStatus = workflowStatus ?: when {
+            bookingRequested -> com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED
+            rixoConfirmed.trim().uppercase() in setOf("TRUE", "1") ->
+                com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED
+            else -> com.automan.backend.model.WorkflowStatus.PURCHASED
+        }
         val car = Purchase(
             chassis = chassis,
             carName = "Test Car",
@@ -87,8 +110,6 @@ class PurchaseCountriesBookingIntegrationTest {
             roadTax = "300.00",
             totalPrice = "11000.00",
             paymentDate = LocalDate.now().toString(),
-            rixoRequested = "0",
-            rixoConfirmed = rixoConfirmed,
             rixoPrice = "0.00",
             shipmentDate = LocalDate.now().toString(),
             vessel = "V1",
@@ -104,7 +125,7 @@ class PurchaseCountriesBookingIntegrationTest {
             numberCut = "0",
             createdAt = LocalDateTime.now(),
             updatedAt = LocalDateTime.now(),
-            bookingRequested = bookingRequested,
+            workflowStatus = resolvedStatus,
         )
         return purchaseRepository.save(car)
     }

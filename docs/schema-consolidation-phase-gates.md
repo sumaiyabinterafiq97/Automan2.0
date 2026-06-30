@@ -2,7 +2,8 @@
 
 Manual QA steps, diagnostic SQL, risk controls, and go/no-go criteria for each phase of the `purchases` column consolidation initiative.
 
-**Related:** [purchases-field-classification.csv](./purchases-field-classification.csv) — field-by-field KEEP / migrate / drop matrix.
+**Related:** [purchases-field-classification.csv](./purchases-field-classification.csv) — field-by-field KEEP / migrate / drop matrix.  
+**Scope freeze:** [schema-consolidation-scope-freeze.md](./schema-consolidation-scope-freeze.md) — no new `purchases` columns until Phase 1 prod.
 
 **Audience:** DBA, backend lead, QA before each release.
 
@@ -224,14 +225,14 @@ FROM purchase_change_history;
 |--------------------|----------|
 | Workflow drift report (D)(E) reviewed and mapping table agreed | >5% unexplained workflow/flag mismatch |
 | Vehicle override % estimated (A)(B) | — |
-| Top edited fields list (F) signed off | — |
-| [Field classification CSV](./purchases-field-classification.csv) reviewed by product/ops | Business rejects map + overrides model |
+| Top edited fields list (F) noted for later phases | — |
+| [Field classification CSV](./purchases-field-classification.csv) skimmed; `reviewed` = APPROVED (solo owner) | You reject map + overrides model |
 
 ### Deliverables
 
-- Completed field classification review
-- `workflow_status` ↔ legacy flag mapping document
-- Signed QA owner for booking + invoice flows
+- Completed solo review of field classification CSV
+- `workflow_status` ↔ legacy flag mapping noted for Phase 1
+- Phase 0 baseline file in `docs/diagnostics/`
 
 ---
 

@@ -1,0 +1,15 @@
+Phase 5 Drop 3 — gate SQL (pre-V55)
+Date: 2026-06-29
+
+## cost_dual_write_gaps
+0 — PASS (GO for V55 implementation)
+
+## purchase_cost_lines
+cost_line_rows: 117
+purchases_with_lines: 10
+
+## Gate query
+SELECT COUNT(*) AS cost_dual_write_gaps
+FROM purchases p
+WHERE p.price IS NOT NULL AND TRIM(p.price) <> ''
+  AND NOT EXISTS (SELECT 1 FROM purchase_cost_lines c WHERE c.purchase_id = p.id);

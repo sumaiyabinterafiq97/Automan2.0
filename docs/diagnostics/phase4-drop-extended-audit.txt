@@ -1,0 +1,23 @@
+Phase 4 Drop 1 — EXTENDED_JSON column drop audit
+Date: 2026-06-29
+Flyway: V51
+
+Columns dropped from purchases:
+  options, auction_no, payment_date, notes, venue_id, number_cut,
+  shaken, negotiate, is_package_mode, car_pictures
+
+Canonical store: purchases.extended_attributes JSON
+
+Code paths updated:
+| File | Change |
+|------|--------|
+| Purchase.kt | Extended fields → @Transient (API shape unchanged) |
+| PurchaseExtendedAttributesService.kt | JSON-only persist via syncFromPurchase; applyForRead from JSON |
+| PurchaseService.kt | finalizePurchaseWrite merges transient fields before sync; hydrate existing via applyReadAdapters on update |
+| PurchaseRepository.kt | searchPurchases: extended_attributes JSON substring; findDistinctVenueIds: JSON_EXTRACT |
+
+Remaining direct column references: NONE (grep verified)
+
+Gate SQL (pre-drop): rows_with_extended = 9; V49 backfill complete
+
+Deferred: COST_LINE, VEHICLE_OVERRIDE column drops (post-go-live maintenance)

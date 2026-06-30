@@ -1,0 +1,77 @@
+Phase 4b — Shipping snapshot read-switch audit
+Date: 2026-06-28
+Scope: vessel, shipmentDate (shippment_date), blNo (B/L_no)
+
+## Canonical source
+
+| Field | Canonical table | Column | Fallback |
+|-------|-----------------|--------|----------|
+| vessel | shipping_history | vessel | purchases.vessel |
+| shipmentDate | shipping_history | shipment_date (DATE → ISO string) | purchases.shippment_date |
+| blNo | purchases only | B/L_no | (no shipping_history column yet — future migration) |
+
+shipping_history: UNIQUE(chassis) per V19.
+
+---
+
+## Backend — writes (dual-write unchanged)
+
+| File | Usage | Phase 4b action |
+|------|-------|-----------------|
+| PurchaseService.kt | updatePurchase / updatePurchasePartial / createPurchase / CSV import set vessel, blNo, shipmentDate on purchases | KEEP dual-write |
+| ShippingHistoryService.kt | saveBatch writes vessel, shipmentDate to shipping_history from C&F/booking | KEEP (canonical writer) |
+| PurchaseChangeHistoryService.kt | audit vessel, blNo, shipmentDate | KEEP |
+
+---
+
+## Backend — reads (updated in Phase 4b)
+
+| File | Usage | Phase 4b action |
+|------|-------|-----------------|
+| PurchaseService.kt | getAllPurchases, getById, search, filters → applyReadAdapters | DONE: ShippingSnapshotService in read chain |
+| PurchaseRepository.kt | findInvoiceFilterCandidatesByClientName/Consignee | DONE: JPQL candidates + vessel/date filter in PurchaseService after read adapter |
+| ShippingHistoryService.kt | listAllRows; getPurchaseByChassis for clientName on save | OK — already uses shipping_history for list; purchase read now canonical via adapter |
+| InvoiceHistoryService.kt | PDF/header vessel from invoice_history | OK — separate from purchase snapshot |
+| ShippingHistoryRepository.kt | findDistinctVesselsForInvoiceClient, findInvoiceRowsOrderByIdAsc | OK — already shipping_history-native |
+
+---
+
+## Frontend — reads (no change required for Phase 4b)
+
+API JSON keys unchanged; backend read adapter returns merged vessel/shipmentDate.
+
+| File | Usage | Notes |
+|------|-------|-------|
+| PurchaseManagement.kt | Invoice PDF prefill from shipping-history API first | Already prefers shipping_history rows |
+| Invoice.kt | loadInvoiceVesselOptions, prefill from purchases.vessel | Receives canonical values from GET /purchases after read-switch |
+| MinimalPurchaseApp.kt | Edit form blNo, shipmentDate, vessel fields | Display/save via purchase API |
+| ApiService.kt / Models.kt | blNo, vessel, shipmentDate mapping | Unchanged |
+
+---
+
+## Flows verified by design
+
+| Flow | Before | After Phase 4b |
+|------|--------|----------------|
+| Purchase list GET | purchases columns only | shipping_history overrides vessel/date when row exists |
+| Invoice filter by client+vessel+date | purchases columns only | Read adapter + service filter on canonical vessel/date |
+| Shipping history recreate | sessionStorage from purchase row | GET purchase returns canonical snapshot |
+| C&F calculate → saveBatch | writes shipping_history + purchases | Unchanged dual-write |
+| Rixo PDF | purchase fields via API | Canonical vessel/date via read adapter |
+
+---
+
+## Recommended follow-ups (post Phase 4b, pre column drop)
+
+1. Add bl_no to shipping_history (Flyway) + dual-write blNo on saveBatch — then extend ShippingSnapshotService
+2. Optional v_purchases_legacy view for reports during drop soak
+3. 30-day soak before DROP purchases.shippment_date, vessel, B/L_no
+
+---
+
+## Implementation summary
+
+- New: ShippingSnapshotService.kt
+- Modified: PurchaseService.applyReadAdapters + filterInvoiceCandidates (invoice filter)
+- Modified: ShippingHistoryRepository.findByChassisIn (batch read)
+- No Flyway changes (no column drops)

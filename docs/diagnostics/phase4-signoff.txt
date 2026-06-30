@@ -1,0 +1,46 @@
+Phase: 4 — Extended attributes (read-switch; no column drops)
+Environment: Docker local (frontend :8080, backend :8083, MySQL automan_mysql_multiplatform)
+Date: 2026-06-28
+DB backup ID: N/A (local dev)
+
+Global diagnostic pack: PASS
+- Flyway latest: V49 (backfill extended attributes)
+- purchases_column_count: 68 (+1 extended_attributes vs Phase 3 baseline 67)
+- Duplicate chassis: 0
+- null_workflow_status: 0
+- booked_without_shipping: 0
+
+Phase 4 diagnostic SQL: PASS
+- rows_with_extended: 9
+- booked_without_shipping: 0  (gate: must be 0)
+- recent_nonempty_fuel_90d: 8  (informational — fuel column still dual-written during soak; expected > 0)
+- purchases_column_count: 68
+
+Dual-write spot-check (column + JSON):
+- AAHH40-ygvn: 9 JSON keys (notes, shaken, negotiate, venueId, numberCut, etc.)
+- IMPORT-QA-001/002/003: notes + shaken + negotiate + paymentDate in extended_attributes
+- Legacy rows (AAHP45W, ACR50, etc.): extended_attributes backfilled via V49
+
+Phase 2/3 regression (unchanged):
+- dual_write_gaps_price: 0
+- override_rows: 7
+- cost_line_rows: 89, purchases_with_lines: 9
+
+verify-schema.sh: PASS (2026-06-28)
+
+Manual QA: completed by owner (2026-06-28)
+- negotiate, shaken, isPackageMode persist
+- car_pictures, venue_id, number_cut on form
+- Cold fields (notes, paymentDate, etc.)
+- Phase 1 regression
+- CSV import / recreate flows
+
+Known regressions: none
+
+Decision: GO — Phase 4 read-switch complete. Column drops NOT approved (separate gated sub-releases after ≥30-day soak).
+
+Sign-off: Phase 4 extended_attributes dual-write + read adapter verified. Do not drop purchases columns until soak + explicit drop gate.
+
+Diagnostic command log:
+  docker exec automan_mysql_multiplatform mysql ... (Phase 4 SQL from schema-consolidation-phase-gates.md lines 507–525)
+  ./scripts/verify-schema.sh

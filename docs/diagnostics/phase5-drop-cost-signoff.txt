@@ -1,0 +1,58 @@
+Phase 5 Drop 3 — COST/fee columns removed (V55)
+Date: 2026-06-29
+Flyway: V55
+Manual QA signed off: PENDING (owner)
+
+## Prerequisite
+phase5-drop-workflow-signoff.txt — SIGNED OFF ✓
+
+## Backup
+backup-pre-v55-20260629.sql (350K)
+
+## Gate SQL
+cost_dual_write_gaps: 0 — PASS
+cost_line_rows: 117
+purchases_with_lines: 10
+
+## Columns dropped (15)
+price, auction_fee, auction_penalty_fee, recycle_fee, road_tax, tax_total,
+shipment_charges, freight, storage_charges, misc_charges, inspection_fee,
+commission, rixo_price, repair_charges, profit
+
+## Columns kept on purchases
+total_price, repair_company (+ all never-drop columns per runbook)
+
+## Automated tests
+./gradlew test (backend) — PASS (142 tests)
+
+## Post-deploy state
+verify-schema.sh — PASS
+Flyway: V55 (drop cost line columns)
+purchases column count: 23
+
+## Code changes
+- V55__drop_cost_line_columns.sql
+- Purchase.kt — 15 cost fields → @Transient
+- PurchaseCostLineService — applyForRead / applyForReadBatch (lines-only read; clears stale session transients)
+- PurchaseService — cost adapter in applyReadAdapters chain; C&F persist + finalizePurchaseWrite
+- PurchaseRepository.searchPurchases — search totalPrice instead of price
+- rollback-v55-template.sql
+
+## API smoke (post-deploy)
+GET /api/purchases/purchase/6 — price, auctionFee, freight, etc. present (derived from purchase_cost_lines)
+
+## Manual QA checklist (owner)
+[ ] C&F calculator: 3 known chassis; totals match pre-V55 baseline
+[ ] CSV import (docs/samples/phase2-import-test-3rows.csv) — prices and fees correct
+[ ] Purchase list shows totalPrice
+[ ] Package mode vs line-item mode totals
+[ ] Invoice / shipping PDF amounts sensible
+[ ] API JSON still includes price, auctionFee, freight, profit (from cost lines)
+
+## Phase 5 complete
+All three pre-handoff column-drop releases deployed:
+- V53 vehicle spec (signed off)
+- V54 workflow flags (signed off)
+- V55 cost lines (this release — automated gates/tests pass; manual QA pending)
+
+SIGNED OFF: (pending owner manual QA)

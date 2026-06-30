@@ -6,7 +6,8 @@ spring:
     # Match latest migration: docker MySQL is seeded by database/01-init-multiplatform.sql on first start.
     baseline-version: 37
   datasource:
-    url: jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&zeroDateTimeBehavior=convertToNull&jdbcCompliantTruncation=false
+    # Hostname "mysql" resolves only inside Docker Compose; override via SPRING_DATASOURCE_URL for host bootRun.
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://mysql:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&zeroDateTimeBehavior=convertToNull&jdbcCompliantTruncation=false}
     username: ${SPRING_DATASOURCE_USERNAME:automan_user}
     password: ${SPRING_DATASOURCE_PASSWORD:automan_password}
     driver-class-name: com.mysql.cj.jdbc.Driver

@@ -120,7 +120,7 @@ After starting the system, access the application at:
 ## 🔑 Default Login Credentials
 
 - **Email**: `admin@automan.com`
-- **Password**: `admin123`
+- **Password**: `Automan!Ship26Tokyo`
 
 ### Optional: Resend for signup approval emails
 

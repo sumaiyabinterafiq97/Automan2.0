@@ -1,0 +1,64 @@
+Phase 5 Drop 2 — WORKFLOW legacy flag column drop audit
+Date: 2026-06-29
+Flyway (pre-drop): V53
+Grep output: docs/diagnostics/phase5-drop-workflow-grep.txt (215 lines)
+
+Columns to DROP (4):
+  rixo_requested, rixo_confirmed, booking_requested, invoice_confirmed
+
+Canonical store:
+  workflow_status, workflow_status_updated_at
+  Service: PurchaseWorkflowService
+
+## Native SQL on legacy workflow columns (must fix before V54)
+
+| File | Query | Fix |
+|------|-------|-----|
+| PurchaseRepository.kt | SQL_BOOKING_NOT_REQUESTED uses booking_requested | → workflow_status NOT IN (BOOKING_REQUESTED, INVOICE_CONFIRMED) |
+| PurchaseRepository.kt | SQL_RIXO_CONFIRMED_ELIGIBILITY uses rixo_confirmed | → workflow_status IN (RIXO_CONFIRMED, BOOKING_REQUESTED, INVOICE_CONFIRMED) |
+| PurchaseRepository.kt | findFilteredChassis, findUnshippedChassisByPolPort | use updated SQL fragments |
+
+## JPQL on legacy columns (must fix)
+
+| File | Query | Fix |
+|------|-------|-----|
+| PurchaseRepository.kt | JPQL_BOOKING_NOT_REQUESTED, JPQL_RIXO_CONFIRMED_ELIGIBILITY | workflow_status-only fragments |
+| PurchaseRepository.kt | searchPurchases rixoRequested/rixoConfirmed LIKE | add workflow_status search or remove |
+| PurchaseRepository.kt | findInvoiceFilterCandidates* bookingRequested/invoiceConfirmed | workflow_status filters |
+| PurchaseRepository.kt | findDistinctPurchaseDateStrings rixoRequested | workflow_status = PURCHASED |
+| PurchaseRepository.kt | findPurchasesWhereRixoConfirmedPositive rixoConfirmed | workflow_status IN confirmed+ |
+
+## Writes to legacy columns (must use workflow_status after drop)
+
+| File | Method | Fix |
+|------|--------|-----|
+| PurchaseService.kt | markPurchasesAsBookingRequested | applyWorkflowWrite / set BOOKING_REQUESTED |
+| PurchaseService.kt | markPurchasesAsInvoiceConfirmed* | set INVOICE_CONFIRMED |
+| PurchaseService.kt | unmarkBookingRequestedForChassis | downgrade workflow_status |
+| PurchaseService.kt | unmarkInvoiceConfirmedForChassis | downgrade workflow_status |
+| PurchaseService.kt | markPurchasesAsRixoRequestedTrue | set RIXO_REQUESTED |
+| PurchaseService.kt | create/update/import partial | applyWorkflowWrite before save |
+| RixoHistoryService.kt | confirm-selected, clear rixoConfirmed | workflow transitions |
+| RixoHistoryService.kt | create purchase defaults | workflow_status only |
+
+## Read paths (must derive flags from workflow_status)
+
+| File | Fix |
+|------|-----|
+| PurchaseWorkflowService.kt | applyForRead: derive rixoRequested, rixoConfirmed, bookingRequested, invoiceConfirmed |
+| PurchaseService.kt | applyReadAdapters chain includes workflow applyForRead |
+| RixoHistoryService.kt | load purchases via workflow_status or applyForRead |
+| ShippingHistoryService.kt | invoiceConfirmed checks → workflow_status |
+
+## STOP condition check
+- Unmapped native SQL: identified with fix plan ✓
+- null_workflow_status: 0 ✓
+
+## Planned code changes (Step 4)
+1. V54__drop_workflow_legacy_flags.sql
+2. Purchase.kt — 4 flags → @Transient
+3. PurchaseWorkflowService — applyForRead + applyWorkflowWrite; workflow-only JPQL/SQL fragments
+4. PurchaseRepository — updated queries
+5. PurchaseService — workflow in read/write paths
+6. RixoHistoryService, ShippingHistoryService — workflow_status transitions
+7. Tests + rollback-v54-template.sql

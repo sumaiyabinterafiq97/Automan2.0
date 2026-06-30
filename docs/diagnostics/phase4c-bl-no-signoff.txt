@@ -1,0 +1,16 @@
+Phase: 4c — shipping_history.bl_no (pre-go-live)
+Date: 2026-06-29
+Flyway: V50
+
+Implementation: PASS
+- V50: shipping_history.bl_no VARCHAR(100) + backfill from purchases.B/L_no by chassis
+- ShippingHistory entity + ShippingHistoryService.saveBatch (blNo param)
+- ShippingSnapshotService: read blNo from shipping_history; syncFromPurchase writes blNo
+
+Diagnostics: PASS
+- bl_no column present on shipping_history
+- booked_without_shipping: 0
+
+Tests: PASS (ShippingSnapshotServiceTest blNo; integration GET blNo)
+
+Decision: GO — Phase 4c complete (superseded by V52 purchase B/L_no drop)

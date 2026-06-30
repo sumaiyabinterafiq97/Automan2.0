@@ -1,0 +1,48 @@
+Phase 5 Drop 3 — cost column drop audit (pre-V55)
+Date: 2026-06-29
+Grep source: docs/diagnostics/phase5-drop-cost-grep.txt
+
+## Columns to DROP (15)
+price, auction_fee, auction_penalty_fee, recycle_fee, road_tax, tax_total,
+shipment_charges, freight, storage_charges, misc_charges, inspection_fee,
+commission, rixo_price, repair_charges, profit
+
+## KEPT on purchases
+total_price, repair_company (and all never-drop columns per runbook)
+
+## Native SQL on purchases cost columns
+- PurchaseRepository.searchPurchases — LOWER(p.price) → FIX: use p.totalPrice (V55)
+- V45 backfill migration — historical only, no runtime impact
+- No other runtime native SQL on dropped purchase cost columns
+
+## Writes to purchases cost columns (fix: lines-only via PurchaseCostLineService)
+- Purchase.kt — @Column → @Transient (V55)
+- PurchaseService.updatePurchase / partialUpdate — merge transient cost fields; finalizePurchaseWrite → syncFromPurchase
+- PurchaseService.saveCarCostDetails / saveFobCarCostDetails — persistPurchase + finalizePurchaseWrite (sync lines from in-memory purchase)
+- PurchaseService.createPurchase / importPurchases — already use finalizePurchaseWrite after persist
+- PurchaseCostLineService.syncFromPurchase — canonical write to purchase_cost_lines (unchanged behavior)
+
+## Read paths (fix: applyForRead in adapter chain)
+- PurchaseService.applyReadAdapters — add purchaseCostLineService.applyForRead / applyForReadBatch (V55)
+- PurchaseCostLineService.buildCostsByChassisApiMap — applyForRead before API map
+- getPurchaseByChassis / list / GET by id — via applyReadAdapters
+- PDF paths (Rixo) — already call applyReadAdapters before generation (V53 fix)
+
+## C&F save paths
+- PurchaseController save-costs → PurchaseService.saveCarCostDetails — FIXED: persist + finalizePurchaseWrite
+- FOB variant saveFobCarCostDetails — same pattern
+
+## CSV import
+- PurchaseService.importPurchases — finalizePurchaseWrite on each row (cost lines synced from parsed transient fields)
+
+## PDF / invoice totals
+- PdfService / InvoiceHistoryService — consume merged Purchase from service layer; no direct column reads on dropped fields
+
+## False positives in grep (not purchases table)
+- rixo_prices.rixo_price — separate table, untouched
+- RixoMapping.rixo_price — separate entity
+- CalculationController /freight — API route name only
+- ShippingHistory priceType — unrelated field
+
+## Risk assessment
+GO — no unmapped native SQL without fix plan. Single searchPurchases JPQL fix required.

@@ -1,0 +1,285 @@
+backend/src/main/kotlin/com/automan/backend/service/RixoImportService.kt:151:                put("shipmentSize", "")
+backend/src/main/kotlin/com/automan/backend/service/RixoImportService.kt:200:        "shipmentSize" to "",
+backend/src/main/kotlin/com/automan/backend/service/DataSeederService.kt:123:                carModelYear = "2012",
+backend/src/main/kotlin/com/automan/backend/service/DataSeederService.kt:147:                carModelYear = "2020",
+backend/src/main/kotlin/com/automan/backend/service/DataSeederService.kt:171:                carModelYear = "2021",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:91:        add("carModelYear", str(before.carModelYear), str(after.carModelYear))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:94:        add("shipmentSize", str(before.shipmentSize), str(after.shipmentSize))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:95:        add("grade", str(before.grade), str(after.grade))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:97:        add("color", str(before.color), str(after.color))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:98:        add("fuel", str(before.fuel), str(after.fuel))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:99:        add("seat", str(before.seat), str(after.seat))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:100:        add("door", str(before.door), str(after.door))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:101:        add("distance", str(before.distance), str(after.distance))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:103:        add("cc", normInt(before.cc), normInt(after.cc))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:104:        add("shift", str(before.shift), str(after.shift))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:105:        add("wd", str(before.wd), str(after.wd))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:106:        add("driveType", str(before.driveType), str(after.driveType))
+backend/src/test/kotlin/com/automan/backend/service/PurchaseVehicleOverrideServiceTest.kt:94:        assertEquals("DIESEL", merged.fuel)
+backend/src/test/kotlin/com/automan/backend/service/PurchaseVehicleOverrideServiceTest.kt:95:        assertEquals("S", merged.grade)
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:545:        val grade = purchase.grade?.trim().orEmpty()
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:546:        val carModelYear = purchase.carModelYear?.trim().orEmpty()
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:547:        val shift = purchase.shift?.trim().orEmpty()
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:548:        val door = purchase.door?.trim().orEmpty()
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:549:        val seat = purchase.seat?.trim().orEmpty()
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:550:        val cc = purchase.cc?.toString()?.trim().orEmpty()
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:551:        val color = purchase.color?.trim().orEmpty()
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:552:        val distance = purchase.distance?.trim().orEmpty()
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:553:        val fuel = purchase.fuel?.trim().orEmpty()
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:565:            if (carModelYear.isNotEmpty()) {
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:567:                append(carModelYear)
+backend/src/main/kotlin/com/automan/backend/util/CarModelYearUtils.kt:3:/** Normalizes stored car_model_year for display as a calendar year only (e.g. "2015-02" → "2015"). */
+backend/src/main/kotlin/com/automan/backend/util/CarModelYearUtils.kt:6:    /** Extracts only the 4-digit year from car_model_year (e.g. "July 2026" → "2026", "2025-07" → "2025"). */
+backend/src/main/kotlin/com/automan/backend/service/CarSearchService.kt:81:            carModelYear = purchase.carModelYear,
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:45:            "fuel" to (firstRow.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:46:            "wd" to (firstRow.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:47:            "shift" to (firstRow.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:48:            "cc" to (firstRow.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:49:            "door" to (firstRow.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:50:            "grade" to (firstRow.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:51:            "seat" to (firstRow.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:54:            "color" to (firstRow.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:55:            "driveType" to (firstRow.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:57:            "carModelYear" to (firstRow.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:67:        val seatList = mappings.mapNotNull { it.seat?.takeIf { s -> s.isNotBlank() } }.distinct().sorted()
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:98:            "fuel" to (firstMatch.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:99:            "wd" to (firstMatch.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:100:            "shift" to (firstMatch.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:101:            "cc" to (firstMatch.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:102:            "door" to (firstMatch.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:103:            "grade" to (firstMatch.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:104:            "seat" to (firstMatch.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:107:            "color" to (firstMatch.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:108:            "driveType" to (firstMatch.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:110:            "carModelYear" to (firstMatch.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:128:            "fuel" to (firstRow.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:129:            "wd" to (firstRow.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:130:            "shift" to (firstRow.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:131:            "cc" to (firstRow.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:132:            "door" to (firstRow.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:133:            "grade" to (firstRow.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:134:            "seat" to (firstRow.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:137:            "color" to (firstRow.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:138:            "driveType" to (firstRow.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:140:            "carModelYear" to (firstRow.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:173:                    "driveTypes" to emptyList<String>(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:184:            "fuel" to (firstMatch.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:185:            "wd" to (firstMatch.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:186:            "shift" to (firstMatch.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:187:            "cc" to (firstMatch.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:188:            "door" to (firstMatch.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:189:            "grade" to (firstMatch.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:190:            "seat" to (firstMatch.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:193:            "color" to (firstMatch.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:194:            "driveType" to (firstMatch.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:196:            "carModelYear" to (firstMatch.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:202:            "fuels" to mappings.mapNotNull { it.fuel }.distinct().sorted(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:203:            "wds" to mappings.mapNotNull { it.wd }.distinct().sorted(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:204:            "shifts" to mappings.mapNotNull { it.shift }.distinct().sorted(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:205:            "ccs" to mappings.mapNotNull { it.cc?.takeIf { s -> s.isNotBlank() } }.distinct().sorted(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:206:            "doors" to mappings.mapNotNull { it.door?.takeIf { s -> s.isNotBlank() } }.distinct().sorted(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:207:            "grades" to mappings.mapNotNull { it.grade }.distinct().sorted(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:208:            "seats" to mappings.mapNotNull { it.seat?.takeIf { s -> s.isNotBlank() } }.distinct().sorted(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:211:            "colors" to mappings.mapNotNull { it.color }.distinct().sorted(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:212:            "driveTypes" to mappings.mapNotNull { it.driveType }.distinct().sorted(),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:219:            "fuel" to (firstMatch.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:220:            "wd" to (firstMatch.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:221:            "shift" to (firstMatch.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:222:            "cc" to (firstMatch.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:223:            "door" to (firstMatch.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:224:            "grade" to (firstMatch.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:227:            "color" to (firstMatch.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:228:            "driveType" to (firstMatch.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:230:            "carModelYear" to (firstMatch.carModelYear ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:254:            (fuel == null || m.fuel?.equals(fuel, ignoreCase = true) == true) &&
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:255:            (wd == null || m.wd?.equals(wd, ignoreCase = true) == true) &&
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:256:            (shift == null || m.shift?.equals(shift, ignoreCase = true) == true) &&
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:257:            (cc == null || semicolonTokenMatches(m.cc, cc)) &&
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:258:            (door == null || semicolonTokenMatches(m.door, door)) &&
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:259:            (grade == null || m.grade?.equals(grade, ignoreCase = true) == true)
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:267:            "fuel" to (row.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:268:            "wd" to (row.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:269:            "shift" to (row.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:270:            "cc" to (row.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:271:            "door" to (row.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:272:            "grade" to (row.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:273:            "seat" to (row.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:276:            "color" to (row.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:277:            "driveType" to (row.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:279:            "carModelYear" to (row.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:375:                "fuel" to (saved.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:376:                "wd" to (saved.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:377:                "shift" to (saved.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:378:                "cc" to (saved.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:379:                "door" to (saved.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:380:                "seat" to (saved.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:381:                "grade" to (saved.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:384:                "color" to (saved.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:385:                "driveType" to (saved.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:387:                "carModelYear" to (saved.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:425:                "fuel" to (merged.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:426:                "wd" to (merged.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:427:                "shift" to (merged.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:428:                "cc" to (merged.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:429:                "door" to (merged.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:430:                "seat" to (merged.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:431:                "grade" to (merged.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:434:                "color" to (merged.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:435:                "driveType" to (merged.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:437:                "carModelYear" to (merged.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:451:                "fuel" to (mapping.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:452:                "wd" to (mapping.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:453:                "shift" to (mapping.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:454:                "cc" to (mapping.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:455:                "door" to (mapping.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:456:                "seat" to (mapping.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:457:                "grade" to (mapping.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:460:                "color" to (mapping.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:461:                "driveType" to (mapping.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:463:                "carModelYear" to (mapping.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:542:        "fuel" to (m.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:543:        "wd" to (m.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:544:        "shift" to (m.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:545:        "cc" to (m.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:546:        "door" to (m.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:547:        "seat" to (m.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:548:        "grade" to (m.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:551:        "color" to (m.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:552:        "driveType" to (m.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:554:        "carModelYear" to (m.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:562:        "fuel" to (m.fuel ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:563:        "wd" to (m.wd ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:564:        "shift" to (m.shift ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:565:        "cc" to (m.cc ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:566:        "door" to (m.door ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:567:        "grade" to (m.grade ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:568:        "seat" to (m.seat ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:571:        "color" to (m.color ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:572:        "driveType" to (m.driveType ?: ""),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:574:        "carModelYear" to (m.carModelYear ?: "")
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:600:        val requestDriveType = parseString(request["driveType"])
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:605:        val requestCarModelYear = if (request.containsKey("carModelYear")) parseString(request["carModelYear"]) else null
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:615:            fuel = mergeField(base?.fuel, requestFuel, replaceExistingValues, request.containsKey("fuel")),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:616:            wd = mergeField(base?.wd, requestWd, replaceExistingValues, request.containsKey("wd")),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:617:            shift = mergeField(base?.shift, requestShift, replaceExistingValues, request.containsKey("shift")),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:618:            cc = mergeField(base?.cc, requestCc, replaceExistingValues, request.containsKey("cc")),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:619:            door = mergeField(base?.door, requestDoor, replaceExistingValues, request.containsKey("door")),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:620:            seat = mergeField(base?.seat, requestSeat, replaceExistingValues, request.containsKey("seat")),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:621:            grade = mergeField(base?.grade, requestGrade, replaceExistingValues, request.containsKey("grade")),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:624:            color = mergeField(base?.color, requestColor, replaceExistingValues, request.containsKey("color")),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:625:            driveType = mergeField(base?.driveType, requestDriveType, replaceExistingValues, request.containsKey("driveType")),
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:627:            carModelYear = mergeField(base?.carModelYear, requestCarModelYear, replaceExistingValues, request.containsKey("carModelYear")),
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:124:                    .setBackgroundColor(com.itextpdf.kernel.colors.ColorConstants.LIGHT_GRAY)
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:226:            .setBackgroundColor(com.itextpdf.kernel.colors.ColorConstants.LIGHT_GRAY)
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:232:            .setBackgroundColor(com.itextpdf.kernel.colors.ColorConstants.LIGHT_GRAY)
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:238:            .setBackgroundColor(com.itextpdf.kernel.colors.ColorConstants.LIGHT_GRAY)
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:250:            // DESCRIPTION column - format: CHASSIS NO. [chassis] \n [carName, carModelYear, clientName, rixoCompany, rixoRequested, rixoConfirmed]
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:255:                    purchase.carModelYear,
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:394:            val yearOnly = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear?.toString())
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:514:            com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:531:            .setBackgroundColor(com.itextpdf.kernel.colors.ColorConstants.LIGHT_GRAY)
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:533:                com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:618:    // Formats carModelYear from YYYY-MM or MM/YYYY to "Month YYYY" format
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:94:     * Validates Production Date (carModelYear): 4-digit year only, no range check.
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:98:    private fun validateCarModelYear(carModelYear: String?): String? {
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:99:        if (carModelYear.isNullOrBlank()) return null // Empty is allowed
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:102:        val parts = carModelYear.split("-")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:104:            return "Invalid Production Date format. Expected YYYY-MM, got: $carModelYear"
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:182:        // Validate carModelYear (Production Date)
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:183:        val yearError = validateCarModelYear(purchase.carModelYear)
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:245:                carModelYear = purchase.carModelYear ?: existingPurchase.carModelYear,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:248:                shipmentSize = purchase.shipmentSize ?: existingPurchase.shipmentSize,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:249:                grade = purchase.grade ?: existingPurchase.grade,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:251:                color = purchase.color ?: existingPurchase.color,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:252:                fuel = purchase.fuel ?: existingPurchase.fuel,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:253:                seat = purchase.seat ?: existingPurchase.seat,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:254:                door = purchase.door ?: existingPurchase.door,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:255:                distance = purchase.distance ?: existingPurchase.distance,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:257:                cc = purchase.cc ?: existingPurchase.cc,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:258:                shift = purchase.shift ?: existingPurchase.shift,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:259:                wd = purchase.wd ?: existingPurchase.wd,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:260:                driveType = purchase.driveType ?: existingPurchase.driveType,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:352:        // Validate carModelYear if provided
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:353:        val carModelYearValue = updateData["carModelYear"] as? String
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:354:        if (carModelYearValue != null) {
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:355:            val yearError = validateCarModelYear(carModelYearValue)
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:370:                carModelYear = updateData["carModelYear"] as? String ?: existingPurchase.carModelYear,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:373:                shipmentSize = run {
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:374:                    Logger.debug("DEBUG: shipmentSize mapping - updateData[shipmentSize]=${updateData["shipmentSize"]}, updateData[vehicleType]=${updateData["vehicleType"]}, existing=${existingPurchase.shipmentSize}")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:375:                    (updateData["shipmentSize"] as? String)
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:377:                        ?: existingPurchase.shipmentSize
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:379:                grade = updateData["grade"] as? String ?: existingPurchase.grade,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:381:                color = updateData["color"] as? String ?: existingPurchase.color,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:382:                fuel = updateData["fuel"] as? String ?: existingPurchase.fuel,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:383:                seat = updateData["seat"] as? String ?: existingPurchase.seat,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:384:                door = updateData["door"] as? String ?: existingPurchase.door,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:385:                distance = updateData["distance"] as? String ?: existingPurchase.distance,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:393:                        ccValue == null -> existingPurchase.cc
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:398:                                existingPurchase.cc
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:403:                shift = updateData["shift"] as? String ?: existingPurchase.shift,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:404:                wd = updateData["wd"] as? String ?: existingPurchase.wd,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:405:                driveType = updateData["driveType"] as? String ?: existingPurchase.driveType,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1347:            carModelYear = getColumnValue(values, columnMapping, "YEAR")?.take(50) ?: "",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1592:                        "carModelYear" -> updatedPurchase.copy(carModelYear = value)
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1650:                        carModelYear = formData["carModelYear"] as? String ?: purchase.carModelYear,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1716:            content.appendLine("Car Model Year: ${purchase.carModelYear}")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1983:                        year = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:2023:                    year = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear),
+backend/src/main/kotlin/com/automan/backend/dto/ShippingHistoryInvoiceDtos.kt:15:    val carModelYear: String? = null,
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:176:                carModelYear = p?.carModelYear,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:26:    @Column(name = "car_model_year")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:27:    val carModelYear: String? = null,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:35:    @Column(name = "shipment_size")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:37:    val shipmentSize: String? = null,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:73:    @Column(name = "drive_type")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:74:    val driveType: String? = null,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:152:        carModelYear = "2020",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:37:            SpecFieldMapping("carModelYear", { it.carModelYear }, { it.carModelYear }, apply = { p, v -> p.copy(carModelYear = v) }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:38:            SpecFieldMapping("shipmentSize", { it.shipmentSize }, { it.vehicleType }, apply = { p, v -> p.copy(shipmentSize = v) }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:39:            SpecFieldMapping("grade", { it.grade }, { it.grade }, apply = { p, v -> p.copy(grade = v) }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:41:            SpecFieldMapping("color", { it.color }, { it.color }, apply = { p, v -> p.copy(color = v) }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:42:            SpecFieldMapping("fuel", { it.fuel }, { it.fuel }, apply = { p, v -> p.copy(fuel = v) }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:43:            SpecFieldMapping("seat", { it.seat }, { it.seat }, apply = { p, v -> p.copy(seat = v) }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:44:            SpecFieldMapping("door", { it.door }, { it.door }, apply = { p, v -> p.copy(door = v) }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:47:                { it.distance },
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:54:                { it.cc?.toString() },
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:55:                { it.cc },
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:58:            SpecFieldMapping("shift", { it.shift }, { it.shift }, apply = { p, v -> p.copy(shift = v) }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:59:            SpecFieldMapping("wd", { it.wd }, { it.wd }, apply = { p, v -> p.copy(wd = v) }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseVehicleOverrideService.kt:60:            SpecFieldMapping("driveType", { it.driveType }, { it.driveType }, apply = { p, v -> p.copy(driveType = v) }),
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseExtendedAttributesIntegrationTest.kt:109:        carModelYear = "2020",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:101:        carModelYear = "2020",
+backend/src/test/kotlin/com/automan/backend/controller/ShippingSnapshotIntegrationTest.kt:107:        carModelYear = "2020",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:96:            carModelYear = "2020",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:78:            .andExpect(jsonPath("$.fuel").value("HYBRID"))
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:101:            .andExpect(jsonPath("$.fuel").value("HYBRID"))
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:122:            .andExpect(jsonPath("$.fuel").value("DIESEL"))
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:128:        carModelYear = "2020",
+backend/src/test/kotlin/com/automan/backend/controller/CarSearchControllerIntegrationTest.kt:183:            .andExpect(jsonPath("$[0].carModelYear").value("2020"))
+backend/src/test/kotlin/com/automan/backend/controller/CarSearchControllerIntegrationTest.kt:208:        carModelYear: String,
+backend/src/test/kotlin/com/automan/backend/controller/CarSearchControllerIntegrationTest.kt:218:            carModelYear = carModelYear,
+backend/src/main/kotlin/com/automan/backend/model/CarBrandMapping.kt:52:    @Column(name = "drive_type", length = 20)
+backend/src/main/kotlin/com/automan/backend/model/CarBrandMapping.kt:53:    val driveType: String? = null,
+backend/src/main/kotlin/com/automan/backend/model/CarBrandMapping.kt:58:    @Column(name = "car_model_year", columnDefinition = "TEXT")
+backend/src/main/kotlin/com/automan/backend/model/CarBrandMapping.kt:59:    val carModelYear: String? = null,
+backend/src/main/kotlin/com/automan/backend/repository/CarBrandMappingRepository.kt:23:    @Query("SELECT DISTINCT c.fuel FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.fuel IS NOT NULL AND c.fuel != '' ORDER BY c.fuel")
+backend/src/main/kotlin/com/automan/backend/repository/CarBrandMappingRepository.kt:26:    @Query("SELECT DISTINCT c.wd FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.wd IS NOT NULL AND c.wd != '' ORDER BY c.wd")
+backend/src/main/kotlin/com/automan/backend/repository/CarBrandMappingRepository.kt:29:    @Query("SELECT DISTINCT c.shift FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.shift IS NOT NULL AND c.shift != '' ORDER BY c.shift")
+backend/src/main/kotlin/com/automan/backend/repository/CarBrandMappingRepository.kt:32:    @Query("SELECT DISTINCT c.cc FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.cc IS NOT NULL AND c.cc != '' ORDER BY c.cc")
+backend/src/main/kotlin/com/automan/backend/repository/CarBrandMappingRepository.kt:35:    @Query("SELECT DISTINCT c.door FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.door IS NOT NULL AND c.door != '' ORDER BY c.door")
+backend/src/main/kotlin/com/automan/backend/repository/CarBrandMappingRepository.kt:38:    @Query("SELECT DISTINCT c.grade FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.grade IS NOT NULL AND c.grade != '' ORDER BY c.grade")
+backend/src/main/kotlin/com/automan/backend/repository/CarBrandMappingRepository.kt:43:    @Query("SELECT c FROM CarBrandMapping c WHERE UPPER(c.carBrand) = UPPER(:carBrand) AND c.chassis = :chassis ORDER BY CASE WHEN c.fuel IS NOT NULL THEN 0 ELSE 1 END, CASE WHEN c.carName IS NOT NULL THEN 0 ELSE 1 END, c.id DESC")
+backend/src/main/kotlin/com/automan/backend/repository/CarBrandMappingRepository.kt:60:    @Query("SELECT c FROM CarBrandMapping c WHERE c.chassis = :chassis ORDER BY CASE WHEN c.fuel IS NOT NULL THEN 0 ELSE 1 END, CASE WHEN c.carName IS NOT NULL THEN 0 ELSE 1 END, c.id DESC")
+backend/src/main/kotlin/com/automan/backend/model/dto/CarInfo.kt:11:    val carModelYear: String? = null,
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1076:            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1145:            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1187:            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1217:            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1247:            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1295:                .setBorderLeft(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1296:                .setBorderRight(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f))
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1299:                        com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f)
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1306:                        com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 1f)
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1336:            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1349:            .setBorder(com.itextpdf.layout.borders.SolidBorder(com.itextpdf.kernel.colors.ColorConstants.BLACK, 2f))
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:1377:            .setBackgroundColor(com.itextpdf.kernel.colors.ColorConstants.LIGHT_GRAY)

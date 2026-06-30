@@ -20,6 +20,15 @@ fun purchaseInvoiceLineAmountYenFromResponse(purchase: PurchaseResponse): Double
     return purchase.price?.replace("¥", "")?.replace(",", "")?.trim()?.toDoubleOrNull() ?: 0.0
 }
 
+/** Plain JSON number for bookingId; Kotlin Long breaks JSON.stringify on JS IR. */
+fun bookingIdForJson(bookingIdLong: Long?): Double? = bookingIdLong?.toDouble()
+
+fun bookingIdForJsonRaw(raw: String?): Double? {
+    val s = raw?.trim().orEmpty()
+    if (s.isEmpty()) return null
+    return s.toLongOrNull()?.toDouble()
+}
+
 /**
  * Escape HTML to prevent XSS attacks
  */

@@ -1,0 +1,60 @@
+# Local bootRun on Mac/Windows host against Docker MySQL on localhost:3306.
+# Use: ./gradlew bootRun --args='--spring.profiles.active=docker-local'
+# Inside Docker Compose, keep using profile "docker" (hostname mysql).
+
+spring:
+  flyway:
+    baseline-on-migrate: true
+    baseline-version: 37
+  datasource:
+    url: jdbc:mysql://localhost:3306/automan_car_purchase?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC&zeroDateTimeBehavior=convertToNull&jdbcCompliantTruncation=false
+    username: ${SPRING_DATASOURCE_USERNAME:automan_user}
+    password: ${SPRING_DATASOURCE_PASSWORD:automan_password}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+        use_sql_comments: true
+
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+
+server:
+  port: ${PORT:8083}
+  servlet:
+    context-path: /api
+
+app:
+  mail:
+    admin-email: ${APP_MAIL_ADMIN_EMAIL:automan.dev.team@gmail.com}
+    resend-api-key: ${RESEND_API_KEY:}
+    from: "Automan <onboarding@resend.dev>"
+    validate-mx: ${APP_MAIL_VALIDATE_MX:true}
+  verification-base-url: ${APP_VERIFICATION_BASE_URL:http://localhost:8083/api}
+  frontend-url: ${APP_FRONTEND_URL:http://localhost:8080}
+
+logging:
+  level:
+    com.automan.backend: INFO
+    org.springframework.web: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always

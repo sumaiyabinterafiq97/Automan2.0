@@ -10,8 +10,7 @@ import org.w3c.dom.events.Event
  * Local/dev builds ship `false` so users still use the login screen.
  * Dockerfile.frontend.prod flips this to true for AWS images.
  *
- * Credentials default to Flyway/V1 seeded admin (`admin@automan.com` / `password`).
- * Optional metas override email/password if the seeded admin password was rotated.
+ * Credentials default to seeded admin (`admin@automan.com`); password via optional meta override.
  */
 fun isProdAutoLoginEnabled(): Boolean {
     val meta = document.querySelector("meta[name=\"automan-prod-auto-login\"]") as? HTMLMetaElement
@@ -26,7 +25,7 @@ fun prodAutoLoginEmail(): String {
 fun prodAutoLoginPassword(): String {
     val meta = document.querySelector("meta[name=\"automan-prod-auto-login-password\"]") as? HTMLMetaElement
     val raw = meta?.getAttribute("content")?.trim()
-    return raw?.takeIf { it.isNotEmpty() } ?: "password"
+    return raw?.takeIf { it.isNotEmpty() } ?: "Automan!Ship26Tokyo"
 }
 
 /**

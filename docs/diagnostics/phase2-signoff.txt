@@ -1,0 +1,38 @@
+Phase: 2 — Cost lines normalization
+Environment: Docker local (frontend :8080, backend :8083, MySQL automan_mysql_multiplatform)
+Date: 2026-06-27
+DB backup ID: N/A (local dev)
+
+Global diagnostic pack: PASS
+- Flyway latest: V46 (purchase change history field name text)
+- purchases_column_count: unchanged from Phase 1 baseline
+- Duplicate chassis: 0 (IMPORT-QA duplicates cleaned after import double-fire fix)
+- orphan_client_ids: 0
+- null_workflow_status: 0
+- zero_amount_shipping: 0
+
+Phase diagnostic SQL: PASS
+- cost_line_rows: 78
+- purchases_with_lines: 8
+- dual_write_gaps_price: 0  (gate: must be 0)
+- IMPORT-QA-* rows: cost lines present (PRICE, AUCTION_FEE, TOTAL_PRICE, etc.)
+- cost_code distribution: PRICE/TOTAL_PRICE on all 8 purchases with lines
+
+Manual QA: 9 / 9 steps passed (owner sign-off 2026-06-27)
+- costs-by-chassis API
+- Edit costs → save → reload
+- C&F Calculate totals
+- FOB save-fob-costs
+- shipping_history.amount
+- CSV import (phase2-import-test-3rows.csv)
+- Spot-check imported rows
+- Invoice / ledger amounts unchanged
+- Purchase list price columns
+
+Dual-write verified: YES (save-costs, save-fob-costs, PUT, CSV import)
+Read-switch active: YES (costs-by-chassis prefers purchase_cost_lines, column fallback)
+Known regressions: none (CSV import double-fire fixed in frontend v1774300231)
+
+Decision: GO Phase 3
+
+Sign-off: Phase 2 complete — proceed to purchase_vehicle_overrides (vehicle spec overrides)

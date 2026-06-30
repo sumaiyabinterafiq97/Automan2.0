@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Profile
  * migration (e.g. V2) does not block startup forever (nginx 502 when backend exits).
  */
 @Configuration
-@Profile("docker")
+@Profile("docker", "docker-local")
 class FlywayDockerRepairConfig {
 
     @Bean

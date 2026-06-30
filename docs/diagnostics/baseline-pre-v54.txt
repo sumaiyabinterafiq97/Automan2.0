@@ -1,0 +1,29 @@
+# Baseline pre-V54 (workflow legacy flag drop)
+# Date: 2026-06-29
+
+## Prerequisite
+phase5-drop-vehicle-signoff.txt — SIGNED OFF ✓
+
+## Backup
+backup-pre-v54-20260629.sql (350K)
+
+## verify-schema.sh
+PASS
+
+## Flyway (latest 3)
+version	description
+53	drop vehicle spec columns
+52	drop purchases shipping columns
+51	drop purchases extended columns
+
+## Latest Flyway version
+V53 ✓
+
+## purchases column count
+42
+
+## workflow_status distribution
+PURCHASED: 6
+RIXO_CONFIRMED: 2
+RIXO_REQUESTED: 1
+INVOICE_CONFIRMED: 1

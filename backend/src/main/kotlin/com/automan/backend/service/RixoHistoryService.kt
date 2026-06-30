@@ -66,11 +66,10 @@ class RixoHistoryService(
         val shouldConfirm = purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows())
         val candidates = purchaseRepository.findPurchasesWhereRixoConfirmedPositive()
         val changed = mutableSetOf<Long>()
-        val now = LocalDateTime.now()
         for (p in candidates) {
             val id = p.id ?: continue
-            if (id !in shouldConfirm) {
-                purchaseRepository.save(p.copy(rixoConfirmed = "FALSE", updatedAt = now))
+            if (id !in shouldConfirm && p.workflowStatus == com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED) {
+                purchaseWorkflowService.setWorkflowStatus(p, com.automan.backend.model.WorkflowStatus.RIXO_REQUESTED)
                 changed.add(id)
             }
         }
@@ -136,7 +135,7 @@ class RixoHistoryService(
 
         for (purchaseId in allMatchedPurchaseIds) {
             val p = purchaseRepository.findById(purchaseId).orElse(null) ?: return false
-            if (!PurchaseWorkflowService.isRixoFlagTrue(p.rixoConfirmed)) return false
+            if (!PurchaseWorkflowService.isRixoConfirmedForBooking(p)) return false
         }
         return true
     }
@@ -149,7 +148,7 @@ class RixoHistoryService(
         if (purchaseIds.isEmpty()) return false
         for (purchaseId in purchaseIds) {
             val p = purchaseRepository.findById(purchaseId).orElse(null) ?: continue
-            if (p.bookingRequested) return true
+            if (PurchaseWorkflowService.isBookingRequested(p)) return true
         }
         return false
     }
@@ -161,7 +160,7 @@ class RixoHistoryService(
         var maxTs: LocalDateTime? = null
         for (purchaseId in allMatchedPurchaseIds) {
             val p = purchaseRepository.findById(purchaseId).orElse(null) ?: continue
-            if (!PurchaseWorkflowService.isRixoFlagTrue(p.rixoConfirmed)) continue
+            if (!PurchaseWorkflowService.isRixoConfirmedForBooking(p)) continue
             val u = p.updatedAt
             if (maxTs == null || u.isAfter(maxTs)) maxTs = u
         }
@@ -257,20 +256,11 @@ class RixoHistoryService(
         }
 
         var updated = 0
-        val now = LocalDateTime.now()
         for ((_, p) in purchaseById) {
-            val old = p.rixoConfirmed?.trim()?.uppercase(Locale.ROOT) ?: ""
-            if (old == "TRUE" || old == "1") continue
-            purchaseRepository.save(
-                p.copy(
-                    rixoConfirmed = "TRUE",
-                    updatedAt = now,
-                ),
-            )
+            if (PurchaseWorkflowService.isRixoConfirmedForBooking(p)) continue
+            purchaseWorkflowService.setWorkflowStatus(p, com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED)
             updated += 1
         }
-
-        purchaseWorkflowService.recomputeByPurchaseIds(purchaseById.keys)
 
         return RixoConfirmResult(
             selectedRows = rows.size,
@@ -339,7 +329,7 @@ class RixoHistoryService(
         val affectedPurchaseIds = linkedSetOf<Long>()
         for (token in expandedRemoved) {
             for (p in purchaseRepository.findByChassisToken(token)) {
-                if (p.bookingRequested) {
+                if (PurchaseWorkflowService.isBookingRequested(p)) {
                     throw IllegalArgumentException(
                         "Cannot remove: this car is already booking requested.",
                     )
@@ -384,19 +374,10 @@ class RixoHistoryService(
      */
     private fun resetPurchasedWorkflowWhenNotCovered(candidatePurchaseIds: Set<Long>) {
         val stillCover = purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows())
-        val now = LocalDateTime.now()
         for (id in candidatePurchaseIds) {
             if (id !in stillCover) {
                 val p = purchaseRepository.findById(id).orElse(null) ?: continue
-                purchaseRepository.save(
-                    p.copy(
-                        rixoRequested = "FALSE",
-                        rixoConfirmed = "FALSE",
-                        bookingRequested = false,
-                        invoiceConfirmed = false,
-                        updatedAt = now,
-                    ),
-                )
+                purchaseWorkflowService.setWorkflowStatus(p, com.automan.backend.model.WorkflowStatus.PURCHASED)
             }
         }
     }

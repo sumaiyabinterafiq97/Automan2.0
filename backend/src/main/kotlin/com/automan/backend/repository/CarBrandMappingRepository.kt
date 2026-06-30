@@ -68,6 +68,17 @@ interface CarBrandMappingRepository : JpaRepository<CarBrandMapping, Long> {
     @Query("SELECT c FROM CarBrandMapping c WHERE c.chassis IS NOT NULL AND c.chassis LIKE CONCAT(:prefix, '%') ORDER BY c.id")
     fun findByChassisStartingWith(@Param("prefix") prefix: String): List<CarBrandMapping>
 
+    /** Longest mapping.chassis prefix where full chassis starts with mapping.chassis (Phase 3 baseline). */
+    @Query(
+        """
+        SELECT c FROM CarBrandMapping c
+        WHERE c.chassis IS NOT NULL AND c.chassis <> ''
+        AND :fullChassis LIKE CONCAT(c.chassis, '%')
+        ORDER BY LENGTH(c.chassis) DESC, c.id DESC
+        """,
+    )
+    fun findBestPrefixMatchForChassis(@Param("fullChassis") fullChassis: String): List<CarBrandMapping>
+
     @Query(
         """
         SELECT DISTINCT c.carName

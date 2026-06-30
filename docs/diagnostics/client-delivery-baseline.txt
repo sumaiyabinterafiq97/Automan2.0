@@ -1,0 +1,22 @@
+Client delivery baseline — schema consolidation pre-go-live
+Date: 2026-06-29
+Environment: Docker local (frontend :8080, backend :8083, MySQL automan_mysql_multiplatform)
+
+Flyway latest: V52 (drop purchases shipping columns)
+purchases_column_count: 55
+rows_with_extended: 9
+booked_without_shipping: 0
+shipping_history.bl_no: present
+
+Migrations applied this session:
+  V50 shipping history bl no
+  V51 drop purchases extended columns
+  V52 drop purchases shipping columns
+
+Automated tests: ./gradlew test — BUILD SUCCESSFUL
+
+Deferred for post-go-live:
+  COST_LINE column drops (dual-write active)
+  VEHICLE_OVERRIDE column drops (dual-write active)
+
+Deploy: ./scripts/rebuild-and-restart-backend.sh --prebuilt — PASS

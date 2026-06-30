@@ -1,0 +1,215 @@
+backend/src/main/kotlin/com/automan/backend/dto/RixoHistoryRowDto.kt:10:    val rixoConfirmed: Boolean = false,
+backend/src/main/kotlin/com/automan/backend/dto/RixoHistoryRowDto.kt:12:    val rixoConfirmedDate: String? = null,
+backend/src/main/kotlin/com/automan/backend/dto/RixoHistoryRowDto.kt:13:    /** True when at least one purchase matched by chassis on this row has [com.automan.backend.model.Purchase.bookingRequested]. */
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:22:        /** JPQL fragment: legacy rixo_confirmed OR workflow at/after RIXO_CONFIRMED. */
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:24:            "(UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:31:            "(UPPER(TRIM(COALESCE(p.rixo_confirmed, ''))) IN ('TRUE', '1') " +
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:35:            "(p.bookingRequested IS NULL OR p.bookingRequested = false)"
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:38:            "(p.booking_requested IS NULL OR p.booking_requested = 0)"
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:45:        /** Dual-read: legacy rixo_confirmed flag OR canonical workflow at/after RIXO_CONFIRMED. */
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:47:            if (isRixoFlagTrue(p.rixoConfirmed)) return true
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:53:        if (p.invoiceConfirmed == true) return WorkflowStatus.INVOICE_CONFIRMED
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:54:        if (p.bookingRequested) return WorkflowStatus.BOOKING_REQUESTED
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:55:        if (isRixoFlagTrue(p.rixoConfirmed)) return WorkflowStatus.RIXO_CONFIRMED
+backend/src/main/kotlin/com/automan/backend/service/PurchaseWorkflowService.kt:56:        if (isRixoFlagTrue(p.rixoRequested)) return WorkflowStatus.RIXO_REQUESTED
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:250:            // DESCRIPTION column - format: CHASSIS NO. [chassis] \n [carName, carModelYear, clientName, rixoCompany, rixoRequested, rixoConfirmed]
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:258:                    purchase.rixoRequested,
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:259:                    purchase.rixoConfirmed
+backend/src/main/kotlin/com/automan/backend/dto/InvoiceConfirmAndDownloadRequest.kt:4: * Saves [InvoiceHistory], marks [purchaseIds] as invoice_confirmed, returns PDF bytes.
+backend/src/main/kotlin/com/automan/backend/controller/RixoHistoryController.kt:23:    /** Mark all purchases under selected history rows as `rixo_confirmed = TRUE`. */
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:134:    @Column(name = "rixo_requested")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:135:    val rixoRequested: String? = null,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:137:    @Column(name = "rixo_confirmed")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:138:    val rixoConfirmed: String? = null,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:155:    @field:JsonProperty("bookingRequested")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:156:    @field:JsonAlias("booking_requested")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:157:    @Column(name = "booking_requested", nullable = false)
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:158:    val bookingRequested: Boolean = false,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:162:    @Column(name = "invoice_confirmed")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:163:    val invoiceConfirmed: Boolean? = null,
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:40:                Purchase(id = 10L, chassis = "AA-111", rixoConfirmed = "TRUE"),
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:49:        assertEquals("FALSE", captor.value.rixoConfirmed)
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:74:            rixoRequested = "TRUE",
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:75:            rixoConfirmed = "TRUE",
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:76:            bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:77:            invoiceConfirmed = true,
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:92:                    saved.rixoRequested == "FALSE" &&
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:93:                    saved.rixoConfirmed == "FALSE" &&
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:94:                    !saved.bookingRequested &&
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:95:                    saved.invoiceConfirmed == false
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:118:        val p = Purchase(id = 10L, chassis = "ABC-999", bookingRequested = true)
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryServiceSyncTest.kt:148:        val p = Purchase(id = 10L, chassis = "ABC-999", bookingRequested = true)
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:126:     * Vessels that still have at least one chassis not yet marked invoiced in [Purchase.invoiceConfirmed]
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:140:     * Invoice lines for client + vessel. Excludes chassis whose purchase has invoice_confirmed true
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:155:            if (p?.invoiceConfirmed == true) null else row to p
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:215:     * - sets `booking_requested = false` on purchases for those chassis;
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:216:     * - sets `invoice_confirmed = false` (Sold) on those purchases;
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:222:     * Deletes the row when no chassis segments remain. Resets booking_requested and invoice_confirmed on that chassis.
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:279:        // Reset booking_requested on matching purchases
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:282:        // Clear Sold / invoice_confirmed for those chassis (workflow recomputed in PurchaseService)
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:22:    fun computeStatus_invoiceConfirmed_wins_over_booking_and_rixo() {
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:25:            bookingRequested = true,
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:26:            invoiceConfirmed = true,
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:27:            rixoConfirmed = "FALSE",
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:28:            rixoRequested = "TRUE",
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:34:    fun computeStatus_bookingRequested_wins_over_rixo_flags() {
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:37:            bookingRequested = true,
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:38:            invoiceConfirmed = false,
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:39:            rixoConfirmed = "TRUE",
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:40:            rixoRequested = "TRUE",
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:46:    fun computeStatus_rixoConfirmed_wins_over_rixoRequested() {
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:49:            bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:50:            invoiceConfirmed = false,
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:51:            rixoConfirmed = "TRUE",
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:52:            rixoRequested = "TRUE",
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:58:    fun computeStatus_rixoRequested_string_one() {
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:61:            rixoRequested = "1",
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:74:        val p = Purchase(chassis = "X", rixoConfirmed = "1", workflowStatus = WorkflowStatus.PURCHASED)
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:79:    fun isRixoConfirmedForBooking_workflow_at_rixo_confirmed() {
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:80:        val p = Purchase(chassis = "X", rixoConfirmed = "0", workflowStatus = WorkflowStatus.RIXO_CONFIRMED)
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:86:        val p = Purchase(chassis = "X", rixoConfirmed = "0", workflowStatus = WorkflowStatus.RIXO_REQUESTED)
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:95:            invoiceConfirmed = true,
+backend/src/test/kotlin/com/automan/backend/service/PurchaseWorkflowServiceTest.kt:110:            invoiceConfirmed = true,
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:62:     * Clears [Purchase.rixoConfirmed] when the chassis no longer appears in any Rixo history row
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:63:     * (same token rules as confirm). Returns purchase ids whose `rixo_confirmed` was written.
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:73:                purchaseRepository.save(p.copy(rixoConfirmed = "FALSE", updatedAt = now))
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:102:                rixoConfirmed = computeHistoryRowRixoConfirmedStrict(e),
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:103:                rixoConfirmedDate = computeHistoryRowRixoConfirmedAtIso(e),
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:131:     * - Every purchase matched for any segment must have [Purchase.rixoConfirmed] truthy.
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:139:            if (!PurchaseWorkflowService.isRixoFlagTrue(p.rixoConfirmed)) return false
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:145:     * True when at least one purchase matched for any chassis segment on this row has [Purchase.bookingRequested].
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:152:            if (p.bookingRequested) return true
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:164:            if (!PurchaseWorkflowService.isRixoFlagTrue(p.rixoConfirmed)) continue
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:226:     * Marks `purchases.rixo_confirmed = TRUE` for all cars mapped by chassis tokens in selected history rows.
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:262:            val old = p.rixoConfirmed?.trim()?.uppercase(Locale.ROOT) ?: ""
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:266:                    rixoConfirmed = "TRUE",
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:342:                if (p.bookingRequested) {
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:393:                        rixoRequested = "FALSE",
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:394:                        rixoConfirmed = "FALSE",
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:395:                        bookingRequested = false,
+backend/src/main/kotlin/com/automan/backend/service/RixoHistoryService.kt:396:                        invoiceConfirmed = false,
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:27:           "LOWER(p.rixoRequested) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:28:           "LOWER(p.rixoConfirmed) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:33:     * Prefix match on chassis — booking flow only: [bookingRequested] false/null and Rixo confirmed
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:254:            "(p.bookingRequested IS NULL OR p.bookingRequested = false) AND " +
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:255:            "(p.invoiceConfirmed IS NULL OR p.invoiceConfirmed = false)",
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:263:            "(p.bookingRequested IS NULL OR p.bookingRequested = false) AND " +
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:264:            "(p.invoiceConfirmed IS NULL OR p.invoiceConfirmed = false)",
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:270:     * where rixo_requested is not TRUE/1 (i.e., pending requests still exist on that date).
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:275:            "AND (p.rixoRequested IS NULL OR TRIM(p.rixoRequested) = '' " +
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:276:            "OR LOWER(p.rixoRequested) NOT IN ('1', 'true'))"
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:288:        "SELECT p FROM Purchase p WHERE UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1')"
+backend/src/main/kotlin/com/automan/backend/controller/ShippingHistoryController.kt:97:    /** Deletes shipping-history rows by ID and resets `booking_requested = false` on their purchases. */
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:84:     * Saves invoice_history + lines, marks purchases as invoice_confirmed, syncs ledger.
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:125:     * Only includes dates that still have at least one purchase with rixo_requested not TRUE/1.
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:221:                    bookingRequested = persisted.bookingRequested,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:222:                    invoiceConfirmed = persisted.invoiceConfirmed,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:281:                rixoRequested = purchase.rixoRequested ?: existingPurchase.rixoRequested,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:282:                rixoConfirmed = purchase.rixoConfirmed ?: existingPurchase.rixoConfirmed,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:287:                bookingRequested = purchase.bookingRequested,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:288:                invoiceConfirmed = purchase.invoiceConfirmed ?: existingPurchase.invoiceConfirmed,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:335:                    bookingRequested = refreshed.bookingRequested,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:336:                    invoiceConfirmed = refreshed.invoiceConfirmed,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:464:                rixoRequested = updateData["rixoRequested"] as? String ?: existingPurchase.rixoRequested,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:465:                rixoConfirmed = updateData["rixoConfirmed"] as? String ?: existingPurchase.rixoConfirmed,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:613:                bookingRequested = run {
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:615:                        updateData.containsKey("bookingRequested") -> updateData["bookingRequested"]
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:616:                        updateData.containsKey("booking_requested") -> updateData["booking_requested"]
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:623:                        else -> existingPurchase.bookingRequested
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:626:                invoiceConfirmed = run {
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:627:                    val raw = if (updateData.containsKey("invoiceConfirmed")) {
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:628:                        updateData["invoiceConfirmed"]
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:630:                        updateData["invoice_confirmed"]
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:636:                        else -> existingPurchase.invoiceConfirmed
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:686:                    bookingRequested = refreshed.bookingRequested,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:687:                    invoiceConfirmed = refreshed.invoiceConfirmed,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:710:        Logger.log("Marking ${purchaseIds.size} purchases as booking_requested: $purchaseIds")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:717:                    bookingRequested = true,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:722:                Logger.debug("Marked purchase $id as booking_requested")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:728:        Logger.debug("Successfully marked ${updatedPurchases.size} purchases as booking_requested")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:739:     * Resets [Purchase.bookingRequested] to `false` for all purchases whose chassis
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:750:                purchaseRepository.save(p.copy(bookingRequested = false, updatedAt = java.time.LocalDateTime.now()))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:758:        Logger.log("Unset booking_requested for $count purchase(s) across ${chassisValues.size} chassis values")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:778:        Logger.log("Marking ${purchaseIds.size} purchases as invoice_confirmed: $purchaseIds")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:785:                    invoiceConfirmed = true,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:790:                Logger.debug("Marked purchase $id as invoice_confirmed")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:792:                Logger.warn("Purchase $id not found, skipping invoice_confirmed update")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:796:        Logger.debug("Successfully marked ${updatedPurchases.size} purchases as invoice_confirmed")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:807:     * Marks all purchases whose chassis matches any value in [chassisValues] as invoice_confirmed.
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:817:                if (p.invoiceConfirmed != true) {
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:818:                    purchaseRepository.save(p.copy(invoiceConfirmed = true, updatedAt = java.time.LocalDateTime.now()))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:820:                    Logger.debug("Marked purchase (chassis=$chassis) as invoice_confirmed")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:825:        Logger.log("Marked ${markedIds.size} purchase(s) as invoice_confirmed by chassis")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:829:     * Sets [Purchase.invoiceConfirmed] to false for purchases matching each chassis in [chassisValues]
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:843:                if (p.invoiceConfirmed != true) continue
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:845:                    p.copy(invoiceConfirmed = false, updatedAt = java.time.LocalDateTime.now()),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:854:        Logger.log("Cleared invoice_confirmed on $updatedRows purchase row(s) for ${chassisValues.size} chassis token(s)")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:860:        Logger.log("Marking ${purchaseIds.size} purchases as rixo_requested=TRUE: $purchaseIds")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:867:                    rixoRequested = "TRUE",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:872:                Logger.debug("Marked purchase $id as rixo_requested=TRUE")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:874:                Logger.warn("Purchase $id not found, skipping rixo_requested update")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:878:        Logger.debug("Successfully marked ${updatedPurchases.size} purchases as rixo_requested=TRUE")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:931:     * (`rixoConfirmed` `1`/`TRUE`) and booking not requested yet.
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1146:                                    bookingRequested = persisted.bookingRequested,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1147:                                    invoiceConfirmed = persisted.invoiceConfirmed,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1382:            rixoRequested = getColumnValue(values, columnMapping, "RIXO REQUESTED")?.take(50) ?: "",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1383:            rixoConfirmed = getColumnValue(values, columnMapping, "RIXO CONFIRMED", "RXO CONFIRMED")?.replace("\t", "")?.replace(" ", "")?.take(50) ?: "",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1552:    // Generates Rixo PDF only; does NOT persist rixoRequested. Client sets Rixo Requested manually after faxing.
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1587:                        "rixoRequested" -> updatedPurchase.copy(rixoRequested = value)
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1588:                        "rixoConfirmed" -> updatedPurchase.copy(rixoConfirmed = value)
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1612:    // Generates Rixo Transport PDF only; does NOT persist rixoRequested. Client sets Rixo Requested manually after faxing.
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1717:            content.appendLine("Rixo Requested: ${purchase.rixoRequested}")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1718:            content.appendLine("Rixo Confirmed: ${purchase.rixoConfirmed}")
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:188:    /** Chassis at this POL where `booking_requested` is not true (legacy path: `/unshipped-chassis`). */
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:379:    /** Sets `booking_requested = true` for the given purchases (legacy alias: `POST /ship`). */
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:382:        Logger.debug("[Controller] Set booking_requested request received")
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:396:        Logger.debug("[Controller] Marking ${purchaseIds.size} purchases as booking_requested")
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:423:        Logger.debug("[Controller] Marking ${purchaseIds.size} purchases as invoice_confirmed")
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:438:     * sets invoice_confirmed on purchases, returns PDF.
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:467:     * marks purchases invoice_confirmed, ledger — **no** PDF generation or download.
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryRowConfirmedStrictTest.kt:47:        val p = Purchase(id = 10L, chassis = "ZZE124", rixoConfirmed = "TRUE")
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryRowConfirmedStrictTest.kt:57:        val p = Purchase(id = 10L, chassis = "ZZE124", rixoConfirmed = "FALSE")
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryRowConfirmedStrictTest.kt:67:        val p1 = Purchase(id = 1L, chassis = "A-1", rixoConfirmed = "TRUE")
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryRowConfirmedStrictTest.kt:79:        val p1 = Purchase(id = 1L, chassis = "X", rixoConfirmed = "TRUE")
+backend/src/test/kotlin/com/automan/backend/service/RixoHistoryRowConfirmedStrictTest.kt:80:        val p2 = Purchase(id = 2L, chassis = "Y", rixoConfirmed = "FALSE")
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:125:        add("rixoRequested", str(before.rixoRequested), str(after.rixoRequested))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:126:        add("rixoConfirmed", str(before.rixoConfirmed), str(after.rixoConfirmed))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:131:        add("bookingRequested", before.bookingRequested.toString(), after.bookingRequested.toString())
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:132:        add("invoiceConfirmed", normBool(before.invoiceConfirmed), normBool(after.invoiceConfirmed))
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:181:        rixoRequested = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:182:        rixoConfirmed = "1",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:198:        bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:163:        rixoRequested = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:164:        rixoConfirmed = "1",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:180:        bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/controller/ShippingSnapshotIntegrationTest.kt:79:                bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/controller/ShippingSnapshotIntegrationTest.kt:80:                invoiceConfirmed = false,
+backend/src/test/kotlin/com/automan/backend/controller/ShippingSnapshotIntegrationTest.kt:116:        rixoRequested = "0",
+backend/src/test/kotlin/com/automan/backend/controller/ShippingSnapshotIntegrationTest.kt:117:        rixoConfirmed = "1",
+backend/src/test/kotlin/com/automan/backend/controller/ShippingSnapshotIntegrationTest.kt:132:        bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseExtendedAttributesIntegrationTest.kt:120:        rixoRequested = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseExtendedAttributesIntegrationTest.kt:121:        rixoConfirmed = "1",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseExtendedAttributesIntegrationTest.kt:137:        bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:40:        purchase("CH-JP", "Japan", bookingRequested = false, rixoConfirmed = "1")
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:41:        purchase("CH-KR", "Korea", bookingRequested = true, rixoConfirmed = "1")
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:52:        purchase("CH-US-A", "USA", bookingRequested = true, rixoConfirmed = "1")
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:53:        purchase("CH-US-B", "USA", bookingRequested = false, rixoConfirmed = "TRUE")
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:63:        purchase("CH-JP", "Japan", bookingRequested = false, rixoConfirmed = "0")
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:75:            bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:76:            rixoConfirmed = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:89:        bookingRequested: Boolean,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:90:        rixoConfirmed: String = "1",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:107:            rixoRequested = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:108:            rixoConfirmed = rixoConfirmed,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:124:            bookingRequested = bookingRequested,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:50:            basePurchase("RIXO-001").copy(rixoConfirmed = "FALSE", workflowStatus = WorkflowStatus.PURCHASED),
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:70:        assertEquals("TRUE", updated.rixoConfirmed)
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:79:                rixoConfirmed = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:81:                bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:86:                rixoConfirmed = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:88:                bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:112:        rixoRequested = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:113:        rixoConfirmed = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:129:        bookingRequested = false,
+backend/src/test/kotlin/com/automan/backend/controller/CarSearchControllerIntegrationTest.kt:229:            rixoRequested = "0",
+backend/src/test/kotlin/com/automan/backend/controller/CarSearchControllerIntegrationTest.kt:230:            rixoConfirmed = "0",

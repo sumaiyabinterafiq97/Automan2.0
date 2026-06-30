@@ -1,0 +1,24 @@
+Phase: 4 Drop 2 — SHIPPING purchases columns removed
+Date: 2026-06-29
+Flyway: V52
+
+Columns dropped from purchases:
+  vessel, shippment_date, B/L_no
+
+Canonical store: shipping_history (vessel, shipment_date, bl_no)
+
+Code paths updated:
+| File | Change |
+|------|--------|
+| Purchase.kt | vessel, shipmentDate, blNo → @Transient |
+| ShippingSnapshotService.kt | applyForRead + syncFromPurchase (upsert shipping_history) |
+| PurchaseService.kt | finalizePurchaseWrite calls shippingSnapshotService.syncFromPurchase |
+| ShippingHistoryService.kt | saveBatch accepts blNo |
+
+Gate: PASS
+- booked_without_shipping: 0
+- Phase 4c bl_no backfill on shipping_history
+
+Automated tests: PASS
+
+Decision: GO — shipping snapshot columns dropped from purchases

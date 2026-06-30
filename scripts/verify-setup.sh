@@ -175,7 +175,7 @@ if [ ${#missing_tables[@]} -eq 0 ] && [ ${#missing_columns[@]} -eq 0 ]; then
     echo ""
     echo "🔑 Login Credentials:"
     echo "   • Email: admin@automan.com"
-    echo "   • Password: admin123"
+    echo "   • Password: Automan!Ship26Tokyo"
     exit 0
 else
     echo "⚠️  Some checks failed. Please review the output above."

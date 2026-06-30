@@ -26,6 +26,10 @@ class PurchaseService(
     private val shippingHistoryRepository: ShippingHistoryRepository,
     private val purchaseWorkflowService: PurchaseWorkflowService,
     private val purchaseChangeHistoryService: PurchaseChangeHistoryService,
+    private val purchaseCostLineService: PurchaseCostLineService,
+    private val purchaseVehicleOverrideService: PurchaseVehicleOverrideService,
+    private val purchaseExtendedAttributesService: PurchaseExtendedAttributesService,
+    private val shippingSnapshotService: ShippingSnapshotService,
     private val clientRepository: ClientRepository,
 ) {
     /** Links [Purchase.clientId] when [clientName] matches exactly one row in clients (case-insensitive). */
@@ -35,6 +39,43 @@ class PurchaseService(
         val matches = clientRepository.findByClientNameIgnoreCase(name)
         return if (matches.size == 1) matches.first().id else null
     }
+
+    /** Phase 2–4 write sync + read adapters for API responses. */
+    private fun finalizePurchaseWrite(purchase: Purchase): Purchase {
+        val withWorkflow = purchaseWorkflowService.applyWorkflowWrite(purchase)
+        purchaseCostLineService.syncFromPurchase(withWorkflow)
+        purchaseVehicleOverrideService.syncFromPurchase(withWorkflow)
+        // Shipping fields are @Transient on Purchase; sync before extended-attributes JPA save.
+        shippingSnapshotService.syncFromPurchase(withWorkflow)
+        val withExtended = purchaseExtendedAttributesService.syncFromPurchase(withWorkflow)
+        return applyReadAdapters(withExtended)
+    }
+
+    private fun applyReadAdapters(purchase: Purchase): Purchase {
+        val withExtended = purchaseExtendedAttributesService.applyForRead(purchase)
+        val withVehicle = purchaseVehicleOverrideService.applyForRead(withExtended)
+        val withShipping = shippingSnapshotService.applyForRead(withVehicle)
+        val withWorkflow = purchaseWorkflowService.applyForRead(withShipping)
+        return purchaseCostLineService.applyForRead(withWorkflow)
+    }
+
+    private fun applyReadAdapterOrNull(purchase: Purchase?): Purchase? =
+        purchase?.let { applyReadAdapters(it) }
+
+    private fun applyReadAdapters(purchases: List<Purchase>): List<Purchase> {
+        if (purchases.isEmpty()) return purchases
+        val withExtended = purchases.map { purchaseExtendedAttributesService.applyForRead(it) }
+        val withVehicle = withExtended.map { purchaseVehicleOverrideService.applyForRead(it) }
+        val withShipping = shippingSnapshotService.applyForReadBatch(withVehicle)
+        val withWorkflow = withShipping.map { purchaseWorkflowService.applyForRead(it) }
+        return purchaseCostLineService.applyForReadBatch(withWorkflow)
+    }
+
+    private fun persistPurchase(purchase: Purchase): Purchase =
+        purchaseRepository.save(purchaseWorkflowService.applyWorkflowWrite(purchase))
+
+    private fun persistPurchaseAndFlush(purchase: Purchase): Purchase =
+        purchaseRepository.saveAndFlush(purchaseWorkflowService.applyWorkflowWrite(purchase))
 
     /** POL from stock_location mapping (same mapping used in Rixo import). */
     private fun polFromStockLocation(stockLocation: String?): String? {
@@ -88,7 +129,7 @@ class PurchaseService(
     }
     
     fun getAllPurchases(): List<Purchase> {
-        return purchaseRepository.findAll()
+        return applyReadAdapters(purchaseRepository.findAll())
     }
 
     /**
@@ -103,12 +144,12 @@ class PurchaseService(
     }
     
     fun getPurchaseById(id: Long): Purchase? {
-        return purchaseRepository.findById(id).orElse(null)
+        return applyReadAdapterOrNull(purchaseRepository.findById(id).orElse(null))
     }
 
     /** All purchases sharing the same shipping booking id (car booking search). */
     fun getPurchasesByBookingId(bookingId: Long): List<Purchase> {
-        return purchaseRepository.findByBookingId(bookingId)
+        return applyReadAdapters(purchaseRepository.findByBookingId(bookingId))
     }
     
     private fun firstSemicolonToken(raw: String?): String {
@@ -177,14 +218,26 @@ class PurchaseService(
         )
         
         Logger.debug("Creating purchase - received shaken=${purchase.shaken}, saving shaken=${purchaseToSave.shaken}")
-        val savedPurchase = purchaseRepository.save(purchaseToSave)
+        val savedPurchase = persistPurchase(purchaseToSave)
         Logger.debug("Saved purchase - shaken=${savedPurchase.shaken}")
         val newId = savedPurchase.id
         if (newId != null) {
             purchaseWorkflowService.recomputeByPurchaseId(newId)
-            return purchaseRepository.findById(newId).orElse(savedPurchase)
+            val persisted = purchaseRepository.findById(newId).orElse(savedPurchase)
+            return finalizePurchaseWrite(
+                purchaseToSave.copy(
+                    id = persisted.id,
+                    createdAt = persisted.createdAt,
+                    workflowStatus = persisted.workflowStatus,
+                    workflowStatusUpdatedAt = persisted.workflowStatusUpdatedAt,
+                    bookingRequested = persisted.bookingRequested,
+                    invoiceConfirmed = persisted.invoiceConfirmed,
+                    bookingId = persisted.bookingId,
+                    updatedAt = persisted.updatedAt,
+                ),
+            )
         }
-        return savedPurchase
+        return finalizePurchaseWrite(purchaseToSave)
     }
     
     @Transactional
@@ -192,7 +245,7 @@ class PurchaseService(
         Logger.debug("🔍 [Service] Updating purchase ID: $id")
         Logger.debug("🔍 [Service] Purchase data received: $purchase")
         
-        val existingPurchase = purchaseRepository.findById(id).orElse(null)
+        val existingPurchase = purchaseRepository.findById(id).orElse(null)?.let { applyReadAdapters(it) }
         if (existingPurchase != null) {
             Logger.debug("🔍 [Service] Found existing purchase: $existingPurchase")
             
@@ -281,10 +334,22 @@ class PurchaseService(
             )
             
             Logger.debug("🔍 [Service] Saving updated purchase: $updatedPurchase")
-            val savedPurchase = purchaseRepository.save(updatedPurchase)
+            val savedPurchase = persistPurchase(updatedPurchase)
             Logger.log("✅ [Service] Successfully saved purchase: $savedPurchase")
             purchaseWorkflowService.recomputeByPurchaseId(id)
-            return purchaseRepository.findById(id).orElse(savedPurchase)
+            val refreshed = purchaseRepository.findById(id).orElse(savedPurchase)
+            return finalizePurchaseWrite(
+                updatedPurchase.copy(
+                    id = refreshed.id,
+                    createdAt = refreshed.createdAt,
+                    workflowStatus = refreshed.workflowStatus,
+                    workflowStatusUpdatedAt = refreshed.workflowStatusUpdatedAt,
+                    bookingRequested = refreshed.bookingRequested,
+                    invoiceConfirmed = refreshed.invoiceConfirmed,
+                    bookingId = refreshed.bookingId,
+                    updatedAt = refreshed.updatedAt,
+                ),
+            )
         } else {
             Logger.error("Purchase with ID $id not found")
         }
@@ -305,7 +370,7 @@ class PurchaseService(
             }
         }
         
-        val existingPurchase = purchaseRepository.findById(id).orElse(null)
+        val existingPurchase = purchaseRepository.findById(id).orElse(null)?.let { applyReadAdapters(it) }
         if (existingPurchase != null) {
             Logger.debug("🔍 [Service] Found existing purchase: $existingPurchase")
             
@@ -411,8 +476,20 @@ class PurchaseService(
                 rixoRequested = updateData["rixoRequested"] as? String ?: existingPurchase.rixoRequested,
                 rixoConfirmed = updateData["rixoConfirmed"] as? String ?: existingPurchase.rixoConfirmed,
                 notes = updateData["notes"] as? String ?: existingPurchase.notes,
-                shipmentDate = updateData["shipmentDate"] as? String ?: existingPurchase.shipmentDate,
-                blNo = updateData["blNo"] as? String ?: existingPurchase.blNo,
+                shipmentDate = run {
+                    if (!updateData.containsKey("shipmentDate")) {
+                        existingPurchase.shipmentDate
+                    } else {
+                        updateData["shipmentDate"] as? String
+                    }
+                },
+                blNo = run {
+                    if (!updateData.containsKey("blNo")) {
+                        existingPurchase.blNo
+                    } else {
+                        updateData["blNo"] as? String
+                    }
+                },
                 shipmentCharges = updateData["shipmentCharges"] as? String ?: existingPurchase.shipmentCharges,
                 freight = updateData["freight"] as? String ?: existingPurchase.freight,
                 storageCharges = updateData["storageCharges"] as? String ?: existingPurchase.storageCharges,
@@ -607,7 +684,7 @@ class PurchaseService(
                 existingPurchase,
                 purchaseToSave,
             )
-            val savedPurchase = purchaseRepository.saveAndFlush(purchaseToSave)
+            val savedPurchase = persistPurchaseAndFlush(purchaseToSave)
             // CRITICAL: Fetch fresh entity from database to ensure we get the actual saved value
             // This prevents JPA from returning a cached/stale entity
             val freshPurchase = purchaseRepository.findById(id).orElse(null)
@@ -623,7 +700,19 @@ class PurchaseService(
             }
 
             purchaseWorkflowService.recomputeByPurchaseId(id)
-            return purchaseRepository.findById(id).orElse(purchaseToReturn)
+            val refreshed = purchaseRepository.findById(id).orElse(purchaseToSave)
+            return finalizePurchaseWrite(
+                purchaseToSave.copy(
+                    id = refreshed.id,
+                    createdAt = refreshed.createdAt,
+                    workflowStatus = refreshed.workflowStatus,
+                    workflowStatusUpdatedAt = refreshed.workflowStatusUpdatedAt,
+                    bookingRequested = refreshed.bookingRequested,
+                    invoiceConfirmed = refreshed.invoiceConfirmed,
+                    bookingId = refreshed.bookingId,
+                    updatedAt = refreshed.updatedAt,
+                ),
+            )
         } else {
             Logger.error("Purchase with ID $id not found")
         }
@@ -652,7 +741,7 @@ class PurchaseService(
                     bookingRequested = true,
                     updatedAt = java.time.LocalDateTime.now()
                 )
-                val savedPurchase = purchaseRepository.save(updatedPurchase)
+                val savedPurchase = persistPurchase(updatedPurchase)
                 updatedPurchases.add(savedPurchase)
                 Logger.debug("Marked purchase $id as booking_requested")
             } else {
@@ -661,11 +750,12 @@ class PurchaseService(
         }
         
         Logger.debug("Successfully marked ${updatedPurchases.size} purchases as booking_requested")
-        purchaseWorkflowService.recomputeByPurchaseIds(purchaseIds)
-        return updatedPurchases.map { up ->
-            val oid = up.id ?: return@map up
-            purchaseRepository.findById(oid).orElse(up)
-        }
+        return applyReadAdapters(
+            updatedPurchases.map { up ->
+                val oid = up.id ?: return@map up
+                purchaseRepository.findById(oid).orElse(up)
+            },
+        )
     }
 
     /**
@@ -680,13 +770,17 @@ class PurchaseService(
         for (chassis in chassisValues) {
             val purchases = purchaseRepository.findByChassis(chassis)
             for (p in purchases) {
-                purchaseRepository.save(p.copy(bookingRequested = false, updatedAt = java.time.LocalDateTime.now()))
+                val next = when (p.workflowStatus) {
+                    com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED ->
+                        com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED
+                    com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED ->
+                        com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED
+                    else -> p.workflowStatus ?: com.automan.backend.model.WorkflowStatus.PURCHASED
+                }
+                purchaseWorkflowService.setWorkflowStatus(p, next)
                 count++
                 p.id?.let { affectedIds.add(it) }
             }
-        }
-        if (affectedIds.isNotEmpty()) {
-            purchaseWorkflowService.recomputeByPurchaseIds(affectedIds.distinct())
         }
         Logger.log("Unset booking_requested for $count purchase(s) across ${chassisValues.size} chassis values")
         return count
@@ -718,7 +812,7 @@ class PurchaseService(
                     invoiceConfirmed = true,
                     updatedAt = java.time.LocalDateTime.now()
                 )
-                val savedPurchase = purchaseRepository.save(updatedPurchase)
+                val savedPurchase = persistPurchase(updatedPurchase)
                 updatedPurchases.add(savedPurchase)
                 Logger.debug("Marked purchase $id as invoice_confirmed")
             } else {
@@ -727,11 +821,12 @@ class PurchaseService(
         }
 
         Logger.debug("Successfully marked ${updatedPurchases.size} purchases as invoice_confirmed")
-        purchaseWorkflowService.recomputeByPurchaseIds(purchaseIds)
-        return updatedPurchases.map { up ->
-            val oid = up.id ?: return@map up
-            purchaseRepository.findById(oid).orElse(up)
-        }
+        return applyReadAdapters(
+            updatedPurchases.map { up ->
+                val oid = up.id ?: return@map up
+                purchaseRepository.findById(oid).orElse(up)
+            },
+        )
     }
 
     /**
@@ -745,14 +840,12 @@ class PurchaseService(
         for (chassis in chassisValues) {
             val purchases = purchaseRepository.findByChassis(chassis)
             for (p in purchases) {
-                if (p.invoiceConfirmed != true) {
-                    purchaseRepository.save(p.copy(invoiceConfirmed = true, updatedAt = java.time.LocalDateTime.now()))
-                    p.id?.let { markedIds.add(it) }
-                    Logger.debug("Marked purchase (chassis=$chassis) as invoice_confirmed")
-                }
+                if (p.workflowStatus == com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED) continue
+                purchaseWorkflowService.setWorkflowStatus(p, com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED)
+                p.id?.let { markedIds.add(it) }
+                Logger.debug("Marked purchase (chassis=$chassis) as invoice_confirmed")
             }
         }
-        if (markedIds.isNotEmpty()) purchaseWorkflowService.recomputeByPurchaseIds(markedIds)
         Logger.log("Marked ${markedIds.size} purchase(s) as invoice_confirmed by chassis")
     }
 
@@ -771,16 +864,16 @@ class PurchaseService(
             if (chassis.isEmpty()) continue
             val purchases = purchaseRepository.findByChassis(chassis)
             for (p in purchases) {
-                if (p.invoiceConfirmed != true) continue
-                val saved = purchaseRepository.save(
-                    p.copy(invoiceConfirmed = false, updatedAt = java.time.LocalDateTime.now()),
-                )
+                if (p.workflowStatus != com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED) continue
+                val next = if (p.workflowStatus == com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED) {
+                    com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED
+                } else {
+                    p.workflowStatus ?: com.automan.backend.model.WorkflowStatus.PURCHASED
+                }
+                val saved = purchaseWorkflowService.setWorkflowStatus(p, next)
                 updatedRows++
                 saved.id?.let { affectedIds.add(it) }
             }
-        }
-        if (affectedIds.isNotEmpty()) {
-            purchaseWorkflowService.recomputeByPurchaseIds(affectedIds.distinct())
         }
         Logger.log("Cleared invoice_confirmed on $updatedRows purchase row(s) for ${chassisValues.size} chassis token(s)")
         return updatedRows
@@ -798,7 +891,7 @@ class PurchaseService(
                     rixoRequested = "TRUE",
                     updatedAt = java.time.LocalDateTime.now()
                 )
-                val savedPurchase = purchaseRepository.save(updatedPurchase)
+                val savedPurchase = persistPurchase(updatedPurchase)
                 updatedPurchases.add(savedPurchase)
                 Logger.debug("Marked purchase $id as rixo_requested=TRUE")
             } else {
@@ -807,18 +900,19 @@ class PurchaseService(
         }
 
         Logger.debug("Successfully marked ${updatedPurchases.size} purchases as rixo_requested=TRUE")
-        purchaseWorkflowService.recomputeByPurchaseIds(purchaseIds)
-        return updatedPurchases.map { up ->
-            val oid = up.id ?: return@map up
-            purchaseRepository.findById(oid).orElse(up)
-        }
+        return applyReadAdapters(
+            updatedPurchases.map { up ->
+                val oid = up.id ?: return@map up
+                purchaseRepository.findById(oid).orElse(up)
+            },
+        )
     }
     
     fun searchPurchases(searchTerm: String): List<Purchase> {
         return if (searchTerm.isBlank()) {
             getAllPurchases()
         } else {
-            purchaseRepository.searchPurchases(searchTerm)
+            applyReadAdapters(purchaseRepository.searchPurchases(searchTerm))
         }
     }
 
@@ -844,7 +938,7 @@ class PurchaseService(
             else -> throw IllegalArgumentException("Invalid search field: $field. Use all, chassis, carName, brand, clientName, or supplier.")
         }
         return PurchasePageResponse(
-            content = pg.content,
+            content = applyReadAdapters(pg.content),
             totalElements = pg.totalElements,
             totalPages = pg.totalPages,
             page = pg.number,
@@ -864,13 +958,13 @@ class PurchaseService(
         if (q.isEmpty()) return emptyList()
         val cap = maxResults.coerceIn(1, 100)
         val prefix = purchaseRepository.searchByChassisPrefix(q, PageRequest.of(0, cap))
-        if (prefix.size >= cap) return prefix
+        if (prefix.size >= cap) return applyReadAdapters(prefix)
         val need = cap - prefix.size
         val prefixIds = prefix.mapNotNull { it.id }.toSet()
         val contains = purchaseRepository.searchByChassisContains(q, PageRequest.of(0, need + 20))
             .filter { p -> p.id != null && p.id !in prefixIds }
             .take(need)
-        return prefix + contains
+        return applyReadAdapters(prefix + contains)
     }
 
     private fun sanitizeChassisSearchToken(raw: String): String =
@@ -894,27 +988,51 @@ class PurchaseService(
     }
     
     fun filterByCarName(carName: String): List<Purchase> {
-        return purchaseRepository.findByCarNameContainingIgnoreCase(carName)
+        return applyReadAdapters(purchaseRepository.findByCarNameContainingIgnoreCase(carName))
     }
-    
+
     fun filterByAuctionHouse(auctionHouse: String): List<Purchase> {
-        return purchaseRepository.findByAuctionHouseContainingIgnoreCase(auctionHouse)
+        return applyReadAdapters(purchaseRepository.findByAuctionHouseContainingIgnoreCase(auctionHouse))
     }
-    
+
     fun filterByClientName(clientName: String): List<Purchase> {
-        return purchaseRepository.findByClientNameContainingIgnoreCase(clientName)
+        return applyReadAdapters(purchaseRepository.findByClientNameContainingIgnoreCase(clientName))
     }
-    
+
     fun filterByDate(date: String): List<Purchase> {
-        return purchaseRepository.findByDateContainingIgnoreCase(date)
+        return applyReadAdapters(purchaseRepository.findByDateContainingIgnoreCase(date))
     }
-    
+
     fun filterByConsigneeAndVesselAndShipmentDate(consignee: String?, vessel: String?, shipmentDate: String?): List<Purchase> {
-        return purchaseRepository.findByConsigneeAndVesselAndShipmentDate(consignee, vessel, shipmentDate)
+        val candidates = purchaseRepository.findInvoiceFilterCandidatesByConsignee(consignee)
+        return filterInvoiceCandidates(candidates, vessel, shipmentDate)
     }
 
     fun filterByClientNameAndVesselAndShipmentDate(clientName: String?, vessel: String?, shipmentDate: String?): List<Purchase> {
-        return purchaseRepository.findByClientNameAndVesselAndShipmentDate(clientName, vessel, shipmentDate)
+        val candidates = purchaseRepository.findInvoiceFilterCandidatesByClientName(clientName)
+        return filterInvoiceCandidates(candidates, vessel, shipmentDate)
+    }
+
+    /** Phase 4b: vessel/shipmentDate compared after shipping_history read adapter. */
+    private fun filterInvoiceCandidates(
+        candidates: List<Purchase>,
+        vessel: String?,
+        shipmentDate: String?,
+    ): List<Purchase> {
+        val resolved = applyReadAdapters(candidates)
+        return resolved.filter { purchase ->
+            matchesInvoiceVessel(purchase, vessel) && matchesInvoiceShipmentDate(purchase, shipmentDate)
+        }
+    }
+
+    private fun matchesInvoiceVessel(purchase: Purchase, vessel: String?): Boolean {
+        if (vessel.isNullOrBlank()) return true
+        return purchase.vessel?.trim()?.equals(vessel.trim(), ignoreCase = true) == true
+    }
+
+    private fun matchesInvoiceShipmentDate(purchase: Purchase, shipmentDate: String?): Boolean {
+        if (shipmentDate.isNullOrBlank()) return true
+        return purchase.shipmentDate?.trim() == shipmentDate.trim()
     }
     
     fun importPurchases(file: MultipartFile): ImportResponse {
@@ -1025,7 +1143,7 @@ class PurchaseService(
                         val existing = purchaseRepository.findByChassis(purchase.chassis).firstOrNull()
                         val resolvedClientId = purchase.clientId ?: resolveClientIdFromName(purchase.clientName)
                         val purchaseToPersist = purchase.copy(clientId = resolvedClientId)
-                        val savedPurchase = if (existing != null) {
+                        val persisted = if (existing != null) {
                             val updated = existing.copy(
                                 date = if (!purchase.date.isNullOrBlank()) purchase.date else existing.date,
                                 auctionHouse = if (!purchase.auctionHouse.isNullOrBlank()) purchase.auctionHouse else existing.auctionHouse,
@@ -1037,11 +1155,24 @@ class PurchaseService(
                                     existing.clientId
                                 },
                             )
-                            purchaseRepository.save(updated)
+                            persistPurchase(updated)
                         } else {
-                            purchaseRepository.save(purchaseToPersist)
+                            persistPurchase(purchaseToPersist)
                         }
-                        savedPurchases.add(savedPurchase)
+                        savedPurchases.add(
+                            finalizePurchaseWrite(
+                                purchaseToPersist.copy(
+                                    id = persisted.id,
+                                    createdAt = persisted.createdAt,
+                                    updatedAt = persisted.updatedAt,
+                                    bookingId = persisted.bookingId,
+                                    bookingRequested = persisted.bookingRequested,
+                                    invoiceConfirmed = persisted.invoiceConfirmed,
+                                    workflowStatus = persisted.workflowStatus,
+                                    workflowStatusUpdatedAt = persisted.workflowStatusUpdatedAt,
+                                ),
+                            ),
+                        )
                         Logger.debug("✅ Saved: ${purchase.carName} (Chassis: ${purchase.chassis})")
                     } catch (e: Exception) {
                         // Check if it's a unique constraint violation (duplicate) - this is expected and non-critical
@@ -1293,7 +1424,9 @@ class PurchaseService(
                     dest.isNotEmpty() -> "POD: $dest"
                     else -> n
                 }
-            }
+            },
+            shaken = false,
+            negotiate = false,
         )
     }
 
@@ -1445,10 +1578,10 @@ class PurchaseService(
         Logger.debug("Missing Rixo data: $missingRixoData")
         
         try {
-            // Get selected purchases
-            val purchases = selectedIds.mapNotNull { id ->
-                purchaseRepository.findById(id).orElse(null)
-            }
+            // Hydrate canonical stores (extended JSON, vehicle overrides, shipping) for PDF fields.
+            val purchases = applyReadAdapters(
+                selectedIds.mapNotNull { id -> purchaseRepository.findById(id).orElse(null) },
+            )
             
             if (purchases.isEmpty()) {
                 throw IllegalArgumentException("No purchases found for the selected IDs")
@@ -1504,10 +1637,9 @@ class PurchaseService(
         Logger.log("Starting Rixo Transport PDF generation for ${selectedIds.size} purchases")
         
         try {
-            // Get selected purchases
-            val purchases = selectedIds.mapNotNull { id ->
-                purchaseRepository.findById(id).orElse(null)
-            }
+            val purchases = applyReadAdapters(
+                selectedIds.mapNotNull { id -> purchaseRepository.findById(id).orElse(null) },
+            )
             
             if (purchases.isEmpty()) {
                 throw IllegalArgumentException("No purchases found for the selected IDs")
@@ -1568,10 +1700,9 @@ class PurchaseService(
         Logger.log("Starting Rixo text generation for ${selectedIds.size} purchases")
         
         try {
-            // Get selected purchases
-            val purchases = selectedIds.mapNotNull { id ->
-                purchaseRepository.findById(id).orElse(null)
-            }
+            val purchases = applyReadAdapters(
+                selectedIds.mapNotNull { id -> purchaseRepository.findById(id).orElse(null) },
+            )
             
             if (purchases.isEmpty()) {
                 throw IllegalArgumentException("No purchases found for the selected IDs")
@@ -1616,8 +1747,7 @@ class PurchaseService(
     }
     
     fun getPurchaseByChassis(chassis: String): Purchase? {
-        // Return first purchase with this chassis (since chassis is no longer unique)
-        return purchaseRepository.findByChassis(chassis).firstOrNull()
+        return applyReadAdapterOrNull(purchaseRepository.findByChassis(chassis).firstOrNull())
     }
     
     /** Used by Car Booking country dropdown: at least one chassis Rixo-confirmed and booking not requested yet. */
@@ -1686,18 +1816,26 @@ class PurchaseService(
         if (desiredPol.isBlank()) return emptyList()
 
         val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
-        return purchases
-            .filter { p ->
-                effectivePol(p.pol, p.stockLocation)?.equals(desiredPol, ignoreCase = true) == true
-            }
-            // keep deterministic order for the UI
-            .sortedBy { it.chassis }
+        return applyReadAdapters(
+            purchases
+                .filter { p ->
+                    effectivePol(p.pol, p.stockLocation)?.equals(desiredPol, ignoreCase = true) == true
+                }
+                .sortedBy { it.chassis },
+        )
     }
     
     fun getChassisWithoutBookingRequestByPol(polPort: String): List<String> {
         return purchaseRepository.findUnshippedChassisByPolPort(polPort)
     }
+
+    @Transactional(readOnly = true)
+    fun getCostDetailsByChassis(chassis: String): Map<String, Any>? {
+        val purchase = getPurchaseByChassis(chassis) ?: return null
+        return purchaseCostLineService.buildCostsByChassisApiMap(purchase)
+    }
     
+    @Transactional
     fun saveCarCostDetails(
         chassis: String,
         carPrice: Double,
@@ -1716,7 +1854,6 @@ class PurchaseService(
         if (existingPurchases.isNotEmpty()) {
             // Update all purchases with this chassis (since chassis is no longer unique)
             existingPurchases.forEach { existingPurchase ->
-                // Create a new Purchase object with updated cost details
                 val updatedPurchase = existingPurchase.copy(
                     price = carPrice.toString(),
                     auctionFee = auctionFee.toString(),
@@ -1731,8 +1868,8 @@ class PurchaseService(
                     isPackageMode = isPackageMode,
                     updatedAt = java.time.LocalDateTime.now()
                 )
-                
-                purchaseRepository.save(updatedPurchase)
+                persistPurchase(updatedPurchase)
+                finalizePurchaseWrite(updatedPurchase)
             }
             purchaseWorkflowService.recomputeByPurchaseIds(existingPurchases.mapNotNull { it.id })
             Logger.debug("Updated cost details for chassis: $chassis (${existingPurchases.size} purchase(s))")
@@ -1741,6 +1878,7 @@ class PurchaseService(
         }
     }
 
+    @Transactional
     fun saveFobCarCostDetails(
         chassis: String,
         carPrice: Double,
@@ -1757,7 +1895,6 @@ class PurchaseService(
         if (existingPurchases.isNotEmpty()) {
             // Update all purchases with this chassis (since chassis is no longer unique)
             existingPurchases.forEach { existingPurchase ->
-                // Create a new Purchase object with updated FOB cost details
                 val updatedPurchase = existingPurchase.copy(
                     price = carPrice.toString(),
                     auctionFee = auctionFee.toString(),
@@ -1770,8 +1907,8 @@ class PurchaseService(
                     profit = java.math.BigDecimal(profit),
                     updatedAt = java.time.LocalDateTime.now()
                 )
-                
-                purchaseRepository.save(updatedPurchase)
+                persistPurchase(updatedPurchase)
+                finalizePurchaseWrite(updatedPurchase)
             }
             purchaseWorkflowService.recomputeByPurchaseIds(existingPurchases.mapNotNull { it.id })
             Logger.debug("Updated FOB cost details for chassis: $chassis (${existingPurchases.size} purchase(s))")

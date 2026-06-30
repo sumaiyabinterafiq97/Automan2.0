@@ -1,0 +1,170 @@
+backend/src/main/kotlin/db/migration/V8__BackfillRixoPolFromStockLocation.kt:9: * Sets [rixo_prices.pol] from [rixo_prices.stock_location] using [RixoPolFromStockLocation].
+backend/src/main/kotlin/db/migration/V8__BackfillRixoPolFromStockLocation.kt:18:            st.executeQuery("SELECT id, stock_location FROM rixo_prices").use { rs ->
+backend/src/main/kotlin/db/migration/V8__BackfillRixoPolFromStockLocation.kt:24:        conn.prepareStatement("UPDATE rixo_prices SET pol = ? WHERE id = ?").use { ps ->
+backend/src/main/kotlin/com/automan/backend/util/RixoPolFromStockLocation.kt:4: * Derives Port of Loading (POL) for `rixo_prices` from semicolon/comma-separated stock locations.
+backend/src/main/kotlin/com/automan/backend/service/RixoImportService.kt:138:     * rixo_prices (avoids 500s when the DB was trimmed, e.g. no type_of_vehicle).
+backend/src/main/kotlin/com/automan/backend/service/RixoImportService.kt:144:            FROM rixo_prices
+backend/src/main/kotlin/com/automan/backend/service/RixoImportService.kt:219:    /** No price column on rixo_prices; vehicle types live in master_menu. */
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:113:    @Column(name = "auction_fee")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:114:    val auctionFee: String? = null,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:116:    @Column(name = "auction_penalty_fee")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:119:    @Column(name = "recycle_fee")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:122:    @Column(name = "road_tax")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:125:    @Column(name = "tax_total")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:172:    @Column(name = "shipment_charges")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:173:    val shipmentCharges: String? = null,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:175:    @Column(name = "freight")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:176:    val freight: String? = null,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:178:    @Column(name = "storage_charges")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:181:    @Column(name = "misc_charges")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:184:    @Column(name = "inspection_fee")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:187:    @Column(name = "commission")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:188:    val commission: String? = null,
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:190:    @Column(name = "rixo_price")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:210:    @Column(name = "repair_charges")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:214:    @Column(name = "profit")
+backend/src/main/kotlin/com/automan/backend/model/Purchase.kt:215:    val profit: java.math.BigDecimal? = null,
+backend/src/main/kotlin/com/automan/backend/dto/SupplierMapPageResponse.kt:3:/** Paginated Supplier Map search (rixo_prices). */
+backend/src/main/kotlin/com/automan/backend/service/PdfService.kt:110:            .add(Paragraph("Price Type: ${request.priceType}").setFontSize(10f))
+backend/src/main/kotlin/com/automan/backend/controller/CalculationController.kt:17:    @PostMapping("/freight")
+backend/src/main/kotlin/com/automan/backend/controller/CalculationController.kt:23:            Logger.warn("Invalid request for freight calculation: ${e.message}")
+backend/src/main/kotlin/com/automan/backend/controller/CalculationController.kt:33:            Logger.error("Error calculating freight: ${e.message}", e)
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:40:                priceType = e.priceType,
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:62:        val priceType = request.priceType?.trim()?.takeIf { it.isNotEmpty() }
+backend/src/main/kotlin/com/automan/backend/service/ShippingHistoryService.kt:168:            priceType = first.priceType,
+backend/src/main/kotlin/com/automan/backend/model/RixoPrice.kt:8:@Table(name = "rixo_prices")
+backend/src/main/kotlin/com/automan/backend/repository/PurchaseRepository.kt:26:           "LOWER(p.price) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+backend/src/test/kotlin/com/automan/backend/service/PurchaseCostLineServiceTest.kt:31:            auctionFee = "5000",
+backend/src/test/kotlin/com/automan/backend/service/PurchaseCostLineServiceTest.kt:32:            profit = BigDecimal("2500.00"),
+backend/src/test/kotlin/com/automan/backend/service/PurchaseCostLineServiceTest.kt:76:        val purchase = Purchase(id = 1L, chassis = "X", price = "5000", freight = "100")
+backend/src/test/kotlin/com/automan/backend/service/PurchaseCostLineServiceTest.kt:79:        assertEquals(BigDecimal("100"), map["freight"])
+backend/src/main/kotlin/com/automan/backend/controller/RixoImportController.kt:237:                "data" to result.price
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:282:                price = purchase.price ?: existingPurchase.price,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:283:                auctionFee = purchase.auctionFee ?: existingPurchase.auctionFee,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:300:                shipmentCharges = purchase.shipmentCharges ?: existingPurchase.shipmentCharges,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:301:                freight = purchase.freight ?: existingPurchase.freight,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:305:                commission = purchase.commission ?: existingPurchase.commission,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:465:                price = updateData["price"] as? String ?: existingPurchase.price,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:466:                auctionFee = updateData["auctionFee"] as? String ?: existingPurchase.auctionFee,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:478:                shipmentCharges = updateData["shipmentCharges"] as? String ?: existingPurchase.shipmentCharges,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:479:                freight = updateData["freight"] as? String ?: existingPurchase.freight,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:483:                commission = updateData["commission"] as? String ?: existingPurchase.commission,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1384:            auctionFee = getColumnValue(values, columnMapping, "AUCTION FEE")?.take(10) ?: "",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1396:            shipmentCharges = getColumnValue(values, columnMapping, "SHIPMENT CHARGES")?.take(10) ?: "",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1397:            freight = getColumnValue(values, columnMapping, "FREIGHT")?.take(10) ?: "",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1401:            commission = getColumnValue(values, columnMapping, "COMMISSION")?.take(10) ?: "",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1827:        auctionFee: Double,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1831:        freight: Double,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1835:        profit: Double,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1844:                    auctionFee = auctionFee.toString(),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1847:                    shipmentCharges = shippingCharge.toString(),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1848:                    freight = freight.toString(),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1852:                    profit = java.math.BigDecimal(profit),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1870:        auctionFee: Double,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1877:        profit: Double
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1885:                    auctionFee = auctionFee.toString(),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1888:                    shipmentCharges = shippingCharge.toString(),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:1892:                    profit = java.math.BigDecimal(profit),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:2005:                    val carPrice = try { java.math.BigDecimal(purchase.price ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:2011:                        val auctionFee = try { java.math.BigDecimal(purchase.auctionFee ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:2013:                        val shipmentCharges = try { java.math.BigDecimal(purchase.shipmentCharges ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:2014:                        val freight = try { java.math.BigDecimal(purchase.freight ?: "0") } catch (e: Exception) { java.math.BigDecimal.ZERO }
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:2018:                        val profit = purchase.profit ?: java.math.BigDecimal.ZERO
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:2020:                        carPrice.add(auctionFee).add(rixoPrice).add(shipmentCharges)
+backend/src/main/kotlin/com/automan/backend/service/PurchaseService.kt:2021:                            .add(freight).add(inspectionFee).add(repairCharges).add(miscCharges).add(profit)
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:55:                priceType = h.priceType,
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:133:            priceType = pdf.priceType.trim().takeIf { it.isNotEmpty() },
+backend/src/main/kotlin/com/automan/backend/service/InvoiceHistoryService.kt:533:            priceType = header.priceType?.trim()?.takeIf { it.isNotEmpty() } ?: "C&F",
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:29:            CostFieldMapping("PRICE", 1, { it.price }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:30:            CostFieldMapping("AUCTION_FEE", 2, { it.auctionFee }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:36:            CostFieldMapping("SHIPMENT_CHARGES", 8, { it.shipmentCharges }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:37:            CostFieldMapping("FREIGHT", 9, { it.freight }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:41:            CostFieldMapping("COMMISSION", 13, { it.commission }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:44:            CostFieldMapping("PROFIT", 16, { null }, { it.profit }),
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:120:            "carPrice" to resolveApiAmount("PRICE", lineAmounts) { parseMoneyString(purchase.price) ?: BigDecimal.ZERO },
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:121:            "auctionFee" to resolveApiAmount("AUCTION_FEE", lineAmounts) { parseMoneyString(purchase.auctionFee) ?: BigDecimal.ZERO },
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:127:                parseMoneyString(purchase.shipmentCharges) ?: BigDecimal.ZERO
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:129:            "freight" to resolveApiAmount("FREIGHT", lineAmounts) { parseMoneyString(purchase.freight) ?: BigDecimal.ZERO },
+backend/src/main/kotlin/com/automan/backend/service/PurchaseCostLineService.kt:137:            "profit" to resolveApiAmount("PROFIT", lineAmounts) { purchase.profit ?: BigDecimal.ZERO },
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:202:            val auctionFee = (costData["auctionFee"] as? Number)?.toDouble() ?: 0.0
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:206:            val freight = (costData["freight"] as? Number)?.toDouble() ?: 0.0
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:210:            val profit = (costData["profit"] as? Number)?.toDouble() ?: 0.0
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:217:                chassis, carPrice, auctionFee, auctionPenaltyFee, rixoPrice, shippingCharge,
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:218:                freight, inspectionFee, repairFee, mscCharges, profit, isPackageMode
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:232:            val auctionFee = (costData["auctionFee"] as? Number)?.toDouble() ?: 0.0
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:239:            val profit = (costData["profit"] as? Number)?.toDouble() ?: 0.0
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:242:                chassis, carPrice, auctionFee, auctionPenaltyFee, rixoPrice, shippingCharge,
+backend/src/main/kotlin/com/automan/backend/controller/PurchaseController.kt:243:                inspectionFee, repairFee, mscCharges, profit
+backend/src/main/kotlin/com/automan/backend/model/RixoMapping.kt:26:    @Column(name = "rixo_price", nullable = true)
+backend/src/main/kotlin/com/automan/backend/model/CarBrandMapping.kt:55:    @Column(name = "recycle_fee", columnDefinition = "TEXT")
+backend/src/main/kotlin/com/automan/backend/service/CalculationService.kt:16:                        request.inspectionFee + request.fobPrice + request.freightPrice + request.insurance
+backend/src/main/kotlin/com/automan/backend/service/CalculationService.kt:24:            "freightPrice" to request.freightPrice,
+backend/src/main/kotlin/com/automan/backend/service/CalculationService.kt:47:            "freightPrice" to request.freightPrice,
+backend/src/main/kotlin/com/automan/backend/service/CalculationService.kt:62:                        request.inspectionFee + request.fobPrice + request.freightPrice + request.insurance
+backend/src/main/kotlin/com/automan/backend/service/CalculationService.kt:70:            "freightPrice" to request.freightPrice,
+backend/src/main/kotlin/com/automan/backend/service/CalculationService.kt:89:                       request.inspectionFee + request.fobPrice + request.freightPrice + request.insurance
+backend/src/main/kotlin/com/automan/backend/service/CalculationService.kt:101:            "freightPrice" to request.freightPrice,
+backend/src/main/kotlin/com/automan/backend/service/CalculationService.kt:118:                       request.inspectionFee + request.fobPrice + request.freightPrice + request.insurance
+backend/src/test/kotlin/com/automan/backend/service/CalculationServiceTest.kt:35:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/service/CalculationServiceTest.kt:52:        assertEquals(400.0, result.breakdown["freightPrice"])
+backend/src/test/kotlin/com/automan/backend/service/CalculationServiceTest.kt:69:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/service/CalculationServiceTest.kt:97:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/service/CalculationServiceTest.kt:119:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/service/CalculationServiceTest.kt:149:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/service/CalculationServiceTest.kt:175:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:53:                    """{"chassis":"COST-DW-1","carPrice":100000,"auctionFee":5000,"auctionPenaltyFee":0,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:54:                    |"rixoPrice":2000,"shippingCharge":3000,"freight":4000,"inspectionFee":500,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:55:                    |"repairFee":600,"mscCharges":700,"profit":800,"isPackageMode":false}""".trimMargin(),
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:71:                freight = "1",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:94:            .andExpect(jsonPath("$.freight").value(1200))
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:103:                shipmentCharges = "900",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:104:                profit = BigDecimal("100"),
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:112:            .andExpect(jsonPath("$.profit").value(100))
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:118:            basePurchase("PUT-DW-1").copy(price = "100", auctionFee = "50"),
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:140:                .content("""{"price":"¥999","auctionFee":"¥888","chassis":"PUT-DW-1"}"""),
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:158:        auctionFee = "500.00",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:168:        shipmentCharges = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:169:        freight = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCostLineIntegrationTest.kt:173:        commission = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:121:        auctionFee = "500.00",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:131:        shipmentCharges = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:132:        freight = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseWorkflowPhase1IntegrationTest.kt:136:        commission = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:108:            auctionFee = "500.00",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:116:            shipmentCharges = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:117:            freight = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseCountriesBookingIntegrationTest.kt:121:            commission = "0",
+backend/src/main/kotlin/com/automan/backend/model/dto/CalculationRequest.kt:10:    val freightPrice: Double,
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:176:        auctionFee = "500.00",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:186:        shipmentCharges = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:187:        freight = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseVehicleOverrideIntegrationTest.kt:191:        commission = "0",
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:35:    fun `POST api calculations freight should calculate freight successfully`() {
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:44:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:51:            post("/api/calculations/freight")
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:65:            .andExpect(jsonPath("$.breakdown.freightPrice").value(400.0))
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:79:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:108:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:136:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:167:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:192:            freightPrice = 400.0,
+backend/src/test/kotlin/com/automan/backend/controller/CalculationControllerIntegrationTest.kt:236:            freightPrice = 400.0,
+backend/src/main/kotlin/com/automan/backend/service/CarBrandMappingService.kt:480:     * The recycle_fee column stores a semicolon-delimited string of "YYYY-MM:fee" pairs,
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:117:        add("price", str(before.price), str(after.price))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:118:        add("auctionFee", str(before.auctionFee), str(after.auctionFee))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:133:        add("shipmentCharges", str(before.shipmentCharges), str(after.shipmentCharges))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:134:        add("freight", str(before.freight), str(after.freight))
+backend/src/main/kotlin/com/automan/backend/service/PurchaseChangeHistoryService.kt:138:        add("commission", str(before.commission), str(after.commission))
+backend/src/test/kotlin/com/automan/backend/controller/CarSearchControllerIntegrationTest.kt:224:            auctionFee = "500.00",
+backend/src/test/kotlin/com/automan/backend/controller/CarSearchControllerIntegrationTest.kt:236:            shipmentCharges = "1000.00",
+backend/src/test/kotlin/com/automan/backend/controller/CarSearchControllerIntegrationTest.kt:237:            freight = "800.00",
+backend/src/test/kotlin/com/automan/backend/controller/CarSearchControllerIntegrationTest.kt:241:            commission = "200.00",
+backend/src/test/kotlin/com/automan/backend/controller/ShippingSnapshotIntegrationTest.kt:121:        shipmentCharges = "0",
+backend/src/test/kotlin/com/automan/backend/controller/ShippingSnapshotIntegrationTest.kt:122:        freight = "0",
+backend/src/test/kotlin/com/automan/backend/controller/ShippingSnapshotIntegrationTest.kt:126:        commission = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseExtendedAttributesIntegrationTest.kt:115:        auctionFee = "500.00",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseExtendedAttributesIntegrationTest.kt:125:        shipmentCharges = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseExtendedAttributesIntegrationTest.kt:126:        freight = "0",
+backend/src/test/kotlin/com/automan/backend/controller/PurchaseExtendedAttributesIntegrationTest.kt:130:        commission = "0",
+backend/src/test/kotlin/com/automan/backend/service/PurchaseChangeHistoryServiceTest.kt:29:        val before = Purchase(id = 6L, chassis = "ACV30", price = "0", auctionFee = "0")
+backend/src/test/kotlin/com/automan/backend/service/PurchaseChangeHistoryServiceTest.kt:30:        val after = before.copy(price = "100", auctionFee = "200", recycleFee = "300")

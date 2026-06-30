@@ -3330,18 +3330,7 @@ fun setupEditableComboboxHandlers() {
             // Lazy rebuild supplier master comboboxes if populate/clear stripped mapping + separator
             var supplierMasterOpenIds = ['stockLocation','editStockLocation','rixoCompany','editRixoCompany','venueId','editVenueId','pol','editPol'];
             if (supplierMasterOpenIds.indexOf(selectId) !== -1 && typeof window.ensureSupplierMasterComboboxReady === 'function') {
-                if (window.__supplierComboboxRebuildForOpen === selectId) {
-                    window.__supplierComboboxRebuildForOpen = null;
-                } else if (!window.ensureSupplierMasterComboboxReady(selectId)) {
-                    window.__supplierComboboxRebuildForOpen = selectId;
-                    setTimeout(function() {
-                        if (window.__supplierComboboxRebuildForOpen === selectId) {
-                            window.__supplierComboboxRebuildForOpen = null;
-                            window.openComboboxDropdown(selectId);
-                        }
-                    }, 120);
-                    return;
-                }
+                window.ensureSupplierMasterComboboxReady(selectId);
             }
             
             // ALWAYS close all other dropdowns first to prevent conflicts
@@ -7687,9 +7676,46 @@ fun setupRixoDropdowns() {
             clearDropdown('rixoPrice');
             clearDropdown('editRixoPrice');
 
+            function firstSemicolonTokenJs(v) {
+                if (v == null || v === undefined) return '';
+                var s = String(v).trim();
+                if (!s) return '';
+                var parts = s.split(';').map(function(x) { return x.trim(); }).filter(function(x) { return x.length > 0; });
+                return parts.length ? parts[0] : s;
+            }
+
+            function resolveEditSupplierRebuildSnapshot() {
+                if (!document.getElementById('editForm')) return null;
+                var snap = null;
+                if (typeof window.__snapshotSupplierFormForPreserve === 'function') {
+                    snap = window.__snapshotSupplierFormForPreserve();
+                }
+                var pd = window.__editPurchaseDataForRixo;
+                var auction = '';
+                if (snap && snap.auction) auction = String(snap.auction).trim();
+                if (!auction && pd) auction = (pd.auctionHouse || '').toString().trim();
+                if (!auction && typeof window.getComboboxValue === 'function') {
+                    auction = (window.getComboboxValue('editAuctionName') || '').trim();
+                }
+                if (!auction || auction === '__add_new_supplier__') return null;
+                if (!snap) snap = {};
+                snap.auction = auction;
+                snap.isEdit = true;
+                if (!snap.stock && pd) snap.stock = firstSemicolonTokenJs(pd.stockLocation || pd.stock_location);
+                if (!snap.venue && pd) snap.venue = firstSemicolonTokenJs(pd.venueId || pd.venue_id);
+                if (!snap.rixo && pd) snap.rixo = firstSemicolonTokenJs(pd.rixoCompany || pd.rixo_company);
+                if (!snap.pol && pd) snap.pol = firstSemicolonTokenJs(pd.pol);
+                return snap;
+            }
+
             function reapplySupplierDropdownsFromCurrentAuction() {
                 var auction = '';
-                if (typeof window.getComboboxValue === 'function') {
+                var preserveSnap = null;
+                if (document.getElementById('editForm')) {
+                    preserveSnap = resolveEditSupplierRebuildSnapshot();
+                    if (preserveSnap) auction = preserveSnap.auction;
+                }
+                if (!auction && typeof window.getComboboxValue === 'function') {
                     if (document.getElementById('editAuctionName')) {
                         auction = (window.getComboboxValue('editAuctionName') || '').trim();
                     } else if (document.getElementById('auctionName')) {
@@ -7698,11 +7724,21 @@ fun setupRixoDropdowns() {
                 }
                 if (!auction || auction === '__add_new_supplier__') return;
                 if (typeof window.rebuildSupplierDependentDropdowns === 'function') {
-                    window.rebuildSupplierDependentDropdowns(auction, {
+                    var rebuildOpts = {
                         autoSelect: false,
-                        restoreValues: true,
-                        restoreDelay: 80
-                    });
+                        restoreDelay: document.getElementById('editForm') ? 0 : 80
+                    };
+                    if (preserveSnap) {
+                        rebuildOpts.preserveSnapshot = preserveSnap;
+                    } else {
+                        rebuildOpts.restoreValues = true;
+                    }
+                    window.rebuildSupplierDependentDropdowns(auction, rebuildOpts);
+                    if (preserveSnap && preserveSnap.stock && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+                        var mp = (typeof window.getPolTokensFromRixoMappingForSupplier === 'function')
+                            ? window.getPolTokensFromRixoMappingForSupplier(auction) : null;
+                        window.fetchPolsByStockLocationAndUpdate(auction, preserveSnap.stock, false, mp).catch(function() {});
+                    }
                 } else if (typeof window.autoSelectRelatedFields === 'function') {
                     window.autoSelectRelatedFields(auction, 'auctionHouse', auction);
                 }
@@ -7729,67 +7765,6 @@ fun setupRixoDropdowns() {
                 .catch(function(err) {
                     console.warn('Failed to load type_of_vehicle master data:', err);
                 });
-            // populateDropdownOptions clears edit Stock Location / POL / etc. When Rixo loads after the edit form
-            // is filled, those selects only have placeholders — re-apply mapping + saved values (fixes dropdown open / "not found in options").
-            setTimeout(function() {
-                try {
-                    var pd = window.__editPurchaseDataForRixo;
-                    if (!pd || !document.getElementById('editForm')) return;
-                    var auction = (pd.auctionHouse || '').toString().trim();
-                    if (!auction) return;
-                    if (typeof window.rixoPriceMapping === 'undefined' || !window.rixoPriceMapping[auction]) return;
-                    function fsd(v) {
-                        if (v == null || v === undefined) return '';
-                        var s = String(v).trim();
-                        if (!s) return '';
-                        var parts = s.split(';').map(function(x) { return x.trim(); }).filter(function(x) { return x.length > 0; });
-                        return parts.length ? parts[0] : s;
-                    }
-                    var eAuc = document.getElementById('editAuctionName');
-                    var eAucIn = document.getElementById('editAuctionNameInput');
-                    if (eAuc && auction) {
-                        window.__suppressSupplierModalFlow = true;
-                        var hasA = false;
-                        for (var ai = 0; ai < eAuc.options.length; ai++) {
-                            if (eAuc.options[ai].value === auction) { hasA = true; break; }
-                        }
-                        if (!hasA) {
-                            var ao = document.createElement('option');
-                            ao.value = auction;
-                            ao.textContent = auction;
-                            eAuc.appendChild(ao);
-                        }
-                        eAuc.value = auction;
-                        if (eAucIn) eAucIn.value = auction;
-                        if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('editAuctionName');
-                        setTimeout(function() { window.__suppressSupplierModalFlow = false; }, 300);
-                    }
-                    var editSnap = {
-                        auction: auction,
-                        stock: fsd(pd.stockLocation),
-                        pol: fsd(pd.pol),
-                        rixo: fsd(pd.rixoCompany),
-                        venue: fsd(pd.venueId)
-                    };
-                    if (typeof window.rebuildSupplierDependentDropdowns === 'function') {
-                        window.rebuildSupplierDependentDropdowns(auction, {
-                            autoSelect: false,
-                            preserveSnapshot: editSnap,
-                            restoreDelay: 100
-                        });
-                    } else if (typeof window.updateDropdownOptions === 'function') {
-                        window.updateDropdownOptions(auction);
-                    }
-                    if (pd.stockLocation && pd.auctionHouse && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                        var mp = (typeof window.getPolTokensFromRixoMappingForSupplier === 'function')
-                            ? window.getPolTokensFromRixoMappingForSupplier(pd.auctionHouse) : null;
-                        window.fetchPolsByStockLocationAndUpdate(pd.auctionHouse, fsd(pd.stockLocation), false, mp).catch(function() {});
-                    }
-                    console.log('✅ Re-applied edit supplier combobox options after populateDropdownOptions (Rixo init)');
-                } catch (e) {
-                    console.warn('reapply edit after populateDropdownOptions:', e);
-                }
-            }, 0);
             }
             
             return new Promise(function(resolve) {
@@ -8077,17 +8052,20 @@ fun setupRixoDropdowns() {
         window.selectRixoPrice = selectRixoPrice;
         window.selectEditRixoPrice = selectEditRixoPrice;
 
-        // Fill Rixo Price using rixo_mapping (stock_location + rixo_company + supported_vehicle_type)
+        // Fill Rixo Price using rixo_mapping (auction_name + rixo_company + stock_location + supported_vehicle_type)
         window.calculateRixoPriceFromMapping = function(isEditForm) {
+            var auctionNameId = isEditForm ? 'editAuctionName' : 'auctionName';
             var stockLocationId = isEditForm ? 'editStockLocation' : 'stockLocation';
             var rixoCompanyId = isEditForm ? 'editRixoCompany' : 'rixoCompany';
             var vehicleTypeId = isEditForm ? 'editShipmentSize' : 'shipmentSize';
             var rixoPriceInputId = isEditForm ? 'editRixoPriceInput' : 'rixoPriceInput';
 
+            var auctionName = window.getComboboxValue ? window.getComboboxValue(auctionNameId) : '';
             var stockLocation = window.getComboboxValue ? window.getComboboxValue(stockLocationId) : '';
             var rixoCompany = window.getComboboxValue ? window.getComboboxValue(rixoCompanyId) : '';
             var vehicleType = window.getComboboxValue ? window.getComboboxValue(vehicleTypeId) : '';
 
+            auctionName = (auctionName || '').toString().trim();
             stockLocation = (stockLocation || '').toString().trim();
             rixoCompany = (rixoCompany || '').toString().trim();
             vehicleType = (vehicleType || '').toString().trim();
@@ -8095,9 +8073,9 @@ fun setupRixoDropdowns() {
             var input = document.getElementById(rixoPriceInputId);
             if (!input) return;
 
-            if (!stockLocation || !rixoCompany || !vehicleType) {
+            if (!auctionName || !stockLocation || !rixoCompany || !vehicleType) {
                 if (typeof window.showMessage === 'function') {
-                    window.showMessage('Please select Stock Location, Rixo Company, and Vehicle type before calculating Rixo Price.', 'error');
+                    window.showMessage('Please select Supplier Name, Rixo Company, Stock Location, and Vehicle type before calculating Rixo Price.', 'error');
                 }
                 return;
             }
@@ -8106,6 +8084,7 @@ fun setupRixoDropdowns() {
             input.value = input.value || '';
 
             var url = apiUrl('rixo-mapping/lookup?' +
+                'auctionName=' + encodeURIComponent(auctionName) + '&' +
                 'stockLocation=' + encodeURIComponent(stockLocation) + '&' +
                 'rixoCompany=' + encodeURIComponent(rixoCompany) + '&' +
                 'supportedVehicleType=' + encodeURIComponent(vehicleType)
@@ -10687,6 +10666,34 @@ private fun chassisMappingNeedsFieldDisambiguation(uniqueValuesObj: dynamic): Bo
     return keys.any { flattenSemicolonChoices(tokensForKey(it)).size > 1 }
 }
 
+/** Seed edit purchase supplier snapshot before Rixo init so populateDropdownOptions can rebuild comboboxes. */
+private fun seedEditPurchaseRixoSnapshot(purchaseData: dynamic) {
+    window.asDynamic().__editPurchaseDataForRixo = purchaseData
+    window.asDynamic().__editPurchaseHydrating = true
+    js("""
+        (function() {
+            var pd = window.__editPurchaseDataForRixo;
+            if (!pd) return;
+            function fsd(v) {
+                if (v == null || v === undefined) return '';
+                var s = String(v).trim();
+                if (!s) return '';
+                var parts = s.split(';').map(function(x) { return x.trim(); }).filter(function(x) { return x.length > 0; });
+                return parts.length ? parts[0] : s;
+            }
+            var auc = (pd.auctionHouse || pd.auction_house || '').toString().trim();
+            window.__rixoSupplierPreserveSnapshot = {
+                auction: auc,
+                stock: fsd(pd.stockLocation || pd.stock_location),
+                venue: fsd(pd.venueId || pd.venue_id),
+                rixo: fsd(pd.rixoCompany || pd.rixo_company),
+                pol: fsd(pd.pol),
+                isEdit: true
+            };
+        })();
+    """)
+}
+
 /** Force edit form chassis-dependent fields from saved purchase row (DB wins over mapping autofill). */
 private fun applySavedPurchaseFieldSnapshot(purchaseForMerge: dynamic) {
     val pd = purchaseForMerge.unsafeCast<dynamic>()
@@ -10697,6 +10704,37 @@ private fun applySavedPurchaseFieldSnapshot(purchaseForMerge: dynamic) {
             is Number -> raw.toString().trim()
             else -> raw.toString().trim()
         }
+    }
+    val auctionHouse = firstSemicolonToken(pdStr(pd.auctionHouse))
+    if (auctionHouse.isNotBlank()) {
+        window.asDynamic().__snapRebuildAuction = auctionHouse
+        window.asDynamic().__snapRebuildPd = purchaseForMerge
+        js("""
+            (function() {
+                var auc = window.__snapRebuildAuction;
+                var pd = window.__snapRebuildPd;
+                if (!auc || !pd || typeof window.rebuildSupplierDependentDropdowns !== 'function') return;
+                function fsd(v) {
+                    if (v == null || v === undefined) return '';
+                    var s = String(v).trim();
+                    if (!s) return '';
+                    var parts = s.split(';').map(function(x) { return x.trim(); }).filter(function(x) { return x.length > 0; });
+                    return parts.length ? parts[0] : s;
+                }
+                window.rebuildSupplierDependentDropdowns(auc, {
+                    autoSelect: false,
+                    preserveSnapshot: {
+                        auction: auc,
+                        stock: fsd(pd.stockLocation || pd.stock_location),
+                        pol: fsd(pd.pol),
+                        rixo: fsd(pd.rixoCompany || pd.rixo_company),
+                        venue: fsd(pd.venueId || pd.venue_id),
+                        isEdit: true
+                    },
+                    restoreDelay: 0
+                });
+            })();
+        """)
     }
     fun pdCcDoorSeat(raw: dynamic?): String {
         val s = pdStr(raw)
@@ -14499,7 +14537,7 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     purchaseData.blNo = (document.getElementById("blNo") as? HTMLInputElement)?.value ?: ""
     purchaseData.vessel = (document.getElementById("purchaseVessel") as? HTMLInputElement)?.value ?: ""
     val addBookingRaw = (document.getElementById("addPurchaseBookingId") as? HTMLInputElement)?.value?.trim() ?: ""
-    purchaseData.bookingId = if (addBookingRaw.isNotEmpty()) addBookingRaw.toLongOrNull() else null
+    purchaseData.bookingId = bookingIdForJsonRaw(addBookingRaw)
     purchaseData.destination = (document.getElementById("destination") as? HTMLInputElement)?.value ?: ""
     val shipmentChargesValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('shipmentCharges') : ''").unsafeCast<String>().trim()
     purchaseData.shipmentCharges = if (shipmentChargesValue.isNotBlank()) "¥$shipmentChargesValue" else ""
@@ -14630,6 +14668,7 @@ private fun loadPurchaseForEdit(fetchUrl: String) {
 fun showEditFormWithData(purchaseData: dynamic) {
     // Ensure scrolling is enabled when showing form
     js("if (typeof window.ensureScrollingRestored === 'function') { window.ensureScrollingRestored(); }")
+    seedEditPurchaseRixoSnapshot(purchaseData)
     val chassisForRoute = purchaseData.chassis?.toString()?.trim() ?: ""
     if (chassisForRoute.isNotEmpty()) {
         val route = editPurchaseRouteFromChassis(chassisForRoute)
@@ -14657,6 +14696,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
     val editDriveDisp = firstDisplayToken(purchaseData.driveType)
     val editShipDisp = firstDisplayToken(purchaseData.shipmentSize ?: purchaseData.vehicleType)
     val editGradeDisp = firstDisplayToken(purchaseData.grade?.toString())
+    val editVenueDisp = firstDisplayToken(purchaseData.venueId?.toString())
+    val editStockDisp = firstDisplayToken(purchaseData.stockLocation?.toString())
     val wdFirstIs4Wd = editWdDisp.contains("4", ignoreCase = true)
     val editPurchaseDateIsoInitial =
         toIsoFromLabel(purchaseData.date).takeUnless { it.isBlank() } ?: todayIsoLocalDate()
@@ -14950,23 +14991,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Venue ID</label>
-                        <div style="position: relative; width: 100%;">
-                            <input type="text" id="editVenueIdInput" value="${purchaseData.venueId ?: ""}" placeholder="Select Venue ID" 
-                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
-                                   autocomplete="off"
-                                   onfocus="this.select();">
-                            <select id="editVenueId" 
-                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
-                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editVenueId');"
-                                    onchange="syncComboboxInput('editVenueId')">
-                                <option value="">▼</option>
-                                ${if (purchaseData.venueId != null) "<option value=\"${purchaseData.venueId}\" selected>${purchaseData.venueId}</option>" else ""}
-                        </select>
-                            <div id="editVenueIdButton" onclick="openComboboxDropdown('editVenueId')" 
-                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
-                                ▼
-                            </div>
-                        </div>
+                        ${createEditableCombobox("editVenueId", "Select Venue ID", initialValue = editVenueDisp)}
                     </div>
                 </div>
                 
@@ -14978,22 +15003,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Stock Location</label>
-                        <div style="position: relative; width: 100%;">
-                            <input type="text" id="editStockLocationInput" value="${purchaseData.stockLocation ?: ""}" placeholder="Select Stock Location" 
-                                   style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
-                                   autocomplete="off"
-                                   onfocus="this.select();">
-                            <select id="editStockLocation" 
-                                    style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0;"
-                                    onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('editStockLocation');"
-                                    onchange="syncComboboxInput('editStockLocation'); if (typeof window.fetchPolsAfterStockChange === 'function') { window.fetchPolsAfterStockChange('editStockLocation'); }">
-                                <option value="">▼</option>
-                        </select>
-                            <div id="editStockLocationButton" onclick="openComboboxDropdown('editStockLocation')" 
-                                 style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; z-index: 3; pointer-events: auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; color: #666; user-select: none;">
-                                ▼
-                            </div>
-                        </div>
+                        ${createEditableCombobox("editStockLocation", "Select Stock Location", initialValue = editStockDisp)}
                     </div>
                     <div>
                         <label>Rixo Price</label>
@@ -15515,25 +15525,31 @@ private fun loadEditPurchaseChangeHistory(purchaseId: Long) {
                         """<tr><td colspan="2" style="padding:16px;color:#6b7280;">No changes recorded for this purchase</td></tr>"""
                     )
                 } else {
-                    for (i in rows.indices) {
-                        val r = rows[i]
-                        val rd = r.unsafeCast<dynamic>()
-                        val tsRaw = rd.changedAt?.toString() ?: ""
-                        val fname = rd.fieldName?.toString() ?: ""
-                        val oldV = rd.oldValue
-                        val newV = rd.newValue
-                        val oldS = if (oldV == null || oldV == js("undefined")) "" else oldV.toString()
-                        val newS = if (newV == null || newV == js("undefined")) "" else newV.toString()
+                    // Backend writes one row per changed field; group by timestamp so one save = one expandable entry.
+                    val grouped = linkedMapOf<String, MutableList<dynamic>>()
+                    for (r in rows) {
+                        val ts = r.unsafeCast<dynamic>().changedAt?.toString()?.trim() ?: ""
+                        grouped.getOrPut(ts) { mutableListOf() }.add(r)
+                    }
+                    var groupIndex = 0
+                    for ((tsRaw, groupRows) in grouped) {
                         val dt = escapeHtml(formatPurchaseChangeHistoryDateTime(tsRaw))
-                        
-                        val rowId = "ch_details_$i"
-                        
+                        val fieldCount = groupRows.size
+                        val summarySuffix =
+                            if (fieldCount > 1) {
+                                """ <span style="color:#6b7280;font-weight:400;">($fieldCount fields)</span>"""
+                            } else {
+                                ""
+                            }
+                        val rowId = "ch_details_$groupIndex"
+                        groupIndex++
+
                         // Summary Row
                         sb.append("""<tr style="cursor:pointer;background:#f9fafb;transition:background 0.2s;" onmouseover="this.style.background='#f3f4f6'; this.querySelector('.ch-indicator').style.backgroundColor='#d1d5db';" onmouseout="this.style.background='#f9fafb'; this.querySelector('.ch-indicator').style.backgroundColor='#e5e7eb';" onclick="var el = document.getElementById('$rowId'); if(el.style.display==='none'){ el.style.display='table-row'; this.querySelector('.ch-indicator').textContent='-'; }else{ el.style.display='none'; this.querySelector('.ch-indicator').textContent='+'; }">""")
-                        sb.append("""<td style="padding:10px 10px;border-bottom:1px solid #e5e7eb;white-space:nowrap;font-weight:500;">$dt</td>""")
+                        sb.append("""<td style="padding:10px 10px;border-bottom:1px solid #e5e7eb;white-space:nowrap;font-weight:500;">$dt$summarySuffix</td>""")
                         sb.append("""<td style="padding:10px 10px;border-bottom:1px solid #e5e7eb;text-align:right;"><span class="ch-indicator" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background-color:#e5e7eb;color:#374151;font-size:18px;font-weight:bold;line-height:1;user-select:none;box-shadow:0 1px 2px rgba(0,0,0,0.05);transition:background-color 0.2s;">+</span></td>""")
                         sb.append("</tr>")
-                        
+
                         // Details Row
                         sb.append("""<tr id="$rowId" style="display:none;background:#ffffff;">""")
                         sb.append("""<td colspan="2" style="padding:16px 10px;border-bottom:1px solid #e5e7eb;">""")
@@ -15543,26 +15559,36 @@ private fun loadEditPurchaseChangeHistory(purchaseId: Long) {
                         sb.append("""<th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:600;width:35%;">Old value</th>""")
                         sb.append("""<th style="text-align:left;padding:6px 10px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-weight:600;width:35%;">New value</th>""")
                         sb.append("""</tr></thead><tbody>""")
-                        
-                        val fields = fname.split(" ; ")
-                        val oldValues = oldS.split(" ; ")
-                        val newValues = newS.split(" ; ")
-                        
-                        for (j in fields.indices) {
-                            val f = escapeHtml(purchaseChangeHistoryFieldLabel(fields[j]))
-                            val o = escapeHtml(oldValues.getOrNull(j) ?: "")
-                            val n = escapeHtml(newValues.getOrNull(j) ?: "")
-                            
-                            val displayO = if (o.isBlank()) "<span style='color:#9ca3af;font-style:italic;'>empty</span>" else "<span style='color:#ef4444;'><del>$o</del></span>"
-                            val displayN = if (n.isBlank()) "<span style='color:#9ca3af;font-style:italic;'>empty</span>" else "<span style='color:#10b981;'>$n</span>"
-                            
-                            sb.append("<tr>")
-                            sb.append("""<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-weight:500;">$f</td>""")
-                            sb.append("""<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;word-break:break-word;background:#fef2f2;">$displayO</td>""")
-                            sb.append("""<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;word-break:break-word;background:#f0fdf4;">$displayN</td>""")
-                            sb.append("</tr>")
+
+                        for (r in groupRows) {
+                            val rd = r.unsafeCast<dynamic>()
+                            val fname = rd.fieldName?.toString() ?: ""
+                            val oldV = rd.oldValue
+                            val newV = rd.newValue
+                            val oldS = if (oldV == null || oldV == js("undefined")) "" else oldV.toString()
+                            val newS = if (newV == null || newV == js("undefined")) "" else newV.toString()
+
+                            // Legacy rows may join multiple fields with " ; "
+                            val fields = fname.split(" ; ")
+                            val oldValues = oldS.split(" ; ")
+                            val newValues = newS.split(" ; ")
+
+                            for (j in fields.indices) {
+                                val f = escapeHtml(purchaseChangeHistoryFieldLabel(fields[j]))
+                                val o = escapeHtml(oldValues.getOrNull(j) ?: "")
+                                val n = escapeHtml(newValues.getOrNull(j) ?: "")
+
+                                val displayO = if (o.isBlank()) "<span style='color:#9ca3af;font-style:italic;'>empty</span>" else "<span style='color:#ef4444;'><del>$o</del></span>"
+                                val displayN = if (n.isBlank()) "<span style='color:#9ca3af;font-style:italic;'>empty</span>" else "<span style='color:#10b981;'>$n</span>"
+
+                                sb.append("<tr>")
+                                sb.append("""<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;font-weight:500;">$f</td>""")
+                                sb.append("""<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;word-break:break-word;background:#fef2f2;">$displayO</td>""")
+                                sb.append("""<td style="padding:8px 10px;border-bottom:1px solid #f3f4f6;word-break:break-word;background:#f0fdf4;">$displayN</td>""")
+                                sb.append("</tr>")
+                            }
                         }
-                        
+
                         sb.append("""</tbody></table></td></tr>""")
                     }
                 }
@@ -16454,11 +16480,7 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.negotiate = if (negotiate) true else false
     purchaseData.numberCut = numberCutString
     purchaseData.notes = notes
-    if (bookingId != null) {
-        purchaseData.bookingId = bookingId
-    } else {
-        purchaseData.bookingId = null
-    }
+    purchaseData.bookingId = bookingIdForJson(bookingId)
     
     // Include car pictures so change detection matches the save payload (edit form uses two DOM areas)
     purchaseData.carPictures = collectCarPictures()
@@ -17137,18 +17159,9 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.negotiate = if (negotiate) true else false
     purchaseData.numberCut = numberCutString
     purchaseData.notes = notes
-    // Always include bookingId in JSON to allow clearing the value
-    // If field is empty, send null to clear the value in database
-    // If field has value, send as Long (backend expects Long, not Int or Number)
-    if (bookingId != null) {
-        // Send as Long - backend expects Long type
-        purchaseData.bookingId = bookingId
-        console.log("🔍 [DEBUG] Including bookingId in update:", bookingId, "as Long")
-    } else {
-        // Explicitly set to null to clear the value in database
-        purchaseData.bookingId = null
-        console.log("🔍 [DEBUG] Setting bookingId to null to clear the value in database")
-    }
+    // Always include bookingId in JSON to allow clearing the value (plain number for Jackson Long)
+    purchaseData.bookingId = bookingIdForJson(bookingId)
+    console.log("🔍 [DEBUG] bookingId in update payload:", purchaseData.bookingId)
     
     // Debug log to verify shaken value is being sent
     console.log("🔍 [DEBUG] Edit Shaken checkbox checked:", shaken)
@@ -17348,6 +17361,8 @@ fun loadExistingCarPictures(purchaseData: dynamic, domRetryCount: Int = 0) {
 }
 
 fun showImportModal() {
+    closeImportModal()
+
     // Create modal overlay
     val modal = document.createElement("div")
     modal.id = "importModal"
@@ -17366,117 +17381,10 @@ fun showImportModal() {
         </div>
     """
     
-    // Close modal function - use the global closeImportModal function
     val closeModal = {
         closeImportModal()
     }
-    
-    // Add global mousedown AND click listeners to handle button clicks directly
-    // Use mousedown (fires first) AND click (backup) with capture phase
-    js("""
-        window.importModalClickHandler = function(e) {
-            var target = e.target;
-            var id = target.id;
-            var tagName = target.tagName;
-            
-            // Handle Cancel button - check both mousedown and click
-            if (id === 'cancelImportBtn' || (target.closest && target.closest('#cancelImportBtn'))) {
-                console.log('🎯 [GLOBAL] Detected ' + e.type + ' on Cancel button');
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                e.stopPropagation();
-                
-                var modal = document.getElementById('importModal');
-                if (modal && modal.parentNode) {
-                    console.log('🔴 [GLOBAL] Removing modal directly');
-                    modal.parentNode.removeChild(modal);
-                }
-                if (window.importModalEscapeHandler) {
-                    document.removeEventListener('keydown', window.importModalEscapeHandler);
-                    window.importModalEscapeHandler = null;
-                }
-                return false;
-            }
-            
-            // Handle Import button - check both mousedown and click
-            // Button is now always enabled (no disabled attribute), but visually shows disabled state
-            if (id === 'modalImportBtn' || (target.closest && target.closest('#modalImportBtn'))) {
-                console.log('🎯 [GLOBAL] Detected ' + e.type + ' on Import button');
-                
-                // Stop event immediately
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                e.stopPropagation();
-                
-                // Get file from input FIRST (most reliable) - check multiple ways
-                var fileInput = document.getElementById('csvFile');
-                var file = null;
-                
-                console.log('🔍 [GLOBAL] Checking for file...');
-                console.log('🔍 [GLOBAL] fileInput:', fileInput);
-                if (fileInput) {
-                    console.log('🔍 [GLOBAL] fileInput.value:', fileInput.value);
-                    console.log('🔍 [GLOBAL] fileInput.files:', fileInput.files);
-                    console.log('🔍 [GLOBAL] fileInput.files.length:', fileInput.files ? fileInput.files.length : 'null');
-                    
-                    // If input has value but files is empty, trigger a change event manually
-                    if (fileInput.value && (!fileInput.files || fileInput.files.length === 0)) {
-                        console.log('⚠️ [GLOBAL] File input has value but files is empty - this is a browser security issue');
-                        console.log('⚠️ [GLOBAL] File input value:', fileInput.value);
-                        alert('File selection detected but cannot access file. Please select the file again.');
-                        return false;
-                    }
-                }
-                console.log('🔍 [GLOBAL] window.selectedFile:', window.selectedFile);
-                
-                if (fileInput && fileInput.files && fileInput.files.length > 0) {
-                    file = fileInput.files[0];
-                    console.log('✅ [GLOBAL] File found in input:', file.name, 'Size:', file.size);
-                    window.selectedFile = file;
-                } else if (window.selectedFile) {
-                    file = window.selectedFile;
-                    console.log('✅ [GLOBAL] File found in window.selectedFile:', file.name);
-                } else {
-                    console.log('❌ [GLOBAL] No file selected');
-                    alert('Please select a CSV file first');
-                    return false;
-                }
-                
-                if (!file) {
-                    alert('Please select a CSV file first');
-                    return false;
-                }
-                
-                // Call handleImport - this is a Kotlin function exposed to global scope
-                if (window.handleImport) {
-                    console.log('🟢 [GLOBAL] Calling handleImport with file:', file.name, 'Size:', file.size);
-                    // Call handleImport - it will close the modal and process the import
-                    try {
-                        window.handleImport();
-                    } catch (err) {
-                        console.error('❌ [GLOBAL] Error calling handleImport:', err);
-                        alert('Error starting import: ' + err.message);
-                    }
-                } else {
-                    console.error('❌ [GLOBAL] handleImport function not found in global scope');
-                    alert('Import function not available. Please refresh the page.');
-                }
-                
-                return false;
-            }
-        };
-        
-        // Attach BOTH mousedown (fires first) and click (backup) with capture phase
-        // Remove existing listeners first to prevent duplicates
-        if (window.importModalClickHandler) {
-            document.removeEventListener('mousedown', window.importModalClickHandler, true);
-            document.removeEventListener('click', window.importModalClickHandler, true);
-        }
-        document.addEventListener('mousedown', window.importModalClickHandler, true);
-        document.addEventListener('click', window.importModalClickHandler, true);
-        console.log('✅ [GLOBAL] Import modal click handlers attached (mousedown + click)');
-    """)
-    
+
     document.body?.appendChild(modal)
     
     // Create global file select handler - this will be called by the inline onchange
@@ -17531,116 +17439,21 @@ fun showImportModal() {
         console.log('✅ [IMPORT MODAL] Global handleFileSelect function created');
     """)
     
-    // Cancel button listener - attach immediately
+    // Cancel button — single click handler
     val cancelBtn = document.getElementById("cancelImportBtn") as? HTMLButtonElement
-    console.log("🔍 [IMPORT MODAL] Looking for cancel button:", cancelBtn)
-    if (cancelBtn != null) {
-        console.log("✅ [IMPORT MODAL] Cancel button found, attaching listeners")
-        
-        // Set onclick FIRST (runs before addEventListener)
-        js("""
-            var btn = document.getElementById('cancelImportBtn');
-            if (btn) {
-                console.log('🔴 [IMPORT MODAL] Setting onclick for cancel button');
-                btn.onclick = function(e) {
-                    console.log('🔴 [IMPORT MODAL] Cancel onclick fired - DIRECT');
-                    if (e) {
-                        e.preventDefault();
-                        e.stopImmediatePropagation();
-                        e.stopPropagation();
-                    }
-                    var modal = document.getElementById('importModal');
-                    if (modal && modal.parentNode) {
-                        console.log('🔴 [IMPORT MODAL] Removing modal');
-                        modal.parentNode.removeChild(modal);
-                    }
-                    if (window.importModalEscapeHandler) {
-                        document.removeEventListener('keydown', window.importModalEscapeHandler);
-                        window.importModalEscapeHandler = null;
-                    }
-                    return false;
-                };
-                console.log('🔴 [IMPORT MODAL] onclick set, btn.onclick:', btn.onclick);
-            }
-        """)
-        
-        // Attach click listener (backup)
-        cancelBtn.addEventListener("click", { event: Event ->
-            console.log("🔴 [IMPORT MODAL] Cancel button clicked - addEventListener")
-            event.preventDefault()
-            event.stopImmediatePropagation()
-            event.stopPropagation()
-            closeModal()
-        }, true)
-        
-        // Attach mousedown listener
-        cancelBtn.addEventListener("mousedown", { event: Event ->
-            console.log("🔴 [IMPORT MODAL] Cancel button mousedown")
-            event.stopPropagation()
-        }, true)
-    } else {
-        console.error("❌ [IMPORT MODAL] Cancel button not found!")
-    }
-    
-    // Import button listener - attach immediately
+    cancelBtn?.addEventListener("click", { event: Event ->
+        event.preventDefault()
+        event.stopPropagation()
+        closeModal()
+    })
+
+    // Import button — single click handler (avoid mousedown + click double-fire)
     val importBtn = document.getElementById("modalImportBtn") as? HTMLButtonElement
-    console.log("🔍 [IMPORT MODAL] Looking for import button:", importBtn)
-    if (importBtn != null) {
-        console.log("✅ [IMPORT MODAL] Import button found, attaching listeners")
-        
-        // Set onclick FIRST (runs before addEventListener)
-        js("""
-            var btn = document.getElementById('modalImportBtn');
-            if (btn) {
-                console.log('🟢 [IMPORT MODAL] Setting onclick for import button');
-                btn.onclick = function(e) {
-                    console.log('🟢 [IMPORT MODAL] Import onclick fired - DIRECT');
-                    if (e) {
-                        e.preventDefault();
-                        e.stopImmediatePropagation();
-                        e.stopPropagation();
-                    }
-                    
-                    // Call handleImport directly - it will check for file itself
-                    // This is more reliable than trying to get file here
-                    if (window.handleImport) {
-                        console.log('🟢 [IMPORT MODAL] Calling handleImport');
-                        window.handleImport();
-                    } else {
-                        console.error('❌ [IMPORT MODAL] handleImport function not found in global scope');
-                        alert('Import function not available');
-                    }
-                    return false;
-                };
-                console.log('🟢 [IMPORT MODAL] onclick set, btn.onclick:', btn.onclick);
-            }
-        """)
-        
-        // Attach click listener (backup)
-        importBtn.addEventListener("click", { event: Event ->
-            console.log("🟢 [IMPORT MODAL] Import button clicked - addEventListener")
-            event.preventDefault()
-            event.stopImmediatePropagation()
-            event.stopPropagation()
-            
-            val file = js("window.selectedFile") as File?
-            if (file == null) {
-                showMessage("Please select a file first", "error")
-                return@addEventListener
-            }
-            
+    importBtn?.addEventListener("click", { event: Event ->
+        event.preventDefault()
+        event.stopPropagation()
         handleImport()
-            closeModal()
-        }, true)
-        
-        // Attach mousedown listener
-        importBtn.addEventListener("mousedown", { event: Event ->
-            console.log("🟢 [IMPORT MODAL] Import button mousedown")
-            event.stopPropagation()
-        }, true)
-    } else {
-        console.error("❌ [IMPORT MODAL] Import button not found!")
-    }
+    })
     
     // Prevent modal content clicks from closing the modal
     val modalContent = document.getElementById("importModalContent")
@@ -17684,6 +17497,16 @@ fun showImportModal() {
     """)
 }
 fun handleImport() {
+    val importInProgress = js("window.importInProgress") as? Boolean ?: false
+    if (importInProgress) {
+        console.log("⚠️ [IMPORT] Import already in progress, ignoring duplicate call")
+        return
+    }
+
+    fun clearImportInProgress() {
+        js("window.importInProgress = false")
+    }
+
     // Get file directly from input - this is the most reliable way
     val fileInput = document.getElementById("csvFile") as? HTMLInputElement
     var file: File? = null
@@ -17725,7 +17548,9 @@ fun handleImport() {
     }
     
     console.log("📥 [IMPORT] Starting import for file: ${file.name}, size: ${file.size} bytes")
-    
+
+    js("window.importInProgress = true")
+
     // Close modal immediately to show we're processing
     closeImportModal()
     
@@ -17771,22 +17596,27 @@ fun handleImport() {
                 // Reload purchase list to show imported purchases
                 console.log("🔄 [IMPORT] Reloading purchase list...")
                 loadPurchases()
+                clearImportInProgress()
             }.catch { error ->
                 console.error("❌ [IMPORT] Error parsing JSON response:", error)
                 showMessage("Import failed: Could not parse server response", "error")
+                clearImportInProgress()
             }
         } else {
             response.text().then { errorText ->
                 console.error("❌ [IMPORT] Error response (${response.status}):", errorText)
                 showMessage("Import failed (${response.status}): $errorText", "error")
+                clearImportInProgress()
             }.catch { error ->
                 console.error("❌ [IMPORT] Error reading error response:", error)
                 showMessage("Import failed: ${response.status} ${response.statusText}", "error")
+                clearImportInProgress()
             }
         }
     }.catch { error ->
         console.error("❌ [IMPORT] Fetch error:", error)
         showMessage("Import failed: ${error.message}", "error")
+        clearImportInProgress()
     }
 }
 
@@ -17800,11 +17630,7 @@ fun closeImportModal() {
                 document.removeEventListener('keydown', window.importModalEscapeHandler);
                 window.importModalEscapeHandler = null;
             }
-            if (window.importModalClickHandler) {
-                document.removeEventListener('mousedown', window.importModalClickHandler, true);
-                document.removeEventListener('click', window.importModalClickHandler, true);
-                window.importModalClickHandler = null;
-            }
+            window.importInProgress = false;
         """)
         console.log("🔴 [IMPORT] Modal closed")
     }

@@ -10,6 +10,8 @@ interface ShippingHistoryRepository : JpaRepository<ShippingHistory, Long> {
     /** Single row per chassis (see migration V19); latest id if duplicates exist pre-migration. */
     fun findFirstByChassisOrderByIdDesc(chassis: String): ShippingHistory?
 
+    fun findByChassisIn(chassis: Collection<String>): List<ShippingHistory>
+
     @Query(
         value = (
             "SELECT DISTINCT TRIM(client_name) FROM shipping_history " +

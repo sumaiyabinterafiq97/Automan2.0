@@ -64,7 +64,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "[LOGIN] Pre-configured Login:"
     echo "   - Email: admin@automan.com"
-    echo "   - Password: password"
+    echo "   - Password: Automan!Ship26Tokyo"
     echo ""
     echo "[DATA] Pre-populated Data:"
     echo "   - 1 Admin user"

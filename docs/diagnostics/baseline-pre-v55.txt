@@ -1,0 +1,24 @@
+Phase 5 Drop 3 — baseline before V55 (cost column drop)
+Date: 2026-06-29
+
+## Prerequisite
+phase5-drop-workflow-signoff.txt — SIGNED OFF ✓
+
+## Backup
+backup-pre-v55-20260629.sql (350K)
+
+## verify-schema.sh
+PASS
+
+## Flyway (latest)
+version	description
+54	drop workflow legacy flags
+53	drop vehicle spec columns
+52	drop purchases shipping columns
+
+## purchases column count
+38
+
+## purchase_cost_lines
+cost_line_rows: 117
+purchases_with_lines: 10

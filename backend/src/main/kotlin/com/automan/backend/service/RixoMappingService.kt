@@ -18,22 +18,36 @@ class RixoMappingService(
     )
 
     fun findRixoPrice(
+        auctionName: String,
         stockLocation: String,
         rixoCompany: String,
-        supportedVehicleType: String?
+        supportedVehicleType: String?,
     ): RixoMapping? {
-        if (stockLocation.isBlank() || rixoCompany.isBlank()) return null
+        if (auctionName.isBlank() || stockLocation.isBlank() || rixoCompany.isBlank()) return null
 
+        val trimmedAuction = auctionName.trim()
+        val trimmedStock = stockLocation.trim()
+        val trimmedCompany = rixoCompany.trim()
         val trimmedVehicleType = supportedVehicleType?.trim()?.takeIf { it.isNotBlank() }
 
-        val matches = rixoMappingRepository.findTopMatch(
-            stockLocation = stockLocation.trim(),
-            rixoCompany = rixoCompany.trim(),
-            supportedVehicleType = trimmedVehicleType
+        val exact = rixoMappingRepository.findExactMatch(
+            auctionName = trimmedAuction,
+            stockLocation = trimmedStock,
+            rixoCompany = trimmedCompany,
+            supportedVehicleType = trimmedVehicleType,
         )
+        if (exact.isNotEmpty()) return exact.first()
 
-        if (matches.isEmpty()) return null
-        return matches.firstOrNull()
+        if (trimmedVehicleType != null) {
+            val fallback = rixoMappingRepository.findMatchWithNullVehicleType(
+                auctionName = trimmedAuction,
+                stockLocation = trimmedStock,
+                rixoCompany = trimmedCompany,
+            )
+            if (fallback.isNotEmpty()) return fallback.first()
+        }
+
+        return null
     }
 
     fun listAllForTree(): List<RixoMapping> =

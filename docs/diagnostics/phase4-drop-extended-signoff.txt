@@ -1,0 +1,17 @@
+Phase: 4 Drop 1 — EXTENDED_JSON columns removed
+Date: 2026-06-29
+Flyway: V51
+
+purchases_column_count: 55 (was 68 before drops 1+2)
+
+Gate: PASS
+- rows_with_extended: 9
+- All read paths via PurchaseExtendedAttributesService.applyForRead
+- All write paths via syncFromPurchase → extended_attributes JSON
+- API JSON flat keys unchanged (notes, venueId, shaken, etc.)
+
+Automated tests: PASS (full backend ./gradlew test)
+
+Manual QA: pending owner (see client-handover doc checklist)
+
+Decision: GO — extended JSON legacy columns dropped

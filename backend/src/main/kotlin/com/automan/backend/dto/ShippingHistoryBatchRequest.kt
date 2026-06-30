@@ -17,6 +17,8 @@ data class ShippingHistoryBatchRequest(
     val pod: String? = null,
     val bookingId: String? = null,
     val vessel: String? = null,
+    /** Bill of lading number (dual-written to shipping_history.bl_no). */
+    val blNo: String? = null,
     /** "C&F" or "FOB" */
     val priceType: String? = null,
     val items: List<ShippingHistoryItemRequest> = emptyList(),

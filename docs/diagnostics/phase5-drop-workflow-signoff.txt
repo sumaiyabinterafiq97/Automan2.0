@@ -1,0 +1,48 @@
+Phase 5 Drop 2 — WORKFLOW legacy flag columns removed (V54)
+Date: 2026-06-29
+Flyway: V54
+Manual QA signed off: 2026-06-29 (owner)
+
+## Prerequisite
+phase5-drop-vehicle-signoff.txt — SIGNED OFF ✓
+
+## Backup
+backup-pre-v54-20260629.sql (350K)
+
+## Gate SQL
+null_workflow_status: 0 — PASS
+
+## Columns dropped (4)
+rixo_requested, rixo_confirmed, booking_requested, invoice_confirmed
+
+## Automated tests
+./gradlew test — PASS (139 tests)
+
+## Post-deploy schema
+Flyway latest: V54 (drop workflow legacy flags)
+purchases column count: 38 (42 − 4)
+./scripts/verify-schema.sh — PASS
+Dropped columns absent: rixo_requested, rixo_confirmed, booking_requested, invoice_confirmed
+
+## Owner verification (terminal 2026-06-29)
+./scripts/verify-schema.sh — PASS
+GET /api/purchases/purchase/6:
+- workflowStatus: PURCHASED (DB matches)
+- rixoRequested: "0", rixoConfirmed: "0" (derived)
+- bookingRequested: false, invoiceConfirmed: false (derived)
+- Legacy API keys present; values consistent with workflow_status adapter
+
+## Manual QA checklist
+- [x] Car booking: country/POL/chassis search returns eligible cars
+- [x] Mark booking requested → workflow status updates; car leaves booking pool
+- [x] Invoice confirmed / Sold behavior unchanged
+- [x] Rixo request generator / distinct purchase dates still correct
+- [x] API JSON still includes rixoRequested, rixoConfirmed, bookingRequested, invoiceConfirmed
+
+## Rollback
+docs/diagnostics/rollback-v54-template.sql
+Fastest: restore backup-pre-v54-20260629.sql + redeploy pre-V54 backend
+
+## Decision
+**SIGNED OFF** — Release 2 (V54 workflow flag drop) complete.
+Release 3 (V55 cost drops) NOT started.

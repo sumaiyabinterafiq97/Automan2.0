@@ -5,6 +5,7 @@ import java.time.LocalDateTime
 import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonInclude
 
 @Entity
 @Table(name = "purchases")
@@ -22,7 +23,8 @@ data class Purchase(
     @Column(name = "chassis", nullable = false)
     val chassis: String,
     
-    @Column(name = "car_model_year")
+    /** Phase 5 drop 1: canonical on purchase_vehicle_overrides + car_brand_mapping. */
+    @Transient
     val carModelYear: String? = null,
     
     @Column(name = "brand")
@@ -31,47 +33,48 @@ data class Purchase(
     @Column(name = "car_name")
     val carName: String? = null,
     
-    @Column(name = "shipment_size")
-    @com.fasterxml.jackson.annotation.JsonAlias("vehicleType")
+    @field:JsonAlias("vehicleType")
+    @Transient
     val shipmentSize: String? = null,
     
-    @Column(name = "grade")
+    @Transient
     val grade: String? = null,
     
-    @Column(name = "`rank`")
+    @Transient
     val rank: String? = null,
     
-    @Column(name = "color")
+    @Transient
     val color: String? = null,
     
-    @Column(name = "fuel")
+    @Transient
     val fuel: String? = null,
     
-    @Column(name = "seat")
+    @Transient
     val seat: String? = null,
     
-    @Column(name = "door")
+    @Transient
     val door: String? = null,
     
-    @Column(name = "distance")
+    @Transient
     val distance: String? = null,
     
-    @Column(name = "options")
+    /** Phase 4 drop 1: stored in extended_attributes JSON only. */
+    @Transient
     val options: String? = null,
     
-    @Column(name = "CC")
+    @Transient
     val cc: Int? = null,
     
-    @Column(name = "shift")
+    @Transient
     val shift: String? = null,
     
-    @Column(name = "WD")
+    @Transient
     val wd: String? = null,
     
-    @Column(name = "drive_type")
+    @Transient
     val driveType: String? = null,
     
-    @Column(name = "auction_no")
+    @Transient
     val auctionNo: String? = null,
     
     @Column(name = "auction_house")
@@ -104,58 +107,60 @@ data class Purchase(
     @Column(name = "country")
     val country: String? = null,
     
-    @Column(name = "price")
+    /** Phase 5 drop 3: canonical on purchase_cost_lines. */
+    @Transient
     val price: String? = null,
     
-    @Column(name = "auction_fee")
+    @Transient
     val auctionFee: String? = null,
     
-    @Column(name = "auction_penalty_fee")
+    @Transient
     val auctionPenaltyFee: String? = null,
     
-    @Column(name = "recycle_fee")
+    @Transient
     val recycleFee: String? = null,
     
-    @Column(name = "road_tax")
+    @Transient
     val roadTax: String? = null,
     
-    @Column(name = "tax_total")
+    @Transient
     val taxTotal: String? = null,
     
     @Column(name = "total_price")
     val totalPrice: String? = null,
     
-    @Column(name = "payment_date")
+    @Transient
     val paymentDate: String? = null,
     
-    @Column(name = "rixo_requested")
+    @Transient
     val rixoRequested: String? = null,
     
-    @Column(name = "rixo_confirmed")
+    @Transient
     val rixoConfirmed: String? = null,
     
-    @Column(name = "notes")
+    @Transient
     val notes: String? = null,
-    
-    @Column(name = "shippment_date")
+
+    /** Phase 4 drop 2: canonical on shipping_history. */
+    @Transient
     val shipmentDate: String? = null,
-    
-    @Column(name = "`B/L_no`")
+
+    @Transient
     val blNo: String? = null,
 
     /** Shipment vessel name; JSON may still send `vesselNo` from older clients. */
     @field:JsonAlias("vesselNo")
-    @Column(name = "vessel")
+    @Transient
     val vessel: String? = null,
     
     @field:JsonProperty("bookingRequested")
     @field:JsonAlias("booking_requested")
-    @Column(name = "booking_requested", nullable = false)
+    @Transient
     val bookingRequested: Boolean = false,
 
 
 
-    @Column(name = "invoice_confirmed")
+    @Transient
     val invoiceConfirmed: Boolean? = null,
 
     @Enumerated(EnumType.STRING)
@@ -165,59 +170,63 @@ data class Purchase(
     @Column(name = "workflow_status_updated_at")
     val workflowStatusUpdatedAt: LocalDateTime? = null,
     
-    @Column(name = "shipment_charges")
+    @Transient
     val shipmentCharges: String? = null,
     
-    @Column(name = "freight")
+    @Transient
     val freight: String? = null,
     
-    @Column(name = "storage_charges")
+    @Transient
     val storageCharges: String? = null,
     
-    @Column(name = "misc_charges")
+    @Transient
     val miscCharges: String? = null,
     
-    @Column(name = "inspection_fee")
+    @Transient
     val inspectionFee: String? = null,
     
-    @Column(name = "commission")
+    @Transient
     val commission: String? = null,
     
-    @Column(name = "rixo_price")
+    @Transient
     val rixoPrice: String? = null,
     
-    @Column(name = "venue_id")
+    @Transient
     val venueId: String? = null,
-    
-    @Column(name = "number_cut")
+
+    @Transient
     val numberCut: String? = null,
-    
-    @Column(name = "shaken")
-    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    @Transient
     val shaken: Boolean? = null,
 
-    @Column(name = "negotiate")
-    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.ALWAYS)
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    @Transient
     val negotiate: Boolean? = null,
     
     @Column(name = "repair_company")
     val repairCompany: String? = null,
     
-    @Column(name = "repair_charges")
+    @Transient
     val repairCharges: String? = null,
     
-    
-    @Column(name = "profit")
+    @Transient
     val profit: java.math.BigDecimal? = null,
     
-    @Column(name = "is_package_mode")
+    @Transient
     val isPackageMode: Boolean? = null,
     
     @Column(name = "booking_id")
     val bookingId: Long? = null,
     
-    @Column(name = "car_pictures", columnDefinition = "TEXT")
+    @Transient
     val carPictures: String? = null,
+
+    /** Phase 4: canonical store for cold fields; not exposed in API (flat keys unchanged). */
+    @field:com.fasterxml.jackson.annotation.JsonIgnore
+    @Column(name = "extended_attributes", columnDefinition = "JSON")
+    val extendedAttributesJson: String? = null,
     
     @Column(name = "created_at")
     val createdAt: LocalDateTime = LocalDateTime.now(),

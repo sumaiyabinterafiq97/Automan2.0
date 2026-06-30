@@ -1,6 +1,7 @@
 package com.automan.backend.repository
 
 import com.automan.backend.model.Purchase
+import com.automan.backend.service.PurchaseWorkflowService
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
@@ -22,19 +23,19 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
            "LOWER(p.rixoCompany) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
            "LOWER(p.clientName) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
            "LOWER(p.country) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-           "LOWER(p.price) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-           "LOWER(p.rixoRequested) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-           "LOWER(p.rixoConfirmed) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
-           "LOWER(p.notes) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
+           "LOWER(p.totalPrice) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+           "LOWER(COALESCE(CAST(p.workflowStatus AS string), '')) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+           "LOWER(COALESCE(p.extendedAttributesJson, '')) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
     fun searchPurchases(@Param("searchTerm") searchTerm: String): List<Purchase>
 
     /**
-     * Prefix match on chassis — booking flow only: [bookingRequested] false/null and Rixo confirmed (`1`/`TRUE`).
+     * Prefix match on chassis — booking flow only: [bookingRequested] false/null and Rixo confirmed
+     * (legacy flag or [Purchase.workflowStatus] at/after RIXO_CONFIRMED).
      */
     @Query(
         "SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT(:prefix, '%') " +
-            "AND (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
-            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+            "AND ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
+            "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
             "ORDER BY p.chassis ASC",
     )
     fun searchByChassisPrefix(@Param("prefix") prefix: String, pageable: Pageable): List<Purchase>
@@ -44,8 +45,8 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
      */
     @Query(
         "SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT('%', :q, '%') " +
-            "AND (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
-            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+            "AND ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
+            "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
             "ORDER BY p.chassis ASC",
     )
     fun searchByChassisContains(@Param("q") q: String, pageable: Pageable): List<Purchase>
@@ -151,12 +152,12 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT p FROM Purchase p WHERE p.chassis = :chassis")
     fun findCostDetailsByChassis(@Param("chassis") chassis: String): Purchase?
     
-    // Country-related methods (Car Booking): countries with at least one chassis Rixo-confirmed and booking not requested yet.
+    // Country-related methods (Car Booking): countries with at least one Rixo-confirmed, booking-not-requested chassis.
     @Query(
         "SELECT DISTINCT p.country FROM Purchase p " +
             "WHERE p.country IS NOT NULL AND p.country != '' " +
-            "AND (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
-            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+            "AND ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
+            "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
             "ORDER BY p.country",
     )
     fun findDistinctCountriesWithPendingBooking(): List<String>
@@ -168,11 +169,11 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.country = :country AND p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
     fun findDistinctStockLocationsByCountry(@Param("country") country: String): List<String>
     
-    // For booking-page filtering: booking not requested yet and Rixo confirmed.
+    // For booking-page filtering: booking not requested yet and Rixo confirmed (legacy or workflow).
     @Query(
         "SELECT p FROM Purchase p " +
-            "WHERE (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
-            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+            "WHERE ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
+            "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
             "AND LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
             "ORDER BY p.chassis",
     )
@@ -194,7 +195,17 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     fun findDistinctRepairCompanies(): List<String>
     
     // Venue ID (from purchases only)
-    @Query("SELECT DISTINCT p.venueId FROM Purchase p WHERE p.venueId IS NOT NULL AND p.venueId != '' ORDER BY p.venueId")
+    @Query(
+        value = """
+            SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(p.extended_attributes, '$.venueId')) AS venue_id
+            FROM purchases p
+            WHERE p.extended_attributes IS NOT NULL
+              AND JSON_UNQUOTE(JSON_EXTRACT(p.extended_attributes, '$.venueId')) IS NOT NULL
+              AND TRIM(JSON_UNQUOTE(JSON_EXTRACT(p.extended_attributes, '$.venueId'))) <> ''
+            ORDER BY venue_id
+        """,
+        nativeQuery = true,
+    )
     fun findDistinctVenueIds(): List<String>
     
     // Filtered chassis: booking not requested and Rixo confirmed (native query for raw table).
@@ -203,8 +214,8 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
             "AND LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
             "AND p.chassis IS NOT NULL AND p.chassis != '' " +
-            "AND (p.booking_requested IS NULL OR p.booking_requested = 0) " +
-            "AND UPPER(TRIM(COALESCE(p.rixo_confirmed, ''))) IN ('TRUE', '1') " +
+            "AND ${PurchaseWorkflowService.SQL_BOOKING_NOT_REQUESTED} " +
+            "AND ${PurchaseWorkflowService.SQL_RIXO_CONFIRMED_ELIGIBILITY} " +
             "ORDER BY p.chassis",
         nativeQuery = true,
     )
@@ -214,8 +225,8 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
         "SELECT p FROM Purchase p " +
             "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
             "AND LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
-            "AND (p.bookingRequested IS NULL OR p.bookingRequested = false) " +
-            "AND UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1') " +
+            "AND ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
+            "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
             "ORDER BY p.chassis",
     )
     fun findFilteredPurchasesByCountryAndPol(
@@ -227,49 +238,40 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query(
         value = "SELECT DISTINCT p.chassis FROM purchases p " +
             "WHERE LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
-            "AND (p.booking_requested IS NULL OR p.booking_requested = 0) " +
-            "AND UPPER(TRIM(COALESCE(p.rixo_confirmed, ''))) IN ('TRUE', '1') " +
+            "AND ${PurchaseWorkflowService.SQL_BOOKING_NOT_REQUESTED} " +
+            "AND ${PurchaseWorkflowService.SQL_RIXO_CONFIRMED_ELIGIBILITY} " +
             "AND p.chassis IS NOT NULL AND p.chassis != '' " +
             "ORDER BY p.chassis",
         nativeQuery = true,
     )
     fun findUnshippedChassisByPolPort(@Param("polPort") polPort: String): List<String>
     
-    // Invoice filtering: Find purchases by consignee, vessel, and shipment_date
-    @Query("SELECT p FROM Purchase p WHERE " +
-           "(:consignee IS NULL OR TRIM(:consignee) = '' OR LOWER(TRIM(COALESCE(p.consignee, ''))) = LOWER(TRIM(:consignee))) AND " +
-           "(:vessel IS NULL OR TRIM(:vessel) = '' OR LOWER(TRIM(COALESCE(p.vessel, ''))) = LOWER(TRIM(:vessel))) AND " +
-           "(:shipmentDate IS NULL OR TRIM(:shipmentDate) = '' OR TRIM(COALESCE(p.shipmentDate, '')) = TRIM(:shipmentDate)) AND " +
-           "(p.bookingRequested IS NULL OR p.bookingRequested = false) AND " +
-           "(p.invoiceConfirmed IS NULL OR p.invoiceConfirmed = false)")
-    fun findByConsigneeAndVesselAndShipmentDate(
-        @Param("consignee") consignee: String?,
-        @Param("vessel") vessel: String?,
-        @Param("shipmentDate") shipmentDate: String?
-    ): List<Purchase>
+    // Invoice filtering: consignee candidates (vessel/date matched post read-adapter in PurchaseService)
+    @Query(
+        "SELECT p FROM Purchase p WHERE " +
+            "(:consignee IS NULL OR TRIM(:consignee) = '' OR LOWER(TRIM(COALESCE(p.consignee, ''))) = LOWER(TRIM(:consignee))) AND " +
+            "${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} AND " +
+            "${PurchaseWorkflowService.JPQL_INVOICE_NOT_CONFIRMED}",
+    )
+    fun findInvoiceFilterCandidatesByConsignee(@Param("consignee") consignee: String?): List<Purchase>
 
-    // Invoice filtering: purchases by client name (client_map / purchases.client_name), vessel, shipment_date
-    @Query("SELECT p FROM Purchase p WHERE " +
-           "(:clientName IS NULL OR TRIM(:clientName) = '' OR LOWER(TRIM(COALESCE(p.clientName, ''))) = LOWER(TRIM(:clientName))) AND " +
-           "(:vessel IS NULL OR TRIM(:vessel) = '' OR LOWER(TRIM(COALESCE(p.vessel, ''))) = LOWER(TRIM(:vessel))) AND " +
-           "(:shipmentDate IS NULL OR TRIM(:shipmentDate) = '' OR TRIM(COALESCE(p.shipmentDate, '')) = TRIM(:shipmentDate)) AND " +
-           "(p.bookingRequested IS NULL OR p.bookingRequested = false) AND " +
-           "(p.invoiceConfirmed IS NULL OR p.invoiceConfirmed = false)")
-    fun findByClientNameAndVesselAndShipmentDate(
-        @Param("clientName") clientName: String?,
-        @Param("vessel") vessel: String?,
-        @Param("shipmentDate") shipmentDate: String?
-    ): List<Purchase>
+    // Invoice filtering: client name candidates (vessel/date matched post read-adapter in PurchaseService)
+    @Query(
+        "SELECT p FROM Purchase p WHERE " +
+            "(:clientName IS NULL OR TRIM(:clientName) = '' OR LOWER(TRIM(COALESCE(p.clientName, ''))) = LOWER(TRIM(:clientName))) AND " +
+            "${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} AND " +
+            "${PurchaseWorkflowService.JPQL_INVOICE_NOT_CONFIRMED}",
+    )
+    fun findInvoiceFilterCandidatesByClientName(@Param("clientName") clientName: String?): List<Purchase>
 
     /**
-     * Distinct non-blank [Purchase.date] (VARCHAR) for Rixo "Buying date", including only rows
-     * where rixo_requested is not TRUE/1 (i.e., pending requests still exist on that date).
+     * Distinct non-blank [Purchase.date] for Rixo "Buying date" — dates that still have at least one
+     * purchase in PURCHASED workflow (Rixo request not yet sent).
      */
     @Query(
         "SELECT DISTINCT p.date FROM Purchase p " +
             "WHERE p.date IS NOT NULL AND p.date <> '' " +
-            "AND (p.rixoRequested IS NULL OR TRIM(p.rixoRequested) = '' " +
-            "OR LOWER(p.rixoRequested) NOT IN ('1', 'true'))"
+            "AND (p.workflowStatus IS NULL OR p.workflowStatus = com.automan.backend.model.WorkflowStatus.PURCHASED)",
     )
     fun findDistinctPurchaseDateStrings(): List<String>
 
@@ -281,7 +283,10 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     fun findByChassisToken(@Param("token") token: String): List<Purchase>
 
     @Query(
-        "SELECT p FROM Purchase p WHERE UPPER(TRIM(COALESCE(p.rixoConfirmed, ''))) IN ('TRUE', '1')"
+        "SELECT p FROM Purchase p WHERE p.workflowStatus IN (" +
+            "com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED, " +
+            "com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED, " +
+            "com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED)",
     )
     fun findPurchasesWhereRixoConfirmedPositive(): List<Purchase>
 }
