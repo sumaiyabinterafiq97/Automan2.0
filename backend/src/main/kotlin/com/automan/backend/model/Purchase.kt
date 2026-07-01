@@ -204,6 +204,10 @@ data class Purchase(
     @JsonInclude(JsonInclude.Include.ALWAYS)
     @Transient
     val negotiate: Boolean? = null,
+
+    /** Domestic (Japan) sale — export/shipping fields are not used when true. */
+    @Column(name = "`local`")
+    val local: Boolean = false,
     
     @Column(name = "repair_company")
     val repairCompany: String? = null,

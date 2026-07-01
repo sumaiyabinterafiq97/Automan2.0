@@ -44,6 +44,11 @@ class ShippingSnapshotService(
         val chassis = purchase.chassis.trim()
         if (chassis.isEmpty()) return purchase
 
+        if (purchase.local) {
+            clearShippingSnapshot(chassis)
+            return purchase
+        }
+
         val vessel = purchase.vessel?.trim()?.takeIf { it.isNotEmpty() }
         val blNo = purchase.blNo?.trim()?.takeIf { it.isNotEmpty() }
         val shipmentDate = parseShipmentDate(purchase.shipmentDate)
@@ -93,5 +98,16 @@ class ShippingSnapshotService(
     private fun parseShipmentDate(raw: String?): LocalDate? {
         val s = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         return PurchaseDateParseUtils.parseToLocalDate(s)
+    }
+
+    private fun clearShippingSnapshot(chassis: String) {
+        val existing = shippingHistoryRepository.findFirstByChassisOrderByIdDesc(chassis) ?: return
+        shippingHistoryRepository.save(
+            existing.copy(
+                vessel = null,
+                blNo = null,
+                shipmentDate = null,
+            ),
+        )
     }
 }

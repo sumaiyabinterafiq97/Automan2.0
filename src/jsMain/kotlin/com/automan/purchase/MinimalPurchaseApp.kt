@@ -1588,6 +1588,14 @@ private fun purchaseNegotiateChecked(purchaseData: dynamic): Boolean {
     return notes.contains("NEGOTIATE", ignoreCase = true)
 }
 
+private fun purchaseLocalChecked(purchaseData: dynamic): Boolean {
+    val row = asDynamicRow(purchaseData)
+    val local = row.local
+    if (local == true || local == "true" || local == 1) return true
+    val client = row.clientName?.toString()?.trim()?.uppercase() ?: ""
+    return client == "LOCAL"
+}
+
 // Shared options for Number Cut Hiragana (chassis-style combobox on Add/Edit and Rixo modal)
 fun getNumberCutHiraganaOptions(): List<Pair<String, String>> = listOf(
     "あ" to "あ (a)", "い" to "い (i)", "う" to "う (u)", "え" to "え (e)", "お" to "お (o)",
@@ -4167,6 +4175,7 @@ private val masterSetDisplayOverrides = mapOf(
     "car_grade" to "Car Grade",
     "shift" to "Car Shift",
     "type_of_vehicle" to "Type of Vehicles",
+    "number_place" to "Number Place",
 )
 
 private fun toMasterSetLabel(fieldName: String): String {
@@ -4178,6 +4187,7 @@ private fun toMasterSetLabel(fieldName: String): String {
 
 private fun masterSetRouteForField(fieldName: String): String {
     if (fieldName.equals("car_grade", ignoreCase = true)) return "#/master/car-grade"
+    if (fieldName.equals("number_place", ignoreCase = true)) return "#/master/number-place"
     return "#/master/set/${js("encodeURIComponent(fieldName)") as String}"
 }
 
@@ -4319,6 +4329,9 @@ private fun navigateHomeIfViewingDeletedMasterSet(deletedField: String) {
         "fuel" -> if (hash.startsWith("#/master/fuel")) navigateToAppHome()
         "shift" -> if (hash.startsWith("#/master/car-shift")) navigateToAppHome()
         "type_of_vehicle" -> if (hash.startsWith("#/master/type-of-vehicles")) navigateToAppHome()
+        "number_place" -> {
+            if (hash.startsWith("#/master/number-place")) navigateToAppHome()
+        }
         "car_grade" -> {
             if (hash.startsWith("#/master/car-grade")) {
                 navigateToAppHome()
@@ -5462,6 +5475,12 @@ fun updateContent(root: Element) {
         }
         hash.startsWith("#/master/type-of-vehicles") -> {
             showDynamicMasterSetPage("type_of_vehicle")
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        hash.startsWith("#/master/number-place") -> {
+            showDynamicMasterSetPage("number_place")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -7234,6 +7253,12 @@ fun createAddFormHTML(): String {
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('status')"><h3 class="form-section-header" data-section="status">Status</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="status">
+                    <div style="grid-column: 1 / -1; margin-bottom: 4px;">
+                        <label style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; cursor: pointer; margin: 0;">
+                            <input type="checkbox" id="localCheckbox" style="width: 18px; height: 18px; accent-color: #007bff;">
+                            LOCAL
+                        </label>
+                    </div>
                     <div>
                         <label>Purchased</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
@@ -9490,6 +9515,122 @@ private fun purchaseStatusSet(name: String, value: String) {
     node?.checked = true
 }
 
+private fun isLocalPurchaseCheckboxChecked(isEdit: Boolean): Boolean {
+    val checkboxId = if (isEdit) "editLocalCheckbox" else "localCheckbox"
+    return (document.getElementById(checkboxId) as? HTMLInputElement)?.checked == true
+}
+
+private fun setPurchaseInputLocked(elementId: String, locked: Boolean) {
+    val el = document.getElementById(elementId) as? HTMLElement ?: return
+    when (el) {
+        is HTMLInputElement -> {
+            el.disabled = locked
+            el.readOnly = locked
+            el.style.backgroundColor = if (locked) "#f3f4f6" else ""
+            el.style.cursor = if (locked) "not-allowed" else ""
+        }
+        is HTMLTextAreaElement -> {
+            el.disabled = locked
+            el.readOnly = locked
+            el.style.backgroundColor = if (locked) "#f3f4f6" else ""
+        }
+        is HTMLButtonElement -> {
+            el.disabled = locked
+            el.style.opacity = if (locked) "0.55" else "1"
+            el.style.cursor = if (locked) "not-allowed" else "pointer"
+        }
+    }
+}
+
+private fun setPurchaseComboboxLocked(comboboxId: String, locked: Boolean) {
+    val input = document.getElementById("${comboboxId}Input") as? HTMLInputElement
+    val select = document.getElementById(comboboxId) as? HTMLSelectElement
+    val button = document.getElementById("${comboboxId}Button") as? HTMLElement
+    input?.disabled = locked
+    input?.readOnly = locked
+    input?.style?.backgroundColor = if (locked) "#f3f4f6" else ""
+    input?.style?.cursor = if (locked) "not-allowed" else ""
+    select?.disabled = locked
+    if (button != null) {
+        button.style.setProperty("pointer-events", if (locked) "none" else "auto")
+        button.style.opacity = if (locked) "0.55" else "1"
+        button.style.cursor = if (locked) "not-allowed" else "pointer"
+    }
+}
+
+private fun setPurchaseRadioGroupLocked(groupName: String, locked: Boolean) {
+    val radios = document.querySelectorAll("input[name=\"$groupName\"]")
+    for (i in 0 until radios.length) {
+        (radios.item(i) as? HTMLInputElement)?.disabled = locked
+    }
+}
+
+fun applyLocalPurchaseFieldLock(isEdit: Boolean, locked: Boolean) {
+    val rixoCompanyId = if (isEdit) "editRixoCompany" else "rixoCompany"
+    val stockLocationId = if (isEdit) "editStockLocation" else "stockLocation"
+    val countryId = if (isEdit) "editCountry" else "country"
+    val polId = if (isEdit) "editPol" else "pol"
+    val rixoPriceId = if (isEdit) "editRixoPriceInput" else "rixoPriceInput"
+    val shipmentDateId = if (isEdit) "editShipmentDate" else "shipmentDateText"
+    val shipmentDatePickerId = if (isEdit) "editShipmentDatePicker" else "shipmentDate"
+    val shipmentDateCalBtnId = if (isEdit) "editShipmentDateCalendarBtn" else "shipmentDateCalendarBtn"
+    val blNoId = if (isEdit) "editBlNo" else "blNo"
+    val bookingId = if (isEdit) "editBookingId" else "addPurchaseBookingId"
+    val vesselId = if (isEdit) "editVessel" else "purchaseVessel"
+    val shipmentChargesId = if (isEdit) "editShipmentCharges" else "shipmentCharges"
+    val freightId = if (isEdit) "editFreight" else "freight"
+    val inspectionFeeId = if (isEdit) "editInspectionFee" else "inspectionFee"
+    val calcBtnId = if (isEdit) "calculateEditRixoPriceBtn" else "calculateRixoPriceBtn"
+    val rrName = if (isEdit) "editStatusRixoRequested" else "statusRixoRequested"
+    val rcName = if (isEdit) "editStatusRixoConfirmed" else "statusRixoConfirmed"
+    val brName = if (isEdit) "editStatusBookingRequested" else "statusBookingRequested"
+
+    listOf(rixoCompanyId, stockLocationId, countryId, polId).forEach { setPurchaseComboboxLocked(it, locked) }
+    listOf(
+        rixoPriceId, shipmentDateId, blNoId, bookingId, vesselId,
+        shipmentChargesId, freightId, inspectionFeeId,
+    ).forEach { setPurchaseInputLocked(it, locked) }
+    setPurchaseInputLocked(shipmentDatePickerId, locked)
+    setPurchaseInputLocked(shipmentDateCalBtnId, locked)
+    setPurchaseInputLocked(calcBtnId, locked)
+    listOf(rrName, rcName, brName).forEach { setPurchaseRadioGroupLocked(it, locked) }
+    enforcePurchaseStatusState(isEdit)
+}
+
+private fun applyLocalFlagAndNullLockedFields(purchaseData: dynamic, isEdit: Boolean) {
+    val isLocal = isLocalPurchaseCheckboxChecked(isEdit)
+    purchaseData.local = isLocal
+    if (!isLocal) return
+    purchaseData.rixoCompany = null
+    purchaseData.stockLocation = null
+    purchaseData.rixoPrice = null
+    purchaseData.rixoRequested = "FALSE"
+    purchaseData.rixoConfirmed = "FALSE"
+    purchaseData.bookingRequested = false
+    purchaseData.country = null
+    purchaseData.pol = null
+    purchaseData.pod = null
+    purchaseData.destination = null
+    purchaseData.shipmentDate = null
+    purchaseData.blNo = null
+    purchaseData.vessel = null
+    purchaseData.bookingId = null
+    purchaseData.shipmentCharges = null
+    purchaseData.freight = null
+    purchaseData.inspectionFee = null
+}
+
+private fun setupLocalPurchaseCheckboxListener(isEdit: Boolean) {
+    val checkboxId = if (isEdit) "editLocalCheckbox" else "localCheckbox"
+    val checkbox = document.getElementById(checkboxId) as? HTMLInputElement ?: return
+    if (checkbox.hasAttribute("data-local-listener-attached")) return
+    checkbox.setAttribute("data-local-listener-attached", "true")
+    checkbox.addEventListener("change", { _: Event ->
+        applyLocalPurchaseFieldLock(isEdit, checkbox.checked)
+    })
+    applyLocalPurchaseFieldLock(isEdit, checkbox.checked)
+}
+
 private fun isLocalPurchaseByClientCombobox(isEdit: Boolean): Boolean {
     val clientField = if (isEdit) "editClientName" else "clientName"
     val value = getComboboxValueSafe(clientField).trim().uppercase()
@@ -9506,7 +9647,7 @@ private fun enforcePurchaseStatusState(isEdit: Boolean) {
     var rc = purchaseStatusRead(rcName) == "TRUE"
     var br = purchaseStatusRead(brName) == "TRUE"
     var ic = purchaseStatusRead(icName) == "TRUE"
-    val isLocal = isLocalPurchaseByClientCombobox(isEdit)
+    val isLocal = isLocalPurchaseCheckboxChecked(isEdit) || isLocalPurchaseByClientCombobox(isEdit)
 
     if (!rr) {
         rc = false
@@ -9529,6 +9670,10 @@ private fun enforcePurchaseStatusState(isEdit: Boolean) {
     (document.querySelector("input[name=\"$rcName\"][value=\"TRUE\"]") as? HTMLInputElement)?.disabled = !rr
     (document.querySelector("input[name=\"$brName\"][value=\"TRUE\"]") as? HTMLInputElement)?.disabled = !rc
     (document.querySelector("input[name=\"$icName\"][value=\"TRUE\"]") as? HTMLInputElement)?.disabled = !rc || (!isLocal && !br)
+
+    if (isLocalPurchaseCheckboxChecked(isEdit)) {
+        listOf(rrName, rcName, brName).forEach { setPurchaseRadioGroupLocked(it, locked = true) }
+    }
 }
 
 private fun setupPurchaseStatusStateMachine(isEdit: Boolean) {
@@ -9547,6 +9692,7 @@ private fun setupPurchaseStatusStateMachine(isEdit: Boolean) {
     val clientBase = if (isEdit) "editClientName" else "clientName"
     document.getElementById(clientBase)?.addEventListener("change", { _: Event -> enforcePurchaseStatusState(isEdit) })
     document.getElementById("${clientBase}Input")?.addEventListener("change", { _: Event -> enforcePurchaseStatusState(isEdit) })
+    setupLocalPurchaseCheckboxListener(isEdit)
     enforcePurchaseStatusState(isEdit)
 }
 
@@ -14611,6 +14757,8 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     val carPicturesCount = js("carPictures.length").unsafeCast<Int>()
     purchaseData.carPictures = if (carPicturesCount > 0) JSON.stringify(carPictures) else null
 
+    applyLocalFlagAndNullLockedFields(purchaseData, isEdit = false)
+
     // Send POST request to create purchase
     val requestInit = js("{}")
     requestInit.method = "POST"
@@ -15062,6 +15210,12 @@ fun showEditFormWithData(purchaseData: dynamic) {
 
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('status')"><h3 class="form-section-header" data-section="status">Status</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="status">
+                    <div style="grid-column: 1 / -1; margin-bottom: 4px;">
+                        <label style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: #374151; cursor: pointer; margin: 0;">
+                            <input type="checkbox" id="editLocalCheckbox" ${if (purchaseLocalChecked(purchaseData)) "checked" else ""} style="width: 18px; height: 18px; accent-color: #007bff;">
+                            LOCAL
+                        </label>
+                    </div>
                     <div>
                         <label>Purchased</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
@@ -16337,6 +16491,7 @@ fun getFieldDisplayName(fieldName: String): String {
         "repairCharges" -> "Repair Charges"
         "shaken" -> "SHAKEN"
         "negotiate" -> "NEGOTIATE"
+        "local" -> "LOCAL"
         "numberCut" -> "Number Cut"
         "notes" -> "Notes"
         "bookingId" -> "Booking No"
@@ -16524,6 +16679,8 @@ fun collectCurrentEditFormData(): dynamic {
     
     // Include car pictures so change detection matches the save payload (edit form uses two DOM areas)
     purchaseData.carPictures = collectCarPictures()
+    
+    applyLocalFlagAndNullLockedFields(purchaseData, isEdit = true)
     
     return purchaseData
 }
@@ -17210,6 +17367,8 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     // Collect car pictures data
     val carPictures = collectCarPictures()
     purchaseData.carPictures = carPictures
+    
+    applyLocalFlagAndNullLockedFields(purchaseData, isEdit = true)
     
     console.log("Sending update data: ${JSON.stringify(purchaseData)}")
     console.log("📷 Car pictures data:", carPictures)

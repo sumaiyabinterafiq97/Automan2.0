@@ -1025,6 +1025,7 @@ private val simpleMasterTitleOverrides = mapOf(
     "shift" to "Car Shift",
     "country" to "Country",
     "fuel" to "Fuel",
+    "number_place" to "Number Place",
     "pod" to "POD",
     "pol" to "POL",
     "repair_company" to "Repair Company",
@@ -13212,6 +13213,11 @@ fun showMasterTypeOfVehiclesPage() {
 fun loadMasterTypeOfVehicles() { loadSimpleMaster("master-menu/type_of_vehicle", "typeOfVehiclesFilter", "typeOfVehiclesTable", "Type of Vehicles", typeOfVehiclesCurrentPage, typeOfVehiclesItemsPerPage, allTypeOfVehicles, { typeOfVehiclesCurrentPage = it }, { allTypeOfVehicles = it }, ::showEditTypeOfVehiclesModal, "type-of-vehicles-edit-btn", "data-type-of-vehicles", "typeOfVehiclesPrevPage", "typeOfVehiclesNextPage", ::loadMasterTypeOfVehicles) }
 fun showAddTypeOfVehiclesModal() { addSimpleMasterModal("master-menu/type_of_vehicle", "Type of Vehicles", "typeOfVehiclesEditModal", "typeOfVehiclesModalInput", "typeOfVehiclesModalCancelBtn", "typeOfVehiclesModalAddBtn", { typeOfVehiclesCurrentPage = 1; loadMasterTypeOfVehicles() }) }
 fun showEditTypeOfVehiclesModal(originalName: String) { editSimpleMasterModal("master-menu/type_of_vehicle", "Type of Vehicles", originalName, "typeOfVehiclesEditModal", "typeOfVehiclesModalInput", "typeOfVehiclesModalCancelBtn", "typeOfVehiclesModalUpdateBtn", "typeOfVehiclesModalDeleteBtn", { loadMasterTypeOfVehicles() }, { typeOfVehiclesCurrentPage = 1; loadMasterTypeOfVehicles() }) }
+
+fun showMasterNumberPlacePage() {
+    window.location.hash = "#/master/number-place"
+    showDynamicMasterSetPage("number_place")
+}
 
 fun showDynamicMasterSetPage(fieldName: String) {
     val normalizedField = fieldName.trim().lowercase()

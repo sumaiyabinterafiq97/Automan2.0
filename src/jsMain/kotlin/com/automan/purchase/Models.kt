@@ -48,5 +48,6 @@ data class Purchase(
     val repairCharges: String? = null,
     val shaken: Boolean? = null,
     val negotiate: Boolean? = null,
+    val local: Boolean? = null,
     val numberCut: String? = null
 )

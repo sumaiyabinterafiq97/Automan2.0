@@ -30,6 +30,7 @@ class PurchaseService(
     private val purchaseVehicleOverrideService: PurchaseVehicleOverrideService,
     private val purchaseExtendedAttributesService: PurchaseExtendedAttributesService,
     private val shippingSnapshotService: ShippingSnapshotService,
+    private val localPurchaseSanitizer: LocalPurchaseSanitizer,
     private val clientRepository: ClientRepository,
 ) {
     /** Links [Purchase.clientId] when [clientName] matches exactly one row in clients (case-insensitive). */
@@ -42,7 +43,8 @@ class PurchaseService(
 
     /** Phase 2–4 write sync + read adapters for API responses. */
     private fun finalizePurchaseWrite(purchase: Purchase): Purchase {
-        val withWorkflow = purchaseWorkflowService.applyWorkflowWrite(purchase)
+        val sanitized = localPurchaseSanitizer.apply(purchase)
+        val withWorkflow = purchaseWorkflowService.applyWorkflowWrite(sanitized)
         purchaseCostLineService.syncFromPurchase(withWorkflow)
         purchaseVehicleOverrideService.syncFromPurchase(withWorkflow)
         // Shipping fields are @Transient on Purchase; sync before extended-attributes JPA save.
@@ -72,10 +74,14 @@ class PurchaseService(
     }
 
     private fun persistPurchase(purchase: Purchase): Purchase =
-        purchaseRepository.save(purchaseWorkflowService.applyWorkflowWrite(purchase))
+        purchaseRepository.save(
+            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)),
+        )
 
     private fun persistPurchaseAndFlush(purchase: Purchase): Purchase =
-        purchaseRepository.saveAndFlush(purchaseWorkflowService.applyWorkflowWrite(purchase))
+        purchaseRepository.saveAndFlush(
+            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)),
+        )
 
     /** POL from stock_location mapping (same mapping used in Rixo import). */
     private fun polFromStockLocation(stockLocation: String?): String? {
@@ -214,6 +220,7 @@ class PurchaseService(
         val purchaseToSave = purchase.copy(
             shaken = shakenValue,
             negotiate = negotiateValue,
+            local = purchase.local,
             clientId = purchase.clientId ?: resolveClientIdFromName(purchase.clientName),
         )
         
@@ -328,6 +335,7 @@ class PurchaseService(
                     purchase.negotiate == false -> false
                     else -> existingPurchase.negotiate
                 },
+                local = purchase.local,
                 repairCompany = purchase.repairCompany ?: existingPurchase.repairCompany,
                 repairCharges = purchase.repairCharges ?: existingPurchase.repairCharges,
                 updatedAt = java.time.LocalDateTime.now()
@@ -545,6 +553,15 @@ class PurchaseService(
                         negotiateValue == false -> false
                         negotiateValue == null -> existingPurchase.negotiate
                         else -> existingPurchase.negotiate
+                    }
+                },
+                local = run {
+                    val localValue = updateData["local"]
+                    when {
+                        localValue is Boolean -> localValue
+                        localValue is String -> localValue.toBoolean()
+                        localValue is Number -> localValue.toInt() != 0
+                        else -> existingPurchase.local
                     }
                 },
                 repairCompany = updateData["repairCompany"] as? String ?: existingPurchase.repairCompany,
