@@ -243,6 +243,37 @@ fun editFormDateRawToWeekdayFormatted(raw: String): String {
     else formatWithWeekday(raw)
 }
 
+/** Overlay native date/month input on the calendar button so showPicker() opens under ▼. */
+private fun positionHiddenPickerOverButton(hidden: HTMLInputElement, btn: HTMLElement) {
+    val parent = btn.parentElement as? HTMLElement ?: return
+    val pos = window.getComputedStyle(parent).position
+    if (pos == "static" || pos.isEmpty()) {
+        parent.style.position = "relative"
+    }
+    if (hidden.parentElement != parent) {
+        parent.appendChild(hidden)
+    }
+    fun apply() {
+        hidden.style.position = "absolute"
+        hidden.style.left = "${btn.offsetLeft}px"
+        hidden.style.top = "${btn.offsetTop}px"
+        hidden.style.width = "${kotlin.math.max(btn.offsetWidth, 36)}px"
+        hidden.style.height = "${kotlin.math.max(btn.offsetHeight, 32)}px"
+        hidden.style.right = "auto"
+        hidden.style.opacity = "0"
+        hidden.style.border = "none"
+        hidden.style.padding = "0"
+        hidden.style.margin = "0"
+        hidden.style.setProperty("overflow", "hidden")
+        hidden.style.zIndex = "5"
+        hidden.style.cursor = "pointer"
+        hidden.tabIndex = -1
+        btn.style.cursor = "pointer"
+    }
+    apply()
+    window.setTimeout({ apply() }, 0)
+}
+
 fun bindStrictDateTextMask(baseId: String, hintId: String? = null) {
     val hidden = document.getElementById(baseId) as? HTMLInputElement ?: return
     val already = hidden.asDynamic().__strictDateBound as? Boolean ?: false
@@ -280,17 +311,7 @@ fun bindStrictDateTextMask(baseId: String, hintId: String? = null) {
         return masked.length
     }
 
-    hidden.style.position = "absolute"
-    hidden.style.left = "0"
-    hidden.style.top = "0"
-    hidden.style.width = "0"
-    hidden.style.height = "0"
-    hidden.style.opacity = "0"
-    hidden.style.border = "none"
-    hidden.style.padding = "0"
-    hidden.style.margin = "0"
-    hidden.style.setProperty("overflow", "hidden")
-    hidden.tabIndex = -1
+    positionHiddenPickerOverButton(hidden, btn)
 
     if (hidden.value.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) setFromIso(hidden.value)
     else if (text.value.isNotBlank()) {
@@ -373,17 +394,7 @@ fun bindStrictMonthYearTextMask(baseId: String, hintId: String? = null) {
     val btn = document.getElementById(btnId) as? HTMLElement ?: return
     val hint = if (hintId.isNullOrBlank()) null else document.getElementById(hintId) as? HTMLElement
 
-    hidden.style.position = "absolute"
-    hidden.style.left = "0"
-    hidden.style.top = "0"
-    hidden.style.width = "0"
-    hidden.style.height = "0"
-    hidden.style.opacity = "0"
-    hidden.style.border = "none"
-    hidden.style.padding = "0"
-    hidden.style.margin = "0"
-    hidden.style.setProperty("overflow", "hidden")
-    hidden.tabIndex = -1
+    positionHiddenPickerOverButton(hidden, btn)
 
     fun syncHint() {
         hint?.style?.display = if (text.value.isBlank()) "block" else "none"
@@ -1360,6 +1371,8 @@ fun main() {
 }
 
 // Helper function to create editable combobox HTML
+private const val PURCHASE_SPEC_PLAIN_INT_ATTRS = """inputmode="numeric" class="plain-int-input""""
+
 fun createEditableCombobox(
     id: String,
     placeholder: String,
@@ -7101,11 +7114,11 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Seat</label>
-                        ${createEditableCombobox("seat", "Select Seat", showDropdownButton = false)}
+                        ${createEditableCombobox("seat", "Select Seat", showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
                         <label>Door</label>
-                        ${createEditableCombobox("door", "Select Door", showDropdownButton = false)}
+                        ${createEditableCombobox("door", "Select Door", showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
                         <label>Distance</label>
@@ -7113,7 +7126,7 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>CC</label>
-                        ${createEditableCombobox("cc", "Select CC", showDropdownButton = false)}
+                        ${createEditableCombobox("cc", "Select CC", showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
                         <label>Shift</label>
@@ -9229,6 +9242,10 @@ fun setupMoneyInputFormattingOnce() {
         window._moneyFormatAllowNegative = function(raw) { return _moneyFormatAllowNegative(raw); };
         window._commaIntSanitize = function(raw) { return _commaIntSanitize(raw); };
         window._commaIntFormat = function(raw) { return _commaIntFormat(raw); };
+        window._plainIntSanitize = function(raw) {
+            if (raw == null) return '';
+            return String(raw).replace(/[^0-9]/g, '');
+        };
         function _bindMoneyDelegation() {
             if (window.__moneyInputListenersV2Installed) return;
             window.__moneyInputListenersV2Installed = true;
@@ -9237,6 +9254,25 @@ fun setupMoneyInputFormattingOnce() {
                 if (__moneyFormatting) return;
                 var el = e.target;
                 if (!el || !el.classList) return;
+
+                // Spec fields (CC/Seat/Door): digits only, no comma formatting
+                if (el.classList.contains('plain-int-input')) {
+                    var oldPlain = el.value;
+                    var selPlain = (el.selectionStart == null) ? oldPlain.length : el.selectionStart;
+                    var beforePlain = oldPlain.substring(0, selPlain);
+                    var digitsBeforePlain = beforePlain.replace(/[^0-9]/g, '').length;
+                    var sanitizedPlain = oldPlain.replace(/[^0-9]/g, '');
+                    if (sanitizedPlain !== oldPlain) {
+                        __moneyFormatting = true;
+                        try {
+                            el.value = sanitizedPlain;
+                            var newPosPlain = Math.min(digitsBeforePlain, sanitizedPlain.length);
+                            el.setSelectionRange(newPosPlain, newPosPlain);
+                        } catch (err) { }
+                        __moneyFormatting = false;
+                    }
+                    return;
+                }
 
                 // Mileage/Distance: commas while typing, digits only (no decimals)
                 if (el.classList.contains('comma-int-input')) {
@@ -9306,13 +9342,17 @@ fun setupMoneyInputFormattingOnce() {
             document.addEventListener('keydown', function(e) {
                 var el = e.target;
                 if (!el || !el.classList) return;
-                if (!(el.classList.contains('money-input') || el.classList.contains('comma-int-input'))) return;
+                if (!(el.classList.contains('money-input') || el.classList.contains('comma-int-input') || el.classList.contains('plain-int-input'))) return;
                 if (e.ctrlKey || e.metaKey || e.altKey) return;
                 var k = e.key;
                 if (!k) return;
                 if (k === 'Backspace' || k === 'Delete' || k === 'Tab' || k === 'Enter' || k === 'Escape') return;
                 if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown' || k === 'Home' || k === 'End') return;
-                // mileage wants digits only; money allows dot (and optional leading minus on allow-negative)
+                // CC/Seat/Door and mileage: digits only
+                if (el.classList.contains('plain-int-input')) {
+                    if (k.length === 1 && !/[0-9]/.test(k)) e.preventDefault();
+                    return;
+                }
                 if (el.classList.contains('comma-int-input')) {
                     if (k.length === 1 && !/[0-9]/.test(k)) e.preventDefault();
                     return;
@@ -14884,11 +14924,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Seat</label>
-                        ${createEditableCombobox("editSeat", "Select Seat", initialValue = editSeatDisp, showDropdownButton = false)}
+                        ${createEditableCombobox("editSeat", "Select Seat", initialValue = editSeatDisp, showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
                         <label>Door</label>
-                        ${createEditableCombobox("editDoor", "Select Door", initialValue = editDoorDisp, showDropdownButton = false)}
+                        ${createEditableCombobox("editDoor", "Select Door", initialValue = editDoorDisp, showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
                         <label>Distance</label>
@@ -14896,7 +14936,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>CC</label>
-                        ${createEditableCombobox("editCc", "Select CC", initialValue = editCcDisp, showDropdownButton = false)}
+                        ${createEditableCombobox("editCc", "Select CC", initialValue = editCcDisp, showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
                         <label>Shift</label>
@@ -24261,7 +24301,7 @@ fun populateColumnCheckboxes(selectedColumns: Set<String>) {
     val container = document.getElementById("columnCheckboxes")
     if (container == null) return
     
-    val allColumns = purchaseListColumnLabels().entries.sortedBy { it.value.lowercase() }
+    val allColumns = purchaseListSelectableColumnLabels().entries.sortedBy { it.value.lowercase() }
     val mandatory = purchaseListMandatoryColumnKeys()
     
     container.innerHTML = allColumns.map { (key, label) ->
@@ -24354,7 +24394,7 @@ fun applyColumnChanges() {
     val deviceType = getDeviceType()
     val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
     val ordered = ensurePurchaseListPinnedColumns(
-        prioritizePurchaseListDateAndChassis(selectedColumns),
+        prioritizePurchaseListDateAndChassis(sanitizePurchaseListSelectedColumns(selectedColumns)),
         maxColumns,
     )
     

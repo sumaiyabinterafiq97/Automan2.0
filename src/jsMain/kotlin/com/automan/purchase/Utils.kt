@@ -741,6 +741,57 @@ fun purchaseListColumnLabels(): Map<String, String> {
     )
 }
 
+/** Legacy purchase-list column keys mapped to the canonical key used in the table. */
+private val purchaseListColumnKeyAliases: Map<String, String> = mapOf(
+    "sold" to "invoiceConfirmed",
+    "vesselNo" to "vessel",
+)
+
+/**
+ * Not offered in Purchase List column picker or table.
+ * Canonical keys (e.g. invoiceConfirmed, vessel) remain selectable.
+ */
+fun purchaseListHiddenColumnKeys(): Set<String> = setOf(
+    "sold",
+    "vesselNo",
+    "clientId",
+    "destination",
+    "isPackageMode",
+    "carPictures",
+    "consignee",
+    "pod",
+    "id",
+    "createdAt",
+    "updatedAt",
+    "displacement",
+    "packagePrice",
+)
+
+/** Column keys the user can pick in the Purchase List column filter modal. */
+fun purchaseListSelectableColumnLabels(): Map<String, String> =
+    purchaseListColumnLabels().filterKeys { it !in purchaseListHiddenColumnKeys() }
+
+/** Normalize saved/legacy column keys; returns null when the column should be dropped. */
+fun normalizePurchaseListColumnKey(key: String): String? {
+    val trimmed = key.trim()
+    if (trimmed.isEmpty()) return null
+    val canonical = purchaseListColumnKeyAliases[trimmed] ?: trimmed
+    if (canonical in purchaseListHiddenColumnKeys()) return null
+    if (canonical !in purchaseListColumnLabels()) return null
+    return canonical
+}
+
+/** Dedupe, migrate aliases, and drop hidden/unknown columns from a saved selection. */
+fun sanitizePurchaseListSelectedColumns(columns: List<String>): List<String> {
+    val out = mutableListOf<String>()
+    val seen = mutableSetOf<String>()
+    for (raw in columns) {
+        val key = normalizePurchaseListColumnKey(raw) ?: continue
+        if (seen.add(key)) out.add(key)
+    }
+    return out
+}
+
 /** Human-readable label for a purchase field key in change-history rows. */
 fun purchaseChangeHistoryFieldLabel(field: String): String {
     val key = field.trim()

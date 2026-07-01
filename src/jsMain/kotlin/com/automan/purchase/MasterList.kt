@@ -71,6 +71,8 @@ private var supplierTreeSelectedSupplier: String? = null
 private var supplierTreeSelectedStock: String? = null
 private var supplierTreePolEditRowId: Long? = null
 private var supplierTreePolEditBranchIdx: Int? = null
+private var supplierTreeStockEditRowId: Long? = null
+private var supplierTreeStockEditBranchIdx: Int? = null
 private var supplierTreeVenueEditRowId: Long? = null
 private var supplierTreeVenueEditBranchIdx: Int? = null
 private var supplierTreeSelectedStockRowId: Long? = null
@@ -6556,6 +6558,13 @@ private fun supplierStockIsReal(st: String): Boolean {
     return t.isNotEmpty() && t != "-"
 }
 
+/** One Rixo company chip under a stock branch (index within that branch's `;`-separated Rixo list). */
+private data class SupplierRixoLeafRef(
+    val stockBranchIdx: Int,
+    val rixoSubIdx: Int,
+    val label: String,
+)
+
 /** One visual branch under a supplier: token-split stock + aligned venue/POL + one or more Rixo leaves. */
 private data class SupplierStockBranchView(
     val supplier: String,
@@ -6564,8 +6573,7 @@ private data class SupplierStockBranchView(
     val polToken: String,
     val row: SupplierPriceRowLite,
     val stockBranchIndex: Int,
-    /** Pairs of (index in `rixo_company` semicolon list, label). */
-    val rixoLeaves: List<Pair<Int, String>>,
+    val rixoLeaves: List<SupplierRixoLeafRef>,
 )
 
 private fun splitSupplierSemicolonTokens(raw: String): List<String> =
@@ -6573,6 +6581,42 @@ private fun splitSupplierSemicolonTokens(raw: String): List<String> =
 
 private fun joinSupplierSemicolonParts(parts: List<String>): String =
     parts.joinToString(";")
+
+/** Multiple Rixo companies on one stock branch — comma-separated inside a single `;` segment. */
+private fun splitRixoCompaniesInBranchSegment(segment: String): List<String> {
+    if (segment.isBlank() || segment.trim() == "-") return emptyList()
+    return segment.split(',', ';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && it != "-" }
+        .distinctBy { it.lowercase() }
+}
+
+private fun joinRixoCompaniesInBranchSegment(tokens: List<String>): String {
+    val cleaned = tokens.map { it.trim() }.filter { it.isNotEmpty() && it != "-" }
+    return if (cleaned.isEmpty()) "-" else cleaned.joinToString(",")
+}
+
+/**
+ * One `;` segment per stock branch. When legacy rows have fewer segments than stock branches,
+ * all existing Rixo values are treated as belonging to branch 0 (fixes mistaken `LOGICO;KLC` writes).
+ */
+private fun alignedRixoBranchSegments(raw: String, numStockBranches: Int): MutableList<String> {
+    val n = if (numStockBranches <= 1) 1 else numStockBranches
+    val parts = splitSupplierSemicolonTokens(raw).map { it.trim() }
+    if (n <= 1) {
+        val allRixos = parts.flatMap { splitRixoCompaniesInBranchSegment(it) }
+        return mutableListOf(joinRixoCompaniesInBranchSegment(allRixos))
+    }
+    if (parts.size < n) {
+        val branch0 = parts.flatMap { splitRixoCompaniesInBranchSegment(it) }
+        val aligned = MutableList(n) { "-" }.toMutableList()
+        aligned[0] = joinRixoCompaniesInBranchSegment(branch0)
+        return aligned
+    }
+    val aligned = parts.take(n).toMutableList()
+    while (aligned.size < n) aligned.add("-")
+    return aligned
+}
 
 /** Strip grouping/currency so inputs like `15,000` or `¥60,000` parse as numbers. */
 private fun parseMoneyNumericInput(raw: String): Double? {
@@ -6610,18 +6654,28 @@ private fun computeRixoLeavesForBranch(
     numStockBranches: Int,
     rixosAll: List<String>,
     stockBranchIdx: Int,
-): List<Pair<Int, String>> {
-    if (numStockBranches <= 1) {
-        val leaves = mutableListOf<Pair<Int, String>>()
-        for ((j, t) in rixosAll.withIndex()) {
-            val tt = t.trim()
-            if (tt.isEmpty() || tt == "-") continue
-            leaves.add(j to tt)
-        }
-        return leaves.ifEmpty { listOf(0 to "") }
-    }
-    val tt = rixosAll.getOrNull(stockBranchIdx)?.trim().orEmpty()
-    return listOf(stockBranchIdx to tt)
+): List<SupplierRixoLeafRef> {
+    val rawRixo = if (rixosAll.isEmpty()) "" else joinSupplierSemicolonParts(rixosAll)
+    val aligned = alignedRixoBranchSegments(rawRixo, numStockBranches)
+    val segment = aligned.getOrNull(stockBranchIdx).orEmpty()
+    val tokens = splitRixoCompaniesInBranchSegment(segment)
+    if (tokens.isEmpty()) return listOf(SupplierRixoLeafRef(stockBranchIdx, 0, ""))
+    return tokens.mapIndexed { subIdx, tok -> SupplierRixoLeafRef(stockBranchIdx, subIdx, tok) }
+}
+
+private fun rixoTokensForBranch(row: SupplierPriceRowLite, stockBranchIdx: Int): MutableList<String> {
+    val n = supplierStockBranchCount(row)
+    val aligned = alignedRixoBranchSegments(row.rixoCompany, n)
+    val segment = aligned.getOrNull(stockBranchIdx).orEmpty()
+    return splitRixoCompaniesInBranchSegment(segment).toMutableList()
+}
+
+private fun writeRixoTokensForBranch(row: SupplierPriceRowLite, stockBranchIdx: Int, tokens: List<String>): String {
+    val n = supplierStockBranchCount(row)
+    val aligned = alignedRixoBranchSegments(row.rixoCompany, n)
+    while (aligned.size <= stockBranchIdx) aligned.add("-")
+    aligned[stockBranchIdx] = joinRixoCompaniesInBranchSegment(tokens)
+    return if (n <= 1) aligned[0] else joinSupplierSemicolonParts(aligned)
 }
 
 private fun expandStockBranchesForSupplier(rows: List<SupplierPriceRowLite>, supplier: String): List<SupplierStockBranchView> {
@@ -6721,6 +6775,7 @@ private fun buildSupplierTreeCardHtml(
     rowId: Long?,
     branchIdx: Int?,
     branchEditActive: Boolean = false,
+    stockEditActive: Boolean = false,
 ): String {
     val selectedClass = if (selected) " rixo-tree-card--selected" else ""
     val levelClass = if (level == "supplier") " rixo-tree-card--company" else " rixo-tree-card--auction"
@@ -6735,12 +6790,31 @@ private fun buildSupplierTreeCardHtml(
         return """
             <div class="rixo-tree-card-wrapper $wrapperClass" data-smap-path-supplier="$ps" data-smap-path-stock="$pst" data-smap-card-level="$level" data-smap-row-id="$rid" data-smap-branch-idx="$bidx">
                 <div class="rixo-tree-card$levelClass$selectedClass rixo-tree-card--inline-editing" data-smap-card-level="$level" aria-expanded="$ariaExpanded" style="cursor: default;">
-                    <span class="rixo-tree-exp-indicator" aria-hidden="true"></span>
-                    <span class="rixo-tree-label-wrap" style="display:flex;flex-direction:row;align-items:center;min-width:0;text-align:left;width:100%;gap:10px;">
-                        <input type="text" id="supTreeSupplierInlineEditInput" value="$ps" style="flex:1; padding: 4px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 14px; box-sizing: border-box;" />
-                        <button type="button" class="rixo-tree-card-inline-cancel" data-smap-supplier-cancel="1">Cancel</button>
-                        <button type="button" class="rixo-tree-card-inline-save" data-smap-supplier-save="1">Save</button>
-                    </span>
+                    <div class="supplier-tree-pol-strip supplier-tree-pol-strip--editing supplier-tree-inline-edit-strip" style="width:100%;">
+                        <span class="supplier-tree-pol-label">Supplier</span>
+                        <input type="text" id="supTreeSupplierInlineEditInput" value="$ps" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+                        <div class="supplier-tree-inline-edit-actions">
+                            <button type="button" class="rixo-tree-card-inline-cancel" data-smap-supplier-cancel="1">Cancel</button>
+                            <button type="button" class="rixo-tree-card-inline-save" data-smap-supplier-save="1">Save</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        """.trimIndent()
+    }
+
+    if (level == "stock" && stockEditActive) {
+        return """
+            <div class="rixo-tree-card-wrapper $wrapperClass" data-smap-path-supplier="$ps" data-smap-path-stock="$pst" data-smap-card-level="$level" data-smap-row-id="$rid" data-smap-branch-idx="$bidx">
+                <div class="rixo-tree-card$levelClass$selectedClass rixo-tree-card--inline-editing" data-smap-card-level="$level" aria-expanded="$ariaExpanded" style="cursor: default;">
+                    <div class="supplier-tree-pol-strip supplier-tree-pol-strip--editing supplier-tree-inline-edit-strip" style="width:100%;">
+                        <span class="supplier-tree-pol-label">Stock location</span>
+                        <div class="supplier-tree-pol-combo">${createEditableCombobox("supTreeStockEditCombo", "Select Stock Location", required = true)}</div>
+                        <div class="supplier-tree-inline-edit-actions">
+                            <button type="button" class="rixo-tree-card-inline-cancel" data-smap-stock-cancel="1">Cancel</button>
+                            <button type="button" class="rixo-tree-card-inline-save" data-smap-stock-save="1">Save</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         """.trimIndent()
@@ -6849,7 +6923,7 @@ private fun buildSupplierPolStripHtml(rowId: Long, branchIdx: Int, pol: String, 
 private fun buildSupplierRixoLeafRowHtml(
     rowId: Long,
     stockBranchIdx: Int,
-    rixoSegIdx: Int,
+    rixoSubIdx: Int,
     rixoToken: String,
     branchEditing: Boolean,
 ): String {
@@ -6857,10 +6931,11 @@ private fun buildSupplierRixoLeafRowHtml(
     val pencilSvg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 0 0 0-1.41l-2.34-2.34a.996.996 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>"""
     val trashSvg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>"""
     val sbi = stockBranchIdx.toString()
-    val comboId = "supTreeBranchEditRixo_${rowId}_${rixoSegIdx}"
+    val rsi = rixoSubIdx.toString()
+    val comboId = "supTreeBranchEditRixo_${rowId}_${stockBranchIdx}_${rixoSubIdx}"
     if (branchEditing) {
         return """
-            <div class="rixo-tree-leaf-row rixo-tree-leaf-row--selectable rixo-tree-leaf-row--inline-editing" data-smap-leaf-id="$rowId" data-smap-stock-branch-idx="$sbi" data-smap-rixo-idx="$rixoSegIdx">
+            <div class="rixo-tree-leaf-row rixo-tree-leaf-row--selectable rixo-tree-leaf-row--inline-editing" data-smap-leaf-id="$rowId" data-smap-stock-branch-idx="$sbi" data-smap-rixo-sub-idx="$rsi">
                 <div class="rixo-tree-leaf-cells">
                     <div class="rixo-tree-leaf-edit" style="display:flex !important;align-items:center;gap:8px;width:100%;">
                         <div class="rixo-tree-leaf-vtype-wrap" style="flex:1;min-width:120px;">${createEditableCombobox(comboId, "Select Rixo Company", required = true)}</div>
@@ -6870,13 +6945,13 @@ private fun buildSupplierRixoLeafRowHtml(
         """.trimIndent()
     }
     return """
-        <div class="rixo-tree-leaf-row rixo-tree-leaf-row--selectable" data-smap-leaf-id="$rowId" data-smap-stock-branch-idx="$sbi" data-smap-rixo-idx="$rixoSegIdx">
+        <div class="rixo-tree-leaf-row rixo-tree-leaf-row--selectable" data-smap-leaf-id="$rowId" data-smap-stock-branch-idx="$sbi" data-smap-rixo-sub-idx="$rsi">
             <div class="rixo-tree-leaf-cells">
                 <div class="rixo-tree-leaf-view">
                     <div style="flex:1;min-width:0;">$chip</div>
                     <div class="rixo-tree-leaf-price-cell" style="max-width:none;">
                         <button type="button" class="rixo-tree-leaf-edit-btn" data-smap-rixo-edit="1" aria-label="Edit">$pencilSvg</button>
-                        <button type="button" class="rixo-tree-leaf-delete-btn" data-smap-rixo-branch-delete="$rowId" data-smap-branch-idx="$sbi" aria-label="Delete">$trashSvg</button>
+                        <button type="button" class="rixo-tree-leaf-delete-btn" data-smap-rixo-delete="$rowId" data-smap-branch-idx="$sbi" data-smap-rixo-sub-idx="$rsi" aria-label="Delete">$trashSvg</button>
                     </div>
                 </div>
             </div>
@@ -6983,6 +7058,9 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
                     val branchEditing =
                         supplierTreeBranchEditRowId == br.row.id &&
                             supplierTreeBranchEditBranchIdx == br.stockBranchIndex
+                    val stockEditing =
+                        supplierTreeStockEditRowId == br.row.id &&
+                            supplierTreeStockEditBranchIdx == br.stockBranchIndex
                     sb.append("""<div class="rixo-tree-node">""")
                     sb.append(
                         buildSupplierTreeCardHtml(
@@ -6993,7 +7071,8 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
                             br.stockToken,
                             br.row.id,
                             br.stockBranchIndex,
-                            branchEditActive = branchEditing,
+                            branchEditActive = branchEditing && !stockEditing,
+                            stockEditActive = stockEditing,
                         ),
                     )
                     if (isStockOpen) {
@@ -7006,13 +7085,13 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
                         sb.append(buildSupplierVenueStripHtml(br.venueToken, br.row.id, br.stockBranchIndex, branchEditing = branchEditing))
                         sb.append("""</div>""")
                         sb.append("""<div class="supplier-tree-branch-col supplier-tree-branch-col--rixo">""")
-                        for ((rixIdx, tok) in br.rixoLeaves) {
+                        for (leaf in br.rixoLeaves) {
                             sb.append(
                                 buildSupplierRixoLeafRowHtml(
                                     br.row.id,
-                                    br.stockBranchIndex,
-                                    rixIdx,
-                                    tok,
+                                    leaf.stockBranchIdx,
+                                    leaf.rixoSubIdx,
+                                    leaf.label,
                                     branchEditing = branchEditing,
                                 ),
                             )
@@ -7065,6 +7144,13 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
 }
 
 private fun wireSupplierMapTreeComboboxes() {
+    if (supplierTreeStockEditRowId != null && supplierTreeStockEditBranchIdx != null) {
+        populateEditableComboboxFromMasterMenu("supTreeStockEditCombo", "stock_location")
+        val row = supplierRowById(supplierTreeStockEditRowId!!)
+        val parts = splitSupplierSemicolonTokens(row?.stock ?: "")
+        val sv = parts.getOrNull(supplierTreeStockEditBranchIdx!!).orEmpty()
+        setEditableComboboxValue("supTreeStockEditCombo", sv)
+    }
     if (supplierTreePolEditRowId != null && supplierTreePolEditBranchIdx != null) {
         populateEditableComboboxFromMasterMenu("supTreePolEditCombo", "pol")
         val row = supplierRowById(supplierTreePolEditRowId!!)
@@ -7102,11 +7188,10 @@ private fun wireSupplierMapTreeComboboxes() {
             val branches = expandStockBranchesForSupplier(supplierMapTreeRowsCache, row.supplier)
             val br = branches.firstOrNull { it.row.id == rid && it.stockBranchIndex == bidx }
             if (br != null) {
-                for ((rixIdx, _) in br.rixoLeaves) {
-                    val cid = "supTreeBranchEditRixo_${rid}_${rixIdx}"
+                for (leaf in br.rixoLeaves) {
+                    val cid = "supTreeBranchEditRixo_${rid}_${leaf.stockBranchIdx}_${leaf.rixoSubIdx}"
                     populateEditableComboboxFromRixoMappingDistinctCompanies(cid)
-                    val rp = splitSupplierSemicolonTokens(row.rixoCompany)
-                    setEditableComboboxValue(cid, rp.getOrNull(rixIdx).orEmpty())
+                    setEditableComboboxValue(cid, leaf.label)
                 }
             }
         }
@@ -7255,6 +7340,8 @@ private fun putSupplierMappingRow(row: SupplierPriceRowLite, successMessage: Str
         .then { _: dynamic ->
             supplierTreePolEditRowId = null
             supplierTreePolEditBranchIdx = null
+            supplierTreeStockEditRowId = null
+            supplierTreeStockEditBranchIdx = null
             supplierTreeVenueEditRowId = null
             supplierTreeVenueEditBranchIdx = null
             supplierTreeBranchEditRowId = null
@@ -7314,6 +7401,7 @@ private fun putSupplierFieldSegment(
     val parts = when (field) {
         "pol" -> splitSupplierSemicolonTokens(row.pol).toMutableList()
         "venueId" -> splitSupplierSemicolonTokens(row.venueId).toMutableList()
+        "stock" -> splitSupplierSemicolonTokens(row.stock).toMutableList()
         else -> return
     }
     while (parts.size <= branchIdx) parts.add("")
@@ -7323,6 +7411,7 @@ private fun putSupplierFieldSegment(
     val updated = when (field) {
         "pol" -> row.copy(pol = joined)
         "venueId" -> row.copy(venueId = joined)
+        "stock" -> row.copy(stock = joined)
         else -> row
     }
     putSupplierMappingRow(updated, successMessage)
@@ -7342,22 +7431,23 @@ private fun applySupplierBranchInlineEdit(rowId: Long, branchIdx: Int) {
         showMessage("Branch not found", "error")
         return
     }
-    val rixSegs = splitSupplierSemicolonTokens(row.rixoCompany).toMutableList()
-    for ((rixIdx, _) in br.rixoLeaves) {
-        val v = getEditableComboboxValue("supTreeBranchEditRixo_${rowId}_${rixIdx}").trim()
+    val branchTokens = mutableListOf<String>()
+    for (leaf in br.rixoLeaves) {
+        val comboId = "supTreeBranchEditRixo_${rowId}_${leaf.stockBranchIdx}_${leaf.rixoSubIdx}"
+        val v = getEditableComboboxValue(comboId).trim()
         if (v.isEmpty()) {
             showMessage("Rixo company is required", "error")
             return
         }
-        while (rixSegs.size <= rixIdx) rixSegs.add("")
-        if (rixIdx < rixSegs.size) rixSegs[rixIdx] = v else rixSegs.add(v)
+        branchTokens.add(v)
     }
-    val newRixoJoined = joinSupplierSemicolonParts(rixSegs)
-    val updated = row.copy(
+    val withDims = row.copy(
         stock = replaceSupplierSemicolonSegment(row.stock, branchIdx, newStock),
         venueId = replaceSupplierSemicolonSegment(row.venueId, branchIdx, newVenue),
         pol = replaceSupplierSemicolonSegment(row.pol, branchIdx, newPol),
-        rixoCompany = newRixoJoined.ifBlank { "-" },
+    )
+    val updated = withDims.copy(
+        rixoCompany = writeRixoTokensForBranch(withDims, branchIdx, branchTokens).ifBlank { "-" },
     )
     putSupplierMappingRow(updated, "Mapping updated")
 }
@@ -7367,20 +7457,26 @@ private fun supplierStockBranchCount(row: SupplierPriceRowLite): Int {
     return if (stocks.isEmpty()) 1 else stocks.size
 }
 
-/** Add a Rixo token for this branch: multiple leaves when one stock branch; one segment per branch when stock is split. */
-private fun mergeNewRixoIntoRow(row: SupplierPriceRowLite, branchIdx: Int, newTok: String): SupplierPriceRowLite {
+/** Append a Rixo company to one stock branch; returns null if duplicate or invalid. */
+private fun mergeNewRixoIntoRow(row: SupplierPriceRowLite, branchIdx: Int, newTok: String): SupplierPriceRowLite? {
     val nt = newTok.trim()
-    val nBranches = supplierStockBranchCount(row)
-    val rixosAll = splitSupplierSemicolonTokens(row.rixoCompany).toMutableList()
-    if (nBranches <= 1) {
-        val nonBlank = rixosAll.map { it.trim() }.filter { it.isNotEmpty() && it != "-" }.toMutableList()
-        nonBlank.add(nt)
-        return row.copy(rixoCompany = joinSupplierSemicolonParts(nonBlank))
+    if (nt.isEmpty()) return null
+    val tokens = rixoTokensForBranch(row, branchIdx)
+    if (tokens.any { it.equals(nt, ignoreCase = true) }) return null
+    tokens.add(nt)
+    return row.copy(rixoCompany = writeRixoTokensForBranch(row, branchIdx, tokens))
+}
+
+private fun removeRixoCompanyFromRow(rowId: Long, stockBranchIdx: Int, rixoSubIdx: Int) {
+    val row = supplierRowById(rowId) ?: return
+    val tokens = rixoTokensForBranch(row, stockBranchIdx)
+    if (rixoSubIdx !in tokens.indices) {
+        showMessage("Rixo company not found", "error")
+        return
     }
-    while (rixosAll.size <= branchIdx) rixosAll.add("")
-    val cur = rixosAll.getOrNull(branchIdx)?.trim().orEmpty()
-    rixosAll[branchIdx] = if (cur.isEmpty() || cur == "-") nt else "$cur;$nt"
-    return row.copy(rixoCompany = joinSupplierSemicolonParts(rixosAll))
+    tokens.removeAt(rixoSubIdx)
+    val updated = row.copy(rixoCompany = writeRixoTokensForBranch(row, stockBranchIdx, tokens))
+    putSupplierMappingRow(updated, "Rixo company removed")
 }
 
 private fun removeParallelBranchFromRow(rowId: Long, branchIdx: Int, _root: HTMLElement) {
@@ -7496,11 +7592,32 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                             supplierTreeSupplierEditName = ps
                             root.innerHTML = buildSupplierMapTreeHtmlFromCache()
                             bindSupplierMapTreeClicks(root)
+                            window.setTimeout({
+                                (document.getElementById("supTreeSupplierInlineEditInput") as? HTMLInputElement)?.focus()
+                            }, 0)
                         }
                         "stock" -> {
                             val id = wrap.getAttribute("data-smap-row-id")?.toLongOrNull()
-                            if (id != null) editMasterSupplier(id)
-                            else showMessage("No row for stock branch", "error")
+                            val bidx = wrap.getAttribute("data-smap-branch-idx")?.toIntOrNull()
+                            if (id == null || bidx == null) {
+                                showMessage("No row for stock branch", "error")
+                                return@click
+                            }
+                            supplierTreeStockEditRowId = id
+                            supplierTreeStockEditBranchIdx = bidx
+                            supplierTreeBranchEditRowId = null
+                            supplierTreeBranchEditBranchIdx = null
+                            supplierTreePolEditRowId = null
+                            supplierTreePolEditBranchIdx = null
+                            supplierTreeVenueEditRowId = null
+                            supplierTreeVenueEditBranchIdx = null
+                            supplierTreeSelectedSupplier = ps
+                            supplierTreeSelectedStock = wrap.getAttribute("data-smap-path-stock")?.trim().orEmpty()
+                            supplierTreeSelectedStockRowId = id
+                            supplierTreeSelectedStockBranchIdx = bidx
+                            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                            bindSupplierMapTreeClicks(root)
+                            window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
                         }
                     }
                 }
@@ -7528,6 +7645,69 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                     }
                 }
             }
+            return@click
+        }
+
+        val supplierCancel = target.closest("[data-smap-supplier-cancel]") as? HTMLElement
+        if (supplierCancel != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            supplierTreeSupplierEditName = null
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            return@click
+        }
+
+        val supplierSave = target.closest("[data-smap-supplier-save]") as? HTMLElement
+        if (supplierSave != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            val oldName = supplierTreeSupplierEditName ?: return@click
+            val newName = (document.getElementById("supTreeSupplierInlineEditInput") as? HTMLInputElement)?.value?.trim().orEmpty()
+            if (newName.isEmpty()) {
+                showMessage("Supplier name is required", "error")
+                return@click
+            }
+            if (newName == oldName) {
+                supplierTreeSupplierEditName = null
+                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                bindSupplierMapTreeClicks(root)
+                return@click
+            }
+            val rows = supplierRowsBySupplierKey(oldName)
+            if (rows.isEmpty()) {
+                supplierTreeSupplierEditName = null
+                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                bindSupplierMapTreeClicks(root)
+                return@click
+            }
+            updateSupplierRowsSequentially(rows, newName, root)
+            return@click
+        }
+
+        val stockCancel = target.closest("[data-smap-stock-cancel]") as? HTMLElement
+        if (stockCancel != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            supplierTreeStockEditRowId = null
+            supplierTreeStockEditBranchIdx = null
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            return@click
+        }
+
+        val stockSave = target.closest("[data-smap-stock-save]") as? HTMLElement
+        if (stockSave != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            val rid = supplierTreeStockEditRowId ?: return@click
+            val bidx = supplierTreeStockEditBranchIdx ?: return@click
+            val newStock = getEditableComboboxValue("supTreeStockEditCombo").trim()
+            if (newStock.isEmpty() || newStock == "-") {
+                showMessage("Stock location is required", "error")
+                return@click
+            }
+            putSupplierFieldSegment(rid, bidx, "stock", newStock, "Stock location updated")
             return@click
         }
 
@@ -7569,6 +7749,8 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
             val strip = polEdit.closest(".supplier-tree-pol-strip") as? HTMLElement ?: return@click
             supplierTreeBranchEditRowId = null
             supplierTreeBranchEditBranchIdx = null
+            supplierTreeStockEditRowId = null
+            supplierTreeStockEditBranchIdx = null
             supplierTreePolEditRowId = strip.getAttribute("data-smap-pol-row")?.toLongOrNull()
             supplierTreePolEditBranchIdx = strip.getAttribute("data-smap-pol-idx")?.toIntOrNull()
             root.innerHTML = buildSupplierMapTreeHtmlFromCache()
@@ -7631,41 +7813,6 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
             return@click
         }
 
-        val supplierCancel = target.closest("[data-smap-supplier-cancel]") as? HTMLElement
-        if (supplierCancel != null) {
-            ev.preventDefault()
-            supplierTreeSupplierEditName = null
-            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
-            bindSupplierMapTreeClicks(root)
-            return@click
-        }
-
-        val supplierSave = target.closest("[data-smap-supplier-save]") as? HTMLElement
-        if (supplierSave != null) {
-            ev.preventDefault()
-            val oldName = supplierTreeSupplierEditName ?: return@click
-            val newName = (document.getElementById("supTreeSupplierInlineEditInput") as? HTMLInputElement)?.value?.trim().orEmpty()
-            if (newName.isEmpty()) {
-                showMessage("Supplier name is required", "error")
-                return@click
-            }
-            if (newName == oldName) {
-                supplierTreeSupplierEditName = null
-                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
-                bindSupplierMapTreeClicks(root)
-                return@click
-            }
-            val rows = supplierRowsBySupplierKey(oldName)
-            if (rows.isEmpty()) {
-                supplierTreeSupplierEditName = null
-                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
-                bindSupplierMapTreeClicks(root)
-                return@click
-            }
-            updateSupplierRowsSequentially(rows, newName, root)
-            return@click
-        }
-
         val supplierBranchSaveBtn = target.closest("[data-smap-supplier-branch-save]") as? HTMLElement
         if (supplierBranchSaveBtn != null) {
             ev.preventDefault()
@@ -7673,6 +7820,83 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
             val rid = supplierBranchSaveBtn.getAttribute("data-smap-supplier-branch-save")?.toLongOrNull() ?: return@click
             val bidx = supplierBranchSaveBtn.getAttribute("data-smap-branch-idx")?.toIntOrNull() ?: return@click
             applySupplierBranchInlineEdit(rid, bidx)
+            return@click
+        }
+
+        val leafAddCancel = target.closest("[data-smap-leaf-add-cancel]") as? HTMLElement
+        if (leafAddCancel != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            supplierTreeInlineAddLevel = null
+            supplierTreeLeafAddRowId = null
+            supplierTreeLeafAddBranchIdx = null
+            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+            bindSupplierMapTreeClicks(root)
+            return@click
+        }
+
+        val leafAddSave = target.closest("[data-smap-leaf-add-save]") as? HTMLElement
+        if (leafAddSave != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            val sup = supplierTreeInlineSupplier.trim()
+            val stk = supplierTreeInlineStock.trim()
+            val rixo = getEditableComboboxValue("supTreeLeafAddRixo").trim()
+            if (sup.isEmpty() || stk.isEmpty() || rixo.isEmpty()) {
+                showMessage("Rixo company is required", "error")
+                return@click
+            }
+            val rid = supplierTreeLeafAddRowId
+            val bidx = supplierTreeLeafAddBranchIdx ?: 0
+            if (rid != null) {
+                val row = supplierRowById(rid) ?: return@click
+                val updated = mergeNewRixoIntoRow(row, bidx, rixo)
+                if (updated == null) {
+                    showMessage("Rixo company already exists on this branch", "error")
+                    return@click
+                }
+                supplierTreeInlineAddLevel = null
+                supplierTreeLeafAddRowId = null
+                supplierTreeLeafAddBranchIdx = null
+                putSupplierMappingRow(updated, "Rixo company added")
+                return@click
+            }
+            val venue = supplierRowsBySupplierKey(sup).firstOrNull()?.venueId ?: ""
+            val payload = js("{}")
+            payload.auctionHouse = sup
+            payload.stockLocation = stk
+            payload.rixoCompany = rixo
+            payload.venueId = venue
+            payload.pol = ""
+            window.fetch(apiUrl("rixo/mappings/add"), js("""{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
+                .then { r: dynamic ->
+                    r.json().then { res: dynamic ->
+                        if (r.ok && (res.success as? Boolean == true)) {
+                            supplierTreeInlineAddLevel = null
+                            supplierTreeLeafAddRowId = null
+                            supplierTreeLeafAddBranchIdx = null
+                            showMessage((res.message as? String) ?: "Mapping added", "success")
+                            notifySupplierRixoPricesChanged()
+                            refreshSupplierMapTreeData()
+                        } else {
+                            showMessage((res.message as? String) ?: "Add failed", "error")
+                        }
+                        Unit
+                    }
+                }
+                .catch { _: dynamic -> showMessage("Add failed", "error") }
+            return@click
+        }
+
+        val rixoDel = target.closest("[data-smap-rixo-delete]") as? HTMLElement
+        if (rixoDel != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            val id = rixoDel.getAttribute("data-smap-rixo-delete")?.toLongOrNull() ?: return@click
+            val bidx = rixoDel.getAttribute("data-smap-branch-idx")?.toIntOrNull() ?: return@click
+            val subIdx = rixoDel.getAttribute("data-smap-rixo-sub-idx")?.toIntOrNull() ?: return@click
+            if (!window.confirm("Remove this Rixo company?") as Boolean) return@click
+            removeRixoCompanyFromRow(id, bidx, subIdx)
             return@click
         }
 
@@ -7690,22 +7914,14 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                 supplierTreeBranchEditBranchIdx = stockBranchIdx
                 supplierTreePolEditRowId = null
                 supplierTreePolEditBranchIdx = null
+                supplierTreeStockEditRowId = null
+                supplierTreeStockEditBranchIdx = null
                 supplierTreeVenueEditRowId = null
                 supplierTreeVenueEditBranchIdx = null
             }
             root.innerHTML = buildSupplierMapTreeHtmlFromCache()
             bindSupplierMapTreeClicks(root)
             window.setTimeout({ wireSupplierMapTreeComboboxes() }, 0)
-            return@click
-        }
-
-        val rixoBranchDel = target.closest("[data-smap-rixo-branch-delete]") as? HTMLElement
-        if (rixoBranchDel != null) {
-            ev.preventDefault()
-            val id = rixoBranchDel.getAttribute("data-smap-rixo-branch-delete")?.toLongOrNull() ?: return@click
-            val bidx = rixoBranchDel.getAttribute("data-smap-branch-idx")?.toIntOrNull() ?: return@click
-            if (!window.confirm("Remove this branch (stock, venue, POL, and Rixo slots)?") as Boolean) return@click
-            removeParallelBranchFromRow(id, bidx, root)
             return@click
         }
 
@@ -7789,65 +8005,6 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                             supplierTreeSelectedSupplier = sup
                             supplierTreeSelectedStock = st
                             showMessage((res.message as? String) ?: "Stock added", "success")
-                            notifySupplierRixoPricesChanged()
-                            refreshSupplierMapTreeData()
-                        } else {
-                            showMessage((res.message as? String) ?: "Add failed", "error")
-                        }
-                        Unit
-                    }
-                }
-                .catch { _: dynamic -> showMessage("Add failed", "error") }
-            return@click
-        }
-
-        val leafAddCancel = target.closest("[data-smap-leaf-add-cancel]") as? HTMLElement
-        if (leafAddCancel != null) {
-            ev.preventDefault()
-            supplierTreeInlineAddLevel = null
-            supplierTreeLeafAddRowId = null
-            supplierTreeLeafAddBranchIdx = null
-            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
-            bindSupplierMapTreeClicks(root)
-            return@click
-        }
-
-        val leafAddSave = target.closest("[data-smap-leaf-add-save]") as? HTMLElement
-        if (leafAddSave != null) {
-            ev.preventDefault()
-            val sup = supplierTreeInlineSupplier.trim()
-            val stk = supplierTreeInlineStock.trim()
-            val rixo = getEditableComboboxValue("supTreeLeafAddRixo").trim()
-            if (sup.isEmpty() || stk.isEmpty() || rixo.isEmpty()) {
-                showMessage("Rixo company is required", "error")
-                return@click
-            }
-            val rid = supplierTreeLeafAddRowId
-            val bidx = supplierTreeLeafAddBranchIdx ?: 0
-            if (rid != null) {
-                val row = supplierRowById(rid) ?: return@click
-                supplierTreeInlineAddLevel = null
-                supplierTreeLeafAddRowId = null
-                supplierTreeLeafAddBranchIdx = null
-                val updated = mergeNewRixoIntoRow(row, bidx, rixo)
-                putSupplierMappingRow(updated, "Rixo company added")
-                return@click
-            }
-            val venue = supplierRowsBySupplierKey(sup).firstOrNull()?.venueId ?: ""
-            val payload = js("{}")
-            payload.auctionHouse = sup
-            payload.stockLocation = stk
-            payload.rixoCompany = rixo
-            payload.venueId = venue
-            payload.pol = ""
-            window.fetch(apiUrl("rixo/mappings/add"), js("""{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
-                .then { r: dynamic ->
-                    r.json().then { res: dynamic ->
-                        if (r.ok && (res.success as? Boolean == true)) {
-                            supplierTreeInlineAddLevel = null
-                            supplierTreeLeafAddRowId = null
-                            supplierTreeLeafAddBranchIdx = null
-                            showMessage((res.message as? String) ?: "Mapping added", "success")
                             notifySupplierRixoPricesChanged()
                             refreshSupplierMapTreeData()
                         } else {

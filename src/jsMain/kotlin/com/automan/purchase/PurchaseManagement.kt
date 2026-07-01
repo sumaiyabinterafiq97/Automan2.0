@@ -94,6 +94,78 @@ private val purchaseColumnCategories: Map<String, List<String>> = linkedMapOf(
 /** Purchase / Payment / Shipment — full day, same controls as Edit Purchase. */
 private fun purchaseAdvFilterFullDayDateFields(): Set<String> = setOf("date", "paymentDate", "shipmentDate")
 
+/** Hidden from Advanced Filters chip list (still valid table columns). */
+private val purchaseAdvFilterExcludedFields: Set<String> = setOf(
+    "clientId", "carPictures", "shaken", "taxTotal", "profit",
+    "bookingRequested", "invoiceConfirmed", "rixoRequested", "rixoConfirmed",
+    "consignee", "pod", "destination", "isPackageMode",
+)
+
+private fun purchaseAdvPlainIntFields(): Set<String> = setOf("cc", "seat", "door")
+
+private fun purchaseAdvCommaIntFields(): Set<String> = setOf("distance")
+
+private fun purchaseAdvMoneyFields(): Set<String> = setOf(
+    "price", "totalPrice", "auctionFee", "auctionPenaltyFee", "recycleFee", "roadTax", "rixoPrice",
+    "shipmentCharges", "freight", "storageCharges", "miscCharges", "inspectionFee", "commission", "repairCharges",
+)
+
+private fun purchaseAdvPurgeExcludedSelections() {
+    purchaseFilterSelectedColumns.removeAll(purchaseAdvFilterExcludedFields)
+    purchaseAdvancedFilters.removeAll { it.field in purchaseAdvFilterExcludedFields }
+}
+
+private fun purchaseAdvSanitizePlainInt(raw: String): String = raw.replace(Regex("[^0-9]"), "")
+
+private fun purchaseAdvSanitizeMoney(raw: String): String {
+    if (raw.isBlank()) return ""
+    val fn = js("window._moneySanitize")
+    return if (fn != js("undefined")) fn(raw).unsafeCast<String>().trim()
+    else raw.replace(Regex("[^0-9.]"), "")
+}
+
+private fun purchaseAdvSanitizeCommaInt(raw: String, isKm: Boolean): String {
+    if (raw.isBlank()) return ""
+    val stripped = if (isKm) raw.replace(Regex("\\s*km\\s*$", RegexOption.IGNORE_CASE), "").trim() else raw
+    val fn = js("window._commaIntSanitize")
+    return if (fn != js("undefined")) fn(stripped).unsafeCast<String>().trim()
+    else stripped.replace(Regex("[^0-9]"), "")
+}
+
+private fun purchaseAdvFormatMoneyDisplay(v: String): String {
+    if (v.isBlank()) return ""
+    val core = purchaseAdvSanitizeMoney(v)
+    if (core.isBlank()) return ""
+    val fn = js("window._moneyFormat")
+    return if (fn != js("undefined")) fn(core).unsafeCast<String>() else core
+}
+
+private fun purchaseAdvFormatCommaIntDisplay(v: String, isKm: Boolean): String {
+    if (v.isBlank()) return ""
+    val core = purchaseAdvSanitizeCommaInt(v, isKm)
+    if (core.isBlank()) return ""
+    if (isKm) {
+        val fn = js("window._commaIntFormat")
+        val formatted = if (fn != js("undefined")) fn(core).unsafeCast<String>() else core
+        return if (formatted.isNotBlank()) "$formatted km" else ""
+    }
+    val fn = js("window._commaIntFormat")
+    return if (fn != js("undefined")) fn(core).unsafeCast<String>() else core
+}
+
+private fun purchaseAdvNumericFilterMatch(p: dynamic, field: String, filterValue: String): Boolean {
+    val filterNum = parseCurrency(filterValue)
+    if (!filterNum.isNaN()) {
+        purchaseComparableNumber(p, field)?.let { rowNum ->
+            if (rowNum == filterNum) return true
+        }
+    }
+    val rowDigits = purchaseComparableText(p, field).replace(Regex("[^0-9]"), "")
+    val filterDigits = filterValue.replace(Regex("[^0-9]"), "")
+    if (filterDigits.isEmpty()) return false
+    return rowDigits.contains(filterDigits)
+}
+
 private val purchaseAdvFilterLeftColumnCategories: List<String> = listOf(
     "📅 Date Fields",
     "🏷️ Identification",
@@ -267,8 +339,56 @@ private fun ensurePurchaseSuggestionDropdown(): HTMLElement {
     el.addEventListener("mousedown", { ev: Event ->
         ev.preventDefault()
     })
+    wirePurchaseSuggestionDropdownDelegation(el)
     document.body?.appendChild(el)
     return el
+}
+
+private fun wirePurchaseSuggestionDropdownDelegation(dd: HTMLElement) {
+    if (dd.getAttribute("data-purchase-suggest-delegation") == "true") return
+    dd.setAttribute("data-purchase-suggest-delegation", "true")
+    dd.addEventListener("mousedown", { ev: Event ->
+        val target = ev.target
+        val el = when (target) {
+            is HTMLElement -> target.closest(".purchase-suggestion-item") as? HTMLElement
+            else -> null
+        } ?: return@addEventListener
+        ev.preventDefault()
+        ev.stopPropagation()
+        val idx = el.getAttribute("data-idx")?.toIntOrNull() ?: return@addEventListener
+        val item = purchaseSuggestionItems.getOrNull(idx) ?: return@addEventListener
+        purchaseSuggestionApplyCallback?.invoke(item.value)
+        hidePurchaseSuggestionDropdown()
+    })
+    dd.addEventListener("mouseover", { ev: Event ->
+        val target = ev.target
+        val el = when (target) {
+            is HTMLElement -> target.closest(".purchase-suggestion-item") as? HTMLElement
+            else -> null
+        } ?: return@addEventListener
+        val idx = el.getAttribute("data-idx")?.toIntOrNull() ?: return@addEventListener
+        if (idx == purchaseSuggestionActiveIndex) return@addEventListener
+        purchaseSuggestionActiveIndex = idx
+        updatePurchaseSuggestionActiveHighlight()
+    })
+}
+
+private fun updatePurchaseSuggestionActiveHighlight() {
+    val dd = document.getElementById("purchaseSuggestionDropdown") as? HTMLElement ?: return
+    val nodes = dd.querySelectorAll(".purchase-suggestion-item")
+    for (i in 0 until nodes.length) {
+        val n = nodes.item(i) as? HTMLElement ?: continue
+        val active = i == purchaseSuggestionActiveIndex
+        n.style.background = if (active) "#eff6ff" else "transparent"
+        n.style.border = if (active) "1px solid #bfdbfe" else "1px solid transparent"
+        if (active) {
+            n.style.setProperty("border-left", "3px solid #3b82f6")
+            n.style.paddingLeft = "9px"
+        } else {
+            n.style.removeProperty("border-left")
+            n.style.paddingLeft = "10px"
+        }
+    }
 }
 
 private fun positionPurchaseSuggestionDropdown(anchorInput: HTMLInputElement) {
@@ -319,19 +439,7 @@ private fun renderPurchaseSuggestionDropdown() {
         """
     }.joinToString("")
     dd.style.display = "block"
-    val nodes = dd.querySelectorAll(".purchase-suggestion-item")
-    for (i in 0 until nodes.length) {
-        val n = nodes.item(i) as? HTMLElement ?: continue
-        n.addEventListener("mouseenter", { _: Event ->
-            purchaseSuggestionActiveIndex = i
-            renderPurchaseSuggestionDropdown()
-        })
-        n.addEventListener("mousedown", { _: Event ->
-            val item = purchaseSuggestionItems.getOrNull(i) ?: return@addEventListener
-            purchaseSuggestionApplyCallback?.invoke(item.value)
-            hidePurchaseSuggestionDropdown()
-        })
-    }
+    updatePurchaseSuggestionActiveHighlight()
 }
 
 private fun resolvePurchaseSearchSuggestionFields(): List<String> {
@@ -404,12 +512,12 @@ private fun attachSuggestionHandlersToInput(
             "ArrowDown" -> {
                 ev.preventDefault()
                 purchaseSuggestionActiveIndex = (purchaseSuggestionActiveIndex + 1).coerceAtMost(purchaseSuggestionItems.lastIndex)
-                renderPurchaseSuggestionDropdown()
+                updatePurchaseSuggestionActiveHighlight()
             }
             "ArrowUp" -> {
                 ev.preventDefault()
                 purchaseSuggestionActiveIndex = if (purchaseSuggestionActiveIndex <= 0) 0 else purchaseSuggestionActiveIndex - 1
-                renderPurchaseSuggestionDropdown()
+                updatePurchaseSuggestionActiveHighlight()
             }
             "Enter" -> {
                 if (purchaseSuggestionActiveIndex >= 0) {
@@ -467,9 +575,9 @@ private fun purchaseAdvInitialIsoMonth(v: String): String {
     return ""
 }
 private fun purchaseNumericFields(): Set<String> = setOf(
-    "price", "auctionFee", "auctionPenaltyFee", "recycleFee", "roadTax", "taxTotal", "totalPrice",
+    "price", "auctionFee", "auctionPenaltyFee", "recycleFee", "roadTax", "totalPrice",
     "shipmentCharges", "freight", "storageCharges", "miscCharges", "inspectionFee", "commission",
-    "repairCharges", "profit", "bookingId", "cc", "door", "seat"
+    "repairCharges", "rixoPrice", "bookingId", "cc", "door", "seat", "distance",
 )
 private fun purchaseBooleanFields(): Set<String> = setOf("bookingRequested", "shaken", "isPackageMode")
 private fun purchasePresenceFields(): Set<String> = setOf("carPictures")
@@ -530,6 +638,13 @@ private fun purchaseMatchesFilter(p: dynamic, f: PurchaseAdvancedFilter): Boolea
         val fromTs = parseDateForSorting(v) ?: return false
         val toTs = parseDateForSorting(v) ?: return false
         return ts in fromTs..toTs
+    }
+
+    if (purchaseAdvMoneyFields().contains(f.field) ||
+        purchaseAdvCommaIntFields().contains(f.field) ||
+        purchaseAdvPlainIntFields().contains(f.field)
+    ) {
+        return purchaseAdvNumericFilterMatch(p, f.field, v)
     }
 
     val text = purchaseComparableText(p, f.field).lowercase()
@@ -742,59 +857,81 @@ private fun togglePurchaseDateQuickFilterMenu(anchor: HTMLElement) {
     }
 }
 
+private fun purchaseDateQuickFilterSelectedIso(): String {
+    val text = document.getElementById("purchaseDateQuickFilterInputText") as? HTMLInputElement
+    val hidden = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
+    strictMmDdYyyySlashToIso(text?.value?.trim() ?: "")?.let { return it }
+    val h = hidden?.value?.trim() ?: ""
+    return if (h.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) h else ""
+}
+
+private fun syncPurchaseDateQuickFilterTextFromIso(iso: String) {
+    val hidden = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement ?: return
+    val text = document.getElementById("purchaseDateQuickFilterInputText") as? HTMLInputElement
+    hidden.value = iso
+    text?.value = isoToMmDdYyyy(iso)
+}
+
 private fun setupPurchaseDateQuickFilterMenuPortal() {
     if (window.asDynamic().__purchaseDateQuickFilterMenuOpen == null) {
         window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
     }
 
-    val purchaseList = document.getElementById("purchaseList") ?: return
-    if (document.getElementById("purchaseDateQuickFilterMenu") == null) {
+    document.getElementById("purchaseList")?.querySelector("#purchaseDateQuickFilterMenu")?.remove()
+
+    var menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
+    if (menu == null) {
         val wrapper = document.createElement("div")
         wrapper.innerHTML = purchaseDateQuickFilterMenuPortalHtml()
-        val menu = wrapper.firstElementChild
+        menu = wrapper.firstElementChild as? HTMLElement
         if (menu != null) {
-            purchaseList.appendChild(menu)
+            document.body?.appendChild(menu)
         }
     }
 
-    if (window.asDynamic().__purchaseDateQuickFilterActionsWired == true) return
-    window.asDynamic().__purchaseDateQuickFilterActionsWired = true
-
+    val hidden = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
+    hidden?.asDynamic().__strictDateBound = false
     bindStrictDateTextMask("purchaseDateQuickFilterInput")
 
-    val closeAfterAction = {
-        closePurchaseDateQuickFilterMenu()
-    }
+    if (window.asDynamic().__purchaseDateQuickFilterDelegationWired == true) return
+    window.asDynamic().__purchaseDateQuickFilterDelegationWired = true
 
-    document.getElementById("purchaseDateQuickFilterApplyBtn")?.addEventListener("click", { _: Event ->
-        val input = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
-        val selected = input?.value ?: ""
-        if (selected.trim().isNotEmpty()) {
-            applyPurchaseDateFilterRange(selected, selected)
+    val closeAfterAction = { closePurchaseDateQuickFilterMenu() }
+
+    menu?.addEventListener("click", { ev: Event ->
+        val target = ev.target as? HTMLElement ?: return@addEventListener
+        ev.stopPropagation()
+        when {
+            target.id == "purchaseDateQuickFilterApplyBtn" || target.closest("#purchaseDateQuickFilterApplyBtn") != null -> {
+                val selected = purchaseDateQuickFilterSelectedIso()
+                if (selected.isNotEmpty()) {
+                    applyPurchaseDateFilterRange(selected, selected)
+                }
+                closeAfterAction()
+            }
+            target.id == "purchaseDateQuickTodayBtn" || target.closest("#purchaseDateQuickTodayBtn") != null -> {
+                val today = isoLocalToday()
+                syncPurchaseDateQuickFilterTextFromIso(today)
+                applyPurchaseDateFilterRange(today, today)
+                closeAfterAction()
+            }
+            target.id == "purchaseDateQuickLast7Btn" || target.closest("#purchaseDateQuickLast7Btn") != null -> {
+                val end = isoLocalToday()
+                val start = isoLocalOffsetDays(-6)
+                applyPurchaseDateFilterRange(start, end)
+                closeAfterAction()
+            }
+            target.id == "purchaseDateQuickThisMonthBtn" || target.closest("#purchaseDateQuickThisMonthBtn") != null -> {
+                val start = isoLocalThisMonthStart()
+                val end = isoLocalThisMonthEnd()
+                applyPurchaseDateFilterRange(start, end)
+                closeAfterAction()
+            }
+            target.id == "purchaseDateQuickClearBtn" || target.closest("#purchaseDateQuickClearBtn") != null -> {
+                clearPurchaseDateFilter()
+                closeAfterAction()
+            }
         }
-        closeAfterAction()
-    })
-    document.getElementById("purchaseDateQuickTodayBtn")?.addEventListener("click", { _: Event ->
-        val today = isoLocalToday()
-        (document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement)?.value = today
-        applyPurchaseDateFilterRange(today, today)
-        closeAfterAction()
-    })
-    document.getElementById("purchaseDateQuickLast7Btn")?.addEventListener("click", { _: Event ->
-        val end = isoLocalToday()
-        val start = isoLocalOffsetDays(-6)
-        applyPurchaseDateFilterRange(start, end)
-        closeAfterAction()
-    })
-    document.getElementById("purchaseDateQuickThisMonthBtn")?.addEventListener("click", { _: Event ->
-        val start = isoLocalThisMonthStart()
-        val end = isoLocalThisMonthEnd()
-        applyPurchaseDateFilterRange(start, end)
-        closeAfterAction()
-    })
-    document.getElementById("purchaseDateQuickClearBtn")?.addEventListener("click", { _: Event ->
-        clearPurchaseDateFilter()
-        closeAfterAction()
     })
 
     if (window.asDynamic().__purchaseDateQuickFilterDocumentWired != true) {
@@ -807,8 +944,8 @@ private fun setupPurchaseDateQuickFilterMenuPortal() {
                 togglePurchaseDateQuickFilterMenu(btnEl)
                 return@addEventListener
             }
-            val menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement ?: return@addEventListener
-            if (!menu.contains(target)) {
+            val menuEl = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement ?: return@addEventListener
+            if (!menuEl.contains(target)) {
                 closePurchaseDateQuickFilterMenu()
             }
         })
@@ -1956,9 +2093,10 @@ fun checkAndAdjustColumnsForDeviceChange() {
         // Auto-adjust if needed
         if (savedColumns != null) {
             val max = getMaxPurchaseListColumnsForDevice(currentDeviceType)
+            val sanitized = sanitizePurchaseListSelectedColumns(savedColumns)
             val adjustedColumns = ensurePurchaseListPinnedColumns(
                 prioritizePurchaseListDateAndChassis(
-                    autoAdjustColumnsForDevice(savedColumns, currentDeviceType),
+                    autoAdjustColumnsForDevice(sanitized, currentDeviceType),
                 ),
                 max,
             )
@@ -2110,7 +2248,9 @@ private fun purchaseOperatorOptionsForField(field: String): List<Pair<String, St
 
 private fun buildPurchaseAdvCategoryBlock(category: String, labels: Map<String, String>): String {
     val fields = purchaseColumnCategories[category] ?: return ""
-    val categoryFields = fields.filter { it in labels && it != "vesselNo" }
+    val categoryFields = fields.filter {
+        it in labels && it != "vesselNo" && it !in purchaseAdvFilterExcludedFields
+    }
     if (categoryFields.isEmpty()) return ""
     val chipsHtml = categoryFields.joinToString("") { field ->
         val active = purchaseFilterSelectedColumns.contains(field)
@@ -2145,6 +2285,14 @@ private fun purchaseAdvCanonicalFilterValue(row: HTMLElement, field: String): St
         val t = row.querySelector(".purchase-adv-date-text") as? HTMLInputElement
         return strictMmDdYyyySlashToIso(t?.value?.trim() ?: "") ?: ""
     }
+    val money = row.querySelector("input.purchase-adv-v1.money-input") as? HTMLInputElement
+    if (money != null) return purchaseAdvSanitizeMoney(money.value)
+    val commaInt = row.querySelector("input.purchase-adv-v1.comma-int-input") as? HTMLInputElement
+    if (commaInt != null) {
+        return purchaseAdvSanitizeCommaInt(commaInt.value, field == "distance")
+    }
+    val plainInt = row.querySelector("input.purchase-adv-v1.plain-int-input") as? HTMLInputElement
+    if (plainInt != null) return purchaseAdvSanitizePlainInt(plainInt.value)
     return (row.querySelector(".purchase-adv-v1") as? HTMLInputElement)?.value?.trim() ?: ""
 }
 
@@ -2156,6 +2304,7 @@ private fun showPurchaseAdvancedFilterModal() {
         (document.getElementById("purchaseSearchFilterBtn") as? HTMLElement)?.setAttribute("aria-expanded", "false")
         return
     }
+    purchaseAdvPurgeExcludedSelections()
     val labels = purchaseListColumnLabels()
 
     val leftCol = StringBuilder()
@@ -2187,7 +2336,7 @@ private fun showPurchaseAdvancedFilterModal() {
           $categorizedHtml
         </div>
 
-        <div id="purchaseAdvValueFilters" style="flex:0 0 auto;max-height:320px;overflow-y:auto;padding:8px 18px 12px;"></div>
+        <div id="purchaseAdvValueFilters" class="purchase-adv-value-filters" style="flex:0 0 auto;max-height:320px;overflow-y:auto;padding:8px 18px 12px;"></div>
 
         <div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-shrink:0;">
           <div style="font-size:12px;color:#6b7280;white-space:nowrap;">
@@ -2204,10 +2353,13 @@ private fun showPurchaseAdvancedFilterModal() {
     (document.getElementById("purchaseSearchFilterBtn") as? HTMLElement)?.setAttribute("aria-expanded", "true")
 
     fun renderFilterRows() {
-        val selected = purchaseFilterSelectedColumns.toList().sorted()
+        val selected = purchaseFilterSelectedColumns
+            .filter { it !in purchaseAdvFilterExcludedFields }
+            .sorted()
         val container = document.getElementById("purchaseAdvValueFilters") as? HTMLElement ?: return
         if (selected.size == 0) {
             container.innerHTML = ""
+            container.style.display = "none"
             return
         }
         val html = StringBuilder()
@@ -2218,11 +2370,11 @@ private fun showPurchaseAdvancedFilterModal() {
             val icon = when {
                 purchaseDateFields().contains(field) -> "📅"
                 field in listOf("chassis", "blNo", "bookingId") -> "🏷️"
-                purchasePriceFields().contains(field) -> "💰"
-                purchaseNumericFields().contains(field) -> "🔢"
+                purchaseAdvMoneyFields().contains(field) -> "💰"
+                purchaseAdvCommaIntFields().contains(field) || purchaseAdvPlainIntFields().contains(field) -> "🔢"
                 else -> "📝"
             }
-            val rowStack = "display:flex;flex-direction:column;gap:8px;padding:10px 0;"
+            val rowStack = "display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid #f3f4f6;border-radius:8px;background:#fafbfc;box-sizing:border-box;"
             val baseDateId = "purchaseAdvDt_$field"
             when {
                 field == "carModelYear" -> {
@@ -2239,12 +2391,11 @@ private fun showPurchaseAdvancedFilterModal() {
                             <div style="display:flex;gap:8px;align-items:center;width:100%;box-sizing:border-box;">
                               <input type="text" id="${baseDateId}Text" class="purchase-adv-month-text" maxlength="7" inputmode="numeric" autocomplete="off" placeholder="MM/YYYY"
                                      style="flex:1;min-width:0;padding:8px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;font-size:13px;font-family:inherit;" />
-                              <button type="button" id="${baseDateId}CalendarBtn" title="Open month picker"
+                              <button type="button" id="${baseDateId}CalendarBtn" class="purchase-adv-calendar-btn" title="Open month picker"
                                       style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:8px;cursor:pointer;">📅</button>
                             </div>
                             <input type="month" id="$baseDateId" class="purchase-adv-canon"$monthValAttr tabindex="-1" aria-hidden="true"
-                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
-                            <span id="${baseDateId}Hint" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;pointer-events:none;">MM/YYYY</span>
+                                   style="position:absolute;opacity:0;border:none;padding:0;margin:0;overflow:hidden;width:0;height:0;" />
                           </div>
                         </div>
                         """.trimIndent()
@@ -2264,13 +2415,61 @@ private fun showPurchaseAdvancedFilterModal() {
                             <div style="display:flex;gap:8px;align-items:center;width:100%;box-sizing:border-box;">
                               <input type="text" id="${baseDateId}Text" class="purchase-adv-date-text" maxlength="10" inputmode="numeric" autocomplete="off" placeholder="MM/DD/YYYY"
                                      style="flex:1;min-width:0;padding:8px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;font-size:13px;font-family:inherit;" />
-                              <button type="button" id="${baseDateId}CalendarBtn" title="Open calendar"
+                              <button type="button" id="${baseDateId}CalendarBtn" class="purchase-adv-calendar-btn" title="Open calendar"
                                       style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:8px;cursor:pointer;">📅</button>
                               <span id="${baseDateId}Hint" style="color:#6b7280;font-size:12px;white-space:nowrap;"></span>
                             </div>
                             <input type="date" id="$baseDateId" class="purchase-adv-canon"$dateValAttr tabindex="-1" aria-hidden="true"
-                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
+                                   style="position:absolute;opacity:0;border:none;padding:0;margin:0;overflow:hidden;width:0;height:0;" />
                           </div>
+                        </div>
+                        """.trimIndent()
+                    )
+                }
+                purchaseAdvCommaIntFields().contains(field) -> {
+                    val displayVal = purchaseAdvFormatCommaIntDisplay(v, isKm = true)
+                    html.append(
+                        """
+                        <div class="purchase-adv-filter-row" data-field="$field" style="$rowStack">
+                          <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:14px;">$icon</span>
+                            <div style="font-weight:600;color:#111827;font-size:13px;">${escapeHtml(label)}</div>
+                          </div>
+                          <input class="purchase-adv-v1 comma-int-input km-suffix-input" type="text" value="${escapeHtml(displayVal)}"
+                                 inputmode="numeric" autocomplete="off" placeholder=""
+                                 style="display:block;width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box;" />
+                        </div>
+                        """.trimIndent()
+                    )
+                }
+                purchaseAdvPlainIntFields().contains(field) -> {
+                    val displayVal = purchaseAdvSanitizePlainInt(v)
+                    html.append(
+                        """
+                        <div class="purchase-adv-filter-row" data-field="$field" style="$rowStack">
+                          <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:14px;">$icon</span>
+                            <div style="font-weight:600;color:#111827;font-size:13px;">${escapeHtml(label)}</div>
+                          </div>
+                          <input class="purchase-adv-v1 plain-int-input" type="text" value="${escapeHtml(displayVal)}"
+                                 inputmode="numeric" autocomplete="off" placeholder=""
+                                 style="display:block;width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box;" />
+                        </div>
+                        """.trimIndent()
+                    )
+                }
+                purchaseAdvMoneyFields().contains(field) -> {
+                    val displayVal = purchaseAdvFormatMoneyDisplay(v)
+                    html.append(
+                        """
+                        <div class="purchase-adv-filter-row" data-field="$field" style="$rowStack">
+                          <div style="display:flex;align-items:center;gap:8px;">
+                            <span style="font-size:14px;">$icon</span>
+                            <div style="font-weight:600;color:#111827;font-size:13px;">${escapeHtml(label)}</div>
+                          </div>
+                          <input class="purchase-adv-v1 money-input" type="text" value="${escapeHtml(displayVal)}"
+                                 inputmode="decimal" autocomplete="off" placeholder="0"
+                                 style="display:block;width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box;" />
                         </div>
                         """.trimIndent()
                     )
@@ -2278,12 +2477,12 @@ private fun showPurchaseAdvancedFilterModal() {
                 else -> {
                     html.append(
                         """
-                        <div class="purchase-adv-filter-row" data-field="$field" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:10px 0;">
-                          <div style="display:flex;align-items:center;gap:8px;min-width:120px;">
+                        <div class="purchase-adv-filter-row" data-field="$field" style="$rowStack">
+                          <div style="display:flex;align-items:center;gap:8px;">
                             <span style="font-size:14px;">$icon</span>
-                            <div style="font-weight:600;color:#111827;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(label)}</div>
+                            <div style="font-weight:600;color:#111827;font-size:13px;">${escapeHtml(label)}</div>
                           </div>
-                          <input class="purchase-adv-v1" type="text" value="${escapeHtml(v)}" style="display:block;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit;flex:1;min-width:0;box-sizing:border-box;" placeholder="e.g. Toyota" />
+                          <input class="purchase-adv-v1" type="text" value="${escapeHtml(v)}" style="display:block;width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:13px;font-family:inherit;box-sizing:border-box;" placeholder="" />
                         </div>
                         """.trimIndent()
                     )
@@ -2291,13 +2490,14 @@ private fun showPurchaseAdvancedFilterModal() {
             }
         }
         container.innerHTML = html.toString()
+        container.style.display = ""
         selected.forEach { f ->
             when {
-                f == "carModelYear" -> bindStrictMonthYearTextMask("purchaseAdvDt_carModelYear", "purchaseAdvDt_carModelYearHint")
+                f == "carModelYear" -> bindStrictMonthYearTextMask("purchaseAdvDt_carModelYear")
                 purchaseAdvFilterFullDayDateFields().contains(f) -> bindStrictDateTextMask("purchaseAdvDt_$f", "purchaseAdvDt_${f}Hint")
             }
         }
-        val textOnly = container.querySelectorAll(".purchase-adv-v1")
+        val textOnly = container.querySelectorAll(".purchase-adv-v1:not(.money-input):not(.comma-int-input):not(.plain-int-input)")
         for (i in 0 until textOnly.length) {
             val input = textOnly.item(i) as? HTMLInputElement ?: continue
             var row: HTMLElement? = input.parentElement as? HTMLElement
@@ -2399,10 +2599,7 @@ private fun showPurchaseAdvancedFilterModal() {
     })
 }
 
-private fun purchasePriceFields(): Set<String> = setOf(
-    "price", "totalPrice", "auctionFee", "auctionPenaltyFee", "recycleFee", "roadTax", "taxTotal",
-    "rixoPrice", "rixoRequested", "rixoConfirmed"
-)
+private fun purchasePriceFields(): Set<String> = purchaseAdvMoneyFields()
 
 private fun updatePurchaseFilterResultCount() {
     val count = applyPurchaseAdvancedFilters(purchaseBaseRows).size
@@ -2551,7 +2748,9 @@ fun setupPurchaseSearchBarListeners() {
             val btn = document.getElementById("purchaseSearchFilterBtn") as? HTMLElement
             val insidePanel = panel.contains(target)
             val insideBtn = btn != null && btn.contains(target)
-            if (!insidePanel && !insideBtn) {
+            val suggestDd = document.getElementById("purchaseSuggestionDropdown") as? HTMLElement
+            val insideSuggest = suggestDd != null && suggestDd.contains(target)
+            if (!insidePanel && !insideBtn && !insideSuggest) {
                 panel.style.display = "none"
                 btn?.setAttribute("aria-expanded", "false")
                 hidePurchaseSuggestionDropdown()
@@ -2834,7 +3033,8 @@ fun displayPurchasesWithPagination() {
         })
     }
     
-    // Purchase Date quick filter trigger lives in the header; menu is portaled on #purchaseList.
+    // Purchase Date quick filter trigger lives in the header; menu is portaled on document.body.
+    setupPurchaseDateQuickFilterMenuPortal()
     for (columnKey in selectedColumns) {
         if (columnKey != "date" && sortableFields.contains(columnKey)) {
             val sortBtnId = "purchaseSortBtn_$columnKey"
@@ -3070,10 +3270,10 @@ fun getSelectedColumns(): List<String> {
         return ensurePurchaseListPinnedColumns(prioritizePurchaseListDateAndChassis(defaultColumns), max)
     }
     
-    // Filter out removed columns (displacement, packagePrice, id/audit fields)
-    val validColumns = savedColumns.filter {
-        it != "displacement" && it != "packagePrice" &&
-            it != "id" && it != "createdAt" && it != "updatedAt"
+    // Filter out removed/hidden columns and migrate legacy aliases (sold→invoiceConfirmed, vesselNo→vessel)
+    val validColumns = sanitizePurchaseListSelectedColumns(savedColumns)
+    if (validColumns != savedColumns) {
+        safeLocalStorageSet("selectedColumns", JSON.stringify(validColumns.toTypedArray()))
     }
     
     // Auto-adjust if saved columns exceed device limit, then pin date/chassis to the left
