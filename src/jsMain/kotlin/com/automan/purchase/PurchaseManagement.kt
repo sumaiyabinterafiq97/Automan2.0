@@ -39,6 +39,11 @@ var purchaseSearchFieldChoice: String = "all"
 private var purchaseSearchDebounceTimer: dynamic = null
 private var purchaseSuggestionDebounceTimers: MutableMap<String, Int> = mutableMapOf()
 private var purchaseReturnPageFromEdit: Int? = null
+/** When true, next [showPurchaseList] keeps filters (returning from edit purchase). */
+private var preservePurchaseListFiltersOnNextShow: Boolean = false
+private var restoringPurchaseListFromEdit: Boolean = false
+private var purchaseDateFilterStartIso: String = ""
+private var purchaseDateFilterEndIso: String = ""
 
 private data class PurchaseSuggestionItem(
     val value: String,
@@ -733,7 +738,7 @@ private fun isoToLocalDayRangeTimestamps(isoDate: String): Pair<Long, Long>? {
     return startTs to endTs
 }
 
-private fun applyPurchaseDateFilterRange(startIso: String, endIso: String) {
+private fun applyPurchaseDateFilterRange(startIso: String, endIso: String, resetPage: Boolean = true) {
     if (purchaseSearchServerMode) {
         showMessage("Clear the search box to use purchase date filters on the full list.", "info")
         return
@@ -758,8 +763,12 @@ private fun applyPurchaseDateFilterRange(startIso: String, endIso: String) {
         ts != null && ts >= startTs && ts <= endTs
     }.toTypedArray()
 
+    purchaseDateFilterStartIso = startIso
+    purchaseDateFilterEndIso = endIso
     allPurchases = filtered
-    currentPage = 1
+    if (resetPage) {
+        currentPage = 1
+    }
     displayPurchasesWithPagination()
 }
 
@@ -768,8 +777,45 @@ private fun clearPurchaseDateFilter() {
     allPurchases = purchasesBeforePurchaseDateFilter
     purchaseDateFilterActive = false
     purchasesBeforePurchaseDateFilter = emptyArray()
+    purchaseDateFilterStartIso = ""
+    purchaseDateFilterEndIso = ""
     currentPage = 1
     displayPurchasesWithPagination()
+}
+
+/** Call when opening edit purchase so Cancel/back restores list filters. */
+fun markPurchaseListPreserveFiltersForEditReturn() {
+    preservePurchaseListFiltersOnNextShow = true
+}
+
+/** Call when navigating to any page other than purchase list or edit purchase. */
+fun clearPurchaseListPreserveFiltersForEditReturn() {
+    preservePurchaseListFiltersOnNextShow = false
+    restoringPurchaseListFromEdit = false
+}
+
+private fun resetPurchaseListFilters() {
+    purchaseSearchQuery = ""
+    purchaseAdvancedFilters.clear()
+    purchaseFilterSelectedColumns.clear()
+    purchaseDateFilterActive = false
+    purchasesBeforePurchaseDateFilter = emptyArray()
+    purchaseDateFilterStartIso = ""
+    purchaseDateFilterEndIso = ""
+    purchaseSearchServerMode = false
+    purchaseReturnPageFromEdit = null
+    window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+}
+
+private fun restorePurchaseListFilterUi() {
+    (document.getElementById("purchaseSearchInput") as? HTMLInputElement)?.let { input ->
+        input.value = purchaseSearchQuery
+    }
+    refreshPurchaseSearchScopeUi()
+    updatePurchaseFilterBadge()
+    if (purchaseDateFilterStartIso.isNotEmpty()) {
+        syncPurchaseDateQuickFilterTextFromIso(purchaseDateFilterStartIso)
+    }
 }
 
 private const val PURCHASE_DATE_QUICK_FILTER_MENU_WIDTH_PX = 260.0
@@ -1051,14 +1097,15 @@ private fun togglePurchaseTableSort(field: String) {
     refreshPurchaseRowsFromBase(resetPage = true)
 }
 
-fun showPurchaseList() {
+fun showPurchaseList(forceClearFilters: Boolean = false) {
     window.location.hash = "#/purchase"
-    // Clear all filters when navigating to this page
-    purchaseSearchQuery = ""
-    purchaseAdvancedFilters.clear()
-    purchaseDateFilterActive = false
-    purchaseSearchServerMode = false
-    window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
+    val preserveFilters = !forceClearFilters && preservePurchaseListFiltersOnNextShow
+    preservePurchaseListFiltersOnNextShow = false
+    if (preserveFilters) {
+        restoringPurchaseListFromEdit = true
+    } else {
+        resetPurchaseListFilters()
+    }
     
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -2766,9 +2813,16 @@ fun displayPurchases(purchases: dynamic) {
     purchaseSearchServerTotal = 0
     purchaseSearchServerTotalPages = 0
 
-    // New data load => reset any active date filter to avoid stale base arrays.
-    purchaseDateFilterActive = false
-    purchasesBeforePurchaseDateFilter = emptyArray()
+    val restoringFromEdit = restoringPurchaseListFromEdit
+    restoringPurchaseListFromEdit = false
+
+    if (!restoringFromEdit) {
+        // New data load => reset any active date filter to avoid stale base arrays.
+        purchaseDateFilterActive = false
+        purchasesBeforePurchaseDateFilter = emptyArray()
+        purchaseDateFilterStartIso = ""
+        purchaseDateFilterEndIso = ""
+    }
     
     if (js("purchases.length") == 0) {
         table.innerHTML = """
@@ -2795,13 +2849,29 @@ fun displayPurchases(purchases: dynamic) {
     
     // Store base rows, then apply advanced filters + sort + pagination
     purchaseBaseRows = sortedPurchases.toTypedArray()
-    val returnPage = purchaseReturnPageFromEdit
-    if (returnPage != null && returnPage > 0) {
-        currentPage = returnPage
-        purchaseReturnPageFromEdit = null
+    if (restoringFromEdit) {
         refreshPurchaseRowsFromBase(resetPage = false)
+        if (purchaseDateFilterStartIso.isNotEmpty()) {
+            purchaseDateFilterActive = false
+            purchasesBeforePurchaseDateFilter = emptyArray()
+            applyPurchaseDateFilterRange(purchaseDateFilterStartIso, purchaseDateFilterEndIso, resetPage = false)
+        }
+        val returnPage = purchaseReturnPageFromEdit
+        if (returnPage != null && returnPage > 0) {
+            currentPage = returnPage
+            purchaseReturnPageFromEdit = null
+        }
+        displayPurchasesWithPagination()
+        restorePurchaseListFilterUi()
     } else {
-        refreshPurchaseRowsFromBase(resetPage = true)
+        val returnPage = purchaseReturnPageFromEdit
+        if (returnPage != null && returnPage > 0) {
+            currentPage = returnPage
+            purchaseReturnPageFromEdit = null
+            refreshPurchaseRowsFromBase(resetPage = false)
+        } else {
+            refreshPurchaseRowsFromBase(resetPage = true)
+        }
     }
 }
 
@@ -3234,7 +3304,7 @@ fun deletePurchase(id: Long) {
                 onSuccess = {
                     ErrorHandler.showSuccess("Purchase deleted successfully!")
                     // Always return to the main list after deletion
-                    showPurchaseList()
+                    showPurchaseList(forceClearFilters = true)
                 },
                 onError = { message, _ ->
                     Logger.error("Failed to delete purchase: $message")

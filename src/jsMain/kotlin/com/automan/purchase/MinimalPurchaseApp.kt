@@ -68,6 +68,9 @@ var globalShippingChargeValues: MutableMap<String, Double> = mutableMapOf()
 // Global variable to store original purchase data for edit confirmation modal
 var originalPurchaseData: dynamic = null
 
+/** Field keys from the last confirm-changes modal; sent to backend for aligned audit rows. */
+var pendingEditAuditChangedFields: Array<String>? = null
+
 // Store booking details for PDF generation
 // Top-level function for converting ISO date to weekday label
 fun isoToWeekdayLabelTopLevel(value: String): String {
@@ -4750,6 +4753,7 @@ fun createApp(root: Element) {
         // Clear car booking states when navigating to Purchase List
         clearCarBookingStates()
         closeSidebar()
+        clearPurchaseListPreserveFiltersForEditReturn()
         window.location.hash = "#/purchase"
     })
     
@@ -5160,6 +5164,11 @@ fun updateContent(root: Element) {
         clearCarBookingStates()
     }
 
+    when {
+        hash.startsWith("#/edit/") -> markPurchaseListPreserveFiltersForEditReturn()
+        hash != "#/purchase" -> clearPurchaseListPreserveFiltersForEditReturn()
+    }
+
     // If unauthenticated, allow navigation but render auth page only when hash is "#/"
     val token = window.localStorage.getItem("authToken")
     if ((token == null || token.isBlank()) && (hash == "" || hash == "#")) {
@@ -5205,14 +5214,14 @@ fun updateContent(root: Element) {
             when {
                 isLegacyNumericEditRoute(hash) -> {
                     val id = hash.substring(7).toLongOrNull()
-                    if (id != null) showEditForm(id) else showPurchaseList()
+                    if (id != null) showEditForm(id) else showPurchaseList(forceClearFilters = true)
                 }
                 else -> {
                     val chassis = chassisFromEditRoute(hash)
                     if (chassis != null && chassis.isNotEmpty()) {
                         showEditFormByChassis(chassis)
                     } else {
-                        showPurchaseList()
+                        showPurchaseList(forceClearFilters = true)
                     }
                 }
             }
@@ -5517,7 +5526,7 @@ fun updateContent(root: Element) {
                 window.location.hash = "#/"
             } else {
                 ensureSidebarPresent()
-                showPurchaseList()
+                showPurchaseList(forceClearFilters = true)
                 // Show sorting bar on purchase list page
                 // Hide only Rixo Transport by default; invoice button is controlled by selection
                 (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -6059,7 +6068,7 @@ private fun setupAuthHandlers() {
                     if (nameResp != null) safeLocalStorageSet("authUserName", nameResp)
                     if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
                     window.location.hash = ""
-                    showPurchaseList()
+                    showPurchaseList(forceClearFilters = true)
                     updateUserInfoInSidebar()
                     applyRoleBasedRestrictions()
                 } else js("alert('Login failed')")
@@ -6117,6 +6126,7 @@ fun setupSidebarListeners() {
         purchaseListBtn.setAttribute("data-listener-attached", "true")
         purchaseListBtn.addEventListener("click", { _: Event ->
             closeSidebar()
+            clearPurchaseListPreserveFiltersForEditReturn()
             window.location.hash = "#/purchase"
         })
     }
@@ -9778,23 +9788,13 @@ fun setupAddFormListeners() {
             .then { data: dynamic ->
                 val found = (data.found as? Boolean) ?: false
                 val rfInput = document.getElementById("recycleFee") as? HTMLInputElement
-                if (rfInput != null) {
-                    if (found) {
-                        val fee = (data.fee ?: "").toString()
-                        if (fee.isNotBlank()) {
-                            rfInput.value = fee
-                            calculateTotalCostBeforeTax()
-                            calculateTotalCostAfterTax()
-                            console.log("✅ Auto-filled Recycle Fee from chassis map: $fee (production date: $productionDate)")
-                        } else {
-                            rfInput.value = ""
-                            calculateTotalCostBeforeTax()
-                            calculateTotalCostAfterTax()
-                        }
-                    } else {
-                        rfInput.value = ""
+                if (rfInput != null && found) {
+                    val fee = (data.fee ?: "").toString()
+                    if (fee.isNotBlank()) {
+                        rfInput.value = fee
                         calculateTotalCostBeforeTax()
                         calculateTotalCostAfterTax()
+                        console.log("✅ Auto-filled Recycle Fee from chassis map: $fee (production date: $productionDate)")
                     }
                 }
             }
@@ -9850,7 +9850,7 @@ fun setupAddFormListeners() {
     })
     
     document.getElementById("cancelBtn")?.addEventListener("click", { _: Event ->
-        showPurchaseList()
+        showPurchaseList(forceClearFilters = true)
     })
     
     // Simple Save button click listener - with retry mechanism
@@ -10440,8 +10440,52 @@ fun calculateEditTotalCostAfterTax() {
     }
 }
 
+/** When SHAKEN is checked, all four Number Cut detail fields must be filled before save. */
+private fun missingNumberCutFieldsWhenShaken(isEdit: Boolean): List<String> {
+    val shakenId = if (isEdit) "editShakenCheckbox" else "shakenCheckbox"
+    val shakenChecked = (document.getElementById(shakenId) as? HTMLInputElement)?.checked == true
+    if (!shakenChecked) return emptyList()
+
+    val placeKey = if (isEdit) "editNumberCutPlace" else "numberCutPlace"
+    val number1Id = if (isEdit) "editNumberCutNumber1" else "numberCutNumber1"
+    val hiraganaKey = if (isEdit) "editNumberCutHiragana" else "numberCutHiragana"
+    val number2Id = if (isEdit) "editNumberCutNumber2" else "numberCutNumber2"
+
+    val missing = mutableListOf<String>()
+    if (getComboboxValueSafe(placeKey).trim().isEmpty()) missing.add("Place Name (Japanese)")
+    if ((document.getElementById(number1Id) as? HTMLInputElement)?.value?.trim().isNullOrEmpty()) {
+        missing.add("Number (English) — first field")
+    }
+    if (getComboboxValueSafe(hiraganaKey).trim().isEmpty()) missing.add("Hiragana Character")
+    if ((document.getElementById(number2Id) as? HTMLInputElement)?.value?.trim().isNullOrEmpty()) {
+        missing.add("Number (English) — second field")
+    }
+    return missing
+}
+
+private fun ensureNumberCutSectionExpanded(isEdit: Boolean) {
+    val sections = document.querySelectorAll(".form-section-content[data-section='numberCut']")
+    val sectionCount = (sections.length as Number).toInt()
+    for (i in 0 until sectionCount) {
+        (sections.item(i) as? HTMLElement)?.style?.display = "block"
+    }
+    val wrapId = if (isEdit) "editNumberCutFieldsWrap" else "numberCutFieldsWrap"
+    (document.getElementById(wrapId) as? HTMLElement)?.style?.display = "block"
+}
+
+/** @return true when valid or SHAKEN is unchecked; false when validation failed (modal shown). */
+private fun validateNumberCutWhenShaken(isEdit: Boolean): Boolean {
+    val missing = missingNumberCutFieldsWhenShaken(isEdit)
+    if (missing.isEmpty()) return true
+    ensureNumberCutSectionExpanded(isEdit)
+    showErrorModal(
+        "Number Cut Required",
+        "SHAKEN is selected. Please complete all Number Cut detail fields.",
+    )
+    return false
+}
+
 fun setupNumberCutListeners() {
-    // Function to generate number cut string
     fun generateNumberCutString() {
         val place = (document.getElementById("numberCutPlace") as HTMLSelectElement?)?.value ?: ""
         val number1 = (document.getElementById("numberCutNumber1") as HTMLInputElement?)?.value ?: ""
@@ -14475,6 +14519,12 @@ fun saveNewPurchase() {
         showErrorModal("Invalid Production Date", yearErrorMsg)
         return
     }
+
+    if (!validateNumberCutWhenShaken(isEdit = false)) {
+        saveButton?.disabled = false
+        saveButton?.textContent = originalText
+        return
+    }
     
     // Extract field values for master list validation
     val valBrand = js("getComboboxValue('brand')").unsafeCast<String>()
@@ -14568,6 +14618,12 @@ fun saveNewPurchaseAndAddMore() {
         saveButton?.disabled = false
         saveButton?.textContent = originalText
         showErrorModal("Invalid Production Date", yearErrorMsg)
+        return
+    }
+
+    if (!validateNumberCutWhenShaken(isEdit = false)) {
+        saveButton?.disabled = false
+        saveButton?.textContent = originalText
         return
     }
 
@@ -14783,7 +14839,7 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
                 }, 0)
             } else {
                 showMessage("Purchase created successfully!", "success")
-                showPurchaseList()
+                showPurchaseList(forceClearFilters = true)
             }
             // Button will be re-enabled when page reloads, no need to re-enable here
         } else {
@@ -14840,7 +14896,7 @@ private fun loadPurchaseForEdit(fetchUrl: String) {
             }
         } else {
             showMessage("Failed to load purchase data", "error")
-            showPurchaseList()
+            showPurchaseList(forceClearFilters = true)
         }
     }.catch { error ->
         val errorMsg = try {
@@ -14850,7 +14906,7 @@ private fun loadPurchaseForEdit(fetchUrl: String) {
             "Unknown error"
         }
         showMessage("Failed to load purchase data: $errorMsg", "error")
-        showPurchaseList()
+        showPurchaseList(forceClearFilters = true)
     }
 }
 fun showEditFormWithData(purchaseData: dynamic) {
@@ -15689,6 +15745,72 @@ fun showEditFormWithData(purchaseData: dynamic) {
     }, 500)
 }
 
+private fun reseedEditPurchaseBaselineFromApi(updatedPurchase: dynamic) {
+    normalizeApiPurchaseForClient(updatedPurchase)
+    originalPurchaseData = try {
+        JSON.parse(JSON.stringify(updatedPurchase))
+    } catch (e: Throwable) {
+        console.warn("reseedEditPurchaseBaselineFromApi: deep copy failed:", e.message)
+        updatedPurchase
+    }
+    val snap = originalPurchaseData
+    if (snap != null) {
+        val raw = carPicturesFieldFromPurchase(snap)
+        if (raw != null && raw != js("undefined")) {
+            snap.carPictures = raw
+        }
+    }
+    syncOriginalPurchaseCarPicturesBaselineFromDom()
+}
+
+private fun reseedEditPurchaseBaselineFromDom() {
+    if (document.getElementById("editForm") == null) return
+    try {
+        val baseline = collectCurrentEditFormData()
+        originalPurchaseData = JSON.parse(JSON.stringify(baseline))
+        syncOriginalPurchaseCarPicturesBaselineFromDom()
+    } catch (e: Throwable) {
+        console.warn("reseedEditPurchaseBaselineFromDom failed:", e.message)
+    }
+}
+
+private fun ensureEditPurchaseChangeHistorySectionVisible() {
+    val header = document.querySelector(".form-section-header[data-section='changeHistory']") as? HTMLElement ?: return
+    val contentDivs = document.querySelectorAll(".form-section-content[data-section='changeHistory']")
+    for (i in 0 until contentDivs.length) {
+        (contentDivs.item(i) as? HTMLElement)?.style?.display = ""
+    }
+    header.classList.remove("collapsed")
+}
+
+private fun syncEditPurchaseRouteAfterSave(updatedPurchase: dynamic) {
+    val chassisForRoute = updatedPurchase.chassis?.toString()?.trim() ?: ""
+    if (chassisForRoute.isEmpty()) return
+    val route = editPurchaseRouteFromChassis(chassisForRoute)
+    if (window.location.hash != route) {
+        val base = window.location.href.substringBefore('#', window.location.href)
+        val history = window.asDynamic().history
+        if (history != undefined && history.replaceState != undefined) {
+            history.replaceState(null, "", "$base$route")
+        } else {
+            window.location.hash = route
+        }
+    }
+}
+
+fun refreshEditPurchaseAfterSuccessfulSave(purchaseId: Long, updatedPurchase: dynamic?) {
+    loadEditPurchaseChangeHistory(purchaseId)
+    if (updatedPurchase != null) {
+        normalizeApiPurchaseForClient(updatedPurchase)
+        seedEditPurchaseRixoSnapshot(updatedPurchase)
+        reseedEditPurchaseBaselineFromApi(updatedPurchase)
+        syncEditPurchaseRouteAfterSave(updatedPurchase)
+    } else {
+        reseedEditPurchaseBaselineFromDom()
+    }
+    ensureEditPurchaseChangeHistorySectionVisible()
+}
+
 private fun loadEditPurchaseChangeHistory(purchaseId: Long) {
     val host = document.getElementById("editPurchaseChangeHistoryHost") as? HTMLElement ?: return
     if (purchaseId <= 0L) {
@@ -16268,23 +16390,13 @@ fun setupEditFormListeners() {
             .then { data: dynamic ->
                 val found = (data.found as? Boolean) ?: false
                 val rfInput = document.getElementById("editRecycleFee") as? HTMLInputElement
-                if (rfInput != null) {
-                    if (found) {
-                        val fee = (data.fee ?: "").toString()
-                        if (fee.isNotBlank()) {
-                            rfInput.value = fee
-                            calculateEditTotalCostBeforeTax()
-                            calculateEditTotalCostAfterTax()
-                            console.log("✅ [Edit] Auto-filled Recycle Fee from chassis map: $fee (production date: $productionDate)")
-                        } else {
-                            rfInput.value = ""
-                            calculateEditTotalCostBeforeTax()
-                            calculateEditTotalCostAfterTax()
-                        }
-                    } else {
-                        rfInput.value = ""
+                if (rfInput != null && found) {
+                    val fee = (data.fee ?: "").toString()
+                    if (fee.isNotBlank()) {
+                        rfInput.value = fee
                         calculateEditTotalCostBeforeTax()
                         calculateEditTotalCostAfterTax()
+                        console.log("✅ [Edit] Auto-filled Recycle Fee from chassis map: $fee (production date: $productionDate)")
                     }
                 }
             }
@@ -16745,7 +16857,7 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
         "roadTax", "taxTotal", "totalPrice", "paymentDate", "rixoRequested", "rixoConfirmed",
         "rixoPrice", "shipmentDate", "blNo", "vessel", "destination", "shipmentCharges",
         "freight", "storageCharges", "miscCharges", "inspectionFee", "commission", "repairCompany",
-        "repairCharges", "shaken", "numberCut", "notes", "bookingId", "bookingRequested", "sold", "invoiceConfirmed", "carPictures"
+        "repairCharges", "shaken", "negotiate", "local", "numberCut", "notes", "bookingId", "bookingRequested", "sold", "invoiceConfirmed", "carPictures"
     )
 
     // Compare money values by numeric content only (ignore `¥`, commas, formatting, etc.)
@@ -16782,6 +16894,26 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
         "commission",
         "repairCharges"
     )
+
+    val boolFields = setOf(
+        "shaken",
+        "negotiate",
+        "invoiceConfirmed",
+        "local",
+        "bookingRequested",
+        "sold",
+    )
+
+    fun normalizeBoolForCompare(v: dynamic): String {
+        if (v == null || v == js("undefined")) return "false"
+        if (v is Boolean) return if (v) "true" else "false"
+        val s = v.toString().trim().lowercase()
+        return when {
+            s.isEmpty() -> "false"
+            s == "true" || s == "1" || s == "yes" -> "true"
+            else -> "false"
+        }
+    }
     
     Logger.debug("[COMPARE] Comparing ${fieldsToCompare.size} fields...")
     
@@ -16821,12 +16953,14 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
         // Normalize values for comparison (treat empty string and null as same)
         val origNormalized = when {
             fieldName in moneyFields -> normalizeMoneyForCompare(originalValue)
+            fieldName in boolFields -> normalizeBoolForCompare(originalValue)
             originalValue == null || originalValue == js("undefined") -> ""
             originalValue is Boolean -> originalValue.toString()
             else -> originalValue.toString().trim()
         }
         val currNormalized = when {
             fieldName in moneyFields -> normalizeMoneyForCompare(currentValue)
+            fieldName in boolFields -> normalizeBoolForCompare(currentValue)
             currentValue == null || currentValue == js("undefined") -> ""
             currentValue is Boolean -> currentValue.toString()
             else -> currentValue.toString().trim()
@@ -16955,12 +17089,14 @@ fun showEditConfirmationModal(changes: Map<String, Pair<String, String>>, purcha
     // Close button handler
     document.getElementById("closeEditConfirmationModal")?.addEventListener("click", { _: Event ->
         document.getElementById("editConfirmationModal")?.remove()
+        pendingEditAuditChangedFields = null
         clearRixoAutoSelectSuppress()
     })
     
     // Cancel button handler
     document.getElementById("cancelEditConfirmation")?.addEventListener("click", { _: Event ->
         document.getElementById("editConfirmationModal")?.remove()
+        pendingEditAuditChangedFields = null
         clearRixoAutoSelectSuppress()
     })
     
@@ -16968,6 +17104,7 @@ fun showEditConfirmationModal(changes: Map<String, Pair<String, String>>, purcha
     modal.addEventListener("click", { event: Event ->
         if ((event.target as? HTMLElement)?.id == "editConfirmationModal") {
             document.getElementById("editConfirmationModal")?.remove()
+            pendingEditAuditChangedFields = null
             clearRixoAutoSelectSuppress()
         }
     })
@@ -17101,6 +17238,10 @@ fun handleEditPurchase() {
         showErrorModal("Invalid Production Date", yearErrorMsg)
         return
     }
+
+    if (!validateNumberCutWhenShaken(isEdit = true)) {
+        return
+    }
     
     // NOTE:
     // There used to be a brittle "direct DOM dropdown validation" here that blocks saving if a select
@@ -17142,6 +17283,7 @@ private fun continueEditPurchaseAfterDuplicateCheck(id: Long, chassis: String) {
         
         // Show confirmation modal with changes
         console.log("📋 Showing confirmation modal with ${changes.size} change(s)")
+        pendingEditAuditChangedFields = changes.keys.toTypedArray()
         showEditConfirmationModal(changes, id)
     } else {
         // Original data not available, proceed directly (fallback)
@@ -17154,6 +17296,11 @@ private fun continueEditPurchaseAfterDuplicateCheck(id: Long, chassis: String) {
 fun proceedWithEditPurchase(id: Long, chassis: String) {
     setRixoAutoSelectSuppress()
     console.log("📝 [TEST] Starting data collection in proceedWithEditPurchase()")
+
+    if (!validateNumberCutWhenShaken(isEdit = true)) {
+        clearRixoAutoSelectSuppress()
+        return
+    }
     
     // Extract field values for master list validation first
     val valBrand = getComboboxValueSafe("editBrand")
@@ -17369,6 +17516,10 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.carPictures = carPictures
     
     applyLocalFlagAndNullLockedFields(purchaseData, isEdit = true)
+
+    pendingEditAuditChangedFields?.let { fields ->
+        purchaseData.auditChangedFields = fields.toList()
+    }
     
     console.log("Sending update data: ${JSON.stringify(purchaseData)}")
     console.log("📷 Car pictures data:", carPictures)
@@ -17401,12 +17552,20 @@ fun submitEditPurchase(id: Long, purchaseData: dynamic) {
     
     window.fetch(apiUrl("purchases/$id"), requestInit).then { response ->
         if (response.ok) {
-            // Clear original purchase data when update succeeds
-            originalPurchaseData = null
-            showMessage("Purchase updated successfully!", "success")
-            window.location.hash = "#/purchase"
-            clearRixoAutoSelectSuppress()
+            response.json().then { updatedPurchase: dynamic ->
+                refreshEditPurchaseAfterSuccessfulSave(id, updatedPurchase)
+                pendingEditAuditChangedFields = null
+                showMessage("Purchase updated successfully!", "success")
+                clearRixoAutoSelectSuppress()
+            }.catch { err: dynamic ->
+                console.warn("Edit save OK but response parse failed:", err)
+                refreshEditPurchaseAfterSuccessfulSave(id, null)
+                pendingEditAuditChangedFields = null
+                showMessage("Purchase updated successfully!", "success")
+                clearRixoAutoSelectSuppress()
+            }
         } else {
+            pendingEditAuditChangedFields = null
             response.text().then { errorText ->
                 console.log("Update error response: $errorText")
                 // Try to parse as JSON first

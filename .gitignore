@@ -285,3 +285,7 @@ AWS-DEPLOYMENT-GUIDE.md
 # Cursor IDE (local only)
 .cursor/
 .vercel
+
+# Railway MySQL backups (local dumps — never commit)
+backups/
+.env.railway.backup

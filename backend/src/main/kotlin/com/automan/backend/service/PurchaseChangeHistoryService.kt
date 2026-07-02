@@ -11,6 +11,8 @@ import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Service
@@ -70,20 +72,34 @@ class PurchaseChangeHistoryService(
     }
 
     @Transactional
-    fun recordPurchasePartialEdit(before: Purchase, after: Purchase, changedBy: String? = null) {
+    fun recordPurchasePartialEdit(
+        before: Purchase,
+        after: Purchase,
+        changedBy: String? = null,
+        onlyFields: Set<String>? = null,
+    ) {
         val purchaseId = before.id ?: return
         if (after.id != null && after.id != purchaseId) return
-        
+
         val fieldNames = mutableListOf<String>()
         val oldValues = mutableListOf<String>()
         val newValues = mutableListOf<String>()
-        val now = java.time.LocalDateTime.now()
+        val now = LocalDateTime.now(JAPAN_ZONE)
 
         fun add(fieldName: String, oldV: String?, newV: String?) {
-            if (oldV == newV) return
+            if (onlyFields != null && fieldName !in onlyFields) return
+            if (valuesEqual(fieldName, oldV, newV)) return
             fieldNames.add(fieldName)
-            oldValues.add(oldV?.take(maxStoredLength) ?: "")
-            newValues.add(newV?.take(maxStoredLength) ?: "")
+            oldValues.add(displayValue(fieldName, oldV).take(maxStoredLength))
+            newValues.add(displayValue(fieldName, newV).take(maxStoredLength))
+        }
+
+        fun addBool(fieldName: String, oldV: Boolean?, newV: Boolean?) {
+            if (onlyFields != null && fieldName !in onlyFields) return
+            if (normBoolForCompare(oldV) == normBoolForCompare(newV)) return
+            fieldNames.add(fieldName)
+            oldValues.add(displayBool(oldV).take(maxStoredLength))
+            newValues.add(displayBool(newV).take(maxStoredLength))
         }
 
         add("date", str(before.date), str(after.date))
@@ -128,8 +144,8 @@ class PurchaseChangeHistoryService(
         add("shipmentDate", str(before.shipmentDate), str(after.shipmentDate))
         add("blNo", str(before.blNo), str(after.blNo))
         add("vessel", str(before.vessel), str(after.vessel))
-        add("bookingRequested", before.bookingRequested.toString(), after.bookingRequested.toString())
-        add("invoiceConfirmed", normBool(before.invoiceConfirmed), normBool(after.invoiceConfirmed))
+        addBool("bookingRequested", before.bookingRequested, after.bookingRequested)
+        addBool("invoiceConfirmed", before.invoiceConfirmed, after.invoiceConfirmed)
         add("shipmentCharges", str(before.shipmentCharges), str(after.shipmentCharges))
         add("freight", str(before.freight), str(after.freight))
         add("storageCharges", str(before.storageCharges), str(after.storageCharges))
@@ -139,25 +155,21 @@ class PurchaseChangeHistoryService(
         add("rixoPrice", str(before.rixoPrice), str(after.rixoPrice))
         add("venueId", str(before.venueId), str(after.venueId))
         add("numberCut", str(before.numberCut), str(after.numberCut))
-        add("shaken", normBool(before.shaken), normBool(after.shaken))
-        add("negotiate", normBool(before.negotiate), normBool(after.negotiate))
-        add("local", before.local.toString(), after.local.toString())
+        addBool("shaken", before.shaken, after.shaken)
+        addBool("negotiate", before.negotiate, after.negotiate)
+        addBool("local", before.local, after.local)
         add("repairCompany", str(before.repairCompany), str(after.repairCompany))
         add("repairCharges", str(before.repairCharges), str(after.repairCharges))
         add("bookingId", normLong(before.bookingId), normLong(after.bookingId))
         run {
+            if (onlyFields != null && "carPictures" !in onlyFields) return@run
             val a = str(before.carPictures)
             val b = str(after.carPictures)
-            if (a != b) {
-                if (a.length > 200 || b.length > 200) {
-                    add(
-                        "carPictures",
-                        "(${a.length} chars)",
-                        "(${b.length} chars)",
-                    )
-                } else {
-                    add("carPictures", a, b)
-                }
+            if (normCarPictures(a) == normCarPictures(b)) return@run
+            if (a.length > 200 || b.length > 200) {
+                add("carPictures", "(${a.length} chars)", "(${b.length} chars)")
+            } else {
+                add("carPictures", a, b)
             }
         }
 
@@ -178,21 +190,107 @@ class PurchaseChangeHistoryService(
         }
     }
 
+    private fun valuesEqual(fieldName: String, oldV: String?, newV: String?): Boolean {
+        return when (fieldName) {
+            in MONEY_FIELDS -> normMoney(oldV) == normMoney(newV)
+            "carPictures" -> normCarPictures(oldV) == normCarPictures(newV)
+            else -> str(oldV) == str(newV)
+        }
+    }
+
+    private fun displayValue(fieldName: String, value: String?): String {
+        val s = str(value)
+        if (s.isEmpty()) return ""
+        return s
+    }
+
+    private fun displayBool(value: Boolean?): String = when (value) {
+        true -> "TRUE"
+        false -> "FALSE"
+        null -> ""
+    }
+
     private fun str(s: String?): String = s?.trim()?.ifEmpty { "" } ?: ""
 
     private fun normInt(v: Int?): String = v?.toString() ?: ""
 
     private fun normLong(v: Long?): String = v?.toString() ?: ""
 
-    private fun normBool(v: Boolean?): String = when (v) {
+    /** Mirrors frontend confirm-modal money compare: strip ¥, commas, compare numeric content. */
+    private fun normMoney(s: String?): String {
+        val trimmed = str(s)
+        if (trimmed.isEmpty()) return ""
+        val cleaned = trimmed.replace(Regex("[^0-9.]"), "")
+        if (cleaned.isEmpty()) return ""
+        val parts = cleaned.split(".")
+        return if (parts.size <= 1) {
+            parts[0]
+        } else {
+            parts[0] + "." + parts.drop(1).joinToString("")
+        }
+    }
+
+    private fun normBoolForCompare(v: Boolean?): String = when (v) {
         true -> "true"
-        false -> "false"
-        null -> ""
+        false, null -> "false"
+    }
+
+    private fun normCarPictures(s: String?): String {
+        val a = str(s)
+        if (a.isEmpty() || a == "[]" || a.equals("null", ignoreCase = true)) return ""
+        return a
     }
 
     companion object {
+        val JAPAN_ZONE: ZoneId = ZoneId.of("Asia/Tokyo")
+
         const val MAX_PURCHASE_IDS = 500
         const val MAX_HISTORY_SIZE = 100
         const val MAX_SINGLE_PURCHASE_HISTORY_ROWS = 500
+
+        private val MONEY_FIELDS = setOf(
+            "price",
+            "auctionFee",
+            "auctionPenaltyFee",
+            "recycleFee",
+            "roadTax",
+            "taxTotal",
+            "totalPrice",
+            "rixoPrice",
+            "shipmentCharges",
+            "freight",
+            "storageCharges",
+            "miscCharges",
+            "inspectionFee",
+            "commission",
+            "repairCharges",
+        )
+
+        /** Map confirm-modal field keys to persisted purchase / history field names. */
+        fun mapAuditFieldKeys(keys: Collection<String>): Set<String> {
+            val mapped = linkedSetOf<String>()
+            for (key in keys) {
+                val trimmed = key.trim()
+                if (trimmed.isEmpty()) continue
+                when (trimmed) {
+                    "sold" -> mapped.add("invoiceConfirmed")
+                    "vehicleType" -> mapped.add("shipmentSize")
+                    else -> mapped.add(trimmed)
+                }
+            }
+            return mapped
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        fun extractAuditChangedFields(updateData: Map<String, Any>): Set<String>? {
+            val raw = updateData["auditChangedFields"] ?: return null
+            val keys = when (raw) {
+                is Collection<*> -> raw.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                is Array<*> -> raw.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                else -> emptyList()
+            }
+            if (keys.isEmpty()) return null
+            return mapAuditFieldKeys(keys)
+        }
     }
 }

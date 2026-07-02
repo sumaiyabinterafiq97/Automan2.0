@@ -730,6 +730,8 @@ fun purchaseListColumnLabels(): Map<String, String> {
         "commission" to "Commission",
         "numberCut" to "Number Cut",
         "shaken" to "SHAKEN",
+        "negotiate" to "NEGOTIATE",
+        "local" to "LOCAL",
         "repairCompany" to "Repair Company",
         "repairCharges" to "Repair Charges",
         "profit" to "Profit",
@@ -811,22 +813,21 @@ fun isRixoRequestedPendingForTransportGenerator(raw: String?): Boolean {
 }
 
 /**
- * Formats backend ISO local date/time (`yyyy-MM-dd'T'HH:mm:ss`) for display,
- * e.g. `Apr 29, 2026 7:58 PM` (interpreted in the browser local zone).
+ * Formats backend ISO local date/time (`yyyy-MM-dd'T'HH:mm:ss`) for display.
+ * Values are stored in Japan Standard Time (Asia/Tokyo) and shown as-is (no browser timezone shift).
  */
 fun formatPurchaseChangeHistoryDateTime(isoLocalDateTime: String): String {
     if (isoLocalDateTime.isBlank()) return ""
     val normalized = isoLocalDateTime.trim().replace(" ", "T")
-    val t = Date.parse(normalized)
-    if (t.isNaN() || !t.isFinite()) return isoLocalDateTime.trim()
-    val d = Date(t.toLong())
+    val match = Regex("""(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})""").find(normalized)
+        ?: return isoLocalDateTime.trim()
+    val year = match.groupValues[1].toIntOrNull() ?: return isoLocalDateTime.trim()
+    val month = match.groupValues[2].toIntOrNull()?.coerceIn(1, 12) ?: return isoLocalDateTime.trim()
+    val day = match.groupValues[3].toIntOrNull() ?: return isoLocalDateTime.trim()
+    val hRaw = match.groupValues[4].toIntOrNull() ?: return isoLocalDateTime.trim()
+    val m = match.groupValues[5].toIntOrNull() ?: return isoLocalDateTime.trim()
     val months =
         listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-    val monthIdx = d.getMonth().toInt().coerceIn(0, 11)
-    val day = d.getDate().toInt()
-    val year = d.getFullYear().toInt()
-    val hRaw = d.getHours().toInt()
-    val m = d.getMinutes().toInt()
     val pm = hRaw >= 12
     val h12 = when {
         hRaw == 0 -> 12
@@ -835,7 +836,7 @@ fun formatPurchaseChangeHistoryDateTime(isoLocalDateTime: String): String {
     }
     val ampm = if (pm) "PM" else "AM"
     val minStr = m.toString().padStart(2, '0')
-    return "${months[monthIdx]} $day, $year $h12:$minStr $ampm"
+    return "${months[month - 1]} $day, $year $h12:$minStr $ampm JST"
 }
 
 /**

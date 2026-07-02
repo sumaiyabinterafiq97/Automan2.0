@@ -368,6 +368,7 @@ class PurchaseService(
     fun updatePurchasePartial(id: Long, updateData: Map<String, Any>): Purchase? {
         Logger.debug("🔍 [Service] Updating purchase ID: $id with partial data")
         Logger.debug("🔍 [Service] Update data received: $updateData")
+        val auditChangedFields = PurchaseChangeHistoryService.extractAuditChangedFields(updateData)
         
         // Validate carModelYear if provided
         val carModelYearValue = updateData["carModelYear"] as? String
@@ -700,6 +701,7 @@ class PurchaseService(
             purchaseChangeHistoryService.recordPurchasePartialEdit(
                 existingPurchase,
                 purchaseToSave,
+                onlyFields = auditChangedFields,
             )
             val savedPurchase = persistPurchaseAndFlush(purchaseToSave)
             // CRITICAL: Fetch fresh entity from database to ensure we get the actual saved value

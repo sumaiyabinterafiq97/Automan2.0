@@ -44,6 +44,7 @@ services:
       start_period: 120s
     environment:
       SPRING_PROFILES_ACTIVE: docker
+      TZ: Asia/Tokyo
       # database/01-init-multiplatform.sql seeds schema + data on first MySQL start; baseline at latest migration.
       SPRING_FLYWAY_BASELINE_ON_MIGRATE: "true"
       SPRING_FLYWAY_BASELINE_VERSION: "37"
