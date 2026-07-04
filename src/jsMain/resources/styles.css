@@ -10106,12 +10106,117 @@ input.client-form-readonly:read-only {
 }
 
 .supplier-map-tree-root {
-    margin-top: 12px;
+    margin-top: 0;
+}
+
+.supplier-map-tree-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.supplier-map-supplier-add-footer {
+    flex-shrink: 0;
+}
+
+/* Supplier Map — viewport-bound page: no document scroll; only tree body scrolls */
+:root {
+    --app-title-bar-height: 52px;
+}
+
+#content:has(#supplierList.supplier-map-page) {
+    overflow: hidden;
+    height: calc(100vh - var(--app-title-bar-height));
+    height: calc(100dvh - var(--app-title-bar-height));
+    max-height: calc(100vh - var(--app-title-bar-height));
+    max-height: calc(100dvh - var(--app-title-bar-height));
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    box-sizing: border-box;
+}
+
+#supplierList.supplier-map-page.rixo-tree-page {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 8px 12px 12px;
+    gap: 12px;
+}
+
+#supplierList .supplier-map-topbar,
+#supplierList .supplier-map-search-panel {
+    flex-shrink: 0;
+    margin-bottom: 0;
+}
+
+#supplierList .supplier-map-tree-root {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 18px 16px 12px;
+    box-sizing: border-box;
+}
+
+#supplierList .supplier-map-tree-root > .rixo-tree.supplier-map-tree {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    gap: 0;
+}
+
+#supplierList .supplier-map-tree-root .rixo-tree-headers {
+    flex-shrink: 0;
+}
+
+#supplierList .supplier-map-tree-root .supplier-map-tree-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 8px;
+}
+
+#supplierList .supplier-map-tree-root .supplier-map-supplier-add-footer {
+    flex: 0 0 auto;
+    position: relative;
+    z-index: 20;
+    padding: 12px 0 4px;
+    background: #eef2f7;
+    border-top: 1px solid rgba(203, 213, 225, 0.85);
+    box-shadow: 0 -4px 12px rgba(15, 23, 42, 0.06);
+}
+
+#supplierList .supplier-map-tree-root .supplier-map-supplier-add-footer .rixo-tree-add-wrap--supplier-root {
+    margin-top: 0;
+    padding-left: 10px;
+    width: 270px;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+#supplierList .supplier-map-tree-root .supplier-map-supplier-add-footer .rixo-tree-node {
+    margin-bottom: 10px;
+    max-width: 520px;
 }
 
 @media (max-width: 1024px) {
+    #supplierList.supplier-map-page.rixo-tree-page {
+        padding: 12px 12px 12px !important;
+        gap: 10px;
+    }
+
     .supplier-map-page {
-        padding: 12px 12px 24px;
+        padding: 12px 12px 12px;
     }
 
     .supplier-map-topbar {
@@ -10154,17 +10259,33 @@ input.client-form-readonly:read-only {
     }
 
     #supplierList .supplier-map-tree-root {
-        overflow-x: visible;
-        overflow-y: auto;
-        max-height: calc(100vh - 220px);
-        -webkit-overflow-scrolling: touch;
-        padding: 14px 12px 20px;
+        padding: 14px 12px 10px;
     }
 
-    #supplierList .supplier-map-tree {
+    #supplierList .supplier-map-tree-root > .rixo-tree.supplier-map-tree {
         min-width: 0;
         width: 100%;
+    }
+
+    #supplierList .supplier-map-tree-root .supplier-map-tree-body {
         gap: 14px;
+    }
+
+    #supplierList .supplier-map-tree-root .supplier-map-supplier-add-footer {
+        padding: 10px 0 6px;
+        background: #eef2f7;
+    }
+
+    #supplierList .supplier-map-tree-root .supplier-map-supplier-add-footer .rixo-tree-add-wrap--supplier-root {
+        width: 100%;
+        padding-left: 0;
+    }
+
+    #supplierList .supplier-map-tree-root .supplier-map-supplier-add-footer .rixo-tree-add-wrap--supplier-root .rixo-tree-add-btn {
+        width: 100%;
+        justify-content: center;
+        min-height: 44px;
+        font-size: 13px;
     }
 
     #supplierList .rixo-tree-headers {
@@ -10409,9 +10530,13 @@ input.client-form-readonly:read-only {
 }
 
 @media (max-width: 767px) {
+    #supplierList.supplier-map-page.rixo-tree-page {
+        padding: 8px 10px 10px !important;
+        gap: 8px;
+    }
+
     #supplierList .supplier-map-tree-root {
-        max-height: calc(100vh - 200px);
-        padding: 12px 10px 16px;
+        padding: 12px 10px 10px;
     }
 
     #supplierList .supplier-map-title {

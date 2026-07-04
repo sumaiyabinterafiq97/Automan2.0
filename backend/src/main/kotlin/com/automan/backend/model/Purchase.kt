@@ -208,6 +208,10 @@ data class Purchase(
     /** Domestic (Japan) sale — export/shipping fields are not used when true. */
     @Column(name = "`local`")
     val local: Boolean = false,
+
+    /** Manufacture year (YYYY only). */
+    @Column(name = "manufacture_year", length = 4)
+    val manufactureYear: String? = null,
     
     @Column(name = "repair_company")
     val repairCompany: String? = null,

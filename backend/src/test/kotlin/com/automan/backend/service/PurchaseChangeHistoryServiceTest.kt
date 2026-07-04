@@ -127,6 +127,20 @@ class PurchaseChangeHistoryServiceTest {
     }
 
     @Test
+    fun `recordPurchasePartialEdit logs manufactureYear change`() {
+        val repo = mock(PurchaseChangeHistoryRepository::class.java)
+        val svc = PurchaseChangeHistoryService(repo)
+        val before = Purchase(id = 11L, chassis = "ABC", manufactureYear = "2018")
+        val after = before.copy(manufactureYear = "2022")
+        svc.recordPurchasePartialEdit(before, after)
+        val captor = ArgumentCaptor.forClass(PurchaseChangeHistory::class.java)
+        verify(repo).save(captor.capture())
+        assertEquals("manufactureYear", captor.value.fieldName)
+        assertEquals("2018", captor.value.oldValue)
+        assertEquals("2022", captor.value.newValue)
+    }
+
+    @Test
     fun `recordPurchasePartialEdit stores changedAt in Japan zone`() {
         val repo = mock(PurchaseChangeHistoryRepository::class.java)
         val svc = PurchaseChangeHistoryService(repo)

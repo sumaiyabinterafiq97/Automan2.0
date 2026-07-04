@@ -123,15 +123,40 @@ class PurchaseService(
         }
         
         val yearStr = parts[0].trim()
-        // Limit to 4 digits only: year must be exactly 4 digits and numeric
+        val monthStr = parts[1].trim()
         if (yearStr.length != 4) {
             return "Production year must be exactly 4 digits. Got: $yearStr"
         }
         if (!yearStr.all { it.isDigit() }) {
             return "Production year must be 4 digits only. Got: $yearStr"
         }
+        val month = monthStr.toIntOrNull()
+        if (month == null || month !in 0..12) {
+            return "Invalid Production Date month. Use 00–12 (00 = year only)."
+        }
         
         return null // Valid
+    }
+
+    private fun normalizeManufactureYear(raw: String?): String? {
+        val t = raw?.trim().orEmpty()
+        return t.ifEmpty { null }
+    }
+
+    /**
+     * Validates Manufacture Year: optional; if set must be exactly 4 digits between 1000 and 9999.
+     */
+    private fun validateManufactureYear(manufactureYear: String?): String? {
+        val t = manufactureYear?.trim().orEmpty()
+        if (t.isEmpty()) return null
+        if (t.length != 4 || !t.all { it.isDigit() }) {
+            return "Manufacture year must be exactly 4 digits (YYYY)."
+        }
+        val year = t.toIntOrNull()
+        if (year == null || year < 1000 || year > 9999) {
+            return "Manufacture year must be between 1000 and 9999."
+        }
+        return null
     }
     
     fun getAllPurchases(): List<Purchase> {
@@ -202,6 +227,7 @@ class PurchaseService(
         if (yearError != null) {
             throw IllegalArgumentException(yearError)
         }
+        validateManufactureYear(purchase.manufactureYear)?.let { throw IllegalArgumentException(it) }
 
         assertNoDuplicatePurchase(purchase.chassis, excludeId = null)
         
@@ -221,6 +247,7 @@ class PurchaseService(
             shaken = shakenValue,
             negotiate = negotiateValue,
             local = purchase.local,
+            manufactureYear = normalizeManufactureYear(purchase.manufactureYear),
             clientId = purchase.clientId ?: resolveClientIdFromName(purchase.clientName),
         )
         
@@ -255,7 +282,8 @@ class PurchaseService(
         val existingPurchase = purchaseRepository.findById(id).orElse(null)?.let { applyReadAdapters(it) }
         if (existingPurchase != null) {
             Logger.debug("🔍 [Service] Found existing purchase: $existingPurchase")
-            
+            validateManufactureYear(purchase.manufactureYear)?.let { throw IllegalArgumentException(it) }
+
             // Merge the new data with existing data, keeping existing values for null fields
             val updatedPurchase = existingPurchase.copy(
                 id = id,
@@ -336,6 +364,7 @@ class PurchaseService(
                     else -> existingPurchase.negotiate
                 },
                 local = purchase.local,
+                manufactureYear = normalizeManufactureYear(purchase.manufactureYear) ?: existingPurchase.manufactureYear,
                 repairCompany = purchase.repairCompany ?: existingPurchase.repairCompany,
                 repairCharges = purchase.repairCharges ?: existingPurchase.repairCharges,
                 updatedAt = java.time.LocalDateTime.now()
@@ -377,6 +406,9 @@ class PurchaseService(
             if (yearError != null) {
                 throw IllegalArgumentException(yearError)
             }
+        }
+        if (updateData.containsKey("manufactureYear")) {
+            validateManufactureYear(updateData["manufactureYear"] as? String)?.let { throw IllegalArgumentException(it) }
         }
         
         val existingPurchase = purchaseRepository.findById(id).orElse(null)?.let { applyReadAdapters(it) }
@@ -563,6 +595,13 @@ class PurchaseService(
                         localValue is String -> localValue.toBoolean()
                         localValue is Number -> localValue.toInt() != 0
                         else -> existingPurchase.local
+                    }
+                },
+                manufactureYear = run {
+                    if (!updateData.containsKey("manufactureYear")) {
+                        existingPurchase.manufactureYear
+                    } else {
+                        normalizeManufactureYear(updateData["manufactureYear"] as? String)
                     }
                 },
                 repairCompany = updateData["repairCompany"] as? String ?: existingPurchase.repairCompany,

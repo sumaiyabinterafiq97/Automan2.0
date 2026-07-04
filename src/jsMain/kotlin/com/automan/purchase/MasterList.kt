@@ -4174,7 +4174,7 @@ private fun buildCarBrandTableUi(
                 "color" to "Color",
                 "driveType" to "Drive Type",
                 "recycleFee" to "Recycle Fees",
-                "carModelYear" to "Production Date"
+                "carModelYear" to "Registration Date"
             )
             
             val carBrandColCount = 1 + selectedColumns.size
@@ -4589,7 +4589,7 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         "color" to "Color",
         "driveType" to "Drive Type",
         "recycleFee" to "Recycle Fees",
-        "carModelYear" to "Production Date"
+        "carModelYear" to "Registration Date"
     )
     
     val cardsHTML = StringBuilder()
@@ -4808,7 +4808,7 @@ fun showCarBrandColumnFilterModal() {
         "color" to "Color",
         "driveType" to "Drive Type",
         "recycleFee" to "Recycle Fees",
-        "carModelYear" to "Production Date"
+        "carModelYear" to "Registration Date"
     )
     
     val checkboxesDiv = document.getElementById("carBrandColumnCheckboxes")
@@ -5016,10 +5016,10 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                             <div style="visibility:hidden;"></div>
                         </div>
                         <div style="margin-bottom: 20px;">
-                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Recycle Fees <span style="color: #6b7280; font-weight: 400; font-size: 12px;">(by Production Date)</span></label>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Recycle Fees <span style="color: #6b7280; font-weight: 400; font-size: 12px;">(by Registration Date)</span></label>
                             <div id="recycleFeeRows" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;"></div>
                             <button type="button" id="addRecycleFeeRow" style="display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; background: #f3f4f6; border: 1px dashed #d1d5db; border-radius: 6px; color: #374151; font-size: 13px; cursor: pointer; transition: background 0.15s;">
-                                <span style="font-size: 16px; line-height: 1;">+</span> Add Production Date
+                                <span style="font-size: 16px; line-height: 1;">+</span> Add Registration Date
                             </button>
                         </div>
                         <div class="car-brand-modal-actions">
@@ -5057,8 +5057,7 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                     '</div>' +
                     '<button type="button" class="recycle-fee-date-btn" title="Open month picker" ' +
                         'style="flex-shrink:0; padding:9px 10px; border:1px solid #d1d5db; background:#f9fafb; border-radius:6px; cursor:pointer; font-size:14px; display:flex; align-items:center; justify-content:center; box-sizing:border-box;">📅</button>' +
-                    '<input type="month" class="recycle-fee-month-picker" tabindex="-1" aria-hidden="true" ' +
-                        'style="position:absolute; left:0; top:0; width:0; height:0; opacity:0; border:none; padding:0; margin:0; overflow:hidden;">' +
+                    '<input type="hidden" class="recycle-fee-date-canonical" value="">' +
                 '</div>' +
                 '<input type="text" class="recycle-fee-amount-input money-input" inputmode="decimal" autocomplete="off" ' +
                     'placeholder="Fee (¥)" value="' + (fee || '') + '" ' +
@@ -5070,9 +5069,48 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
             var dateInput = row.querySelector('.recycle-fee-date-input');
             var hint = row.querySelector('.recycle-fee-date-hint');
             var dateBtn = row.querySelector('.recycle-fee-date-btn');
-            var monthPicker = row.querySelector('.recycle-fee-month-picker');
+            var canonicalInput = row.querySelector('.recycle-fee-date-canonical');
+            var monthPicker = null;
+
+            function syncRecycleFeeCanonical() {
+                var current = (dateInput.value || '').trim();
+                var match = current.match(/^(\d{2})\/(\d{4})$/);
+                if (match) {
+                    var mm = parseInt(match[1], 10);
+                    var yyyy = parseInt(match[2], 10);
+                    if (mm >= 0 && mm <= 12) {
+                        var paddedMm = mm < 10 ? '0' + mm : '' + mm;
+                        canonicalInput.value = yyyy + '-' + paddedMm;
+                        return;
+                    }
+                }
+                if (!current) canonicalInput.value = '';
+            }
+
+            function ensureMonthPicker() {
+                if (monthPicker) return monthPicker;
+                monthPicker = document.createElement('input');
+                monthPicker.type = 'month';
+                monthPicker.tabIndex = -1;
+                monthPicker.setAttribute('aria-hidden', 'true');
+                monthPicker.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;';
+                dateBtn.parentElement.appendChild(monthPicker);
+                monthPicker.addEventListener('change', function() {
+                    var iso = monthPicker.value.trim();
+                    if (iso.match(/^\d{4}-\d{2}$/)) {
+                        var parts = iso.split('-');
+                        var formatted = parts[1] + '/' + parts[0];
+                        dateInput.value = formatted;
+                        lastAcceptedText = formatted;
+                        canonicalInput.value = iso;
+                        hint.style.display = 'none';
+                    }
+                });
+                return monthPicker;
+            }
 
             var lastAcceptedText = dateInput.value || '';
+            syncRecycleFeeCanonical();
             dateInput.addEventListener('input', function(e) {
                 var raw = dateInput.value;
                 var digits = raw.replace(/\D/g, '').substring(0, 6);
@@ -5099,7 +5137,7 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                             if (mmVal[0] !== '0' && mmVal[0] !== '1') isValid = false;
                         } else if (mmVal.length === 2) {
                             var mNum = parseInt(mmVal, 10);
-                            if (isNaN(mNum) || mNum < 1 || mNum > 12) isValid = false;
+                            if (isNaN(mNum) || mNum < 0 || mNum > 12) isValid = false;
                         }
                         if (yyyyVal.length > 4) isValid = false;
                     }
@@ -5113,6 +5151,7 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                 dateInput.value = next;
                 lastAcceptedText = next;
                 hint.style.display = next.length > 0 ? 'none' : 'block';
+                syncRecycleFeeCanonical();
             });
 
             dateInput.addEventListener('keydown', function(ev) {
@@ -5130,7 +5169,7 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
             dateInput.addEventListener('blur', function() {
                 var current = dateInput.value.trim();
                 if (current === '') {
-                    monthPicker.value = '';
+                    canonicalInput.value = '';
                     hint.style.display = 'block';
                     lastAcceptedText = '';
                     return;
@@ -5139,42 +5178,31 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                 if (match) {
                     var mm = parseInt(match[1], 10);
                     var yyyy = parseInt(match[2], 10);
-                    if (mm >= 1 && mm <= 12) {
+                    if (mm >= 0 && mm <= 12) {
                         var paddedMm = mm < 10 ? '0' + mm : '' + mm;
                         var formatted = paddedMm + '/' + yyyy;
                         dateInput.value = formatted;
                         lastAcceptedText = formatted;
-                        monthPicker.value = yyyy + '-' + paddedMm;
+                        canonicalInput.value = yyyy + '-' + paddedMm;
                         hint.style.display = 'none';
                         return;
                     }
                 }
             });
 
-            monthPicker.addEventListener('change', function() {
-                var iso = monthPicker.value.trim();
-                if (iso.match(/^\d{4}-\d{2}$/)) {
-                    var parts = iso.split('-');
-                    var formatted = parts[1] + '/' + parts[0];
-                    dateInput.value = formatted;
-                    lastAcceptedText = formatted;
-                    hint.style.display = 'none';
-                }
-            });
-
             dateBtn.addEventListener('click', function(e) {
                 e.preventDefault();
-                var currentVal = (dateInput.value || '').trim();
-                var isoMonth = '';
-                var mmYYYY = currentVal.match(/^(\d{2})\/(\d{4})$/);
-                if (mmYYYY) {
-                    isoMonth = mmYYYY[2] + '-' + mmYYYY[1];
-                }
-                monthPicker.value = isoMonth;
+                syncRecycleFeeCanonical();
+                var canonical = (canonicalInput.value || '').trim();
+                if (canonical.endsWith('-00')) return;
+                var picker = ensureMonthPicker();
+                picker.value = canonical.match(/^\d{4}-\d{2}$/) && !canonical.endsWith('-00')
+                    ? canonical
+                    : (new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0'));
                 try {
-                    monthPicker.showPicker();
+                    picker.showPicker();
                 } catch (err) {
-                    monthPicker.click();
+                    picker.click();
                 }
             });
 
@@ -6533,7 +6561,7 @@ fun showSupplierMapPage() {
                 </div>
             </div>
             
-            <div id="supplierMapTreeRoot" class="rixo-tree-root supplier-map-tree supplier-map-tree-root">
+            <div id="supplierMapTreeRoot" class="rixo-tree-root supplier-map-tree-root">
                 <div class="rixo-tree-loading">Loading supplier map…</div>
             </div>
         </div>
@@ -6759,12 +6787,35 @@ private fun supplierTreeRowsForSearch(): List<SupplierPriceRowLite> {
 private fun distinctSuppliersSorted(rows: List<SupplierPriceRowLite>): List<String> =
     rows.map { it.supplier }.distinct().sortedBy { it.lowercase() }
 
-private fun supplierTreeAddButtonHtml(level: String, supplier: String?, stock: String?, rowId: Long?, branchIdx: Int?): String {
+private fun supplierTreeAddButtonHtml(
+    level: String,
+    supplier: String?,
+    stock: String?,
+    rowId: Long?,
+    branchIdx: Int?,
+    wrapClass: String = "",
+): String {
     val c = escapeHtml(supplier ?: "")
     val s = escapeHtml(stock ?: "")
     val rid = rowId?.toString() ?: ""
     val bidx = branchIdx?.toString() ?: ""
-    return """<div class="rixo-tree-add-wrap"><button type="button" class="rixo-tree-add-btn" data-smap-add="$level" data-smap-supplier="$c" data-smap-stock="$s" data-smap-row-id="$rid" data-smap-branch-idx="$bidx">+ Add</button></div>"""
+    val wrapExtra = if (wrapClass.isNotBlank()) " $wrapClass" else ""
+    return """<div class="rixo-tree-add-wrap$wrapExtra"><button type="button" class="rixo-tree-add-btn" data-smap-add="$level" data-smap-supplier="$c" data-smap-stock="$s" data-smap-row-id="$rid" data-smap-branch-idx="$bidx">+ Add</button></div>"""
+}
+
+/** Pinned footer: supplier inline-add form + root-level + Add (mobile scroll body stays above). */
+private fun supplierTreeRootAddFooterHtml(): String {
+    val inlineAdd = if (supplierTreeInlineAddLevel == "supplier") {
+        """<div class="rixo-tree-node">${buildSupplierSupplierInlineAddHtml()}</div>"""
+    } else {
+        ""
+    }
+    return """
+        <div class="supplier-map-supplier-add-footer">
+            $inlineAdd
+            ${supplierTreeAddButtonHtml("supplier", null, null, null, null, "rixo-tree-add-wrap--supplier-root")}
+        </div>
+    """.trimIndent()
 }
 
 private fun buildSupplierTreeCardHtml(
@@ -7022,9 +7073,10 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
                     <div class="rixo-tree-header">Venue ID</div>
                     <div class="rixo-tree-header rixo-tree-header--price">Rixo company</div>
                 </div>
-                <div class="rixo-tree-note">No matching rows. Add a supplier or adjust search.</div>
-                ${if (supplierTreeInlineAddLevel == "supplier") """<div class="rixo-tree-node">${buildSupplierSupplierInlineAddHtml()}</div>""" else ""}
-                ${supplierTreeAddButtonHtml("supplier", null, null, null, null)}
+                <div class="supplier-map-tree-body">
+                    <div class="rixo-tree-note">No matching rows. Add a supplier or adjust search.</div>
+                </div>
+                ${supplierTreeRootAddFooterHtml()}
             </div>
         """.trimIndent()
     }
@@ -7043,6 +7095,7 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
     sb.append(
         """<div class="rixo-tree-headers"><div class="rixo-tree-header">Supplier</div><div class="rixo-tree-header">Stock location</div><div class="rixo-tree-header">POL</div><div class="rixo-tree-header">Venue ID</div><div class="rixo-tree-header rixo-tree-header--price">Rixo company</div></div>""",
     )
+    sb.append("""<div class="supplier-map-tree-body">""")
 
     for (supplier in suppliers) {
         val isSupOpen = supplier.equals(selSup, ignoreCase = true)
@@ -7134,12 +7187,8 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
         }
         sb.append("""</div>""")
     }
-    if (supplierTreeInlineAddLevel == "supplier") {
-        sb.append("""<div class="rixo-tree-node">""")
-        sb.append(buildSupplierSupplierInlineAddHtml())
-        sb.append("""</div>""")
-    }
-    sb.append(supplierTreeAddButtonHtml("supplier", null, null, null, null))
+    sb.append("""</div>""")
+    sb.append(supplierTreeRootAddFooterHtml())
     sb.append("""</div>""")
     return sb.toString()
 }
@@ -13599,6 +13648,12 @@ private fun loadSimpleMaster(apiPath: String, filterId: String, tableId: String,
         }
 }
 
+private fun invalidateNumberCutPlaceCacheIfNeeded(apiPath: String) {
+    if (apiPath.endsWith("number_place")) {
+        invalidateNumberCutPlaceOptionsCache()
+    }
+}
+
 private fun addSimpleMasterModal(apiPath: String, title: String, modalId: String, inputId: String, cancelBtnId: String, addBtnId: String, onSuccess: () -> Unit) {
     document.getElementById(modalId)?.remove()
     val modal = document.createElement("div")
@@ -13624,7 +13679,7 @@ private fun addSimpleMasterModal(apiPath: String, title: String, modalId: String
         val req = js("{}"); req.method = "POST"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
         window.fetch(apiUrl(apiPath), req)
             .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to add')") }
-            .then { _: dynamic -> showMessage("$title added successfully", "success"); modal.remove(); onSuccess() }
+            .then { _: dynamic -> showMessage("$title added successfully", "success"); modal.remove(); invalidateNumberCutPlaceCacheIfNeeded(apiPath); onSuccess() }
             .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
     })
 }
@@ -13658,7 +13713,7 @@ private fun editSimpleMasterModal(apiPath: String, title: String, originalName: 
         val req = js("{}"); req.method = "PUT"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
         window.fetch(apiUrl(apiPath), req)
             .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to update')") }
-            .then { _: dynamic -> showMessage("$title updated successfully", "success"); modal.remove(); onUpdateSuccess() }
+            .then { _: dynamic -> showMessage("$title updated successfully", "success"); modal.remove(); invalidateNumberCutPlaceCacheIfNeeded(apiPath); onUpdateSuccess() }
             .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
     })
     document.getElementById(deleteBtnId)?.addEventListener("click", { _: Event ->
@@ -13667,7 +13722,7 @@ private fun editSimpleMasterModal(apiPath: String, title: String, originalName: 
         val req = js("{}"); req.method = "DELETE"
         window.fetch(apiUrl(apiPath + "?value=" + encoded), req)
             .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete')") }
-            .then { _: dynamic -> showMessage("$title deleted successfully", "success"); modal.remove(); onDeleteSuccess() }
+            .then { _: dynamic -> showMessage("$title deleted successfully", "success"); modal.remove(); invalidateNumberCutPlaceCacheIfNeeded(apiPath); onDeleteSuccess() }
             .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
     })
 }

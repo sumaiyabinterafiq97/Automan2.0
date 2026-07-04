@@ -676,7 +676,8 @@ fun purchaseListColumnLabels(): Map<String, String> {
     return linkedMapOf(
         "date" to "Purchase Date",
         "chassis" to "Chassis",
-        "carModelYear" to "Production Date",
+        "carModelYear" to "Registration Date",
+        "manufactureYear" to "Manufacture Year",
         "brand" to "Brand",
         "carName" to "Car Name",
         "shipmentSize" to "Vehicle type",
@@ -1257,7 +1258,8 @@ fun formatCarModelYear(yearStr: String?): String {
             if (parts.size == 2) {
                 val year = parts[0].toIntOrNull()
                 val month = parts[1].toIntOrNull()
-                if (year != null && month != null && month >= 1 && month <= 12) {
+                if (year != null && month != null && month in 0..12) {
+                    if (month == 0) return "00/$year"
                     return "${months[month - 1]} $year"
                 }
             }
@@ -1269,7 +1271,8 @@ fun formatCarModelYear(yearStr: String?): String {
             if (parts.size == 2) {
                 val month = parts[0].toIntOrNull()
                 val year = parts[1].toIntOrNull()
-                if (month != null && year != null && month >= 1 && month <= 12) {
+                if (month != null && year != null && month in 0..12) {
+                    if (month == 0) return "00/$year"
                     return "${months[month - 1]} $year"
                 }
             }
@@ -1311,14 +1314,37 @@ fun carModelYearToYearOnly(yearStr: String?): String {
     return yearStr
 }
 
-/** Normalizes car_model_year to `YYYY-MM` for `<input type="month">`. */
+private val MONTH_NAME_TO_NUM: Map<String, Int> = mapOf(
+    "january" to 1, "february" to 2, "march" to 3, "april" to 4,
+    "may" to 5, "june" to 6, "july" to 7, "august" to 8,
+    "september" to 9, "october" to 10, "november" to 11, "december" to 12,
+)
+
+/** Parses legacy labels like "June 2021" to canonical `YYYY-MM`. */
+fun parseMonthNameLabelToIsoMonth(raw: String?): String? {
+    if (raw.isNullOrBlank()) return null
+    val tokens = raw.trim().split(Regex("\\s+"))
+    if (tokens.size < 2) return null
+    val monthNum = MONTH_NAME_TO_NUM[tokens[0].lowercase()] ?: return null
+    val year = tokens.last().toIntOrNull() ?: return null
+    if (year !in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) return null
+    return year.toString() + "-" + monthNum.toString().padStart(2, '0')
+}
+
+/** Normalizes car_model_year to canonical `YYYY-MM`. Month `00` = year only. */
 fun carModelYearToMonthInputValue(raw: String?): String {
     if (raw == null || raw.isBlank()) return ""
     val t = raw.trim()
-    if (Regex("^\\d{4}-\\d{2}$").matches(t)) return t
-    if (Regex("^\\d{4}$").matches(t)) return "$t-01"
+    if (Regex("^\\d{4}-\\d{2}$").matches(t)) {
+        val mm = t.substring(5, 7).toIntOrNull()
+        if (mm != null && mm in 0..12) return t
+        return ""
+    }
+    strictMmYyyySlashToIsoMonth(t)?.let { return it }
+    parseMonthNameLabelToIsoMonth(t)?.let { return it }
+    if (Regex("^\\d{4}$").matches(t)) return "$t-00"
     val yOnly = carModelYearToYearOnly(t)
-    if (yOnly.length == 4 && yOnly.all { it.isDigit() }) return "$yOnly-01"
+    if (yOnly.length == 4 && yOnly.all { it.isDigit() }) return "$yOnly-00"
     return ""
 }
 

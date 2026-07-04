@@ -192,15 +192,114 @@ fun strictMmYyyySlashToIsoMonth(raw: String): String? {
     if (!t.matches(Regex("^\\d{2}/\\d{4}$"))) return null
     val mm = t.substring(0, 2).toIntOrNull() ?: return null
     val yyyy = t.substring(3, 7).toIntOrNull() ?: return null
-    if (mm !in 1..12) return null
+    // 00 = auction did not specify month (year only); 01–12 = normal month
+    if (mm !in 0..12) return null
     if (yyyy !in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) return null
     return yyyy.toString() + "-" + mm.toString().padStart(2, '0')
+}
+
+/** Canonical `YYYY-MM` for change detection (handles API ISO, MM/YYYY text, and legacy labels). */
+fun normalizeCarModelYearForCompare(raw: String?): String {
+    if (raw.isNullOrBlank()) return ""
+    val t = raw.trim()
+    strictMmYyyySlashToIsoMonth(t)?.let { return it }
+    parseMonthNameLabelToIsoMonth(t)?.let { return it }
+    if (t.matches(Regex("^\\d{4}-\\d{2}$"))) {
+        val mm = t.substring(5, 7).toIntOrNull() ?: return t
+        if (mm in 0..12) return t
+        return ""
+    }
+    return carModelYearToMonthInputValue(t).ifEmpty { t }
+}
+
+/** Write canonical `YYYY-MM` (incl. `YYYY-00`) to hidden store + MM/YYYY text display. */
+fun writeCarModelYearInput(baseId: String, iso: String?) {
+    val canonical = if (iso.isNullOrBlank()) "" else normalizeCarModelYearForCompare(iso)
+    (document.getElementById(baseId) as? HTMLInputElement)?.value = canonical
+    (document.getElementById("${baseId}Text") as? HTMLInputElement)?.value =
+        if (canonical.isEmpty()) "" else isoMonthToMmYyyy(canonical)
+}
+
+/** Read Registration Date: parse visible MM/YYYY first, else canonical hidden (supports month 00). */
+fun readCarModelYearInput(baseId: String): String {
+    val text = (document.getElementById("${baseId}Text") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val hiddenEl = document.getElementById(baseId) as? HTMLInputElement
+    strictMmYyyySlashToIsoMonth(text)?.let { iso ->
+        hiddenEl?.value = iso
+        return iso
+    }
+    if (text.isEmpty()) {
+        hiddenEl?.value = ""
+        return ""
+    }
+    val hidden = hiddenEl?.value?.trim().orEmpty()
+    if (hidden.matches(Regex("^\\d{4}-\\d{2}$"))) {
+        val mm = hidden.substring(5, 7).toIntOrNull()
+        if (mm != null && mm in 0..12) return hidden
+    }
+    return ""
+}
+
+/** Sync visible MM/YYYY into hidden canonical (same as blur). Returns parsed `YYYY-MM` or "". */
+fun commitCarModelYearInputFromText(baseId: String): String {
+    val text = (document.getElementById("${baseId}Text") as? HTMLInputElement)?.value?.trim().orEmpty()
+    if (text.isEmpty()) {
+        writeCarModelYearInput(baseId, "")
+        return ""
+    }
+    strictMmYyyySlashToIsoMonth(text)?.let { iso ->
+        writeCarModelYearInput(baseId, iso)
+        return iso
+    }
+    return readCarModelYearInput(baseId)
+}
+
+/**
+ * Validates Registration Date: empty is OK; non-empty text must parse to `YYYY-MM`
+ * (month 00–12, year within [MIN_YEAR, MAX_YEAR]).
+ */
+fun validateCarModelYearField(baseId: String): Pair<Boolean, String> {
+    val text = (document.getElementById("${baseId}Text") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val committed = commitCarModelYearInputFromText(baseId)
+    if (text.isEmpty()) return Pair(true, "")
+    if (committed.isNotEmpty()) return validateProductionDateYear(committed)
+    return Pair(
+        false,
+        "Invalid Registration Date. Use MM/YYYY with month 00–12 and year " +
+            "${AppConstants.MIN_YEAR}–${AppConstants.MAX_YEAR}.",
+    )
+}
+
+private fun editCarModelYearApiBaseline(): String {
+    val fromWindow = js("window.__editCarModelYearBaseline || ''").unsafeCast<String>().trim()
+    if (fromWindow.isNotEmpty()) return fromWindow
+    return normalizeCarModelYearForCompare(originalPurchaseData?.carModelYear?.toString())
+}
+
+private fun ensureCarModelYearMonthPicker(baseId: String, btn: HTMLElement): HTMLInputElement {
+    val pickerId = "${baseId}Picker"
+    val existing = document.getElementById(pickerId) as? HTMLInputElement
+    if (existing != null) {
+        positionHiddenPickerOverButton(existing, btn)
+        return existing
+    }
+    val picker = document.createElement("input") as HTMLInputElement
+    picker.type = "month"
+    picker.id = pickerId
+    picker.tabIndex = -1
+    picker.setAttribute("aria-hidden", "true")
+    val parent = btn.parentElement as? HTMLElement
+    parent?.appendChild(picker)
+    positionHiddenPickerOverButton(picker, btn)
+    return picker
 }
 
 fun isoMonthToMmYyyy(isoMonth: String?): String {
     if (isoMonth.isNullOrBlank()) return ""
     val t = isoMonth.trim()
     if (!t.matches(Regex("^\\d{4}-\\d{2}$"))) return ""
+    val mm = t.substring(5, 7).toIntOrNull() ?: return ""
+    if (mm !in 0..12) return ""
     return t.substring(5, 7) + "/" + t.substring(0, 4)
 }
 
@@ -224,7 +323,7 @@ fun isPotentialStrictMonthYearInput(value: String): Boolean {
         if (mm[0] !in '0'..'1') return false
     } else if (mm.length == 2) {
         val m = mm.toIntOrNull() ?: return false
-        if (m !in 1..12) return false
+        if (m !in 0..12) return false
     }
     if (yyyy.length > 4) return false
     if (yyyy.any { !it.isDigit() }) return false
@@ -396,17 +495,32 @@ fun bindStrictMonthYearTextMask(baseId: String, hintId: String? = null) {
     val text = document.getElementById(textId) as? HTMLInputElement ?: return
     val btn = document.getElementById(btnId) as? HTMLElement ?: return
     val hint = if (hintId.isNullOrBlank()) null else document.getElementById(hintId) as? HTMLElement
-
-    positionHiddenPickerOverButton(hidden, btn)
+    val picker = ensureCarModelYearMonthPicker(baseId, btn)
+    val pickerBound = picker.asDynamic().__carModelYearPickerBound as? Boolean ?: false
 
     fun syncHint() {
         hint?.style?.display = if (text.value.isBlank()) "block" else "none"
     }
 
-    if (hidden.value.matches(Regex("^\\d{4}-\\d{2}$"))) text.value = isoMonthToMmYyyy(hidden.value)
-    syncHint()
     var lastAcceptedText = text.value
+
+    fun setFromIso(iso: String) {
+        writeCarModelYearInput(baseId, iso)
+        lastAcceptedText = text.value
+        syncHint()
+    }
+
+    when {
+        hidden.value.trim().matches(Regex("^\\d{4}-\\d{2}$")) -> setFromIso(hidden.value.trim())
+        text.value.trim().isNotBlank() -> {
+            val iso = strictMmYyyySlashToIsoMonth(text.value.trim())
+            if (iso != null) setFromIso(iso) else syncHint()
+        }
+        else -> syncHint()
+    }
+
     text.addEventListener("input", { _: Event ->
+        if (baseId == "editCarModelYear") js("window.__editCarModelYearUserEdited = true")
         val next = maskMmYyyyFromDigits(text.value)
         if (!isPotentialStrictMonthYearInput(next)) {
             text.value = lastAcceptedText
@@ -430,25 +544,147 @@ fun bindStrictMonthYearTextMask(baseId: String, hintId: String? = null) {
     text.addEventListener("blur", { _: Event ->
         val iso = strictMmYyyySlashToIsoMonth(text.value.trim())
         if (iso != null) {
-            hidden.value = iso
-            text.value = isoMonthToMmYyyy(iso)
-        } else if (text.value.isBlank()) hidden.value = ""
+            setFromIso(iso)
+        } else if (text.value.isBlank()) {
+            hidden.value = ""
+            syncHint()
+        }
+        // Invalid non-empty text left visible; validateCarModelYearField errors on Update.
+    })
+    btn.addEventListener("click", { ev ->
+        ev.preventDefault()
+        val canonical = readCarModelYearInput(baseId)
+        // Month picker cannot represent 00; skip when year-only (00/YYYY)
+        if (canonical.endsWith("-00")) return@addEventListener
+        picker.value = when {
+            canonical.matches(Regex("^\\d{4}-\\d{2}$")) && !canonical.endsWith("-00") -> canonical
+            else -> todayIsoLocalYearMonth()
+        }
+        val dyn = picker.asDynamic()
+        try { dyn.showPicker() } catch (_: dynamic) { picker.click() }
+    })
+    if (!pickerBound) {
+        picker.addEventListener("change", { _: Event ->
+            val v = picker.value.trim()
+            if (v.matches(Regex("^\\d{4}-\\d{2}$"))) {
+                setFromIso(v)
+                text.dispatchEvent(Event("change", js("({bubbles: true})").unsafeCast<EventInit>()))
+            }
+        })
+        picker.asDynamic().__carModelYearPickerBound = true
+    }
+    hidden.asDynamic().__strictMonthBound = true
+}
+
+private var strictYearPickerOutsideHandler: ((Event) -> Unit)? = null
+
+private fun closeStrictYearPickerPopover() {
+    strictYearPickerOutsideHandler?.let { document.removeEventListener("click", it) }
+    strictYearPickerOutsideHandler = null
+    document.getElementById("strictYearPickerPopover")?.remove()
+}
+
+private fun openStrictYearPickerPopover(anchorBtn: HTMLElement, currentYear: String, onSelect: (String) -> Unit) {
+    closeStrictYearPickerPopover()
+    val rect = anchorBtn.getBoundingClientRect()
+    val pop = document.createElement("div") as HTMLElement
+    pop.id = "strictYearPickerPopover"
+    pop.style.cssText =
+        "position:fixed;z-index:10050;background:white;border:1px solid #d1d5db;border-radius:8px;" +
+            "box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:4px;max-height:220px;overflow-y:auto;"
+    pop.style.top = "${rect.bottom + 4}px"
+    pop.style.left = "${rect.left}px"
+    pop.style.minWidth = "${rect.width.coerceAtLeast(100.0)}px"
+    val nowY = js("new Date().getFullYear()").unsafeCast<Int>()
+    for (y in (nowY + 1) downTo 1980) {
+        val yearStr = y.toString()
+        val item = document.createElement("button") as HTMLButtonElement
+        item.type = "button"
+        item.textContent = yearStr
+        val selected = yearStr == currentYear
+        item.style.cssText =
+            "display:block;width:100%;text-align:left;padding:6px 10px;border:none;cursor:pointer;font-size:13px;" +
+                "background:${if (selected) "#e0f2fe" else "white"};"
+        item.addEventListener("click", { ev: Event ->
+            ev.stopPropagation()
+            onSelect(yearStr)
+            closeStrictYearPickerPopover()
+        })
+        item.addEventListener("mouseenter", { _: Event -> item.style.backgroundColor = "#f3f4f6" })
+        item.addEventListener("mouseleave", { _: Event ->
+            item.style.backgroundColor = if (selected) "#e0f2fe" else "white"
+        })
+        pop.appendChild(item)
+    }
+    document.body?.appendChild(pop)
+    window.setTimeout({
+        val handler: (Event) -> Unit = handler@{ e: Event ->
+            val t = e.target as? Node ?: return@handler
+            if (pop.contains(t) || anchorBtn.contains(t)) return@handler
+            closeStrictYearPickerPopover()
+        }
+        strictYearPickerOutsideHandler = handler
+        document.addEventListener("click", handler)
+    }, 0)
+}
+
+fun bindStrictYearTextMask(baseId: String, hintId: String? = null) {
+    val hidden = document.getElementById(baseId) as? HTMLInputElement ?: return
+    val already = hidden.asDynamic().__strictYearBound as? Boolean ?: false
+    if (already) return
+    val text = document.getElementById("${baseId}Text") as? HTMLInputElement ?: return
+    val btn = document.getElementById("${baseId}CalendarBtn") as? HTMLElement ?: return
+    val hint = if (hintId.isNullOrBlank()) null else document.getElementById(hintId) as? HTMLElement
+
+    fun syncHint() {
+        hint?.style?.display = if (text.value.isBlank()) "block" else "none"
+    }
+
+    if (hidden.value.length == 4) text.value = hidden.value
+    syncHint()
+
+    text.addEventListener("input", { _: Event ->
+        val digits = text.value.filter { it.isDigit() }.take(4)
+        text.value = digits
+        hidden.value = when {
+            digits.isEmpty() -> ""
+            digits.length == 4 -> digits
+            else -> hidden.value
+        }
+        syncHint()
+    })
+    text.addEventListener("keydown", { ev ->
+        val ke = ev as? KeyboardEvent ?: return@addEventListener
+        val key = ke.key
+        val isDigit = key.length == 1 && key[0] in '0'..'9'
+        val navKeys = setOf("Backspace", "Delete", "ArrowLeft", "ArrowRight", "Tab", "Enter", "Home", "End")
+        if (ke.ctrlKey || ke.metaKey || ke.altKey) return@addEventListener
+        if (isDigit || navKeys.contains(key)) return@addEventListener
+        ke.preventDefault()
+    })
+    text.addEventListener("blur", { _: Event ->
+        val t = text.value.trim()
+        hidden.value = if (t.isEmpty()) "" else if (t.length == 4 && t.all { it.isDigit() }) t else hidden.value
         syncHint()
     })
     btn.addEventListener("click", { ev ->
         ev.preventDefault()
-        hidden.value = strictMmYyyySlashToIsoMonth(text.value.trim()) ?: hidden.value.takeIf { it.matches(Regex("^\\d{4}-\\d{2}$")) } ?: todayIsoLocalYearMonth()
-        val dyn = hidden.asDynamic()
-        try { dyn.showPicker() } catch (_: dynamic) { hidden.click() }
-    })
-    hidden.addEventListener("change", { _: Event ->
-        if (hidden.value.matches(Regex("^\\d{4}-\\d{2}$"))) {
-            text.value = isoMonthToMmYyyy(hidden.value)
+        ev.stopPropagation()
+        val current = text.value.trim().ifEmpty { hidden.value.trim() }
+        openStrictYearPickerPopover(btn, current) { year ->
+            text.value = year
+            hidden.value = year
+            syncHint()
             text.dispatchEvent(Event("change", js("({bubbles: true})").unsafeCast<EventInit>()))
         }
-        syncHint()
     })
-    hidden.asDynamic().__strictMonthBound = true
+    hidden.asDynamic().__strictYearBound = true
+}
+
+fun readManufactureYearInput(baseId: String): String {
+    val hidden = (document.getElementById(baseId) as? HTMLInputElement)?.value?.trim().orEmpty()
+    if (hidden.isNotEmpty()) return hidden
+    return (document.getElementById("${baseId}Text") as? HTMLInputElement)?.value?.trim().orEmpty()
 }
 
 fun storeBookingDetailsForPdf() {
@@ -755,6 +991,11 @@ fun initializeAppSetup() {
         if (merge != null) {
             window.asDynamic().__editPurchaseHydrating = true
             window.asDynamic().__editPurchaseSnapshot = merge
+            window.asDynamic().__chassisSpecPreserveActive = false
+            window.asDynamic().__chassisSpecPreserveSnapshot = null
+            window.asDynamic().__chassisUserChangeActive = false
+            window.asDynamic().__chassisMappedBrand = null
+            window.asDynamic().__chassisMappedCarName = null
         }
         fetchMappingByChassisOnly(chassis, isEditForm, merge)
     }
@@ -1563,25 +1804,165 @@ fun createMultiSelectCombobox(id: String, placeholder: String, initialValue: Str
     """.trimIndent()
 }
 
-// Shared options for Number Cut Place (chassis-style combobox on Add/Edit and Rixo modal)
-fun getNumberCutPlaceOptions(): List<Pair<String, String>> = listOf(
-    "札幌" to "札幌 (Sapporo)", "函館" to "函館 (Hakodate)", "旭川" to "旭川 (Asahikawa)", "室蘭" to "室蘭 (Muroran)",
-    "釧路" to "釧路 (Kushiro)", "帯広" to "帯広 (Obihiro)", "十勝" to "十勝 (Tokachi)", "北見" to "北見 (Kitami)",
-    "知床" to "知床 (Shiretoko)", "苫小牧" to "苫小牧 (Tomakomai)", "青森" to "青森 (Aomori)", "弘前" to "弘前 (Hirosaki)",
-    "岩手" to "岩手 (Iwate)", "盛岡" to "盛岡 (Morioka)", "平泉" to "平泉 (Hiraizumi)", "宮城" to "宮城 (Miyagi)",
-    "仙台" to "仙台 (Sendai)", "八戸" to "八戸 (Hachinohe)", "秋田" to "秋田 (Akita)", "山形" to "山形 (Yamagata)",
-    "福島" to "福島 (Fukushima)", "茨城" to "茨城 (Ibaraki)", "栃木" to "栃木 (Tochigi)", "群馬" to "群馬 (Gunma)",
-    "埼玉" to "埼玉 (Saitama)", "千葉" to "千葉 (Chiba)", "市川" to "市川 (ICHIKAWA)", "東京" to "東京 (Tokyo)", "神奈川" to "神奈川 (Kanagawa)",
-    "新潟" to "新潟 (Niigata)", "富山" to "富山 (Toyama)", "石川" to "石川 (Ishikawa)", "福井" to "福井 (Fukui)",
-    "山梨" to "山梨 (Yamanashi)", "長野" to "長野 (Nagano)", "岐阜" to "岐阜 (Gifu)", "静岡" to "静岡 (Shizuoka)",
-    "愛知" to "愛知 (Aichi)", "三重" to "三重 (Mie)", "伊勢志摩" to "伊勢志摩 (ISESHIMA)", "滋賀" to "滋賀 (Shiga)", "京都" to "京都 (Kyoto)",
-    "大阪" to "大阪 (Osaka)", "兵庫" to "兵庫 (Hyogo)", "奈良" to "奈良 (Nara)", "和歌山" to "和歌山 (Wakayama)",
-    "鳥取" to "鳥取 (Tottori)", "島根" to "島根 (Shimane)", "岡山" to "岡山 (Okayama)", "広島" to "広島 (Hiroshima)",
-    "山口" to "山口 (Yamaguchi)", "徳島" to "徳島 (Tokushima)", "香川" to "香川 (Kagawa)", "愛媛" to "愛媛 (Ehime)",
-    "高知" to "高知 (Kochi)", "福岡" to "福岡 (Fukuoka)", "福山" to "福山 (Fukuyama)", "北九州" to "北九州(KITA-KYUSHU)", "佐賀" to "佐賀 (Saga)", "長崎" to "長崎 (Nagasaki)",
-    "熊本" to "熊本 (Kumamoto)", "大分" to "大分 (Oita)", "宮崎" to "宮崎 (Miyazaki)", "鹿児島" to "鹿児島 (Kagoshima)",
-    "沖縄" to "沖縄 (Okinawa)"
-)
+// Number Cut Place options from master_menu (`number_place`); Hiragana remains static below.
+private var cachedNumberCutPlaceOptions: List<Pair<String, String>> = emptyList()
+private var numberCutPlaceOptionsLoading: Boolean = false
+private val numberCutPlaceOptionsReadyCallbacks = mutableListOf<() -> Unit>()
+
+/** Parse `鹿児島 (Kagoshima)` → value `鹿児島`, label full string (stored numberCut uses Japanese prefix). */
+fun numberCutPlaceOptionFromMasterValue(raw: String): Pair<String, String> {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return "" to ""
+    val match = Regex("^(.+?)\\s*\\(([^)]+)\\)\\s*$").find(trimmed)
+    return if (match != null) {
+        match.groupValues[1].trim() to trimmed
+    } else {
+        trimmed to trimmed
+    }
+}
+
+fun numberCutPlaceOptionsFromMasterValues(values: List<String>): List<Pair<String, String>> =
+    values.map { numberCutPlaceOptionFromMasterValue(it) }.filter { it.first.isNotEmpty() }
+
+fun getNumberCutPlaceOptions(): List<Pair<String, String>> = cachedNumberCutPlaceOptions
+
+fun invalidateNumberCutPlaceOptionsCache() {
+    cachedNumberCutPlaceOptions = emptyList()
+    numberCutPlaceOptionsLoading = false
+    numberCutPlaceOptionsReadyCallbacks.clear()
+}
+
+fun ensureNumberCutPlaceOptionsLoaded(onReady: (() -> Unit)? = null) {
+    if (cachedNumberCutPlaceOptions.isNotEmpty()) {
+        onReady?.invoke()
+        return
+    }
+    if (onReady != null) {
+        numberCutPlaceOptionsReadyCallbacks.add(onReady)
+    }
+    if (numberCutPlaceOptionsLoading) return
+    numberCutPlaceOptionsLoading = true
+    window.fetch(apiUrl("master-menu/number_place"))
+        .then { response: dynamic ->
+            if (response.ok) {
+                response.json()
+            } else {
+                throw RuntimeException("Failed to load master-menu/number_place")
+            }
+        }
+        .then { raw: dynamic ->
+            val values = parsePurchaseMasterListArray(raw)
+            cachedNumberCutPlaceOptions = numberCutPlaceOptionsFromMasterValues(values)
+            numberCutPlaceOptionsLoading = false
+            val callbacks = numberCutPlaceOptionsReadyCallbacks.toList()
+            numberCutPlaceOptionsReadyCallbacks.clear()
+            callbacks.forEach { it.invoke() }
+            Unit
+        }
+        .catch { _: dynamic ->
+            console.error("Failed to load master-menu/number_place")
+            numberCutPlaceOptionsLoading = false
+            numberCutPlaceOptionsReadyCallbacks.clear()
+        }
+}
+
+private fun repopulateNumberCutPlaceCombobox(selectId: String, selectedJapanese: String = "") {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    val current = selectedJapanese.trim().ifEmpty { getComboboxValueSafe(selectId).trim() }
+    select.innerHTML = ""
+    val arrow = document.createElement("option") as HTMLOptionElement
+    arrow.value = ""
+    arrow.textContent = "▼"
+    select.appendChild(arrow)
+    val options = getNumberCutPlaceOptions()
+    var matched = false
+    for ((value, label) in options) {
+        val opt = document.createElement("option") as HTMLOptionElement
+        opt.value = value
+        opt.textContent = label
+        if (current.isNotEmpty() && value == current) {
+            opt.selected = true
+            matched = true
+        }
+        select.appendChild(opt)
+    }
+    if (current.isNotEmpty() && !matched) {
+        val opt = document.createElement("option") as HTMLOptionElement
+        opt.value = current
+        opt.textContent = current
+        opt.selected = true
+        select.appendChild(opt)
+    }
+    val input = document.getElementById("${selectId}Input") as? HTMLInputElement
+    if (input != null) {
+        val displayLabel = options.find { it.first == select.value }?.second ?: select.value
+        input.value = if (select.value.isNotEmpty()) displayLabel else current
+    }
+}
+
+private fun repopulatePlainNumberCutPlaceSelect(selectId: String) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    val current = select.value.trim()
+    select.innerHTML = ""
+    val def = document.createElement("option") as HTMLOptionElement
+    def.value = ""
+    def.textContent = "Select Place"
+    select.appendChild(def)
+    var matched = false
+    for ((value, label) in getNumberCutPlaceOptions()) {
+        val opt = document.createElement("option") as HTMLOptionElement
+        opt.value = value
+        opt.textContent = label
+        if (current.isNotEmpty() && value == current) {
+            opt.selected = true
+            matched = true
+        }
+        select.appendChild(opt)
+    }
+    if (current.isNotEmpty() && !matched) {
+        val opt = document.createElement("option") as HTMLOptionElement
+        opt.value = current
+        opt.textContent = current
+        opt.selected = true
+        select.appendChild(opt)
+    }
+}
+
+fun populateNumberCutPlaceComboboxesForPurchaseForm() {
+    ensureNumberCutPlaceOptionsLoaded {
+        repopulateNumberCutPlaceCombobox("numberCutPlace")
+        val nc = (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value
+        val initial = getInitialPlaceFromNumberCut(nc)
+        repopulateNumberCutPlaceCombobox("editNumberCutPlace", initial)
+        prefillEditNumberCutDetailFields(nc)
+    }
+}
+
+private fun refreshAllRixoNumberCutPlaceComboboxes() {
+    ensureNumberCutPlaceOptionsLoaded {
+        val cells = document.querySelectorAll(".rixo-nc-cell")
+        val n = (cells.length as Number).toInt()
+        for (i in 0 until n) {
+            val nc = cells.item(i) as? HTMLElement ?: continue
+            val pid = nc.getAttribute("data-nc-pid")?.trim().orEmpty()
+            if (pid.isEmpty()) continue
+            val placeId = "rixoNcP_$pid"
+            if (document.getElementById(placeId) == null) continue
+            repopulateNumberCutPlaceCombobox(placeId, rixoReadNcPlace(pid))
+        }
+    }
+}
+
+private fun populateMissingNumberCutPlaceSelects() {
+    ensureNumberCutPlaceOptionsLoaded {
+        val selects = document.querySelectorAll("select[id*='_numberCutPlace']")
+        val n = (selects.length as Number).toInt()
+        for (i in 0 until n) {
+            val sel = selects.item(i) as? HTMLSelectElement ?: continue
+            repopulatePlainNumberCutPlaceSelect(sel.id)
+        }
+    }
+}
 
 private fun purchaseNegotiateChecked(purchaseData: dynamic): Boolean {
     val row = asDynamicRow(purchaseData)
@@ -1614,8 +1995,17 @@ fun getNumberCutHiraganaOptions(): List<Pair<String, String>> = listOf(
 )
 
 fun getInitialPlaceFromNumberCut(numberCut: Any?): String {
-    val s = numberCut?.toString() ?: return ""
-    return getNumberCutPlaceOptions().find { (p, _) -> s.startsWith(p) }?.first ?: ""
+    val s = numberCut?.toString()?.trim() ?: return ""
+    if (s.isEmpty()) return ""
+    val options = getNumberCutPlaceOptions()
+    if (options.isNotEmpty()) {
+        options.map { it.first }.sortedByDescending { it.length }.firstOrNull { p ->
+            p.isNotEmpty() && s.startsWith(p)
+        }?.let { return it }
+    }
+    val paren = Regex("^(.+?)\\s*\\(").find(s)?.groupValues?.get(1)?.trim()
+    if (!paren.isNullOrEmpty()) return paren
+    return Regex("^([^0-9]+)").find(s)?.groupValues?.get(1)?.trim() ?: ""
 }
 
 fun getInitialHiraganaFromNumberCut(numberCut: Any?): String {
@@ -1623,11 +2013,11 @@ fun getInitialHiraganaFromNumberCut(numberCut: Any?): String {
     return getNumberCutHiraganaOptions().find { (c, _) -> s.contains(c) }?.first ?: ""
 }
 
-private data class RixoNumberCutParts(val place: String, val num1: String, val hiragana: String, val num2: String)
+data class NumberCutParts(val place: String, val num1: String, val hiragana: String, val num2: String)
 
-private fun parseRixoNumberCutParts(numberCutRaw: String?): RixoNumberCutParts {
+fun parseNumberCutParts(numberCutRaw: String?): NumberCutParts {
     val s = numberCutRaw?.trim().orEmpty()
-    if (s.isEmpty()) return RixoNumberCutParts("", "", "", "")
+    if (s.isEmpty()) return NumberCutParts("", "", "", "")
     val place = getInitialPlaceFromNumberCut(s)
     val rest = if (place.isNotEmpty()) s.removePrefix(place) else s
     val hiraganaChars = getNumberCutHiraganaOptions().map { it.first }.sortedByDescending { it.length }
@@ -1641,10 +2031,20 @@ private fun parseRixoNumberCutParts(numberCutRaw: String?): RixoNumberCutParts {
             break
         }
     }
-    if (idx < 0) return RixoNumberCutParts(place, rest, "", "")
+    if (idx < 0) return NumberCutParts(place, rest, "", "")
     val n1 = rest.substring(0, idx)
     val n2 = rest.substring(idx + hiragana.length)
-    return RixoNumberCutParts(place, n1, hiragana, n2)
+    return NumberCutParts(place, n1, hiragana, n2)
+}
+
+fun prefillEditNumberCutDetailFields(numberCutRaw: Any?) {
+    val s = numberCutRaw?.toString()?.trim().orEmpty()
+    val parts = parseNumberCutParts(s.ifEmpty { null })
+    (document.getElementById("editNumberCutNumber1") as? HTMLInputElement)?.value = parts.num1
+    (document.getElementById("editNumberCutNumber2") as? HTMLInputElement)?.value = parts.num2
+    if (s.isNotEmpty()) {
+        (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value = s
+    }
 }
 
 /** Cars-to-Rixo: strip legacy `shaken` from saved selections (Shaken is edited inside the Number Cut column only). */
@@ -7066,7 +7466,7 @@ fun createAddFormHTML(): String {
                         ${createEditableCombobox("carName", "Select Car Name")}
                     </div>
                     <div>
-                        <label>Production Date</label>
+                        <label>Registration Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="carModelYearText" maxlength="7" inputmode="numeric" autocomplete="off"
@@ -7075,11 +7475,24 @@ fun createAddFormHTML(): String {
                                 <button type="button" id="carModelYearCalendarBtn" title="Open month picker"
                                         style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
                             </div>
-                            <input type="month" id="carModelYear" value="" tabindex="-1" aria-hidden="true"
-                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                            <input type="hidden" id="carModelYear" value="">
                             <span id="carModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">MM/YYYY</span>
                         </div>
                 </div>
+                    <div>
+                        <label>Manufacture Year</label>
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="manufactureYearText" maxlength="4" inputmode="numeric" autocomplete="off"
+                                       placeholder="YYYY"
+                                       style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
+                                <button type="button" id="manufactureYearCalendarBtn" title="Open year picker"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                            </div>
+                            <input type="hidden" id="manufactureYear" value="">
+                            <span id="manufactureYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">YYYY</span>
+                        </div>
+                    </div>
                     <div>
                         <label>Grade</label>
                         ${createEditableCombobox("grade", "Select Grade", showDropdownButton = false)}
@@ -7104,7 +7517,7 @@ fun createAddFormHTML(): String {
                     <div class="form-grid-4col">
                     <div>
                         <label>Place Name (Japanese)</label>
-                        ${createEditableComboboxWithOptions("numberCutPlace", "Select Place", getNumberCutPlaceOptions(), "")}
+                        ${createEditableComboboxWithOptions("numberCutPlace", "Select Place", emptyList(), "")}
                     </div>
                     <div>
                         <label>Number (English)</label>
@@ -7601,6 +8014,9 @@ private fun normalizeApiPurchaseForClient(p: dynamic) {
     if (js("(p.carModelYear === undefined || p.carModelYear === null) && p.car_model_year != null").unsafeCast<Boolean>()) {
         p.carModelYear = js("p.car_model_year")
     }
+    if (js("(p.manufactureYear === undefined || p.manufactureYear === null) && p.manufacture_year != null").unsafeCast<Boolean>()) {
+        p.manufactureYear = js("p.manufacture_year")
+    }
     if (js("(p.bookingId === undefined || p.bookingId === null) && p.booking_id != null").unsafeCast<Boolean>()) {
         p.bookingId = js("p.booking_id")
     }
@@ -7627,6 +8043,8 @@ private fun finalizeEditFormOriginalBaselineFromDom() {
     if (originalPurchaseData == null) return
     try {
         val baseline = collectCurrentEditFormData()
+        // Registration Date baseline always from API snapshot — never typed DOM (avoids false "no change").
+        baseline.carModelYear = editCarModelYearApiBaseline()
         originalPurchaseData = JSON.parse(JSON.stringify(baseline))
     } catch (e: Throwable) {
         console.log("finalizeEditFormOriginalBaselineFromDom:", e.message)
@@ -7641,7 +8059,7 @@ private fun syncOriginalPurchaseCarPicturesBaselineFromDom() {
 
 fun setEditFormValuesFromKotlin(purchaseData: dynamic) {
     normalizeApiPurchaseForClient(purchaseData)
-    js("window.__editRixoFieldOverrides = {}; window.__suppressRixoAutoSelect = false;")
+    js("window.__editRixoFieldOverrides = {}; window.__suppressRixoAutoSelect = false; window.__editCarModelYearUserEdited = false;")
     // Store original purchase data for comparison (deep copy). Huge base64 in carPictures can make stringify fail or stall.
     originalPurchaseData = try {
         JSON.parse(JSON.stringify(purchaseData))
@@ -7656,6 +8074,11 @@ fun setEditFormValuesFromKotlin(purchaseData: dynamic) {
         if (raw != null && raw != js("undefined")) {
             snap.carPictures = raw
         }
+        val cmCanonical = normalizeCarModelYearForCompare(snap.carModelYear?.toString())
+        if (cmCanonical.isNotEmpty()) {
+            snap.carModelYear = cmCanonical
+        }
+        window.asDynamic().__editCarModelYearBaseline = cmCanonical
     }
     
     val dataToPass = purchaseData
@@ -7670,6 +8093,7 @@ fun setEditFormValuesFromKotlin(purchaseData: dynamic) {
             console.log('Error calling setEditFormValues:', e);
         }
     """)
+    prefillEditNumberCutDetailFields(purchaseData.numberCut)
 }
 fun setupRixoDropdowns() {
     window.asDynamic().populateSupplierAuctionNameDropdownsFromRixoPricesApi = {
@@ -9751,6 +10175,7 @@ fun setupAddFormListeners() {
     ensureBaseComboboxOptionsForAddEdit()
     // Populate Grade, Fuel, Shift, Country, Client Name, Repair Company from master_menu
     populateMasterMenuComboboxesForPurchaseForm()
+    populateNumberCutPlaceComboboxesForPurchaseForm()
     
     // Load all chassis from car_brand_mapping table (chassis-first flow support)
     loadAllChassisDropdown(isEditForm = false)
@@ -9769,6 +10194,7 @@ fun setupAddFormListeners() {
     bindStrictDateTextMask("paymentDate", "paymentDateDayHint")
     bindStrictDateTextMask("shipmentDate", "shipmentDateDayHint")
     bindStrictMonthYearTextMask("carModelYear", "carModelYearHint")
+    bindStrictYearTextMask("manufactureYear", "manufactureYearHint")
 
     // Auto-fill Recycle Fee when Production Date (carModelYear) changes on Add Purchase form
     fun triggerRecycleFeeAutoFillAdd() {
@@ -9985,23 +10411,6 @@ fun setupAddFormListeners() {
         val hint = document.getElementById("shipmentDateDayHint") as HTMLElement?
         hint?.textContent = isoToWeekdayLabel(v)
     })
-    (document.getElementById("carModelYear") as HTMLInputElement?)?.let { monthEl ->
-        val hint = document.getElementById("carModelYearHint") as HTMLElement?
-        val updateHint = {
-            val isEmpty = monthEl.value.isBlank()
-            hint?.style?.display = if (isEmpty) "block" else "none"
-            if (isEmpty) {
-                monthEl.style.color = "transparent"
-                monthEl.style.setProperty("-webkit-text-fill-color", "transparent")
-            } else {
-                monthEl.style.color = ""
-                monthEl.style.setProperty("-webkit-text-fill-color", "")
-            }
-        }
-        updateHint()
-        monthEl.addEventListener("change", { _: Event -> updateHint() })
-        monthEl.addEventListener("input", { _: Event -> updateHint() })
-    }
     
     // Option buttons: highlight selected only; text box is for custom options only (no predefined in text box)
     // Use event delegation so Add and Edit forms both work (form can be rendered after initial load)
@@ -10509,6 +10918,10 @@ fun setupNumberCutListeners() {
 }
 
 fun setupEditNumberCutListeners() {
+    prefillEditNumberCutDetailFields(
+        (document.getElementById("editNumberCutString") as? HTMLInputElement)?.value,
+    )
+
     // Function to generate number cut string for edit form
     fun generateEditNumberCutString() {
         val place = (document.getElementById("editNumberCutPlace") as HTMLSelectElement?)?.value ?: ""
@@ -10988,8 +11401,10 @@ private fun applySavedPurchaseFieldSnapshot(purchaseForMerge: dynamic) {
             })();
         """)
     }
-    setEditCombobox("editBrand", firstSemicolonToken(pdStr(pd.brand).ifBlank { pdStr(pd.carBrand) }))
-    setEditCombobox("editCarName", firstSemicolonToken(pdStr(pd.carName)))
+    if (!isChassisUserChangeActive()) {
+        setEditCombobox("editBrand", firstSemicolonToken(pdStr(pd.brand).ifBlank { pdStr(pd.carBrand) }))
+        setEditCombobox("editCarName", firstSemicolonToken(pdStr(pd.carName)))
+    }
     setEditCombobox("editFuel", firstSemicolonToken(pdStr(pd.fuel)))
     setEditCombobox("editShift", firstSemicolonToken(pdStr(pd.shift)))
     val grade = firstSemicolonToken(pdStr(pd.grade))
@@ -11128,7 +11543,8 @@ private fun populateChassisMappingWithMasterListAsync(
     defaultLabel: String,
     chassisTokens: List<String>,
     selectedValue: String,
-    masterApiPath: String
+    masterApiPath: String,
+    preserveIfEmpty: String = "",
 ) {
     val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
     val input = document.getElementById("${selectId}Input") as? HTMLInputElement
@@ -11156,7 +11572,12 @@ private fun populateChassisMappingWithMasterListAsync(
     sep.textContent = SUPPLIER_MASTER_SEP_OPTION_LABEL
     sep.disabled = true
     select.appendChild(sep)
-    val toSet = firstSemicolonToken(selectedValue.takeIf { it.isNotBlank() } ?: chassisTokens.firstOrNull() ?: "")
+    val toSet = firstSemicolonToken(
+        mergeChassisFieldValue(
+            selectedValue.takeIf { it.isNotBlank() } ?: chassisTokens.firstOrNull() ?: "",
+            preserveIfEmpty,
+        ),
+    )
     if (toSet.isNotBlank()) {
         var found = false
         for (i in 0 until select.options.length) {
@@ -11180,8 +11601,21 @@ private fun populateChassisMappingWithMasterListAsync(
         select.value = toSet
         input?.value = toSet
     } else {
-        select.value = ""
-        input?.value = ""
+        val keep = preserveIfEmpty.trim()
+        if (keep.isNotBlank()) {
+            window.asDynamic().__preserveComboId = selectId
+            window.asDynamic().__preserveComboVal = keep
+            js("""
+                if (typeof ensureComboboxOptionExists === 'function') {
+                    ensureComboboxOptionExists(window.__preserveComboId, window.__preserveComboVal);
+                }
+            """)
+            select.value = keep
+            input?.value = keep
+        } else {
+            select.value = ""
+            input?.value = ""
+        }
     }
     syncComboboxFromSelect(selectId)
     val masterSeen = mutableSetOf<String>()
@@ -11212,8 +11646,40 @@ private fun populateChassisMappingWithMasterListAsync(
             window.asDynamic().__restoreComboId = selectId
             js("""
                 (function() {
-                    if (!window.__editPurchaseHydrating || !window.__editPurchaseSnapshot) return;
                     var id = window.__restoreComboId;
+                    if (window.__chassisUserChangeActive === true) {
+                        var val = '';
+                        if ((id === 'editBrand' || id === 'brand') && window.__chassisMappedBrand) {
+                            val = String(window.__chassisMappedBrand);
+                        } else if ((id === 'editCarName' || id === 'carName') && window.__chassisMappedCarName) {
+                            val = String(window.__chassisMappedCarName);
+                        }
+                        if (val) {
+                            if (typeof ensureComboboxOptionExists === 'function') ensureComboboxOptionExists(id, val);
+                            var sel = document.getElementById(id);
+                            var inp = document.getElementById(id + 'Input');
+                            var valLower = val.toLowerCase();
+                            if (sel) {
+                                for (var i = 0; i < sel.options.length; i++) {
+                                    var o = sel.options[i];
+                                    if ((o.value || '').toLowerCase() === valLower) {
+                                        sel.value = o.value;
+                                        val = o.value;
+                                        break;
+                                    }
+                                }
+                                if (!sel.value) sel.value = val;
+                            }
+                            if (inp) inp.value = val;
+                            if (id === 'editBrand' || id === 'brand') {
+                                window.isAutoFillingBrand = true;
+                                window.autoFilledBrand = val;
+                                setTimeout(function() { window.isAutoFillingBrand = false; }, 300);
+                            }
+                        }
+                        return;
+                    }
+                    if (!window.__editPurchaseHydrating || !window.__editPurchaseSnapshot) return;
                     var snap = window.__editPurchaseSnapshot;
                     var restore = '';
                     if (id === 'editCarName' && snap.carName) {
@@ -11242,7 +11708,14 @@ private fun populateChassisMappingWithMasterListAsync(
 }
 
 /** Populate a combobox `<select>` with label row + one option per token. */
-private fun populateComboboxTokensWithSeeMore(selectId: String, defaultLabel: String, tokens: List<String>, selectedValue: String, @Suppress("UNUSED_PARAMETER") addSeeMore: Boolean) {
+private fun populateComboboxTokensWithSeeMore(
+    selectId: String,
+    defaultLabel: String,
+    tokens: List<String>,
+    selectedValue: String,
+    @Suppress("UNUSED_PARAMETER") addSeeMore: Boolean,
+    preserveIfEmpty: String = "",
+) {
     val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
     val input = document.getElementById("${selectId}Input") as? HTMLInputElement
     select.innerHTML = ""
@@ -11262,7 +11735,12 @@ private fun populateComboboxTokensWithSeeMore(selectId: String, defaultLabel: St
             }
         }
     }
-    val toSet = firstSemicolonToken(selectedValue.takeIf { it.isNotBlank() } ?: tokens.firstOrNull() ?: "")
+    val toSet = firstSemicolonToken(
+        mergeChassisFieldValue(
+            selectedValue.takeIf { it.isNotBlank() } ?: tokens.firstOrNull() ?: "",
+            preserveIfEmpty,
+        ),
+    )
     if (toSet.isNotBlank()) {
         var found = false
         for (i in 0 until select.options.length) {
@@ -11281,8 +11759,21 @@ private fun populateComboboxTokensWithSeeMore(selectId: String, defaultLabel: St
         select.value = toSet
         input?.value = toSet
     } else {
-        select.value = ""
-        input?.value = ""
+        val keep = preserveIfEmpty.trim()
+        if (keep.isNotBlank()) {
+            window.asDynamic().__preserveComboId = selectId
+            window.asDynamic().__preserveComboVal = keep
+            js("""
+                if (typeof ensureComboboxOptionExists === 'function') {
+                    ensureComboboxOptionExists(window.__preserveComboId, window.__preserveComboVal);
+                }
+            """)
+            select.value = keep
+            input?.value = keep
+        } else {
+            select.value = ""
+            input?.value = ""
+        }
     }
     syncComboboxFromSelect(selectId)
 }
@@ -12566,6 +13057,160 @@ fun setupCollapsibleChipsDelegation() {
     })
 }
 
+/** Mapping wins when non-empty; otherwise keep previous form value (chassis change). */
+fun mergeChassisFieldValue(mappingValue: String, preserveValue: String): String {
+    val m = mappingValue.trim()
+    if (m.isNotEmpty()) return m
+    return preserveValue.trim()
+}
+
+private fun readRadioGroupValue(radioName: String): String {
+    val el = document.querySelector("input[name=\"$radioName\"]:checked") as? HTMLInputElement
+    return el?.value?.trim().orEmpty()
+}
+
+/** Snapshot spec fields before chassis changes so empty mapping does not wipe the form. */
+fun captureChassisSpecFieldSnapshot(isEditForm: Boolean): dynamic {
+    val snap = js("{}")
+    if (isEditForm) {
+        snap.fuel = getComboboxValueSafe("editFuel")
+        snap.shift = getComboboxValueSafe("editShift")
+        snap.grade = getComboboxValueSafe("editGrade")
+        snap.cc = getComboboxValueSafe("editCc")
+        snap.door = getComboboxValueSafe("editDoor")
+        snap.seat = getComboboxValueSafe("editSeat")
+        snap.vehicleType = getComboboxValueSafe("editShipmentSize")
+        snap.rank = getComboboxValueSafe("editRank")
+        snap.color = getComboboxValueSafe("editColor")
+        snap.wd = readRadioGroupValue("editWd")
+        snap.driveType = readRadioGroupValue("editDriveType")
+    } else {
+        snap.fuel = getComboboxValueSafe("fuel")
+        snap.shift = getComboboxValueSafe("shift")
+        snap.grade = getComboboxValueSafe("grade")
+        snap.cc = getComboboxValueSafe("cc")
+        snap.door = getComboboxValueSafe("door")
+        snap.seat = getComboboxValueSafe("seat")
+        snap.vehicleType = getComboboxValueSafe("shipmentSize")
+        snap.rank = getComboboxValueSafe("rank")
+        snap.color = getComboboxValueSafe("color")
+        snap.wd = readRadioGroupValue("wd")
+        snap.driveType = readRadioGroupValue("driveType")
+    }
+    return snap
+}
+
+fun beginChassisChangePreserve(isEditForm: Boolean) {
+    window.asDynamic().__chassisSpecPreserveSnapshot = captureChassisSpecFieldSnapshot(isEditForm)
+    window.asDynamic().__chassisSpecPreserveActive = true
+    window.asDynamic().__chassisUserChangeActive = true
+}
+
+private fun endChassisChangePreserve() {
+    window.asDynamic().__chassisSpecPreserveActive = false
+    window.asDynamic().__chassisSpecPreserveSnapshot = null
+    window.asDynamic().__chassisUserChangeActive = false
+    window.asDynamic().__chassisMappedBrand = null
+    window.asDynamic().__chassisMappedCarName = null
+}
+
+private fun isChassisUserChangeActive(): Boolean =
+    js("window.__chassisUserChangeActive === true").unsafeCast<Boolean>()
+
+/** Apply chassis-map brand and car name; mapping wins on user chassis change. */
+private fun applyChassisBrandAndCarName(isEditForm: Boolean, brand: String, carName: String) {
+    val brandVal = firstSemicolonToken(brand.trim())
+    val carNameVal = firstSemicolonToken(carName.trim())
+    val brandFieldId = if (isEditForm) "editBrand" else "brand"
+    val carNameFieldId = if (isEditForm) "editCarName" else "carName"
+    window.asDynamic().__applyBrandVal = brandVal
+    window.asDynamic().__applyCarNameVal = carNameVal
+    window.asDynamic().__applyBrandFieldId = brandFieldId
+    window.asDynamic().__applyCarNameFieldId = carNameFieldId
+    if (isChassisUserChangeActive()) {
+        window.asDynamic().__chassisMappedBrand = if (brandVal.isNotBlank()) brandVal else null
+        window.asDynamic().__chassisMappedCarName = if (carNameVal.isNotBlank()) carNameVal else null
+    }
+    js("""
+        (function() {
+            function applyCombo(id, val, isBrand) {
+                if (!id || !val) return;
+                if (typeof ensureComboboxOptionExists === 'function') ensureComboboxOptionExists(id, val);
+                var sel = document.getElementById(id);
+                var inp = document.getElementById(id + 'Input');
+                var valLower = String(val).toLowerCase();
+                if (sel) {
+                    var matched = false;
+                    for (var i = 0; i < sel.options.length; i++) {
+                        var o = sel.options[i];
+                        if ((o.value || '').toLowerCase() === valLower) {
+                            sel.value = o.value;
+                            val = o.value;
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched) sel.value = val;
+                }
+                if (inp) inp.value = val;
+                if (isBrand) {
+                    window.isAutoFillingBrand = true;
+                    window.autoFilledBrand = val;
+                    setTimeout(function() { window.isAutoFillingBrand = false; }, 300);
+                }
+                if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(id);
+            }
+            applyCombo(window.__applyBrandFieldId, window.__applyBrandVal, true);
+            applyCombo(window.__applyCarNameFieldId, window.__applyCarNameVal, false);
+        })();
+    """)
+    if (brandVal.isNotBlank()) console.log("✅ Set brand from chassis mapping: $brandVal ($brandFieldId)")
+    if (carNameVal.isNotBlank()) console.log("✅ Set car name from chassis mapping: $carNameVal ($carNameFieldId)")
+}
+
+private fun activeChassisSpecPreserveSnapshot(): dynamic? {
+    if (!js("window.__chassisSpecPreserveActive === true").unsafeCast<Boolean>()) return null
+    val snap = window.asDynamic().__chassisSpecPreserveSnapshot
+    if (snap == null || snap == js("undefined")) return null
+    return snap
+}
+
+private fun preserveSpecFieldValue(snapshot: dynamic, key: String): String {
+    return js("(function(s,k){ if(!s) return ''; var v=s[k]; return v==null||v===undefined?'':String(v).trim(); })")
+        .unsafeCast<(dynamic, String) -> String>()(snapshot, key)
+}
+
+private fun mergeSpecWithPreserve(snapshot: dynamic?, mappingValue: String, key: String): String {
+    if (snapshot == null) return mappingValue.trim()
+    return mergeChassisFieldValue(mappingValue, preserveSpecFieldValue(snapshot, key))
+}
+
+private fun specPreserveOrEmpty(snapshot: dynamic?, key: String): String =
+    if (snapshot == null) "" else preserveSpecFieldValue(snapshot, key)
+
+private fun applyChassisSpecPreserveMerge(
+    preserveSnap: dynamic?,
+    fuel: String, wd: String, shift: String, grade: String, vehicleType: String,
+    rank: String, color: String, driveType: String, cc: String, door: String, seat: String,
+): Array<String> {
+    if (preserveSnap == null) {
+        return arrayOf(fuel, wd, shift, grade, vehicleType, rank, color, driveType, cc, door, seat)
+    }
+    return arrayOf(
+        mergeSpecWithPreserve(preserveSnap, fuel, "fuel"),
+        mergeSpecWithPreserve(preserveSnap, wd, "wd"),
+        mergeSpecWithPreserve(preserveSnap, shift, "shift"),
+        mergeSpecWithPreserve(preserveSnap, grade, "grade"),
+        mergeSpecWithPreserve(preserveSnap, vehicleType, "vehicleType"),
+        mergeSpecWithPreserve(preserveSnap, rank, "rank"),
+        mergeSpecWithPreserve(preserveSnap, color, "color"),
+        mergeSpecWithPreserve(preserveSnap, driveType, "driveType"),
+        mergeSpecWithPreserve(preserveSnap, cc, "cc"),
+        mergeSpecWithPreserve(preserveSnap, door, "door"),
+        mergeSpecWithPreserve(preserveSnap, seat, "seat"),
+    )
+}
+
 // Function to fetch mapping by chassis only (chassis-first flow)
 fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForMerge: dynamic? = null): dynamic {
     if (chassis.isBlank()) {
@@ -12606,6 +13251,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
             
             if (!found) {
                 console.log("⚠️ No mapping found for chassis: $chassis")
+                endChassisChangePreserve()
                 return@then js("Promise.resolve()")
             }
             
@@ -12877,6 +13523,31 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                 val savedSeat = pdCcDoorSeat(pd.seat)
                 if (savedSeat.isNotBlank()) seat = savedSeat
             }
+
+            val preserveSnap = if (purchaseForMerge == null || js("purchaseForMerge === void 0").unsafeCast<Boolean>()) {
+                activeChassisSpecPreserveSnapshot()
+            } else null
+            if (preserveSnap != null) {
+                val merged = applyChassisSpecPreserveMerge(
+                    preserveSnap, fuel, wd, shift, grade, vehicleType, rank, color, driveType, cc, door, seat,
+                )
+                fuel = merged[0]
+                wd = merged[1]
+                shift = merged[2]
+                grade = merged[3]
+                vehicleType = merged[4]
+                rank = merged[5]
+                color = merged[6]
+                driveType = merged[7]
+                cc = merged[8]
+                door = merged[9]
+                seat = merged[10]
+            }
+
+            if (isChassisUserChangeActive()) {
+                window.asDynamic().__chassisMappedBrand = if (brand.isNotBlank()) brand else null
+                window.asDynamic().__chassisMappedCarName = if (carName.isNotBlank()) carName else null
+            }
             
             var recycleFeeDigits = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
             if (isEditForm && purchaseForMerge != null && !js("purchaseForMerge === void 0").unsafeCast<Boolean>() && recycleFeeDigits.isBlank()) {
@@ -12964,10 +13635,16 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
             populateChassisMappingWithMasterListAsync(brandId, "Add Brand", brandsForDropdown, brand.trim(), "master-menu/car_brands")
             
             val fuelId = getFieldId("Fuel")
-            populateChassisMappingWithMasterListAsync(fuelId, "Select Fuel", fuelsForDropdown, fuel, "master-menu/fuel")
+            populateChassisMappingWithMasterListAsync(
+                fuelId, "Select Fuel", fuelsForDropdown, fuel, "master-menu/fuel",
+                specPreserveOrEmpty(preserveSnap, "fuel"),
+            )
             
             val shiftId = getFieldId("Shift")
-            populateChassisMappingWithMasterListAsync(shiftId, "Select Shift", shiftsForDropdown, shift, "master-menu/shift")
+            populateChassisMappingWithMasterListAsync(
+                shiftId, "Select Shift", shiftsForDropdown, shift, "master-menu/shift",
+                specPreserveOrEmpty(preserveSnap, "shift"),
+            )
             
             val shipFieldId = if (isEditForm) "editShipmentSize" else "shipmentSize"
             populateChassisMappingWithMasterListAsync(
@@ -12975,30 +13652,49 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                 "Select Vehicle type",
                 vehicleTypes.sorted().toList(),
                 vehicleType,
-                "master-menu/type_of_vehicle"
+                "master-menu/type_of_vehicle",
+                specPreserveOrEmpty(preserveSnap, "vehicleType"),
             )
             
             val gradeOptions = grades.sorted().toList()
             val gradeId = getFieldId("Grade")
-            populateComboboxTokensWithSeeMore(gradeId, "Select Grade", gradeOptions, grade, false)
+            populateComboboxTokensWithSeeMore(
+                gradeId, "Select Grade", gradeOptions, grade, false,
+                specPreserveOrEmpty(preserveSnap, "grade"),
+            )
             
             val rankOptions = ranks.sorted().toList()
             val rankId = if (isEditForm) "editRank" else "rank"
-            populateComboboxTokensWithSeeMore(rankId, "Select Rank", rankOptions, rank, false)
+            populateComboboxTokensWithSeeMore(
+                rankId, "Select Rank", rankOptions, rank, false,
+                specPreserveOrEmpty(preserveSnap, "rank"),
+            )
             
             val colorOptions = colors.sorted().toList()
             val colorId = if (isEditForm) "editColor" else "color"
-            populateComboboxTokensWithSeeMore(colorId, "Select Color", colorOptions, color, false)
+            populateComboboxTokensWithSeeMore(
+                colorId, "Select Color", colorOptions, color, false,
+                specPreserveOrEmpty(preserveSnap, "color"),
+            )
             
             val ccId = getFieldId("Cc")
-            populateComboboxTokensWithSeeMore(ccId, "Select CC", ccsForDropdown, cc, false)
+            populateComboboxTokensWithSeeMore(
+                ccId, "Select CC", ccsForDropdown, cc, false,
+                specPreserveOrEmpty(preserveSnap, "cc"),
+            )
             
             val doorId = getFieldId("Door")
-            populateComboboxTokensWithSeeMore(doorId, "Select Door", doorsForDropdown, door, false)
+            populateComboboxTokensWithSeeMore(
+                doorId, "Select Door", doorsForDropdown, door, false,
+                specPreserveOrEmpty(preserveSnap, "door"),
+            )
             
             val seatOptions = uniqueSeats.toList().sorted()
             val seatId = getFieldId("Seat")
-            populateComboboxTokensWithSeeMore(seatId, "Select Seat", seatOptions, seat, false)
+            populateComboboxTokensWithSeeMore(
+                seatId, "Select Seat", seatOptions, seat, false,
+                specPreserveOrEmpty(preserveSnap, "seat"),
+            )
 
             // Chassis-dependent fields: show dropdown only when mapping yields 2+ options.
             updateConditionalComboboxButtonVisibility(gradeId, gradeOptions, grade)
@@ -13038,6 +13734,7 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                 // If user closed the modal, skip autofill fields completely
                 if (!hasSelected && needsDisambiguation) {
                     console.log("❌ Chassis mapping selection cancelled by user, skipping field autofills")
+                    endChassisChangePreserve()
                     return@then Unit
                 }
                 
@@ -13125,6 +13822,26 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                     if (savedSeat.isNotBlank()) seat = savedSeat
                 }
 
+                val innerPreserveSnap = if (purchaseForMerge == null || js("purchaseForMerge === void 0").unsafeCast<Boolean>()) {
+                    activeChassisSpecPreserveSnapshot()
+                } else null
+                if (innerPreserveSnap != null) {
+                    val merged = applyChassisSpecPreserveMerge(
+                        innerPreserveSnap, fuel, wd, shift, grade, vehicleType, rank, color, driveType, cc, door, seat,
+                    )
+                    fuel = merged[0]
+                    wd = merged[1]
+                    shift = merged[2]
+                    grade = merged[3]
+                    vehicleType = merged[4]
+                    rank = merged[5]
+                    color = merged[6]
+                    driveType = merged[7]
+                    cc = merged[8]
+                    door = merged[9]
+                    seat = merged[10]
+                }
+
                 // Overwrite dynamic variables on window so the rest of the setting code can read them
                 window.asDynamic().__tempCarName = if (carName.isNotBlank()) carName else null
                 window.asDynamic().__tempFuel = if (fuel.isNotBlank()) fuel else null
@@ -13195,41 +13912,8 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                     val finalSeat = seatValue
                     val finalGrade = gradeValue
                     
-                    // Brand — set after sequential resolution (deferred from pre-fetch autofill)
-                    val brandFieldId = if (isEditForm) "editBrand" else "brand"
-                    if (brand.isNotBlank()) {
-                        val trimmedBrand = brand.trim()
-                        val brandSelect = document.getElementById(brandFieldId) as? HTMLSelectElement
-                        val brandInput = document.getElementById("${brandFieldId}Input") as? HTMLInputElement
-                        if (brandSelect != null) {
-                            window.asDynamic().isAutoFillingBrand = true
-                            window.asDynamic().autoFilledBrand = trimmedBrand
-                            brandSelect.value = trimmedBrand
-                            brandInput?.value = trimmedBrand
-                            js("window.__tempBrandFieldId = brandFieldId")
-                            js("if (typeof window.syncComboboxInput === 'function') { window.syncComboboxInput(window.__tempBrandFieldId); }")
-                            console.log("✅ Set brand from mapping: $trimmedBrand (field ID: $brandFieldId)")
-                            js("setTimeout(function() { window.isAutoFillingBrand = false; }, 300);")
-                        }
-                    }
-                    
-                    // Car Name - use correct field ID based on form type
-                    if (carNameValue.isNotBlank()) {
-                        val carNameId = getFieldId("CarName")
-                        val carNameSelect = document.getElementById(carNameId) as? HTMLSelectElement
-                        val carNameInput = document.getElementById("${carNameId}Input") as? HTMLInputElement
-                        if (carNameSelect != null) {
-                            carNameSelect.value = carNameValue
-                            if (carNameInput != null) {
-                                carNameInput.value = carNameValue
-                            }
-                            js("window.__tempCarNameId = carNameId")
-                            js("if (typeof window.syncComboboxInput === 'function') { window.syncComboboxInput(window.__tempCarNameId); }")
-                            console.log("✅ Set car name: $carNameValue (field ID: $carNameId)")
-                        } else {
-                            console.warn("⚠️ Car name select element not found: $carNameId")
-                        }
-                    }
+                    // Brand and car name — mapping wins on user chassis change
+                    applyChassisBrandAndCarName(isEditForm, brand, carNameValue.ifBlank { carName })
                     
                     // Fuel - use correct field ID based on form type
                     // Always use mapping value, even if empty (clear field if mapping is empty)
@@ -13454,12 +14138,14 @@ fun fetchMappingByChassisOnly(chassis: String, isEditForm: Boolean, purchaseForM
                         js("setTimeout(function() { window.__editPurchaseHydrating = false; }, 1200);")
                     }
 
+                    endChassisChangePreserve()
                     null
                 }
             
             return@then mappingFieldsApplied.unsafeCast<dynamic>().then { _: dynamic -> data }
         }
         .catch { error: dynamic ->
+            endChassisChangePreserve()
             console.error("❌ Error fetching mapping by chassis:", error)
             js("Promise.resolve()")
         }
@@ -14216,6 +14902,7 @@ fun setupBrandSelectionHandlers() {
                     
                     // Trigger auto-fill using Part 1 only (skip during background master-data sync)
                     if (js("window.__purchaseFormSyncInProgress !== true").unsafeCast<Boolean>()) {
+                        beginChassisChangePreserve(isEditForm)
                         fetchMappingByChassisOnly(part1, isEditForm, null)
                     }
                 } else {
@@ -14377,28 +15064,40 @@ fun validateChassisPart1(chassis: String, isEditForm: Boolean): Boolean {
     return false
 }
 
-// Helper function to validate Production Date (carModelYear): 4-digit year only, no range check
+// Helper function to validate Production Date (carModelYear): YYYY-MM with month 00–12 (00 = year only)
 fun validateProductionDateYear(value: String): Pair<Boolean, String> {
     if (value.isBlank()) {
-        // Empty is allowed (optional field)
         return Pair(true, "")
     }
-    
-    // HTML month input format is YYYY-MM (e.g., "2013-12")
     val parts = value.split("-")
     if (parts.size != 2) {
-        return Pair(false, "Invalid Production Date format. Please use the date picker (YYYY-MM).")
+        return Pair(false, "Invalid Registration Date format. Please use MM/YYYY or the date picker.")
     }
-    
     val yearStr = parts[0].trim()
-    // Limit to 4 digits only: year must be exactly 4 digits and numeric
-    if (yearStr.length != 4) {
+    val monthStr = parts[1].trim()
+    if (yearStr.length != 4 || !yearStr.all { it.isDigit() }) {
         return Pair(false, "Production year must be exactly 4 digits. Got: $yearStr")
     }
-    if (!yearStr.all { it.isDigit() }) {
-        return Pair(false, "Production year must be 4 digits only. Got: $yearStr")
+    if (monthStr.length != 2 || !monthStr.all { it.isDigit() }) {
+        return Pair(false, "Invalid Registration Date month. Use 00–12.")
     }
-    
+    val month = monthStr.toIntOrNull()
+    if (month == null || month !in 0..12) {
+        return Pair(false, "Invalid Registration Date month. Use 00–12 (00 = year only).")
+    }
+    return Pair(true, "")
+}
+
+fun validateManufactureYear(value: String): Pair<Boolean, String> {
+    val t = value.trim()
+    if (t.isEmpty()) return Pair(true, "")
+    if (t.length != 4 || !t.all { it.isDigit() }) {
+        return Pair(false, "Manufacture year must be exactly 4 digits (YYYY).")
+    }
+    val year = t.toIntOrNull()
+    if (year == null || year < 1000 || year > 9999) {
+        return Pair(false, "Manufacture year must be between 1000 and 9999.")
+    }
     return Pair(true, "")
 }
 
@@ -14511,12 +15210,20 @@ fun saveNewPurchase() {
     }
     
     // Validate Production Date year
-    val carModelYearValue = (document.getElementById("carModelYear") as? HTMLInputElement)?.value ?: ""
-    val (isValidYear, yearErrorMsg) = validateProductionDateYear(carModelYearValue)
+    val (isValidYear, yearErrorMsg) = validateCarModelYearField("carModelYear")
     if (!isValidYear) {
         saveButton?.disabled = false
         saveButton?.textContent = originalText
-        showErrorModal("Invalid Production Date", yearErrorMsg)
+        showErrorModal("Invalid Registration Date", yearErrorMsg)
+        return
+    }
+
+    val manufactureYearValue = readManufactureYearInput("manufactureYear")
+    val (isValidManufactureYear, manufactureYearErrorMsg) = validateManufactureYear(manufactureYearValue)
+    if (!isValidManufactureYear) {
+        saveButton?.disabled = false
+        saveButton?.textContent = originalText
+        showErrorModal("Invalid Manufacture Year", manufactureYearErrorMsg)
         return
     }
 
@@ -14612,12 +15319,20 @@ fun saveNewPurchaseAndAddMore() {
         return
     }
 
-    val carModelYearValue = (document.getElementById("carModelYear") as? HTMLInputElement)?.value ?: ""
-    val (isValidYear, yearErrorMsg) = validateProductionDateYear(carModelYearValue)
+    val (isValidYear, yearErrorMsg) = validateCarModelYearField("carModelYear")
     if (!isValidYear) {
         saveButton?.disabled = false
         saveButton?.textContent = originalText
-        showErrorModal("Invalid Production Date", yearErrorMsg)
+        showErrorModal("Invalid Registration Date", yearErrorMsg)
+        return
+    }
+
+    val manufactureYearValue = readManufactureYearInput("manufactureYear")
+    val (isValidManufactureYear, manufactureYearErrorMsg) = validateManufactureYear(manufactureYearValue)
+    if (!isValidManufactureYear) {
+        saveButton?.disabled = false
+        saveButton?.textContent = originalText
+        showErrorModal("Invalid Manufacture Year", manufactureYearErrorMsg)
         return
     }
 
@@ -14712,7 +15427,8 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     val dateIso = (document.getElementById("date") as? HTMLInputElement)?.value ?: ""
     purchaseData.date = if (dateIso.isNotBlank()) formatWithWeekday(dateIso) else ""
     purchaseData.chassis = chassis
-    purchaseData.carModelYear = (document.getElementById("carModelYear") as? HTMLInputElement)?.value ?: ""
+    purchaseData.carModelYear = readCarModelYearInput("carModelYear")
+    purchaseData.manufactureYear = readManufactureYearInput("manufactureYear")
     purchaseData.brand = js("getComboboxValue('brand')").unsafeCast<String>()
     purchaseData.carName = js("getComboboxValue('carName')").unsafeCast<String>()
     purchaseData.vehicleType = js("getComboboxValue('typeOfVehicle')").unsafeCast<String>()
@@ -14951,6 +15667,10 @@ fun showEditFormWithData(purchaseData: dynamic) {
     val editShipmentIsoInitial =
         toIsoFromLabel(purchaseData.shipmentDate ?: purchaseData.shipment_date ?: purchaseData.shippment_date)
     val editShipmentMaskedInitial = if (editShipmentIsoInitial.isBlank()) "" else isoToMmDdYyyy(editShipmentIsoInitial)
+    val editNumberCutRaw = purchaseData.numberCut?.toString()?.trim().orEmpty()
+    val editNumberCutParts = parseNumberCutParts(editNumberCutRaw.ifEmpty { null })
+    val editCarModelYearIsoInitial = normalizeCarModelYearForCompare(purchaseData.carModelYear?.toString())
+    val editCarModelYearTextInitial = isoMonthToMmYyyy(editCarModelYearIsoInitial.ifEmpty { null })
 
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -15032,25 +15752,33 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         ${createEditableCombobox("editGrade", "Select Grade", initialValue = editGradeDisp, showDropdownButton = false)}
                     </div>
                     <div>
-                        <label>Production Date</label>
+                        <label>Registration Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="editCarModelYearText" maxlength="7" inputmode="numeric" autocomplete="off"
                                        placeholder="MM/YYYY"
-                                       value="${if (purchaseData.carModelYear != null) {
-                            val parts = purchaseData.carModelYear.toString().split("/")
-                            if (parts.size == 2) "${parts[0].padStart(2, '0')}/${parts[1]}" else isoMonthToMmYyyy(purchaseData.carModelYear.toString())
-                        } else ""}"
+                                       value="${escapeAttr(editCarModelYearTextInitial)}"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="editCarModelYearCalendarBtn" title="Open month picker"
                                         style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
                             </div>
-                            <input type="month" id="editCarModelYear" onkeydown="return false;" onpaste="return false;" ondrop="return false;" value="${if (purchaseData.carModelYear != null) {
-                            val parts = purchaseData.carModelYear.toString().split("/")
-                            if (parts.size == 2) "${parts[1]}-${parts[0].padStart(2, '0')}" else purchaseData.carModelYear.toString()
-                        } else ""}" tabindex="-1" aria-hidden="true"
-                                   style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                            <input type="hidden" id="editCarModelYear" value="${escapeAttr(editCarModelYearIsoInitial)}">
                             <span id="editCarModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">MM/YYYY</span>
+                        </div>
+                    </div>
+                    <div>
+                        <label>Manufacture Year</label>
+                        <div style="position:relative; width:100%;">
+                            <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
+                                <input type="text" id="editManufactureYearText" maxlength="4" inputmode="numeric" autocomplete="off"
+                                       placeholder="YYYY"
+                                       value="${escapeHtml((purchaseData.manufactureYear ?: "").toString())}"
+                                       style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
+                                <button type="button" id="editManufactureYearCalendarBtn" title="Open year picker"
+                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                            </div>
+                            <input type="hidden" id="editManufactureYear" value="${escapeHtml((purchaseData.manufactureYear ?: "").toString())}">
+                            <span id="editManufactureYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">YYYY</span>
                         </div>
                     </div>
                     <div>
@@ -15073,11 +15801,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div class="form-grid-4col">
                     <div>
                         <label>Place Name (Japanese)</label>
-                        ${createEditableComboboxWithOptions("editNumberCutPlace", "Select Place", getNumberCutPlaceOptions(), getInitialPlaceFromNumberCut(purchaseData.numberCut))}
+                        ${createEditableComboboxWithOptions("editNumberCutPlace", "Select Place", emptyList(), getInitialPlaceFromNumberCut(purchaseData.numberCut))}
                     </div>
                     <div>
                         <label>Number (English)</label>
-                        <input type="number" id="editNumberCutNumber1" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="number" id="editNumberCutNumber1" placeholder="Enter number" value="${escapeAttr(editNumberCutParts.num1)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label>Hiragana Character</label>
@@ -15085,12 +15813,12 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Number (English)</label>
-                        <input type="number" id="editNumberCutNumber2" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="number" id="editNumberCutNumber2" placeholder="Enter number" value="${escapeAttr(editNumberCutParts.num2)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
                 <div style="margin-bottom: 20px;">
                     <label>Number Cut:</label>
-                    <input type="text" id="editNumberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
+                    <input type="text" id="editNumberCutString" readonly value="${escapeAttr(editNumberCutRaw)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
                     </div>
                     </div>
                 </div>
@@ -15635,6 +16363,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
 
     // Populate Grade, Country, Client Name, Repair Company from master_menu for edit form
     populateMasterMenuComboboxesForPurchaseForm()
+    populateNumberCutPlaceComboboxesForPurchaseForm()
     
     // Setup Rixo dropdowns and set values
     setupRixoDropdowns()
@@ -15759,6 +16488,13 @@ private fun reseedEditPurchaseBaselineFromApi(updatedPurchase: dynamic) {
         if (raw != null && raw != js("undefined")) {
             snap.carPictures = raw
         }
+        val fromDom = readCarModelYearInput("editCarModelYear")
+        val cmCanonical = fromDom.ifEmpty { normalizeCarModelYearForCompare(snap.carModelYear?.toString()) }
+        if (cmCanonical.isNotEmpty()) {
+            snap.carModelYear = cmCanonical
+        }
+        window.asDynamic().__editCarModelYearBaseline = cmCanonical
+        window.asDynamic().__editCarModelYearUserEdited = false
     }
     syncOriginalPurchaseCarPicturesBaselineFromDom()
 }
@@ -16344,24 +17080,8 @@ fun setupEditFormListeners() {
         attachMaskedEditDateField("editPaymentDate", "editPaymentDatePicker", "editPaymentDateDayHint", "editPaymentDateCalendarBtn", strictPurchaseDate = true)
         attachMaskedEditDateField("editShipmentDate", "editShipmentDatePicker", "editShipmentDateDayHint", "editShipmentDateCalendarBtn", strictPurchaseDate = true)
         bindStrictMonthYearTextMask("editCarModelYear", "editCarModelYearHint")
+        bindStrictYearTextMask("editManufactureYear", "editManufactureYearHint")
     }, 100)
-    (document.getElementById("editCarModelYear") as HTMLInputElement?)?.let { monthEl ->
-        val hint = document.getElementById("editCarModelYearHint") as HTMLElement?
-        val updateHint = {
-            val isEmpty = monthEl.value.isBlank()
-            hint?.style?.display = if (isEmpty) "block" else "none"
-            if (isEmpty) {
-                monthEl.style.color = "transparent"
-                monthEl.style.setProperty("-webkit-text-fill-color", "transparent")
-            } else {
-                monthEl.style.color = ""
-                monthEl.style.setProperty("-webkit-text-fill-color", "")
-            }
-        }
-        updateHint()
-        monthEl.addEventListener("change", { _: Event -> updateHint() })
-        monthEl.addEventListener("input", { _: Event -> updateHint() })
-    }
 
     // Add SHAKEN checkbox listener for edit form — only toggles detail fields inside Number Cut Information
     document.getElementById("editShakenCheckbox")?.addEventListener("change", { event: Event ->
@@ -16554,7 +17274,8 @@ fun getFieldDisplayName(fieldName: String): String {
     return when (fieldName) {
         "date" -> "Date"
         "chassis" -> "Chassis"
-        "carModelYear" -> "Production Date"
+        "carModelYear" -> "Registration Date"
+        "manufactureYear" -> "Manufacture Year"
         "brand" -> "Brand"
         "carName" -> "Car Name"
         "vehicleType" -> "Vehicle Type"
@@ -16627,7 +17348,8 @@ fun formatValueForDisplay(value: dynamic): String {
 // Function to collect current form data (same logic as proceedWithEditPurchase)
 fun collectCurrentEditFormData(): dynamic {
     val date = editPurchaseDateDisplayToWeekdayFormatted((document.getElementById("editDate") as? HTMLInputElement)?.value ?: "")
-    val carModelYear = (document.getElementById("editCarModelYear") as? HTMLInputElement)?.value ?: ""
+    val carModelYear = readCarModelYearInput("editCarModelYear")
+    val manufactureYear = readManufactureYearInput("editManufactureYear")
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
     val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
@@ -16733,6 +17455,7 @@ fun collectCurrentEditFormData(): dynamic {
     val editChassisInput = document.getElementById("editChassisInput") as? HTMLInputElement
     purchaseData.chassis = editChassisInput?.value?.trim() ?: ""
     purchaseData.carModelYear = carModelYear
+    purchaseData.manufactureYear = manufactureYear
     purchaseData.brand = brand
     purchaseData.carName = carName
     purchaseData.shipmentSize = shipmentSize.ifEmpty { vehicleType }
@@ -16850,7 +17573,7 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
     console.log("🔍 [COMPARE] Current data:", JSON.stringify(current))
     
     val fieldsToCompare = listOf(
-        "date", "chassis", "carModelYear", "brand", "carName", "vehicleType", "shipmentSize",
+        "date", "chassis", "carModelYear", "manufactureYear", "brand", "carName", "vehicleType", "shipmentSize",
         "grade", "rank", "color", "fuel", "seat", "door", "distance", "options", "cc",
         "shift", "wd", "driveType", "auctionNo", "auctionHouse", "stockLocation", "pol",
         "rixoCompany", "clientName", "country", "venueId", "price", "auctionFee", "auctionPenaltyFee", "recycleFee",
@@ -16952,6 +17675,9 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
         
         // Normalize values for comparison (treat empty string and null as same)
         val origNormalized = when {
+            fieldName == "carModelYear" -> normalizeCarModelYearForCompare(
+                if (originalValue == null || originalValue == js("undefined")) "" else originalValue.toString()
+            )
             fieldName in moneyFields -> normalizeMoneyForCompare(originalValue)
             fieldName in boolFields -> normalizeBoolForCompare(originalValue)
             originalValue == null || originalValue == js("undefined") -> ""
@@ -16959,6 +17685,9 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
             else -> originalValue.toString().trim()
         }
         val currNormalized = when {
+            fieldName == "carModelYear" -> normalizeCarModelYearForCompare(
+                if (currentValue == null || currentValue == js("undefined")) "" else currentValue.toString()
+            )
             fieldName in moneyFields -> normalizeMoneyForCompare(currentValue)
             fieldName in boolFields -> normalizeBoolForCompare(currentValue)
             currentValue == null || currentValue == js("undefined") -> ""
@@ -17231,11 +17960,17 @@ fun handleEditPurchase() {
         (document.getElementById("editShipmentDatePicker") as? HTMLInputElement)?.value = editShipmentDateIso
     }
     
-    // Validate Production Date year
-    val editCarModelYear = (document.getElementById("editCarModelYear") as? HTMLInputElement)?.value ?: ""
-    val (isValidYear, yearErrorMsg) = validateProductionDateYear(editCarModelYear)
+    // Validate Registration Date (commit typed MM/YYYY before read/compare)
+    val (isValidYear, yearErrorMsg) = validateCarModelYearField("editCarModelYear")
     if (!isValidYear) {
-        showErrorModal("Invalid Production Date", yearErrorMsg)
+        showErrorModal("Invalid Registration Date", yearErrorMsg)
+        return
+    }
+
+    val editManufactureYear = readManufactureYearInput("editManufactureYear")
+    val (isValidManufactureYear, manufactureYearErrorMsg) = validateManufactureYear(editManufactureYear)
+    if (!isValidManufactureYear) {
+        showErrorModal("Invalid Manufacture Year", manufactureYearErrorMsg)
         return
     }
 
@@ -17349,7 +18084,8 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
 // Extracted function to perform the actual edit purchase save after master list validation
 fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     val date = editPurchaseDateDisplayToWeekdayFormatted((document.getElementById("editDate") as? HTMLInputElement)?.value ?: "")
-    val carModelYear = (document.getElementById("editCarModelYear") as? HTMLInputElement)?.value ?: ""
+    val carModelYear = readCarModelYearInput("editCarModelYear")
+    val manufactureYear = readManufactureYearInput("editManufactureYear")
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
     val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
@@ -17446,6 +18182,7 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.date = date
     purchaseData.chassis = chassis
     purchaseData.carModelYear = carModelYear
+    purchaseData.manufactureYear = manufactureYear
     purchaseData.brand = brand
     purchaseData.carName = carName
     // Send shipment size using the canonical field name; keep legacy vehicleType for compatibility
@@ -20350,6 +21087,7 @@ FAX: 047-711-0409
     
     // Set up event listeners
     setupRixoRequestGeneratorListeners()
+    ensureNumberCutPlaceOptionsLoaded(null)
     loadRixoSelectedColumnsFromStorage()
 
     val prefillRaw = window.sessionStorage.getItem(RIXO_HISTORY_EDIT_SESSION_KEY)
@@ -21435,7 +22173,7 @@ private fun purchaseValueForRixoCompare(purchase: dynamic, columnKey: String): S
     if (purchase == null || purchase == js("undefined")) return ""
     return when (columnKey) {
         "carModelYear" ->
-            carModelYearToMonthInputValue(purchaseInlineEditSeed(purchase, columnKey)).ifEmpty {
+            normalizeCarModelYearForCompare(purchaseInlineEditSeed(purchase, columnKey)).ifEmpty {
                 purchaseInlineEditSeed(purchase, columnKey).trim()
             }
         "shaken" -> if (rixoPurchaseShakenChecked(purchase)) "1" else "0"
@@ -21470,6 +22208,10 @@ private fun readRixoControlCompareString(columnKey: String, row: HTMLElement): S
     }
     val el = row.querySelector("[data-col=\"$columnKey\"]") as? HTMLElement ?: return ""
     return when (columnKey) {
+        "carModelYear" -> {
+            val base = el.getAttribute("data-base")?.trim().orEmpty().ifEmpty { el.id }
+            readCarModelYearInput(base)
+        }
         "shaken" -> if ((el as HTMLInputElement).checked) "1" else "0"
         "bookingRequested", "sold", "invoiceConfirmed", "isPackageMode" -> (el as HTMLSelectElement).value
         "rixoRequested", "rixoConfirmed" -> (el as HTMLSelectElement).value
@@ -21488,6 +22230,10 @@ private fun readRixoCommitTypedValue(columnKey: String, row: HTMLElement): Any? 
     }
     val el = row.querySelector("[data-col=\"$columnKey\"]") ?: return null
     return when (columnKey) {
+        "carModelYear" -> {
+            val base = (el as HTMLElement).getAttribute("data-base")?.trim().orEmpty().ifEmpty { el.id }
+            readCarModelYearInput(base)
+        }
         "shaken" -> (el as HTMLInputElement).checked
         "bookingRequested", "sold", "invoiceConfirmed", "isPackageMode" ->
             (el as HTMLSelectElement).value == "true"
@@ -21554,13 +22300,13 @@ private fun rixoInlineNumberCutMarkup(purchase: dynamic): String {
     val shakenChecked = if (rixoPurchaseShakenChecked(purchase)) " checked" else ""
     val seed = purchaseInlineEditSeed(purchase, "numberCut")
     val hiddenVal = escapeAttr(seed)
-    val parts = parseRixoNumberCutParts(seed)
+    val parts = parseNumberCutParts(seed)
     val placeId = "rixoNcP_$pid"
     val hiraId = "rixoNcH_$pid"
     val n1Id = "rixoNcN1_$pid"
     val n2Id = "rixoNcN2_$pid"
     val collapsedText = escapeHtml(if (seed.isNotBlank()) seed else "—")
-    val placeComb = createEditableComboboxWithOptions(placeId, "Place", getNumberCutPlaceOptions(), parts.place)
+    val placeComb = createEditableComboboxWithOptions(placeId, "Place", emptyList(), parts.place)
     val hiraComb = createEditableComboboxWithOptions(hiraId, "字", getNumberCutHiraganaOptions(), parts.hiragana)
     val escN1 = escapeAttr(parts.num1)
     val escN2 = escapeAttr(parts.num2)
@@ -21640,8 +22386,7 @@ private fun rixoInlineControlMarkup(columnKey: String, purchase: dynamic): Strin
                     <button type="button" id="${base}CalendarBtn" title="Open month picker"
                             style="padding:4px 6px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
                 </div>
-                <input type="month" id="$base" class="rixo-inline-control rixo-inline-month-hidden" data-base="$base" data-col="$columnKey" value="${escAttrLocal(iso)}" tabindex="-1" aria-hidden="true"
-                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                <input type="hidden" id="$base" class="rixo-inline-control rixo-inline-month-hidden" data-base="$base" data-col="$columnKey" value="${escAttrLocal(iso)}">
             </div>
             """
         }
@@ -21757,6 +22502,7 @@ private fun rixoOnShakenToggled(tr: HTMLElement) {
         coll.textContent = "—"
         exp.style.display = "block"
         coll.style.display = "none"
+        repopulateNumberCutPlaceCombobox("rixoNcP_$pid", rixoReadNcPlace(pid))
     } else {
         exp.style.display = "none"
         coll.style.display = ""
@@ -21807,6 +22553,7 @@ private fun setupRixoInlineNumberCutAndShaken() {
             })
         }
     }
+    refreshAllRixoNumberCutPlaceComboboxes()
 }
 
 private fun rixoFillInlineComboSelect(sel: HTMLSelectElement, currentValue: String, names: List<String>) {
@@ -22142,7 +22889,8 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
                     } else {
                         val raw = if (key == "carModelYear") {
                             val r = row.carModelYear?.toString() ?: ""
-                            carModelYearToMonthInputValue(r).ifEmpty { carModelYearToYearOnly(r) }
+                            val iso = carModelYearToMonthInputValue(r)
+                            if (iso.isNotEmpty()) isoMonthToMmYyyy(iso) else carModelYearToYearOnly(r)
                         } else {
                             purchaseTableCellValue(row, key)
                         }
@@ -22890,70 +23638,6 @@ fun renderMissingDataForRixoTransport(missingPurchases: List<dynamic>) {
                     sb.append("<label style=\"display: block; margin-bottom: 4px; font-size: 12px; font-weight: 500; color: #6b7280;\">Place Name</label>")
                     sb.append("<select id=\"missing_${id}_numberCutPlace\" style=\"width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;\">")
                     sb.append("<option value=\"\">Select Place</option>")
-                    sb.append("<option value=\"札幌\">札幌 (Sapporo)</option>")
-                    sb.append("<option value=\"函館\">函館 (Hakodate)</option>")
-                    sb.append("<option value=\"旭川\">旭川 (Asahikawa)</option>")
-                    sb.append("<option value=\"室蘭\">室蘭 (Muroran)</option>")
-                    sb.append("<option value=\"釧路\">釧路 (Kushiro)</option>")
-                    sb.append("<option value=\"帯広\">帯広 (Obihiro)</option>")
-                    sb.append("<option value=\"十勝\">十勝 (Tokachi)</option>")
-                    sb.append("<option value=\"北見\">北見 (Kitami)</option>")
-                    sb.append("<option value=\"知床\">知床 (Shiretoko)</option>")
-                    sb.append("<option value=\"苫小牧\">苫小牧 (Tomakomai)</option>")
-                    sb.append("<option value=\"青森\">青森 (Aomori)</option>")
-                    sb.append("<option value=\"弘前\">弘前 (Hirosaki)</option>")
-                    sb.append("<option value=\"岩手\">岩手 (Iwate)</option>")
-                    sb.append("<option value=\"盛岡\">盛岡 (Morioka)</option>")
-                    sb.append("<option value=\"平泉\">平泉 (Hiraizumi)</option>")
-                    sb.append("<option value=\"宮城\">宮城 (Miyagi)</option>")
-                    sb.append("<option value=\"仙台\">仙台 (Sendai)</option>")
-                    sb.append("<option value=\"八戸\">八戸 (Hachinohe)</option>")
-                    sb.append("<option value=\"秋田\">秋田 (Akita)</option>")
-                    sb.append("<option value=\"山形\">山形 (Yamagata)</option>")
-                    sb.append("<option value=\"福島\">福島 (Fukushima)</option>")
-                    sb.append("<option value=\"茨城\">茨城 (Ibaraki)</option>")
-                    sb.append("<option value=\"栃木\">栃木 (Tochigi)</option>")
-                    sb.append("<option value=\"群馬\">群馬 (Gunma)</option>")
-                    sb.append("<option value=\"埼玉\">埼玉 (Saitama)</option>")
-                    sb.append("<option value=\"千葉\">千葉 (Chiba)</option>")
-                    sb.append("<option value=\"市川\">市川 (ICHIKAWA)</option>")
-                    sb.append("<option value=\"東京\">東京 (Tokyo)</option>")
-                    sb.append("<option value=\"神奈川\">神奈川 (Kanagawa)</option>")
-                    sb.append("<option value=\"新潟\">新潟 (Niigata)</option>")
-                    sb.append("<option value=\"富山\">富山 (Toyama)</option>")
-                    sb.append("<option value=\"石川\">石川 (Ishikawa)</option>")
-                    sb.append("<option value=\"福井\">福井 (Fukui)</option>")
-                    sb.append("<option value=\"山梨\">山梨 (Yamanashi)</option>")
-                    sb.append("<option value=\"長野\">長野 (Nagano)</option>")
-                    sb.append("<option value=\"岐阜\">岐阜 (Gifu)</option>")
-                    sb.append("<option value=\"静岡\">静岡 (Shizuoka)</option>")
-                    sb.append("<option value=\"愛知\">愛知 (Aichi)</option>")
-                    sb.append("<option value=\"三重\">三重 (Mie)</option>")
-                    sb.append("<option value=\"伊勢志摩\">伊勢志摩 (ISESHIMA)</option>")
-                    sb.append("<option value=\"滋賀\">滋賀 (Shiga)</option>")
-                    sb.append("<option value=\"京都\">京都 (Kyoto)</option>")
-                    sb.append("<option value=\"大阪\">大阪 (Osaka)</option>")
-                    sb.append("<option value=\"兵庫\">兵庫 (Hyogo)</option>")
-                    sb.append("<option value=\"奈良\">奈良 (Nara)</option>")
-                    sb.append("<option value=\"和歌山\">和歌山 (Wakayama)</option>")
-                    sb.append("<option value=\"鳥取\">鳥取 (Tottori)</option>")
-                    sb.append("<option value=\"島根\">島根 (Shimane)</option>")
-                    sb.append("<option value=\"岡山\">岡山 (Okayama)</option>")
-                    sb.append("<option value=\"広島\">広島 (Hiroshima)</option>")
-                    sb.append("<option value=\"山口\">山口 (Yamaguchi)</option>")
-                    sb.append("<option value=\"徳島\">徳島 (Tokushima)</option>")
-                    sb.append("<option value=\"香川\">香川 (Kagawa)</option>")
-                    sb.append("<option value=\"愛媛\">愛媛 (Ehime)</option>")
-                    sb.append("<option value=\"高知\">高知 (Kochi)</option>")
-                    sb.append("<option value=\"福岡\">福岡 (Fukuoka)</option>")
-                    sb.append("<option value=\"北九州\">北九州(KITA-KYUSHU)</option>")
-                    sb.append("<option value=\"佐賀\">佐賀 (Saga)</option>")
-                    sb.append("<option value=\"長崎\">長崎 (Nagasaki)</option>")
-                    sb.append("<option value=\"熊本\">熊本 (Kumamoto)</option>")
-                    sb.append("<option value=\"大分\">大分 (Oita)</option>")
-                    sb.append("<option value=\"宮崎\">宮崎 (Miyazaki)</option>")
-                    sb.append("<option value=\"鹿児島\">鹿児島 (Kagoshima)</option>")
-                    sb.append("<option value=\"沖縄\">沖縄 (Okinawa)</option>")
                     sb.append("</select>")
                     sb.append("</div>")
                     
@@ -23049,6 +23733,7 @@ fun renderMissingDataForRixoTransport(missingPurchases: List<dynamic>) {
     
     content.innerHTML = sb.toString()
     
+    populateMissingNumberCutPlaceSelects()
     // Set up number cut listeners for all purchases
     setupRixoTransportNumberCutListeners()
 }

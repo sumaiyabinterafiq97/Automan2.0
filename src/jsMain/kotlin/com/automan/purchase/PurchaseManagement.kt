@@ -2441,8 +2441,7 @@ private fun showPurchaseAdvancedFilterModal() {
                               <button type="button" id="${baseDateId}CalendarBtn" class="purchase-adv-calendar-btn" title="Open month picker"
                                       style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:8px;cursor:pointer;">📅</button>
                             </div>
-                            <input type="month" id="$baseDateId" class="purchase-adv-canon"$monthValAttr tabindex="-1" aria-hidden="true"
-                                   style="position:absolute;opacity:0;border:none;padding:0;margin:0;overflow:hidden;width:0;height:0;" />
+                            <input type="hidden" id="$baseDateId" class="purchase-adv-canon"$monthValAttr />
                           </div>
                         </div>
                         """.trimIndent()

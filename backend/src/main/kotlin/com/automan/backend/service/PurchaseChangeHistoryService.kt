@@ -105,6 +105,7 @@ class PurchaseChangeHistoryService(
         add("date", str(before.date), str(after.date))
         add("chassis", str(before.chassis), str(after.chassis))
         add("carModelYear", str(before.carModelYear), str(after.carModelYear))
+        add("manufactureYear", str(before.manufactureYear), str(after.manufactureYear))
         add("brand", str(before.brand), str(after.brand))
         add("carName", str(before.carName), str(after.carName))
         add("shipmentSize", str(before.shipmentSize), str(after.shipmentSize))
