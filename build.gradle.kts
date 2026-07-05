@@ -117,7 +117,17 @@ tasks.register("prepareVercelPublic") {
             automanFiles.forEach { name ->
                 val f = sourceDir.resolve(name)
                 if (f.exists()) {
-                    f.copyTo(automanDir.resolve(name), overwrite = true)
+                    val dest = automanDir.resolve(name)
+                    if (name == "index.html") {
+                        dest.writeText(
+                            f.readText().replace(
+                                """<base href="/">""",
+                                """<base href="/automan/">"""
+                            )
+                        )
+                    } else {
+                        f.copyTo(dest, overwrite = true)
+                    }
                 }
             }
             val imagesDir = sourceDir.resolve("images")

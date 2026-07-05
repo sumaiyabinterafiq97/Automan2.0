@@ -8,7 +8,7 @@ import org.w3c.dom.events.Event
 /**
  * Production-only auto-login driven by `<meta name="automan-prod-auto-login" content="true">` in index.html.
  * Local/dev builds ship `false` so users still use the login screen.
- * Dockerfile.frontend.prod flips this to true for AWS images.
+ * Optional build-arg ENABLE_PROD_AUTO_LOGIN=true on Dockerfile.frontend.prod for AWS images.
  *
  * Credentials default to seeded admin (`admin@automan.com`); password via optional meta override.
  */
@@ -42,7 +42,7 @@ suspend fun prodAutoLoginIfNeeded() {
     body.password = password
     when (val r = ApiClient.post<dynamic>("auth/login", body)) {
         is ApiResult.Success -> {
-            val d = r.data.asDynamic()
+            val d = (r.data as Any).unsafeCast<dynamic>()
             val token = d.token as? String
             val role = d.role as? String
             val nameResp = d.name as? String

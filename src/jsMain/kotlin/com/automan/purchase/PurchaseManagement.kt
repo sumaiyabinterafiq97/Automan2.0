@@ -1097,8 +1097,12 @@ private fun togglePurchaseTableSort(field: String) {
     refreshPurchaseRowsFromBase(resetPage = true)
 }
 
-fun showPurchaseList(forceClearFilters: Boolean = false) {
+fun navigateToPurchaseList(forceClearFilters: Boolean = false) {
+    if (forceClearFilters) resetPurchaseListFilters()
     navigateToApp("/purchase")
+}
+
+fun showPurchaseList(forceClearFilters: Boolean = false) {
     val preserveFilters = !forceClearFilters && preservePurchaseListFiltersOnNextShow
     preservePurchaseListFiltersOnNextShow = false
     if (preserveFilters) {
@@ -3360,7 +3364,7 @@ fun deletePurchase(id: Long) {
                 onSuccess = {
                     ErrorHandler.showSuccess("Purchase deleted successfully!")
                     // Always return to the main list after deletion
-                    showPurchaseList(forceClearFilters = true)
+                    navigateToPurchaseList(forceClearFilters = true)
                 },
                 onError = { message, _ ->
                     Logger.error("Failed to delete purchase: $message")

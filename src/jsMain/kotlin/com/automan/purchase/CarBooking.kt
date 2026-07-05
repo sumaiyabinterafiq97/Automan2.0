@@ -663,7 +663,7 @@ fun setupCarBookingPageListeners() {
     // Purchase List button
     document.getElementById("purchaseListBtn")?.addEventListener("click", { _: Event ->
         Logger.debug("Purchase List button clicked - navigating to existing purchase list")
-        showPurchaseList(forceClearFilters = true)
+        navigateToPurchaseList(forceClearFilters = true)
     })
     
     // Country dropdown change - trigger filtered chassis loading and booking mappings

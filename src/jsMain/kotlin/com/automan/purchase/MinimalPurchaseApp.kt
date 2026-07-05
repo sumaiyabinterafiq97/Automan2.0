@@ -5614,14 +5614,14 @@ fun updateContent(root: Element) {
             when {
                 isLegacyNumericEditRoute(route) -> {
                     val id = route.removePrefix("/edit/").toLongOrNull()
-                    if (id != null) showEditForm(id) else showPurchaseList(forceClearFilters = true)
+                    if (id != null) showEditForm(id) else navigateToPurchaseList(forceClearFilters = true)
                 }
                 else -> {
                     val chassis = chassisFromEditRoute(route)
                     if (chassis != null && chassis.isNotEmpty()) {
                         showEditFormByChassis(chassis)
                     } else {
-                        showPurchaseList(forceClearFilters = true)
+                        navigateToPurchaseList(forceClearFilters = true)
                     }
                 }
             }
@@ -5918,7 +5918,7 @@ fun updateContent(root: Element) {
                 navigateToApp("/login")
             } else {
                 ensureSidebarPresent()
-                showPurchaseList(forceClearFilters = true)
+                navigateToPurchaseList(forceClearFilters = true)
                 // Show sorting bar on purchase list page
                 // Hide only Rixo Transport by default; invoice button is controlled by selection
                 (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -6461,8 +6461,7 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
                     if (role != null) safeLocalStorageSet("authUserRole", role)
                     if (nameResp != null) safeLocalStorageSet("authUserName", nameResp)
                     if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
-                    navigateToApp("/purchase")
-                    showPurchaseList(forceClearFilters = true)
+                    navigateToPurchaseList(forceClearFilters = true)
                     updateUserInfoInSidebar()
                     applyRoleBasedRestrictions()
                 } else js("alert('Login failed')")
@@ -10270,7 +10269,7 @@ fun setupAddFormListeners() {
     })
     
     document.getElementById("cancelBtn")?.addEventListener("click", { _: Event ->
-        showPurchaseList(forceClearFilters = true)
+        navigateToPurchaseList(forceClearFilters = true)
     })
     
     // Simple Save button click listener - with retry mechanism
@@ -15546,7 +15545,7 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
                 }, 0)
             } else {
                 showMessage("Purchase created successfully!", "success")
-                showPurchaseList(forceClearFilters = true)
+                navigateToPurchaseList(forceClearFilters = true)
             }
             // Button will be re-enabled when page reloads, no need to re-enable here
         } else {
@@ -15603,7 +15602,7 @@ private fun loadPurchaseForEdit(fetchUrl: String) {
             }
         } else {
             showMessage("Failed to load purchase data", "error")
-            showPurchaseList(forceClearFilters = true)
+            navigateToPurchaseList(forceClearFilters = true)
         }
     }.catch { error ->
         val errorMsg = try {
@@ -15613,7 +15612,7 @@ private fun loadPurchaseForEdit(fetchUrl: String) {
             "Unknown error"
         }
         showMessage("Failed to load purchase data: $errorMsg", "error")
-        showPurchaseList(forceClearFilters = true)
+        navigateToPurchaseList(forceClearFilters = true)
     }
 }
 fun showEditFormWithData(purchaseData: dynamic) {

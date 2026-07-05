@@ -141,7 +141,7 @@ fun ensureAppPathOrRedirect(): Boolean {
         navigateToApp("/purchase", replace = true)
         return true
     }
-    if (!token && route.isNotEmpty() && !isAuthRoute()) {
+    if (!token && !isAuthRoute()) {
         navigateToApp("/login", replace = true)
         return true
     }

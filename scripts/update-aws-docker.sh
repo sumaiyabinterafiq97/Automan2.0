@@ -68,6 +68,7 @@ if [ "$BUILD_FRONTEND" = "1" ]; then
   (cd "$PROJECT_ROOT" && ./gradlew jsBrowserProductionWebpack --no-daemon -q)
   echo "🐳 Building frontend image..."
   docker build --platform "$PLATFORM" \
+    --build-arg ENABLE_PROD_AUTO_LOGIN=true \
     -t "$DOCKERHUB_USERNAME/automan-frontend:latest" \
     -f "$PROJECT_ROOT/docker/Dockerfile.frontend.prod" \
     "$PROJECT_ROOT"
