@@ -163,6 +163,10 @@ class PurchaseService(
         return applyReadAdapters(purchaseRepository.findAll())
     }
 
+    /** Hydrates purchases for export (cost lines, vehicle overrides, shipping, workflow, extended JSON). */
+    fun hydratePurchasesForExport(purchases: List<Purchase>): List<Purchase> =
+        applyReadAdapters(purchases)
+
     /**
      * Unique purchase dates from [Purchase.date] as ISO [yyyy-MM-dd], newest first, for Rixo Buying Date.
      * Only includes dates that still have at least one purchase with rixo_requested not TRUE/1.

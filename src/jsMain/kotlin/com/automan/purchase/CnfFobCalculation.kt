@@ -298,10 +298,10 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
         lastCalculationMode = mode
         js("window.lastCalculationMode = mode")
         console.log("💾 Back to booking: lastCalculationMode = $mode")
-        val backHash = if (isCarBookingRecreateCalculationSession() || isCarBookingRecreateSession()) {
-            "#/recalculate-booking"
+        val backRoute = if (isCarBookingRecreateCalculationSession() || isCarBookingRecreateSession()) {
+            "/recalculate-booking"
         } else {
-            "#/booking"
+            "/booking"
         }
         val purchaseIdsToRefresh = if (cnfPageSelectedPurchaseIds.isNotEmpty()) {
             cnfPageSelectedPurchaseIds
@@ -313,7 +313,7 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
                 } else null
             }
         }
-        window.location.hash = backHash
+        navigateToApp(backRoute)
         if (purchaseIdsToRefresh.isNotEmpty()) {
             refreshPurchasesByIds(purchaseIdsToRefresh)
         } else {

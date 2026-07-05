@@ -2343,7 +2343,7 @@ fun setupConsigneeDeviceChangeListener() {
                 Logger.debug("Consignee page: Device type changed from $lastConsigneeDeviceType to $newDeviceType, reloading")
                 
                 // If we're on the consignee page, reload to show correct view (cards or table)
-                if (window.location.hash.contains("#/master/consignee")) {
+                if (routeStartsWith("/master/consignee")) {
                     loadMasterConsignee()
                 }
             }
@@ -3968,7 +3968,7 @@ fun setupCarBrandDeviceChangeListener() {
                 Logger.debug("Car Brands page: Device type changed from $lastCarBrandDeviceType to $newDeviceType, reloading")
                 
                 // If we're on the car brands page, reload to show correct view (cards or table)
-                if (window.location.hash.contains("#/master/car-brands")) {
+                if (routeStartsWith("/master/car-brands")) {
                     loadMasterCarBrands()
                 }
             }
@@ -5617,7 +5617,7 @@ fun duplicateMasterCarBrand(id: dynamic) {
 
 // Placeholder functions for other master list pages
 fun showMasterCountriesPage() {
-    window.location.hash = "#/master/set/country"
+    navigateToApp("/master/set/country")
     showDynamicMasterSetPage("country")
 }
 
@@ -9945,7 +9945,7 @@ fun setupSupplierDeviceChangeListener() {
                 Logger.debug("Supplier page: Device type changed from $lastSupplierDeviceType to $newDeviceType, reloading")
                 
                 // If we're on the supplier page, reload to show correct view (cards or table)
-                if (window.location.hash.contains("#/master/supplier")) {
+                if (routeStartsWith("/master/supplier")) {
                     loadMasterSuppliers()
                 }
             }
@@ -11329,7 +11329,7 @@ fun deleteMasterSupplier(priceId: Long) {
 }
 
 fun showMasterRixoCompanyPage() {
-    window.location.hash = "#/master/rixo-company"
+    navigateToApp("/master/rixo-company")
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div id="rixoCompanyList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
@@ -11668,7 +11668,7 @@ fun showEditRixoCompanyModal(originalName: String) {
 }
 
 fun showMasterStockLocationsPage() {
-    window.location.hash = "#/master/stock-location"
+    navigateToApp("/master/stock-location")
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div id="stockLocationList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
@@ -12006,7 +12006,7 @@ fun showEditStockLocationModal(originalName: String) {
 }
 
 fun showMasterRepairCompaniesPage() {
-    window.location.hash = "#/master/set/repair_company"
+    navigateToApp("/master/set/repair_company")
     showDynamicMasterSetPage("repair_company")
 }
 
@@ -12309,7 +12309,7 @@ fun showEditRepairCompanyModal(originalName: String) {
 }
 
 fun showMasterBankAccountsPage() {
-    window.location.hash = "#/master/set/bank_accounts"
+    navigateToApp("/master/set/bank_accounts")
     showDynamicMasterSetPage("bank_accounts")
 }
 
@@ -12607,7 +12607,7 @@ fun showEditBankAccountModal(originalName: String) {
 }
 
 fun showMasterVenueIdsPage() {
-    window.location.hash = "#/master/set/venue_id"
+    navigateToApp("/master/set/venue_id")
     showDynamicMasterSetPage("venue_id")
 }
 
@@ -12911,7 +12911,7 @@ fun showEditVenueIdModal(originalValue: String) {
 
 // --- POL master page (responsive simple-master UI via dynamic master set) ---
 fun showMasterPolPage() {
-    window.location.hash = "#/master/set/pol"
+    navigateToApp("/master/set/pol")
     showDynamicMasterSetPage("pol")
 }
 
@@ -13088,7 +13088,7 @@ fun showEditPolModal(originalName: String) {
 }
 
 fun showMasterPodPage() {
-    window.location.hash = "#/master/set/pod"
+    navigateToApp("/master/set/pod")
     showDynamicMasterSetPage("pod")
 }
 
@@ -13228,7 +13228,7 @@ fun showEditPodModal(originalName: String) {
 }
 
 fun showMasterFuelPage() {
-    window.location.hash = "#/master/set/fuel"
+    navigateToApp("/master/set/fuel")
     showDynamicMasterSetPage("fuel")
 }
 fun loadMasterFuel() { loadSimpleMaster("master-menu/fuel", "fuelFilter", "fuelTable", "Fuel", fuelCurrentPage, fuelItemsPerPage, allFuel, { fuelCurrentPage = it }, { allFuel = it }, ::showEditFuelModal, "fuel-edit-btn", "data-fuel", "fuelPrevPage", "fuelNextPage", ::loadMasterFuel) }
@@ -13241,14 +13241,14 @@ fun openMasterCarGradeRoute() {
 }
 
 fun showMasterCarGradePage() {
-    window.location.hash = "#/master/car-grade"
+    navigateToApp("/master/car-grade")
 }
 fun loadMasterCarGrade() { loadSimpleMaster("master-menu/car_grade", "carGradeFilter", "carGradeTable", "Car Grade", carGradeCurrentPage, carGradeItemsPerPage, allCarGrades, { carGradeCurrentPage = it }, { allCarGrades = it }, ::showEditCarGradeModal, "car-grade-edit-btn", "data-car-grade", "carGradePrevPage", "carGradeNextPage", ::loadMasterCarGrade) }
 fun showAddCarGradeModal() { addSimpleMasterModal("master-menu/car_grade", "Car Grade", "carGradeEditModal", "carGradeModalInput", "carGradeModalCancelBtn", "carGradeModalAddBtn", { carGradeCurrentPage = 1; loadMasterCarGrade() }) }
 fun showEditCarGradeModal(originalName: String) { editSimpleMasterModal("master-menu/car_grade", "Car Grade", originalName, "carGradeEditModal", "carGradeModalInput", "carGradeModalCancelBtn", "carGradeModalUpdateBtn", "carGradeModalDeleteBtn", { loadMasterCarGrade() }, { carGradeCurrentPage = 1; loadMasterCarGrade() }) }
 
 fun showMasterCarShiftPage() {
-    window.location.hash = "#/master/set/shift"
+    navigateToApp("/master/set/shift")
     showDynamicMasterSetPage("shift")
 }
 fun loadMasterCarShift() { loadSimpleMaster("master-menu/shift", "carShiftFilter", "carShiftTable", "Car Shift", carShiftCurrentPage, carShiftItemsPerPage, allCarShifts, { carShiftCurrentPage = it }, { allCarShifts = it }, ::showEditCarShiftModal, "car-shift-edit-btn", "data-car-shift", "carShiftPrevPage", "carShiftNextPage", ::loadMasterCarShift) }
@@ -13256,7 +13256,7 @@ fun showAddCarShiftModal() { addSimpleMasterModal("master-menu/shift", "Car Shif
 fun showEditCarShiftModal(originalName: String) { editSimpleMasterModal("master-menu/shift", "Car Shift", originalName, "carShiftEditModal", "carShiftModalInput", "carShiftModalCancelBtn", "carShiftModalUpdateBtn", "carShiftModalDeleteBtn", { loadMasterCarShift() }, { carShiftCurrentPage = 1; loadMasterCarShift() }) }
 
 fun showMasterTypeOfVehiclesPage() {
-    window.location.hash = "#/master/set/type_of_vehicle"
+    navigateToApp("/master/set/type_of_vehicle")
     showDynamicMasterSetPage("type_of_vehicle")
 }
 fun loadMasterTypeOfVehicles() { loadSimpleMaster("master-menu/type_of_vehicle", "typeOfVehiclesFilter", "typeOfVehiclesTable", "Type of Vehicles", typeOfVehiclesCurrentPage, typeOfVehiclesItemsPerPage, allTypeOfVehicles, { typeOfVehiclesCurrentPage = it }, { allTypeOfVehicles = it }, ::showEditTypeOfVehiclesModal, "type-of-vehicles-edit-btn", "data-type-of-vehicles", "typeOfVehiclesPrevPage", "typeOfVehiclesNextPage", ::loadMasterTypeOfVehicles) }
@@ -13264,7 +13264,7 @@ fun showAddTypeOfVehiclesModal() { addSimpleMasterModal("master-menu/type_of_veh
 fun showEditTypeOfVehiclesModal(originalName: String) { editSimpleMasterModal("master-menu/type_of_vehicle", "Type of Vehicles", originalName, "typeOfVehiclesEditModal", "typeOfVehiclesModalInput", "typeOfVehiclesModalCancelBtn", "typeOfVehiclesModalUpdateBtn", "typeOfVehiclesModalDeleteBtn", { loadMasterTypeOfVehicles() }, { typeOfVehiclesCurrentPage = 1; loadMasterTypeOfVehicles() }) }
 
 fun showMasterNumberPlacePage() {
-    window.location.hash = "#/master/number-place"
+    navigateToApp("/master/number-place")
     showDynamicMasterSetPage("number_place")
 }
 
@@ -13275,7 +13275,7 @@ fun showDynamicMasterSetPage(fieldName: String) {
         return
     }
     if (normalizedField == "car_grade") {
-        window.location.hash = "#/master/car-grade"
+        navigateToApp("/master/car-grade")
         return
     }
     window.fetch(apiUrl("master-menu/fields"))

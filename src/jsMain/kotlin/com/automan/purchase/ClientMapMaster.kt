@@ -217,7 +217,7 @@ fun setupClientMapDeviceChangeListener() {
         resizeTimeout = window.setTimeout({
             val newDevice = getDeviceType()
             if (lastClientMapDeviceType != null && lastClientMapDeviceType != newDevice) {
-                if (window.location.hash.contains("#/master/client-map")) {
+                if (routeStartsWith("/master/client-map")) {
                     loadClientMaps()
                 }
             }

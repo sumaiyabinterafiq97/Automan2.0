@@ -121,7 +121,7 @@ private fun handleInvoiceSaveFailure(httpStatus: Int, errorText: String) {
 private var invoiceRecreateInvoiceNumber: String? = null
 
 fun isInvoiceRecreateSession(): Boolean =
-    window.location.hash.startsWith("#/recreate-invoice")
+    routeStartsWith("/recreate-invoice")
 
 private fun clearInvoiceRecreateSessionData() {
     invoiceRecreateInvoiceNumber = null
@@ -164,8 +164,7 @@ fun showInvoicePage() {
     js("window.currentInvoiceChassisList = []")
     
     // Check for URL parameters (ids) for pre-selected purchases
-    val urlHash = window.location.hash
-    val isRecreateInvoice = urlHash.startsWith("#/recreate-invoice")
+    val isRecreateInvoice = routeStartsWith("/recreate-invoice")
     val invoicePageMainTitle =
         if (isRecreateInvoice) {
             "AUTOMAN | RECREATE LOCAL CUSTOMER INVOICE"
@@ -187,13 +186,9 @@ fun showInvoicePage() {
         clearInvoiceRecreateSessionData()
     }
 
-    val idsParam = if (urlHash.contains("?")) {
-        val queryString = urlHash.substringAfter("?")
-        val params = queryString.split("&")
-        params.find { it.startsWith("ids=") }?.substringAfter("=")
-    } else {
-        null
-    }
+    val idsParam = window.location.search.removePrefix("?").split("&")
+        .find { it.startsWith("ids=") }
+        ?.substringAfter("=")
     
     // Also check localStorage for invoiceSelectedIds
     val localStorageIds = try {
@@ -1970,7 +1965,7 @@ private fun handleDeleteInvoiceFromRecreate() {
                     }
                     else -> showMessage("Invoice deleted.", "success")
                 }
-                window.location.hash = "#/invoice-history"
+                navigateToApp("/invoice-history")
             },
             onError = { message, statusCode ->
                 val msg =

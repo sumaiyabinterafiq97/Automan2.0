@@ -23,7 +23,7 @@ private var rixoHistoryResizeDebounceHandle: Int? = null
 private const val RIXO_HISTORY_COMPACT_MAX_WIDTH_PX = 860
 
 fun showRixoHistoryPage() {
-    window.location.hash = "#/rixo-history"
+    navigateToApp("/rixo-history")
     val content = document.getElementById("content") ?: return
     rixoHistoryCachedRows = emptyArray()
     rixoHistorySortField = "buyingDate"
@@ -289,7 +289,7 @@ private fun storeAndNavigateRixoHistoryEdit(row: dynamic) {
     payload.historyId = rixoHistoryCell(row, "id")
     payload.hasBookingRequested = rixoHistoryHasBookingRequestedFromRow(row)
     window.sessionStorage.setItem(RIXO_HISTORY_EDIT_SESSION_KEY, JSON.stringify(payload))
-    window.location.hash = "#/rixo-updater"
+    navigateToApp("/rixo-updater")
 }
 
 private fun rixoHistoryEditButtonHtml(historyId: String): String {

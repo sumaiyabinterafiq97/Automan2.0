@@ -32,10 +32,10 @@ var carBookingShippingRecreateChassisToHistoryId: MutableMap<String, Long> = mut
 var carBookingShippingRecreateChassisAmounts: MutableMap<String, String> = mutableMapOf()
 
 fun isCarBookingRecreateSession(): Boolean =
-    window.location.hash.startsWith("#/recalculate-booking")
+    routeStartsWith("/recalculate-booking")
 
 fun isCarBookingRecreateCalculationSession(): Boolean =
-    window.location.hash.startsWith("#/recalculate-booking/recalculation")
+    routeStartsWith("/recalculate-booking/recalculation")
 
 private fun clearCarBookingShippingRecreateSessionData() {
     carBookingShippingRecreateRowIds.clear()
@@ -617,11 +617,13 @@ private fun proceedCarBookingCalculateToCnf(
                 isFobMode = isFobMode,
                 isRecreateCalculation = isCarBookingRecreateSession(),
             )
-            window.location.hash = if (isCarBookingRecreateSession()) {
-                "#/recalculate-booking/recalculation"
-            } else {
-                "#/booking/calculation"
-            }
+            navigateToApp(
+                if (isCarBookingRecreateSession()) {
+                    "/recalculate-booking/recalculation"
+                } else {
+                    "/booking/calculation"
+                }
+            )
         }
     )
 }
@@ -2530,7 +2532,7 @@ private fun handleRemoveChassisFromBookingRecreate(btn: HTMLButtonElement) {
                 renumberBookingListTable()
                 showMessage("Car removed from booking.", "success")
                 if (carBookingDisplayedCars.isEmpty() && carBookingShippingRecreateRowIds.isEmpty()) {
-                    window.location.hash = "#/shipping-history"
+                    navigateToApp("/shipping-history")
                 }
             },
             onError = { message, statusCode ->
@@ -2590,7 +2592,7 @@ private fun handleDeleteShippingHistoryFromRecreate() {
                 carBookingDisplayedCars = emptyArray()
                 carBookingShippingHistoryEditBookingIdNormalized = null
                 showMessage("Shipping history removed.", "success")
-                window.location.hash = "#/shipping-history"
+                navigateToApp("/shipping-history")
             },
             onError = { message, statusCode ->
                 val msg =

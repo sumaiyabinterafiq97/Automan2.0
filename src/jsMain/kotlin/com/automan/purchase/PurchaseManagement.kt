@@ -1098,7 +1098,7 @@ private fun togglePurchaseTableSort(field: String) {
 }
 
 fun showPurchaseList(forceClearFilters: Boolean = false) {
-    window.location.hash = "#/purchase"
+    navigateToApp("/purchase")
     val preserveFilters = !forceClearFilters && preservePurchaseListFiltersOnNextShow
     preservePurchaseListFiltersOnNextShow = false
     if (preserveFilters) {
@@ -1146,6 +1146,13 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
                     </div>
                 </div>
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <button id="exportPurchasesExcelBtn" style="padding: 8px 16px; background-color: #198754; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
+                            <path d="M14 2v6h6M8 13h8M8 17h8M8 9h2" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                        </svg>
+                        Export Excel
+                    </button>
                     <button id="columnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
@@ -1182,6 +1189,10 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
     document.getElementById("columnFilterBtn")?.addEventListener("click", { _: Event ->
         showColumnFilterModal()
     })
+
+    document.getElementById("exportPurchasesExcelBtn")?.addEventListener("click", { _: Event ->
+        exportPurchasesToExcel()
+    })
     
     // Add quick access to client accounts
     document.getElementById("clientAccountsQuickBtn")?.addEventListener("click", { _: Event ->
@@ -1200,7 +1211,7 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
 }
 
 fun showShippingHistoryPage() {
-    window.location.hash = "#/shipping-history"
+    navigateToApp("/shipping-history")
     val content = document.getElementById("content") ?: return
     shippingHistoryCachedRows = emptyArray()
     shippingHistorySortField = "bookingId"
@@ -1570,7 +1581,7 @@ private fun storeAndNavigateShippingHistoryEdit(gRows: List<dynamic>) {
     val payload = js("{}")
     payload.rows = shippingHistoryRowsPayloadArray(gRows)
     window.sessionStorage.setItem(SHIPPING_HISTORY_EDIT_SESSION_KEY, JSON.stringify(payload))
-    window.location.hash = "#/recalculate-booking"
+    navigateToApp("/recalculate-booking")
 }
 
 private fun autoCreateInvoicesFromShippingHistory(gRows: List<dynamic>) {
@@ -1692,13 +1703,13 @@ private fun autoCreateInvoicesFromShippingHistory(gRows: List<dynamic>) {
                     else "$savedCount invoices created successfully.",
                     "success"
                 )
-                window.location.hash = "#/invoice-history"
+                navigateToApp("/invoice-history")
             } else if (hasErrors) {
                 showMessage("Failed to create invoices. Check console for details.", "error")
                 console.error("[batch-confirm] errors:", errorsArr)
             } else {
                 showMessage("No invoices were created (possibly already exist).", "warning")
-                window.location.hash = "#/invoice-history"
+                navigateToApp("/invoice-history")
             }
         } catch (e: Throwable) {
             dismiss()
@@ -2185,7 +2196,7 @@ fun setupDeviceChangeListener() {
                 checkAndAdjustColumnsForDeviceChange()
                 
                 // If we're on the purchase list page, reload to show adjusted columns
-                if (window.location.hash.contains("#/purchase")) {
+                if (routeStartsWith("/purchase")) {
                     loadPurchases()
                 }
             }
@@ -2200,9 +2211,55 @@ fun setupDeviceChangeListener() {
     window.addEventListener("resize", resizeListener)
 }
 
+fun exportPurchasesToExcel() {
+    val btn = document.getElementById("exportPurchasesExcelBtn") as? HTMLButtonElement
+    val originalHtml = btn?.innerHTML
+    if (btn != null) {
+        btn.disabled = true
+        btn.style.opacity = "0.7"
+        btn.textContent = "Exporting…"
+    }
+    MainScope().launch {
+        try {
+            showMessage("Preparing Excel export…", "info")
+            val response = window.fetch(apiUrl("purchases/export/xlsx")).await()
+            if (!response.ok) {
+                val errorText = response.text().await()
+                ErrorHandler.showError("Export failed: ${ErrorHandler.extractErrorMessage(errorText)}")
+                return@launch
+            }
+            val blob = response.blob().await()
+            val url = js("URL.createObjectURL(blob)") as String
+            try {
+                val disposition = response.headers.get("Content-Disposition") ?: ""
+                val filenameMatch = Regex("filename=\"?([^\";]+)\"?").find(disposition)
+                val filename = filenameMatch?.groupValues?.get(1)
+                    ?: "purchases_export_${js("Date.now()")}.xlsx"
+                val a = document.createElement("a") as HTMLAnchorElement
+                a.href = url
+                a.download = filename
+                document.body?.appendChild(a)
+                a.click()
+                document.body?.removeChild(a)
+                showMessage("Purchase list exported successfully", "success")
+            } finally {
+                js("URL.revokeObjectURL(url)")
+            }
+        } catch (e: dynamic) {
+            ErrorHandler.showError("Export failed: ${e.toString()}")
+        } finally {
+            if (btn != null) {
+                btn.disabled = false
+                btn.style.opacity = "1"
+                if (originalHtml != null) btn.innerHTML = originalHtml
+                else btn.textContent = "Export Excel"
+            }
+        }
+    }
+}
+
 fun loadPurchases() {
     Logger.debug("loadPurchases function called")
-    // Sorting dropdowns removed; always load base purchases.
     val endpoint = "purchases"
     
     val scope = MainScope()
@@ -3095,7 +3152,7 @@ fun displayPurchasesWithPagination() {
                 navigateToEditPurchase(chassis)
             } else if (id != null && id.length > 0 && id != "0") {
                 purchaseReturnPageFromEdit = currentPage
-                window.location.hash = "#/edit/$id"
+                navigateToApp("/edit/$id")
             } else {
                 showMessage("Invalid purchase. Cannot edit this purchase.", "error")
             }
@@ -3259,7 +3316,7 @@ fun displayPurchasesAsCards() {
                 navigateToEditPurchase(chassis)
             } else if (id != null && id.length > 0 && id != "0") {
                 purchaseReturnPageFromEdit = currentPage
-                window.location.hash = "#/edit/$id"
+                navigateToApp("/edit/$id")
             } else {
                 showMessage("Invalid purchase. Cannot edit this purchase.", "error")
             }

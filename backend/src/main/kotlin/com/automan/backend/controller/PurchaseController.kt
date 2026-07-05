@@ -8,6 +8,7 @@ import com.automan.backend.dto.InvoiceConfirmAndDownloadRequest
 import com.automan.backend.dto.InvoiceLedgerResult
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
+import com.automan.backend.service.PurchaseExportService
 import com.automan.backend.service.PurchaseService
 import com.automan.backend.service.PurchaseChangeHistoryService
 import com.automan.backend.service.ClientService
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.*
 import org.springframework.web.multipart.MultipartFile
 import java.math.BigDecimal
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @RestController
 @RequestMapping("/purchases")
@@ -28,6 +30,7 @@ import java.time.LocalDateTime
 class PurchaseController(
     private val purchaseService: PurchaseService,
     private val purchaseChangeHistoryService: PurchaseChangeHistoryService,
+    private val purchaseExportService: PurchaseExportService,
     private val clientService: ClientService,
     private val transactionService: TransactionService,
     private val pdfService: com.automan.backend.service.PdfService,
@@ -39,6 +42,29 @@ class PurchaseController(
     fun getAllPurchases(): ResponseEntity<List<Purchase>> {
         val purchases = purchaseService.getAllPurchases()
         return ResponseEntity.ok(purchases)
+    }
+
+    /** Full-database purchase export as Excel (.xlsx) with raw formula-friendly cell values. */
+    @GetMapping("/export/xlsx")
+    fun exportPurchasesXlsx(): ResponseEntity<ByteArray> {
+        return try {
+            val bytes = purchaseExportService.exportAllPurchasesXlsx()
+            val ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+            ResponseEntity.ok()
+                .header(
+                    "Content-Disposition",
+                    "attachment; filename=\"purchases_export_$ts.xlsx\"",
+                )
+                .contentType(
+                    MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ),
+                )
+                .body(bytes)
+        } catch (e: Exception) {
+            Logger.error("Purchase XLSX export failed: ${e.message}", e)
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+        }
     }
 
     /** Unique purchase dates (as ISO yyyy-MM-dd) for Rixo Request Generator "Buying date" select. */

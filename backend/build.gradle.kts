@@ -26,11 +26,9 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
     
-    // Excel processing dependencies - updated versions
+    // Excel processing (POI 5.x — do not pin legacy poi-ooxml-schemas 4.x; it breaks xmlbeans)
     implementation("org.apache.poi:poi:5.2.4")
     implementation("org.apache.poi:poi-ooxml:5.2.4")
-    implementation("org.apache.poi:poi-ooxml-schemas:4.1.2")
-    implementation("org.apache.xmlbeans:xmlbeans:5.1.1")
     implementation("org.apache.logging.log4j:log4j-api:2.20.0")
     implementation("org.apache.logging.log4j:log4j-core:2.20.0")
     

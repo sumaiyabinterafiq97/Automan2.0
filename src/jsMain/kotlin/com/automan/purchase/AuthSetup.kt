@@ -58,9 +58,8 @@ suspend fun prodAutoLoginIfNeeded() {
             Logger.debug("Prod auto-login succeeded for ${email}")
             applyRoleBasedRestrictions()
             updateUserInfoInSidebar()
-            val h = window.location.hash
-            if (h.isEmpty() || h == "#" || h == "#/") {
-                window.location.hash = "#/purchase"
+            if (currentRoute().isEmpty() || isAuthRoute()) {
+                navigateToApp("/purchase")
             }
         }
         is ApiResult.Error -> {
@@ -82,7 +81,7 @@ fun logout() {
     closeSidebar()
     
     // Redirect to login page
-    window.location.hash = "#/"
+    navigateToApp("/login")
 }
 
 fun updateUserInfoInSidebar() {
@@ -150,7 +149,7 @@ fun updateSidebarForRole() {
 }
 
 fun showUserManagementPage() {
-    window.location.hash = "#/users"
+    navigateToApp("/users")
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div class="user-page-container">
@@ -181,14 +180,14 @@ fun showUserManagementPage() {
         showAddUserForm()
     })
     document.getElementById("pendingRequestBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/pending-signups"
+        navigateToApp("/pending-signups")
     })
     loadUsers()
 }
 
 fun showPendingSignupsPage() {
     console.log("🔵 [PENDING PAGE] showPendingSignupsPage() called")
-    window.location.hash = "#/pending-signups"
+    navigateToApp("/pending-signups")
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div class="user-page-container">
@@ -212,7 +211,7 @@ fun showPendingSignupsPage() {
     
     // Add event listener for back button
     document.getElementById("backToUsersBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/users"
+        navigateToApp("/users")
     })
     
     // Load pending signups

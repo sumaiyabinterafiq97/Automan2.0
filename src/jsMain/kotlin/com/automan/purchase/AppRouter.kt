@@ -1,0 +1,155 @@
+package com.automan.purchase
+
+import kotlinx.browser.window
+import org.w3c.dom.events.Event
+
+/** Production mount path for the Automan SPA on memon.co.jp. */
+const val APP_BASE_PATH = "/automan"
+
+private var routeUpdateListener: (() -> Unit)? = null
+
+fun registerRouteUpdateListener(listener: () -> Unit) {
+    routeUpdateListener = listener
+}
+
+fun installPopstateListener(onPopState: () -> Unit) {
+    window.addEventListener("popstate", { _: Event -> onPopState() })
+}
+
+private fun notifyRouteUpdate() {
+    routeUpdateListener?.invoke()
+}
+
+/** `/automan` when deployed under subpath; empty when served at site root (local dev). */
+fun detectedAppBasePath(): String {
+    val pathname = window.location.pathname
+    return if (pathname == APP_BASE_PATH || pathname.startsWith("$APP_BASE_PATH/")) {
+        APP_BASE_PATH
+    } else {
+        ""
+    }
+}
+
+/** App route with leading slash, e.g. `/purchase`. Empty at bare app base. */
+fun currentRoute(): String {
+    val base = detectedAppBasePath()
+    val pathname = window.location.pathname
+    val rest = if (base.isNotEmpty()) pathname.removePrefix(base) else pathname
+    val normalized = rest.trimEnd('/')
+    return if (normalized.isEmpty()) "" else normalized
+}
+
+fun routeStartsWith(prefix: String): Boolean {
+    val route = currentRoute()
+    val p = if (prefix.startsWith("/")) prefix else "/$prefix"
+    return route == p || route.startsWith("$p/")
+}
+
+fun routeEquals(path: String): Boolean {
+    val p = if (path.startsWith("/")) path else "/$path"
+    return currentRoute() == p
+}
+
+fun isAuthRoute(): Boolean = routeEquals("/login") || routeEquals("/signup")
+
+fun hasAuthToken(): Boolean = !safeLocalStorageGet("authToken").isNullOrBlank()
+
+fun navigateToApp(path: String, replace: Boolean = false) {
+    val normalized = path.trim().let {
+        when {
+            it.isEmpty() -> "/"
+            it.startsWith("/") -> it
+            else -> "/$it"
+        }
+    }
+    val base = detectedAppBasePath().ifEmpty {
+        if (window.location.pathname.startsWith(APP_BASE_PATH)) APP_BASE_PATH else ""
+    }
+    val fullPath = if (base.isNotEmpty()) "$base$normalized" else normalized
+    val target = fullPath + window.location.search
+    val current = window.location.pathname + window.location.search
+    if (current == target) {
+        notifyRouteUpdate()
+        return
+    }
+    if (replace) {
+        window.history.replaceState(null, "", target)
+    } else {
+        window.history.pushState(null, "", target)
+    }
+    notifyRouteUpdate()
+}
+
+fun navigateToAppHome() {
+    navigateToApp("/purchase")
+}
+
+fun editPurchaseRouteFromChassis(chassis: String): String {
+    val trimmed = chassis.trim()
+    if (trimmed.isEmpty()) return "/purchase"
+    val encoded = js("encodeURIComponent(trimmed)").unsafeCast<String>()
+    return "/edit/$encoded"
+}
+
+fun navigateToEditPurchase(chassis: String) {
+    navigateToApp(editPurchaseRouteFromChassis(chassis))
+}
+
+fun chassisFromEditRoute(route: String = currentRoute()): String? {
+    if (!route.startsWith("/edit/")) return null
+    val segment = route.removePrefix("/edit/")
+    if (segment.isEmpty()) return null
+    return try {
+        js("decodeURIComponent(segment)").unsafeCast<String>().trim()
+    } catch (_: dynamic) {
+        segment.trim()
+    }
+}
+
+fun isLegacyNumericEditRoute(route: String = currentRoute()): Boolean {
+    if (!route.startsWith("/edit/")) return false
+    val segment = route.removePrefix("/edit/")
+    return segment.isNotEmpty() && segment.all { it.isDigit() }
+}
+
+fun migrateLegacyHashIfPresent(): Boolean {
+    val hash = window.location.hash
+    if (!hash.startsWith("#/")) return false
+    val path = hash.removePrefix("#")
+    window.location.hash = ""
+    navigateToApp(path, replace = true)
+    return true
+}
+
+/**
+ * Normalizes URL and enforces auth redirects.
+ * @return true when navigation was adjusted and [updateContent] should return early.
+ */
+fun ensureAppPathOrRedirect(): Boolean {
+    if (migrateLegacyHashIfPresent()) return true
+
+    val route = currentRoute()
+    val base = detectedAppBasePath()
+
+    if (base == APP_BASE_PATH && route.isEmpty()) {
+        navigateToApp("/login", replace = true)
+        return true
+    }
+
+    val token = hasAuthToken()
+    if (token && isAuthRoute()) {
+        navigateToApp("/purchase", replace = true)
+        return true
+    }
+    if (!token && route.isNotEmpty() && !isAuthRoute()) {
+        navigateToApp("/login", replace = true)
+        return true
+    }
+    return false
+}
+
+fun exposeNavigateToAppOnWindow() {
+    window.asDynamic().navigateToApp = { path: String ->
+        navigateToApp(path)
+    }
+}

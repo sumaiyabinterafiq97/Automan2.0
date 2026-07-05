@@ -21,7 +21,7 @@ private var invoiceHistoryResizeDebounceHandle: Int? = null
 private const val INVOICE_HISTORY_COMPACT_MAX_WIDTH_PX = 860
 
 fun showInvoiceHistoryPage() {
-    window.location.hash = "#/invoice-history"
+    navigateToApp("/invoice-history")
     val content = document.getElementById("content") ?: return
     invoiceHistoryCachedRows = emptyArray()
     invoiceHistorySortField = "invoiceNumber"
@@ -160,7 +160,7 @@ private fun storeAndNavigateInvoiceHistoryEdit(row: dynamic) {
     payload.chassis = invoiceHistoryCell(row, "chassis")
     payload.totalAmount = invoiceHistoryCell(row, "totalAmount")
     window.sessionStorage.setItem(INVOICE_HISTORY_EDIT_SESSION_KEY, JSON.stringify(payload))
-    window.location.hash = "#/recreate-invoice"
+    navigateToApp("/recreate-invoice")
 }
 
 private fun invoiceHistoryEditButtonHtml(invoiceNumber: String): String {

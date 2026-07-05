@@ -120,7 +120,7 @@ fun showClientDetailsPage(clientId: Long) {
         </div>
     """
     document.getElementById("backToClientsBtn")?.addEventListener("click", { _: Event ->
-        window.location.hash = "#/master/client-transactions"
+        navigateToApp("/master/client-transactions")
     })
     document.getElementById("clientStatementPdfBtn")?.addEventListener("click", { _: Event ->
         openStatementPdfModal(clientId)
@@ -137,7 +137,7 @@ fun showClientAccountsPage() {
     // Stay on current hash; this function renders list view
     val content = document.getElementById("content")!!
     // Check if we're on master/clients route to use appropriate title
-    val isMasterList = window.location.hash.startsWith("#/master/client-transactions")
+    val isMasterList = routeStartsWith("/master/client-transactions")
     val pageTitle = if (isMasterList) "Client Transactions" else "Client Accounts Management"
     content.innerHTML = """
         <div id="clientTransactionsPage" class="client-page-container">
@@ -285,7 +285,7 @@ fun displayClients(clients: dynamic) {
         """
         <div class="client-item" style="$alertStyle">
             <div class="client-item-content">
-                <div class="client-info client-info-flex" onclick="window.location.hash='#/client/${client.id}'">
+                <div class="client-info client-info-flex" onclick="window.navigateToApp('/client/${client.id}')">
                     <div class="client-info-row">
                         <div>
                             <div class="client-name">$alertIcon ${client.clientName}</div>
@@ -311,7 +311,7 @@ fun displayClients(clients: dynamic) {
 }
 
 fun selectClient(clientId: Long) {
-    window.location.hash = "#/client/$clientId"
+    navigateToApp("/client/$clientId")
 }
 
 fun loadClientDetails(clientId: Long) {

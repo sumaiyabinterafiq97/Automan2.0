@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Memon — Automotive Solutions</title>
+    <link rel="stylesheet" href="/home.css">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%234CC9FF'/%3E%3C/svg%3E">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container header-inner">
+            <a class="logo" href="/">MEMON</a>
+            <nav class="nav-actions">
+                <a class="btn btn-ghost" id="signInLink" href="/automan/login">Sign In</a>
+                <a class="btn btn-primary" href="/automan/signup">Sign Up</a>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero">
+            <div class="container hero-inner">
+                <p class="eyebrow">memon.co.jp</p>
+                <h1>Automotive trading &amp; purchase management</h1>
+                <p class="lead">
+                    Memon provides vehicle sourcing, auction support, and operational tools for international car trading teams.
+                </p>
+            </div>
+        </section>
+
+        <section class="about">
+            <div class="container">
+                <h2>About Memon</h2>
+                <p>
+                    This is a placeholder homepage for Memon. Content and branding will be updated when the client provides final copy and design assets.
+                </p>
+                <p>
+                    Staff can access the Automan purchase management system using the Sign In button above.
+                </p>
+            </div>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>&copy; 2026 Memon &middot; memon.co.jp</p>
+        </div>
+    </footer>
+
+    <script>
+        (function () {
+            var signIn = document.getElementById('signInLink');
+            if (!signIn) return;
+            signIn.addEventListener('click', function (e) {
+                try {
+                    if (localStorage.getItem('authToken')) {
+                        e.preventDefault();
+                        window.location.href = '/automan/purchase';
+                    }
+                } catch (err) {
+                    /* ignore storage errors */
+                }
+            });
+        })();
+    </script>
+</body>
+</html>

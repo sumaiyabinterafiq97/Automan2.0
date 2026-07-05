@@ -1,12 +1,21 @@
 {
+  "buildCommand": "./gradlew jsBrowserProductionWebpack prepareVercelPublic",
+  "outputDirectory": "public",
+  "redirects": [
+    {
+      "source": "/automan",
+      "destination": "/automan/login",
+      "permanent": false
+    }
+  ],
   "rewrites": [
     {
       "source": "/api/:match*",
       "destination": "https://automan20-production.up.railway.app/api/:match*"
     },
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "source": "/automan/:path*",
+      "destination": "/automan/index.html"
     }
   ]
 }

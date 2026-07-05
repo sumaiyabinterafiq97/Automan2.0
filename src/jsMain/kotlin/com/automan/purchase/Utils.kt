@@ -500,45 +500,6 @@ fun apiUrl(path: String): String {
     return fullUrl
 }
 
-/**
- * In-app default after leaving a removed or invalid master screen.
- * Do not use `#/` here — that route shows the sign-in page and looks like a logout even when the token is still valid.
- */
-fun navigateToAppHome() {
-    window.location.hash = "#/purchase"
-}
-
-/** Hash route for edit purchase: `#/edit/{url-encoded-chassis}`. */
-fun editPurchaseRouteFromChassis(chassis: String): String {
-    val trimmed = chassis.trim()
-    if (trimmed.isEmpty()) return "#/purchase"
-    val encoded = js("encodeURIComponent(trimmed)").unsafeCast<String>()
-    return "#/edit/$encoded"
-}
-
-fun navigateToEditPurchase(chassis: String) {
-    window.location.hash = editPurchaseRouteFromChassis(chassis)
-}
-
-/** Segment after `#/edit/` (URL-decoded). Null when missing or empty. */
-fun chassisFromEditRoute(hash: String): String? {
-    if (!hash.startsWith("#/edit/")) return null
-    val segment = hash.substring(7)
-    if (segment.isEmpty()) return null
-    return try {
-        js("decodeURIComponent(segment)").unsafeCast<String>().trim()
-    } catch (_: dynamic) {
-        segment.trim()
-    }
-}
-
-/** True when the edit route uses a legacy numeric purchase id (e.g. `#/edit/2`). */
-fun isLegacyNumericEditRoute(hash: String): Boolean {
-    if (!hash.startsWith("#/edit/")) return false
-    val segment = hash.substring(7)
-    return segment.isNotEmpty() && segment.all { it.isDigit() }
-}
-
 // Helper function to safely extract numeric value from database field (handles strings with ¥, numbers, null, etc.)
 fun extractNumericFromDbValue(value: dynamic): String {
     if (value == null || value == js("undefined")) return ""

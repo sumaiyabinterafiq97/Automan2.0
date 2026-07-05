@@ -95,3 +95,46 @@ tasks.named("jsBrowserProductionWebpack") {
         }
     }
 }
+
+tasks.register("prepareVercelPublic") {
+    dependsOn("jsBrowserProductionWebpack")
+    doLast {
+        val sourceDir = file("build/dist/js/productionExecutable")
+        val automanDir = file("public/automan")
+        val publicDir = file("public")
+        automanDir.mkdirs()
+        publicDir.mkdirs()
+        val automanFiles = listOf(
+            "index.html",
+            "styles.css",
+            "automan-car-purchase.js",
+            "rixo-price-mapping.js",
+            "booking-mapping.js",
+            "booking-mapping-modal.js",
+            "invoice-history-pdf-btn.jpeg",
+        )
+        if (sourceDir.exists()) {
+            automanFiles.forEach { name ->
+                val f = sourceDir.resolve(name)
+                if (f.exists()) {
+                    f.copyTo(automanDir.resolve(name), overwrite = true)
+                }
+            }
+            val imagesDir = sourceDir.resolve("images")
+            if (imagesDir.exists()) {
+                val targetImages = automanDir.resolve("images")
+                targetImages.mkdirs()
+                imagesDir.listFiles()?.forEach { img ->
+                    if (img.isFile) {
+                        img.copyTo(targetImages.resolve(img.name), overwrite = true)
+                    }
+                }
+            }
+            println("✅ Copied Automan build to public/automan/")
+        }
+        val homepageDir = file("homepage")
+        homepageDir.resolve("index.html").copyTo(publicDir.resolve("index.html"), overwrite = true)
+        homepageDir.resolve("home.css").copyTo(publicDir.resolve("home.css"), overwrite = true)
+        println("✅ Copied homepage to public/")
+    }
+}
