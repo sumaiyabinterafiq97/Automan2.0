@@ -731,10 +731,7 @@ fun setupCarBookingPageListeners() {
     
     // Gear: open Consignee Map master page in a new tab; remind user to refresh for latest mappings.
     document.getElementById("manageBookingMappingsBtn")?.addEventListener("click", { _: Event ->
-        val origin = window.location.origin
-        val path = window.location.pathname
-        val search = window.location.search
-        val consigneeMapUrl = "$origin$path$search#/master/consignee-map"
+        val consigneeMapUrl = buildAppAbsoluteUrl("/master/consignee-map")
         Logger.debug("Opening Consignee Map in new tab: $consigneeMapUrl")
         window.open(consigneeMapUrl, "_blank")
         showConsigneeMapRefreshNoticeModal()

@@ -10543,8 +10543,7 @@ fun setupAddFormListeners() {
             event.preventDefault()
             event.stopImmediatePropagation()
             event.stopPropagation()
-            val currentUrl = window.location.origin + window.location.pathname
-            val url = "$currentUrl#/master/supplier-map"
+            val url = buildAppAbsoluteUrl("/master/supplier-map")
             console.log("🟢 [SUPPLIER BUTTON] Opening URL in new tab:", url)
             window.setTimeout({
                 val newWindow = window.open(url, "_blank")
@@ -10569,7 +10568,9 @@ fun setupAddFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/supplier-map';
+                    var url = (typeof window.buildAppAbsoluteUrl === 'function')
+                        ? window.buildAppAbsoluteUrl('/master/supplier-map')
+                        : (window.location.origin + '/master/supplier-map');
                     console.log('🟢 [SUPPLIER] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
@@ -10610,8 +10611,7 @@ fun setupAddFormListeners() {
             event.preventDefault()
             event.stopImmediatePropagation()
             event.stopPropagation()
-            val currentUrl = window.location.origin + window.location.pathname
-            val url = "$currentUrl#/master/car-brands-map"
+            val url = buildAppAbsoluteUrl("/master/car-brands-map")
             console.log("🔵 [CAR BRANDS BUTTON] Opening URL in new tab:", url)
             // Use setTimeout to ensure this happens after all other handlers
             window.setTimeout({
@@ -10640,7 +10640,9 @@ fun setupAddFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/car-brands-map';
+                    var url = (typeof window.buildAppAbsoluteUrl === 'function')
+                        ? window.buildAppAbsoluteUrl('/master/car-brands-map')
+                        : (window.location.origin + '/master/car-brands-map');
                     console.log('🔵 [CAR BRANDS] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
@@ -10662,7 +10664,9 @@ fun setupAddFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/car-brands-map';
+                    var url = (typeof window.buildAppAbsoluteUrl === 'function')
+                        ? window.buildAppAbsoluteUrl('/master/car-brands-map')
+                        : (window.location.origin + '/master/car-brands-map');
                     console.log('🔵 [CAR BRANDS] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
@@ -16732,8 +16736,7 @@ fun setupEditFormListeners() {
             event.preventDefault()
             event.stopImmediatePropagation()
             event.stopPropagation()
-            val currentUrl = window.location.origin + window.location.pathname
-            val url = "$currentUrl#/master/supplier-map"
+            val url = buildAppAbsoluteUrl("/master/supplier-map")
             console.log("🟢 [SUPPLIER BUTTON] Opening URL in new tab:", url)
             window.setTimeout({
                 val newWindow = window.open(url, "_blank")
@@ -16758,7 +16761,9 @@ fun setupEditFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/supplier-map';
+                    var url = (typeof window.buildAppAbsoluteUrl === 'function')
+                        ? window.buildAppAbsoluteUrl('/master/supplier-map')
+                        : (window.location.origin + '/master/supplier-map');
                     console.log('🟢 [SUPPLIER] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
@@ -16798,8 +16803,7 @@ fun setupEditFormListeners() {
             event.preventDefault()
             event.stopImmediatePropagation()
             event.stopPropagation()
-            val currentUrl = window.location.origin + window.location.pathname
-            val url = "$currentUrl#/master/car-brands-map"
+            val url = buildAppAbsoluteUrl("/master/car-brands-map")
             console.log("🔵 [CAR BRANDS BUTTON EDIT] Opening URL in new tab:", url)
             window.setTimeout({
                 val newWindow = window.open(url, "_blank")
@@ -16825,7 +16829,9 @@ fun setupEditFormListeners() {
                         e.stopImmediatePropagation();
                         e.stopPropagation();
                     }
-                    var url = window.location.origin + window.location.pathname + '#/master/car-brands-map';
+                    var url = (typeof window.buildAppAbsoluteUrl === 'function')
+                        ? window.buildAppAbsoluteUrl('/master/car-brands-map')
+                        : (window.location.origin + '/master/car-brands-map');
                     console.log('🔵 [CAR BRANDS EDIT] Opening URL:', url);
                     setTimeout(function() {
                         var newWin = window.open(url, '_blank');
@@ -20268,7 +20274,7 @@ fun handleRixoTransportPdfGeneration() {
     console.log("Storing selected IDs for Rixo Transport:", selectedIds)
     
     // Navigate to rixo transport page in new tab
-    val url = "${window.location.origin}${window.location.pathname}#/rixo-generator?ids=${selectedIds.joinToString(",")}"
+    val url = buildAppAbsoluteUrl("/rixo-generator?ids=${selectedIds.joinToString(",")}")
     window.open(url, "_blank")
 }
 
@@ -20281,7 +20287,7 @@ fun navigateToInvoicePage(selectedIds: List<Long>) {
     
     // Navigate to invoice page in new tab (similar to Rixo Transport)
         val idsParam = selectedIds.joinToString(",")
-    val url = "${window.location.origin}${window.location.pathname}#/invoice?ids=$idsParam"
+    val url = buildAppAbsoluteUrl("/invoice?ids=$idsParam")
     console.log("Opening invoice page in new tab:", url)
     window.open(url, "_blank")
 }

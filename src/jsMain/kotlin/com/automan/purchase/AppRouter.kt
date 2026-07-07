@@ -67,7 +67,10 @@ fun isAuthRoute(): Boolean = routeEquals("/login") || routeEquals("/signup")
 fun hasAuthToken(): Boolean = !safeLocalStorageGet("authToken").isNullOrBlank()
 
 private fun buildAppFullPath(path: String): String {
-    val normalized = path.trim().let {
+    val trimmed = path.trim()
+    val pathPart = trimmed.substringBefore('?')
+    val queryPart = trimmed.substringAfter('?', "")
+    val normalized = pathPart.let {
         when {
             it.isEmpty() -> "/"
             it.startsWith("/") -> it
@@ -78,7 +81,33 @@ private fun buildAppFullPath(path: String): String {
         if (window.location.pathname.startsWith(APP_BASE_PATH)) APP_BASE_PATH else ""
     }
     val fullPath = if (base.isNotEmpty()) "$base$normalized" else normalized
-    return fullPath + window.location.search
+    val routeQuery = if (queryPart.isNotEmpty()) "?$queryPart" else ""
+    val currentSearch = window.location.search
+    return if (routeQuery.isNotEmpty()) {
+        fullPath + routeQuery
+    } else {
+        fullPath + currentSearch
+    }
+}
+
+/** Full browser URL for opening an app route in a new tab (pathname routing, no hash). */
+fun buildAppAbsoluteUrl(path: String): String {
+    val trimmed = path.trim()
+    val pathPart = trimmed.substringBefore('?')
+    val queryPart = trimmed.substringAfter('?', "")
+    val normalized = pathPart.let {
+        when {
+            it.isEmpty() -> "/"
+            it.startsWith("/") -> it
+            else -> "/$it"
+        }
+    }
+    val base = detectedAppBasePath().ifEmpty {
+        if (window.location.pathname.startsWith(APP_BASE_PATH)) APP_BASE_PATH else ""
+    }
+    val fullPath = if (base.isNotEmpty()) "$base$normalized" else normalized
+    val query = if (queryPart.isNotEmpty()) "?$queryPart" else ""
+    return window.location.origin + fullPath + query
 }
 
 /** Updates the browser URL without re-running the router (avoids re-fetch loops on edit). */
@@ -190,5 +219,8 @@ fun ensureAppPathOrRedirect(): Boolean {
 fun exposeNavigateToAppOnWindow() {
     window.asDynamic().navigateToApp = { path: String ->
         navigateToApp(path)
+    }
+    window.asDynamic().buildAppAbsoluteUrl = { path: String ->
+        buildAppAbsoluteUrl(path)
     }
 }
