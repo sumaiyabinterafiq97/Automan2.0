@@ -5157,7 +5157,7 @@ fun createApp(root: Element) {
         clearCarBookingStates()
         closeSidebar()
         clearPurchaseListPreserveFiltersForEditReturn()
-        navigateToApp("/purchase")
+        navigateToApp("/purchase", forceRefresh = true)
     })
     
     document.getElementById("newBtn")?.addEventListener("click", { _: Event ->
@@ -5555,6 +5555,9 @@ fun updateContent(root: Element) {
     if (ensureAppPathOrRedirect()) return
 
     val route = currentRoute()
+    if (!routeAtEquals(route, "/purchase")) {
+        invalidatePurchaseListLoads()
+    }
     console.log("🔵 [ROUTER] updateContent() called with route: '$route'")
     val content = document.getElementById("content")
     if (content == null) {
@@ -5562,34 +5565,34 @@ fun updateContent(root: Element) {
         return
     }
 
-    if (!routeStartsWith("/booking") && !routeStartsWith("/recalculate-booking")) {
+    if (!routeAtStartsWith(route, "/booking") && !routeAtStartsWith(route, "/recalculate-booking")) {
         clearCarBookingStates()
     }
 
     when {
-        routeStartsWith("/edit/") -> markPurchaseListPreserveFiltersForEditReturn()
-        !routeEquals("/purchase") -> clearPurchaseListPreserveFiltersForEditReturn()
+        routeAtStartsWith(route, "/edit/") -> markPurchaseListPreserveFiltersForEditReturn()
+        !routeAtEquals(route, "/purchase") -> clearPurchaseListPreserveFiltersForEditReturn()
     }
 
     when {
-        routeEquals("/login") -> {
+        routeAtEquals(route, "/login") -> {
             removeHamburgerMenu()
             showAuthPage(signInMode = true)
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeEquals("/signup") -> {
+        routeAtEquals(route, "/signup") -> {
             removeHamburgerMenu()
             showAuthPage(signInMode = false)
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeEquals("/purchase") -> {
+        routeAtEquals(route, "/purchase") -> {
             ensureSidebarPresent()
             showPurchaseList()
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("/add") -> {
+        routeAtStartsWith(route, "/add") -> {
             Logger.debug("[ROUTER] Navigating to Add Purchase page")
             // Ensure scrolling is enabled when showing form
             js("if (typeof window.ensureScrollingRestored === 'function') { window.ensureScrollingRestored(); }")
@@ -5610,18 +5613,23 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("/edit/") -> {
+        routeAtStartsWith(route, "/edit/") -> {
+            console.log("🟢 [ROUTER] Matched edit branch for route: '$route', chassis='${chassisFromEditRoute(route)}'")
             when {
                 isLegacyNumericEditRoute(route) -> {
                     val id = route.removePrefix("/edit/").toLongOrNull()
-                    if (id != null) showEditForm(id) else navigateToPurchaseList(forceClearFilters = true)
+                    if (id != null) {
+                        showEditForm(id)
+                    } else {
+                        showEditPurchaseLoadError("Invalid purchase ID in URL.")
+                    }
                 }
                 else -> {
                     val chassis = chassisFromEditRoute(route)
                     if (chassis != null && chassis.isNotEmpty()) {
-                        showEditFormByChassis(chassis)
+                        showEditFormByChassis(chassis, fallbackId = consumeEditPurchaseFallbackId())
                     } else {
-                        navigateToPurchaseList(forceClearFilters = true)
+                        showEditPurchaseLoadError("Invalid chassis in URL.")
                     }
                 }
             }
@@ -5631,14 +5639,14 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("invoice-history") -> {
+        routeAtStartsWith(route, "invoice-history") -> {
             showInvoiceHistoryPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("recreate-invoice") ||
-            routeStartsWith("invoice") -> {
+        routeAtStartsWith(route, "recreate-invoice") ||
+            routeAtStartsWith(route, "invoice") -> {
             showInvoicePage()
             ensureSidebarPresent() // Call after content is set
             // Hide sorting bar on invoice page
@@ -5646,19 +5654,19 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("rixo-history") -> {
+        routeAtStartsWith(route, "rixo-history") -> {
             showRixoHistoryPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("rixo-generator") ||
-            routeStartsWith("rixo-updater") ||
-            routeStartsWith("rixo-transport") -> {
+        routeAtStartsWith(route, "rixo-generator") ||
+            routeAtStartsWith(route, "rixo-updater") ||
+            routeAtStartsWith(route, "rixo-transport") -> {
             showRixoRequestGeneratorPage()
             ensureSidebarPresent() // Call after content is set
         }
-        routeStartsWith("recalculate-booking/recalculation") -> {
+        routeAtStartsWith(route, "recalculate-booking/recalculation") -> {
             ensureSidebarPresent()
             if (cnfPageSelectedCars.isNotEmpty()) {
                 showCnfCalculationPage(
@@ -5671,11 +5679,11 @@ fun updateContent(root: Element) {
                 navigateToApp("/recalculate-booking")
             }
         }
-        routeStartsWith("recalculate-booking") -> {
+        routeAtStartsWith(route, "recalculate-booking") -> {
             showCarBookingPage()
             ensureSidebarPresent()
         }
-        routeStartsWith("booking/calculation") -> {
+        routeAtStartsWith(route, "booking/calculation") -> {
             ensureSidebarPresent()
             if (cnfPageSelectedCars.isNotEmpty()) {
                 showCnfCalculationPage(
@@ -5688,17 +5696,17 @@ fun updateContent(root: Element) {
                 navigateToApp("/booking")
             }
         }
-        routeStartsWith("booking") -> {
+        routeAtStartsWith(route, "booking") -> {
             showCarBookingPage()
             ensureSidebarPresent() // Call after content is set
         }
-        routeStartsWith("shipping-history") -> {
+        routeAtStartsWith(route, "shipping-history") -> {
             showShippingHistoryPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("/users/edit/") -> {
+        routeAtStartsWith(route, "/users/edit/") -> {
             val id = route.removePrefix("/users/edit/").toLongOrNull()
             if (id != null) {
                 showEditUserPage(id)
@@ -5711,7 +5719,7 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("pending-signups") -> {
+        routeAtStartsWith(route, "pending-signups") -> {
             showPendingSignupsPage()
             ensureSidebarPresent() // Call after content is set
             // Hide sorting bar on pending signups page
@@ -5719,13 +5727,13 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("/role-request") -> {
+        routeAtStartsWith(route, "/role-request") -> {
             showRoleRequestForm()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("/users/add") -> {
+        routeAtStartsWith(route, "/users/add") -> {
             showAddUserForm()
             ensureSidebarPresent() // Call after content is set
             // Hide sorting bar on add user page
@@ -5733,7 +5741,7 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("users") -> {
+        routeAtStartsWith(route, "users") -> {
             showUserManagementPage()
             ensureSidebarPresent() // Call after content is set
             // Hide sorting bar on user management page
@@ -5741,7 +5749,7 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/client-transactions") -> {
+        routeAtStartsWith(route, "master/client-transactions") -> {
             // Client Transactions view (accounts + alerts + list)
             showClientAccountsPage()
             ensureSidebarPresent()
@@ -5749,145 +5757,145 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         // Must be before #/master/client: "#/master/client-map".startsWith("#/master/client") is true
-        routeStartsWith("master/client-map") -> {
+        routeAtStartsWith(route, "master/client-map") -> {
             showClientMapPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/client") -> {
+        routeAtStartsWith(route, "master/client") -> {
             showDynamicMasterSetPage("clients")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/consignee-map") -> {
+        routeAtStartsWith(route, "master/consignee-map") -> {
             showConsigneeMapPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/consignee") -> {
+        routeAtStartsWith(route, "master/consignee") -> {
             showDynamicMasterSetPage("consignee")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/country") -> {
+        routeAtStartsWith(route, "master/country") -> {
             showDynamicMasterSetPage("country")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/supplier-map") -> {
+        routeAtStartsWith(route, "master/supplier-map") -> {
             showSupplierMapPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/shipping-charge-map") -> {
+        routeAtStartsWith(route, "master/shipping-charge-map") -> {
             showShippingChargeMapPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/rixo-mapping") -> {
+        routeAtStartsWith(route, "master/rixo-mapping") -> {
             showRixoMappingTreePage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/supplier") -> {
+        routeAtStartsWith(route, "master/supplier") -> {
             showDynamicMasterSetPage("supplier")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/rixo-company") -> {
+        routeAtStartsWith(route, "master/rixo-company") -> {
             showDynamicMasterSetPage("rixo_company")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/stock-location") -> {
+        routeAtStartsWith(route, "master/stock-location") -> {
             showDynamicMasterSetPage("stock_location")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/repair-company") -> {
+        routeAtStartsWith(route, "master/repair-company") -> {
             showDynamicMasterSetPage("repair_company")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/car-brands-map") -> {
+        routeAtStartsWith(route, "master/car-brands-map") -> {
             showCarBrandsMapPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/car-brands") -> {
+        routeAtStartsWith(route, "master/car-brands") -> {
             showDynamicMasterSetPage("car_brands")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/bank-accounts") -> {
+        routeAtStartsWith(route, "master/bank-accounts") -> {
             showDynamicMasterSetPage("bank_accounts")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/venue-id") -> {
+        routeAtStartsWith(route, "master/venue-id") -> {
             showDynamicMasterSetPage("venue_id")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/pol") -> {
+        routeAtStartsWith(route, "master/pol") -> {
             showDynamicMasterSetPage("pol")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/pod") -> {
+        routeAtStartsWith(route, "master/pod") -> {
             showDynamicMasterSetPage("pod")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/fuel") -> {
+        routeAtStartsWith(route, "master/fuel") -> {
             showDynamicMasterSetPage("fuel")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/car-grade") -> {
+        routeAtStartsWith(route, "master/car-grade") -> {
             openMasterCarGradeRoute()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/car-shift") -> {
+        routeAtStartsWith(route, "master/car-shift") -> {
             showDynamicMasterSetPage("shift")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/type-of-vehicles") -> {
+        routeAtStartsWith(route, "master/type-of-vehicles") -> {
             showDynamicMasterSetPage("type_of_vehicle")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("master/number-place") -> {
+        routeAtStartsWith(route, "master/number-place") -> {
             showDynamicMasterSetPage("number_place")
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("/master/set/") -> {
+        routeAtStartsWith(route, "/master/set/") -> {
             val encoded = route.removePrefix("/master/set/")
             val fieldName = js("decodeURIComponent(encoded)") as String
             if (fieldName.trim().equals("car_grade", ignoreCase = true)) {
@@ -5899,7 +5907,7 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
             }
         }
-        routeStartsWith("/client/") -> {
+        routeAtStartsWith(route, "/client/") -> {
             val id = route.removePrefix("/client/").toLongOrNull()
             if (id != null) {
                 showClientDetailsPage(id)
@@ -5910,12 +5918,18 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeStartsWith("/clients") -> {
+        routeAtStartsWith(route, "/clients") -> {
             navigateToApp("/master/client-transactions")
         }
         else -> {
             if (!hasAuthToken()) {
                 navigateToApp("/login")
+            } else if (routeAtStartsWith(route, "/edit/")) {
+                Logger.warn("[ROUTER] Unhandled edit route '$route' — showing error instead of redirecting")
+                ensureSidebarPresent()
+                showEditPurchaseLoadError("Could not open edit purchase for this URL.")
+                (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+                (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
             } else {
                 ensureSidebarPresent()
                 navigateToPurchaseList(forceClearFilters = true)
@@ -6520,7 +6534,7 @@ fun setupSidebarListeners() {
         purchaseListBtn.addEventListener("click", { _: Event ->
             closeSidebar()
             clearPurchaseListPreserveFiltersForEditReturn()
-            navigateToApp("/purchase")
+            navigateToApp("/purchase", forceRefresh = true)
         })
     }
     
@@ -15581,40 +15595,73 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     }
 }
 
+private var editPurchaseLoadGeneration = 0
+
+fun showEditPurchaseLoading(label: String = "") {
+    invalidatePurchaseListLoads()
+    val content = document.getElementById("content") ?: return
+    val detail = label.trim().ifEmpty { "purchase" }
+    content.innerHTML = """
+        <div class="edit-purchase-container" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; background: #fafbfc;">
+            <h2>Edit Purchase</h2>
+            <div style="text-align: center; color: #666; padding: 40px;">
+                Loading $detail...
+            </div>
+        </div>
+    """.trimIndent()
+}
+
+private fun showEditPurchaseLoadError(message: String) {
+    val content = document.getElementById("content") ?: return
+    val safeMessage = escapeHtml(message)
+    content.innerHTML = """
+        <div class="edit-purchase-container" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; background: #fafbfc;">
+            <h2>Edit Purchase</h2>
+            <p style="color: #b91c1c; margin: 16px 0;">Failed to load purchase data: $safeMessage</p>
+            <button type="button" id="editLoadErrorBackBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Back to Purchase List
+            </button>
+        </div>
+    """.trimIndent()
+    document.getElementById("editLoadErrorBackBtn")?.addEventListener("click", { _: Event ->
+        navigateToPurchaseList(forceClearFilters = false)
+    })
+}
+
 fun showEditForm(id: Long) {
-    loadPurchaseForEdit(apiUrl("purchases/purchase/$id"))
+    showEditPurchaseLoading("#$id")
+    loadPurchaseForEdit("purchases/purchase/$id")
 }
 
-fun showEditFormByChassis(chassis: String) {
-    val encoded = js("encodeURIComponent(chassis.trim())").unsafeCast<String>()
-    loadPurchaseForEdit(apiUrl("purchases/chassis/$encoded"))
+fun showEditFormByChassis(chassis: String, fallbackId: Long? = null) {
+    showEditPurchaseLoading(chassis)
+    val encoded = js("encodeURIComponent")(chassis.trim()).unsafeCast<String>()
+    loadPurchaseForEdit("purchases/chassis/$encoded", fallbackId = fallbackId)
 }
 
-private fun loadPurchaseForEdit(fetchUrl: String) {
-    window.fetch(fetchUrl).then { response ->
-        if (response.ok) {
-            response.json().then { purchaseData ->
+private fun loadPurchaseForEdit(endpoint: String, fallbackId: Long? = null, triedFallback: Boolean = false) {
+    val generation = ++editPurchaseLoadGeneration
+    minimalPurchaseScope.launch {
+        when (val result = ApiClient.get<dynamic>(endpoint)) {
+            is ApiResult.Success -> {
+                if (generation != editPurchaseLoadGeneration) return@launch
+                val purchaseData = result.data
                 normalizeApiPurchaseForClient(purchaseData)
-                console.log("🔍 [DEBUG] Raw purchase data received:", JSON.stringify(purchaseData))
-                val shakenValue = js("purchaseData.shaken").unsafeCast<Any?>()
-                console.log("🔍 [DEBUG] Shaken field in raw data:", shakenValue, "Type:", js("typeof purchaseData.shaken"))
                 showEditFormWithData(purchaseData)
             }
-        } else {
-            showMessage("Failed to load purchase data", "error")
-            navigateToPurchaseList(forceClearFilters = true)
+            is ApiResult.Error -> {
+                if (generation != editPurchaseLoadGeneration) return@launch
+                if (!triedFallback && fallbackId != null) {
+                    loadPurchaseForEdit("purchases/purchase/$fallbackId", triedFallback = true)
+                } else {
+                    Logger.error("Failed to load purchase for edit ($endpoint): ${result.message}")
+                    showEditPurchaseLoadError(result.message)
+                }
+            }
         }
-    }.catch { error ->
-        val errorMsg = try {
-            val msg = js("error && (error.message || (error.toString && error.toString()))")
-            (msg?.toString() ?: "Unknown error").ifBlank { "Unknown error" }
-        } catch (e: dynamic) {
-            "Unknown error"
-        }
-        showMessage("Failed to load purchase data: $errorMsg", "error")
-        navigateToPurchaseList(forceClearFilters = true)
     }
 }
+
 fun showEditFormWithData(purchaseData: dynamic) {
     // Ensure scrolling is enabled when showing form
     js("if (typeof window.ensureScrollingRestored === 'function') { window.ensureScrollingRestored(); }")
@@ -15623,7 +15670,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
     if (chassisForRoute.isNotEmpty()) {
         val route = editPurchaseRouteFromChassis(chassisForRoute)
         if (currentRoute() != route) {
-            navigateToApp(route, replace = true)
+            replaceAppRouteSilently(route)
         }
     }
     // Chassis mapping may store multi-value cells as "a;b;c"; show only first token in edit form defaults.
@@ -16508,7 +16555,7 @@ private fun syncEditPurchaseRouteAfterSave(updatedPurchase: dynamic) {
     if (chassisForRoute.isEmpty()) return
     val route = editPurchaseRouteFromChassis(chassisForRoute)
     if (currentRoute() != route) {
-        navigateToApp(route, replace = true)
+        replaceAppRouteSilently(route)
     }
 }
 
@@ -16825,7 +16872,7 @@ fun setupEditFormListeners() {
     })
     
     document.getElementById("editCancelBtn")?.addEventListener("click", { _: Event ->
-        navigateToApp("/purchase")
+        navigateToApp("/purchase", forceRefresh = true)
     })
     
     // Form submit listener - matches documentation (simple approach)

@@ -41,20 +41,32 @@ fun currentRoute(): String {
 
 fun routeStartsWith(prefix: String): Boolean {
     val route = currentRoute()
-    val p = if (prefix.startsWith("/")) prefix else "/$prefix"
-    return route == p || route.startsWith("$p/")
+    return routeAtStartsWith(route, prefix)
 }
 
 fun routeEquals(path: String): Boolean {
+    return routeAtEquals(currentRoute(), path)
+}
+
+/** Route match against a captured route string (avoids re-reading URL mid-router pass). */
+fun routeAtStartsWith(route: String, prefix: String): Boolean {
+    val p = if (prefix.startsWith("/")) prefix else "/$prefix"
+    val base = p.trimEnd('/')
+    if (base.isEmpty()) return route.isNotEmpty()
+    if (route == base) return true
+    return route.startsWith("$base/")
+}
+
+fun routeAtEquals(route: String, path: String): Boolean {
     val p = if (path.startsWith("/")) path else "/$path"
-    return currentRoute() == p
+    return route == p
 }
 
 fun isAuthRoute(): Boolean = routeEquals("/login") || routeEquals("/signup")
 
 fun hasAuthToken(): Boolean = !safeLocalStorageGet("authToken").isNullOrBlank()
 
-fun navigateToApp(path: String, replace: Boolean = false) {
+private fun buildAppFullPath(path: String): String {
     val normalized = path.trim().let {
         when {
             it.isEmpty() -> "/"
@@ -66,16 +78,32 @@ fun navigateToApp(path: String, replace: Boolean = false) {
         if (window.location.pathname.startsWith(APP_BASE_PATH)) APP_BASE_PATH else ""
     }
     val fullPath = if (base.isNotEmpty()) "$base$normalized" else normalized
-    val target = fullPath + window.location.search
+    return fullPath + window.location.search
+}
+
+/** Updates the browser URL without re-running the router (avoids re-fetch loops on edit). */
+fun replaceAppRouteSilently(path: String) {
+    val target = buildAppFullPath(path)
+    val current = window.location.pathname + window.location.search
+    if (current == target) return
+    window.history.replaceState(null, "", target)
+}
+
+fun navigateToApp(path: String, replace: Boolean = false, forceRefresh: Boolean = false) {
+    val target = buildAppFullPath(path)
     val current = window.location.pathname + window.location.search
     if (current == target) {
-        notifyRouteUpdate()
+        if (forceRefresh) notifyRouteUpdate()
         return
     }
     if (replace) {
         window.history.replaceState(null, "", target)
     } else {
         window.history.pushState(null, "", target)
+    }
+    // Legacy hash routes (#/edit/ggg) must not survive pushState or migrateLegacyHash loops with pathname routing.
+    if (window.location.hash.isNotEmpty()) {
+        window.location.hash = ""
     }
     notifyRouteUpdate()
 }
@@ -87,23 +115,29 @@ fun navigateToAppHome() {
 fun editPurchaseRouteFromChassis(chassis: String): String {
     val trimmed = chassis.trim()
     if (trimmed.isEmpty()) return "/purchase"
-    val encoded = js("encodeURIComponent(trimmed)").unsafeCast<String>()
+    val encoded = js("encodeURIComponent")(trimmed).unsafeCast<String>()
     return "/edit/$encoded"
 }
 
 fun navigateToEditPurchase(chassis: String) {
-    navigateToApp(editPurchaseRouteFromChassis(chassis))
+    val trimmed = chassis.trim()
+    if (trimmed.isEmpty()) {
+        showMessage("Invalid purchase. Missing chassis.", "error")
+        return
+    }
+    navigateToApp(editPurchaseRouteFromChassis(trimmed))
 }
 
 fun chassisFromEditRoute(route: String = currentRoute()): String? {
     if (!route.startsWith("/edit/")) return null
-    val segment = route.removePrefix("/edit/")
+    val segment = route.removePrefix("/edit/").substringBefore("?").trim()
     if (segment.isEmpty()) return null
-    return try {
-        js("decodeURIComponent(segment)").unsafeCast<String>().trim()
+    val decoded = try {
+        js("decodeURIComponent")(segment).unsafeCast<String>().trim()
     } catch (_: dynamic) {
         segment.trim()
     }
+    return decoded.takeIf { it.isNotEmpty() }
 }
 
 fun isLegacyNumericEditRoute(route: String = currentRoute()): Boolean {
@@ -116,7 +150,12 @@ fun migrateLegacyHashIfPresent(): Boolean {
     val hash = window.location.hash
     if (!hash.startsWith("#/")) return false
     val path = hash.removePrefix("#")
+    val normalizedPath = path.trimEnd('/').ifEmpty { "/" }
+    val current = currentRoute().trimEnd('/').ifEmpty { "/" }
     window.location.hash = ""
+    if (current == normalizedPath || currentRoute().startsWith("$normalizedPath/")) {
+        return false
+    }
     navigateToApp(path, replace = true)
     return true
 }

@@ -1097,9 +1097,68 @@ private fun togglePurchaseTableSort(field: String) {
     refreshPurchaseRowsFromBase(resetPage = true)
 }
 
-fun navigateToPurchaseList(forceClearFilters: Boolean = false) {
+fun navigateToPurchaseList(forceClearFilters: Boolean = false, forceRefresh: Boolean = true) {
     if (forceClearFilters) resetPurchaseListFilters()
-    navigateToApp("/purchase")
+    navigateToApp("/purchase", forceRefresh = forceRefresh)
+}
+
+/** Bumps generation so in-flight purchase list fetches skip DOM updates after navigation away. */
+private var purchaseListLoadGeneration = 0
+
+fun invalidatePurchaseListLoads() {
+    purchaseListLoadGeneration++
+}
+
+fun setupPurchaseEditDelegationOnTable() {
+    val table = document.getElementById("purchaseTable") ?: return
+    if (table.hasAttribute("data-purchase-edit-delegation")) return
+    table.setAttribute("data-purchase-edit-delegation", "true")
+    table.addEventListener("click", { event ->
+        // Use Element (not HTMLElement): clicks on SVG/path inside buttons are not HTMLElements.
+        val target = event.target as? Element ?: return@addEventListener
+        val btn = target.closest(".edit-btn, .card-edit-btn") as? HTMLElement ?: return@addEventListener
+        event.preventDefault()
+        event.stopPropagation()
+        handlePurchaseEditButtonClick(btn)
+    })
+}
+
+/** One-shot purchase id used if chassis lookup fails after navigating to /edit/{chassis}. */
+private const val EDIT_PURCHASE_FALLBACK_ID_KEY = "automanEditPurchaseFallbackId"
+
+fun stashEditPurchaseFallbackId(id: Long) {
+    try {
+        window.sessionStorage.setItem(EDIT_PURCHASE_FALLBACK_ID_KEY, id.toString())
+    } catch (_: dynamic) { }
+}
+
+fun consumeEditPurchaseFallbackId(): Long? {
+    return try {
+        val raw = window.sessionStorage.getItem(EDIT_PURCHASE_FALLBACK_ID_KEY)?.trim().orEmpty()
+        window.sessionStorage.removeItem(EDIT_PURCHASE_FALLBACK_ID_KEY)
+        raw.toLongOrNull()?.takeIf { it > 0L }
+    } catch (_: dynamic) {
+        null
+    }
+}
+
+private fun handlePurchaseEditButtonClick(btn: HTMLElement) {
+    val chassis = btn.getAttribute("data-chassis")?.trim().orEmpty()
+    val idStr = btn.getAttribute("data-id")?.trim().orEmpty()
+    val id = idStr.toLongOrNull()
+    purchaseReturnPageFromEdit = currentPage
+    when {
+        chassis.isNotEmpty() -> {
+            if (id != null && id > 0L) stashEditPurchaseFallbackId(id)
+            invalidatePurchaseListLoads()
+            navigateToEditPurchase(chassis)
+        }
+        id != null && id > 0L -> {
+            invalidatePurchaseListLoads()
+            navigateToApp("/edit/$id")
+        }
+        else -> showMessage("Invalid purchase. Cannot edit this purchase.", "error")
+    }
 }
 
 fun showPurchaseList(forceClearFilters: Boolean = false) {
@@ -1211,6 +1270,7 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
     
     setupPurchaseSearchBarListeners()
     setupPurchaseDateQuickFilterMenuPortal()
+    setupPurchaseEditDelegationOnTable()
     loadPurchases()
 }
 
@@ -2263,18 +2323,24 @@ fun exportPurchasesToExcel() {
 }
 
 fun loadPurchases() {
+    if (!routeEquals("/purchase")) return
     Logger.debug("loadPurchases function called")
     val endpoint = "purchases"
+    val generation = purchaseListLoadGeneration
     
     val scope = MainScope()
     scope.launch {
         val result = ApiClient.get<Array<dynamic>>(endpoint)
         result.fold(
             onSuccess = { purchases ->
+                if (generation != purchaseListLoadGeneration) return@fold
+                if (!routeEquals("/purchase")) return@fold
                 Logger.debug("Purchases data received: ${purchases.size} items")
                 displayPurchases(purchases)
             },
             onError = { message, status ->
+                if (generation != purchaseListLoadGeneration) return@fold
+                if (!routeEquals("/purchase")) return@fold
                 Logger.error("API call failed: $message (status: $status)")
                 ErrorHandler.showError("Failed to load purchases: $message")
             }
@@ -2867,7 +2933,8 @@ fun setupPurchaseSearchBarListeners() {
 }
 
 fun displayPurchases(purchases: dynamic) {
-    val table = document.getElementById("purchaseTable")!!
+    if (!routeEquals("/purchase")) return
+    val table = document.getElementById("purchaseTable") ?: return
 
     purchaseSearchServerMode = false
     purchaseSearchServerTotal = 0
@@ -2959,7 +3026,8 @@ private fun computePurchaseListViewSlice(): PurchaseListViewSlice {
 }
 
 fun displayPurchasesWithPagination() {
-    val table = document.getElementById("purchaseTable")!!
+    if (!routeEquals("/purchase")) return
+    val table = document.getElementById("purchaseTable") ?: return
     val deviceType = getDeviceType()
     
     // Use card layout for mobile, table for tablet/desktop
@@ -3088,7 +3156,7 @@ fun displayPurchasesWithPagination() {
             <tr>
                 <td style="padding: 8px 12px;">
                     ${if (isEditor() && purchaseId > 0L && chassisStr.isNotEmpty()) """
-                    <button class="edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit"
+                    <button type="button" class="edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit"
                             style="display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
                         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
@@ -3142,26 +3210,7 @@ fun displayPurchasesWithPagination() {
     }
     
     table.innerHTML = tableHTML.toString()
-    
-    // Add event listeners for edit buttons
-    val editButtons = document.querySelectorAll(".edit-btn")
-    for (i in 0 until editButtons.length) {
-        val button = editButtons.item(i) as HTMLElement
-        button.addEventListener("click", { event ->
-            val btn = event.currentTarget as HTMLElement
-            val chassis = btn.getAttribute("data-chassis")?.trim() ?: ""
-            val id = btn.getAttribute("data-id")
-            if (chassis.isNotEmpty()) {
-                purchaseReturnPageFromEdit = currentPage
-                navigateToEditPurchase(chassis)
-            } else if (id != null && id.length > 0 && id != "0") {
-                purchaseReturnPageFromEdit = currentPage
-                navigateToApp("/edit/$id")
-            } else {
-                showMessage("Invalid purchase. Cannot edit this purchase.", "error")
-            }
-        })
-    }
+    setupPurchaseEditDelegationOnTable()
     
     // Purchase Date quick filter trigger lives in the header; menu is portaled on document.body.
     setupPurchaseDateQuickFilterMenuPortal()
@@ -3265,7 +3314,7 @@ fun displayPurchasesAsCards() {
             <div class="purchase-card">
                 <div class="card-header">
                     ${if (isEditor() && purchaseId > 0L && hasChassis) """
-                    <button class="card-edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit">
+                    <button type="button" class="card-edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit">
                         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
                             <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
@@ -3306,26 +3355,7 @@ fun displayPurchasesAsCards() {
     }
     
     table.innerHTML = cardsHTML.toString()
-    
-    // Add event listeners for edit buttons
-    val editButtons = document.querySelectorAll(".card-edit-btn")
-    for (i in 0 until editButtons.length) {
-        val button = editButtons.item(i) as HTMLElement
-        button.addEventListener("click", { event ->
-            val btn = event.currentTarget as HTMLElement
-            val chassis = btn.getAttribute("data-chassis")?.trim() ?: ""
-            val id = btn.getAttribute("data-id")
-            if (chassis.isNotEmpty()) {
-                purchaseReturnPageFromEdit = currentPage
-                navigateToEditPurchase(chassis)
-            } else if (id != null && id.length > 0 && id != "0") {
-                purchaseReturnPageFromEdit = currentPage
-                navigateToApp("/edit/$id")
-            } else {
-                showMessage("Invalid purchase. Cannot edit this purchase.", "error")
-            }
-        })
-    }
+    setupPurchaseEditDelegationOnTable()
     
     // Setup pagination event listeners
     document.getElementById("prevPageBtn")?.addEventListener("click", { _: Event ->
