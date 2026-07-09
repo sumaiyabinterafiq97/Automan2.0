@@ -46,6 +46,17 @@ app:
     validate-mx: ${APP_MAIL_VALIDATE_MX:true}
   verification-base-url: ${APP_VERIFICATION_BASE_URL:http://localhost:8083/api}
   frontend-url: ${APP_FRONTEND_URL:http://localhost:8080}
+  media:
+    r2:
+      enabled: ${R2_ENABLED:false}
+      account-id: ${R2_ACCOUNT_ID:}
+      access-key-id: ${R2_ACCESS_KEY_ID:}
+      secret-access-key: ${R2_SECRET_ACCESS_KEY:}
+      bucket-name: ${R2_BUCKET_NAME:}
+      endpoint: ${R2_ENDPOINT:}
+      presigned-url-ttl-seconds: ${MEDIA_PRESIGNED_URL_TTL_SECONDS:3600}
+      max-file-size-bytes: ${MEDIA_MAX_FILE_SIZE_BYTES:5242880}
+      max-files-per-purchase: ${MEDIA_MAX_FILES_PER_PURCHASE:20}
 
 logging:
   level:

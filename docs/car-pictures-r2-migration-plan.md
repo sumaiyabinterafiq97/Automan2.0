@@ -1,6 +1,6 @@
 # Car Pictures → Cloudflare R2 Migration Plan
 
-**Status:** Plan only — no code changes yet  
+**Status:** In progress — Phase 1–3 implemented; enable R2 via env to activate  
 **Date:** 2026-07-07  
 **Scope:** Move Automan 2.0 car pictures from base64-in-MySQL to Cloudflare R2 + `purchase_media` metadata table
 

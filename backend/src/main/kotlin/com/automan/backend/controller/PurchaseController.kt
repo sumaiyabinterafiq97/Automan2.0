@@ -510,7 +510,9 @@ class PurchaseController(
 
     private fun purchaseValidationErrorResponse(e: IllegalArgumentException): ResponseEntity<Any> {
         val message = e.message ?: "Validation error"
-        return if (message.contains("already exists", ignoreCase = true)) {
+        val isDuplicateChassis = message.equals(PurchaseService.DUPLICATE_CHASSIS_MESSAGE, ignoreCase = true) ||
+            message.contains("already exists", ignoreCase = true)
+        return if (isDuplicateChassis) {
             ResponseEntity.status(HttpStatus.CONFLICT).body(
                 mapOf(
                     "error" to "Conflict",

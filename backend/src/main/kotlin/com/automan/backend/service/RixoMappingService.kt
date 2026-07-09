@@ -13,8 +13,10 @@ class RixoMappingService(
         val rixoCompany: String,
         val auctionName: String?,
         val stockLocation: String,
+        val venueId: String? = null,
+        val pol: String? = null,
         val supportedVehicleType: String?,
-        val rixoPrice: String?
+        val rixoPrice: String?,
     )
 
     fun findRixoPrice(
@@ -97,6 +99,8 @@ class RixoMappingService(
             )
             "STOCK" -> existing.copy(
                 stockLocation = stockLocation!!.trim(),
+                venueId = existing.venueId,
+                pol = existing.pol,
                 createdAt = created,
             )
             "FULL" -> existing.copy(
@@ -117,8 +121,10 @@ class RixoMappingService(
                 rixoCompany = row.rixoCompany.trim(),
                 auctionName = row.auctionName?.trim()?.takeIf { it.isNotEmpty() },
                 stockLocation = row.stockLocation.trim(),
+                venueId = row.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                pol = row.pol?.trim()?.takeIf { it.isNotEmpty() },
                 supportedVehicleType = row.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
-                rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotEmpty() }
+                rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
             )
         }
         return rixoMappingRepository.saveAll(entities)
@@ -130,8 +136,10 @@ class RixoMappingService(
             rixoCompany = row.rixoCompany.trim(),
             auctionName = row.auctionName?.trim()?.takeIf { it.isNotEmpty() },
             stockLocation = row.stockLocation.trim(),
+            venueId = row.venueId?.trim()?.takeIf { it.isNotEmpty() },
+            pol = row.pol?.trim()?.takeIf { it.isNotEmpty() },
             supportedVehicleType = row.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
-            rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotEmpty() }
+            rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
         )
         return rixoMappingRepository.save(updated)
     }

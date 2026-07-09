@@ -123,6 +123,29 @@ class CarBrandMappingController(
         }
     }
 
+    @GetMapping("/chassis/{chassis}/manufacture-year")
+    fun getManufactureYearForChassisNumber(
+        @PathVariable chassis: String,
+        @RequestParam chassisNumber: String
+    ): ResponseEntity<Map<String, Any?>> {
+        return try {
+            val chassisPrefix = chassis.substringBefore("-").trim()
+            val year = carBrandMappingService.getManufactureYearForChassisNumber(chassisPrefix, chassisNumber)
+            if (year != null) {
+                ResponseEntity.ok(mapOf("found" to true, "manufactureYear" to year))
+            } else {
+                ResponseEntity.ok(mapOf("found" to false, "manufactureYear" to ""))
+            }
+        } catch (e: Exception) {
+            Logger.error("Failed to look up manufacture year: ${e.message}", e)
+            ResponseEntity.status(500).body(mapOf(
+                "found" to false,
+                "manufactureYear" to "",
+                "message" to "Error: ${e.message}"
+            ))
+        }
+    }
+
     @GetMapping("/car-names/distinct")
     fun getAllDistinctCarNames(): ResponseEntity<List<String>> {
         return try {

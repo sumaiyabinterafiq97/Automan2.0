@@ -54,7 +54,9 @@ class CarBrandMappingService(
             "color" to (firstRow.color ?: ""),
             "driveType" to (firstRow.driveType ?: ""),
             "recycleFee" to (firstRow.recycleFee ?: ""),
-            "carModelYear" to (firstRow.carModelYear ?: "")
+            "carModelYear" to (firstRow.carModelYear ?: ""),
+            "chassisNumber" to (firstRow.chassisNumber ?: ""),
+            "manufactureYear" to (firstRow.manufactureYear ?: "")
         )
         val chassisList = carBrandMappingRepository.findDistinctChassisByCarBrand(brandName)
         val carNameList = carBrandMappingRepository.findDistinctCarNameByCarBrand(brandName)
@@ -107,7 +109,9 @@ class CarBrandMappingService(
             "color" to (firstMatch.color ?: ""),
             "driveType" to (firstMatch.driveType ?: ""),
             "recycleFee" to (firstMatch.recycleFee ?: ""),
-            "carModelYear" to (firstMatch.carModelYear ?: "")
+            "carModelYear" to (firstMatch.carModelYear ?: ""),
+            "chassisNumber" to (firstMatch.chassisNumber ?: ""),
+            "manufactureYear" to (firstMatch.manufactureYear ?: "")
         )
         return mapOf("found" to true, "data" to data)
     }
@@ -137,7 +141,9 @@ class CarBrandMappingService(
             "color" to (firstRow.color ?: ""),
             "driveType" to (firstRow.driveType ?: ""),
             "recycleFee" to (firstRow.recycleFee ?: ""),
-            "carModelYear" to (firstRow.carModelYear ?: "")
+            "carModelYear" to (firstRow.carModelYear ?: ""),
+            "chassisNumber" to (firstRow.chassisNumber ?: ""),
+            "manufactureYear" to (firstRow.manufactureYear ?: "")
         )
         return mapOf("found" to true, "chassisList" to chassisList, "firstRow" to firstRowData)
     }
@@ -171,7 +177,9 @@ class CarBrandMappingService(
                     "ranks" to emptyList<String>(),
                     "colors" to emptyList<String>(),
                     "driveTypes" to emptyList<String>(),
-                    "recycleFees" to emptyList<String>()
+                    "recycleFees" to emptyList<String>(),
+                    "chassisNumbers" to emptyList<String>(),
+                    "carModelYears" to emptyList<String>()
                 )
             )
         }
@@ -193,7 +201,9 @@ class CarBrandMappingService(
             "color" to (firstMatch.color ?: ""),
             "driveType" to (firstMatch.driveType ?: ""),
             "recycleFee" to (firstMatch.recycleFee ?: ""),
-            "carModelYear" to (firstMatch.carModelYear ?: "")
+            "carModelYear" to (firstMatch.carModelYear ?: ""),
+            "chassisNumber" to (firstMatch.chassisNumber ?: ""),
+            "manufactureYear" to (firstMatch.manufactureYear ?: "")
         )
         val allRows = mappings.map { m -> toMapWithBrand(m) }
         val uniqueValues = mapOf(
@@ -210,7 +220,15 @@ class CarBrandMappingService(
             "ranks" to mappings.mapNotNull { it.rank }.distinct().sorted(),
             "colors" to mappings.mapNotNull { it.color }.distinct().sorted(),
             "driveTypes" to mappings.mapNotNull { it.driveType }.distinct().sorted(),
-            "recycleFees" to mappings.mapNotNull { m -> m.recycleFee?.takeIf { rf -> rf.isNotBlank() } }.distinct().sorted()
+            "recycleFees" to mappings.mapNotNull { m -> m.recycleFee?.takeIf { rf -> rf.isNotBlank() } }.distinct().sorted(),
+            "chassisNumbers" to mappings
+                .flatMap { extractChassisNumberTokens(it.chassisNumber) }
+                .distinct()
+                .sorted(),
+            "carModelYears" to mappings
+                .flatMap { extractCarModelYearTokens(it.carModelYear) }
+                .distinct()
+                .sorted()
         )
         return mapOf(
             "found" to true,
@@ -228,6 +246,8 @@ class CarBrandMappingService(
             "driveType" to (firstMatch.driveType ?: ""),
             "recycleFee" to (firstMatch.recycleFee ?: ""),
             "carModelYear" to (firstMatch.carModelYear ?: ""),
+            "chassisNumber" to (firstMatch.chassisNumber ?: ""),
+            "manufactureYear" to (firstMatch.manufactureYear ?: ""),
             "firstRow" to firstRowData,
             "allRows" to allRows,
             "uniqueValues" to uniqueValues,
@@ -276,7 +296,9 @@ class CarBrandMappingService(
             "color" to (row.color ?: ""),
             "driveType" to (row.driveType ?: ""),
             "recycleFee" to (row.recycleFee ?: ""),
-            "carModelYear" to (row.carModelYear ?: "")
+            "carModelYear" to (row.carModelYear ?: ""),
+            "chassisNumber" to (row.chassisNumber ?: ""),
+            "manufactureYear" to (row.manufactureYear ?: "")
         )
         return mapOf("found" to true, "match" to matchData, "isFallback" to (match == null))
     }
@@ -384,7 +406,9 @@ class CarBrandMappingService(
                 "color" to (saved.color ?: ""),
                 "driveType" to (saved.driveType ?: ""),
                 "recycleFee" to (saved.recycleFee ?: ""),
-                "carModelYear" to (saved.carModelYear ?: "")
+                "carModelYear" to (saved.carModelYear ?: ""),
+                "chassisNumber" to (saved.chassisNumber ?: ""),
+                "manufactureYear" to (saved.manufactureYear ?: "")
             )
         )
     }
@@ -434,7 +458,9 @@ class CarBrandMappingService(
                 "color" to (merged.color ?: ""),
                 "driveType" to (merged.driveType ?: ""),
                 "recycleFee" to (merged.recycleFee ?: ""),
-                "carModelYear" to (merged.carModelYear ?: "")
+                "carModelYear" to (merged.carModelYear ?: ""),
+                "chassisNumber" to (merged.chassisNumber ?: ""),
+                "manufactureYear" to (merged.manufactureYear ?: "")
             )
         )
     }
@@ -460,7 +486,9 @@ class CarBrandMappingService(
                 "color" to (mapping.color ?: ""),
                 "driveType" to (mapping.driveType ?: ""),
                 "recycleFee" to (mapping.recycleFee ?: ""),
-                "carModelYear" to (mapping.carModelYear ?: "")
+                "carModelYear" to (mapping.carModelYear ?: ""),
+                "chassisNumber" to (mapping.chassisNumber ?: ""),
+                "manufactureYear" to (mapping.manufactureYear ?: "")
             )
         )
     }
@@ -534,6 +562,62 @@ class CarBrandMappingService(
         return null
     }
 
+    /**
+     * Looks up the manufacture year for a chassis suffix from the chassis map.
+     *
+     * The [chassisPrefix] is the code portion (e.g. "ACR50" from "ACR50-67h").
+     * The [chassisNumber] is the suffix after the hyphen (e.g. "67h").
+     *
+     * The chassis_number column stores semicolon-delimited "number:year" pairs,
+     * e.g. "67H:2019;t6yg:2020".
+     */
+    fun getManufactureYearForChassisNumber(chassisPrefix: String, chassisNumber: String): String? {
+        if (chassisPrefix.isBlank() || chassisNumber.isBlank()) return null
+        val normalizedNumber = chassisNumber.trim()
+        if (normalizedNumber.isBlank()) return null
+
+        val mappings = carBrandMappingRepository.findByChassisStartingWith(chassisPrefix)
+        if (mappings.isEmpty()) return null
+
+        for (mapping in mappings) {
+            val pairsRaw = mapping.chassisNumber ?: continue
+            if (pairsRaw.isBlank()) continue
+
+            val pairs = pairsRaw.split(";").map { it.trim() }.filter { it.isNotBlank() }
+            for (pair in pairs) {
+                val colonIdx = pair.lastIndexOf(':')
+                if (colonIdx <= 0) continue
+                val numberToken = pair.substring(0, colonIdx).trim()
+                val yearToken = pair.substring(colonIdx + 1).trim()
+                if (numberToken.equals(normalizedNumber, ignoreCase = true) && yearToken.matches(Regex("""\d{4}"""))) {
+                    return yearToken
+                }
+            }
+        }
+        return null
+    }
+
+    /** Parses `number:year;number:year` chassis_number cells into suffix tokens only. */
+    private fun extractChassisNumberTokens(pairsRaw: String?): List<String> {
+        if (pairsRaw.isNullOrBlank()) return emptyList()
+        return pairsRaw.split(";")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .mapNotNull { pair ->
+                val colonIdx = pair.lastIndexOf(':')
+                if (colonIdx <= 0) pair else pair.substring(0, colonIdx).trim()
+            }
+            .filter { it.isNotBlank() }
+    }
+
+    /** Parses semicolon-delimited `YYYY-MM` registration dates from car_model_year cells. */
+    private fun extractCarModelYearTokens(yearsRaw: String?): List<String> {
+        if (yearsRaw.isNullOrBlank()) return emptyList()
+        return yearsRaw.split(";")
+            .map { it.trim() }
+            .filter { it.isNotBlank() && it.matches(Regex("""\d{4}-\d{2}""")) }
+    }
+
     private fun toMap(m: CarBrandMapping): Map<String, Any> = mapOf(
         "id" to (m.id ?: 0),
         "carBrand" to (m.carBrand ?: ""),
@@ -551,7 +635,9 @@ class CarBrandMappingService(
         "color" to (m.color ?: ""),
         "driveType" to (m.driveType ?: ""),
         "recycleFee" to (m.recycleFee ?: ""),
-        "carModelYear" to (m.carModelYear ?: "")
+        "carModelYear" to (m.carModelYear ?: ""),
+        "chassisNumber" to (m.chassisNumber ?: ""),
+        "manufactureYear" to (m.manufactureYear ?: "")
     )
 
     private fun toMapWithBrand(m: CarBrandMapping): Map<String, Any> = mapOf(
@@ -571,7 +657,9 @@ class CarBrandMappingService(
         "color" to (m.color ?: ""),
         "driveType" to (m.driveType ?: ""),
         "recycleFee" to (m.recycleFee ?: ""),
-        "carModelYear" to (m.carModelYear ?: "")
+        "carModelYear" to (m.carModelYear ?: ""),
+        "chassisNumber" to (m.chassisNumber ?: ""),
+        "manufactureYear" to (m.manufactureYear ?: "")
     )
 
     private fun parseString(value: Any?): String? = when {
@@ -603,6 +691,8 @@ class CarBrandMappingService(
         val requestSeat = if (request.containsKey("seat")) parseString(request["seat"]) else null
         val requestRecycleFee = if (request.containsKey("recycleFee")) parseString(request["recycleFee"]) else null
         val requestCarModelYear = if (request.containsKey("carModelYear")) parseString(request["carModelYear"]) else null
+        val requestChassisNumber = if (request.containsKey("chassisNumber")) parseString(request["chassisNumber"]) else null
+        val requestManufactureYear = if (request.containsKey("manufactureYear")) parseString(request["manufactureYear"]) else null
 
         val carBrand = mergeField(base?.carBrand, requestBrand, replaceExistingValues, request.containsKey("carBrand"))
             ?: throw IllegalArgumentException("carBrand is required")
@@ -625,6 +715,8 @@ class CarBrandMappingService(
             driveType = mergeField(base?.driveType, requestDriveType, replaceExistingValues, request.containsKey("driveType")),
             recycleFee = mergeField(base?.recycleFee, requestRecycleFee, replaceExistingValues, request.containsKey("recycleFee")),
             carModelYear = mergeField(base?.carModelYear, requestCarModelYear, replaceExistingValues, request.containsKey("carModelYear")),
+            chassisNumber = mergeField(base?.chassisNumber, requestChassisNumber, replaceExistingValues, request.containsKey("chassisNumber")),
+            manufactureYear = mergeField(base?.manufactureYear, requestManufactureYear, replaceExistingValues, request.containsKey("manufactureYear")),
             createdAt = base?.createdAt ?: now,
             updatedAt = now
         )

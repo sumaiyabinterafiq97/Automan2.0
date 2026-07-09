@@ -2541,8 +2541,9 @@ window.fetchPolsAfterStockChange = function(stockFieldId) {
 // Fetch POLs for a stock location from rixo_prices and update POL dropdowns; optionally set first value.
 // mappingPolTokens: optional POL list from Supplier Map (shown first, then API extras, then master list).
 // auctionHouse is required so we don't accidentally pull POLs belonging to a different supplier.
-window.fetchPolsByStockLocationAndUpdate = function(auctionHouse, stockLocation, setFirstValue, mappingPolTokens) {
+window.fetchPolsByStockLocationAndUpdate = function(auctionHouse, stockLocation, setFirstValue, mappingPolTokens, requestSeq) {
     if (setFirstValue === undefined) setFirstValue = true;
+    var seq = (requestSeq != null) ? requestSeq : (window.__supplierMappingSeq || 0);
     var polSelect = document.getElementById('pol');
     var editPolSelect = document.getElementById('editPol');
     if (!stockLocation || String(stockLocation).trim() === '') {
@@ -2574,12 +2575,20 @@ window.fetchPolsByStockLocationAndUpdate = function(auctionHouse, stockLocation,
     console.log('[POL] Fetching POLs from rixo_prices for auctionHouse:', auctionHouse, 'stockLocation:', stockLocation, '->', url);
     return fetch(url)
         .then(function(r) {
+            if (seq !== (window.__supplierMappingSeq || 0)) {
+                console.log('[POL] Stale POL response ignored for', auctionHouse, stockLocation);
+                return null;
+            }
             if (!r.ok) {
                 console.warn('[POL] API responded with status:', r.status, r.statusText, 'for', url);
             }
             return r.json();
         })
         .then(function(res) {
+            if (res == null || seq !== (window.__supplierMappingSeq || 0)) {
+                if (res != null) console.log('[POL] Stale POL apply ignored for', auctionHouse, stockLocation);
+                return;
+            }
             var prices = (res && res.data && Array.isArray(res.data)) ? res.data : [];
             // Filter by stockLocation then extract distinct non-empty POLs.
             // DB cells often store multiple yards as "A; B"; match if the selected yard equals any token.
@@ -2619,6 +2628,10 @@ window.fetchPolsByStockLocationAndUpdate = function(auctionHouse, stockLocation,
             }
         })
         .catch(function(err) {
+            if (seq !== (window.__supplierMappingSeq || 0)) {
+                console.log('[POL] Stale POL error ignored for', auctionHouse, stockLocation);
+                return;
+            }
             console.warn('[POL] fetchPolsByStockLocationAndUpdate failed for', auctionHouse, stockLocation, ':', err);
             var fallback = (mappingPolTokens && mappingPolTokens.length)
                 ? mappingPolTokens
@@ -2761,16 +2774,20 @@ window.autoSelectRelatedFields = function(auctionName, changedField, changedValu
 
         if (window.__supplierSkipSilentAutoSelect === true) {
             window.__supplierSkipSilentAutoSelect = false;
-            var snapSilent = window.__rixoSupplierPreserveSnapshot;
+            // Supplier map flow applies values via Kotlin; only refresh dropdown options.
             window.rebuildSupplierDependentDropdowns(normalizedAuctionName, {
                 autoSelect: false,
-                preserveSnapshot: snapSilent || __getCurrentSupplierFieldValues(),
-                restoreDelay: 100
+                restoreValues: false,
+                restoreDelay: 0
             });
             return;
         }
 
-        window.rebuildSupplierDependentDropdowns(normalizedAuctionName, { autoSelect: true, restoreDelay: 100 });
+        window.rebuildSupplierDependentDropdowns(normalizedAuctionName, {
+            autoSelect: true,
+            freshAutoSelect: true,
+            restoreDelay: 100
+        });
         
     } else if (changedField === 'rixoCompany') {
         // When rixoCompany is selected, filter and update other dropdowns
@@ -3028,6 +3045,7 @@ function restoreSupplierMasterFieldValue(addFieldId, editFieldId, value) {
  */
 window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
     options = options || {};
+    var seq = window.__supplierMappingSeq || 0;
     var normalized = normalizeAuctionNameForMapping(auctionName);
     if (!normalized || !window.rixoPriceMapping[normalized] || !window.rixoPriceMapping[normalized].mappings) {
         return false;
@@ -3049,8 +3067,14 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
 
     var restoreDelay = options.restoreDelay != null ? options.restoreDelay : 100;
     setTimeout(function() {
+        if (seq !== (window.__supplierMappingSeq || 0)) {
+            console.log('rebuildSupplierDependentDropdowns: stale restore ignored for', normalized);
+            return;
+        }
         var snap = options.preserveSnapshot;
-        var cur = snap && typeof snap === 'object' ? snap : __getCurrentSupplierFieldValues();
+        var cur = options.freshAutoSelect
+            ? { stock: '', venue: '', rixo: '', pol: '' }
+            : (snap && typeof snap === 'object' ? snap : __getCurrentSupplierFieldValues());
         if (options.autoSelect) {
             var stockPick = stockLocations.length > 0 ? __pickPreservedOrFirst(stockLocations, cur.stock) : null;
             var venuePick = venueIds.length > 0 ? __pickPreservedOrFirst(venueIds, cur.venue) : null;
@@ -3066,7 +3090,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
             if (rixoPick) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', rixoPick);
             if (stockPick && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
                 var keepPol = !!(cur.pol && __listContainsTokenCaseInsensitive(polTokensFromMapping, cur.pol));
-                window.fetchPolsByStockLocationAndUpdate(normalized, stockPick, !keepPol, polTokensFromMapping);
+                window.fetchPolsByStockLocationAndUpdate(normalized, stockPick, !keepPol, polTokensFromMapping, seq);
             }
         } else if (options.restoreValues !== false) {
             if (cur.stock) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', cur.stock);
@@ -3074,7 +3098,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
             if (cur.venue) restoreSupplierMasterFieldValue('venueId', 'editVenueId', cur.venue);
             if (cur.rixo) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', cur.rixo);
             if (cur.stock && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                window.fetchPolsByStockLocationAndUpdate(normalized, cur.stock, false, cur.pol ? [cur.pol] : polTokensFromMapping);
+                window.fetchPolsByStockLocationAndUpdate(normalized, cur.stock, false, cur.pol ? [cur.pol] : polTokensFromMapping, seq);
             }
         }
         if (window.__rixoSupplierPreserveSnapshot) {

@@ -33,6 +33,10 @@ class PurchaseService(
     private val localPurchaseSanitizer: LocalPurchaseSanitizer,
     private val clientRepository: ClientRepository,
 ) {
+    companion object {
+        const val DUPLICATE_CHASSIS_MESSAGE = "the chassis number already exist"
+    }
+
     /** Links [Purchase.clientId] when [clientName] matches exactly one row in clients (case-insensitive). */
     private fun resolveClientIdFromName(clientName: String?): Long? {
         val name = clientName?.trim().orEmpty()
@@ -207,12 +211,8 @@ class PurchaseService(
         }
     }
 
-    fun duplicatePurchaseErrorMessage(duplicate: Purchase): String {
-        val supplier = duplicate.auctionHouse?.trim().orEmpty()
-        val fromClause = if (supplier.isNotEmpty()) " from $supplier" else ""
-        val chassisLabel = duplicate.chassis?.trim().orEmpty()
-        return "Update failed! Chassis $chassisLabel already exists in another purchase$fromClause."
-    }
+    fun duplicatePurchaseErrorMessage(@Suppress("UNUSED_PARAMETER") duplicate: Purchase): String =
+        DUPLICATE_CHASSIS_MESSAGE
 
     private fun assertNoDuplicatePurchase(
         chassis: String?,

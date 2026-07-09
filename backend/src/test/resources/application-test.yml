@@ -1,5 +1,10 @@
 # Integration tests (@ActiveProfiles("test")): no external MySQL, no Flyway replay.
 # Hibernate maintains schema including new entities (e.g. purchase_change_history).
+automan:
+  media:
+    r2:
+      enabled: false
+
 spring:
   flyway:
     enabled: false

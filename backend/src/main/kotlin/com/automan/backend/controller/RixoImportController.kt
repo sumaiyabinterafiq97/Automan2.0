@@ -225,7 +225,7 @@ class RixoImportController(
             )
 
             val message = if (result.merged) {
-                "Merged into existing supplier (values combined with ;)"
+                "Updated existing supplier mapping row"
             } else {
                 "Mapping added successfully"
             }
@@ -257,46 +257,22 @@ class RixoImportController(
             if (existingMapping == null) {
                 return ResponseEntity.notFound().build()
             }
-            
-            // Preserve createdAt when copying - ensure it's never null
-            val createdAtValue = existingMapping.createdAt ?: java.time.LocalDateTime.now()
-            
+
             val newStock = (request["stockLocation"] as? String)?.trim() ?: existingMapping.stockLocation
             val newPol = (request["pol"] as? String)?.trim()
-            val updatedMapping = existingMapping.copy(
-                id = existingMapping.id, // CRITICAL: Explicitly preserve ID
+            val savedMapping = rixoImportService.updateSupplierMapRow(
+                id = id,
                 auctionHouse = request["auctionHouse"] as? String ?: existingMapping.auctionHouse,
                 stockLocation = newStock,
                 rixoCompany = request["rixoCompany"] as? String ?: existingMapping.rixoCompany,
                 venueId = request["venueId"] as? String ?: existingMapping.venueId,
                 pol = if (!newPol.isNullOrBlank()) newPol else RixoPolFromStockLocation.derivePol(newStock),
-                createdAt = createdAtValue // Preserve createdAt (never null)
-            )
-            
-            Logger.debug("[RIXO UPDATE] Original ID: ${existingMapping.id}, Updated ID: ${updatedMapping.id}")
-            
-            // Verify ID is preserved
-            if (updatedMapping.id != existingMapping.id) {
-                Logger.error("[RIXO UPDATE] ERROR: ID mismatch!")
-                return ResponseEntity.badRequest().body(mapOf(
-                    "success" to false,
-                    "message" to "Internal error: ID mismatch during update"
-                ))
-            }
-            
-            val savedMapping = rixoImportService.saveRixoPrice(updatedMapping)
-            
-            // Verify the saved entity has the same ID
-            if (savedMapping.id != existingMapping.id) {
-                Logger.error("[RIXO UPDATE] ERROR: Saved entity has different ID! Original: ${existingMapping.id}, Saved: ${savedMapping.id}")
-                return ResponseEntity.badRequest().body(mapOf(
-                    "success" to false,
-                    "message" to "Error: Update created a new row instead of updating existing one"
-                ))
-            }
-            
-            Logger.debug("[RIXO UPDATE] Successfully updated existing mapping with ID: ${savedMapping.id}")
-            
+                supportedVehicleType = request["supportedVehicleType"] as? String ?: existingMapping.supportedVehicleType,
+                rixoPrice = request["rixoPrice"] as? String ?: existingMapping.rixoPrice,
+            ) ?: return ResponseEntity.notFound().build()
+
+            Logger.debug("[RIXO UPDATE] Successfully updated mapping with ID: ${savedMapping.id}")
+
             ResponseEntity.ok(mapOf(
                 "success" to true,
                 "message" to "Mapping updated successfully",

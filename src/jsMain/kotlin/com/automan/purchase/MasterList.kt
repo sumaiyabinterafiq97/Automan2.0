@@ -268,6 +268,8 @@ private fun groupCarBrandMappingsForView(mappings: List<dynamic>): List<dynamic>
         groupedObj.driveType = joinDistinctNonBlank(list.map { (it.driveType ?: "").toString() })
         groupedObj.recycleFee = joinDistinctNonBlank(list.map { (it.recycleFee ?: "").toString() })
         groupedObj.carModelYear = joinDistinctNonBlank(list.map { (it.carModelYear ?: "").toString() })
+        groupedObj.chassisNumber = joinDistinctNonBlank(list.map { (it.chassisNumber ?: "").toString() })
+        groupedObj.manufactureYear = joinDistinctNonBlank(list.map { (it.manufactureYear ?: "").toString() })
 
         grouped.add(groupedObj)
     }
@@ -279,6 +281,7 @@ private fun populateCarBrandModalComboboxes() {
     populateEditableComboboxFromMasterMenu("carBrandBrand", "car_brands")
     populateEditableComboboxFromMasterMenu("carBrandFuel", "fuel")
     populateEditableComboboxFromMasterMenu("carBrandShift", "shift")
+    populateEditableComboboxFromMasterMenu("carBrandColor", "color")
     populateEditableComboboxFromMasterMenu("carBrandGrade", "car_grade")
     populateEditableComboboxFromMasterMenu("carBrandVehicleType", "type_of_vehicle")
 
@@ -331,6 +334,7 @@ private fun tryPrefillCarBrandModalFromGroupedRow() {
     val colorVal = (row.color ?: "").toString()
     val driveType = (row.driveType ?: "").toString()
     val recycleFeeVal = (row.recycleFee ?: "").toString()
+    val chassisNumberVal = (row.chassisNumber ?: "").toString()
 
     (document.getElementById("carBrandChassis") as? HTMLInputElement)?.value = chassis
     setChipFieldValue("carBrandBrand", carBrand)
@@ -347,7 +351,16 @@ private fun tryPrefillCarBrandModalFromGroupedRow() {
     setChipFieldValue("carBrandColor", colorVal)
     setChipFieldValue("carBrandDriveType", driveType)
     // Populate dynamic recycle fee rows from stored delimited string
-    js("if (typeof window.setRecycleFeeRowsValue === 'function') window.setRecycleFeeRowsValue(recycleFeeVal)")
+    window.asDynamic().__prefillRecycleFee = recycleFeeVal
+    window.asDynamic().__prefillChassisNumber = chassisNumberVal
+    js("""
+        if (typeof window.setRecycleFeeRowsValue === 'function') {
+            window.setRecycleFeeRowsValue(window.__prefillRecycleFee || '');
+        }
+        if (typeof window.setChassisManufactureYearRowsValue === 'function') {
+            window.setChassisManufactureYearRowsValue(window.__prefillChassisNumber || '');
+        }
+    """)
 
     js("window.__carBrandRowData = null")
 }
@@ -4174,7 +4187,9 @@ private fun buildCarBrandTableUi(
                 "color" to "Color",
                 "driveType" to "Drive Type",
                 "recycleFee" to "Recycle Fees",
-                "carModelYear" to "Registration Date"
+                "carModelYear" to "Registration Date",
+                "chassisNumber" to "Chassis Numbers",
+                "manufactureYear" to "Manufacture Years"
             )
             
             val carBrandColCount = 1 + selectedColumns.size
@@ -4224,13 +4239,15 @@ private fun buildCarBrandTableUi(
                 val driveTypeVal = (mapping.driveType ?: "").toString()
                 val recycleFeeVal = (mapping.recycleFee ?: "").toString()
                 val carModelYearVal = (mapping.carModelYear ?: "").toString()
+                val chassisNumberVal = (mapping.chassisNumber ?: "").toString()
+                val manufactureYearVal = (mapping.manufactureYear ?: "").toString()
                 val carModelYearDisplay = carModelYearVal.split(";").map { token ->
                     val m = Regex("""^(\d{4})-(\d{2})$""").find(token.trim())
                     if (m != null) "${m.groupValues[2]}/${m.groupValues[1]}" else token.trim()
                 }.filter { it.isNotEmpty() }.joinToString(";")
 
                 val rowDataJs =
-                    "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}'};"
+                    "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}',chassisNumber:'${escapeJsString(chassisNumberVal)}',manufactureYear:'${escapeJsString(manufactureYearVal)}'};"
                 
                 html += """
                     <tr>
@@ -4272,6 +4289,8 @@ private fun buildCarBrandTableUi(
                         "driveType" -> driveTypeVal
                         "recycleFee" -> recycleFeeVal
                         "carModelYear" -> carModelYearDisplay
+                        "chassisNumber" -> chassisNumberVal
+                        "manufactureYear" -> manufactureYearVal
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
@@ -4279,10 +4298,10 @@ private fun buildCarBrandTableUi(
                         "chassis", "carName" -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top;"
                         else -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top;"
                     }
-                    val cellInner = if (columnKey == "recycleFee") {
-                        formatRecycleFeeChipHtml(value)
-                    } else {
-                        formatCarBrandMapValueChipHtml(value)
+                    val cellInner = when (columnKey) {
+                        "recycleFee" -> formatRecycleFeeChipHtml(value)
+                        "chassisNumber" -> formatChassisManufactureYearChipHtml(value)
+                        else -> formatCarBrandMapValueChipHtml(value)
                     }
                     html += """<td style="$cellStyle">$cellInner</td>"""
                 }
@@ -4589,7 +4608,9 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         "color" to "Color",
         "driveType" to "Drive Type",
         "recycleFee" to "Recycle Fees",
-        "carModelYear" to "Registration Date"
+        "carModelYear" to "Registration Date",
+        "chassisNumber" to "Chassis Numbers",
+        "manufactureYear" to "Manufacture Years"
     )
     
     val cardsHTML = StringBuilder()
@@ -4613,13 +4634,15 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         val driveTypeVal = (mapping.driveType ?: "").toString()
         val recycleFeeVal = (mapping.recycleFee ?: "").toString()
         val carModelYearVal = (mapping.carModelYear ?: "").toString()
+        val chassisNumberVal = (mapping.chassisNumber ?: "").toString()
+        val manufactureYearVal = (mapping.manufactureYear ?: "").toString()
         val carModelYearDisplay = carModelYearVal.split(";").map { token ->
             val m = Regex("""^(\d{4})-(\d{2})$""").find(token.trim())
             if (m != null) "${m.groupValues[2]}/${m.groupValues[1]}" else token.trim()
         }.filter { it.isNotEmpty() }.joinToString(";")
 
         val rowDataJs =
-            "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}'};"
+            "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',vehicleType:'${escapeJsString(vehicleType)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}',chassisNumber:'${escapeJsString(chassisNumberVal)}',manufactureYear:'${escapeJsString(manufactureYearVal)}'};"
         
         // Build card content based on selected columns
         val cardFields = StringBuilder()
@@ -4642,14 +4665,16 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
                 "driveType" -> driveTypeVal
                 "recycleFee" -> recycleFeeVal
                 "carModelYear" -> carModelYearDisplay
+                "chassisNumber" -> chassisNumberVal
+                "manufactureYear" -> manufactureYearVal
                 else -> ""
             }
             
             if (value.isNotEmpty()) {
-                val displayValue = if (columnKey == "recycleFee") {
-                    formatRecycleFeeChipHtml(value)
-                } else {
-                    formatCarBrandMapValueChipHtml(value)
+                val displayValue = when (columnKey) {
+                    "recycleFee" -> formatRecycleFeeChipHtml(value)
+                    "chassisNumber" -> formatChassisManufactureYearChipHtml(value)
+                    else -> formatCarBrandMapValueChipHtml(value)
                 }
                 cardFields.append("""
                     <div style="margin-bottom: 8px;">
@@ -4808,7 +4833,9 @@ fun showCarBrandColumnFilterModal() {
         "color" to "Color",
         "driveType" to "Drive Type",
         "recycleFee" to "Recycle Fees",
-        "carModelYear" to "Registration Date"
+        "carModelYear" to "Registration Date",
+        "chassisNumber" to "Chassis Numbers",
+        "manufactureYear" to "Manufacture Years"
     )
     
     val checkboxesDiv = document.getElementById("carBrandColumnCheckboxes")
@@ -5005,7 +5032,7 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                             </div>
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Color</label>
-                                ${createChipInput("carBrandColor", "Type Color")}
+                                ${createChipMultiSelectCombobox("carBrandColor", "Select Color")}
                             </div>
                         </div>
                         <div class="car-brand-modal-grid">
@@ -5020,6 +5047,13 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                             <div id="recycleFeeRows" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;"></div>
                             <button type="button" id="addRecycleFeeRow" style="display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; background: #f3f4f6; border: 1px dashed #d1d5db; border-radius: 6px; color: #374151; font-size: 13px; cursor: pointer; transition: background 0.15s;">
                                 <span style="font-size: 16px; line-height: 1;">+</span> Add Registration Date
+                            </button>
+                        </div>
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Manufacture Year <span style="color: #6b7280; font-weight: 400; font-size: 12px;">(by Chassis Number)</span></label>
+                            <div id="chassisManufactureYearRows" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;"></div>
+                            <button type="button" id="addChassisManufactureYearRow" style="display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; background: #f3f4f6; border: 1px dashed #d1d5db; border-radius: 6px; color: #374151; font-size: 13px; cursor: pointer; transition: background 0.15s;">
+                                <span style="font-size: 16px; line-height: 1;">+</span> Add Chassis Number
                             </button>
                         </div>
                         <div class="car-brand-modal-actions">
@@ -5247,11 +5281,94 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                 if (typeof window.addRecycleFeeRow === 'function') window.addRecycleFeeRow(displayDate, feeToken);
             });
         };
+
+        window.addChassisManufactureYearRow = function(chassisNumber, manufactureYear) {
+            var container = document.getElementById('chassisManufactureYearRows');
+            if (!container) return;
+            var row = document.createElement('div');
+            row.style.cssText = 'display:flex; align-items:center; gap:8px;';
+            row.innerHTML =
+                '<input type="text" class="chassis-number-input" autocomplete="off" placeholder="Chassis Number" value="' + (chassisNumber || '') + '" ' +
+                    'style="flex:1; padding:9px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; box-sizing:border-box; font-family:inherit;">' +
+                '<div style="position:relative; flex:1; display:flex; gap:6px; align-items:center;">' +
+                    '<input type="text" class="chassis-manufacture-year-input" maxlength="4" inputmode="numeric" autocomplete="off" placeholder="YYYY" value="' + (manufactureYear || '') + '" ' +
+                        'style="flex:1; padding:9px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:13px; box-sizing:border-box; font-family:inherit;">' +
+                    '<button type="button" class="chassis-manufacture-year-btn" title="Open year picker" ' +
+                        'style="flex-shrink:0; padding:9px 10px; border:1px solid #d1d5db; background:#f9fafb; border-radius:6px; cursor:pointer; font-size:14px;">📅</button>' +
+                '</div>' +
+                '<button type="button" class="chassis-manufacture-year-delete-btn" style="flex-shrink:0; padding:6px 10px; background:#fee2e2; border:1px solid #fca5a5; border-radius:6px; color:#dc2626; font-size:14px; cursor:pointer;" title="Remove row">✕</button>';
+            row.querySelector('.chassis-manufacture-year-delete-btn').addEventListener('click', function() { row.remove(); });
+            var numberInput = row.querySelector('.chassis-number-input');
+            var yearInput = row.querySelector('.chassis-manufacture-year-input');
+            var yearBtn = row.querySelector('.chassis-manufacture-year-btn');
+            numberInput.addEventListener('input', function() {
+                var raw = numberInput.value || '';
+                var cleaned = raw.replace(/[\s-]/g, '').replace(/[^A-Za-z0-9]/g, '');
+                if (cleaned !== raw) numberInput.value = cleaned;
+            });
+            yearInput.addEventListener('input', function() {
+                var digits = (yearInput.value || '').replace(/\D/g, '').substring(0, 4);
+                yearInput.value = digits;
+            });
+            yearBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                var picker = document.createElement('input');
+                picker.type = 'number';
+                picker.min = '1000';
+                picker.max = '9999';
+                picker.value = (yearInput.value || '').trim() || String(new Date().getFullYear());
+                picker.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;';
+                yearBtn.parentElement.appendChild(picker);
+                picker.addEventListener('change', function() {
+                    var y = (picker.value || '').trim();
+                    if (/^\d{4}$/.test(y)) yearInput.value = y;
+                    picker.remove();
+                });
+                try { picker.showPicker(); } catch (err) { picker.focus(); picker.click(); }
+            });
+            container.appendChild(row);
+        };
+
+        window.getChassisManufactureYearRowsValue = function() {
+            var rows = document.querySelectorAll('#chassisManufactureYearRows > div');
+            var pairs = [];
+            rows.forEach(function(row) {
+                var numberEl = row.querySelector('.chassis-number-input');
+                var yearEl = row.querySelector('.chassis-manufacture-year-input');
+                if (!numberEl || !yearEl) return;
+                var numberVal = (numberEl.value || '').trim();
+                var yearVal = (yearEl.value || '').trim();
+                if (numberVal && /^\d{4}$/.test(yearVal)) {
+                    pairs.push(numberVal + ':' + yearVal);
+                }
+            });
+            return pairs.join(';');
+        };
+
+        window.setChassisManufactureYearRowsValue = function(delimitedStr) {
+            var container = document.getElementById('chassisManufactureYearRows');
+            if (!container) return;
+            container.innerHTML = '';
+            if (!delimitedStr || !delimitedStr.trim()) return;
+            var pairs = delimitedStr.split(';');
+            pairs.forEach(function(pair) {
+                var colonIdx = pair.lastIndexOf(':');
+                if (colonIdx <= 0) return;
+                var numberToken = pair.substring(0, colonIdx).trim();
+                var yearToken = pair.substring(colonIdx + 1).trim();
+                if (typeof window.addChassisManufactureYearRow === 'function') {
+                    window.addChassisManufactureYearRow(numberToken, yearToken);
+                }
+            });
+        };
     """)
 
     // Wire up "Add Production Date" button
     document.getElementById("addRecycleFeeRow")?.addEventListener("click", { _: Event ->
         js("window.addRecycleFeeRow('', '')")
+    })
+    document.getElementById("addChassisManufactureYearRow")?.addEventListener("click", { _: Event ->
+        js("window.addChassisManufactureYearRow('', '')")
     })
 
     if (!isEdit && !isDuplicate) {
@@ -5341,7 +5458,11 @@ fun loadCarBrandDataForEdit(mappingId: Long, clearChassisForDuplicate: Boolean =
                 setChipFieldValue("carBrandDriveType", (data.driveType ?: "").toString())
                 // Populate dynamic recycle fee rows from stored delimited string
                 val recycleStr = (data.recycleFee ?: "").toString()
-                js("if (typeof window.setRecycleFeeRowsValue === 'function') window.setRecycleFeeRowsValue(recycleStr)")
+                window.asDynamic().__prefillRecycleFee = recycleStr
+                js("if (typeof window.setRecycleFeeRowsValue === 'function') window.setRecycleFeeRowsValue(window.__prefillRecycleFee || '')")
+                val chassisNumberStr = (data.chassisNumber ?: "").toString()
+                window.asDynamic().__prefillChassisNumber = chassisNumberStr
+                js("if (typeof window.setChassisManufactureYearRowsValue === 'function') window.setChassisManufactureYearRowsValue(window.__prefillChassisNumber || '')")
             } else {
                 throw js("Error(result.message || 'Failed to load car brand data')")
             }
@@ -5458,6 +5579,12 @@ fun performCarBrandSave(mappingId: Long?, replaceExistingValues: Boolean = false
         recFeeStr.split(";").map { it.substringBefore(":") }.filter { it.isNotEmpty() }.joinToString(";")
     } else ""
     carBrandData.carModelYear = derivedModelYears.takeIf { it.isNotEmpty() } ?: null
+    val chassisNumberStr = js("window.getChassisManufactureYearRowsValue ? window.getChassisManufactureYearRowsValue() : ''").unsafeCast<String>().trim()
+    carBrandData.chassisNumber = chassisNumberStr.takeIf { it.isNotEmpty() } ?: null
+    val derivedManufactureYears = if (chassisNumberStr.isNotEmpty()) {
+        chassisNumberStr.split(";").map { it.substringAfter(":") }.filter { it.isNotEmpty() }.joinToString(";")
+    } else ""
+    carBrandData.manufactureYear = derivedManufactureYears.takeIf { it.isNotEmpty() } ?: null
     carBrandData.replaceExistingValues = replaceExistingValues
     
     val saveButton = document.getElementById("saveCarBrandBtn") as? HTMLButtonElement
@@ -6918,7 +7045,7 @@ private fun buildSupplierVenueStripHtml(venue: String, rowId: Long, branchIdx: I
         return """
             <div class="supplier-tree-venue-strip supplier-tree-pol-strip--editing" data-smap-venue-row="$rid" data-smap-venue-idx="$bi">
                 <span class="supplier-tree-pol-label">Venue ID</span>
-                <div class="supplier-tree-pol-combo">${createEditableCombobox("supTreeBranchEditVenue", "Select Venue ID")}</div>
+                <div class="supplier-tree-pol-combo">${createEditableCombobox("supTreeBranchEditVenue", "Select Venue ID", showDropdownButton = false)}</div>
             </div>
         """.trimIndent()
     }
@@ -6926,7 +7053,7 @@ private fun buildSupplierVenueStripHtml(venue: String, rowId: Long, branchIdx: I
         return """
             <div class="supplier-tree-venue-strip supplier-tree-pol-strip--editing" data-smap-venue-row="$rid" data-smap-venue-idx="$bi">
                 <span class="supplier-tree-pol-label">Venue ID</span>
-                <div class="supplier-tree-pol-combo">${createEditableCombobox("supTreeVenueEditCombo", "Select Venue ID")}</div>
+                <div class="supplier-tree-pol-combo">${createEditableCombobox("supTreeVenueEditCombo", "Select Venue ID", showDropdownButton = false)}</div>
                 <button type="button" class="rixo-tree-card-inline-cancel" data-smap-venue-cancel="1">Cancel</button>
                 <button type="button" class="rixo-tree-card-inline-save" data-smap-venue-save="1">Save</button>
             </div>

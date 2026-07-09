@@ -228,6 +228,32 @@ fun formatRecycleFeeChipHtml(raw: String): String {
     return """<span style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;">${chips.joinToString("")}</span>"""
 }
 
+/**
+ * Format chassis_number delimited pairs as readable chips in the Chassis Map table.
+ * Input: "67H:2019;t6yg:2020" → chips showing "67H • 2019".
+ */
+fun formatChassisManufactureYearChipHtml(raw: String): String {
+    if (raw.isBlank()) return ""
+    val trimmed = raw.trim()
+    if (!trimmed.contains(":")) {
+        return formatCarBrandMapValueChipHtml(trimmed)
+    }
+    val pairs = trimmed.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+    if (pairs.isEmpty()) return ""
+    val chips = pairs.mapNotNull { pair ->
+        val colonIdx = pair.lastIndexOf(':')
+        if (colonIdx <= 0) return@mapNotNull null
+        val numberToken = pair.substring(0, colonIdx).trim()
+        val yearToken = pair.substring(colonIdx + 1).trim()
+        if (numberToken.isBlank() || yearToken.isBlank()) return@mapNotNull null
+        val label = escapeHtml("$numberToken • $yearToken")
+        """<span style="display:inline-block;padding:4px 10px;border-radius:9999px;font-size:12px;font-weight:500;background:#eff6ff;color:#1e40af;line-height:1.35;white-space:nowrap;box-shadow:0 1px 4px rgba(30,64,175,0.12);">$label</span>"""
+    }
+    if (chips.isEmpty()) return ""
+    if (chips.size == 1) return chips[0]
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;">${chips.joinToString("")}</span>"""
+}
+
 /** Client Map generic values: black text + subtle shadow for all chips, no multi-color variants. */
 fun formatClientMapValueChipHtml(raw: String): String {
     val tokens = splitMultiValueDisplayTokens(raw)

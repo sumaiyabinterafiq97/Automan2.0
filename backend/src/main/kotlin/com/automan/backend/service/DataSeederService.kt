@@ -16,7 +16,6 @@ class DataSeederService(
     private val userRepository: UserRepository,
     private val clientRepository: ClientRepository,
     private val purchaseRepository: PurchaseRepository,
-    private val rixoPriceRepository: RixoPriceRepository
 ) : CommandLineRunner {
 
     private val passwordEncoder = BCryptPasswordEncoder()
@@ -73,30 +72,8 @@ class DataSeederService(
 
 
     private fun seedRixoPrices() {
-        Logger.debug("Seeding Rixo prices...")
-        
-        val rixoPrices = listOf(
-            RixoPrice(
-                auctionHouse = "AUCNETVAA (SAKURA)",
-                stockLocation = "GLOBAL KAWASAKI",
-                rixoCompany = "YAMAZAKI",
-                venueId = "V001"
-            ),
-            RixoPrice(
-                auctionHouse = "USS YOKOHAMA",
-                stockLocation = "KLC",
-                rixoCompany = "KLC",
-                venueId = "V002"
-            ),
-            RixoPrice(
-                auctionHouse = "TAA KINKI",
-                stockLocation = "GLOBAL HAKATA",
-                rixoCompany = "LOGICO",
-                venueId = "V001"
-            )
-        )
-        rixoPriceRepository.saveAll(rixoPrices)
-        Logger.debug("Created ${rixoPrices.size} Rixo prices")
+        Logger.debug("Seeding Rixo supplier mappings (rixo_mapping)...")
+        // Seeding disabled — see run() early return.
     }
 
     private fun seedPurchases() {

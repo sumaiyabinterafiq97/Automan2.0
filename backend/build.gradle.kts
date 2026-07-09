@@ -40,6 +40,10 @@ dependencies {
     
     // Security - for BCrypt password hashing only (no full security filterchain)
     implementation("org.springframework.security:spring-security-crypto:6.2.0")
+
+    // Cloudflare R2 (S3-compatible object storage for purchase car pictures)
+    implementation(platform("software.amazon.awssdk:bom:2.25.16"))
+    implementation("software.amazon.awssdk:s3")
     
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation(kotlin("test-junit5"))

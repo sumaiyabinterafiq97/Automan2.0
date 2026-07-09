@@ -65,7 +65,6 @@ var purchaseTableSortField: String = "date"
 
 // Purchase date filter state (used only for Purchase List table view)
 private var purchaseDateFilterActive: Boolean = false
-private var purchasesBeforePurchaseDateFilter: Array<dynamic> = emptyArray()
 private var purchaseBaseRows: Array<dynamic> = emptyArray()
 private var purchaseSearchQuery: String = ""
 private var purchaseFilterSelectedColumns: MutableSet<String> = mutableSetOf()
@@ -738,49 +737,39 @@ private fun isoToLocalDayRangeTimestamps(isoDate: String): Pair<Long, Long>? {
     return startTs to endTs
 }
 
+private fun filterPurchasesByPurchaseDateRange(rows: Array<dynamic>, startIso: String, endIso: String): Array<dynamic> {
+    val range = isoToLocalDayRangeTimestamps(startIso)?.let { startPair ->
+        val endRange = isoToLocalDayRangeTimestamps(endIso) ?: return rows
+        startPair.first to endRange.second
+    } ?: return rows
+
+    val (startTs, endTs) = range
+    return rows.filter { purchase ->
+        val raw = purchase.date?.toString() ?: ""
+        val ts = parseDateForSorting(raw)
+        ts != null && ts >= startTs && ts <= endTs
+    }.toTypedArray()
+}
+
 private fun applyPurchaseDateFilterRange(startIso: String, endIso: String, resetPage: Boolean = true) {
     if (purchaseSearchServerMode) {
         showMessage("Clear the search box to use purchase date filters on the full list.", "info")
         return
     }
-    val range = isoToLocalDayRangeTimestamps(startIso)?.let { startPair ->
-        // Recompute end timestamps from the end iso (in case they're different)
-        val endRange = isoToLocalDayRangeTimestamps(endIso) ?: return
-        startPair.first to endRange.second
-    } ?: return
-
-    if (!purchaseDateFilterActive) {
-        purchasesBeforePurchaseDateFilter = allPurchases
-        purchaseDateFilterActive = true
-    }
-
-    val (startTs, endTs) = range
-    val base = purchasesBeforePurchaseDateFilter.toList()
-
-    val filtered = base.filter { purchase ->
-        val raw = purchase.date?.toString() ?: ""
-        val ts = parseDateForSorting(raw)
-        ts != null && ts >= startTs && ts <= endTs
-    }.toTypedArray()
+    if (isoToLocalDayRangeTimestamps(startIso) == null || isoToLocalDayRangeTimestamps(endIso) == null) return
 
     purchaseDateFilterStartIso = startIso
     purchaseDateFilterEndIso = endIso
-    allPurchases = filtered
-    if (resetPage) {
-        currentPage = 1
-    }
-    displayPurchasesWithPagination()
+    purchaseDateFilterActive = true
+    refreshPurchaseRowsFromBase(resetPage)
 }
 
 private fun clearPurchaseDateFilter() {
     if (!purchaseDateFilterActive) return
-    allPurchases = purchasesBeforePurchaseDateFilter
     purchaseDateFilterActive = false
-    purchasesBeforePurchaseDateFilter = emptyArray()
     purchaseDateFilterStartIso = ""
     purchaseDateFilterEndIso = ""
-    currentPage = 1
-    displayPurchasesWithPagination()
+    refreshPurchaseRowsFromBase(resetPage = true)
 }
 
 /** Call when opening edit purchase so Cancel/back restores list filters. */
@@ -799,7 +788,6 @@ private fun resetPurchaseListFilters() {
     purchaseAdvancedFilters.clear()
     purchaseFilterSelectedColumns.clear()
     purchaseDateFilterActive = false
-    purchasesBeforePurchaseDateFilter = emptyArray()
     purchaseDateFilterStartIso = ""
     purchaseDateFilterEndIso = ""
     purchaseSearchServerMode = false
@@ -842,10 +830,19 @@ private fun purchaseDateQuickFilterMenuPortalHtml(): String = """
     </div>
 """.trimIndent()
 
-private fun purchaseDateQuickFilterHeaderCellHtml(label: String): String = """
+private fun purchaseDateQuickFilterHeaderCellHtml(label: String): String {
+    val sortOrder = purchaseTableSortOrderByField["date"] ?: "desc"
+    val sortTooltip = if (sortOrder == "asc") {
+        "Sorted A-Z (click to sort Z-A)"
+    } else {
+        "Sorted Z-A (click to sort A-Z)"
+    }
+    return """
     <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
         <div style="display:flex; align-items:center; gap:8px;">
-            <span>$label</span>
+            <button type="button" id="purchaseSortBtn_date" title="$sortTooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
+                <span>$label</span><span style="font-size: 14px;">↕</span>
+            </button>
             <button type="button" id="purchaseDateQuickFilterBtn" title="Filter by purchase date" aria-haspopup="dialog" aria-expanded="false"
                     style="background:none; border:none; cursor:pointer; font-weight:600; color:#111827; padding:0; display:inline-flex; align-items:center; justify-content:center;">
                 📅
@@ -853,6 +850,7 @@ private fun purchaseDateQuickFilterHeaderCellHtml(label: String): String = """
         </div>
     </th>
 """.trimIndent()
+}
 
 private fun closePurchaseDateQuickFilterMenu() {
     window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
@@ -1065,6 +1063,9 @@ private fun refreshPurchaseRowsFromBase(resetPage: Boolean = true) {
     if (purchaseSearchServerMode) return
     var rows = applyPurchaseAdvancedFilters(purchaseBaseRows)
     rows = applyPurchaseTextSearch(rows)
+    if (purchaseDateFilterActive && purchaseDateFilterStartIso.isNotEmpty() && purchaseDateFilterEndIso.isNotEmpty()) {
+        rows = filterPurchasesByPurchaseDateRange(rows, purchaseDateFilterStartIso, purchaseDateFilterEndIso)
+    }
     val order = purchaseTableSortOrderByField[purchaseTableSortField] ?: "desc"
     rows = sortPurchasesInMemory(rows, purchaseTableSortField, order).toTypedArray()
     allPurchases = rows
@@ -1087,13 +1088,6 @@ private fun togglePurchaseTableSort(field: String) {
     val next = if (current == "asc") "desc" else "asc"
     purchaseTableSortOrderByField[field] = next
     purchaseTableSortField = field
-
-    // If a date filter is active, keep the "base list" sorted too so clearing the date filter
-    // restores the same order the user selected.
-    if (purchaseDateFilterActive) {
-        val base = purchasesBeforePurchaseDateFilter
-        purchasesBeforePurchaseDateFilter = sortPurchasesInMemory(base, field, next).toTypedArray()
-    }
     refreshPurchaseRowsFromBase(resetPage = true)
 }
 
@@ -2946,7 +2940,6 @@ fun displayPurchases(purchases: dynamic) {
     if (!restoringFromEdit) {
         // New data load => reset any active date filter to avoid stale base arrays.
         purchaseDateFilterActive = false
-        purchasesBeforePurchaseDateFilter = emptyArray()
         purchaseDateFilterStartIso = ""
         purchaseDateFilterEndIso = ""
     }
@@ -2977,12 +2970,10 @@ fun displayPurchases(purchases: dynamic) {
     // Store base rows, then apply advanced filters + sort + pagination
     purchaseBaseRows = sortedPurchases.toTypedArray()
     if (restoringFromEdit) {
-        refreshPurchaseRowsFromBase(resetPage = false)
         if (purchaseDateFilterStartIso.isNotEmpty()) {
-            purchaseDateFilterActive = false
-            purchasesBeforePurchaseDateFilter = emptyArray()
-            applyPurchaseDateFilterRange(purchaseDateFilterStartIso, purchaseDateFilterEndIso, resetPage = false)
+            purchaseDateFilterActive = true
         }
+        refreshPurchaseRowsFromBase(resetPage = false)
         val returnPage = purchaseReturnPageFromEdit
         if (returnPage != null && returnPage > 0) {
             currentPage = returnPage
@@ -3086,7 +3077,7 @@ fun displayPurchasesWithPagination() {
         
         // Purchase Date quick filter trigger lives in the header; menu is portaled on #purchaseList.
         for (columnKey in selectedColumns) {
-            if (columnKey != "date" && sortableFields.contains(columnKey)) {
+            if (sortableFields.contains(columnKey)) {
                 val sortBtnId = "purchaseSortBtn_$columnKey"
                 document.getElementById(sortBtnId)?.addEventListener("click", { _: Event ->
                     togglePurchaseTableSort(columnKey)
@@ -3215,7 +3206,7 @@ fun displayPurchasesWithPagination() {
     // Purchase Date quick filter trigger lives in the header; menu is portaled on document.body.
     setupPurchaseDateQuickFilterMenuPortal()
     for (columnKey in selectedColumns) {
-        if (columnKey != "date" && sortableFields.contains(columnKey)) {
+        if (sortableFields.contains(columnKey)) {
             val sortBtnId = "purchaseSortBtn_$columnKey"
             document.getElementById(sortBtnId)?.addEventListener("click", { _: Event ->
                 togglePurchaseTableSort(columnKey)

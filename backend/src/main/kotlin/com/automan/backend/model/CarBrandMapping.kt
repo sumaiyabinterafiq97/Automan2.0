@@ -58,6 +58,12 @@ data class CarBrandMapping(
     @Column(name = "car_model_year", columnDefinition = "TEXT")
     val carModelYear: String? = null,
 
+    @Column(name = "chassis_number", columnDefinition = "TEXT")
+    val chassisNumber: String? = null,
+
+    @Column(name = "manufacture_year", columnDefinition = "TEXT")
+    val manufactureYear: String? = null,
+
     @Column(name = "created_at")
     val createdAt: LocalDateTime = LocalDateTime.now(),
 

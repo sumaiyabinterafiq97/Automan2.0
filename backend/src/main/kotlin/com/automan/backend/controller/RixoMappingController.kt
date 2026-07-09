@@ -24,6 +24,8 @@ class RixoMappingController(
         val rixoCompany: String? = null,
         val auctionName: String? = null,
         val stockLocation: String? = null,
+        val venueId: String? = null,
+        val pol: String? = null,
         val supportedVehicleType: String? = null,
         val rixoPrice: String? = null,
         /** FULL (default): all fields required. COMPANY / AUCTION / STOCK: partial skeleton rows with empty/null for unset columns. */
@@ -125,6 +127,8 @@ class RixoMappingController(
                 rixoCompany = req.rixoCompany!!.trim(),
                 auctionName = req.auctionName!!.trim(),
                 stockLocation = req.stockLocation!!.trim(),
+                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                pol = req.pol?.trim()?.takeIf { it.isNotEmpty() },
                 supportedVehicleType = null,
                 rixoPrice = null,
             )
@@ -132,6 +136,8 @@ class RixoMappingController(
                 rixoCompany = req.rixoCompany!!.trim(),
                 auctionName = req.auctionName?.trim()?.takeIf { it.isNotEmpty() },
                 stockLocation = req.stockLocation!!.trim(),
+                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                pol = req.pol?.trim()?.takeIf { it.isNotEmpty() },
                 supportedVehicleType = req.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
                 rixoPrice = req.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
             )
@@ -151,6 +157,8 @@ class RixoMappingController(
             rixoCompany = coalesce(req.rixoCompany, existing.rixoCompany) ?: "",
             auctionName = coalesce(req.auctionName, existing.auctionName),
             stockLocation = coalesce(req.stockLocation, existing.stockLocation) ?: "",
+            venueId = coalesce(req.venueId, existing.venueId),
+            pol = coalesce(req.pol, existing.pol),
             supportedVehicleType = coalesce(req.supportedVehicleType, existing.supportedVehicleType),
             rixoPrice = coalesce(req.rixoPrice, existing.rixoPrice),
             insertMode = req.insertMode,
@@ -183,6 +191,8 @@ class RixoMappingController(
                 "rixoCompany" to m.rixoCompany,
                 "auctionName" to m.auctionName,
                 "stockLocation" to m.stockLocation,
+                "venueId" to m.venueId,
+                "pol" to m.pol,
                 "supportedVehicleType" to m.supportedVehicleType,
                 "rixoPrice" to m.rixoPrice
             )
@@ -279,6 +289,8 @@ class RixoMappingController(
                         "rixoCompany" to m.rixoCompany,
                         "auctionName" to m.auctionName,
                         "stockLocation" to m.stockLocation,
+                        "venueId" to m.venueId,
+                        "pol" to m.pol,
                         "supportedVehicleType" to m.supportedVehicleType,
                         "rixoPrice" to m.rixoPrice
                     )
@@ -311,6 +323,8 @@ class RixoMappingController(
                     "rixoCompany" to saved.rixoCompany,
                     "auctionName" to saved.auctionName,
                     "stockLocation" to saved.stockLocation,
+                    "venueId" to saved.venueId,
+                    "pol" to saved.pol,
                     "supportedVehicleType" to saved.supportedVehicleType,
                     "rixoPrice" to saved.rixoPrice
                 )
