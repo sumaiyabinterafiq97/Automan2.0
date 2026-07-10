@@ -8962,7 +8962,7 @@ fun setupRixoDropdowns() {
 
             var editIdEl = document.getElementById('editId');
             var purchaseId = editIdEl && editIdEl.value ? parseInt(editIdEl.value, 10) : null;
-            if (window.handleR2CarPictureUpload && (purchaseId || window.isR2CarPictureStorageEnabled && window.isR2CarPictureStorageEnabled())) {
+            if (window.handleR2CarPictureUpload && window.isR2CarPictureStorageEnabled && window.isR2CarPictureStorageEnabled()) {
                 window.handleR2CarPictureUpload(input, purchaseId);
                 return;
             }

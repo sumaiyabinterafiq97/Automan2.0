@@ -1,5 +1,7 @@
 package com.automan.backend.config
 
+import com.automan.backend.service.media.MediaStorageService
+import com.automan.backend.service.media.R2MediaStorageService
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
@@ -32,5 +34,17 @@ class R2StorageConfig {
             )
             .forcePathStyle(true)
             .build()
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "automan.media.r2", name = ["enabled"], havingValue = "true")
+    fun r2MediaStorageService(
+        s3Client: S3Client,
+        properties: MediaStorageProperties,
+    ): MediaStorageService {
+        require(properties.isConfigured()) {
+            "automan.media.r2.enabled=true but R2 credentials or bucket settings are incomplete"
+        }
+        return R2MediaStorageService(s3Client, properties)
     }
 }

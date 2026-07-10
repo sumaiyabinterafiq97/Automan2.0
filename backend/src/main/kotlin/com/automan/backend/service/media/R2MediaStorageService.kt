@@ -1,8 +1,6 @@
 package com.automan.backend.service.media
 
 import com.automan.backend.config.MediaStorageProperties
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean
-import org.springframework.stereotype.Service
 import software.amazon.awssdk.core.sync.RequestBody
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest
@@ -13,8 +11,6 @@ import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignReques
 import java.io.InputStream
 import java.time.Duration
 
-@Service
-@ConditionalOnBean(S3Client::class)
 class R2MediaStorageService(
     private val s3Client: S3Client,
     private val properties: MediaStorageProperties,
