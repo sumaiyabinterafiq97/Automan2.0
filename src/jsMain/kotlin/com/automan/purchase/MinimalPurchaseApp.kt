@@ -1581,6 +1581,7 @@ fun main() {
     // Initialize app setup (always run, regardless of root element)
     initializeAppSetup()
     registerCarPictureMediaBridges()
+    window.asDynamic().syncEditCarPicturesBaselineFromDom = { syncEditCarPicturesBaselineFromDom() }
     ensureCarPictureMediaConfig()
     // Must run once at startup (not only when #/add loads). Otherwise opening Edit before Add
     // skipped money listeners entirely, and edit-form code used to set flags that blocked install.
@@ -8397,10 +8398,14 @@ private fun finalizeEditFormOriginalBaselineFromDom() {
     }
 }
 
-/** After existing thumbnails are in the DOM, baseline must match collectCarPictures() or every edit looks "changed". */
+/** After existing thumbnails are in the DOM, baseline must match collectCarPicturesForCompare() or every edit looks "changed". */
+fun syncEditCarPicturesBaselineFromDom() {
+    syncOriginalPurchaseCarPicturesBaselineFromDom()
+}
+
 private fun syncOriginalPurchaseCarPicturesBaselineFromDom() {
     val snap = originalPurchaseData ?: return
-    snap.carPictures = collectCarPictures()
+    snap.carPictures = collectCarPicturesForCompare()
 }
 
 fun setEditFormValuesFromKotlin(purchaseData: dynamic) {
@@ -18281,13 +18286,9 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.bookingId = bookingIdForJson(bookingId)
     
     // Include car pictures so change detection matches the save payload (edit form uses two DOM areas)
-    purchaseData.carPictures = if (isR2CarPictureStorageEnabled()) {
-        val legacyOnly = collectCarPictures()
-        val legacyCount = js("legacyOnly.length").unsafeCast<Int>()
-        if (legacyCount > 0) legacyOnly else null
-    } else {
-        collectCarPictures()
-    }
+    val picturesForCompare = collectCarPicturesForCompare()
+    val picturesCount = js("picturesForCompare.length").unsafeCast<Int>()
+    purchaseData.carPictures = if (picturesCount > 0) picturesForCompare else null
     
     applyLocalFlagAndNullLockedFields(purchaseData, isEdit = true)
     
@@ -19027,8 +19028,14 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     console.log("🔍 [DEBUG] Edit Shaken checkbox checked:", shaken)
     console.log("🔍 [DEBUG] Edit Shaken value being sent:", purchaseData.shaken, "Type:", js("typeof purchaseData.shaken"))
     
-    // Collect car pictures data
-    val carPictures = collectCarPictures()
+    // Collect car pictures data (R2 images are already stored via /media; only send legacy base64 blobs)
+    val carPictures = if (isR2CarPictureStorageEnabled()) {
+        val legacyOnly = collectCarPictures()
+        val legacyCount = js("legacyOnly.length").unsafeCast<Int>()
+        if (legacyCount > 0) legacyOnly else null
+    } else {
+        collectCarPictures()
+    }
     purchaseData.carPictures = carPictures
     
     applyLocalFlagAndNullLockedFields(purchaseData, isEdit = true)

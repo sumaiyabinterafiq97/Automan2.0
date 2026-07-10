@@ -68,6 +68,32 @@ fun uploadCarPictureFile(purchaseId: Long, file: File): Promise<dynamic> {
         }
 }
 
+fun collectCarPicturesForCompare(): dynamic {
+    val pictures = js("[]")
+    val containerIds = listOf("carPicturePreview", "existingPicturesList")
+    for (containerId in containerIds) {
+        val previewDiv = document.getElementById(containerId) ?: continue
+        val pictureElements = previewDiv.querySelectorAll("div[data-picture-id]")
+        for (i in 0 until pictureElements.length) {
+            val element = pictureElements.item(i) as HTMLElement
+            val pictureId = element.getAttribute("data-picture-id") ?: continue
+            val pictureData = element.getAttribute("data-picture-data") ?: continue
+            val pictureObj = js("{}")
+            pictureObj.id = pictureId
+            pictureObj.data = pictureData
+            pictures.push(pictureObj)
+        }
+    }
+    return pictures
+}
+
+private fun notifyCarPicturesDomUpdated() {
+    val sync = window.asDynamic().syncEditCarPicturesBaselineFromDom
+    if (sync != null && js("typeof sync === 'function'").unsafeCast<Boolean>()) {
+        sync()
+    }
+}
+
 private fun appendCarPicturePreview(
     container: HTMLElement,
     pictureId: String,
@@ -129,6 +155,7 @@ fun renderR2CarPictureItems(items: dynamic, containerId: String, purchaseId: Lon
         if (url.isEmpty()) continue
         appendCarPicturePreview(container, id, url, r2Media = true, purchaseId = purchaseId)
     }
+    notifyCarPicturesDomUpdated()
 }
 
 fun loadCarPicturesWithR2Fallback(
