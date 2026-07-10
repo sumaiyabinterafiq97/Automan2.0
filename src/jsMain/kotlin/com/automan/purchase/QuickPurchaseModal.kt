@@ -328,13 +328,13 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
                     val errorJson = JSON.parse<dynamic>(errorText)
                     val errorMessage = errorJson.message as? String ?: errorText
                     if (isPurchaseDuplicateError(response.status, errorMessage)) {
-                        showDuplicateChassisErrorModal()
+                        showErrorModal("Duplicate Purchase", errorMessage)
                     } else {
                         showMessage("Failed to create purchase: $errorMessage", "error")
                     }
                 } catch (_: dynamic) {
                     if (isPurchaseDuplicateError(response.status, errorText)) {
-                        showDuplicateChassisErrorModal()
+                        showErrorModal("Duplicate Purchase", errorText)
                     } else {
                         showMessage("Failed to create purchase: $errorText", "error")
                     }
