@@ -176,8 +176,9 @@ fun showCarBookingPage() {
             val pod = (carBookingFormState.podPort as? String)?.trim().orEmpty()
             val bn = (carBookingFormState.bookingNo as? String)?.trim().orEmpty()
             val vs = (carBookingFormState.vesselSelect as? String)?.trim().orEmpty()
+            val carrier = (carBookingFormState.carrierSelect as? String)?.trim().orEmpty()
             cc.isNotEmpty() || pol.isNotEmpty() || pod.isNotEmpty() || bn.isNotEmpty() ||
-                vs.isNotEmpty() || carBookingDisplayedCars.isNotEmpty()
+                vs.isNotEmpty() || carrier.isNotEmpty() || carBookingDisplayedCars.isNotEmpty()
         }
         
         if (!hasSavedState) {
@@ -317,6 +318,26 @@ fun showCarBookingPage() {
                             <label>VESSEL:</label>
                             <input type="text" id="vesselSelect" placeholder="Enter Vessel">
                         </div>
+
+                        <!-- CARRIER (master_menu field: carrier) -->
+                        <div class="booking-form-group">
+                            <label>CARRIER:</label>
+                            <div class="booking-fab-field rixo-company-fab-wrap" id="bookingCarrierFabWrap">
+                                <select id="carrierSelect" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
+                                    <option value="">Select Carrier</option>
+                                </select>
+                                <div class="rixo-company-fab">
+                                    <button type="button" id="bookingCarrierFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingCarrierFabActions">
+                                        <span class="rixo-fab-trigger-text-wrap">
+                                            <span class="rixo-fab-trigger-label" id="bookingCarrierFabLabel">Select Carrier</span>
+                                            <span class="rixo-fab-trigger-hint">Tap to choose carrier</span>
+                                        </span>
+                                        <span class="rixo-fab-trigger-chevron" aria-hidden="true">▼</span>
+                                    </button>
+                                    <div id="bookingCarrierFabActions" class="rixo-fab-actions" role="listbox" style="display: none;" aria-label="Carrier"></div>
+                                </div>
+                            </div>
+                        </div>
                         
                         <!-- Selection Options -->
                         <div class="booking-selection-options">
@@ -361,6 +382,7 @@ fun showCarBookingPage() {
                                         <th>CHASSIS</th>
                                         <th>NAME</th>
                                         <th>YEAR</th>
+                                        <th>STOCK</th>
                                         $listPriceHeader
                                     </tr>
                                 </thead>
@@ -412,6 +434,15 @@ fun showCarBookingPage() {
               defaultLabel: 'Select Port of Loading',
               emptyMessage: 'No POL values available'
             });
+            window.registerBookingFabSelect({
+              selectId: 'carrierSelect',
+              wrapId: 'bookingCarrierFabWrap',
+              triggerId: 'bookingCarrierFabTrigger',
+              actionsId: 'bookingCarrierFabActions',
+              labelId: 'bookingCarrierFabLabel',
+              defaultLabel: 'Select Carrier',
+              emptyMessage: 'No carriers available'
+            });
           }
         }, 0);
         """
@@ -422,18 +453,20 @@ fun showCarBookingPage() {
         clearPolDropdownNoCountry()
     }
     
-    // Load countries first, then restore — otherwise a late API response rebuilds the country dropdown and clears the restored value.
+    // Load countries first, then carriers, then restore — otherwise a late API response rebuilds the country dropdown and clears the restored value.
     loadCountries {
-        window.setTimeout({
-            if (shippingHistoryEditPrefillRaw != null) {
-                MainScope().launch {
-                    applyShippingHistoryEditPrefillFromJson(shippingHistoryEditPrefillRaw)
+        loadCarriers {
+            window.setTimeout({
+                if (shippingHistoryEditPrefillRaw != null) {
+                    MainScope().launch {
+                        applyShippingHistoryEditPrefillFromJson(shippingHistoryEditPrefillRaw)
+                    }
+                } else {
+                    restoreShippingRecreateMetaFromSession()
+                    restoreCarBookingState()
                 }
-            } else {
-                restoreShippingRecreateMetaFromSession()
-                restoreCarBookingState()
-            }
-        }, 80)
+            }, 80)
+        }
     }
     
     // Auto-load purchases into LIST table if both country and POL are selected (after state restoration)
@@ -1021,6 +1054,46 @@ fun loadCountriesFallback(onCountriesLoaded: (() -> Unit)? = null) {
     onCountriesLoaded?.invoke()
 }
 
+/** Carrier dropdown options from master_menu field `carrier`. */
+fun loadCarriers(onComplete: (() -> Unit)? = null) {
+    val carrierSelect = document.getElementById("carrierSelect") as? HTMLSelectElement
+    if (carrierSelect == null) {
+        onComplete?.invoke()
+        return
+    }
+    val preferred = bookingDynString(carBookingFormState.carrierSelect)
+    window.fetch(apiUrl("master-menu/carrier"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else js("[]")
+        }
+        .then { values: dynamic ->
+            carrierSelect.innerHTML = "<option value=\"\">Select Carrier</option>"
+            val list = mutableListOf<String>()
+            if (js("Array.isArray(values)").unsafeCast<Boolean>()) {
+                val n = js("values.length").unsafeCast<Int>()
+                for (i in 0 until n) {
+                    val v = js("values[i]")?.toString()?.trim().orEmpty()
+                    if (v.isNotEmpty()) list.add(v)
+                }
+            }
+            for (v in list.distinct()) {
+                val option = document.createElement("option") as HTMLOptionElement
+                option.value = v
+                option.textContent = v
+                carrierSelect.appendChild(option)
+            }
+            if (preferred.isNotEmpty()) {
+                bookingEnsureCarrierOption(preferred)
+            }
+            refreshBookingFabCarrierUi()
+            onComplete?.invoke()
+        }
+        .catch { _: dynamic ->
+            refreshBookingFabCarrierUi()
+            onComplete?.invoke()
+        }
+}
+
 /** POL dropdown: empty until a country is chosen (no global fetch on page load). */
 fun clearPolDropdownNoCountry() {
     val polSelect = document.getElementById("polPort") as? HTMLSelectElement ?: return
@@ -1521,27 +1594,10 @@ private fun mergePurchaseIntoDisplayedCars(purchase: dynamic) {
     carBookingDisplayedCars = out.toTypedArray()
 }
 
-/** Update the FOB/C&F column (6th td when price mode is active) for an existing chassis row. */
-private fun updateBookingTablePriceCellForChassis(chassisNumber: String, purchase: dynamic) {
+/** Price column was removed from the list table; keep as no-op so refresh merges do not overwrite STOCK. */
+private fun updateBookingTablePriceCellForChassis(@Suppress("UNUSED_PARAMETER") chassisNumber: String, @Suppress("UNUSED_PARAMETER") purchase: dynamic) {
     if (lastCalculationMode.isEmpty()) return
-    val tbody = document.getElementById("carSelectionTableBody") ?: return
-    val rows = tbody.querySelectorAll("tr")
-    for (i in 0 until rows.length) {
-        val row = rows.item(i) as HTMLElement
-        val chassisCell = row.querySelector("td:nth-child(3)") ?: continue
-        if (chassisCell.textContent?.trim() != chassisNumber) continue
-        val total = readPurchaseTotalNullable(purchase, lastCalculationMode)
-        val priceText = if (total != null) formatCurrency(total) else ""
-        var priceCell = row.querySelector("td:nth-child(6)") as? HTMLElement
-        if (priceCell == null) {
-            val td = document.createElement("td") as HTMLElement
-            td.setAttribute("style", "padding: 12px; border-bottom: 1px solid #e5e7eb;")
-            row.appendChild(td)
-            priceCell = td
-        }
-        priceCell.innerHTML = if (priceText.isNotEmpty()) formatPurchaseListCellChipHtml(priceText) else ""
-        break
-    }
+    // Intentionally no UI update — C&F/FOB price column is not shown in the LIST table.
 }
 
 fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
@@ -1607,19 +1663,18 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
             continue
         }
         
-        val total = readPurchaseTotalNullable(purchase, lastCalculationMode)
-        val priceText = if (total != null) formatCurrency(total) else ""
-        
         val rowNumber = currentRowCount + index + 1
         val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
         val chStr = chassisNumber.toString()
         val nameStr = (purchase.carName ?: "N/A").toString()
         val yearStr = formatCarModelYear(purchase.carModelYear?.toString())
+        val stockRaw = (purchase.stockLocation ?: purchase.stock_location ?: "").toString()
+        val stockStr = firstSemicolonToken(stockRaw)
         val noChip = formatPurchaseListCellChipHtml(rowNumber.toString())
         val chChip = formatPurchaseListCellChipHtml(chStr)
         val nmChip = formatPurchaseListCellChipHtml(nameStr)
         val yrChip = if (yearStr.isNotBlank()) formatPurchaseListCellChipHtml(yearStr) else ""
-        val priceChip = if (priceText.isNotEmpty()) formatPurchaseListCellChipHtml(priceText) else ""
+        val stockChip = if (stockStr.isNotBlank()) formatPurchaseListCellChipHtml(stockStr) else ""
         
         val chAttr = chStr.replace("&", "&amp;").replace("\"", "&quot;")
         val historyId = carBookingShippingRecreateChassisToHistoryId[chStr.uppercase()] ?: 0L
@@ -1639,6 +1694,7 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
             <td class="booking-td">$chChip</td>
             <td class="booking-td">$nmChip</td>
             <td class="booking-td">$yrChip</td>
+            <td class="booking-td">$stockChip</td>
         """
         tbody.appendChild(row)
 
@@ -2115,6 +2171,10 @@ private fun refreshBookingFabPolUi() {
     js("if (typeof window.refreshBookingFabSelect === 'function') window.refreshBookingFabSelect('polPort')")
 }
 
+private fun refreshBookingFabCarrierUi() {
+    js("if (typeof window.refreshBookingFabSelect === 'function') window.refreshBookingFabSelect('carrierSelect')")
+}
+
 private fun syncLastCalculationModeFromShippingHistoryPayload(raw: String) {
     try {
         val o = JSON.parse<dynamic>(raw)
@@ -2236,6 +2296,25 @@ private fun bookingEnsurePolOption(pol: String) {
     carBookingFormState.polPort = pol
 }
 
+private fun bookingEnsureCarrierOption(carrier: String) {
+    if (carrier.isBlank()) return
+    val sel = document.getElementById("carrierSelect") as? HTMLSelectElement ?: return
+    for (i in 0 until sel.options.length) {
+        val opt = sel.options.item(i) as? HTMLOptionElement ?: continue
+        if (opt.value.equals(carrier, ignoreCase = true)) {
+            sel.value = opt.value
+            carBookingFormState.carrierSelect = sel.value
+            return
+        }
+    }
+    val opt = document.createElement("option") as HTMLOptionElement
+    opt.value = carrier
+    opt.textContent = carrier
+    sel.appendChild(opt)
+    sel.value = carrier
+    carBookingFormState.carrierSelect = carrier
+}
+
 private fun setBookingPodDomValue(pod: String) {
     val el = document.getElementById("podPort") as? HTMLElement ?: return
     if (el.tagName == "SELECT") {
@@ -2298,6 +2377,7 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
     val shipmentDateRaw = (first.shipmentDate?.toString() ?: "").trim()
     val bookingId = (first.bookingId?.toString() ?: "").trim()
     val vessel = (first.vessel?.toString() ?: "").trim()
+    val carrier = (first.carrier?.toString() ?: "").trim()
     val priceTypeRaw = (first.priceType?.toString() ?: "").trim()
 
     js("window.__bookingRestoreInProgress = true")
@@ -2356,6 +2436,14 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
         carBookingFormState.bookingNo = bookingId
         (document.getElementById("vesselSelect") as? HTMLInputElement)?.value = vessel
         carBookingFormState.vesselSelect = vessel
+        if (carrier.isNotEmpty()) {
+            bookingEnsureCarrierOption(carrier)
+            refreshBookingFabCarrierUi()
+        } else {
+            (document.getElementById("carrierSelect") as? HTMLSelectElement)?.value = ""
+            carBookingFormState.carrierSelect = ""
+            refreshBookingFabCarrierUi()
+        }
         carBookingShippingHistoryEditBookingIdNormalized = normalizeBookingIdKey(bookingId).takeIf { it.isNotEmpty() }
 
         for (hist in rows) {
@@ -2632,6 +2720,8 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
     val etd = bookingFormEtdIso()
     val bookingNo = (document.getElementById("bookingNo") as? HTMLInputElement)?.value?.trim().orEmpty()
     val vessel = (document.getElementById("vesselSelect") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val carrier = (document.getElementById("carrierSelect") as? HTMLSelectElement)?.value?.trim().orEmpty()
+        .ifEmpty { bookingDynString(carBookingFormState.carrierSelect) }
     if (etd.isEmpty() || bookingNo.isEmpty() || vessel.isEmpty()) {
         showMessage("Please fill in ETD, booking no, and vessel before updating.", "error")
         return
@@ -2701,6 +2791,7 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
                 req.pod = pod
                 req.bookingId = bookingNo
                 req.vessel = vessel
+                req.carrier = carrier
                 req.priceType = priceType
                 req.items = items
                 val requestInit = js("{}")

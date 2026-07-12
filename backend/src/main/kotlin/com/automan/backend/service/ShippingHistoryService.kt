@@ -37,6 +37,7 @@ class ShippingHistoryService(
                 pod = e.pod,
                 bookingId = e.bookingId,
                 vessel = e.vessel,
+                carrier = e.carrier,
                 priceType = e.priceType,
                 chassis = e.chassis,
                 clientName = e.clientName,
@@ -66,6 +67,7 @@ class ShippingHistoryService(
         val pol = request.pol?.trim()?.takeIf { it.isNotEmpty() }
         val pod = request.pod?.trim()?.takeIf { it.isNotEmpty() }
         val vessel = request.vessel?.trim()?.takeIf { it.isNotEmpty() }
+        val carrier = request.carrier?.trim()?.takeIf { it.isNotEmpty() }
         val blNo = request.blNo?.trim()?.takeIf { it.isNotEmpty() }
         val bookingIdStored = bookingKey.takeIf { it.isNotEmpty() }
 
@@ -93,6 +95,7 @@ class ShippingHistoryService(
                     pod = pod,
                     bookingId = bookingIdStored,
                     vessel = vessel,
+                    carrier = carrier,
                     blNo = blNo ?: existing.blNo,
                     priceType = priceType,
                     chassis = chassis,
@@ -109,6 +112,7 @@ class ShippingHistoryService(
                     pod = pod,
                     bookingId = bookingIdStored,
                     vessel = vessel,
+                    carrier = carrier,
                     blNo = blNo,
                     priceType = priceType,
                     chassis = chassis,

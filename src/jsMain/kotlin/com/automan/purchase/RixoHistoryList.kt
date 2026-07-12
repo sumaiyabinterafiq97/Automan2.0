@@ -102,7 +102,7 @@ fun showRixoHistoryPage() {
                     <button type="button" id="rixoHistorySearchClearBtn" class="rixo-search-clear" title="Clear search" aria-label="Clear search">×</button>
                 </div>
                 <button id="rixoConfirmSelectedBtn" type="button" class="rixo-primary-btn" disabled>
-                    Rixo Confirm
+                    Rixo Sent
                 </button>
             </div>
             <div id="rixoHistoryTableWrap">
@@ -214,7 +214,7 @@ private fun updateRixoHistorySelectionUi() {
         confirmBtn.disabled = !hasAny
         confirmBtn.style.opacity = if (hasAny) "1" else "0.6"
         confirmBtn.style.cursor = if (hasAny) "pointer" else "not-allowed"
-        confirmBtn.textContent = if (hasAny) "Rixo Confirm (${rixoHistorySelectedIds.size})" else "Rixo Confirm"
+        confirmBtn.textContent = if (hasAny) "Rixo Sent (${rixoHistorySelectedIds.size})" else "Rixo Sent"
     }
 }
 
@@ -223,13 +223,13 @@ private fun confirmSelectedRixoHistoryRows() {
         showMessage("Select at least one history row.", "warning")
         return
     }
-    val ok = window.confirm("Mark all cars under ${rixoHistorySelectedIds.size} selected Rixo history row(s) as Rixo Confirmed?")
+    val ok = window.confirm("Mark all cars under ${rixoHistorySelectedIds.size} selected Rixo history row(s) as Rixo Sent?")
     if (!ok) return
 
     val btn = document.getElementById("rixoConfirmSelectedBtn") as? HTMLButtonElement
     btn?.disabled = true
-    val prevLabel = btn?.textContent ?: "Rixo Confirm"
-    btn?.textContent = "Confirming..."
+    val prevLabel = btn?.textContent ?: "Rixo Sent"
+    btn?.textContent = "Sending..."
 
     MainScope().launch {
         val idLongs = rixoHistorySelectedIds.mapNotNull { it.toLongOrNull() }.distinct()
@@ -251,17 +251,17 @@ private fun confirmSelectedRixoHistoryRows() {
                 val rows = d.selectedRows?.toString() ?: "0"
                 when {
                     rows == "0" || rows.isEmpty() ->
-                        showMessage("No history rows were confirmed (server got no ids). Try again.", "warning")
+                        showMessage("No history rows were marked as Rixo Sent (server got no ids). Try again.", "warning")
                     updated == "0" ->
                         showMessage(
                             "Selected $rows Rixo history row(s), but no purchase rows were updated. " +
                                 "Chassis in history must match purchase chassis (exact or prefix before \"-\"), " +
-                                "or purchases may already be Rixo confirmed.",
+                                "or purchases may already be Rixo Sent.",
                             "warning",
                         )
                     else ->
                         showMessage(
-                            "Rixo confirmed for $updated purchase row(s) from $rows selected history row(s).",
+                            "Rixo Sent for $updated purchase row(s) from $rows selected history row(s).",
                             "success",
                         )
                 }
@@ -269,7 +269,7 @@ private fun confirmSelectedRixoHistoryRows() {
                 loadRixoHistory()
             },
             onError = { message, _ ->
-                showMessage("Failed to confirm Rixo: $message", "error")
+                showMessage("Failed to mark Rixo Sent: $message", "error")
             },
         )
         btn?.textContent = prevLabel
@@ -512,7 +512,7 @@ private fun rixoHistoryHasBookingRequestedFromRow(row: dynamic): Boolean {
 }
 
 private fun rixoHistoryConfirmedIndicatorHtml(confirmed: Boolean): String {
-    val label = if (confirmed) "Rixo confirmed" else "Not Rixo confirmed"
+    val label = if (confirmed) "Rixo Sent" else "Not Rixo Sent"
     val safeLabel = escapeHtml(label)
     return if (confirmed) {
         """<span role="img" aria-label="$safeLabel" title="$safeLabel" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#d1fae5;border:2px solid #6ee7b7;color:#047857;cursor:default;font-size:13px;line-height:1;font-weight:700;">✓</span>"""
@@ -552,8 +552,8 @@ private fun rixoHistorySearchColumnKeys(): List<String> =
     listOf("id") + rixoHistoryDisplayColumnKeys()
 
 private fun rixoHistoryColumnLabel(key: String): String = when (key) {
-    "rixoConfirmed" -> "Rixo Confirmed"
-    "rixoConfirmedDate" -> "Rixo Confirmed Date"
+    "rixoConfirmed" -> "Rixo Sent"
+    "rixoConfirmedDate" -> "Rixo Sent Date"
     "buyingDate" -> "Buying date"
     "rixoCompany" -> "Rixo company"
     "message" -> "Message"
@@ -709,8 +709,8 @@ private fun renderRixoHistoryTableFromCache() {
         56, // Edit
         56, // PDF
         72, // Select checkbox
-        96, // Rixo Confirmed
-        120, // Rixo Confirmed Date
+        96, // Rixo Sent
+        120, // Rixo Sent Date
         112, // Buying date
         128, // Rixo company
         160, // Message
@@ -805,7 +805,7 @@ private fun renderRixoHistoryTableFromCache() {
             html.append("""<div class="rixo-card-grid">""")
             html.append("""<div class="rixo-kv"><div class="rixo-k">Rixo status</div><div class="rixo-v">${rixoHistoryConfirmedIndicatorHtml(confirmed)}</div></div>""")
             if (confirmedDate.isNotEmpty()) {
-                html.append("""<div class="rixo-kv"><div class="rixo-k">Confirmed date</div><div class="rixo-v">${formatPurchaseListNeutralChipHtml(confirmedDate)}</div></div>""")
+                html.append("""<div class="rixo-kv"><div class="rixo-k">Rixo Sent Date</div><div class="rixo-v">${formatPurchaseListNeutralChipHtml(confirmedDate)}</div></div>""")
             }
             if (buyingDate.isNotEmpty()) {
                 html.append("""<div class="rixo-kv"><div class="rixo-k">Buying date</div><div class="rixo-v">${formatPurchaseListNeutralChipHtml(buyingDate)}</div></div>""")

@@ -9,6 +9,7 @@ data class ShippingHistoryRowDto(
     val pod: String? = null,
     val bookingId: String? = null,
     val vessel: String? = null,
+    val carrier: String? = null,
     val priceType: String? = null,
     val chassis: String,
     val clientName: String? = null,

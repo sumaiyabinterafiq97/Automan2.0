@@ -49,10 +49,50 @@ class RixoMappingController(
         return ta.equals(tb, ignoreCase = true)
     }
 
+    /** Supplier Map tree modes start with auction (supplier) first. */
+    private fun isSupplierFirstMode(mode: String): Boolean =
+        mode in setOf("SUPPLIER", "VENUE", "POL", "RIXO_COMPANY")
+
     /** Ensures merge target row matches the path in the request (incremental fill of one DB row). */
     private fun validateMergePath(existing: RixoMapping, req: RixoMappingUpsertRequest): String? {
-        if (!normEqStr(existing.rixoCompany, req.rixoCompany)) return "Row id does not match company"
         val mode = req.insertMode?.uppercase() ?: "FULL"
+        if (isSupplierFirstMode(mode)) {
+            if (!normEqStr(existing.auctionName, req.auctionName)) return "Row id does not match supplier"
+            return when (mode) {
+                "SUPPLIER" -> {
+                    val a = existing.auctionName?.trim().orEmpty()
+                    if (a.isNotEmpty() && !normEqStr(existing.stockLocation, "-") && !normEqStr(existing.stockLocation, "")) {
+                        return "This row already has path data; use Add without merging"
+                    }
+                    null
+                }
+                "VENUE" -> {
+                    if (!existing.venueId.isNullOrBlank()) return "Venue already set on this row"
+                    null
+                }
+                "STOCK" -> {
+                    if (!normEqStr(existing.venueId, req.venueId)) return "Venue id must match the row being updated"
+                    if (existing.stockLocation.trim().isNotEmpty() && !normEqStr(existing.stockLocation, "-")) {
+                        return "Stock location already set on this row"
+                    }
+                    null
+                }
+                "POL" -> {
+                    if (!normEqStr(existing.stockLocation, req.stockLocation)) return "Stock location must match the row being updated"
+                    if (!existing.pol.isNullOrBlank()) return "POL already set on this row"
+                    null
+                }
+                "RIXO_COMPANY" -> {
+                    if (!normEqStr(existing.pol, req.pol)) return "POL must match the row being updated"
+                    if (existing.rixoCompany.trim().isNotEmpty() && !normEqStr(existing.rixoCompany, "-")) {
+                        return "Rixo company already set on this row"
+                    }
+                    null
+                }
+                else -> "Merge is not supported for mode $mode"
+            }
+        }
+        if (!normEqStr(existing.rixoCompany, req.rixoCompany)) return "Row id does not match company"
         return when (mode) {
             "AUCTION" -> {
                 val a = existing.auctionName?.trim().orEmpty()
@@ -81,6 +121,32 @@ class RixoMappingController(
     private fun validate(req: RixoMappingUpsertRequest): String? {
         val mode = req.insertMode?.uppercase() ?: "FULL"
         return when (mode) {
+            "SUPPLIER" -> {
+                if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
+                validateRixoPriceIfPresent(req.rixoPrice)
+            }
+            "VENUE" -> {
+                if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
+                if (req.venueId.isNullOrBlank()) return "Venue id is required"
+                validateRixoPriceIfPresent(req.rixoPrice)
+            }
+            "STOCK" -> {
+                if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
+                if (req.stockLocation.isNullOrBlank()) return "Stock location is required"
+                validateRixoPriceIfPresent(req.rixoPrice)
+            }
+            "POL" -> {
+                if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
+                if (req.stockLocation.isNullOrBlank()) return "Stock location is required"
+                if (req.pol.isNullOrBlank()) return "POL is required"
+                validateRixoPriceIfPresent(req.rixoPrice)
+            }
+            "RIXO_COMPANY" -> {
+                if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
+                if (req.stockLocation.isNullOrBlank()) return "Stock location is required"
+                if (req.rixoCompany.isNullOrBlank()) return "Rixo company is required"
+                validateRixoPriceIfPresent(req.rixoPrice)
+            }
             "COMPANY" -> {
                 if (req.rixoCompany.isNullOrBlank()) return "Rixo company is required"
                 validateRixoPriceIfPresent(req.rixoPrice)
@@ -109,6 +175,51 @@ class RixoMappingController(
     private fun toInput(req: RixoMappingUpsertRequest): RixoMappingService.UpsertInput {
         val mode = req.insertMode?.uppercase() ?: "FULL"
         return when (mode) {
+            "SUPPLIER" -> RixoMappingService.UpsertInput(
+                rixoCompany = "-",
+                auctionName = req.auctionName!!.trim(),
+                stockLocation = "-",
+                venueId = null,
+                pol = null,
+                supportedVehicleType = null,
+                rixoPrice = null,
+            )
+            "VENUE" -> RixoMappingService.UpsertInput(
+                rixoCompany = "-",
+                auctionName = req.auctionName!!.trim(),
+                stockLocation = "-",
+                venueId = req.venueId!!.trim(),
+                pol = null,
+                supportedVehicleType = null,
+                rixoPrice = null,
+            )
+            "STOCK" -> RixoMappingService.UpsertInput(
+                rixoCompany = "-",
+                auctionName = req.auctionName!!.trim(),
+                stockLocation = req.stockLocation!!.trim(),
+                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                pol = null,
+                supportedVehicleType = null,
+                rixoPrice = null,
+            )
+            "POL" -> RixoMappingService.UpsertInput(
+                rixoCompany = "-",
+                auctionName = req.auctionName!!.trim(),
+                stockLocation = req.stockLocation!!.trim(),
+                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                pol = req.pol!!.trim(),
+                supportedVehicleType = null,
+                rixoPrice = null,
+            )
+            "RIXO_COMPANY" -> RixoMappingService.UpsertInput(
+                rixoCompany = req.rixoCompany!!.trim(),
+                auctionName = req.auctionName!!.trim(),
+                stockLocation = req.stockLocation!!.trim(),
+                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                pol = req.pol?.trim()?.takeIf { it.isNotEmpty() },
+                supportedVehicleType = null,
+                rixoPrice = null,
+            )
             "COMPANY" -> RixoMappingService.UpsertInput(
                 rixoCompany = req.rixoCompany!!.trim(),
                 auctionName = null,
@@ -246,9 +357,9 @@ class RixoMappingController(
         for ((idx, row) in rows.withIndex()) {
             if (row.id != null) {
                 val mode = row.insertMode?.uppercase() ?: "FULL"
-                if (mode == "COMPANY") {
+                if (mode == "COMPANY" || mode == "SUPPLIER") {
                     return ResponseEntity.badRequest().body(
-                        mapOf("success" to false, "message" to "Row ${idx + 1}: id is not allowed for COMPANY insert")
+                        mapOf("success" to false, "message" to "Row ${idx + 1}: id is not allowed for $mode insert")
                     )
                 }
                 val existing = rixoMappingService.findById(row.id)
@@ -266,7 +377,10 @@ class RixoMappingController(
                     existing = existing,
                     insertMode = mode,
                     auctionName = row.auctionName,
+                    venueId = row.venueId,
                     stockLocation = row.stockLocation,
+                    pol = row.pol,
+                    rixoCompany = row.rixoCompany,
                     supportedVehicleType = row.supportedVehicleType,
                     rixoPrice = row.rixoPrice,
                 )

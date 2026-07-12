@@ -119,6 +119,43 @@ class PurchaseVehicleOverrideServiceTest {
     }
 
     @Test
+    fun syncFromPurchase_preserves_carModelYear_when_field_null_on_write() {
+        `when`(mappingRepository.findByChassis("AAHP45W")).thenReturn(emptyList())
+        `when`(mappingRepository.findBestPrefixMatchForChassis("AAHP45W")).thenReturn(emptyList())
+        `when`(overrideRepository.findByPurchaseId(10L)).thenReturn(
+            PurchaseVehicleOverride(
+                purchaseId = 10L,
+                overridesJson = """{"carModelYear":"2026-05"}""",
+            ),
+        )
+
+        // Cost-only style write: Transient carModelYear is null on raw entity
+        service.syncFromPurchase(Purchase(id = 10L, chassis = "AAHP45W", price = "100000"))
+
+        val captor = org.mockito.ArgumentCaptor.forClass(PurchaseVehicleOverride::class.java)
+        verify(overrideRepository).save(captor.capture())
+        val savedJson = captor.value.overridesJson
+        assertTrue(savedJson.contains("2026-05"), "expected carModelYear preserved, got: $savedJson")
+    }
+
+    @Test
+    fun syncFromPurchase_clears_carModelYear_when_explicitly_blank() {
+        `when`(mappingRepository.findByChassis("AAHP45W")).thenReturn(emptyList())
+        `when`(mappingRepository.findBestPrefixMatchForChassis("AAHP45W")).thenReturn(emptyList())
+        `when`(overrideRepository.findByPurchaseId(11L)).thenReturn(
+            PurchaseVehicleOverride(
+                purchaseId = 11L,
+                overridesJson = """{"carModelYear":"2026-05"}""",
+            ),
+        )
+
+        service.syncFromPurchase(Purchase(id = 11L, chassis = "AAHP45W", carModelYear = ""))
+
+        verify(overrideRepository).delete(any(PurchaseVehicleOverride::class.java))
+        verify(overrideRepository, never()).save(any(PurchaseVehicleOverride::class.java))
+    }
+
+    @Test
     fun normalize_ignores_case_and_whitespace() {
         assertTrue(PurchaseVehicleOverrideService.normalize(" Gasoline ") == "gasoline")
         assertFalse(PurchaseVehicleOverrideService.normalize("GASOLINE") == "gasoline ")

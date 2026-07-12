@@ -88,23 +88,6 @@ class RixoImportController(
         }
     }
 
-    /**
-     * Paginated search for Supplier Map (supplier name / stock location / rixo company / all).
-     */
-    @GetMapping("/prices/page-search")
-    fun searchSupplierMapPage(
-        @RequestParam q: String,
-        @RequestParam(defaultValue = "all") field: String,
-        @RequestParam(defaultValue = "0") page: Int,
-        @RequestParam(defaultValue = "25") size: Int,
-    ): ResponseEntity<Any> {
-        return try {
-            ResponseEntity.ok(rixoImportService.searchSupplierMapPage(q, field, page, size))
-        } catch (e: IllegalArgumentException) {
-            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
-        }
-    }
-    
     @GetMapping("/dropdowns/auction-names")
     fun getAuctionNames(): ResponseEntity<Map<String, Any>> {
         return try {
@@ -265,10 +248,30 @@ class RixoImportController(
                 auctionHouse = request["auctionHouse"] as? String ?: existingMapping.auctionHouse,
                 stockLocation = newStock,
                 rixoCompany = request["rixoCompany"] as? String ?: existingMapping.rixoCompany,
-                venueId = request["venueId"] as? String ?: existingMapping.venueId,
-                pol = if (!newPol.isNullOrBlank()) newPol else RixoPolFromStockLocation.derivePol(newStock),
-                supportedVehicleType = request["supportedVehicleType"] as? String ?: existingMapping.supportedVehicleType,
-                rixoPrice = request["rixoPrice"] as? String ?: existingMapping.rixoPrice,
+                venueId = if (request.containsKey("venueId")) {
+                    (request["venueId"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+                } else {
+                    existingMapping.venueId
+                },
+                pol = if (request.containsKey("pol") && !newPol.isNullOrBlank()) {
+                    newPol
+                } else if (request.containsKey("pol")) {
+                    null
+                } else if (!newPol.isNullOrBlank()) {
+                    newPol
+                } else {
+                    RixoPolFromStockLocation.derivePol(newStock)
+                },
+                supportedVehicleType = if (request.containsKey("supportedVehicleType")) {
+                    (request["supportedVehicleType"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+                } else {
+                    existingMapping.supportedVehicleType
+                },
+                rixoPrice = if (request.containsKey("rixoPrice")) {
+                    (request["rixoPrice"] as? String)?.trim()?.takeIf { it.isNotBlank() }
+                } else {
+                    existingMapping.rixoPrice
+                },
             ) ?: return ResponseEntity.notFound().build()
 
             Logger.debug("[RIXO UPDATE] Successfully updated mapping with ID: ${savedMapping.id}")

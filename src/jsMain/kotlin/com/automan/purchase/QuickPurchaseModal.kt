@@ -55,6 +55,19 @@ fun openQuickPurchaseModal() {
                     ${createEditableCombobox("qpCarName", "Select Car Name")}
                 </div>
                 <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Registration Date</label>
+                    <div style="position:relative;width:100%;">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <input type="text" id="qpCarModelYearText" autocomplete="off"
+                                   style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;">
+                            <button type="button" id="qpCarModelYearCalendarBtn" title="Open month picker"
+                                    style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                        </div>
+                        <input type="hidden" id="qpCarModelYear" value="" tabindex="-1" aria-hidden="true">
+                        <span id="qpCarModelYearHint" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;pointer-events:none;">MM/YYYY</span>
+                    </div>
+                </div>
+                <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Supplier Name</label>
                     ${createEditableCombobox("qpAuctionName", "Add Supplier Name")}
                 </div>
@@ -94,6 +107,7 @@ fun openQuickPurchaseModal() {
     document.body?.appendChild(modal)
 
     bindStrictDateTextMask("qpDate", null)
+    bindStrictMonthYearTextMask("qpCarModelYear", "qpCarModelYearHint")
     setupQuickPurchaseModalListeners()
     preloadQuickPurchaseDropdowns()
 
@@ -115,6 +129,9 @@ private fun resetQuickPurchaseModalForm() {
         inp?.value = ""
     }
     (document.getElementById("qpPrice") as? HTMLInputElement)?.value = ""
+    writeCarModelYearInput("qpCarModelYear", "")
+    window.asDynamic().__qpChassisMappingCache = null
+    window.asDynamic().__qpResolvedSupplier = null
     val today = todayIsoLocalDate()
     (document.getElementById("qpDate") as? HTMLInputElement)?.value = today
     val dateText = document.getElementById("qpDateText") as? HTMLInputElement
@@ -227,6 +244,7 @@ fun populateQuickSupplierDropdownsFromAuction(auctionName: String) {
 
 fun applyQuickPurchaseSupplierSelection(selection: dynamic) {
     window.asDynamic().__supplierSel = selection
+    window.asDynamic().__qpResolvedSupplier = selection
     js("""
         (function() {
             var sel = window.__supplierSel;
@@ -244,6 +262,7 @@ fun applyQuickPurchaseSupplierSelection(selection: dynamic) {
             } finally {
                 window.__suppressRixoAutoSelect = prevSuppress;
             }
+            window.__qpResolvedSupplier = sel;
         })();
     """)
 }
@@ -294,58 +313,70 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
     purchaseData.country = getComboboxValueSafe("qpCountry")
     val priceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpPrice') : ''").unsafeCast<String>().trim()
     purchaseData.price = if (priceValue.isNotBlank()) "¥$priceValue" else ""
+    val regDate = readCarModelYearInput("qpCarModelYear")
+    if (regDate.isNotBlank()) purchaseData.carModelYear = regDate
+
+    enrichQuickPurchasePayload(purchaseData)
 
     val requestInit = js("{}")
     requestInit.method = "POST"
     val headers = js("{}")
     headers["Content-Type"] = "application/json"
     requestInit.headers = headers
-    requestInit.body = JSON.stringify(purchaseData)
 
-    window.fetch(apiUrl("purchases"), requestInit).then { response ->
-        if (response.ok) {
-            if (saveAndMore) {
-                resetQuickPurchaseModalForm()
-                showMessage("Purchase saved. You can add another.", "success")
-            } else {
-                closeQuickPurchaseModal()
-                showMessage("Purchase created successfully!", "success")
-            }
-            if (document.getElementById("purchaseTable") != null) {
-                loadPurchases()
-            }
-            saveBtn?.disabled = false
-            saveMoreBtn?.disabled = false
-            saveBtn?.textContent = originalSave
-            saveMoreBtn?.textContent = originalMore
-        } else {
-            response.text().then { errorText ->
+    finalizeQuickPurchasePayload(purchaseData).then { enriched: dynamic ->
+        requestInit.body = JSON.stringify(enriched)
+        window.fetch(apiUrl("purchases"), requestInit).then { response ->
+            if (response.ok) {
+                if (saveAndMore) {
+                    resetQuickPurchaseModalForm()
+                    showMessage("Purchase saved. You can add another.", "success")
+                } else {
+                    closeQuickPurchaseModal()
+                    showMessage("Purchase created successfully!", "success")
+                }
+                if (document.getElementById("purchaseTable") != null) {
+                    loadPurchases()
+                }
                 saveBtn?.disabled = false
                 saveMoreBtn?.disabled = false
                 saveBtn?.textContent = originalSave
                 saveMoreBtn?.textContent = originalMore
-                try {
-                    val errorJson = JSON.parse<dynamic>(errorText)
-                    val errorMessage = errorJson.message as? String ?: errorText
-                    if (isPurchaseDuplicateError(response.status, errorMessage)) {
-                        showErrorModal("Duplicate Purchase", errorMessage)
-                    } else {
-                        showMessage("Failed to create purchase: $errorMessage", "error")
-                    }
-                } catch (_: dynamic) {
-                    if (isPurchaseDuplicateError(response.status, errorText)) {
-                        showErrorModal("Duplicate Purchase", errorText)
-                    } else {
-                        showMessage("Failed to create purchase: $errorText", "error")
+            } else {
+                response.text().then { errorText ->
+                    saveBtn?.disabled = false
+                    saveMoreBtn?.disabled = false
+                    saveBtn?.textContent = originalSave
+                    saveMoreBtn?.textContent = originalMore
+                    try {
+                        val errorJson = JSON.parse<dynamic>(errorText)
+                        val errorMessage = errorJson.message as? String ?: errorText
+                        if (isPurchaseDuplicateError(response.status, errorMessage)) {
+                            showErrorModal("Duplicate Purchase", errorMessage)
+                        } else {
+                            showMessage("Failed to create purchase: $errorMessage", "error")
+                        }
+                    } catch (_: dynamic) {
+                        if (isPurchaseDuplicateError(response.status, errorText)) {
+                            showErrorModal("Duplicate Purchase", errorText)
+                        } else {
+                            showMessage("Failed to create purchase: $errorText", "error")
+                        }
                     }
                 }
             }
+        }.catch { error: dynamic ->
+            saveBtn?.disabled = false
+            saveMoreBtn?.disabled = false
+            saveBtn?.textContent = originalSave
+            saveMoreBtn?.textContent = originalMore
+            showMessage("Failed to create purchase: ${error.message}", "error")
         }
     }.catch { error: dynamic ->
         saveBtn?.disabled = false
         saveMoreBtn?.disabled = false
         saveBtn?.textContent = originalSave
         saveMoreBtn?.textContent = originalMore
-        showMessage("Failed to create purchase: ${error.message}", "error")
+        showMessage("Failed to prepare purchase: ${error.message}", "error")
     }
 }

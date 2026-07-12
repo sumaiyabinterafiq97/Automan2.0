@@ -198,12 +198,28 @@ class PurchaseService(
         return parts.firstOrNull() ?: s
     }
 
+    /**
+     * Full chassis identity = chassis code + chassis number (`CODE-NUMBER`).
+     * Code-only values (e.g. `AAHH45`) are not unique and must not trigger duplicate errors.
+     */
+    fun isFullChassisIdentity(chassis: String?): Boolean {
+        val c = chassis?.trim().orEmpty()
+        if (c.isEmpty()) return false
+        val dash = c.indexOf('-')
+        if (dash <= 0 || dash >= c.length - 1) return false
+        val code = c.substring(0, dash).trim()
+        val number = c.substring(dash + 1).trim()
+        return code.isNotEmpty() && number.isNotEmpty()
+    }
+
     fun findDuplicatePurchase(
         chassis: String?,
         excludeId: Long?,
     ): Purchase? {
         val c = chassis?.trim().orEmpty()
         if (c.isEmpty()) return null
+        // Only enforce uniqueness for full chassis (code-number). Code-only is allowed to repeat.
+        if (!isFullChassisIdentity(c)) return null
 
         val candidates = purchaseRepository.findByChassisIgnoreCaseTrim(c)
         return candidates.firstOrNull { row ->
@@ -1915,7 +1931,10 @@ class PurchaseService(
         val existingPurchases = purchaseRepository.findByChassis(chassis)
         if (existingPurchases.isNotEmpty()) {
             // Update all purchases with this chassis (since chassis is no longer unique)
-            existingPurchases.forEach { existingPurchase ->
+            existingPurchases.forEach { rawPurchase ->
+                // Hydrate Transient vehicle specs (e.g. carModelYear) before finalize/sync so cost-only
+                // writes do not wipe purchase_vehicle_overrides.
+                val existingPurchase = applyReadAdapters(rawPurchase)
                 val updatedPurchase = existingPurchase.copy(
                     price = carPrice.toString(),
                     auctionFee = auctionFee.toString(),
@@ -1956,7 +1975,8 @@ class PurchaseService(
         val existingPurchases = purchaseRepository.findByChassis(chassis)
         if (existingPurchases.isNotEmpty()) {
             // Update all purchases with this chassis (since chassis is no longer unique)
-            existingPurchases.forEach { existingPurchase ->
+            existingPurchases.forEach { rawPurchase ->
+                val existingPurchase = applyReadAdapters(rawPurchase)
                 val updatedPurchase = existingPurchase.copy(
                     price = carPrice.toString(),
                     auctionFee = auctionFee.toString(),
@@ -2050,12 +2070,15 @@ class PurchaseService(
         
         // Fetch car details for each chassis — price column prefers FOB/C&F calculator totals from the client,
         // then shipping_history.amount, then sums from purchase fields.
+        // Apply read adapters so carModelYear (registration date) resolves from overrides / chassis map
+        // after V53 dropped purchases.car_model_year.
         val carList = request.chassisNumbers.mapIndexed { index, chassisRaw ->
             val chassis = chassisRaw.trim()
             val frontendYen = resolveFrontendYenForShippingPdf(request.frontendTotalYenByChassis, chassis)
             val historyRow = shippingHistoryRepository.findFirstByChassisOrderByIdDesc(chassis)
-            val purchases = purchaseRepository.findByChassis(chassis)
-            val purchase = purchases.firstOrNull() // Use first purchase if multiple exist
+            val rawPurchases = purchaseRepository.findByChassisIgnoreCaseTrim(chassis)
+                .ifEmpty { purchaseRepository.findByChassis(chassis) }
+            val purchase = applyReadAdapterOrNull(rawPurchases.firstOrNull())
 
             if (frontendYen != null) {
                 if (purchase != null) {

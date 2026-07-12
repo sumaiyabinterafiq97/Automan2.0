@@ -1626,6 +1626,7 @@ private fun shippingHistoryRowsPayloadArray(gRows: List<dynamic>): dynamic {
         o.pod = shippingHistoryCell(r, "pod")
         o.bookingId = shippingHistoryCell(r, "bookingId")
         o.vessel = shippingHistoryCell(r, "vessel")
+        o.carrier = shippingHistoryCell(r, "carrier")
         o.priceType = shippingHistoryCell(r, "priceType")
         o.chassis = shippingHistoryCell(r, "chassis")
         o.clientName = shippingHistoryCell(r, "clientName")
@@ -1899,7 +1900,7 @@ private fun loadShippingHistory() {
 /** Data columns only; Booking ID is rendered in its own left column after Actions. */
 private fun shippingHistoryDisplayColumnKeys(): List<String> = listOf(
     "country", "consignee", "shipmentDate", "pol", "pod",
-    "vessel", "priceType", "chassis", "clientName", "amount",
+    "vessel", "carrier", "priceType", "chassis", "clientName", "amount",
 )
 
 private fun shippingHistorySearchColumnKeys(): List<String> =
@@ -1913,6 +1914,7 @@ private fun shippingHistoryColumnLabel(key: String): String = when (key) {
     "pod" -> "POD"
     "bookingId" -> "Booking ID"
     "vessel" -> "Vessel"
+    "carrier" -> "Carrier"
     "priceType" -> "Price type"
     "chassis" -> "Chassis"
     "clientName" -> "Client name"
@@ -1932,6 +1934,7 @@ private fun shippingHistoryRawField(row: dynamic, key: String): String {
         "pod" -> d.pod
         "bookingId" -> d.bookingId
         "vessel" -> d.vessel
+        "carrier" -> d.carrier
         "priceType" -> d.priceType
         "chassis" -> d.chassis
         "clientName" -> d.clientName
@@ -1956,6 +1959,7 @@ private fun shippingHistoryCell(row: dynamic, key: String): String {
         "pod" -> d.pod
         "bookingId" -> d.bookingId
         "vessel" -> d.vessel
+        "carrier" -> d.carrier
         "priceType" -> d.priceType
         "chassis" -> d.chassis
         "clientName" -> d.clientName

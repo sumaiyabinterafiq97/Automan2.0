@@ -222,8 +222,10 @@ fun normalizeCarModelYearForCompare(raw: String?): String {
 fun writeCarModelYearInput(baseId: String, iso: String?) {
     val canonical = if (iso.isNullOrBlank()) "" else normalizeCarModelYearForCompare(iso)
     (document.getElementById(baseId) as? HTMLInputElement)?.value = canonical
-    (document.getElementById("${baseId}Text") as? HTMLInputElement)?.value =
-        if (canonical.isEmpty()) "" else isoMonthToMmYyyy(canonical)
+    val display = if (canonical.isEmpty()) "" else isoMonthToMmYyyy(canonical)
+    (document.getElementById("${baseId}Text") as? HTMLInputElement)?.value = display
+    (document.getElementById("${baseId}Hint") as? org.w3c.dom.HTMLElement)?.style?.display =
+        if (display.isBlank()) "block" else "none"
 }
 
 /** Read Registration Date: parse visible MM/YYYY first, else canonical hidden (supports month 00). */
@@ -352,7 +354,7 @@ fun editFormDateRawToWeekdayFormatted(raw: String): String {
 }
 
 /** Overlay native date/month input on the calendar button so showPicker() opens under ▼. */
-private fun positionHiddenPickerOverButton(hidden: HTMLInputElement, btn: HTMLElement) {
+fun positionHiddenPickerOverButton(hidden: HTMLInputElement, btn: HTMLElement) {
     val parent = btn.parentElement as? HTMLElement ?: return
     val pos = window.getComputedStyle(parent).position
     if (pos == "static" || pos.isEmpty()) {
@@ -693,6 +695,20 @@ fun readManufactureYearInput(baseId: String): String {
     return (document.getElementById("${baseId}Text") as? HTMLInputElement)?.value?.trim().orEmpty()
 }
 
+fun writeManufactureYearInput(baseId: String, year: String) {
+    val y = year.trim()
+    if (y.isBlank()) return
+    (document.getElementById(baseId) as? HTMLInputElement)?.value = y
+    (document.getElementById("${baseId}Text") as? HTMLInputElement)?.value = y
+    (document.getElementById("${baseId}Hint") as? org.w3c.dom.HTMLElement)?.style?.display = "none"
+}
+
+fun openStrictYearPickerForButton(anchorBtn: HTMLElement, currentYear: String, onSelect: dynamic) {
+    openStrictYearPickerPopover(anchorBtn, currentYear) { year ->
+        onSelect(year)
+    }
+}
+
 fun storeBookingDetailsForPdf() {
     Logger.debug("Storing booking details for PDF generation...")
     
@@ -701,6 +717,7 @@ fun storeBookingDetailsForPdf() {
     // Get form values and use fallbacks for empty strings
     val bookingNoField = document.getElementById("bookingNo") as? HTMLInputElement
     val vesselField = document.getElementById("vesselSelect") as? HTMLInputElement
+    val carrierSelect = document.getElementById("carrierSelect") as? HTMLSelectElement
     val polSelect = document.getElementById("polPort") as? HTMLSelectElement
     val podPortEl = document.getElementById("podPort") // Can be input or select
     val etdField = document.getElementById("etdDate") as? HTMLInputElement
@@ -725,10 +742,12 @@ fun storeBookingDetailsForPdf() {
     
     val bookingNoValue = bookingNoField?.value?.trim() ?: ""
     val vesselNameValue = vesselField?.value?.trim() ?: ""
+    val carrierValue = carrierSelect?.value?.trim().orEmpty()
+        .ifEmpty { bookingDynString(carBookingFormState.carrierSelect) }
     val polValue = polSelect?.selectedOptions?.item(0)?.textContent?.trim() ?: ""
     val shippingDateValue = etdField?.value?.trim() ?: ""
     
-    Logger.debug("Reading form values - Booking No: $bookingNoValue, Vessel: $vesselNameValue, POL: $polValue, POD: $podValue, ETD: $shippingDateValue")
+    Logger.debug("Reading form values - Booking No: $bookingNoValue, Vessel: $vesselNameValue, Carrier: $carrierValue, POL: $polValue, POD: $podValue, ETD: $shippingDateValue")
     
     // Get consignee value from consigneeName input field ONLY
     val consigneeNameInput = document.getElementById("consigneeName") as? HTMLInputElement
@@ -740,6 +759,7 @@ fun storeBookingDetailsForPdf() {
     // Use fallback values for empty strings
     bookingDetails.bookingNo = if (bookingNoValue.isNotEmpty()) bookingNoValue else "EBKG14265885"
     bookingDetails.vesselName = if (vesselNameValue.isNotEmpty() && vesselNameValue != "Select Vessel") vesselNameValue else "MSC RICCARDA II"
+    bookingDetails.carrier = carrierValue
     bookingDetails.pol = if (polValue.isNotEmpty()) polValue else "HAKATA"
     bookingDetails.pod = if (podValue.isNotEmpty()) podValue else "KARACHI"
     bookingDetails.shippingDate = if (shippingDateValue.isNotEmpty()) shippingDateValue else "2025-09-27"
@@ -867,8 +887,6 @@ fun initializeAppSetup() {
     window.asDynamic().deleteMasterCarBrand = ::deleteMasterCarBrand
     window.asDynamic().editMasterClientMap = ::editMasterClientMap
     window.asDynamic().duplicateMasterClientMap = ::duplicateMasterClientMap
-    window.asDynamic().editMasterSupplier = ::editMasterSupplier
-    window.asDynamic().duplicateMasterSupplier = ::duplicateMasterSupplier
     window.asDynamic().editMasterShippingCharge = ::editMasterShippingCharge
     window.asDynamic().duplicateMasterShippingCharge = ::duplicateMasterShippingCharge
     window.asDynamic().addClientTransaction = ::addClientTransaction
@@ -878,6 +896,8 @@ fun initializeAppSetup() {
     window.asDynamic().isoToWeekdayLabel = ::isoToWeekdayLabelTopLevel
     window.asDynamic().todayIsoLocalDate = ::todayIsoLocalDate
     window.asDynamic().isoToMmDdYyyy = ::isoToMmDdYyyy
+    window.asDynamic().positionHiddenPickerOverButton = ::positionHiddenPickerOverButton
+    window.asDynamic().openStrictYearPickerForButton = ::openStrictYearPickerForButton
     
     // Expose state persistence functions to global scope
     window.asDynamic().saveCarBookingState = ::saveCarBookingState
@@ -1223,7 +1243,6 @@ fun initializeAppSetup() {
                     if (result.cc && !cellMatchesValue(row.cc, result.cc)) return false;
                     if (result.door && !cellMatchesValue(row.door, result.door)) return false;
                     if (result.seat && !cellMatchesValue(row.seat, result.seat)) return false;
-                    if (result.vehicleType && !cellMatchesValue(row.vehicleType, result.vehicleType)) return false;
                     if (result.rank && !cellMatchesValue(row.rank, result.rank)) return false;
                     if (result.color && !cellMatchesValue(row.color, result.color)) return false;
                     if (result.driveType && !cellMatchesValue(row.driveType, result.driveType)) return false;
@@ -1336,10 +1355,6 @@ fun initializeAppSetup() {
                 })
                 .then(function(seat) {
                     result.seat = seat;
-                    return resolveField('Vehicle Type', 'vehicleTypes', firstRow.vehicleType);
-                })
-                .then(function(vehicleType) {
-                    result.vehicleType = vehicleType;
                     return resolveField('Rank', 'ranks', firstRow.rank);
                 })
                 .then(function(rank) {
@@ -1411,6 +1426,7 @@ fun initializeAppSetup() {
                         venueId: venueTok,
                         rixoCompany: rixoOptions.length === 1 ? rixoOptions[0] : '',
                         rixoOptions: rixoOptions,
+                        vehicleTypeOptions: window.splitSupplierSemicolonTokens(row.supportedVehicleType || row.supported_vehicle_type || row.shipmentSize || row.typeOfVehicle).filter(function(v) { return v && v !== '-'; }),
                         rowId: row.id,
                         branchIndex: i
                     });
@@ -1419,7 +1435,208 @@ fun initializeAppSetup() {
             return branches;
         };
 
-        window.supplierMappingNeedsDisambiguation = function(branches) {
+        window.supplierMappingNeedsDisambiguation = function(branches, rows) {
+            if (!branches || !Array.isArray(branches) || branches.length === 0) return false;
+            function distinctCount(getter) {
+                var seen = {};
+                var n = 0;
+                branches.forEach(function(b) {
+                    getter(b).forEach(function(v) {
+                        var s = String(v || '').trim();
+                        if (!s || s === '-') return;
+                        var k = s.toLowerCase();
+                        if (!seen[k]) { seen[k] = true; n++; }
+                    });
+                });
+                return n;
+            }
+            if (distinctCount(function(b) { return b.venueId ? [b.venueId] : []; }) > 1) return true;
+            if (distinctCount(function(b) { return [b.stockLocation]; }) > 1) return true;
+            if (distinctCount(function(b) { return b.pol ? [b.pol] : []; }) > 1) return true;
+            if (distinctCount(function(b) {
+                if (b.rixoOptions && b.rixoOptions.length) return b.rixoOptions;
+                return b.rixoCompany ? [b.rixoCompany] : [];
+            }) > 1) return true;
+            if (distinctCount(function(b) {
+                if (b.vehicleTypeOptions && b.vehicleTypeOptions.length) return b.vehicleTypeOptions;
+                return [];
+            }) > 1) return true;
+            return false;
+        };
+
+        window.rowMatchesSupplierSelection = function(row, sel) {
+            function tokenMatch(rowVal, selVal) {
+                if (!selVal || !String(selVal).trim()) return true;
+                var tokens = window.splitSupplierSemicolonTokens(rowVal);
+                if (!tokens.length) tokens = [String(rowVal || '').trim()];
+                var u = String(selVal).trim().toLowerCase();
+                for (var i = 0; i < tokens.length; i++) {
+                    if (String(tokens[i]).trim().toLowerCase() === u) return true;
+                }
+                return false;
+            }
+            if (!tokenMatch(row.stockLocation || row.stock_location, sel.stockLocation)) return false;
+            if (!tokenMatch(row.venueId || row.venue_id, sel.venueId)) return false;
+            if (!tokenMatch(row.pol, sel.pol)) return false;
+            var rixos = window.splitSupplierSemicolonTokens(row.rixoCompany || row.rixo_company);
+            if (sel.rixoCompany && rixos.length) {
+                var ru = String(sel.rixoCompany).trim().toLowerCase();
+                var found = false;
+                for (var j = 0; j < rixos.length; j++) {
+                    if (String(rixos[j]).trim().toLowerCase() === ru) { found = true; break; }
+                }
+                if (!found) return false;
+            }
+            return true;
+        };
+
+        window.vehicleTypesForSupplierSelection = function(rows, sel) {
+            var out = [];
+            var seen = {};
+            if (!rows || !Array.isArray(rows)) return out;
+            rows.forEach(function(row) {
+                if (!window.rowMatchesSupplierSelection(row, sel)) return;
+                window.splitSupplierSemicolonTokens(row.supportedVehicleType || row.supported_vehicle_type || row.shipmentSize || row.typeOfVehicle).forEach(function(v) {
+                    var s = String(v || '').trim();
+                    if (!s || s === '-') return;
+                    var k = s.toLowerCase();
+                    if (!seen[k]) { seen[k] = true; out.push(s); }
+                });
+            });
+            return out;
+        };
+
+        window.resolveSupplierPolVenueFromBranches = function(branches, sel) {
+            var stock = String((sel && sel.stockLocation) || '').trim();
+            var rixo = String((sel && sel.rixoCompany) || '').trim();
+            var pol = String((sel && sel.pol) || '').trim();
+            var venue = String((sel && sel.venueId) || '').trim();
+            if (pol && venue) return { pol: pol, venueId: venue };
+            if (!branches || !Array.isArray(branches) || branches.length === 0) {
+                return { pol: pol, venueId: venue };
+            }
+            var matched = branches.filter(function(b) {
+                if (stock && String(b.stockLocation || '').trim().toLowerCase() !== stock.toLowerCase()) return false;
+                if (rixo) {
+                    var opts = (b.rixoOptions && b.rixoOptions.length) ? b.rixoOptions : (b.rixoCompany ? [b.rixoCompany] : []);
+                    if (opts.length && !opts.some(function(o) { return String(o).trim().toLowerCase() === rixo.toLowerCase(); })) return false;
+                }
+                return true;
+            });
+            var pick = matched.length ? matched[0] : branches[0];
+            return {
+                pol: pol || String((pick && pick.pol) || '').trim(),
+                venueId: venue || String((pick && pick.venueId) || '').trim()
+            };
+        };
+
+        window.resolveSupplierFieldsSequentially = function(supplier, branches, firstBranch) {
+            return new Promise(function(resolve) {
+                var result = {};
+                var activeBranches = (branches && Array.isArray(branches)) ? branches.slice() : [];
+
+                function branchMatches(b) {
+                    if (result.venueId && String(b.venueId || '').trim() && String(b.venueId).trim().toLowerCase() !== String(result.venueId).trim().toLowerCase()) return false;
+                    if (result.stockLocation && String(b.stockLocation || '').trim().toLowerCase() !== String(result.stockLocation).trim().toLowerCase()) return false;
+                    if (result.pol && String(b.pol || '').trim() && String(b.pol).trim().toLowerCase() !== String(result.pol).trim().toLowerCase()) return false;
+                    if (result.rixoCompany) {
+                        var ru = String(result.rixoCompany).trim().toLowerCase();
+                        var opts = [];
+                        if (b.rixoOptions && b.rixoOptions.length) opts = b.rixoOptions;
+                        else if (b.rixoCompany) opts = [b.rixoCompany];
+                        if (opts.length && !opts.some(function(o) { return String(o).trim().toLowerCase() === ru; })) return false;
+                    }
+                    return true;
+                }
+
+                function filteredBranches() {
+                    return activeBranches.filter(branchMatches);
+                }
+
+                function distinctFromBranches(getter) {
+                    var seen = {};
+                    var distinct = [];
+                    filteredBranches().forEach(function(b) {
+                        getter(b).forEach(function(v) {
+                            var s = String(v || '').trim();
+                            if (!s || s === '-') return;
+                            var k = s.toLowerCase();
+                            if (!seen[k]) {
+                                seen[k] = true;
+                                distinct.push(s);
+                            }
+                        });
+                    });
+                    return distinct;
+                }
+
+                function resolveField(label, getter, defaultValue) {
+                    return new Promise(function(res, rej) {
+                        var distinct = distinctFromBranches(getter);
+                        if (distinct.length <= 1) {
+                            res(distinct.length ? distinct[0] : (defaultValue || ''));
+                            return;
+                        }
+                        window.showFieldSelectionModal('Supplier: ' + supplier, label, distinct).then(function(chosen) {
+                            if (chosen === null) rej('CANCELLED');
+                            else res(chosen);
+                        });
+                    });
+                }
+
+                var fb = firstBranch || (activeBranches.length ? activeBranches[0] : {});
+
+                resolveField('Venue ID', function(b) { return b.venueId ? [b.venueId] : []; }, fb.venueId)
+                .then(function(v) {
+                    result.venueId = v;
+                    return resolveField('Stock Location', function(b) { return [b.stockLocation]; }, fb.stockLocation);
+                })
+                .then(function(v) {
+                    result.stockLocation = v;
+                    return resolveField('POL', function(b) { return b.pol ? [b.pol] : []; }, fb.pol);
+                })
+                .then(function(v) {
+                    result.pol = v;
+                    return resolveField('Rixo Company', function(b) {
+                        var opts = [];
+                        if (b.rixoOptions && b.rixoOptions.length) {
+                            b.rixoOptions.forEach(function(r) { opts.push(r); });
+                        } else if (b.rixoCompany) {
+                            opts.push(b.rixoCompany);
+                        }
+                        return opts;
+                    }, fb.rixoCompany || (fb.rixoOptions && fb.rixoOptions[0]) || '');
+                })
+                .then(function(v) {
+                    result.rixoCompany = v;
+                    return new Promise(function(res, rej) {
+                        var rows = window.__tempSupplierRows || [];
+                        var vtypes = window.vehicleTypesForSupplierSelection(rows, result);
+                        if (vtypes.length <= 1) {
+                            res(vtypes.length ? vtypes[0] : '');
+                            return;
+                        }
+                        window.showFieldSelectionModal('Supplier: ' + supplier, 'Supported Vehicle Type', vtypes).then(function(chosen) {
+                            if (chosen === null) rej('CANCELLED');
+                            else res(chosen);
+                        });
+                    });
+                })
+                .then(function(v) {
+                    result.supportedVehicleType = v;
+                    resolve(result);
+                })
+                .catch(function(err) {
+                    if (err === 'CANCELLED') resolve(null);
+                    else {
+                        console.error('Error during supplier field resolution:', err);
+                        resolve(null);
+                    }
+                });
+            });
+        };
+
+        window.quickPurchaseNeedsDisambiguation = function(branches) {
             if (!branches || !Array.isArray(branches) || branches.length === 0) return false;
             function distinctCount(getter) {
                 var seen = {};
@@ -1435,8 +1652,6 @@ fun initializeAppSetup() {
                 return n;
             }
             if (distinctCount(function(b) { return [b.stockLocation]; }) > 1) return true;
-            if (distinctCount(function(b) { return b.pol ? [b.pol] : []; }) > 1) return true;
-            if (distinctCount(function(b) { return b.venueId ? [b.venueId] : []; }) > 1) return true;
             if (distinctCount(function(b) {
                 if (b.rixoOptions && b.rixoOptions.length) return b.rixoOptions;
                 return b.rixoCompany ? [b.rixoCompany] : [];
@@ -1444,15 +1659,20 @@ fun initializeAppSetup() {
             return false;
         };
 
-        window.resolveSupplierFieldsSequentially = function(supplier, branches, firstBranch) {
+        window.resolveQuickPurchaseSupplierFields = function(supplier, branches, firstBranch) {
             return new Promise(function(resolve) {
                 var result = {};
                 var activeBranches = (branches && Array.isArray(branches)) ? branches.slice() : [];
 
                 function branchMatches(b) {
                     if (result.stockLocation && String(b.stockLocation || '').trim().toLowerCase() !== String(result.stockLocation).trim().toLowerCase()) return false;
-                    if (result.pol && String(b.pol || '').trim() && String(b.pol).trim().toLowerCase() !== String(result.pol).trim().toLowerCase()) return false;
-                    if (result.venueId && String(b.venueId || '').trim() && String(b.venueId).trim().toLowerCase() !== String(result.venueId).trim().toLowerCase()) return false;
+                    if (result.rixoCompany) {
+                        var ru = String(result.rixoCompany).trim().toLowerCase();
+                        var opts = [];
+                        if (b.rixoOptions && b.rixoOptions.length) opts = b.rixoOptions;
+                        else if (b.rixoCompany) opts = [b.rixoCompany];
+                        if (opts.length && !opts.some(function(o) { return String(o).trim().toLowerCase() === ru; })) return false;
+                    }
                     return true;
                 }
 
@@ -1496,14 +1716,6 @@ fun initializeAppSetup() {
                 resolveField('Stock Location', function(b) { return [b.stockLocation]; }, fb.stockLocation)
                 .then(function(v) {
                     result.stockLocation = v;
-                    return resolveField('POL', function(b) { return b.pol ? [b.pol] : []; }, fb.pol);
-                })
-                .then(function(v) {
-                    result.pol = v;
-                    return resolveField('Venue ID', function(b) { return b.venueId ? [b.venueId] : []; }, fb.venueId);
-                })
-                .then(function(v) {
-                    result.venueId = v;
                     return resolveField('Rixo Company', function(b) {
                         var opts = [];
                         if (b.rixoOptions && b.rixoOptions.length) {
@@ -1516,12 +1728,19 @@ fun initializeAppSetup() {
                 })
                 .then(function(v) {
                     result.rixoCompany = v;
+                    var matched = filteredBranches();
+                    var pick = matched.length ? matched[0] : fb;
+                    result.venueId = pick.venueId ? String(pick.venueId).trim() : '';
+                    result.pol = pick.pol ? String(pick.pol).trim() : '';
+                    var rows = window.__tempSupplierRows || [];
+                    var vtypes = window.vehicleTypesForSupplierSelection(rows, result);
+                    result.supportedVehicleType = vtypes.length ? String(vtypes[0]).trim() : '';
                     resolve(result);
                 })
                 .catch(function(err) {
                     if (err === 'CANCELLED') resolve(null);
                     else {
-                        console.error('Error during supplier field resolution:', err);
+                        console.error('Error during quick purchase supplier field resolution:', err);
                         resolve(null);
                     }
                 });
@@ -3068,7 +3287,10 @@ fun setupEditableComboboxHandlers() {
             return selectId === 'chassisCode' || selectId === 'editChassisCode' || selectId === 'qpChassis';
         };
         
-        window.syncComboboxInput = function(selectId) {
+        window.syncComboboxInput = function(selectId, options) {
+            options = options || {};
+            var suppressCascade = options.suppressCascade === true ||
+                (typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate());
             // Rixo buying date: show option label in input, keep ISO on select
             if (selectId === 'buyingDate') {
                 var sel = document.getElementById('buyingDate');
@@ -3107,7 +3329,9 @@ fun setupEditableComboboxHandlers() {
                     if (typeof window.clearInvalidFieldMarker === 'function') {
                         window.clearInvalidFieldMarker(selectId);
                     }
-                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                    if (!suppressCascade) {
+                        inp.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
                     if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') {
                         window.updateRixoCompanyFabTriggerLabel();
                     }
@@ -3133,8 +3357,9 @@ fun setupEditableComboboxHandlers() {
                 if (typeof window.clearInvalidFieldMarker === 'function') {
                     window.clearInvalidFieldMarker(selectId);
                 }
-                // Trigger change event on input for any listeners
-                input.dispatchEvent(new Event('change', { bubbles: true }));
+                if (!suppressCascade) {
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
                 
                 // For chassis field, DO NOT dispatch change event on select here
                 // The change event is already dispatched by the option click handler
@@ -5343,12 +5568,11 @@ fun createApp(root: Element) {
                                 <span id="masterMapArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
                             </div>
                             <div id="masterMapItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="masterSupplierMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
                                 <button id="masterCarBrandsMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Chassis Map</button>
                                 <button id="masterClientMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client Map</button>
                                 <button id="masterConsigneeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee Map</button>
                                 <button id="masterShippingChargeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping Charge Map</button>
-                                <button id="masterRixoMappingBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Price Mapping</button>
+                                <button id="masterSupplierMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
                             </div>
                         </div>
                         
@@ -5841,10 +6065,6 @@ fun createApp(root: Element) {
     })
     
     // Master Map event listeners
-    document.getElementById("masterSupplierMapBtn")?.addEventListener("click", { _: Event ->
-        closeSidebar()
-        navigateToApp("/master/supplier-map")
-    })
     document.getElementById("masterCarBrandsMapBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
         navigateToApp("/master/car-brands-map")
@@ -5861,9 +6081,9 @@ fun createApp(root: Element) {
         closeSidebar()
         navigateToApp("/master/shipping-charge-map")
     })
-    document.getElementById("masterRixoMappingBtn")?.addEventListener("click", { _: Event ->
+    document.getElementById("masterSupplierMapBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
-        navigateToApp("/master/rixo-mapping")
+        navigateToApp("/master/supplier-map")
     })
     
     // Load initial data only if we're on the purchase list page
@@ -6108,20 +6328,14 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeAtStartsWith(route, "master/supplier-map") -> {
-            showSupplierMapPage()
-            ensureSidebarPresent()
-            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
-            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
-        }
         routeAtStartsWith(route, "master/shipping-charge-map") -> {
             showShippingChargeMapPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
-        routeAtStartsWith(route, "master/rixo-mapping") -> {
-            showRixoMappingTreePage()
+        routeAtStartsWith(route, "master/supplier-map") -> {
+            showSupplierMapTreePage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -7826,7 +8040,6 @@ fun createAddFormHTML(): String {
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="manufactureYearText" maxlength="4" inputmode="numeric" autocomplete="off"
-                                       placeholder="YYYY"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="manufactureYearCalendarBtn" title="Open year picker"
                                         style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
@@ -7973,7 +8186,7 @@ fun createAddFormHTML(): String {
                             <div style="flex: 1;">
                                 ${createEditableCombobox("auctionName", "Add Supplier Name", required = true)}
                             </div>
-                            <button type="button" id="manageAuctionMappings" class="manage-btn" title="Go to Supplier Master List">
+                            <button type="button" id="manageAuctionMappings" class="manage-btn" title="Go to Supplier Map">
                                 ⚙️
                             </button>
                         </div>
@@ -7996,15 +8209,10 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Rixo Price</label>
-                        <div class="currency-input" style="display:flex; gap:10px; align-items:center;">
+                        <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="rixoPriceInput" class="money-input" placeholder="0"
                                    autocomplete="off" onfocus="this.select();">
-                            <button type="button" id="calculateRixoPriceBtn"
-                                    style="padding: 8px 12px; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; white-space:nowrap; min-height:44px;"
-                                    onclick="window.calculateRixoPriceFromMapping(false)">
-                                Calculate
-                            </button>
                         </div>
                     </div>
                         </div>
@@ -8048,7 +8256,7 @@ fun createAddFormHTML(): String {
                         </div>
                     </div>
                     <div>
-                        <label>Rixo Confirmed</label>
+                        <label>Rixo Sent</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
                                 <input type="radio" name="statusRixoConfirmed" value="TRUE">
@@ -8777,6 +8985,7 @@ fun setupRixoDropdowns() {
                 console.log('⏭️ Skipping supplier modal during edit load');
                 return;
             }
+            window.__rixoPriceUserOverride = false;
 
             if (typeof window.fetchSupplierMapByAuctionName === 'function') {
                 console.log('🔄 Using supplier map modal flow for:', auctionName);
@@ -8817,6 +9026,8 @@ fun setupRixoDropdowns() {
         
         // Handle rixo company change
         function handleRixoCompanyChange(rixoCompany) {
+            if (typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate()) return;
+            if (!rixoCompany || String(rixoCompany).trim() === '') return;
             console.log('Rixo company changed to:', rixoCompany);
             
             var auctionName = document.getElementById('auctionName') ? document.getElementById('auctionName').value : null;
@@ -8827,6 +9038,8 @@ fun setupRixoDropdowns() {
         
         // Handle edit form rixo company change
         function handleEditRixoCompanyChange(rixoCompany) {
+            if (typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate()) return;
+            if (!rixoCompany || String(rixoCompany).trim() === '') return;
             console.log('Edit Rixo company changed to:', rixoCompany);
             
             var auctionName = document.getElementById('editAuctionName') ? document.getElementById('editAuctionName').value : null;
@@ -8876,89 +9089,13 @@ fun setupRixoDropdowns() {
         window.selectRixoPrice = selectRixoPrice;
         window.selectEditRixoPrice = selectEditRixoPrice;
 
-        // Fill Rixo Price using rixo_mapping (auction_name + rixo_company + stock_location + supported_vehicle_type)
-        window.calculateRixoPriceFromMapping = function(isEditForm) {
-            var auctionNameId = isEditForm ? 'editAuctionName' : 'auctionName';
-            var stockLocationId = isEditForm ? 'editStockLocation' : 'stockLocation';
-            var rixoCompanyId = isEditForm ? 'editRixoCompany' : 'rixoCompany';
-            var vehicleTypeId = isEditForm ? 'editShipmentSize' : 'shipmentSize';
-            var rixoPriceInputId = isEditForm ? 'editRixoPriceInput' : 'rixoPriceInput';
-
-            var auctionName = window.getComboboxValue ? window.getComboboxValue(auctionNameId) : '';
-            var stockLocation = window.getComboboxValue ? window.getComboboxValue(stockLocationId) : '';
-            var rixoCompany = window.getComboboxValue ? window.getComboboxValue(rixoCompanyId) : '';
-            var vehicleType = window.getComboboxValue ? window.getComboboxValue(vehicleTypeId) : '';
-
-            auctionName = (auctionName || '').toString().trim();
-            stockLocation = (stockLocation || '').toString().trim();
-            rixoCompany = (rixoCompany || '').toString().trim();
-            vehicleType = (vehicleType || '').toString().trim();
-
-            var input = document.getElementById(rixoPriceInputId);
-            if (!input) return;
-
-            if (!auctionName || !stockLocation || !rixoCompany || !vehicleType) {
-                if (typeof window.showMessage === 'function') {
-                    window.showMessage('Please select Supplier Name, Rixo Company, Stock Location, and Vehicle type before calculating Rixo Price.', 'error');
-                }
-                return;
+        // Rixo price autofill — canonical implementation in rixo-price-mapping.js
+        window.autofillRixoPriceFromMapping = window.autofillRixoPriceFromMapping || function(isEditForm, options) {
+            if (typeof window.scheduleAutofillRixoPriceFromMapping === 'function') {
+                window.scheduleAutofillRixoPriceFromMapping(isEditForm, options && options.fields ? options.fields : { delay: 0 });
             }
-
-            input.disabled = true;
-            input.value = input.value || '';
-
-            var url = apiUrl('rixo-mapping/lookup?' +
-                'auctionName=' + encodeURIComponent(auctionName) + '&' +
-                'stockLocation=' + encodeURIComponent(stockLocation) + '&' +
-                'rixoCompany=' + encodeURIComponent(rixoCompany) + '&' +
-                'supportedVehicleType=' + encodeURIComponent(vehicleType)
-            );
-
-            window.fetch(url)
-                .then(function(resp) { return resp && resp.ok ? resp.json() : null; })
-                .then(function(result) {
-                    if (!result || result.success !== true) {
-                        var msg = (result && result.message) ? result.message : 'No rixo mapping found for these values.';
-                        if (typeof window.showMessage === 'function') window.showMessage(msg, 'error');
-                        return;
-                    }
-
-                    var rixoPrice = result.data ? result.data.rixoPrice : null;
-                    if (!rixoPrice) {
-                        if (typeof window.showMessage === 'function') window.showMessage('Rixo price not found in mapping result.', 'error');
-                        return;
-                    }
-
-                    // Convert "¥x,xxx" -> "xxxx" for money-input fields
-                    var numericValue = (typeof window.parseRixoPrice === 'function') ? window.parseRixoPrice(rixoPrice) : String(rixoPrice);
-                    if (!numericValue) numericValue = String(rixoPrice).replace(/[¥,\s]/g, '').replace(/[^0-9.]/g, '');
-
-                    input.value = numericValue;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                })
-                .catch(function(err) {
-                    console.error('calculateRixoPriceFromMapping error:', err);
-                    if (typeof window.showMessage === 'function') window.showMessage('Failed to calculate Rixo Price. Please try again.', 'error');
-                })
-                .finally(function() {
-                    input.disabled = false;
-                });
         };
-
-        // Wire calculate buttons (both Add and Edit)
-        var _calcBtn = document.getElementById('calculateRixoPriceBtn');
-        if (_calcBtn) {
-            _calcBtn.addEventListener('click', function() {
-                window.calculateRixoPriceFromMapping(false);
-            });
-        }
-        var _calcEditBtn = document.getElementById('calculateEditRixoPriceBtn');
-        if (_calcEditBtn) {
-            _calcEditBtn.addEventListener('click', function() {
-                window.calculateRixoPriceFromMapping(true);
-            });
-        }
+        window.calculateRixoPriceFromMapping = window.autofillRixoPriceFromMapping;
         
         // Handle car picture upload
         function handleCarPictureUpload(input) {
@@ -9017,16 +9154,24 @@ fun setupRixoDropdowns() {
                     
                     var img = document.createElement('img');
                     img.src = e.target.result;
-                    img.style.cssText = 'width: 100%; height: 150px; object-fit: cover;';
+                    img.style.cssText = 'width: 100%; height: 150px; object-fit: contain; cursor: pointer; display: block;';
+                    img.title = 'Click to view full size';
+                    img.onclick = function(ev) {
+                        ev.stopPropagation();
+                        if (window.openCarPictureLightbox) {
+                            window.openCarPictureLightbox(e.target.result);
+                        }
+                    };
                     
                     var overlay = document.createElement('div');
-                    overlay.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; opacity: 0; transition: opacity 0.3s;';
+                    overlay.style.cssText = 'position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; opacity: 0; transition: opacity 0.3s; pointer-events: none;';
                     overlay.textContent = 'Uploading...';
                     
                     var deleteBtn = document.createElement('button');
                     deleteBtn.innerHTML = '❌';
-                    deleteBtn.style.cssText = 'position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px;';
-                    deleteBtn.onclick = function() {
+                    deleteBtn.style.cssText = 'position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px; z-index: 2;';
+                    deleteBtn.onclick = function(ev) {
+                        ev.stopPropagation();
                         previewItem.remove();
                     };
                     
@@ -9098,7 +9243,8 @@ fun setupRixoDropdowns() {
                 var vn = (purchaseData.venueId || purchaseData.venue_id || '').toString().trim();
                 var rc = (purchaseData.rixoCompany || purchaseData.rixo_company || '').toString().trim();
                 var pl = (purchaseData.pol || '').toString().trim();
-                window.__rixoSupplierPreserveSnapshot = { stock: sl, venue: vn, rixo: rc, pol: pl };
+                var vt = (purchaseData.shipmentSize || purchaseData.shipment_size || purchaseData.vehicleType || purchaseData.vehicle_type || '').toString().trim();
+                window.__rixoSupplierPreserveSnapshot = { stock: sl, venue: vn, rixo: rc, pol: pl, vehicleType: vt };
             }
 
             // Existing pictures: Kotlin schedules loadExistingCarPictures in showEditFormWithData, but that can race DOM/async mapping.
@@ -9654,7 +9800,7 @@ fun setupRixoDropdowns() {
                     }
                 }
                 
-                // Set Rixo Confirmed radio button
+                // Set Rixo Sent radio button
                 if (purchaseData.rixoConfirmed) {
                     var rixoConfirmedRadio = document.querySelector('input[name="editRixoConfirmed"][value="' + purchaseData.rixoConfirmed + '"]');
                     if (rixoConfirmedRadio) {
@@ -10658,6 +10804,7 @@ fun setupAddFormListeners() {
             var supplierName = window.getComboboxValue('auctionName');
             console.log('🔵 Supplier Name selected:', supplierName);
             if (window.handleAuctionNameChange) {
+                window.__userInitiatedSupplierChange = true;
                 window.handleAuctionNameChange(supplierName);
             }
         """)
@@ -10667,10 +10814,13 @@ fun setupAddFormListeners() {
             var supplierName = window.getComboboxValue('auctionName');
             console.log('🔵 Supplier Name changed:', supplierName);
             if (window.handleAuctionNameChange) {
+                window.__userInitiatedSupplierChange = true;
                 window.handleAuctionNameChange(supplierName);
             }
         """)
     })
+    
+    js("if (typeof window.wireSupplierMapCascadeAutofill === 'function') window.wireSupplierMapCascadeAutofill();")
     
     // Add event listener for type of vehicle change
     document.getElementById("typeOfVehicle")?.addEventListener("change", { event: Event ->
@@ -10679,11 +10829,16 @@ fun setupAddFormListeners() {
         js("window.handleTypeOfVehicleChange(auctionName, target.value)")
     })
     
-    // Add event listener for rixo company change
-    document.getElementById("rixoCompany")?.addEventListener("change", { event: Event ->
-        val target = event.target as HTMLSelectElement
-        js("window.handleRixoCompanyChange(target.value)")
+    // Rixo company: inline combobox onchange handles handleRixoCompanyChange; only toggle gear button here.
+    document.getElementById("rixoCompany")?.addEventListener("change", { _: Event ->
         js("window.toggleManageButtons()")
+    })
+
+    document.getElementById("shipmentSize")?.addEventListener("change", { _: Event ->
+        js("if (typeof window.onSupplierMapFieldChanged === 'function') window.onSupplierMapFieldChanged('shipmentSize');")
+    })
+    document.getElementById("shipmentSizeInput")?.addEventListener("change", { _: Event ->
+        js("if (typeof window.onSupplierMapFieldChanged === 'function') window.onSupplierMapFieldChanged('shipmentSize');")
     })
     
     document.getElementById("cancelBtn")?.addEventListener("click", { _: Event ->
@@ -11801,7 +11956,221 @@ internal fun firstSemicolonToken(raw: String?): String =
 private fun digitsDotOnlyFromMappingMoney(raw: String?): String {
     val t = firstSemicolonToken(raw?.trim())
     if (t.isBlank()) return ""
+    val colon = t.lastIndexOf(':')
+    if (colon > 0) {
+        val feePart = t.substring(colon + 1).trim()
+        if (feePart.isNotBlank()) return feePart.replace(Regex("[^0-9.]"), "")
+    }
     return t.replace(Regex("[^0-9.]"), "")
+}
+
+/** Parse first `YYYYMM:fee` or date token from chassis-map recycle fee cell → canonical `YYYY-MM`. */
+private fun isoMonthFromRecycleFeeMapping(raw: String?): String {
+    val token = firstSemicolonToken(raw?.trim() ?: "")
+    if (token.isBlank()) return ""
+    val colon = token.lastIndexOf(':')
+    if (colon <= 0) return normalizeCarModelYearForCompare(token)
+    val datePart = token.substring(0, colon).trim()
+    if (datePart.matches(Regex("""\d{6}"""))) {
+        return "${datePart.substring(0, 4)}-${datePart.substring(4, 6)}"
+    }
+    return normalizeCarModelYearForCompare(datePart)
+}
+
+/** First manufacture year from `chassisNumber:year` pairs stored in chassis map. */
+private fun firstManufactureYearFromChassisNumberPairs(chassisNumberRaw: String?): String {
+    val token = firstSemicolonToken(chassisNumberRaw?.trim() ?: "")
+    if (token.isBlank()) return ""
+    if (token.contains(":")) return firstSemicolonToken(token.substringAfter(":"))
+    return ""
+}
+
+private fun purchaseFieldBlank(purchaseForMerge: dynamic?, vararg keys: String): Boolean {
+    if (purchaseForMerge == null || js("purchaseForMerge === void 0").unsafeCast<Boolean>()) return true
+    val pd = purchaseForMerge.unsafeCast<dynamic>()
+    fun pdStr(raw: dynamic?): String {
+        if (raw == null || js("raw === void 0").unsafeCast<Boolean>()) return ""
+        return raw.toString().trim()
+    }
+    return keys.all { key ->
+        when (key) {
+            "carModelYear", "car_model_year" ->
+                pdStr(pd.carModelYear).isBlank() && pdStr(pd.car_model_year).isBlank()
+            "manufactureYear", "manufacture_year" ->
+                pdStr(pd.manufactureYear).isBlank() && pdStr(pd.manufacture_year).isBlank()
+            "recycleFee" -> extractNumericFromDbValue(pdStr(pd.recycleFee)).isBlank()
+            else -> true
+        }
+    }
+}
+
+private fun lookupRecycleFeeForCarModelYear(chassisPrefix: String, carModelYearBaseId: String, recycleInputId: String, isEditForm: Boolean) {
+    if (chassisPrefix.isBlank()) return
+    val productionDate = (document.getElementById("${carModelYearBaseId}Text") as? HTMLInputElement)?.value?.trim() ?: ""
+    if (productionDate.length < 7 || !productionDate.matches(Regex("""\d{2}/\d{4}"""))) return
+    val rfInput = document.getElementById(recycleInputId) as? HTMLInputElement ?: return
+    if (rfInput.value.trim().isNotBlank()) return
+    val encodedChassis = js("encodeURIComponent")(chassisPrefix).unsafeCast<String>()
+    val encodedDate = js("encodeURIComponent")(productionDate).unsafeCast<String>()
+    val url = apiUrl("car-brand-mapping/chassis/$encodedChassis/recycle-fee?productionDate=$encodedDate")
+    window.fetch(url)
+        .then { resp -> resp.json() }
+        .then { data: dynamic ->
+            val found = (data.found as? Boolean) ?: false
+            if (!found) return@then Unit
+            val fee = (data.fee ?: "").toString().trim()
+            if (fee.isBlank()) return@then Unit
+            rfInput.value = fee
+            if (isEditForm) {
+                calculateEditTotalCostBeforeTax()
+                calculateEditTotalCostAfterTax()
+            } else {
+                calculateTotalCostBeforeTax()
+                calculateTotalCostAfterTax()
+            }
+            console.log("✅ Auto-filled Recycle Fee from chassis map: $fee (production date: $productionDate)")
+        }
+        .catch { err: dynamic -> console.warn("Recycle fee lookup failed:", err) }
+}
+
+private fun applyChassisDerivedPricingFieldsIfEmpty(
+    isEditForm: Boolean,
+    purchaseForMerge: dynamic?,
+    chassisPrefix: String,
+    recycleFeeRaw: String,
+    carModelYearRaw: String,
+    manufactureYearRaw: String,
+    chassisNumberRaw: String,
+) {
+    val carModelBase = if (isEditForm) "editCarModelYear" else "carModelYear"
+    val recycleId = if (isEditForm) "editRecycleFee" else "recycleFee"
+    val mfgBase = if (isEditForm) "editManufactureYear" else "manufactureYear"
+
+    if (purchaseFieldBlank(purchaseForMerge, "carModelYear", "car_model_year")) {
+        val iso = isoMonthFromRecycleFeeMapping(recycleFeeRaw)
+            .ifBlank { normalizeCarModelYearForCompare(carModelYearRaw) }
+        if (iso.isNotBlank()) writeCarModelYearInput(carModelBase, iso)
+    }
+
+    if (purchaseFieldBlank(purchaseForMerge, "manufactureYear", "manufacture_year")) {
+        var year = firstSemicolonToken(manufactureYearRaw)
+        if (year.isBlank()) year = firstManufactureYearFromChassisNumberPairs(chassisNumberRaw)
+        if (year.isNotBlank()) writeManufactureYearInput(mfgBase, year)
+    }
+
+    if (purchaseFieldBlank(purchaseForMerge, "recycleFee")) {
+        val directFee = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
+        if (directFee.isNotBlank()) {
+            (document.getElementById(recycleId) as? HTMLInputElement)?.value = directFee
+        } else {
+            lookupRecycleFeeForCarModelYear(chassisPrefix, carModelBase, recycleId, isEditForm)
+        }
+    }
+}
+
+private fun lookupManufactureYearForChassisSuffix(chassisPrefix: String, chassisNumber: String, manufactureYearBaseId: String) {
+    if (chassisPrefix.isBlank() || chassisNumber.isBlank()) return
+    val encodedChassis = js("encodeURIComponent")(chassisPrefix).unsafeCast<String>()
+    val encodedNumber = js("encodeURIComponent")(chassisNumber).unsafeCast<String>()
+    val url = apiUrl("car-brand-mapping/chassis/$encodedChassis/manufacture-year?chassisNumber=$encodedNumber")
+    window.fetch(url)
+        .then { resp -> resp.json() }
+        .then { data: dynamic ->
+            val found = (data.found as? Boolean) ?: false
+            if (!found) return@then Unit
+            val year = (data.manufactureYear ?: "").toString().trim()
+            if (year.isNotBlank()) {
+                writeManufactureYearInput(manufactureYearBaseId, year)
+                console.log("✅ Auto-filled manufacture year from chassis map: $year (suffix: $chassisNumber)")
+            }
+        }
+        .catch { err: dynamic -> console.warn("Manufacture year lookup failed:", err) }
+}
+
+private fun storeQuickPurchaseChassisMappingCache(
+    brand: String,
+    carName: String,
+    fuel: String,
+    recycleFeeRaw: String,
+    carModelYearRaw: String,
+    manufactureYearRaw: String,
+    chassisNumberRaw: String,
+) {
+    val cache = js("{}").unsafeCast<dynamic>()
+    cache.brand = brand
+    cache.carName = carName
+    cache.fuel = fuel
+    cache.recycleFeeRaw = recycleFeeRaw
+    cache.carModelYearRaw = carModelYearRaw
+    cache.manufactureYearRaw = manufactureYearRaw
+    cache.chassisNumberRaw = chassisNumberRaw
+    window.asDynamic().__qpChassisMappingCache = cache
+}
+
+/** Merge supplier-map + chassis-map derived values into Quick Purchase POST body. */
+internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
+    val resolved = window.asDynamic().__qpResolvedSupplier
+    if (resolved != null && resolved != js("undefined")) {
+        val pol = (resolved.pol?.toString() ?: "").trim()
+        val venue = (resolved.venueId?.toString() ?: "").trim()
+        if (pol.isNotBlank()) purchaseData.pol = pol
+        if (venue.isNotBlank()) purchaseData.venueId = venue
+        val vt = (resolved.supportedVehicleType?.toString() ?: "").trim()
+        if (vt.isNotBlank()) {
+            purchaseData.shipmentSize = vt
+            purchaseData.vehicleType = vt
+        }
+    }
+    val cache = window.asDynamic().__qpChassisMappingCache
+    if (cache != null && cache != js("undefined")) {
+        val brand = (cache.brand?.toString() ?: "").trim()
+        if (brand.isNotBlank()) purchaseData.brand = brand
+        val fuel = (cache.fuel?.toString() ?: "").trim()
+        if (fuel.isNotBlank()) purchaseData.fuel = fuel
+        val carModelYearRaw = (cache.carModelYearRaw?.toString() ?: "").trim()
+        val recycleFeeRaw = (cache.recycleFeeRaw?.toString() ?: "").trim()
+        val manufactureYearRaw = (cache.manufactureYearRaw?.toString() ?: "").trim()
+        val chassisNumberRaw = (cache.chassisNumberRaw?.toString() ?: "").trim()
+        val carModelIso = isoMonthFromRecycleFeeMapping(recycleFeeRaw)
+            .ifBlank { normalizeCarModelYearForCompare(carModelYearRaw) }
+        val existingRegDate = (purchaseData.carModelYear?.toString() ?: "").trim()
+        if (existingRegDate.isBlank() && carModelIso.isNotBlank()) {
+            purchaseData.carModelYear = carModelIso
+        }
+        var mfgYear = firstSemicolonToken(manufactureYearRaw)
+        if (mfgYear.isBlank()) mfgYear = firstManufactureYearFromChassisNumberPairs(chassisNumberRaw)
+        if (mfgYear.isNotBlank()) purchaseData.manufactureYear = mfgYear
+        val feeDigits = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
+        if (feeDigits.isNotBlank()) purchaseData.recycleFee = "¥$feeDigits"
+    }
+    return purchaseData
+}
+
+internal fun finalizeQuickPurchasePayload(purchaseData: dynamic): dynamic {
+    enrichQuickPurchasePayload(purchaseData)
+    val chassisFull = purchaseData.chassis?.toString()?.trim() ?: ""
+    val chassisPrefix = chassisFull.substringBefore("-").trim()
+    val carModelIso = purchaseData.carModelYear?.toString()?.trim() ?: ""
+    val recycleStr = purchaseData.recycleFee?.toString()?.trim() ?: ""
+    if (chassisPrefix.isBlank() || carModelIso.isBlank() || recycleStr.isNotBlank()) {
+        return js("Promise.resolve(purchaseData)")
+    }
+    val mmYyyy = isoMonthToMmYyyy(carModelIso)
+    if (mmYyyy.isBlank()) return js("Promise.resolve(purchaseData)")
+    val encodedChassis = js("encodeURIComponent")(chassisPrefix).unsafeCast<String>()
+    val encodedDate = js("encodeURIComponent")(mmYyyy).unsafeCast<String>()
+    val url = apiUrl("car-brand-mapping/chassis/$encodedChassis/recycle-fee?productionDate=$encodedDate")
+    return window.fetch(url)
+        .then { resp -> resp.json() }
+        .then { data: dynamic ->
+            val found = (data.found as? Boolean) ?: false
+            if (found) {
+                val fee = (data.fee ?: "").toString().trim()
+                if (fee.isNotBlank()) purchaseData.recycleFee = "¥$fee"
+            }
+            purchaseData
+        }
+        .catch { _: dynamic -> purchaseData }
 }
 
 /** First token for edit-form HTML defaults (`Any?` from purchase row / DB multi-value cells). */
@@ -11853,7 +12222,7 @@ private fun chassisMappingNeedsFieldDisambiguation(uniqueValuesObj: dynamic): Bo
     }
     val keys = listOf(
         "brands", "carNames", "fuels", "wds", "shifts", "grades",
-        "ccs", "doors", "seats", "vehicleTypes", "ranks", "colors", "driveTypes"
+        "ccs", "doors", "seats", "ranks", "colors", "driveTypes"
     )
     return keys.any { flattenSemicolonChoices(tokensForKey(it)).size > 1 }
 }
@@ -11985,8 +12354,15 @@ private fun applySavedPurchaseFieldSnapshot(purchaseForMerge: dynamic) {
     }
     setEditCombobox("editAuctionName", pdStr(pd.auctionHouse))
     setEditCombobox("editStockLocation", firstSemicolonToken(pdStr(pd.stockLocation)))
-    setEditCombobox("editPol", firstSemicolonToken(pdStr(pd.pol)))
-    setEditCombobox("editVenueId", firstSemicolonToken(pdStr(pd.venueId)))
+    val derived = window.asDynamic().__rixoDerivedSupplierFields
+    val polVal = firstSemicolonToken(pdStr(pd.pol)).ifBlank {
+        (derived?.pol as? String)?.trim() ?: ""
+    }
+    val venueVal = firstSemicolonToken(pdStr(pd.venueId)).ifBlank {
+        (derived?.venueId as? String)?.trim() ?: ""
+    }
+    if (polVal.isNotBlank()) setEditCombobox("editPol", polVal)
+    if (venueVal.isNotBlank()) setEditCombobox("editVenueId", venueVal)
     setEditCombobox("editRixoCompany", firstSemicolonToken(pdStr(pd.rixoCompany)))
 }
 
@@ -12000,26 +12376,116 @@ private fun applySupplierSelectionToForm(selection: dynamic, isEditForm: Boolean
             var isEdit = window.__supplierIsEdit;
             var auc = window.__supplierAuctionName || '';
             if (!sel) return;
-            var prevSuppress = window.__suppressRixoAutoSelect === true;
-            window.__suppressRixoAutoSelect = true;
-            try {
-                function setPair(addId, editId, val) {
-                    if (!val) return;
-                    var id = isEdit ? editId : addId;
-                    if (typeof ensureComboboxOptionExists === 'function') ensureComboboxOptionExists(id, val);
+
+            function setPair(addId, editId, val) {
+                if (!val) return;
+                if (isEdit) {
+                    if (typeof ensureComboboxOptionExists === 'function') ensureComboboxOptionExists(editId, val);
+                    if (typeof window.restoreSupplierMasterFieldValue === 'function') {
+                        window.restoreSupplierMasterFieldValue(editId, editId, val);
+                    } else if (typeof window.setFieldValue === 'function') {
+                        window.setFieldValue(editId, editId, val);
+                    }
+                } else {
+                    if (typeof ensureComboboxOptionExists === 'function') ensureComboboxOptionExists(addId, val);
                     if (typeof window.setFieldValue === 'function') window.setFieldValue(addId, editId, val);
                 }
-                setPair('stockLocation', 'editStockLocation', sel.stockLocation);
-                setPair('pol', 'editPol', sel.pol);
-                setPair('venueId', 'editVenueId', sel.venueId);
-                setPair('rixoCompany', 'editRixoCompany', sel.rixoCompany);
+            }
+            function readFormVt() {
+                if (typeof window.getComboboxValue === 'function') {
+                    return (window.getComboboxValue(isEdit ? 'editShipmentSize' : 'shipmentSize') || '').trim();
+                }
+                return '';
+            }
+            function selectionVt() {
+                return (sel.supportedVehicleType || sel.vehicleType || '').trim();
+            }
+            var userSupplierChange = window.__userInitiatedSupplierChange === true;
+            var snap = {
+                stock: sel.stockLocation || '',
+                venue: sel.venueId || '',
+                rixo: sel.rixoCompany || '',
+                pol: sel.pol || '',
+                vehicleType: selectionVt() || (userSupplierChange ? '' : readFormVt())
+            };
+            window.__rixoSupplierPreserveSnapshot = {
+                auction: auc,
+                stock: snap.stock,
+                pol: snap.pol,
+                venue: snap.venue,
+                rixo: snap.rixo,
+                vehicleType: snap.vehicleType
+            };
+
+            function releaseSupplierApply() {
+                window.__supplierApplyInFlight = false;
+                window.__userInitiatedSupplierChange = false;
+                if (typeof window.forceEndSupplierMapProgrammatic === 'function') {
+                    window.forceEndSupplierMapProgrammatic();
+                } else if (typeof window.endSupplierMapProgrammatic === 'function') {
+                    window.endSupplierMapProgrammatic();
+                }
+            }
+
+            function schedulePriceAutofill() {
+                if (typeof window.scheduleAutofillRixoPriceFromMapping !== 'function') return;
+                window.__rixoPriceUserOverride = false;
+                var vtForPrice = selectionVt() || readFormVt();
+                window.scheduleAutofillRixoPriceFromMapping(isEdit, {
+                    force: true,
+                    delay: userSupplierChange ? 0 : 180,
+                    auctionName: auc,
+                    stockLocation: sel.stockLocation || '',
+                    rixoCompany: sel.rixoCompany || '',
+                    venueId: sel.venueId || '',
+                    pol: sel.pol || '',
+                    supportedVehicleType: vtForPrice
+                });
+            }
+
+            function applyValues() {
+                if (typeof window.beginSupplierMapProgrammatic === 'function') window.beginSupplierMapProgrammatic();
+                try {
+                    setPair('venueId', 'editVenueId', sel.venueId);
+                    setPair('stockLocation', 'editStockLocation', sel.stockLocation);
+                    setPair('pol', 'editPol', sel.pol);
+                    setPair('rixoCompany', 'editRixoCompany', sel.rixoCompany);
+                    var vt = selectionVt();
+                    if (vt && (userSupplierChange || !readFormVt())) {
+                        setPair('shipmentSize', 'editShipmentSize', vt);
+                    }
+                } finally {
+                    if (typeof window.endSupplierMapProgrammatic === 'function') window.endSupplierMapProgrammatic();
+                }
+                var finish = function() {
+                    schedulePriceAutofill();
+                    releaseSupplierApply();
+                };
                 if (sel.stockLocation && auc && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
                     var polHint = sel.pol ? [sel.pol] : [];
                     var seq = window.__supplierMappingSeq || 0;
-                    window.fetchPolsByStockLocationAndUpdate(auc, sel.stockLocation, false, polHint, seq);
+                    window.fetchPolsByStockLocationAndUpdate(auc, sel.stockLocation, false, polHint, seq)
+                        .then(finish)
+                        .catch(finish);
+                } else {
+                    finish();
                 }
-            } finally {
-                window.__suppressRixoAutoSelect = prevSuppress;
+            }
+
+            window.__supplierApplyInFlight = true;
+
+            if (auc && typeof window.rebuildSupplierDependentDropdowns === 'function') {
+                var rebuilt = window.rebuildSupplierDependentDropdowns(auc, {
+                    autoSelect: false,
+                    preserveSnapshot: snap,
+                    restoreDelay: 100,
+                    holdProgrammaticUntilRestored: true,
+                    skipPolFetchOnRestore: true,
+                    onRestored: applyValues
+                });
+                if (!rebuilt) applyValues();
+            } else {
+                applyValues();
             }
         })();
     """)
@@ -13665,7 +14131,6 @@ fun captureChassisSpecFieldSnapshot(isEditForm: Boolean): dynamic {
         snap.cc = getComboboxValueSafe("editCc")
         snap.door = getComboboxValueSafe("editDoor")
         snap.seat = getComboboxValueSafe("editSeat")
-        snap.vehicleType = getComboboxValueSafe("editShipmentSize")
         snap.rank = getComboboxValueSafe("editRank")
         snap.color = getComboboxValueSafe("editColor")
         snap.wd = readRadioGroupValue("editWd")
@@ -13677,7 +14142,6 @@ fun captureChassisSpecFieldSnapshot(isEditForm: Boolean): dynamic {
         snap.cc = getComboboxValueSafe("cc")
         snap.door = getComboboxValueSafe("door")
         snap.seat = getComboboxValueSafe("seat")
-        snap.vehicleType = getComboboxValueSafe("shipmentSize")
         snap.rank = getComboboxValueSafe("rank")
         snap.color = getComboboxValueSafe("color")
         snap.wd = readRadioGroupValue("wd")
@@ -13880,11 +14344,13 @@ fun fetchMappingByChassisOnly(
                 ?: (firstRow?.seat as? Number)?.toString()?.trim()
                 ?: ""
             val gradeRaw = ((firstRow?.grade as? String) ?: (data.grade as? String) ?: "").trim()
-            val vehicleTypeRaw = ((frDyn.vehicleType as? String) ?: (data.vehicleType as? String) ?: "").trim()
             val rankRaw = ((frDyn.rank as? String) ?: (data.rank as? String) ?: "").trim()
             val colorRaw = ((frDyn.color as? String) ?: (data.color as? String) ?: "").trim()
             val driveTypeRaw = ((frDyn.driveType as? String) ?: (data.driveType as? String) ?: "").trim()
             val recycleFeeRaw = ((frDyn.recycleFee as? String) ?: (data.recycleFee as? String) ?: "").trim()
+            val carModelYearRaw = ((frDyn.carModelYear as? String) ?: (data.carModelYear as? String) ?: "").trim()
+            val chassisNumberRaw = ((frDyn.chassisNumber as? String) ?: (data.chassisNumber as? String) ?: "").trim()
+            val manufactureYearRaw = ((frDyn.manufactureYear as? String) ?: (data.manufactureYear as? String) ?: "").trim()
 
             var brand = firstSemicolonToken(brandRaw)
             var carName = firstSemicolonToken(carNameRaw)
@@ -13892,7 +14358,6 @@ fun fetchMappingByChassisOnly(
             var wd = firstSemicolonToken(wdRaw)
             var shift = firstSemicolonToken(shiftRaw)
             var grade = firstSemicolonToken(gradeRaw)
-            var vehicleType = firstSemicolonToken(vehicleTypeRaw)
             var rank = firstSemicolonToken(rankRaw)
             var color = firstSemicolonToken(colorRaw)
             var driveType = firstSemicolonToken(driveTypeRaw)
@@ -13942,7 +14407,6 @@ fun fetchMappingByChassisOnly(
             val ccs = mutableSetOf<String>()
             val doors = mutableSetOf<String>()
             val grades = mutableSetOf<String>()
-            val vehicleTypes = mutableSetOf<String>()
             val ranks = mutableSetOf<String>()
             val colors = mutableSetOf<String>()
             val driveTypes = mutableSetOf<String>()
@@ -13958,7 +14422,6 @@ fun fetchMappingByChassisOnly(
                 addSemicolonTokensToSet(ccs, rowDynamic.cc?.toString())
                 addSemicolonTokensToSet(doors, rowDynamic.door?.toString())
                 addSemicolonTokensToSet(grades, rowDynamic.grade as? String)
-                addSemicolonTokensToSet(vehicleTypes, rowDynamic.vehicleType as? String)
                 addSemicolonTokensToSet(ranks, rowDynamic.rank as? String)
                 addSemicolonTokensToSet(colors, rowDynamic.color as? String)
                 addSemicolonTokensToSet(driveTypes, rowDynamic.driveType as? String)
@@ -14023,13 +14486,6 @@ fun fetchMappingByChassisOnly(
             }
             
             val uniqueSeats = seats.sorted().toTypedArray()
-
-            val uniqueVehicleTypes = if (uniqueValuesRaw != null && uniqueValuesRaw != js("undefined")) {
-                val backendUniqueValues = uniqueValuesRaw.unsafeCast<dynamic>()
-                (backendUniqueValues.vehicleTypes as? Array<String>) ?: vehicleTypes.sorted().toTypedArray()
-            } else {
-                vehicleTypes.sorted().toTypedArray()
-            }
 
             val uniqueRanks = if (uniqueValuesRaw != null && uniqueValuesRaw != js("undefined")) {
                 val backendUniqueValues = uniqueValuesRaw.unsafeCast<dynamic>()
@@ -14103,9 +14559,6 @@ fun fetchMappingByChassisOnly(
                 val savedGrade = pdStr(pd.grade)
                 if (savedGrade.isNotBlank()) grade = firstSemicolonToken(savedGrade)
 
-                val savedVehicleType = pdStr(pd.shipmentSize).ifBlank { pdStr(pd.vehicleType) }
-                if (savedVehicleType.isNotBlank()) vehicleType = firstSemicolonToken(savedVehicleType)
-
                 val savedRank = pdStr(pd.rank)
                 if (savedRank.isNotBlank()) rank = firstSemicolonToken(savedRank)
 
@@ -14130,19 +14583,18 @@ fun fetchMappingByChassisOnly(
             } else null
             if (preserveSnap != null) {
                 val merged = applyChassisSpecPreserveMerge(
-                    preserveSnap, fuel, wd, shift, grade, vehicleType, rank, color, driveType, cc, door, seat,
+                    preserveSnap, fuel, wd, shift, grade, "", rank, color, driveType, cc, door, seat,
                 )
                 fuel = merged[0]
                 wd = merged[1]
                 shift = merged[2]
                 grade = merged[3]
-                vehicleType = merged[4]
-                rank = merged[5]
-                color = merged[6]
-                driveType = merged[7]
-                cc = merged[8]
-                door = merged[9]
-                seat = merged[10]
+                rank = merged[4]
+                color = merged[5]
+                driveType = merged[6]
+                cc = merged[7]
+                door = merged[8]
+                seat = merged[9]
             }
 
             if (isChassisUserChangeActive()) {
@@ -14171,7 +14623,6 @@ fun fetchMappingByChassisOnly(
             window.asDynamic().__tempDoor = if (door.isNotBlank()) door else null
             window.asDynamic().__tempSeat = if (seat.isNotBlank()) seat else null
             window.asDynamic().__tempGrade = if (grade.isNotBlank()) grade else null
-            window.asDynamic().__tempVehicleType = if (vehicleType.isNotBlank()) vehicleType else null
             window.asDynamic().__tempRank = if (rank.isNotBlank()) rank else null
             window.asDynamic().__tempColor = if (color.isNotBlank()) color else null
             window.asDynamic().__tempDriveType = if (driveType.isNotBlank()) driveType else null
@@ -14189,7 +14640,6 @@ fun fetchMappingByChassisOnly(
             uniqueValuesObj.doors = doorsForDropdown.toTypedArray()
             uniqueValuesObj.grades = flattenSemicolonChoices(uniqueGrades.toList()).toTypedArray()
             uniqueValuesObj.seats = flattenSemicolonChoices(uniqueSeats.toList()).toTypedArray()
-            uniqueValuesObj.vehicleTypes = flattenSemicolonChoices(uniqueVehicleTypes.toList()).toTypedArray()
             uniqueValuesObj.ranks = flattenSemicolonChoices(uniqueRanks.toList()).toTypedArray()
             uniqueValuesObj.colors = flattenSemicolonChoices(uniqueColors.toList()).toTypedArray()
             uniqueValuesObj.driveTypes = flattenSemicolonChoices(uniqueDriveTypes.toList()).toTypedArray()
@@ -14223,22 +14673,97 @@ fun fetchMappingByChassisOnly(
             if (quickPurchaseOnly) {
                 resetChassisMasterComboIds()
                 val carNameTokensList = flattenSemicolonChoices(uniqueCarNames.toList())
+
+                fun finishQuickPurchaseChassisAutofill(selectedCarName: String) {
+                    val seqNow = (js("window.__chassisMappingSeq") as? Int) ?: 0
+                    if (seqNow != requestId) {
+                        console.log("⏭️ Stale QP chassis mapping after car name selection ignored")
+                        return
+                    }
+                    populateChassisMappingWithMasterListAsync(
+                        "qpCarName",
+                        "Select Car Name",
+                        carNameTokensList,
+                        selectedCarName,
+                        "car-brand-mapping/car-names/distinct",
+                    )
+                    if (selectedCarName.isNotBlank()) {
+                        applyChassisBrandAndCarName(
+                            isEditForm = false,
+                            brand = brand,
+                            carName = selectedCarName,
+                            carNameFieldIdOverride = "qpCarName",
+                            applyBrand = false,
+                        )
+                    } else {
+                        js("""
+                            (function() {
+                                var sel = document.getElementById('qpCarName');
+                                var inp = document.getElementById('qpCarNameInput');
+                                if (sel) sel.value = '';
+                                if (inp) inp.value = '';
+                                if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('qpCarName');
+                            })();
+                        """)
+                    }
+                    storeQuickPurchaseChassisMappingCache(
+                        brand, selectedCarName, fuel, recycleFeeRaw, carModelYearRaw, manufactureYearRaw, chassisNumberRaw,
+                    )
+                    val regIso = isoMonthFromRecycleFeeMapping(recycleFeeRaw)
+                        .ifBlank { normalizeCarModelYearForCompare(carModelYearRaw) }
+                    if (regIso.isNotBlank() && readCarModelYearInput("qpCarModelYear").isBlank()) {
+                        writeCarModelYearInput("qpCarModelYear", regIso)
+                    }
+                    endChassisChangePreserve()
+                }
+
+                if (carNameTokensList.size <= 1) {
+                    finishQuickPurchaseChassisAutofill(carNameTokensList.firstOrNull().orEmpty().ifBlank { carName })
+                    return@then js("Promise.resolve()")
+                }
+
+                // Multiple car names: populate options, then ask user to pick (same modal as Add Purchase).
                 populateChassisMappingWithMasterListAsync(
                     "qpCarName",
                     "Select Car Name",
                     carNameTokensList,
-                    carName,
+                    "",
                     "car-brand-mapping/car-names/distinct",
                 )
-                applyChassisBrandAndCarName(
-                    isEditForm = false,
-                    brand = brand,
-                    carName = carName,
-                    carNameFieldIdOverride = "qpCarName",
-                    applyBrand = false,
-                )
-                endChassisChangePreserve()
-                return@then js("Promise.resolve()")
+                js("""
+                    (function() {
+                        var sel = document.getElementById('qpCarName');
+                        var inp = document.getElementById('qpCarNameInput');
+                        if (sel) sel.value = '';
+                        if (inp) inp.value = '';
+                    })();
+                """)
+
+                window.asDynamic().__qpCarNamePickChassis = chassis
+                window.asDynamic().__qpCarNamePickOptions = carNameTokensList.toTypedArray()
+                return@then js("""
+                    (function() {
+                        var chassisLabel = 'Chassis: ' + (window.__qpCarNamePickChassis || '');
+                        var opts = window.__qpCarNamePickOptions || [];
+                        if (typeof window.showFieldSelectionModal !== 'function') {
+                            return Promise.resolve(opts.length ? opts[0] : null);
+                        }
+                        return window.showFieldSelectionModal(chassisLabel, 'Car Name', opts);
+                    })()
+                """).then { chosen: dynamic ->
+                    val seqNow = (js("window.__chassisMappingSeq") as? Int) ?: 0
+                    if (seqNow != requestId) {
+                        console.log("⏭️ Stale QP car name modal result ignored")
+                        return@then js("undefined")
+                    }
+                    val chosenStr = when {
+                        chosen == null || js("chosen === void 0").unsafeCast<Boolean>() -> ""
+                        js("chosen === null").unsafeCast<Boolean>() -> ""
+                        else -> chosen.toString().trim()
+                    }
+                    finishQuickPurchaseChassisAutofill(chosenStr)
+                    js("undefined")
+                }
             }
             
             resetChassisMasterComboIds()
@@ -14266,16 +14791,6 @@ fun fetchMappingByChassisOnly(
             populateChassisMappingWithMasterListAsync(
                 shiftId, "Select Shift", shiftsForDropdown, shift, "master-menu/shift",
                 specPreserveOrEmpty(preserveSnap, "shift"),
-            )
-            
-            val shipFieldId = if (isEditForm) "editShipmentSize" else "shipmentSize"
-            populateChassisMappingWithMasterListAsync(
-                shipFieldId,
-                "Select Vehicle type",
-                vehicleTypes.sorted().toList(),
-                vehicleType,
-                "master-menu/type_of_vehicle",
-                specPreserveOrEmpty(preserveSnap, "vehicleType"),
             )
             
             val gradeOptions = grades.sorted().toList()
@@ -14372,7 +14887,6 @@ fun fetchMappingByChassisOnly(
                 val doorVal = if (hasSelected) (selectedRow.door?.toString() ?: "") else ((data.firstRow?.door as? String) ?: (data.firstRow?.door as? Number)?.toString() ?: (data.door as? String) ?: "")
                 val seatVal = if (hasSelected) (selectedRow.seat?.toString() ?: "") else ((data.firstRow?.seat as? String) ?: (data.firstRow?.seat as? Number)?.toString() ?: "")
                 val gradeVal = if (hasSelected) (selectedRow.grade?.toString() ?: "") else ((data.firstRow?.grade as? String) ?: (data.grade as? String) ?: "")
-                val vehicleTypeVal = if (hasSelected) (selectedRow.vehicleType?.toString() ?: "") else ((data.firstRow?.vehicleType as? String) ?: (data.vehicleType as? String) ?: "")
                 val rankVal = if (hasSelected) (selectedRow.rank?.toString() ?: "") else ((data.firstRow?.rank as? String) ?: (data.rank as? String) ?: "")
                 val colorVal = if (hasSelected) (selectedRow.color?.toString() ?: "") else ((data.firstRow?.color as? String) ?: (data.color as? String) ?: "")
                 val driveTypeVal = if (hasSelected) (selectedRow.driveType?.toString() ?: "") else ((data.firstRow?.driveType as? String) ?: (data.driveType as? String) ?: "")
@@ -14383,7 +14897,6 @@ fun fetchMappingByChassisOnly(
                 var wd = firstSemicolonToken(wdVal)
                 var shift = firstSemicolonToken(shiftVal)
                 var grade = firstSemicolonToken(gradeVal)
-                var vehicleType = firstSemicolonToken(vehicleTypeVal)
                 var rank = firstSemicolonToken(rankVal)
                 var color = firstSemicolonToken(colorVal)
                 var driveType = firstSemicolonToken(driveTypeVal)
@@ -14425,9 +14938,6 @@ fun fetchMappingByChassisOnly(
                     val savedGrade = pdStr(pd.grade)
                     if (savedGrade.isNotBlank()) grade = firstSemicolonToken(savedGrade)
 
-                    val savedVehicleType = pdStr(pd.shipmentSize).ifBlank { pdStr(pd.vehicleType) }
-                    if (savedVehicleType.isNotBlank()) vehicleType = firstSemicolonToken(savedVehicleType)
-
                     val savedRank = pdStr(pd.rank)
                     if (savedRank.isNotBlank()) rank = firstSemicolonToken(savedRank)
 
@@ -14452,19 +14962,18 @@ fun fetchMappingByChassisOnly(
                 } else null
                 if (innerPreserveSnap != null) {
                     val merged = applyChassisSpecPreserveMerge(
-                        innerPreserveSnap, fuel, wd, shift, grade, vehicleType, rank, color, driveType, cc, door, seat,
+                        innerPreserveSnap, fuel, wd, shift, grade, "", rank, color, driveType, cc, door, seat,
                     )
                     fuel = merged[0]
                     wd = merged[1]
                     shift = merged[2]
                     grade = merged[3]
-                    vehicleType = merged[4]
-                    rank = merged[5]
-                    color = merged[6]
-                    driveType = merged[7]
-                    cc = merged[8]
-                    door = merged[9]
-                    seat = merged[10]
+                    rank = merged[4]
+                    color = merged[5]
+                    driveType = merged[6]
+                    cc = merged[7]
+                    door = merged[8]
+                    seat = merged[9]
                 }
 
                 // Overwrite dynamic variables on window so the rest of the setting code can read them
@@ -14476,7 +14985,6 @@ fun fetchMappingByChassisOnly(
                 window.asDynamic().__tempDoor = if (door.isNotBlank()) door else null
                 window.asDynamic().__tempSeat = if (seat.isNotBlank()) seat else null
                 window.asDynamic().__tempGrade = if (grade.isNotBlank()) grade else null
-                window.asDynamic().__tempVehicleType = if (vehicleType.isNotBlank()) vehicleType else null
                 window.asDynamic().__tempRank = if (rank.isNotBlank()) rank else null
                 window.asDynamic().__tempColor = if (color.isNotBlank()) color else null
                 window.asDynamic().__tempDriveType = if (driveType.isNotBlank()) driveType else null
@@ -14706,17 +15214,9 @@ fun fetchMappingByChassisOnly(
                         ""
                     }
                     
-                    val vehicleTypeValue = (js("window.__tempVehicleType")?.toString() ?: "").trim()
                     val rankValue = (js("window.__tempRank")?.toString() ?: "").trim()
                     val colorValue = (js("window.__tempColor")?.toString() ?: "").trim()
                     val driveTypeValue = (js("window.__tempDriveType")?.toString() ?: "").trim().uppercase()
-                    
-                    val shipFieldId = if (isEditForm) "editShipmentSize" else "shipmentSize"
-                    if (vehicleTypeValue.isNotBlank()) {
-                        (document.getElementById(shipFieldId) as? HTMLSelectElement)?.value = vehicleTypeValue
-                        (document.getElementById("${shipFieldId}Input") as? HTMLInputElement)?.value = vehicleTypeValue
-                        syncComboboxFromSelect(shipFieldId)
-                    }
                     
                     val rankFieldId = if (isEditForm) "editRank" else "rank"
                     if (!(isEditForm && rankValue.isBlank())) {
@@ -14754,8 +15254,18 @@ fun fetchMappingByChassisOnly(
                     }
                     
                     // Log final values that were actually set (after preservation logic)
-                    console.log("✅ Final field values set: carName=$finalCarName, fuel=$finalFuelValue, wd=$finalWdValue, shift=$finalShiftValue, cc=$finalCcValue, door=$finalDoorValue, seat=$finalSeatValue, grade=$finalGradeValue, vehicleType=$vehicleTypeValue, rank=$rankValue, color=$colorValue, driveType=$driveTypeValue, recycleFeeDigits=$recycleFeeDigits")
+                    console.log("✅ Final field values set: carName=$finalCarName, fuel=$finalFuelValue, wd=$finalWdValue, shift=$finalShiftValue, cc=$finalCcValue, door=$finalDoorValue, seat=$finalSeatValue, grade=$finalGradeValue, rank=$rankValue, color=$colorValue, driveType=$driveTypeValue, recycleFeeDigits=$recycleFeeDigits")
                     console.log("✅ Auto-filled all fields from chassis mapping")
+
+                    applyChassisDerivedPricingFieldsIfEmpty(
+                        isEditForm,
+                        purchaseForMerge,
+                        chassis,
+                        recycleFeeRaw,
+                        carModelYearRaw,
+                        manufactureYearRaw,
+                        chassisNumberRaw,
+                    )
 
                     if (isEditForm && purchaseForMerge != null && !js("purchaseForMerge === void 0").unsafeCast<Boolean>()) {
                         applySavedPurchaseFieldSnapshot(purchaseForMerge)
@@ -14825,6 +15335,12 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
             }
 
             window.asDynamic().__tempSupplierRows = rows
+            window.asDynamic().__tempMergeAuctionName = auctionName
+            js("""
+                if (typeof window.mergeSupplierApiRowsIntoRixoPriceMapping === 'function') {
+                    window.mergeSupplierApiRowsIntoRixoPriceMapping(window.__tempMergeAuctionName, window.__tempSupplierRows);
+                }
+            """)
             val branches = js("window.expandSupplierBranchesFromRows(window.__tempSupplierRows)").unsafeCast<Array<dynamic>>()
             if (branches.isEmpty()) {
                 if (supplierTarget == "quickPurchase") {
@@ -14838,8 +15354,12 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
             val firstBranch = branches[0]
             val skipModals = purchaseForMerge != null
             window.asDynamic().__tempSupplierBranches = branches
-            val needsDisambiguation = !skipModals &&
-                js("window.supplierMappingNeedsDisambiguation(window.__tempSupplierBranches)").unsafeCast<Boolean>()
+            val isQuickPurchaseTarget = supplierTarget == "quickPurchase"
+            val needsDisambiguation = !skipModals && if (isQuickPurchaseTarget) {
+                js("window.quickPurchaseNeedsDisambiguation(window.__tempSupplierBranches)").unsafeCast<Boolean>()
+            } else {
+                js("window.supplierMappingNeedsDisambiguation(window.__tempSupplierBranches, window.__tempSupplierRows)").unsafeCast<Boolean>()
+            }
 
             fun buildDefaultSelection(): dynamic {
                 val sel = js("({})").unsafeCast<dynamic>()
@@ -14853,6 +15373,9 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                     sel.pol = firstSemicolonToken(pdStr(pd.pol))
                     sel.venueId = firstSemicolonToken(pdStr(pd.venueId))
                     sel.rixoCompany = firstSemicolonToken(pdStr(pd.rixoCompany))
+                    sel.supportedVehicleType = firstSemicolonToken(
+                        pdStr(pd.shipmentSize).ifBlank { pdStr(pd.vehicleType) }
+                    )
                 } else {
                     val fb = firstBranch.unsafeCast<dynamic>()
                     sel.stockLocation = (fb.stockLocation?.toString() ?: "").trim()
@@ -14862,18 +15385,57 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                     sel.rixoCompany = (fb.rixoCompany?.toString()?.trim()?.takeIf { it.isNotBlank() }
                         ?: rixoOpts?.firstOrNull()?.toString()?.trim()
                         ?: "")
+                    sel.supportedVehicleType = ""
                 }
-                return sel
+                window.asDynamic().__tempBuildSel = sel
+                window.asDynamic().__tempBuildBranches = branches
+                js("""
+                    if (typeof window.resolveSupplierPolVenueFromBranches === 'function') {
+                        var r = window.resolveSupplierPolVenueFromBranches(window.__tempBuildBranches, window.__tempBuildSel);
+                        if (r.pol) window.__tempBuildSel.pol = r.pol;
+                        if (r.venueId) window.__tempBuildSel.venueId = r.venueId;
+                    }
+                """)
+                return js("window.__tempBuildSel")
+            }
+
+            fun enrichSelectionWithVehicleType(sel: dynamic) {
+                val existing = (sel.supportedVehicleType?.toString() ?: "").trim()
+                if (existing.isNotBlank()) return
+                val userSupplierChange = js("window.__userInitiatedSupplierChange === true").unsafeCast<Boolean>()
+                if (!userSupplierChange) {
+                    window.asDynamic().__enrichVtField = if (isEditForm) "editShipmentSize" else "shipmentSize"
+                    val formVt = js(
+                        "typeof window.getComboboxValue === 'function' ? String(window.getComboboxValue(window.__enrichVtField) || '').trim() : ''"
+                    ).unsafeCast<String>()
+                    if (formVt.isNotBlank()) {
+                        sel.supportedVehicleType = formVt
+                        return
+                    }
+                }
+                val vts = js("window.vehicleTypesForSupplierSelection(window.__tempSupplierRows, sel)").unsafeCast<Array<dynamic>>()
+                if (vts.size == 1) {
+                    sel.supportedVehicleType = vts[0].toString()
+                }
             }
 
             val selectionPromise = if (needsDisambiguation) {
-                window.asDynamic().resolveSupplierFieldsSequentially(
-                    auctionName,
-                    branches,
-                    firstBranch
-                ).unsafeCast<dynamic>()
+                if (isQuickPurchaseTarget) {
+                    window.asDynamic().resolveQuickPurchaseSupplierFields(
+                        auctionName,
+                        branches,
+                        firstBranch
+                    ).unsafeCast<dynamic>()
+                } else {
+                    window.asDynamic().resolveSupplierFieldsSequentially(
+                        auctionName,
+                        branches,
+                        firstBranch
+                    ).unsafeCast<dynamic>()
+                }
             } else {
                 val defaultSel = buildDefaultSelection()
+                enrichSelectionWithVehicleType(defaultSel)
                 window.asDynamic().__tempSupplierDefaultSel = defaultSel
                 js("Promise.resolve(window.__tempSupplierDefaultSel)").unsafeCast<dynamic>()
             }
@@ -14888,6 +15450,9 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                 val hasSelected = selected != null && selected != js("undefined")
                 if (!hasSelected && needsDisambiguation) {
                     console.log("❌ Supplier mapping selection cancelled by user, skipping field autofills")
+                    if (supplierTarget == "quickPurchase") {
+                        populateQuickSupplierDropdownsFromAuction(auctionName)
+                    }
                     return@then Unit
                 }
 
@@ -14895,6 +15460,7 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                 var pol = (selected?.pol?.toString() ?: firstBranch.unsafeCast<dynamic>().pol?.toString() ?: "").trim()
                 var venue = (selected?.venueId?.toString() ?: firstBranch.unsafeCast<dynamic>().venueId?.toString() ?: "").trim()
                 var rixo = (selected?.rixoCompany?.toString() ?: firstBranch.unsafeCast<dynamic>().rixoCompany?.toString() ?: "").trim()
+                var vehicleType = (selected?.supportedVehicleType?.toString() ?: "").trim()
 
                 if (skipModals && purchaseForMerge != null) {
                     val pd = purchaseForMerge.unsafeCast<dynamic>()
@@ -14910,35 +15476,79 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                     if (savedVenue.isNotBlank()) venue = savedVenue
                     val savedRixo = firstSemicolonToken(pdStr(pd.rixoCompany))
                     if (savedRixo.isNotBlank()) rixo = savedRixo
+                    val savedVt = firstSemicolonToken(pdStr(pd.shipmentSize).ifBlank { pdStr(pd.vehicleType) })
+                    if (savedVt.isNotBlank()) vehicleType = savedVt
                 }
+
+                window.asDynamic().__tempResolveSel = js("({ stockLocation: stock, rixoCompany: rixo, pol: pol, venueId: venue })")
+                window.asDynamic().__tempResolveBranches = branches
+                val resolvedPv = js("""
+                    (typeof window.resolveSupplierPolVenueFromBranches === 'function')
+                        ? window.resolveSupplierPolVenueFromBranches(window.__tempResolveBranches, window.__tempResolveSel)
+                        : window.__tempResolveSel
+                """).unsafeCast<dynamic>()
+                pol = (resolvedPv.pol?.toString() ?: pol).trim()
+                venue = (resolvedPv.venueId?.toString() ?: venue).trim()
+
+                val derivedFields = js("({})").unsafeCast<dynamic>()
+                derivedFields.pol = pol
+                derivedFields.venueId = venue
+                window.asDynamic().__rixoDerivedSupplierFields = derivedFields
 
                 val selObj = js("({})").unsafeCast<dynamic>()
                 selObj.stockLocation = stock
                 selObj.pol = pol
                 selObj.venueId = venue
                 selObj.rixoCompany = rixo
+                selObj.supportedVehicleType = vehicleType
+                if (vehicleType.isBlank()) enrichSelectionWithVehicleType(selObj)
+                vehicleType = (selObj.supportedVehicleType?.toString() ?: vehicleType).trim()
 
                 val isQuickPurchase = supplierTarget == "quickPurchase"
                 if (isQuickPurchase) {
                     populateQuickSupplierDropdownsFromAuction(auctionName)
                     applyQuickPurchaseSupplierSelection(selObj)
                 } else {
-                    populateSupplierDropdownsFromAuction(auctionName)
                     applySupplierSelectionToForm(selObj, isEditForm, auctionName)
                 }
 
                 if (skipModals && purchaseForMerge != null) {
+                    val snapObj = js("({})").unsafeCast<dynamic>()
+                    snapObj.stock = stock
+                    snapObj.pol = pol
+                    snapObj.venue = venue
+                    snapObj.rixo = rixo
+                    snapObj.vehicleType = (selObj.supportedVehicleType?.toString() ?: vehicleType).trim()
+                    window.asDynamic().__rixoSupplierPreserveSnapshot = snapObj
+                    window.asDynamic().__rixoDerivedSupplierFields = derivedFields
                     applySavedPurchaseFieldSnapshot(purchaseForMerge)
                     scheduleSavedSupplierSnapshotReapply(purchaseForMerge, auctionName)
+                    window.asDynamic().__autofillIsEditForm = isEditForm
+                    window.asDynamic().__autofillSelObj = selObj
                     js("""
                         setTimeout(function() {
+                            if (typeof window.scheduleAutofillRixoPriceFromMapping === 'function') {
+                                var sel = window.__autofillSelObj || {};
+                                window.scheduleAutofillRixoPriceFromMapping(window.__autofillIsEditForm === true, {
+                                    delay: 0,
+                                    force: true,
+                                    auctionName: (typeof window.getComboboxValue === 'function')
+                                        ? window.getComboboxValue(window.__autofillIsEditForm ? 'editAuctionName' : 'auctionName') : '',
+                                    stockLocation: sel.stockLocation || '',
+                                    rixoCompany: sel.rixoCompany || '',
+                                    supportedVehicleType: sel.supportedVehicleType || '',
+                                    venueId: sel.venueId || '',
+                                    pol: sel.pol || '',
+                                    selection: sel
+                                });
+                            }
                             window.__editPurchaseHydrating = false;
                             window.__suppressSupplierModalFlow = false;
                         }, 1200);
                     """)
                 }
 
-                console.log("✅ Supplier map applied: stock=$stock, pol=$pol, venue=$venue, rixo=$rixo")
+                console.log("✅ Supplier map applied: stock=$stock, pol=$pol, venue=$venue, rixo=$rixo, vehicleType=$vehicleType")
                 null
             }
 
@@ -15015,13 +15625,12 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
     val matchedDoor = firstSemicolonToken((matchDynamic.door as? String ?: "").trim())
     val matchedSeat = firstSemicolonToken((matchDynamic.seat as? String ?: "").trim())
     val matchedGrade = firstSemicolonToken((matchDynamic.grade as? String ?: "").trim())
-    val matchedVehicleType = firstSemicolonToken((matchDynamic.vehicleType as? String ?: "").trim())
     val matchedRank = firstSemicolonToken((matchDynamic.rank as? String ?: "").trim())
     val matchedColor = firstSemicolonToken((matchDynamic.color as? String ?: "").trim())
     val matchedDriveType = firstSemicolonToken((matchDynamic.driveType as? String ?: "").trim()).uppercase()
     val matchedRecycleFee = digitsDotOnlyFromMappingMoney(matchDynamic.recycleFee as? String)
     
-    console.log("✅ Found matching row: brand=$matchedBrand, carName=$matchedCarName, fuel=$matchedFuel, wd=$matchedWd, shift=$matchedShift, cc=$matchedCc, door=$matchedDoor, seat=$matchedSeat, grade=$matchedGrade, vehicleType=$matchedVehicleType, rank=$matchedRank, color=$matchedColor, driveType=$matchedDriveType, recycleFee=$matchedRecycleFee")
+    console.log("✅ Found matching row: brand=$matchedBrand, carName=$matchedCarName, fuel=$matchedFuel, wd=$matchedWd, shift=$matchedShift, cc=$matchedCc, door=$matchedDoor, seat=$matchedSeat, grade=$matchedGrade, rank=$matchedRank, color=$matchedColor, driveType=$matchedDriveType, recycleFee=$matchedRecycleFee")
     
     // Helper function to get correct field ID
     fun getFieldId(base: String): String {
@@ -15165,21 +15774,6 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
         }
     }
     
-    // Vehicle type (shipmentSize combobox)
-    if (changedField.lowercase() != "vehicletype" && matchedVehicleType.isNotBlank()) {
-        val shipId = if (isEditForm) "editShipmentSize" else "shipmentSize"
-        window.asDynamic().__vtMatchRow = matchedVehicleType
-        window.asDynamic().__vtMatchRowId = shipId
-        js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists(window.__vtMatchRowId, window.__vtMatchRow)")
-        val shipSel = document.getElementById(shipId) as? HTMLSelectElement
-        val shipInp = document.getElementById("${shipId}Input") as? HTMLInputElement
-        shipSel?.value = matchedVehicleType
-        shipInp?.value = matchedVehicleType
-        window.asDynamic().__syncShipMatch = shipId
-        js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(window.__syncShipMatch)")
-        console.log("✅ Auto-filled vehicle type from match: $matchedVehicleType")
-    }
-    
     if (changedField.lowercase() != "rank") {
         val rankId = if (isEditForm) "editRank" else "rank"
         (document.getElementById(rankId) as? HTMLInputElement)?.value = matchedRank
@@ -15267,7 +15861,6 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
             val doorRaw = js("mappingData.door")?.toString() ?: ""
             val seatRaw = js("mappingData.seat")?.toString() ?: ""
             val grade = firstSemicolonToken(js("mappingData.grade")?.toString())
-            val vehicleType = firstSemicolonToken(js("mappingData.vehicleType")?.toString()?.trim())
             val rank = firstSemicolonToken(js("mappingData.rank")?.toString()?.trim())
             val color = firstSemicolonToken(js("mappingData.color")?.toString()?.trim())
             val driveType = firstSemicolonToken(js("mappingData.driveType")?.toString()?.trim()?.uppercase())
@@ -15278,7 +15871,7 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
             val door = firstSemicolonToken(if (doorRaw == "0" || doorRaw.isBlank()) "" else doorRaw)
             val seat = firstSemicolonToken(if (seatRaw == "0" || seatRaw.isBlank()) "" else seatRaw)
             
-            console.log("Auto-filling fields from mapping: carName=$carName, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, seat=$seat, grade=$grade, vehicleType=$vehicleType, rank=$rank, color=$color, driveType=$driveType")
+            console.log("Auto-filling fields from mapping: carName=$carName, fuel=$fuel, wd=$wd, shift=$shift, cc=$cc, door=$door, seat=$seat, grade=$grade, rank=$rank, color=$color, driveType=$driveType")
             
             // Helper function to set field value (always set, even if empty)
             // For comboboxes, sets both input and select fields
@@ -15341,11 +15934,6 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                 setFieldValue("editDoor", door)
                 setFieldValue("editSeat", seat)
                 setFieldValue("editGrade", grade)
-                if (vehicleType.isNotBlank()) {
-                    window.asDynamic().__vtMatch = vehicleType
-                    js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists('editShipmentSize', window.__vtMatch)")
-                    setFieldValue("editShipmentSize", vehicleType)
-                }
                 setFieldValue("editRank", rank)
                 setFieldValue("editColor", color)
                 if (driveType == "LHD" || driveType == "RHD") {
@@ -15382,11 +15970,6 @@ fun fetchMappingByChassisOrCarName(brandName: String, chassis: String?, carName:
                 setFieldValue("door", door)
                 setFieldValue("seat", seat)
                 setFieldValue("grade", grade)
-                if (vehicleType.isNotBlank()) {
-                    window.asDynamic().__vtMatchAdd = vehicleType
-                    js("if (typeof window.ensureComboboxOptionExists === 'function') window.ensureComboboxOptionExists('shipmentSize', window.__vtMatchAdd)")
-                    setFieldValue("shipmentSize", vehicleType)
-                }
                 setFieldValue("rank", rank)
                 setFieldValue("color", color)
                 if (driveType == "LHD" || driveType == "RHD") {
@@ -15725,14 +16308,26 @@ fun validatePurchaseChassisForSave(isEditForm: Boolean): Pair<String?, String?> 
 
 fun bindPurchaseChassisNumberInput(fieldId: String) {
     val input = document.getElementById(fieldId) as? HTMLInputElement ?: return
+    val isEditForm = fieldId.startsWith("edit")
+    val manufactureYearBaseId = if (isEditForm) "editManufactureYear" else "manufactureYear"
     fun sanitize() {
         val raw = input.value
         val stripped = raw.replace(" ", "").replace("-", "")
         val alnum = stripped.replace(Regex("[^A-Za-z0-9]"), "")
         if (alnum != raw) input.value = alnum
     }
+    fun maybeLookupManufactureYear() {
+        val suffix = input.value.trim()
+        if (suffix.isBlank()) return
+        if (readManufactureYearInput(manufactureYearBaseId).isNotBlank()) return
+        val prefix = readPurchaseChassisCode(isEditForm)
+        if (prefix.isNotBlank()) lookupManufactureYearForChassisSuffix(prefix, suffix, manufactureYearBaseId)
+    }
     input.addEventListener("input", { _: Event -> sanitize() })
-    input.addEventListener("blur", { _: Event -> sanitize() })
+    input.addEventListener("blur", { _: Event ->
+        sanitize()
+        maybeLookupManufactureYear()
+    })
 }
 
 fun bindPurchaseChassisCodeInputNoDash(fieldId: String) {
@@ -16417,6 +17012,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
     val editShakenWithoutNumber = editShakenTruthy && editNumberCutRaw.isEmpty()
     val editCarModelYearIsoInitial = normalizeCarModelYearForCompare(purchaseData.carModelYear?.toString())
     val editCarModelYearTextInitial = isoMonthToMmYyyy(editCarModelYearIsoInitial.ifEmpty { null })
+    val editManufactureYearInitial = firstDisplayToken(purchaseData.manufactureYear)
 
     val content = document.getElementById("content")!!
     content.innerHTML = """
@@ -16509,14 +17105,13 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="editManufactureYearText" maxlength="4" inputmode="numeric" autocomplete="off"
-                                       placeholder="YYYY"
-                                       value="${escapeHtml((purchaseData.manufactureYear ?: "").toString())}"
+                                       value="${escapeHtml(editManufactureYearInitial)}"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="editManufactureYearCalendarBtn" title="Open year picker"
                                         style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
                             </div>
-                            <input type="hidden" id="editManufactureYear" value="${escapeHtml((purchaseData.manufactureYear ?: "").toString())}">
-                            <span id="editManufactureYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">YYYY</span>
+                            <input type="hidden" id="editManufactureYear" value="${escapeHtml(editManufactureYearInitial)}">
+                            <span id="editManufactureYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none; display:${if (editManufactureYearInitial.isBlank()) "block" else "none"};">YYYY</span>
                         </div>
                     </div>
                     <div>
@@ -16687,7 +17282,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                             <div style="flex: 1;">
                                 ${createEditableCombobox("editAuctionName", "Add Supplier Name", required = true, initialValue = purchaseData.auctionHouse ?: "")}
                             </div>
-                            <button type="button" id="manageEditAuctionMappings" class="manage-btn" title="Go to Supplier Master List">
+                            <button type="button" id="manageEditAuctionMappings" class="manage-btn" title="Go to Supplier Map">
                                 ⚙️
                             </button>
                         </div>
@@ -16710,15 +17305,10 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Rixo Price</label>
-                        <div class="currency-input" style="display:flex; gap:10px; align-items:center;">
+                        <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editRixoPriceInput" class="money-input" value="${extractNumericFromDbValue(purchaseData.rixoPrice)}" placeholder="0"
                                    autocomplete="off" onfocus="this.select();">
-                            <button type="button" id="calculateEditRixoPriceBtn"
-                                    style="padding: 8px 12px; background-color:#007bff; color:white; border:none; border-radius:4px; cursor:pointer; white-space:nowrap; min-height:44px;"
-                                    onclick="window.calculateRixoPriceFromMapping(true)">
-                                Calculate
-                            </button>
                         </div>
                     </div>
                         </div>
@@ -16762,7 +17352,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         </div>
                     </div>
                     <div>
-                        <label>Rixo Confirmed</label>
+                        <label>Rixo Sent</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
                                 <input type="radio" name="editStatusRixoConfirmed" value="TRUE" ${if (purchaseData.rixoConfirmed == "TRUE") "checked" else ""}>
@@ -17454,6 +18044,7 @@ fun setupEditFormListeners() {
             if (window.resetEditRixoOverridesAfterSupplierChange) window.resetEditRixoOverridesAfterSupplierChange();
             var supplierName = window.getComboboxValue('editAuctionName');
             if (window.handleAuctionNameChange) {
+                window.__userInitiatedSupplierChange = true;
                 window.handleAuctionNameChange(supplierName);
             }
         """)
@@ -17464,10 +18055,13 @@ fun setupEditFormListeners() {
             if (window.resetEditRixoOverridesAfterSupplierChange) window.resetEditRixoOverridesAfterSupplierChange();
             var supplierName = window.getComboboxValue('editAuctionName');
             if (window.handleAuctionNameChange) {
+                window.__userInitiatedSupplierChange = true;
                 window.handleAuctionNameChange(supplierName);
             }
         """)
     })
+
+    js("if (typeof window.wireSupplierMapCascadeAutofill === 'function') window.wireSupplierMapCascadeAutofill();")
 
     wireEditRixoUserOverrideListeners()
     setupPurchaseStatusStateMachine(isEdit = true)
@@ -18080,7 +18674,7 @@ fun getFieldDisplayName(fieldName: String): String {
         "totalPrice" -> "Total Price"
         "paymentDate" -> "Payment Date"
         "rixoRequested" -> "Rixo Requested"
-        "rixoConfirmed" -> "Rixo Confirmed"
+        "rixoConfirmed" -> "Rixo Sent"
         "rixoPrice" -> "Rixo Price"
         "shipmentDate" -> "Shipment Date"
         "blNo" -> "BL No"
@@ -18563,6 +19157,7 @@ private fun wireEditRixoUserOverrideListeners() {
     attach("editPol") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editPol')") }
     attach("editVenueId") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editVenueId')") }
     attach("editRixoCompany") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editRixoCompany')") }
+    attach("editShipmentSize") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editShipmentSize')") }
 }
 
 // Function to show confirmation modal
@@ -19233,14 +19828,17 @@ private fun loadLegacyCarPicturesFromPurchaseData(purchaseData: dynamic, existin
         pictureElement.setAttribute("data-picture-id", if (pictureId.length == 0) "legacy_$i" else pictureId)
         pictureElement.setAttribute("data-picture-data", pictureData)
 
-        val img = document.createElement("img")
+        val img = document.createElement("img") as HTMLElement
         img.setAttribute("src", pictureData)
-        img.setAttribute("style", "width: 100%; height: 150px; object-fit: cover;")
+        wireCarPictureThumbnailClick(img, pictureData)
 
         val deleteBtn = document.createElement("button")
         deleteBtn.innerHTML = "\u274C"
-        deleteBtn.setAttribute("style", "position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px;")
-        deleteBtn.setAttribute("onclick", "this.parentElement.remove();")
+        deleteBtn.setAttribute("style", "position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px; z-index: 2;")
+        deleteBtn.addEventListener("click", { event: dynamic ->
+            event.stopPropagation()
+            pictureElement.remove()
+        })
 
         pictureElement.appendChild(img)
         pictureElement.appendChild(deleteBtn)
@@ -19783,6 +20381,7 @@ private fun persistCarBookingFormToSessionStorage() {
         s.asDynamic().podPort = carBookingFormState.podPort ?: ""
         s.asDynamic().bookingNo = carBookingFormState.bookingNo ?: ""
         s.asDynamic().vesselSelect = carBookingFormState.vesselSelect ?: ""
+        s.asDynamic().carrierSelect = carBookingFormState.carrierSelect ?: ""
         s.asDynamic().chassisSelect = carBookingFormState.chassisSelect ?: ""
         val json = js("JSON.stringify(s)") as String
         window.sessionStorage.setItem(SESSION_CAR_BOOKING_FORM_JSON, json)
@@ -19821,6 +20420,7 @@ private fun mergeCarBookingFormFromSessionStorageIfNeeded() {
     mergeKey("podPort")
     mergeKey("bookingNo")
     mergeKey("vesselSelect")
+    mergeKey("carrierSelect")
     mergeKey("chassisSelect")
 }
 
@@ -19874,6 +20474,7 @@ fun saveCarBookingState() {
         val podPortEl = document.getElementById("podPort") // Can be input or select
         val bookingNoEl = document.getElementById("bookingNo") as? HTMLInputElement
         val vesselInputEl = document.getElementById("vesselSelect") as? HTMLInputElement
+        val carrierSelectEl = document.getElementById("carrierSelect") as? HTMLSelectElement
         // Get chassis value from combobox (input or select)
         val chassisValue = js("window.getComboboxValue('chassisSearch')") as? String ?: ""
         
@@ -19925,6 +20526,7 @@ fun saveCarBookingState() {
         carBookingFormState.podPort = podPortValue
         carBookingFormState.bookingNo = bookingNoEl?.value ?: ""
         carBookingFormState.vesselSelect = vesselInputEl?.value ?: ""
+        carBookingFormState.carrierSelect = carrierSelectEl?.value ?: ""
         carBookingFormState.chassisSelect = chassisValue
         
         // Persist C&F/FOB selection from booking page checkboxes
@@ -20035,6 +20637,7 @@ fun restoreCarBookingState() {
     val podPortEl = document.getElementById("podPort") // Can be input or select
     val bookingNoEl = document.getElementById("bookingNo") as? HTMLInputElement
     val vesselInputEl = document.getElementById("vesselSelect") as? HTMLInputElement
+    val carrierSelectEl = document.getElementById("carrierSelect") as? HTMLSelectElement
     val chassisInputEl = document.getElementById("chassisSearchInput") as? HTMLInputElement
     
     console.log("🔍 Form elements found for restoration:")
@@ -20045,6 +20648,7 @@ fun restoreCarBookingState() {
     console.log("  - podPort: ${podPortEl != null}, element type: ${podPortEl?.tagName ?: "null"}")
     console.log("  - bookingNo: ${bookingNoEl != null}")
     console.log("  - vesselInput: ${vesselInputEl != null}")
+    console.log("  - carrierSelect: ${carrierSelectEl != null}")
     console.log("  - chassisInput: ${chassisInputEl != null}")
     
     // Restore form field values (bookingDynString: JSON/dynamic may be JS strings — isNotEmpty must be Kotlin String)
@@ -20165,6 +20769,25 @@ fun restoreCarBookingState() {
     }
     bookingNoEl?.value = bookingDynString(carBookingFormState.bookingNo)
     vesselInputEl?.value = bookingDynString(carBookingFormState.vesselSelect)
+    val restoredCarrier = bookingDynString(carBookingFormState.carrierSelect)
+    if (restoredCarrier.isNotEmpty() && carrierSelectEl != null) {
+        var found = false
+        for (i in 0 until carrierSelectEl.options.length) {
+            val opt = carrierSelectEl.options.item(i) as? HTMLOptionElement ?: continue
+            if (opt.value.equals(restoredCarrier, ignoreCase = true)) {
+                carrierSelectEl.value = opt.value
+                found = true
+                break
+            }
+        }
+        if (!found) {
+            val option = document.createElement("option") as HTMLOptionElement
+            option.value = restoredCarrier
+            option.textContent = restoredCarrier
+            carrierSelectEl.appendChild(option)
+            carrierSelectEl.value = restoredCarrier
+        }
+    }
     // Restore chassis search input value (plain input, no dropdown)
     val chassisValue = bookingDynString(carBookingFormState.chassisSelect)
     if (chassisInputEl != null && chassisValue != null && chassisValue != "" && chassisValue.trim() != "") {
@@ -20180,6 +20803,7 @@ fun restoreCarBookingState() {
           if (typeof window.refreshBookingFabSelect === 'function') {
             if (document.getElementById('consigneeCountry')) window.refreshBookingFabSelect('consigneeCountry');
             if (document.getElementById('polPort')) window.refreshBookingFabSelect('polPort');
+            if (document.getElementById('carrierSelect')) window.refreshBookingFabSelect('carrierSelect');
             if (document.getElementById('consigneeSelect')) window.refreshBookingFabSelect('consigneeSelect');
             if (typeof window.ensureBookingFabPod === 'function') window.ensureBookingFabPod();
             if (document.getElementById('podPort')) window.refreshBookingFabSelect('podPort');
@@ -20921,7 +21545,7 @@ fun showMissingDataModal(purchases: List<dynamic>) {
                 "clientName" -> "Client Name"
                 "rixoCompany" -> "Rixo Company"
                 "rixoRequested" -> "Rixo Requested"
-                "rixoConfirmed" -> "Rixo Confirmed"
+                "rixoConfirmed" -> "Rixo Sent"
                 "rixoPrice" -> "Rixo Price"
 
 
@@ -25220,6 +25844,12 @@ fun sendPdfViaGmail(blob: dynamic) {
 
 // showMessage moved to Utils.kt
 
+/** True when chassis has both code and number parts (`CODE-NUMBER`). Code-only is not a duplicate key. */
+fun isFullChassisIdentity(chassis: String): Boolean {
+    val (code, number) = splitPurchaseChassisForForm(chassis)
+    return code.isNotBlank() && number.isNotBlank()
+}
+
 // Check if full chassis already exists on another purchase
 fun checkPurchaseDuplicate(
     chassis: String,
@@ -25229,6 +25859,11 @@ fun checkPurchaseDuplicate(
 ) {
     val c = chassis.trim()
     if (c.isEmpty()) {
+        onOk()
+        return
+    }
+    // Code-only chassis (no number suffix) is allowed to repeat — skip duplicate API.
+    if (!isFullChassisIdentity(c)) {
         onOk()
         return
     }

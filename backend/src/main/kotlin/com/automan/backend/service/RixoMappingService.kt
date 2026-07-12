@@ -62,7 +62,7 @@ class RixoMappingService(
             )
         )
 
-    /** Distinct non-blank [RixoMapping.auctionName] values for Rixo Price Mapping dropdowns. */
+    /** Distinct non-blank [RixoMapping.auctionName] values for supplier map dropdowns. */
     fun listDistinctAuctionNames(): List<String> =
         rixoMappingRepository.findDistinctAuctionNamesOrdered()
             .map { it.trim() }
@@ -86,10 +86,13 @@ class RixoMappingService(
     fun mergeIncrementalRow(
         existing: RixoMapping,
         insertMode: String,
-        auctionName: String?,
-        stockLocation: String?,
-        supportedVehicleType: String?,
-        rixoPrice: String?,
+        auctionName: String? = null,
+        venueId: String? = null,
+        stockLocation: String? = null,
+        pol: String? = null,
+        rixoCompany: String? = null,
+        supportedVehicleType: String? = null,
+        rixoPrice: String? = null,
     ): RixoMapping {
         val created = existing.createdAt
         return when (insertMode.uppercase()) {
@@ -99,8 +102,20 @@ class RixoMappingService(
             )
             "STOCK" -> existing.copy(
                 stockLocation = stockLocation!!.trim(),
-                venueId = existing.venueId,
-                pol = existing.pol,
+                venueId = venueId?.trim()?.takeIf { it.isNotEmpty() } ?: existing.venueId,
+                pol = pol?.trim()?.takeIf { it.isNotEmpty() } ?: existing.pol,
+                createdAt = created,
+            )
+            "VENUE" -> existing.copy(
+                venueId = venueId!!.trim().takeIf { it.isNotEmpty() },
+                createdAt = created,
+            )
+            "POL" -> existing.copy(
+                pol = pol!!.trim().takeIf { it.isNotEmpty() },
+                createdAt = created,
+            )
+            "RIXO_COMPANY" -> existing.copy(
+                rixoCompany = rixoCompany!!.trim(),
                 createdAt = created,
             )
             "FULL" -> existing.copy(

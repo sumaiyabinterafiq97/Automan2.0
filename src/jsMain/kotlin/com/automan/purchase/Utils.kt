@@ -229,6 +229,30 @@ fun formatRecycleFeeChipHtml(raw: String): String {
 }
 
 /**
+ * Format chassis_number delimited pairs as number-only chips in the Chassis Map table.
+ * Input: "67H:2019;t6yg:2020" → chips showing "67H", "t6yg".
+ */
+fun formatChassisNumberOnlyChipHtml(raw: String): String {
+    if (raw.isBlank()) return ""
+    val trimmed = raw.trim()
+    if (!trimmed.contains(":")) {
+        return formatCarBrandMapValueChipHtml(trimmed)
+    }
+    val pairs = trimmed.split(";").map { it.trim() }.filter { it.isNotEmpty() }
+    if (pairs.isEmpty()) return ""
+    val chips = pairs.mapNotNull { pair ->
+        val colonIdx = pair.lastIndexOf(':')
+        val numberToken = if (colonIdx > 0) pair.substring(0, colonIdx).trim() else pair.trim()
+        if (numberToken.isBlank()) return@mapNotNull null
+        val label = escapeHtml(numberToken)
+        """<span style="display:inline-block;padding:4px 10px;border-radius:9999px;font-size:12px;font-weight:500;background:#eff6ff;color:#1e40af;line-height:1.35;white-space:nowrap;box-shadow:0 1px 4px rgba(30,64,175,0.12);">$label</span>"""
+    }
+    if (chips.isEmpty()) return ""
+    if (chips.size == 1) return chips[0]
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;">${chips.joinToString("")}</span>"""
+}
+
+/**
  * Format chassis_number delimited pairs as readable chips in the Chassis Map table.
  * Input: "67H:2019;t6yg:2020" → chips showing "67H • 2019".
  */
@@ -700,7 +724,7 @@ fun purchaseListColumnLabels(): Map<String, String> {
         "totalPrice" to "Total Price",
         "paymentDate" to "Payment Date",
         "rixoRequested" to "Rixo Requested",
-        "rixoConfirmed" to "Rixo Confirmed",
+        "rixoConfirmed" to "Rixo Sent",
         "rixoPrice" to "Rixo Price",
         "notes" to "Notes",
         "shipmentDate" to "Shipment Date",

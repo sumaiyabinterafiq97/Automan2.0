@@ -1690,6 +1690,7 @@ fun saveShippingHistoryAndBooking() {
                 req.pod = bd.pod
                 req.bookingId = bd.bookingNo
                 req.vessel = bd.vesselName
+                req.carrier = bd.carrier
                 req.priceType = priceType
                 req.items = items
 

@@ -97,17 +97,26 @@ class PurchaseVehicleOverrideService(
     fun syncFromPurchase(purchase: Purchase) {
         val purchaseId = purchase.id ?: return
         val baseline = resolveMapBaseline(purchase)
+        val existing = purchaseVehicleOverrideRepository.findByPurchaseId(purchaseId)
+        val existingOverrides = existing?.let { parseOverrides(it.overridesJson) }.orEmpty()
         val overrides = linkedMapOf<String, String>()
 
         for (mapping in SPEC_FIELD_MAPPINGS) {
-            val actual = mapping.purchaseValue(purchase)?.trim().orEmpty()
+            // null = field not present on this write (e.g. raw JPA entity / cost-only update).
+            // "" = intentional clear from Edit/update. Do not treat them the same.
+            val raw = mapping.purchaseValue(purchase)
+            if (raw == null) {
+                existingOverrides[mapping.jsonKey]?.let { overrides[mapping.jsonKey] = it }
+                continue
+            }
+            val actual = raw.trim()
             val baselineRaw = baseline?.let { mapping.mapValue(it) }
             val baselineNorm = normalize(firstSemicolonToken(baselineRaw))
 
             when {
                 mapping.alwaysOverrideWhenSet && actual.isNotEmpty() ->
                     overrides[mapping.jsonKey] = actual
-                actual.isEmpty() -> Unit
+                actual.isEmpty() -> Unit // explicit clear — drop override key
                 mapping.jsonKey == "cc" -> {
                     val actualNorm = normalize(firstSemicolonToken(actual))
                     if (baseline == null || actualNorm != baselineNorm) {
@@ -119,7 +128,6 @@ class PurchaseVehicleOverrideService(
             }
         }
 
-        val existing = purchaseVehicleOverrideRepository.findByPurchaseId(purchaseId)
         val now = LocalDateTime.now()
         if (overrides.isEmpty()) {
             if (existing != null) {

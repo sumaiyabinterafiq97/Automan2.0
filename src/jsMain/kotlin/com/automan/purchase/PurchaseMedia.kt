@@ -94,6 +94,80 @@ private fun notifyCarPicturesDomUpdated() {
     }
 }
 
+private const val CAR_PICTURE_LIGHTBOX_ID = "carPictureLightbox"
+private var carPictureLightboxKeyHandler: ((dynamic) -> Unit)? = null
+
+fun openCarPictureLightbox(imageSrc: String) {
+    if (imageSrc.isBlank()) return
+    closeCarPictureLightbox()
+
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = CAR_PICTURE_LIGHTBOX_ID
+    overlay.setAttribute(
+        "style",
+        "position: fixed; inset: 0; z-index: 20000; background: rgba(0,0,0,0.92); " +
+            "display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box;",
+    )
+    overlay.setAttribute("role", "dialog")
+    overlay.setAttribute("aria-modal", "true")
+    overlay.setAttribute("aria-label", "Car picture")
+
+    val img = document.createElement("img") as HTMLElement
+    img.setAttribute("src", imageSrc)
+    img.setAttribute("alt", "Car picture")
+    img.setAttribute(
+        "style",
+        "max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; " +
+            "border-radius: 4px; user-select: none; pointer-events: none;",
+    )
+
+    val closeBtn = document.createElement("button") as HTMLElement
+    closeBtn.textContent = "✕"
+    closeBtn.setAttribute("type", "button")
+    closeBtn.setAttribute("aria-label", "Close")
+    closeBtn.setAttribute(
+        "style",
+        "position: absolute; top: 16px; right: 16px; width: 40px; height: 40px; border: none; " +
+            "border-radius: 50%; background: rgba(255,255,255,0.15); color: #fff; font-size: 22px; " +
+            "line-height: 1; cursor: pointer; z-index: 1;",
+    )
+
+    val onKeyDown: (dynamic) -> Unit = { event: dynamic ->
+        if (event.key == "Escape" || event.keyCode == 27) {
+            closeCarPictureLightbox()
+        }
+    }
+    carPictureLightboxKeyHandler = onKeyDown
+
+    closeBtn.addEventListener("click", { event: dynamic ->
+        event.stopPropagation()
+        closeCarPictureLightbox()
+    })
+    overlay.addEventListener("click", { _: dynamic -> closeCarPictureLightbox() })
+    document.addEventListener("keydown", onKeyDown)
+
+    overlay.appendChild(img)
+    overlay.appendChild(closeBtn)
+    document.body?.appendChild(overlay)
+}
+
+fun closeCarPictureLightbox() {
+    carPictureLightboxKeyHandler?.let { handler ->
+        document.removeEventListener("keydown", handler)
+        carPictureLightboxKeyHandler = null
+    }
+    document.getElementById(CAR_PICTURE_LIGHTBOX_ID)?.remove()
+}
+
+fun wireCarPictureThumbnailClick(img: HTMLElement, imageSrc: String) {
+    img.setAttribute("style", "width: 100%; height: 150px; object-fit: contain; cursor: pointer; display: block;")
+    img.setAttribute("title", "Click to view full size")
+    img.addEventListener("click", { event: dynamic ->
+        event.stopPropagation()
+        openCarPictureLightbox(imageSrc)
+    })
+}
+
 private fun appendCarPicturePreview(
     container: HTMLElement,
     pictureId: String,
@@ -116,17 +190,18 @@ private fun appendCarPicturePreview(
         }
     }
 
-    val img = document.createElement("img")
+    val img = document.createElement("img") as HTMLElement
     img.setAttribute("src", imageSrc)
-    img.setAttribute("style", "width: 100%; height: 150px; object-fit: cover;")
+    wireCarPictureThumbnailClick(img, imageSrc)
 
     val deleteBtn = document.createElement("button")
     deleteBtn.textContent = "✕"
     deleteBtn.setAttribute(
         "style",
-        "position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px;",
+        "position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px; z-index: 2;",
     )
-    deleteBtn.addEventListener("click", { _: dynamic ->
+    deleteBtn.addEventListener("click", { event: dynamic ->
+        event.stopPropagation()
         if (r2Media && purchaseId != null) {
             val mediaId = pictureId.toLongOrNull()
             if (mediaId != null) {
@@ -247,4 +322,7 @@ fun registerCarPictureMediaBridges() {
         }
     }
     window.asDynamic().isR2CarPictureStorageEnabled = { isR2CarPictureStorageEnabled() }
+    window.asDynamic().openCarPictureLightbox = { imageSrc: dynamic ->
+        openCarPictureLightbox(imageSrc?.toString() ?: "")
+    }
 }

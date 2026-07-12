@@ -30,12 +30,41 @@ window.resetEditRixoOverridesAfterSupplierChange = function() {
     delete o.editPol;
     delete o.editVenueId;
     delete o.editRixoCompany;
+    delete o.editShipmentSize;
+    window.__rixoPriceUserOverride = false;
+};
+
+/** Nested counter: blocks cascade listeners during programmatic rebuild/restore/apply. */
+window.__supplierMapProgrammaticDepth = 0;
+
+window.beginSupplierMapProgrammatic = function() {
+    window.__supplierMapProgrammaticDepth = (window.__supplierMapProgrammaticDepth || 0) + 1;
+    window.__suppressRixoAutoSelect = true;
+};
+
+window.endSupplierMapProgrammatic = function() {
+    window.__supplierMapProgrammaticDepth = Math.max(0, (window.__supplierMapProgrammaticDepth || 1) - 1);
+    if (window.__supplierMapProgrammaticDepth <= 0) {
+        window.__supplierMapProgrammaticDepth = 0;
+        window.__suppressRixoAutoSelect = false;
+    }
+};
+
+window.forceEndSupplierMapProgrammatic = function() {
+    window.__supplierMapProgrammaticDepth = 0;
+    window.__suppressRixoAutoSelect = false;
+};
+
+window.isSupplierMapProgrammaticUpdate = function() {
+    return (window.__supplierMapProgrammaticDepth || 0) > 0;
 };
 
 function __rixoSkipAutoEditField(editFieldId) {
     if (!editFieldId) return false;
     var id = String(editFieldId);
     if (id.indexOf('edit') !== 0) return false;
+    // User-initiated supplier apply must write edit* fields even while programmatic guard is active.
+    if (window.__supplierApplyInFlight === true) return false;
     if (window.__suppressRixoAutoSelect === true) return true;
     var o = window.__editRixoFieldOverrides;
     return !!(o && typeof o === 'object' && o[id] === true);
@@ -2525,6 +2554,8 @@ function mergePolMappingAndApiLists(mappingPolTokens, apiList) {
 
 // When stock location changes: pass supplier combobox id ('stockLocation' | 'editStockLocation').
 window.fetchPolsAfterStockChange = function(stockFieldId) {
+    if (typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate()) return;
+    if (window.__supplierApplyInFlight === true) return;
     if (!stockFieldId) return;
     var ah = (stockFieldId === 'editStockLocation')
         ? (typeof window.getComboboxValue === 'function' ? window.getComboboxValue('editAuctionName') : '')
@@ -2572,8 +2603,12 @@ window.fetchPolsByStockLocationAndUpdate = function(auctionHouse, stockLocation,
         console.warn('[POL] No apiUrl available, skipping POL fetch for:', auctionHouse, stockLocation);
         return Promise.resolve();
     }
+    var inflightKey = String(seq) + '|' + String(auctionHouse).trim().toLowerCase() + '|' + String(stockLocation).trim().toLowerCase();
+    if (window.__polFetchInflightKey === inflightKey && window.__polFetchInflightPromise) {
+        return window.__polFetchInflightPromise;
+    }
     console.log('[POL] Fetching POLs from rixo_prices for auctionHouse:', auctionHouse, 'stockLocation:', stockLocation, '->', url);
-    return fetch(url)
+    var fetchPromise = fetch(url)
         .then(function(r) {
             if (seq !== (window.__supplierMappingSeq || 0)) {
                 console.log('[POL] Stale POL response ignored for', auctionHouse, stockLocation);
@@ -2643,6 +2678,14 @@ window.fetchPolsByStockLocationAndUpdate = function(auctionHouse, stockLocation,
                 window.setFieldValue('pol', 'editPol', fallback[0]);
             }
         });
+    window.__polFetchInflightKey = inflightKey;
+    window.__polFetchInflightPromise = fetchPromise.finally(function() {
+        if (window.__polFetchInflightKey === inflightKey) {
+            window.__polFetchInflightKey = '';
+            window.__polFetchInflightPromise = null;
+        }
+    });
+    return window.__polFetchInflightPromise;
 };
 
 /** True if trimmed value matches some entry in list (case-insensitive). */
@@ -2718,10 +2761,22 @@ function __getCurrentSupplierFieldValues() {
 
 function __filterMappingsForSupplierSnapshot(mappings, snap) {
     if (!snap || !mappings || !mappings.length) return mappings || [];
+    function polMatches(mPol, selPol) {
+        if (!selPol || !String(selPol).trim()) return true;
+        var polRaw = mPol != null ? String(mPol).trim() : '';
+        if (!polRaw) return true;
+        var tokens = polRaw.split(/[;,]/).map(function(x) { return x.trim(); }).filter(Boolean);
+        var u = String(selPol).trim().toLowerCase();
+        for (var i = 0; i < tokens.length; i++) {
+            if (tokens[i].toLowerCase() === u) return true;
+        }
+        return polRaw.toLowerCase() === u;
+    }
     return mappings.filter(function(m) {
         if (snap.stock && m.stockLocation && String(m.stockLocation).trim().toLowerCase() !== String(snap.stock).trim().toLowerCase()) return false;
         if (snap.rixo && m.rixoCompany && String(m.rixoCompany).trim().toLowerCase() !== String(snap.rixo).trim().toLowerCase()) return false;
         if (snap.venue && m.venueId && String(m.venueId).trim().toLowerCase() !== String(snap.venue).trim().toLowerCase()) return false;
+        if (snap.pol && !polMatches(m.pol, snap.pol)) return false;
         return true;
     });
 }
@@ -2913,42 +2968,73 @@ function masterApiPathForSupplierField(selectId) {
     return map[selectId] || null;
 }
 
+window.__supplierMasterMenuCache = window.__supplierMasterMenuCache || {};
+window.__supplierMasterMenuInflight = window.__supplierMasterMenuInflight || {};
+
+function appendMasterListToSupplierSelect(selectId, list) {
+    var sel = document.getElementById(selectId);
+    if (!sel) return;
+    if (window.__suppressRixoAutoSelect === true &&
+        window.__supplierApplyInFlight !== true &&
+        String(selectId).indexOf('edit') === 0) {
+        return;
+    }
+    var seen = {};
+    for (var i = 0; i < sel.options.length; i++) {
+        var v = (sel.options[i].value || '').trim();
+        if (v && v !== SUPPLIER_MASTER_SEP_VALUE && v !== SEE_MORE_VALUE && v !== '__SEE_LESS__') {
+            seen[v.toLowerCase()] = true;
+        }
+    }
+    (list || []).forEach(function(item) {
+        var it = String(item).trim();
+        if (!it) return;
+        if (seen[it.toLowerCase()]) return;
+        seen[it.toLowerCase()] = true;
+        var opt = document.createElement('option');
+        opt.value = it;
+        opt.textContent = it;
+        sel.appendChild(opt);
+    });
+    if (typeof window.syncComboboxInput === 'function') {
+        var suppressMaster = typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate();
+        window.syncComboboxInput(selectId, suppressMaster ? { suppressCascade: true } : undefined);
+    }
+}
+
 function appendMasterAfterSeparatorForSupplierField(selectId) {
     var path = masterApiPathForSupplierField(selectId);
     if (!path) return;
+    var cache = window.__supplierMasterMenuCache;
+    if (cache[path]) {
+        appendMasterListToSupplierSelect(selectId, cache[path]);
+        return;
+    }
+    var inflight = window.__supplierMasterMenuInflight;
+    if (inflight[path]) {
+        inflight[path].then(function(list) {
+            appendMasterListToSupplierSelect(selectId, list);
+        });
+        return;
+    }
     var url = (typeof window.apiUrl === 'function') ? window.apiUrl(path) : (typeof apiUrl !== 'undefined' ? apiUrl(path) : '');
     if (!url) return;
-    fetch(url)
+    inflight[path] = fetch(url)
         .then(function(r) { return r && r.ok ? r.json() : []; })
         .then(function(raw) {
             var list = Array.isArray(raw) ? raw : [];
-            var sel = document.getElementById(selectId);
-            if (!sel) return;
-            if (window.__suppressRixoAutoSelect === true && String(selectId).indexOf('edit') === 0) return;
-            var seen = {};
-            for (var i = 0; i < sel.options.length; i++) {
-                var v = (sel.options[i].value || '').trim();
-                if (v && v !== SUPPLIER_MASTER_SEP_VALUE && v !== SEE_MORE_VALUE && v !== '__SEE_LESS__') {
-                    seen[v.toLowerCase()] = true;
-                }
-            }
-            list.forEach(function(item) {
-                var it = String(item).trim();
-                if (!it) return;
-                if (seen[it.toLowerCase()]) return;
-                seen[it.toLowerCase()] = true;
-                var opt = document.createElement('option');
-                opt.value = it;
-                opt.textContent = it;
-                sel.appendChild(opt);
-            });
-            if (typeof window.syncComboboxInput === 'function') {
-                window.syncComboboxInput(selectId);
-            }
+            cache[path] = list;
+            delete inflight[path];
+            return list;
         })
         .catch(function(err) {
+            delete inflight[path];
             console.warn('[supplier+master] Failed to load master for', selectId, err);
+            return [];
         });
+    inflight[path].then(function(list) {
+        appendMasterListToSupplierSelect(selectId, list);
+    });
 }
 
 function buildSupplierMappingPlusMasterSelect(selectId, supplierOptions, placeholderLabel) {
@@ -2978,7 +3064,8 @@ function buildSupplierMappingPlusMasterSelect(selectId, supplierOptions, placeho
     sep.disabled = true;
     sel.appendChild(sep);
     if (typeof window.syncComboboxInput === 'function') {
-        window.syncComboboxInput(selectId);
+        var suppressMaster = typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate();
+        window.syncComboboxInput(selectId, suppressMaster ? { suppressCascade: true } : undefined);
     }
     appendMasterAfterSeparatorForSupplierField(selectId);
 }
@@ -3008,15 +3095,20 @@ function getCurrentAuctionNameForPurchaseForm() {
 }
 
 function normalizeAuctionNameForMapping(auctionName) {
-    if (!auctionName || !window.rixoPriceMapping) return '';
-    var name = String(auctionName).trim();
+    return resolveRixoMappingKey(auctionName);
+}
+
+/** Case-insensitive lookup; falls back to trimmed name for suppliers not yet in cache. */
+function resolveRixoMappingKey(auctionName) {
+    var name = String(auctionName || '').trim();
     if (!name) return '';
+    if (!window.rixoPriceMapping) return name;
     if (window.rixoPriceMapping[name]) return name;
     var keys = Object.keys(window.rixoPriceMapping);
     for (var i = 0; i < keys.length; i++) {
         if (keys[i].toLowerCase() === name.toLowerCase()) return keys[i];
     }
-    return '';
+    return name;
 }
 
 function supplierSelectHasMasterSep(selectId) {
@@ -3055,7 +3147,7 @@ function restoreSupplierMasterFieldValue(addFieldId, editFieldId, value) {
         var inp = document.getElementById(selectId + 'Input');
         if (inp) inp.value = sel.value || v;
         if (typeof window.syncComboboxInput === 'function') {
-            window.syncComboboxInput(selectId);
+            window.syncComboboxInput(selectId, { suppressCascade: true });
         }
     }
     if (document.getElementById(addFieldId)) applyOne(addFieldId, val);
@@ -3071,7 +3163,7 @@ function restoreSupplierMasterFieldValue(addFieldId, editFieldId, value) {
 window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
     options = options || {};
     var seq = window.__supplierMappingSeq || 0;
-    var normalized = normalizeAuctionNameForMapping(auctionName);
+    var normalized = resolveRixoMappingKey(auctionName);
     if (!normalized || !window.rixoPriceMapping[normalized] || !window.rixoPriceMapping[normalized].mappings) {
         return false;
     }
@@ -3085,61 +3177,78 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
     var vehicleMappings = __filterMappingsForSupplierSnapshot(mappings, snapHint);
     var vehicleTypes = __vehicleTypesFromMappings(vehicleMappings.length ? vehicleMappings : mappings);
 
-    updateDropdown('stockLocation', 'editStockLocation', stockLocations, true);
-    updateDropdown('venueId', 'editVenueId', venueIds, true);
-    updateDropdown('rixoCompany', 'editRixoCompany', rixoCompanies, true);
-    if (polTokensFromMapping.length > 0) {
-        updateDropdown('pol', 'editPol', polTokensFromMapping, true);
-    } else {
-        updateDropdown('pol', 'editPol', [], true);
+    window.beginSupplierMapProgrammatic();
+    try {
+        updateDropdown('stockLocation', 'editStockLocation', stockLocations, true);
+        updateDropdown('venueId', 'editVenueId', venueIds, true);
+        updateDropdown('rixoCompany', 'editRixoCompany', rixoCompanies, true);
+        if (polTokensFromMapping.length > 0) {
+            updateDropdown('pol', 'editPol', polTokensFromMapping, true);
+        } else {
+            updateDropdown('pol', 'editPol', [], true);
+        }
+        updateDropdown('shipmentSize', 'editShipmentSize', vehicleTypes, true);
+    } finally {
+        if (!options.holdProgrammaticUntilRestored) {
+            window.endSupplierMapProgrammatic();
+        }
     }
-    updateDropdown('shipmentSize', 'editShipmentSize', vehicleTypes, true);
 
     var restoreDelay = options.restoreDelay != null ? options.restoreDelay : 100;
     setTimeout(function() {
         if (seq !== (window.__supplierMappingSeq || 0)) {
             console.log('rebuildSupplierDependentDropdowns: stale restore ignored for', normalized);
+            if (options.holdProgrammaticUntilRestored && typeof window.forceEndSupplierMapProgrammatic === 'function') {
+                window.forceEndSupplierMapProgrammatic();
+            }
             return;
         }
-        var snap = options.preserveSnapshot;
-        var cur = options.freshAutoSelect
-            ? { stock: '', venue: '', rixo: '', pol: '', vehicleType: '' }
-            : (snap && typeof snap === 'object' ? snap : __getCurrentSupplierFieldValues());
-        if (options.autoSelect) {
-            var stockPick = stockLocations.length > 0 ? __pickPreservedOrFirst(stockLocations, cur.stock) : null;
-            var venuePick = venueIds.length > 0 ? __pickPreservedOrFirst(venueIds, cur.venue) : null;
-            var rixoPick = rixoCompanies.length > 0 ? __pickPreservedOrFirst(rixoCompanies, cur.rixo) : null;
-            var polPick = polTokensFromMapping.length > 0 ? __pickPreservedOrFirst(polTokensFromMapping, cur.pol) : null;
-            var vtPick = vehicleTypes.length > 0 ? __pickPreservedOrFirst(vehicleTypes, cur.vehicleType) : null;
-            if (stockPick) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', stockPick);
-            if (polPick || (polTokensFromMapping.length > 0 && !cur.pol)) {
-                restoreSupplierMasterFieldValue('pol', 'editPol', polPick || polTokensFromMapping[0]);
-            } else if (cur.pol) {
-                restoreSupplierMasterFieldValue('pol', 'editPol', cur.pol);
+        window.beginSupplierMapProgrammatic();
+        try {
+            var snap = options.preserveSnapshot;
+            var cur = options.freshAutoSelect
+                ? { stock: '', venue: '', rixo: '', pol: '', vehicleType: '' }
+                : (snap && typeof snap === 'object' ? snap : __getCurrentSupplierFieldValues());
+            if (options.autoSelect) {
+                var stockPick = stockLocations.length > 0 ? __pickPreservedOrFirst(stockLocations, cur.stock) : null;
+                var venuePick = venueIds.length > 0 ? __pickPreservedOrFirst(venueIds, cur.venue) : null;
+                var rixoPick = rixoCompanies.length > 0 ? __pickPreservedOrFirst(rixoCompanies, cur.rixo) : null;
+                var polPick = polTokensFromMapping.length > 0 ? __pickPreservedOrFirst(polTokensFromMapping, cur.pol) : null;
+                var vtPick = vehicleTypes.length > 0 ? __pickPreservedOrFirst(vehicleTypes, cur.vehicleType) : null;
+                if (stockPick) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', stockPick);
+                if (polPick || (polTokensFromMapping.length > 0 && !cur.pol)) {
+                    restoreSupplierMasterFieldValue('pol', 'editPol', polPick || polTokensFromMapping[0]);
+                } else if (cur.pol) {
+                    restoreSupplierMasterFieldValue('pol', 'editPol', cur.pol);
+                }
+                if (venuePick) restoreSupplierMasterFieldValue('venueId', 'editVenueId', venuePick);
+                if (rixoPick) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', rixoPick);
+                if (vtPick) restoreSupplierMasterFieldValue('shipmentSize', 'editShipmentSize', vtPick);
+                if (stockPick && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+                    var keepPol = !!(cur.pol && __listContainsTokenCaseInsensitive(polTokensFromMapping, cur.pol));
+                    window.fetchPolsByStockLocationAndUpdate(normalized, stockPick, !keepPol, polTokensFromMapping, seq);
+                }
+            } else if (options.restoreValues !== false) {
+                if (cur.stock) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', cur.stock);
+                if (cur.pol) restoreSupplierMasterFieldValue('pol', 'editPol', cur.pol);
+                if (cur.venue) restoreSupplierMasterFieldValue('venueId', 'editVenueId', cur.venue);
+                if (cur.rixo) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', cur.rixo);
+                if (cur.vehicleType) restoreSupplierMasterFieldValue('shipmentSize', 'editShipmentSize', cur.vehicleType);
+                if (cur.stock && typeof window.fetchPolsByStockLocationAndUpdate === 'function' && !options.skipPolFetchOnRestore) {
+                    window.fetchPolsByStockLocationAndUpdate(normalized, cur.stock, false, cur.pol ? [cur.pol] : polTokensFromMapping, seq);
+                }
             }
-            if (venuePick) restoreSupplierMasterFieldValue('venueId', 'editVenueId', venuePick);
-            if (rixoPick) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', rixoPick);
-            if (vtPick) restoreSupplierMasterFieldValue('shipmentSize', 'editShipmentSize', vtPick);
-            if (stockPick && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                var keepPol = !!(cur.pol && __listContainsTokenCaseInsensitive(polTokensFromMapping, cur.pol));
-                window.fetchPolsByStockLocationAndUpdate(normalized, stockPick, !keepPol, polTokensFromMapping, seq);
+            if (typeof options.onRestored === 'function') {
+                options.onRestored();
             }
-        } else if (options.restoreValues !== false) {
-            if (cur.stock) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', cur.stock);
-            if (cur.pol) restoreSupplierMasterFieldValue('pol', 'editPol', cur.pol);
-            if (cur.venue) restoreSupplierMasterFieldValue('venueId', 'editVenueId', cur.venue);
-            if (cur.rixo) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', cur.rixo);
-            if (cur.vehicleType) restoreSupplierMasterFieldValue('shipmentSize', 'editShipmentSize', cur.vehicleType);
-            if (cur.stock && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                window.fetchPolsByStockLocationAndUpdate(normalized, cur.stock, false, cur.pol ? [cur.pol] : polTokensFromMapping, seq);
+            if (window.__rixoSupplierPreserveSnapshot && !options.keepPreserveSnapshot &&
+                window.__supplierApplyInFlight !== true && window.__supplierFlowMode !== 'page_load') {
+                window.__rixoSupplierPreserveSnapshot = null;
             }
-        }
-        if (typeof options.onRestored === 'function') {
-            options.onRestored();
-        }
-        if (window.__rixoSupplierPreserveSnapshot && !options.keepPreserveSnapshot &&
-            window.__supplierApplyInFlight !== true && window.__supplierFlowMode !== 'page_load') {
-            window.__rixoSupplierPreserveSnapshot = null;
+        } finally {
+            if (!window.__supplierApplyInFlight) {
+                window.endSupplierMapProgrammatic();
+            }
         }
     }, restoreDelay);
     return true;
@@ -3286,7 +3395,8 @@ window.setFieldValue = function(addFieldId, editFieldId, value) {
         
         // Sync to input if it's a combobox
         if (addInputField && typeof window.syncComboboxInput === 'function') {
-            window.syncComboboxInput(addFieldId);
+            var suppressCascade = typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate();
+            window.syncComboboxInput(addFieldId, suppressCascade ? { suppressCascade: true } : undefined);
         }
     }
     if (addInputField) {
@@ -3313,7 +3423,8 @@ window.setFieldValue = function(addFieldId, editFieldId, value) {
         
         // Sync to input if it's a combobox
         if (editInputField && typeof window.syncComboboxInput === 'function') {
-            window.syncComboboxInput(editFieldId);
+            var suppressEditCascade = typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate();
+            window.syncComboboxInput(editFieldId, suppressEditCascade ? { suppressCascade: true } : undefined);
         }
     }
     if (!skipEditWrites && editInputField) {
@@ -4409,8 +4520,9 @@ window.closeMappingModal = function() {
 
 // Refresh Rixo dropdowns after changes
 function __isOnPurchaseFormPage() {
-    var h = window.location.hash || '';
-    return h.indexOf('#/add') === 0 || h.indexOf('#/edit') === 0;
+    var p = window.location.pathname || '';
+    if (p.indexOf('/add') >= 0 || p.indexOf('/edit') >= 0) return true;
+    return !!document.getElementById('auctionName') || !!document.getElementById('editAuctionName');
 }
 
 function __snapshotSupplierFormForPreserve() {
@@ -4588,6 +4700,9 @@ function __afterRixoDropdownsPopulated(fromMasterSync, preserveSnap) {
 
 window.refreshRixoDropdowns = function(options) {
     options = options || {};
+    if (window.__supplierApplyInFlight === true && options.fromMasterSync !== true) {
+        return;
+    }
     var fromMasterSync = options.fromMasterSync === true;
     var preserveSnap = null;
     if (fromMasterSync || __isOnPurchaseFormPage()) {
@@ -4809,11 +4924,8 @@ window.expandSupplierApiRowsForAutofill = function(rows) {
 window.mergeSupplierApiRowsIntoRixoPriceMapping = function(auctionName, rows) {
     if (!auctionName || !rows || !Array.isArray(rows) || rows.length === 0) return;
     window.rixoPriceMapping = window.rixoPriceMapping || {};
-    var normalized = typeof normalizeAuctionNameForMapping === 'function'
-        ? normalizeAuctionNameForMapping(auctionName) : String(auctionName).trim();
-    var keys = Object.keys(window.rixoPriceMapping);
-    var match = keys.find(function(k) { return k.toLowerCase() === normalized.toLowerCase(); });
-    var key = match || normalized;
+    var key = resolveRixoMappingKey(auctionName);
+    if (!key) key = String(auctionName).trim();
 
     window.rixoPriceMapping[key] = {
         typeOfVehicle: [],
@@ -4919,6 +5031,228 @@ window.showMessage = function(message, type = 'info') {
     setTimeout(() => {
         messageEl.style.display = 'none';
     }, 3000);
+};
+
+/** Autofill Rixo Price from rixo_mapping lookup (no Calculate button). */
+window.findRixoPriceFromSupplierSelection = function(sel, auctionName) {
+    sel = sel || {};
+    var matchSel = {
+        stockLocation: sel.stockLocation || sel.stock || '',
+        venueId: sel.venueId || sel.venue || '',
+        pol: sel.pol || '',
+        rixoCompany: sel.rixoCompany || sel.rixo || ''
+    };
+    var vehicleType = (sel.supportedVehicleType || sel.vehicleType || '').trim();
+    var rows = window.__tempSupplierRows;
+    if (rows && Array.isArray(rows) && typeof window.rowMatchesSupplierSelection === 'function') {
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            if (!window.rowMatchesSupplierSelection(row, matchSel)) continue;
+            if (vehicleType) {
+                var vts = window.splitSupplierSemicolonTokens(row.supportedVehicleType || row.shipmentSize || row.typeOfVehicle || '');
+                if (vts.length) {
+                    var u = vehicleType.toLowerCase();
+                    var vtOk = false;
+                    for (var j = 0; j < vts.length; j++) {
+                        if (String(vts[j]).trim().toLowerCase() === u) { vtOk = true; break; }
+                    }
+                    if (!vtOk) continue;
+                }
+            }
+            var price = row.rixoPrice;
+            if (price != null && String(price).trim() !== '') return String(price).trim();
+        }
+    }
+    var auction = (auctionName || '').trim();
+    if (!auction || !window.rixoPriceMapping) return null;
+    var normalized = typeof normalizeAuctionNameForMapping === 'function'
+        ? normalizeAuctionNameForMapping(auction) : auction;
+    var keys = Object.keys(window.rixoPriceMapping);
+    var key = keys.find(function(k) { return k.toLowerCase() === normalized.toLowerCase(); }) || normalized;
+    var mappings = window.rixoPriceMapping[key] && window.rixoPriceMapping[key].mappings;
+    if (!mappings || !mappings.length) return null;
+    for (var m = 0; m < mappings.length; m++) {
+        var map = mappings[m];
+        var fakeRow = {
+            stockLocation: map.stockLocation,
+            venueId: map.venueId,
+            pol: map.pol,
+            rixoCompany: map.rixoCompany,
+            supportedVehicleType: map.typeOfVehicle || map.shipmentSize,
+            rixoPrice: map.rixoPrice
+        };
+        if (!window.rowMatchesSupplierSelection(fakeRow, matchSel)) continue;
+        if (vehicleType) {
+            var mapVt = String(map.typeOfVehicle || map.shipmentSize || '').trim().toLowerCase();
+            if (mapVt && mapVt !== vehicleType.toLowerCase()) continue;
+        }
+        if (map.rixoPrice != null && String(map.rixoPrice).trim() !== '') return String(map.rixoPrice).trim();
+    }
+    return null;
+};
+
+window.applyRixoPriceToInput = function(isEditForm, priceRaw) {
+    if (!priceRaw) return false;
+    var input = document.getElementById(isEditForm ? 'editRixoPriceInput' : 'rixoPriceInput');
+    if (!input) return false;
+    var numericValue = (typeof window.parseRixoPrice === 'function') ? window.parseRixoPrice(priceRaw) : String(priceRaw);
+    if (!numericValue) numericValue = String(priceRaw).replace(/[¥,\s]/g, '').replace(/[^0-9.]/g, '');
+    if (!numericValue) return false;
+    window.__rixoPriceProgrammaticSet = true;
+    input.value = numericValue;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    window.__rixoPriceProgrammaticSet = false;
+    return true;
+};
+
+window.scheduleAutofillRixoPriceFromMapping = function(isEditForm, fields) {
+    fields = fields || {};
+    if (window.__rixoPriceAutofillTimer) clearTimeout(window.__rixoPriceAutofillTimer);
+    window.__rixoPriceAutofillTimer = setTimeout(function() {
+        window.__rixoPriceAutofillTimer = null;
+        window.autofillRixoPriceFromMapping(isEditForm, { fields: fields, force: fields.force === true });
+    }, fields.delay != null ? fields.delay : 180);
+};
+
+window.autofillRixoPriceFromMapping = function(isEditForm, options) {
+    options = options || {};
+    var fields = options.fields || {};
+    var auctionNameId = isEditForm ? 'editAuctionName' : 'auctionName';
+    var stockLocationId = isEditForm ? 'editStockLocation' : 'stockLocation';
+    var rixoCompanyId = isEditForm ? 'editRixoCompany' : 'rixoCompany';
+    var vehicleTypeId = isEditForm ? 'editShipmentSize' : 'shipmentSize';
+
+    if (window.__editPurchaseHydrating === true && !options.force) return;
+    if (window.__rixoPriceUserOverride === true && !options.force) return;
+
+    var auctionName = (fields.auctionName || (window.getComboboxValue ? window.getComboboxValue(auctionNameId) : '') || '').toString().trim();
+    var stockLocation = (fields.stockLocation || (window.getComboboxValue ? window.getComboboxValue(stockLocationId) : '') || '').toString().trim();
+    var rixoCompany = (fields.rixoCompany || (window.getComboboxValue ? window.getComboboxValue(rixoCompanyId) : '') || '').toString().trim();
+    var vehicleType = (fields.supportedVehicleType || fields.vehicleType ||
+        (window.getComboboxValue ? window.getComboboxValue(vehicleTypeId) : '') || '').toString().trim();
+
+    if (!auctionName || !stockLocation || !rixoCompany) return;
+
+    var venueId = (fields.venueId != null ? fields.venueId : (window.getComboboxValue ? window.getComboboxValue(isEditForm ? 'editVenueId' : 'venueId') : '') || '').toString().trim();
+    var pol = (fields.pol != null ? fields.pol : (window.getComboboxValue ? window.getComboboxValue(isEditForm ? 'editPol' : 'pol') : '') || '').toString().trim();
+    var lookupSel = {
+        stockLocation: stockLocation,
+        venueId: venueId,
+        pol: pol,
+        rixoCompany: rixoCompany,
+        supportedVehicleType: vehicleType
+    };
+
+    var cached = window.findRixoPriceFromSupplierSelection(lookupSel, auctionName);
+    if (cached && window.applyRixoPriceToInput(isEditForm, cached)) return;
+
+    function fetchLookup(vt) {
+        var url = apiUrl('rixo-mapping/lookup?' +
+            'auctionName=' + encodeURIComponent(auctionName) + '&' +
+            'stockLocation=' + encodeURIComponent(stockLocation) + '&' +
+            'rixoCompany=' + encodeURIComponent(rixoCompany) +
+            (vt ? ('&supportedVehicleType=' + encodeURIComponent(vt)) : '')
+        );
+        return window.fetch(url)
+            .then(function(resp) { return resp && resp.ok ? resp.json() : null; })
+            .then(function(result) {
+                if (!result || result.success !== true) return null;
+                return result.data ? result.data.rixoPrice : null;
+            });
+    }
+
+    var chain = vehicleType ? fetchLookup(vehicleType) : fetchLookup(null);
+    chain.then(function(price) {
+        if (price && window.applyRixoPriceToInput(isEditForm, price)) return;
+        if (!vehicleType) return;
+        return fetchLookup(null).then(function(fallbackPrice) {
+            if (fallbackPrice) window.applyRixoPriceToInput(isEditForm, fallbackPrice);
+        });
+    }).catch(function(err) {
+        console.warn('autofillRixoPriceFromMapping error:', err);
+    });
+};
+window.calculateRixoPriceFromMapping = window.autofillRixoPriceFromMapping;
+
+window.buildSupplierMapAutofillFields = function(isEditForm) {
+    var g = typeof window.getComboboxValue === 'function'
+        ? function(id) { return (window.getComboboxValue(id) || '').trim(); }
+        : function() { return ''; };
+    return {
+        delay: 120,
+        auctionName: g(isEditForm ? 'editAuctionName' : 'auctionName'),
+        stockLocation: g(isEditForm ? 'editStockLocation' : 'stockLocation'),
+        rixoCompany: g(isEditForm ? 'editRixoCompany' : 'rixoCompany'),
+        venueId: g(isEditForm ? 'editVenueId' : 'venueId'),
+        pol: g(isEditForm ? 'editPol' : 'pol'),
+        supportedVehicleType: g(isEditForm ? 'editShipmentSize' : 'shipmentSize')
+    };
+};
+
+window.onSupplierMapFieldChanged = function(fieldId) {
+    if (typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate()) return;
+    if (window.__suppressRixoAutoSelect === true || window.__editPurchaseHydrating === true) return;
+    if (window.__supplierApplyInFlight === true) return;
+    var isEdit = String(fieldId || '').indexOf('edit') === 0;
+    var auctionId = isEdit ? 'editAuctionName' : 'auctionName';
+    var auction = window.getComboboxValue ? window.getComboboxValue(auctionId) : '';
+    if (!auction) return;
+    var priceFields = typeof window.buildSupplierMapAutofillFields === 'function'
+        ? window.buildSupplierMapAutofillFields(isEdit)
+        : { delay: 120 };
+    var snap = typeof __snapshotSupplierFormForPreserve === 'function' ? __snapshotSupplierFormForPreserve() : null;
+    var shipmentOnly = fieldId === 'shipmentSize' || fieldId === 'editShipmentSize';
+    if (shipmentOnly && typeof window.scheduleAutofillRixoPriceFromMapping === 'function') {
+        window.scheduleAutofillRixoPriceFromMapping(isEdit, priceFields);
+        return;
+    }
+    if (typeof window.rebuildSupplierDependentDropdowns === 'function') {
+        window.rebuildSupplierDependentDropdowns(auction, {
+            autoSelect: false,
+            preserveSnapshot: snap,
+            restoreDelay: 50,
+            onRestored: function() {
+                if (typeof window.scheduleAutofillRixoPriceFromMapping === 'function') {
+                    window.scheduleAutofillRixoPriceFromMapping(isEdit, priceFields);
+                }
+            }
+        });
+    } else if (typeof window.scheduleAutofillRixoPriceFromMapping === 'function') {
+        window.scheduleAutofillRixoPriceFromMapping(isEdit, priceFields);
+    }
+    if ((fieldId === 'stockLocation' || fieldId === 'editStockLocation') && auction && snap && snap.stock &&
+        typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
+        var polHint = snap.pol ? [snap.pol] : [];
+        window.fetchPolsByStockLocationAndUpdate(auction, snap.stock, false, polHint, window.__supplierMappingSeq || 0);
+    }
+};
+
+window.wireSupplierMapCascadeAutofill = function() {
+    var fieldIds = ['venueId', 'editVenueId', 'stockLocation', 'editStockLocation', 'pol', 'editPol',
+        'rixoCompany', 'editRixoCompany', 'shipmentSize', 'editShipmentSize'];
+    fieldIds.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el && !el.__supplierCascadeWired) {
+            el.__supplierCascadeWired = true;
+            el.addEventListener('change', function() { window.onSupplierMapFieldChanged(id); });
+        }
+        var inp = document.getElementById(id + 'Input');
+        if (inp && !inp.__supplierCascadeWired) {
+            inp.__supplierCascadeWired = true;
+            inp.addEventListener('change', function() { window.onSupplierMapFieldChanged(id); });
+        }
+    });
+    ['rixoPriceInput', 'editRixoPriceInput'].forEach(function(priceId) {
+        var priceInp = document.getElementById(priceId);
+        if (priceInp && !priceInp.__rixoOverrideWired) {
+            priceInp.__rixoOverrideWired = true;
+            priceInp.addEventListener('input', function() {
+                if (window.__rixoPriceProgrammaticSet === true) return;
+                window.__rixoPriceUserOverride = true;
+            });
+        }
+    });
 };
 
 // Initialize event listeners when DOM is ready

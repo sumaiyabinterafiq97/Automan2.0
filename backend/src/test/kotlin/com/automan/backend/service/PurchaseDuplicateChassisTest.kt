@@ -31,13 +31,36 @@ class PurchaseDuplicateChassisTest {
     )
 
     @Test
-    fun findDuplicatePurchase_returnsMatchWhenChassisExists() {
+    fun findDuplicatePurchase_returnsMatchWhenFullChassisExists() {
         val existing = Purchase(id = 10L, chassis = "NZE141-1234567", auctionHouse = "USS")
         `when`(purchaseRepository.findByChassisIgnoreCaseTrim("NZE141-1234567")).thenReturn(listOf(existing))
 
         val duplicate = service.findDuplicatePurchase("NZE141-1234567", excludeId = null)
 
         assertEquals(existing, duplicate)
+    }
+
+    @Test
+    fun findDuplicatePurchase_codeOnlyDoesNotCountAsDuplicate() {
+        val duplicate = service.findDuplicatePurchase("AAHH45", excludeId = null)
+
+        assertNull(duplicate)
+    }
+
+    @Test
+    fun findDuplicatePurchase_codeOnlyWithTrailingDashDoesNotCountAsDuplicate() {
+        val duplicate = service.findDuplicatePurchase("AAHH45-", excludeId = null)
+
+        assertNull(duplicate)
+    }
+
+    @Test
+    fun findDuplicatePurchase_differentNumberIsNotDuplicate() {
+        `when`(purchaseRepository.findByChassisIgnoreCaseTrim("NZE141-5678")).thenReturn(emptyList())
+
+        val duplicate = service.findDuplicatePurchase("NZE141-5678", excludeId = null)
+
+        assertNull(duplicate)
     }
 
     @Test
@@ -79,7 +102,7 @@ class PurchaseDuplicateChassisTest {
     }
 
     @Test
-    fun createPurchase_rejectsDuplicateChassis() {
+    fun createPurchase_rejectsDuplicateFullChassis() {
         val existing = Purchase(id = 20L, chassis = "NZE141-1234567")
         `when`(purchaseRepository.findByChassisIgnoreCaseTrim("NZE141-1234567")).thenReturn(listOf(existing))
 
@@ -88,5 +111,16 @@ class PurchaseDuplicateChassisTest {
         }
 
         assertEquals(PurchaseService.DUPLICATE_CHASSIS_MESSAGE, error.message)
+    }
+
+    @Test
+    fun createPurchase_allowsCodeOnlyEvenIfLookupWouldMatch() {
+        // Code-only must short-circuit before repository lookup; stub would fail if called incorrectly.
+        `when`(purchaseRepository.findByChassisIgnoreCaseTrim("AAHH45")).thenReturn(
+            listOf(Purchase(id = 21L, chassis = "AAHH45")),
+        )
+
+        // createPurchase has more deps; only assert findDuplicatePurchase gate here.
+        assertNull(service.findDuplicatePurchase("AAHH45", excludeId = null))
     }
 }

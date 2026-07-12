@@ -1,11 +1,9 @@
 package com.automan.backend.service
 
-import com.automan.backend.dto.SupplierMapPageResponse
 import com.automan.backend.dto.SupplierMapRowDto
 import com.automan.backend.model.RixoMapping
 import com.automan.backend.repository.RixoMappingRepository
 import com.automan.backend.util.RixoPolFromStockLocation
-import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -151,39 +149,6 @@ class RixoImportService(
         }
     }
 
-    @Transactional(readOnly = true)
-    fun searchSupplierMapPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): SupplierMapPageResponse {
-        val q = sanitizeSupplierMapSearchToken(rawQuery)
-        require(q.isNotEmpty()) { "Search text is required" }
-        val field = rawField.trim().lowercase().ifEmpty { "all" }
-        val pageIdx = page.coerceAtLeast(0)
-        val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
-        val pg = when (field) {
-            "suppliername", "auctionhouse", "auction_house" ->
-                rixoMappingRepository.searchSupplierMapAuctionHouseContains(q, pageable)
-            "stocklocation", "stock_location" ->
-                rixoMappingRepository.searchSupplierMapStockLocationContains(q, pageable)
-            "rixocompany", "rixo_company" ->
-                rixoMappingRepository.searchSupplierMapRixoCompanyContains(q, pageable)
-            "all" -> rixoMappingRepository.searchSupplierMapAllFields(q, pageable)
-            else -> throw IllegalArgumentException(
-                "Invalid search field: $field. Use all, supplierName, stockLocation, or rixoCompany.",
-            )
-        }
-        val content = pg.content.map { SupplierMapRowDto.toSupplierMapMap(SupplierMapRowDto.from(it)) }
-        return SupplierMapPageResponse(
-            content = content,
-            totalElements = pg.totalElements,
-            totalPages = pg.totalPages,
-            page = pg.number,
-            size = pg.size,
-        )
-    }
-
-    private fun sanitizeSupplierMapSearchToken(raw: String): String =
-        raw.trim().replace("%", "").replace("_", "").take(120)
-
     fun getDistinctAuctionHouses(): List<String> =
         rixoMappingRepository.findDistinctAuctionNamesOrdered()
 
@@ -282,13 +247,12 @@ class RixoImportService(
                 auctionName = auctionHouse?.trim()?.takeIf { it.isNotBlank() } ?: existing.auctionName,
                 stockLocation = newStock,
                 rixoCompany = rixoCompany?.trim()?.takeIf { it.isNotBlank() } ?: existing.rixoCompany,
-                venueId = venueId?.trim()?.takeIf { it.isNotBlank() } ?: existing.venueId,
+                venueId = venueId?.trim()?.takeIf { it.isNotBlank() },
                 pol = pol?.trim()?.takeIf { it.isNotBlank() }
                     ?: RixoPolFromStockLocation.derivePol(newStock)
                     ?: existing.pol,
-                supportedVehicleType = supportedVehicleType?.trim()?.takeIf { it.isNotBlank() }
-                    ?: existing.supportedVehicleType,
-                rixoPrice = rixoPrice?.trim()?.takeIf { it.isNotBlank() } ?: existing.rixoPrice,
+                supportedVehicleType = supportedVehicleType?.trim()?.takeIf { it.isNotBlank() },
+                rixoPrice = rixoPrice?.trim()?.takeIf { it.isNotBlank() },
                 createdAt = existing.createdAt,
             ),
         )
