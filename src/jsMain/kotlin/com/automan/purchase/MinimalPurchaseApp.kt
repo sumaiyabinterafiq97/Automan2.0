@@ -22785,7 +22785,27 @@ private suspend fun applyRixoHistoryEditPrefillFromJson(raw: String) {
         js("if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') window.updateRixoCompanyFabTriggerLabel()")
     }
 
-    when (val result = ApiClient.get<Array<dynamic>>("purchases")) {
+    when (val result = run {
+        val tokens = parseChassisTokensForRixoPrefill(chassisRaw)
+        val chassisParam = tokens.joinToString(";")
+        val q = StringBuilder("purchases/for-rixo?includeNonPending=true")
+        if (chassisParam.isNotEmpty()) {
+            q.append("&chassis=").append(js("encodeURIComponent")(chassisParam).unsafeCast<String>())
+        }
+        val dateIso = rixoPrefillDateKey(buyingDate).ifBlank { buyingDate.trim() }
+        if (dateIso.isNotEmpty()) {
+            q.append("&dateIso=").append(js("encodeURIComponent")(dateIso).unsafeCast<String>())
+        }
+        val companyBucket = normalizedRixoCompanyDropdownBucket(rixoCompany)
+        if (rixoCompany.isNotBlank() || companyBucket == RIXO_UNDEFINED_COMPANY_OPTION_VALUE) {
+            q.append("&rixoCompany=").append(js("encodeURIComponent")(companyBucket).unsafeCast<String>())
+        }
+        if (chassisParam.isEmpty() && dateIso.isEmpty()) {
+            ApiClient.get<Array<dynamic>>("purchases")
+        } else {
+            ApiClient.get<Array<dynamic>>(q.toString())
+        }
+    }) {
         is ApiResult.Success -> {
             val arr = result.data
             val tokens = parseChassisTokensForRixoPrefill(chassisRaw)
@@ -23067,10 +23087,9 @@ fun setupRixoRequestGeneratorListeners() {
     document.getElementById("rixoColumnFilterBtn")?.addEventListener("click", { _: Event ->
         showRixoColumnFilterModal()
     })
-    // Buying Date change - load Rixo companies and rows
+    // Buying Date change - load companies first; that auto-selects and loads rows once
     document.getElementById("buyingDate")?.addEventListener("change", { _: Event ->
         loadRixoCompaniesForDate()
-        loadRowsForDateAndCompany()
     })
     
     // Rixo Company change - load rows (combobox structure)
@@ -23191,35 +23210,23 @@ private fun loadRixoBuyingDateDropdownAndInit(prefillJson: String?) {
 fun loadRixoCompaniesForDate() {
     val buyingDate = getRixoBuyingDateValue()
     if (buyingDate.isEmpty()) return
-    
-    // Convert ISO date to database format (e.g., "2025-04-24" -> "April24, 2025(Thursday)")
-    val formattedDate = formatWithWeekday(buyingDate)
-    console.log("Looking for purchases with date:", formattedDate)
-    
-    window.fetch(apiUrl("purchases")).then { response ->
+
+    val encodedDate = js("encodeURIComponent")(buyingDate).unsafeCast<String>()
+    window.fetch(apiUrl("purchases/for-rixo?dateIso=$encodedDate")).then { response ->
         if (response.ok) {
-            response.json().then { allPurchases ->
-                val purchasesArray = allPurchases as Array<dynamic>
+            response.json().then { scopedPurchases ->
+                val purchasesArray = scopedPurchases as Array<dynamic>
                 val rixoCompanies = mutableSetOf<String>()
-                
+
                 for (purchase in purchasesArray) {
-                    val date = js("purchase.date")?.toString() ?: ""
-                    val rixoRequestedRaw = js("purchase.rixoRequested")?.toString()
                     val bucket = normalizedRixoCompanyDropdownBucket(purchaseRixoCompanyRaw(purchase))
-                    
-                    // Same rule as GET /purchases/distinct-purchase-dates (rixo_requested not 1/true)
-                    if (date == formattedDate && isRixoRequestedPendingForTransportGenerator(rixoRequestedRaw)) {
-                        rixoCompanies.add(bucket)
-                        console.log("Found matching purchase Rixo company bucket:", bucket)
-                    }
+                    rixoCompanies.add(bucket)
                 }
-                
+
                 console.log("Found rixoCompanies:", rixoCompanies)
-                
-                // Update combobox dropdown (like chassis dropdown)
+
                 val select = document.getElementById("rixoCompany") as HTMLSelectElement
                 if (select != null) {
-                    // Clear existing options except the first empty one
                     select.innerHTML = "<option value=\"\">▼</option>"
                     val sortedNamed =
                         rixoCompanies.filter { it != RIXO_UNDEFINED_COMPANY_OPTION_VALUE }.sorted()
@@ -23233,7 +23240,6 @@ fun loadRixoCompaniesForDate() {
                         val option = js("new Option(company, company)")
                         select.add(option)
                     }
-                    // Auto-select first available company
                     if (select.options.length > 1) {
                         select.selectedIndex = 1
                         js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('rixoCompany')")
@@ -23241,7 +23247,6 @@ fun loadRixoCompaniesForDate() {
                 }
                 js("if (typeof window.rebuildRixoCompanyFabFromSelect === 'function') window.rebuildRixoCompanyFabFromSelect()")
                 js("if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') window.updateRixoCompanyFabTriggerLabel()")
-                // Trigger row load for the auto-selected company
                 loadRowsForDateAndCompany()
             }
         }
@@ -23256,18 +23261,6 @@ private fun setRixoRowsPreviewEmptyMessage(message: String) {
     document.getElementById("selectedCount")?.textContent = "Selected: 0 of 0"
 }
 
-/** True if there is at least one purchase on [formattedDate] with Rixo still pending (same rule as distinct-purchase-dates). */
-private fun hasAnyRixoPendingPurchaseForDate(allPurchases: Array<dynamic>, formattedDate: String): Boolean {
-    for (purchase in allPurchases) {
-        val date = js("purchase.date")?.toString() ?: ""
-        val rixoRequestedRaw = js("purchase.rixoRequested")?.toString()
-        if (date == formattedDate && isRixoRequestedPendingForTransportGenerator(rixoRequestedRaw)) {
-            return true
-        }
-    }
-    return false
-}
-
 // Load rows for the selected date and company
 fun loadRowsForDateAndCompany() {
     val buyingDate = getRixoBuyingDateValue()
@@ -23277,15 +23270,15 @@ fun loadRowsForDateAndCompany() {
         setRixoRowsPreviewEmptyMessage("Please select a buying date and Rixo company to view available rows.")
         return
     }
-    
-    val formattedDate = formatWithWeekday(buyingDate)
+
+    val encodedDate = js("encodeURIComponent")(buyingDate).unsafeCast<String>()
 
     if (rixoCompany.isEmpty()) {
-        window.fetch(apiUrl("purchases")).then { response ->
+        window.fetch(apiUrl("purchases/for-rixo?dateIso=$encodedDate")).then { response ->
             if (response.ok) {
-                response.json().then { allPurchases ->
-                    val purchasesArray = allPurchases as Array<dynamic>
-                    val anyForDate = hasAnyRixoPendingPurchaseForDate(purchasesArray, formattedDate)
+                response.json().then { scopedPurchases ->
+                    val purchasesArray = scopedPurchases as Array<dynamic>
+                    val anyForDate = purchasesArray.isNotEmpty()
                     val message = if (anyForDate) {
                         "Please select a buying date and Rixo company to view available rows."
                     } else {
@@ -23297,27 +23290,13 @@ fun loadRowsForDateAndCompany() {
         }
         return
     }
-    
-    window.fetch(apiUrl("purchases")).then { response ->
+
+    val encodedCompany = js("encodeURIComponent")(rixoCompany).unsafeCast<String>()
+    window.fetch(apiUrl("purchases/for-rixo?dateIso=$encodedDate&rixoCompany=$encodedCompany")).then { response ->
         if (response.ok) {
-            response.json().then { allPurchases ->
-                val purchasesArray = allPurchases as Array<dynamic>
-                val matchingPurchases = mutableListOf<dynamic>()
-                
-                for (purchase in purchasesArray) {
-                    val date = js("purchase.date")?.toString() ?: ""
-                    val rixoRequestedRaw = js("purchase.rixoRequested")?.toString()
-                    val companyRaw = purchaseRixoCompanyRaw(purchase)
-                    
-                    if (date == formattedDate &&
-                        selectedRixoCompanyMatchesPurchase(companyRaw, rixoCompany) &&
-                        isRixoRequestedPendingForTransportGenerator(rixoRequestedRaw)
-                    ) {
-                        matchingPurchases.add(purchase)
-                    }
-                }
-                
-                renderRixoRowsPreview(matchingPurchases)
+            response.json().then { scopedPurchases ->
+                val purchasesArray = scopedPurchases as Array<dynamic>
+                renderRixoRowsPreview(purchasesArray.toList())
             }
         }
     }

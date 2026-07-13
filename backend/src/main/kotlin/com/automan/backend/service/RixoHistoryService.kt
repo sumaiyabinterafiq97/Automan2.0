@@ -91,18 +91,55 @@ class RixoHistoryService(
 
     fun listAllRows(): List<RixoHistoryRowDto> {
         val sort = Sort.by(Sort.Direction.DESC, "id")
-        return rixoHistoryRepository.findAll(sort).map { e ->
+        val rows = rixoHistoryRepository.findAll(sort)
+        if (rows.isEmpty()) return emptyList()
+
+        // One purchases load + in-memory chassis index (same match rules as findByChassisToken).
+        val byNormalizedChassis = purchaseRepository.findAll()
+            .mapNotNull { p ->
+                val key = p.chassis?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.ROOT) ?: return@mapNotNull null
+                key to p
+            }
+            .groupBy({ it.first }, { it.second })
+
+        return rows.map { e ->
+            val matched = matchedPurchasesForHistoryRow(e, byNormalizedChassis)
+            val rixoConfirmed = isHistoryRowRixoConfirmedStrict(matched)
             RixoHistoryRowDto(
                 id = e.id ?: 0L,
                 buyingDate = e.buyingDate?.toString(),
                 rixoCompany = e.rixoCompany,
                 message = e.message,
                 chassis = e.chassis,
-                rixoConfirmed = computeHistoryRowRixoConfirmedStrict(e),
-                rixoConfirmedDate = computeHistoryRowRixoConfirmedAtIso(e),
-                hasBookingRequested = historyRowHasAnyMatchedPurchaseBookingRequested(e),
+                rixoConfirmed = rixoConfirmed,
+                rixoConfirmedDate = if (rixoConfirmed) historyRowRixoConfirmedAtIso(matched) else null,
+                hasBookingRequested = matchedPurchasesHaveBookingRequested(matched),
             )
         }
+    }
+
+    /**
+     * Purchases matched by chassis segments for a history row.
+     * Empty if no segments, or if any segment matches nothing (same as legacy matchedPurchaseIdsForRixoHistoryRow).
+     */
+    private fun matchedPurchasesForHistoryRow(
+        entity: RixoHistory,
+        byNormalizedChassis: Map<String, List<com.automan.backend.model.Purchase>>,
+    ): List<com.automan.backend.model.Purchase> {
+        val segmentTokens = parseChassisTokens(entity.chassis)
+        if (segmentTokens.isEmpty()) return emptyList()
+        val allMatched = linkedMapOf<Long, com.automan.backend.model.Purchase>()
+        for (segment in segmentTokens) {
+            val found = linkedMapOf<Long, com.automan.backend.model.Purchase>()
+            for (expanded in expandTokenSet(setOf(segment))) {
+                for (p in byNormalizedChassis[expanded].orEmpty()) {
+                    p.id?.let { found[it] = p }
+                }
+            }
+            if (found.isEmpty()) return emptyList()
+            allMatched.putAll(found)
+        }
+        return allMatched.values.toList()
     }
 
     /** All purchase ids matched by any chassis segment on this history row; empty if any segment matches nothing. */
@@ -123,11 +160,36 @@ class RixoHistoryService(
         return allMatchedPurchaseIds
     }
 
+    private fun isHistoryRowRixoConfirmedStrict(
+        matched: List<com.automan.backend.model.Purchase>,
+    ): Boolean {
+        if (matched.isEmpty()) return false
+        return matched.all { PurchaseWorkflowService.isRixoConfirmedForBooking(it) }
+    }
+
+    private fun matchedPurchasesHaveBookingRequested(
+        matched: List<com.automan.backend.model.Purchase>,
+    ): Boolean = matched.any { PurchaseWorkflowService.isBookingRequested(it) }
+
+    private fun historyRowRixoConfirmedAtIso(
+        matched: List<com.automan.backend.model.Purchase>,
+    ): String? {
+        var maxTs: LocalDateTime? = null
+        for (p in matched) {
+            if (!PurchaseWorkflowService.isRixoConfirmedForBooking(p)) continue
+            val u = p.updatedAt
+            if (maxTs == null || u.isAfter(maxTs)) maxTs = u
+        }
+        return maxTs?.toString()
+    }
+
     /**
      * Strict row-level Rixo Confirmed for UI:
      * - Blank / no chassis segments → false.
      * - Each segment’s expanded tokens must match at least one purchase; otherwise false.
      * - Every purchase matched for any segment must have [Purchase.rixoConfirmed] truthy.
+     *
+     * Kept for unit tests / single-row callers; list path uses the batched in-memory equivalent.
      */
     internal fun computeHistoryRowRixoConfirmedStrict(entity: RixoHistory): Boolean {
         val allMatchedPurchaseIds = matchedPurchaseIdsForRixoHistoryRow(entity)

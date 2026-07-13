@@ -442,10 +442,10 @@ private fun buildSmFullRowAddHtml(): String = """
             <div class="sm-tree-full-row-col sm-tree-full-row-col--price">
                 <input id="smFullRowPrice" class="rixo-tree-leaf-inline-price money-input sm-full-row-price-input" type="text" value="" placeholder="0" inputmode="decimal">
             </div>
-            <div class="sm-tree-full-row-actions">
-                <button type="button" class="sm-full-row-add-cancel">Cancel</button>
-                <button type="button" class="sm-full-row-add-save rixo-tree-btn rixo-tree-btn--add">Save</button>
-            </div>
+        </div>
+        <div class="sm-tree-full-row-actions">
+            <button type="button" class="sm-full-row-add-cancel">Cancel</button>
+            <button type="button" class="sm-full-row-add-save rixo-tree-btn rixo-tree-btn--add">Save</button>
         </div>
     </div>
 """.trimIndent()

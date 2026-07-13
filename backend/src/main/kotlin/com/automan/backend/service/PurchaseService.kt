@@ -181,6 +181,96 @@ class PurchaseService(
         val dates = raw.mapNotNull { PurchaseDateParseUtils.parseToLocalDate(it) }
         return dates.distinct().sortedDescending().map { it.toString() }
     }
+
+    /**
+     * Scoped purchase list for Rixo Generator / Updater.
+     *
+     * Filter rules match the frontend:
+     * - [dateIso] → purchase.date parses to that LocalDate (same as weekday-label equality)
+     * - pending Rixo only (rixoRequested empty / not 1 / not true) unless [includeNonPending]
+     * - optional [rixoCompany]: blank/Undefined sentinel → blank company; else exact trim match
+     * - optional [chassis]: semicolon/comma tokens; purchase chassis must equal a token (case-insensitive trim)
+     *
+     * Only matching rows are hydrated (applyReadAdapters), not the full catalog.
+     */
+    fun getPurchasesForRixo(
+        dateIso: String?,
+        rixoCompany: String?,
+        chassis: String?,
+        includeNonPending: Boolean = false,
+    ): List<Purchase> {
+        val targetDate = dateIso?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            try {
+                java.time.LocalDate.parse(it)
+            } catch (_: Exception) {
+                throw IllegalArgumentException("Invalid dateIso: $it (expected yyyy-MM-dd)")
+            }
+        }
+        val chassisTokens = parseRixoChassisTokens(chassis)
+        val companyFilter = rixoCompany?.trim()
+        val undefinedCompany =
+            companyFilter.isNullOrEmpty() ||
+                companyFilter.equals("__RIXO_COMPANY_UNDEFINED__", ignoreCase = true) ||
+                companyFilter.equals("Undefined", ignoreCase = true)
+
+        val candidates = purchaseRepository.findAll().asSequence().filter { p ->
+            if (targetDate != null) {
+                val parsed = PurchaseDateParseUtils.parseToLocalDate(p.date?.trim().orEmpty())
+                if (parsed != targetDate) return@filter false
+            }
+            if (!includeNonPending && !isRixoRequestedPendingForTransport(p.rixoRequested)) {
+                return@filter false
+            }
+            if (companyFilter != null) {
+                val raw = p.rixoCompany?.trim().orEmpty()
+                val ok = if (undefinedCompany) {
+                    raw.isEmpty()
+                } else {
+                    raw.equals(companyFilter, ignoreCase = true)
+                }
+                if (!ok) return@filter false
+            }
+            if (chassisTokens.isNotEmpty()) {
+                val ch = p.chassis?.trim().orEmpty()
+                if (ch.isEmpty() || chassisTokens.none { token -> rixoChassisTokenMatchesPurchase(token, ch) }) {
+                    return@filter false
+                }
+            }
+            true
+        }.toList()
+
+        return applyReadAdapters(candidates)
+    }
+
+    private fun parseRixoChassisTokens(raw: String?): Set<String> {
+        if (raw.isNullOrBlank()) return emptySet()
+        return raw.split(';', ',', '\n', '\r')
+            .mapNotNull { it.trim().takeIf { t -> t.isNotEmpty() } }
+            .toSet()
+    }
+
+    /** Same rules as frontend [rixoPrefillChassisTokenMatchesPurchase]. */
+    private fun rixoChassisTokenMatchesPurchase(token: String, purchaseChassis: String): Boolean {
+        val t = token.trim()
+        val ch = purchaseChassis.trim()
+        if (t.isEmpty() || ch.isEmpty()) return false
+        if (ch.equals(t, ignoreCase = true)) return true
+        val head = ch.substringBefore('-').trim()
+        if (head.equals(t, ignoreCase = true)) return true
+        if (ch.startsWith(t, ignoreCase = true) &&
+            (ch.length == t.length || ch.getOrNull(t.length) == '-')
+        ) {
+            return true
+        }
+        return false
+    }
+
+    /** Same pending rule as frontend [isRixoRequestedPendingForTransportGenerator]. */
+    private fun isRixoRequestedPendingForTransport(raw: String?): Boolean {
+        val s = raw?.trim()?.lowercase().orEmpty()
+        if (s.isEmpty()) return true
+        return s != "1" && s != "true"
+    }
     
     fun getPurchaseById(id: Long): Purchase? {
         return applyReadAdapterOrNull(purchaseRepository.findById(id).orElse(null))

@@ -9684,15 +9684,27 @@ input.client-form-readonly:read-only {
         grid-row: 2;
     }
 
-    #supplierMapTreePage .sm-tree-full-row-add-grid {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
+    #supplierMapTreePage .sm-tree-full-row-add {
         background: #fff;
         border: 1px solid rgba(76, 201, 255, 0.45);
         border-radius: 12px;
         padding: 12px;
         margin-bottom: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    #supplierMapTreePage .sm-tree-full-row-add-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        margin-bottom: 0;
+        box-shadow: none;
     }
 
     #supplierMapTreePage .sm-tree-full-row-col::before {
@@ -9726,17 +9738,30 @@ input.client-form-readonly:read-only {
     width: 100%;
 }
 
-/* Supplier Map PC: full-width panel, fixed column cards (like Rixo), fluid leaf cols */
+/* Supplier Map PC: shared narrow 7-col system (headers + Add + tree) */
 @media (min-width: 1025px) {
     #supplierMapTreePage.rixo-tree-page {
+        --sm-col-supplier: minmax(150px, 1.25fr);
+        --sm-col-venue: minmax(72px, 0.7fr);
+        --sm-col-stock: minmax(110px, 1fr);
+        --sm-col-pol: minmax(80px, 0.85fr);
+        --sm-col-company: minmax(100px, 1fr);
+        --sm-col-vtype: minmax(100px, 1fr);
+        --sm-col-price: minmax(80px, 0.85fr);
+        --sm-col-gap: 8px;
+        --sm-card-supplier: 170px;
+        --sm-card-venue: 90px;
+        --sm-card-stock: 130px;
+        --sm-card-pol: 100px;
+        --sm-card-company: 120px;
         max-width: none;
         width: 100%;
-        padding: 8px 20px 32px;
+        padding: 8px 16px 32px;
         box-sizing: border-box;
     }
 
     #supplierMapTreePage .rixo-tree-root--supplier-map {
-        overflow-x: visible;
+        overflow-x: auto;
         width: 100%;
     }
 
@@ -9750,114 +9775,175 @@ input.client-form-readonly:read-only {
         width: 100%;
         display: grid;
         grid-template-columns:
-            270px
-            200px
-            240px
-            160px
-            200px
-            minmax(120px, 1fr)
-            minmax(120px, 1fr);
-        gap: 14px;
-        padding-right: 8px;
+            var(--sm-col-supplier)
+            var(--sm-col-venue)
+            var(--sm-col-stock)
+            var(--sm-col-pol)
+            var(--sm-col-company)
+            var(--sm-col-vtype)
+            var(--sm-col-price);
+        gap: var(--sm-col-gap);
+        padding-right: 4px;
         box-sizing: border-box;
+        align-items: end;
+    }
+
+    #supplierMapTreePage .rixo-tree-header {
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        line-height: 1.25;
+        overflow: hidden;
+        word-break: break-word;
+        hyphens: auto;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        text-align: left;
     }
 
     #supplierMapTreePage .rixo-tree-header:nth-child(1) {
-        padding-left: 10px;
-    }
-
-    #supplierMapTreePage .rixo-tree-header:nth-child(2) {
-        padding-left: 34px;
-    }
-
-    #supplierMapTreePage .rixo-tree-header:nth-child(3) {
-        padding-left: 68px;
-    }
-
-    #supplierMapTreePage .rixo-tree-header:nth-child(4) {
-        padding-left: 102px;
-    }
-
-    #supplierMapTreePage .rixo-tree-header:nth-child(5) {
-        padding-left: 136px;
-    }
-
-    #supplierMapTreePage .rixo-tree-header:nth-child(6) {
-        padding-left: 170px;
+        padding-left: 8px !important;
     }
 
     #supplierMapTreePage .rixo-tree-header:nth-child(7).rixo-tree-header--price {
-        padding-left: 0;
-        padding-right: 8px;
-        text-align: center;
+        text-align: right;
+        padding-right: 4px !important;
     }
 
-    /* Collapsed root supplier rows: narrow cards under column 1 (like Rixo company list) */
-    #supplierMapTreePage .supplier-map-tree > .rixo-tree-node:not(:has(> .rixo-tree-children)) {
-        align-items: flex-start;
-        width: fit-content;
+    /* Tighter nest chrome — layout alignment comes from subgrid, not indent */
+    #supplierMapTreePage .rixo-tree-node {
+        gap: 0;
+    }
+
+    /* Collapsed + expanded tree: same 7-col grid as headers (subgrid keeps cards under columns) */
+    #supplierMapTreePage .supplier-map-tree > .rixo-tree-node {
+        display: grid;
+        grid-template-columns:
+            var(--sm-col-supplier)
+            var(--sm-col-venue)
+            var(--sm-col-stock)
+            var(--sm-col-pol)
+            var(--sm-col-company)
+            var(--sm-col-vtype)
+            var(--sm-col-price);
+        column-gap: var(--sm-col-gap);
+        row-gap: 8px;
+        align-items: start;
+        width: 100%;
         max-width: 100%;
-        flex: 0 0 auto;
+        flex: none;
+        min-width: 0;
+        box-sizing: border-box;
     }
 
-    #supplierMapTreePage .supplier-map-tree > .rixo-tree-node:not(:has(> .rixo-tree-children)) > .rixo-tree-card-wrapper--company,
-    #supplierMapTreePage .supplier-map-tree > .rixo-tree-node:not(:has(> .rixo-tree-children)) > .rixo-tree-inline-add-outer {
-        width: 270px;
-        flex: 0 0 270px;
-        max-width: 270px;
+    #supplierMapTreePage .supplier-map-tree > .rixo-tree-node > .rixo-tree-card-wrapper {
+        grid-column: 1;
+        width: auto !important;
+        max-width: none !important;
+        flex: none !important;
+        min-width: 0;
+    }
+
+    #supplierMapTreePage .supplier-map-tree > .rixo-tree-node > .rixo-tree-children {
+        grid-column: 2 / -1;
+        display: grid;
+        grid-template-columns: subgrid;
+        margin: 0;
+        padding: 0 0 6px;
+        gap: 10px;
+        min-width: 0;
+        flex: none;
+        max-width: none;
+        position: relative;
+        box-sizing: border-box;
     }
 
     #supplierMapTreePage .supplier-map-tree > .rixo-tree-col-footer {
-        width: 270px;
-        max-width: 270px;
+        width: auto;
+        max-width: none;
+        justify-self: start;
     }
 
-    /* Expanded branch rows: grow horizontally for nested columns */
-    #supplierMapTreePage .rixo-tree-node:has(> .rixo-tree-children) {
-        align-items: flex-start;
-        flex: 1 1 auto;
+    /* Nested nodes inherit remaining columns via subgrid */
+    #supplierMapTreePage .rixo-tree-children > .rixo-tree-node {
+        display: grid;
+        grid-template-columns: subgrid;
+        grid-column: 1 / -1;
+        column-gap: var(--sm-col-gap);
+        row-gap: 8px;
+        align-items: start;
+        width: auto;
         min-width: 0;
-        max-width: 100%;
-        width: 100%;
+        box-sizing: border-box;
     }
 
-    #supplierMapTreePage .rixo-tree-children {
+    #supplierMapTreePage .rixo-tree-children > .rixo-tree-node > .rixo-tree-card-wrapper {
+        grid-column: 1;
+        width: auto !important;
+        max-width: none !important;
+        flex: none !important;
         min-width: 0;
-        flex: 1 1 auto;
-        max-width: 100%;
     }
 
-    /* Per-level fixed card widths (match Rixo tree base rules) */
+    #supplierMapTreePage .rixo-tree-children > .rixo-tree-node > .rixo-tree-children {
+        grid-column: 2 / -1;
+        display: grid;
+        grid-template-columns: subgrid;
+        margin: 0;
+        padding: 0 0 6px;
+        gap: 10px;
+        min-width: 0;
+        flex: none;
+        max-width: none;
+        position: relative;
+        box-sizing: border-box;
+    }
+
+    #supplierMapTreePage .rixo-tree-children > .rixo-tree-col-footer,
+    #supplierMapTreePage .rixo-tree-children > .rixo-tree-node > .rixo-tree-inline-add-outer,
+    #supplierMapTreePage .rixo-tree-children > .rixo-tree-inline-add-outer {
+        grid-column: 1;
+        width: auto;
+        max-width: none;
+        min-width: 0;
+    }
+
+    /* Connectors: decorative only — do not push columns */
+    #supplierMapTreePage .rixo-tree-children::before {
+        left: -6px;
+        top: 4px;
+        bottom: 4px;
+        opacity: 0.7;
+    }
+
+    #supplierMapTreePage .rixo-tree-children > .rixo-tree-node::before {
+        left: -6px;
+        width: 6px;
+        top: 18px;
+    }
+
+    #supplierMapTreePage .rixo-tree-children > .rixo-tree-col-footer::before {
+        left: -6px;
+        width: 6px;
+    }
+
+    /* Cards fill their grid track (header-aligned widths) */
     #supplierMapTreePage .rixo-tree-card-wrapper {
         flex-shrink: 0;
         flex-grow: 0;
         min-width: 0;
         box-sizing: border-box;
+        width: auto;
+        max-width: none;
     }
 
-    #supplierMapTreePage .rixo-tree-card-wrapper--company {
-        width: 270px;
-        flex: 0 0 270px;
-    }
-
-    #supplierMapTreePage .rixo-tree-card-wrapper--venue {
-        width: 200px;
-        flex: 0 0 200px;
-    }
-
-    #supplierMapTreePage .rixo-tree-card-wrapper--stock {
-        width: 240px;
-        flex: 0 0 240px;
-    }
-
-    #supplierMapTreePage .rixo-tree-card-wrapper--pol {
-        width: 160px;
-        flex: 0 0 160px;
-    }
-
+    #supplierMapTreePage .rixo-tree-card-wrapper--company,
+    #supplierMapTreePage .rixo-tree-card-wrapper--venue,
+    #supplierMapTreePage .rixo-tree-card-wrapper--stock,
+    #supplierMapTreePage .rixo-tree-card-wrapper--pol,
     #supplierMapTreePage .rixo-tree-card-wrapper--field {
-        width: 200px;
-        flex: 0 0 200px;
+        width: auto !important;
+        max-width: none !important;
+        flex: none !important;
     }
 
     #supplierMapTreePage .rixo-tree-card--company,
@@ -9865,8 +9951,9 @@ input.client-form-readonly:read-only {
     #supplierMapTreePage .rixo-tree-card--stock {
         width: 100% !important;
         min-width: 0;
-        padding: 6px 8px 6px 8px;
-        min-height: 40px;
+        padding: 5px 6px;
+        min-height: 36px;
+        gap: 6px;
     }
 
     #supplierMapTreePage .rixo-tree-label {
@@ -9874,48 +9961,159 @@ input.client-form-readonly:read-only {
         text-overflow: ellipsis;
         white-space: nowrap;
         min-width: 0;
-        font-size: 13px;
+        font-size: 12px;
     }
 
+    /* Leaf: one card across Vehicle + Price (no nested subgrid) */
     #supplierMapTreePage .rixo-tree-leaf-wrap {
+        grid-column: 1 / -1;
+        display: block;
+        width: 100%;
         min-width: 0;
-        flex: 1 1 0;
+        max-width: none;
+        flex: none;
+        box-sizing: border-box;
     }
 
     #supplierMapTreePage .rixo-tree-leaf-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
         min-width: 0;
+        width: 100%;
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-row {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 8px 10px;
+        box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+        gap: 0;
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-row--selected {
+        border-color: #4CC9FF;
+        box-shadow: 0 0 0 2px rgba(76, 201, 255, 0.25);
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-cells {
+        display: block;
+        width: 100%;
+        min-width: 0;
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-view {
+        display: grid;
+        grid-template-columns: 1fr 0.85fr;
+        column-gap: var(--sm-col-gap);
+        align-items: center;
+        width: 100%;
+        min-width: 0;
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-type {
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+        background: none;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-price-cell {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        max-width: none;
+        flex-shrink: 0;
+        min-width: 0;
+        background: none;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-price {
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-edit {
+        display: none;
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-row--inline-editing .rixo-tree-leaf-view {
+        display: none;
+    }
+
+    #supplierMapTreePage .rixo-tree-leaf-row--inline-editing .rixo-tree-leaf-edit {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        box-sizing: border-box;
     }
 
     #supplierMapTreePage .rixo-tree-col-footer,
     #supplierMapTreePage .rixo-tree-add-wrap {
         flex-shrink: 0;
+        min-width: 0;
     }
 
+    #supplierMapTreePage .rixo-tree-add-btn {
+        padding: 6px 10px;
+        font-size: 11px;
+    }
+
+    #supplierMapTreePage .rixo-tree-children > .rixo-tree-add-wrap--leaf {
+        grid-column: 1 / -1;
+    }
+
+    /* Full-row Add: 7 fields one row; Cancel/Save under */
     #supplierMapTreePage .sm-tree-full-row-add {
         margin: 8px 0 14px;
         width: 100%;
         box-sizing: border-box;
-    }
-
-    #supplierMapTreePage .sm-tree-full-row-add-grid {
-        display: grid;
-        grid-template-columns:
-            270px
-            200px
-            240px
-            160px
-            200px
-            minmax(120px, 1fr)
-            minmax(120px, 1fr)
-            auto;
-        gap: 14px;
-        align-items: center;
         background: #fff;
         border: 1px solid rgba(76, 201, 255, 0.45);
         border-radius: 12px;
         padding: 10px 12px;
         box-shadow: 0 1px 6px rgba(15, 23, 42, 0.08);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    #supplierMapTreePage .sm-tree-full-row-add-grid {
+        display: grid;
+        grid-template-columns:
+            var(--sm-col-supplier)
+            var(--sm-col-venue)
+            var(--sm-col-stock)
+            var(--sm-col-pol)
+            var(--sm-col-company)
+            var(--sm-col-vtype)
+            var(--sm-col-price);
+        gap: var(--sm-col-gap);
+        align-items: center;
+        width: 100%;
         box-sizing: border-box;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
     }
 
     #supplierMapTreePage .sm-tree-full-row-col {
@@ -9925,13 +10123,24 @@ input.client-form-readonly:read-only {
     #supplierMapTreePage .sm-tree-full-row-col .rixo-tree-card-combobox-wrap,
     #supplierMapTreePage .sm-tree-full-row-col > div {
         width: 100%;
+        min-width: 0;
+    }
+
+    #supplierMapTreePage .sm-tree-full-row-col input[type="text"] {
+        font-size: 12px !important;
+        min-height: 32px !important;
+        padding: 6px 8px !important;
+    }
+
+    #supplierMapTreePage .sm-tree-full-row-col .rixo-tree-card-combobox-wrap input[type="text"] {
+        padding-right: 32px !important;
     }
 
     #supplierMapTreePage .sm-full-row-price-input {
         width: 100%;
         box-sizing: border-box;
-        min-height: 34px;
-        padding: 8px 10px;
+        min-height: 32px;
+        padding: 6px 8px;
         border: 1px solid #d1d5db;
         border-radius: 8px;
         font-size: 12px;
@@ -9941,8 +10150,10 @@ input.client-form-readonly:read-only {
     #supplierMapTreePage .sm-tree-full-row-actions {
         display: flex;
         flex-direction: row;
+        justify-content: flex-end;
         align-items: center;
         gap: 8px;
+        width: 100%;
         flex-shrink: 0;
     }
 

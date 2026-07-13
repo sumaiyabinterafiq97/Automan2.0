@@ -72,6 +72,31 @@ class PurchaseController(
     fun getDistinctPurchaseDates(): ResponseEntity<List<String>> {
         return ResponseEntity.ok(purchaseService.getDistinctPurchaseDatesIso())
     }
+
+    /**
+     * Scoped purchases for Rixo Generator / Updater (date ± company ± chassis tokens).
+     * Avoids downloading the full hydrated catalog on every date change.
+     */
+    @GetMapping("/for-rixo")
+    fun getPurchasesForRixo(
+        @RequestParam(required = false) dateIso: String?,
+        @RequestParam(required = false) rixoCompany: String?,
+        @RequestParam(required = false) chassis: String?,
+        @RequestParam(required = false, defaultValue = "false") includeNonPending: Boolean,
+    ): ResponseEntity<Any> {
+        if (dateIso.isNullOrBlank() && chassis.isNullOrBlank()) {
+            return ResponseEntity.badRequest().body(
+                mapOf("error" to "Provide dateIso and/or chassis"),
+            )
+        }
+        return try {
+            ResponseEntity.ok(
+                purchaseService.getPurchasesForRixo(dateIso, rixoCompany, chassis, includeNonPending),
+            )
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
     
     @GetMapping("/search")
     fun searchPurchases(@RequestParam query: String): ResponseEntity<List<Purchase>> {
