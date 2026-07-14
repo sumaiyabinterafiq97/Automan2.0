@@ -376,9 +376,15 @@ fun positionHiddenPickerOverButton(hidden: HTMLInputElement, btn: HTMLElement) {
         hidden.style.margin = "0"
         hidden.style.setProperty("overflow", "hidden")
         hidden.style.zIndex = "5"
+        // Never steal clicks from the visible 📅 button — opacity:0 month/date inputs
+        // intermittently swallow hits without opening the native picker.
+        hidden.style.setProperty("pointer-events", "none")
         hidden.style.cursor = "pointer"
         hidden.tabIndex = -1
         btn.style.cursor = "pointer"
+        btn.style.setProperty("pointer-events", "auto")
+        btn.style.position = btn.style.position.ifBlank { "relative" }
+        btn.style.zIndex = "6"
     }
     apply()
     window.setTimeout({ apply() }, 0)
@@ -478,6 +484,7 @@ fun bindStrictDateTextMask(baseId: String, hintId: String? = null) {
     })
     btn.addEventListener("click", { ev ->
         ev.preventDefault()
+        positionHiddenPickerOverButton(hidden, btn)
         val iso = strictMmDdYyyySlashToIso(text.value.trim()) ?: hidden.value.takeIf { it.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$")) } ?: todayIsoLocalDate()
         hidden.value = iso
         val dyn = hidden.asDynamic()
@@ -561,11 +568,14 @@ fun bindStrictMonthYearTextMask(baseId: String, hintId: String? = null) {
     })
     btn.addEventListener("click", { ev ->
         ev.preventDefault()
+        // Reposition every open (modal scroll / layout) then open via button gesture.
+        positionHiddenPickerOverButton(picker, btn)
         val canonical = readCarModelYearInput(baseId)
-        // Month picker cannot represent 00; skip when year-only (00/YYYY)
-        if (canonical.endsWith("-00")) return@addEventListener
+        // Native month picker cannot represent month 00 — seed January of that year so 📅 still opens.
+        // Typed 00/YYYY remains valid; picking a month from the UI replaces it with 01–12.
         picker.value = when {
-            canonical.matches(Regex("^\\d{4}-\\d{2}$")) && !canonical.endsWith("-00") -> canonical
+            canonical.matches(Regex("^\\d{4}-00$")) -> canonical.substring(0, 4) + "-01"
+            canonical.matches(Regex("^\\d{4}-\\d{2}$")) -> canonical
             else -> todayIsoLocalYearMonth()
         }
         val dyn = picker.asDynamic()
@@ -1012,13 +1022,14 @@ fun initializeAppSetup() {
     }
     
     // Expose fetchMappingByChassisOnly function for chassis-first flow in Edit Purchase (optional purchase snapshot for edit merge)
-    window.asDynamic().fetchMappingByChassisOnly = { chassis: String, isEditForm: Boolean, purchaseData: dynamic ->
+    window.asDynamic().fetchMappingByChassisOnly = { chassis: String, isEditForm: Boolean, purchaseData: dynamic, quickPurchaseOnly: dynamic ->
         val merge = if (js("typeof purchaseData === 'undefined' || purchaseData === null").unsafeCast<Boolean>()) {
             null
         } else {
             purchaseData
         }
-        if (merge != null) {
+        val qpOnly = quickPurchaseOnly == true
+        if (merge != null && !qpOnly) {
             window.asDynamic().__editPurchaseHydrating = true
             window.asDynamic().__editPurchaseSnapshot = merge
             window.asDynamic().__chassisSpecPreserveActive = false
@@ -1027,7 +1038,7 @@ fun initializeAppSetup() {
             window.asDynamic().__chassisMappedBrand = null
             window.asDynamic().__chassisMappedCarName = null
         }
-        fetchMappingByChassisOnly(chassis, isEditForm, merge)
+        fetchMappingByChassisOnly(chassis, isEditForm, merge, quickPurchaseOnly = qpOnly)
     }
     window.asDynamic().applySavedPurchaseFieldSnapshot = { purchaseData: dynamic ->
         if (purchaseData != null && purchaseData != js("undefined")) {
@@ -4293,8 +4304,9 @@ fun setupEditableComboboxHandlers() {
             }
             
             // Lazy rebuild supplier master comboboxes if populate/clear stripped mapping + separator
-            var supplierMasterOpenIds = ['stockLocation','editStockLocation','rixoCompany','editRixoCompany','venueId','editVenueId','pol','editPol'];
-            if (supplierMasterOpenIds.indexOf(selectId) !== -1 && typeof window.ensureSupplierMasterComboboxReady === 'function') {
+            var supplierMasterOpenIds = ['stockLocation','editStockLocation','qpStockLocation','rixoCompany','editRixoCompany','qpRixoCompany','venueId','editVenueId','pol','editPol'];
+            var isSupplierMasterOpen = supplierMasterOpenIds.indexOf(selectId) !== -1;
+            if (isSupplierMasterOpen && typeof window.ensureSupplierMasterComboboxReady === 'function') {
                 window.ensureSupplierMasterComboboxReady(selectId);
             }
             
@@ -4309,6 +4321,15 @@ fun setupEditableComboboxHandlers() {
             
             // Prevent recursion: if dropdown already exists for this selectId, just update it
             var existingDropdown = document.getElementById(selectId + '_dropdown');
+            if (existingDropdown) {
+                // Stale/empty overlay (common after supplier rebuild races): discard and recreate
+                var existingItemCount = existingDropdown.children ? existingDropdown.children.length : 0;
+                var existingHidden = existingDropdown.style && existingDropdown.style.display === 'none';
+                if (isSupplierMasterOpen && (existingItemCount === 0 || existingHidden)) {
+                    existingDropdown.remove();
+                    existingDropdown = null;
+                }
+            }
             if (existingDropdown) {
                 // Dropdown already open, just update it instead of creating a new one
                 var inputId = selectId + 'Input';
@@ -4326,10 +4347,20 @@ fun setupEditableComboboxHandlers() {
                     var searchText = hasSelectedValue ? '' : (input.value || ''); // Show all if has selection
                     console.log('🔵 [DROPDOWN] Reopening dropdown for ' + selectId + ', hasSelectedValue: ' + hasSelectedValue + ', showing all options');
                     filterComboboxDropdown(selectId, searchText);
+                    // If filter left the overlay empty after a rebuild, recreate once
+                    var refreshed = document.getElementById(selectId + '_dropdown');
+                    if (isSupplierMasterOpen && refreshed && refreshed.children && refreshed.children.length === 0) {
+                        refreshed.remove();
+                    } else {
+                        // Ensure scrolling is restored (in case it was stuck)
+                        window.ensureScrollingRestored();
+                        return;
+                    }
+                } else {
+                    // Ensure scrolling is restored (in case it was stuck)
+                    window.ensureScrollingRestored();
+                    return;
                 }
-                // Ensure scrolling is restored (in case it was stuck)
-                window.ensureScrollingRestored();
-                return;
             }
             
             var select = document.getElementById(selectId);
@@ -4611,9 +4642,20 @@ fun setupEditableComboboxHandlers() {
                     var estimatedHeight = Math.min(optionCount * 40 + 10, dropdownMaxHeight); // ~40px per option
                     
                     // If not enough space below, show above the input
-                    // BUT: prefer showing below if there's at least reasonable space (100px or estimated height)
+                    // Prefer flipping above inside modals when below space is tight (e.g. Quick Purchase Country near footer)
                     var minSpaceForBelow = Math.min(estimatedHeight, 120); // At least 100-120px or estimated height
-                    if (spaceBelow < minSpaceForBelow && spaceAbove > spaceBelow && spaceAbove > estimatedHeight) {
+                    var isQpOrNamedModal = boundingContainer && boundingContainer.id &&
+                        (boundingContainer.id === 'quickPurchaseModalContent' || String(boundingContainer.id).endsWith('ModalContent'));
+                    if (isQpOrNamedModal && spaceBelow < Math.max(minSpaceForBelow, 140) && spaceAbove > 60) {
+                        showAbove = true;
+                        var maxAboveQp = Math.max(spaceAbove - 10, 0);
+                        var heightAboveQp = Math.min(dropdownMaxHeight, Math.max(maxAboveQp, 80));
+                        topPos = rect.top - heightAboveQp;
+                        dropdownEl.style.maxHeight = heightAboveQp + 'px';
+                        dropdownEl.style.borderTop = '1px solid #d1d5db';
+                        dropdownEl.style.borderBottom = 'none';
+                        dropdownEl.style.borderRadius = '6px 6px 0 0';
+                    } else if (spaceBelow < minSpaceForBelow && spaceAbove > spaceBelow && spaceAbove > estimatedHeight) {
                         showAbove = true;
                         var maxAbove = Math.max(spaceAbove - 10, 0);
                         topPos = rect.top - Math.min(dropdownMaxHeight, Math.max(maxAbove, 80));
@@ -4626,10 +4668,22 @@ fun setupEditableComboboxHandlers() {
                         var maxAllowedHeight = Math.max(spaceBelow - 10, 0);
                         var finalHeight = Math.min(dropdownMaxHeight, maxAllowedHeight);
                         if (finalHeight < 80 && maxAllowedHeight > 0) { finalHeight = Math.min(80, maxAllowedHeight); }
-                        dropdownEl.style.maxHeight = finalHeight + 'px';
-                        dropdownEl.style.borderTop = 'none';
-                        dropdownEl.style.borderBottom = '1px solid #d1d5db';
-                        dropdownEl.style.borderRadius = '0 0 6px 6px';
+                        // Never draw past modal bottom: if still too tall, flip above when possible
+                        if (isQpOrNamedModal && finalHeight < 90 && spaceAbove > spaceBelow && spaceAbove > 80) {
+                            showAbove = true;
+                            var maxAbove2 = Math.max(spaceAbove - 10, 0);
+                            var heightAbove2 = Math.min(dropdownMaxHeight, Math.max(maxAbove2, 80));
+                            topPos = rect.top - heightAbove2;
+                            dropdownEl.style.maxHeight = heightAbove2 + 'px';
+                            dropdownEl.style.borderTop = '1px solid #d1d5db';
+                            dropdownEl.style.borderBottom = 'none';
+                            dropdownEl.style.borderRadius = '6px 6px 0 0';
+                        } else {
+                            dropdownEl.style.maxHeight = finalHeight + 'px';
+                            dropdownEl.style.borderTop = 'none';
+                            dropdownEl.style.borderBottom = '1px solid #d1d5db';
+                            dropdownEl.style.borderRadius = '0 0 6px 6px';
+                        }
                     }
                     
                     // Ensure dropdown doesn't extend beyond viewport width
@@ -8010,8 +8064,7 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label>Chassis Number</label>
-                        <input type="text" id="chassisNumber" placeholder="Suffix (optional)" autocomplete="off"
-                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;" />
+                        ${createEditableCombobox("chassisNumber", "Suffix (optional)", showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Brand</label>
@@ -9878,7 +9931,7 @@ fun setupRixoDropdowns() {
                         
                         var editChassisCodeInput = document.getElementById('editChassisCodeInput');
                         var editChassisCodeSelect = document.getElementById('editChassisCode');
-                        var editChassisNumber = document.getElementById('editChassisNumber');
+                        var editChassisNumber = document.getElementById('editChassisNumberInput') || document.getElementById('editChassisNumber');
                         
                         if (editChassisCodeInput) {
                             editChassisCodeInput.value = part1;
@@ -12142,6 +12195,14 @@ internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
         if (mfgYear.isNotBlank()) purchaseData.manufactureYear = mfgYear
         val feeDigits = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
         if (feeDigits.isNotBlank()) purchaseData.recycleFee = "¥$feeDigits"
+        // Compose chassis code + first map number when QP only has the code
+        val chassisSaved = (purchaseData.chassis?.toString() ?: "").trim()
+        if (chassisSaved.isNotEmpty() && !chassisSaved.contains('-')) {
+            val nums = parseChassisNumberTokensFromMapping(chassisNumberRaw)
+            if (nums.isNotEmpty()) {
+                purchaseData.chassis = composePurchaseChassisForSave(chassisSaved, nums.first())
+            }
+        }
     }
     return purchaseData
 }
@@ -13534,7 +13595,11 @@ fun fetchMappingsByCarName(brandName: String, carName: String, isEditForm: Boole
                     val (code, number) = splitPurchaseChassisForForm(chassis)
                     setFieldValue(if (isEditForm) "editChassisCode" else "chassisCode", code)
                     val numberId = if (isEditForm) "editChassisNumber" else "chassisNumber"
-                    (document.getElementById(numberId) as? HTMLInputElement)?.value = number
+                    purchaseChassisNumberInputEl(true)?.let { el ->
+                        if (number.isNotBlank()) el.value = number
+                    } ?: run {
+                        (document.getElementById(numberId) as? HTMLInputElement)?.value = number
+                    }
                 }
                 setFieldValue("editFuel", fuel)
                 // WD is 2WD/4WD radio: normalize mapping value to 2WD or 4WD
@@ -13553,7 +13618,11 @@ fun fetchMappingsByCarName(brandName: String, carName: String, isEditForm: Boole
                 if (chassis.isNotBlank()) {
                     val (code, number) = splitPurchaseChassisForForm(chassis)
                     setFieldValue("chassisCode", code)
-                    (document.getElementById("chassisNumber") as? HTMLInputElement)?.value = number
+                    purchaseChassisNumberInputEl(false)?.let { el ->
+                        if (number.isNotBlank()) el.value = number
+                    } ?: run {
+                        (document.getElementById("chassisNumber") as? HTMLInputElement)?.value = number
+                    }
                 }
                 setFieldValue("fuel", fuel)
                 setFieldValue("wd", wd)
@@ -13595,7 +13664,8 @@ fun loadAllChassisDropdown(isEditForm: Boolean = false, preserveForm: Boolean = 
         (document.getElementById(inputFieldId) as? HTMLInputElement)?.value?.trim().orEmpty()
     } else ""
     val savedNumberValue = if (preserveForm && numberFieldId != null) {
-        (document.getElementById(numberFieldId) as? HTMLInputElement)?.value?.trim().orEmpty()
+        (document.getElementById("${numberFieldId}Input") as? HTMLInputElement)?.value?.trim().orEmpty()
+            .ifEmpty { (document.getElementById(numberFieldId) as? HTMLInputElement)?.value?.trim().orEmpty() }
     } else ""
     if (preserveForm) {
         window.asDynamic().__purchaseFormSyncInProgress = true
@@ -13704,7 +13774,28 @@ private fun restoreChassisDropdownSelection(
         else -> null
     }
     if (numberFieldId != null) {
-        (document.getElementById(numberFieldId) as? HTMLInputElement)?.value = part2
+        val numInput = (document.getElementById("${numberFieldId}Input") as? HTMLInputElement)
+            ?: (document.getElementById(numberFieldId) as? HTMLInputElement)
+        numInput?.value = part2
+        val numSelect = document.getElementById(numberFieldId) as? HTMLSelectElement
+        if (numSelect != null && part2.isNotBlank()) {
+            var found = false
+            for (i in 0 until numSelect.options.length) {
+                val opt = numSelect.options.item(i) as? HTMLOptionElement ?: continue
+                if (opt.value.equals(part2, ignoreCase = true)) {
+                    numSelect.value = opt.value
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = part2
+                opt.textContent = part2
+                numSelect.appendChild(opt)
+                numSelect.value = part2
+            }
+        }
     }
     js("setTimeout(function() { window.__syncingChassis = false; }, 100);")
 }
@@ -14278,11 +14369,34 @@ fun fetchMappingByChassisOnly(
     purchaseForMerge: dynamic? = null,
     quickPurchaseOnly: Boolean = false,
 ): dynamic {
-    if (chassis.isBlank()) {
+    // Chassis map is keyed by code only (before '-'); purchases may store CODE-NUMBER.
+    val chassisCode = chassis.trim().substringBefore('-').trim()
+    if (chassisCode.isBlank()) {
         console.log("Chassis is blank, skipping chassis-only mapping")
         return js("Promise.resolve()")
     }
     if (js("window.__purchaseFormSyncInProgress === true").unsafeCast<Boolean>()) {
+        // Dropdown preserve reload in progress — retry once sync flag clears so Chassis Number ▼ still loads.
+        console.log("⏳ Chassis mapping deferred until form sync finishes: $chassisCode")
+        window.asDynamic().__pendingChassisMappingRetry = js("({})")
+        window.asDynamic().__pendingChassisMappingRetry.chassis = chassisCode
+        window.asDynamic().__pendingChassisMappingRetry.isEditForm = isEditForm
+        window.asDynamic().__pendingChassisMappingRetry.purchaseForMerge = purchaseForMerge
+        window.asDynamic().__pendingChassisMappingRetry.quickPurchaseOnly = quickPurchaseOnly
+        js("""
+            (function() {
+                if (window.__chassisMappingSyncRetryTimer) return;
+                window.__chassisMappingSyncRetryTimer = setInterval(function() {
+                    if (window.__purchaseFormSyncInProgress === true) return;
+                    clearInterval(window.__chassisMappingSyncRetryTimer);
+                    window.__chassisMappingSyncRetryTimer = null;
+                    var p = window.__pendingChassisMappingRetry;
+                    window.__pendingChassisMappingRetry = null;
+                    if (!p || !p.chassis || typeof window.fetchMappingByChassisOnly !== 'function') return;
+                    window.fetchMappingByChassisOnly(p.chassis, !!p.isEditForm, p.purchaseForMerge, !!p.quickPurchaseOnly);
+                }, 80);
+            })();
+        """)
         return js("Promise.resolve()")
     }
 
@@ -14294,9 +14408,9 @@ fun fetchMappingByChassisOnly(
     """)
     val requestId = (js("window.__chassisMappingSeq") as? Int) ?: 0
     
-    val encodedChassis = js("encodeURIComponent")(chassis).unsafeCast<String>()
+    val encodedChassis = js("encodeURIComponent")(chassisCode).unsafeCast<String>()
     val url = apiUrl("car-brand-mapping/chassis/$encodedChassis")
-    console.log("🔵 Fetching mapping by chassis only: $chassis (isEditForm: $isEditForm)")
+    console.log("🔵 Fetching mapping by chassis only: $chassisCode (raw='$chassis', isEditForm: $isEditForm)")
     
     return window.fetch(url)
         .then { response ->
@@ -14308,20 +14422,23 @@ fun fetchMappingByChassisOnly(
         .then { data: dynamic ->
             val currentSeq = (js("window.__chassisMappingSeq") as? Int) ?: 0
             if (currentSeq != requestId) {
-                console.log("⏭️ Stale chassis mapping response ignored for: $chassis")
+                console.log("⏭️ Stale chassis mapping response ignored for: $chassisCode")
                 return@then js("Promise.resolve()")
             }
 
             val found = (data.found as? Boolean) ?: false
             
             if (!found) {
-                console.log("⚠️ No mapping found for chassis: $chassis")
+                console.log("⚠️ No mapping found for chassis: $chassisCode")
+                if (!quickPurchaseOnly) {
+                    clearPurchaseChassisNumberFromMapping(isEditForm)
+                }
                 endChassisChangePreserve()
                 return@then js("Promise.resolve()")
             }
             
             // Debug: log the raw API response
-            console.log("🔍 Raw API response for chassis $chassis:", data)
+            console.log("🔍 Raw API response for chassis $chassisCode:", data)
             
             // Extract first row data for auto-fill (multi-value fields use `;` — first token is the default selection)
             val firstRowRaw = js("data.firstRow")
@@ -14387,11 +14504,11 @@ fun fetchMappingByChassisOnly(
                     }
                 })()
             """).unsafeCast<Array<dynamic>>()
-            val chassisKey = "__chassisRows_$chassis"
+            val chassisKey = "__chassisRows_$chassisCode"
             window.asDynamic().__tempChassisKeyForStore = chassisKey
             window.asDynamic().__tempAllRowsForStore = allRows
             js("window[window.__tempChassisKeyForStore] = window.__tempAllRowsForStore")
-            console.log("💾 Stored ${allRows.size} rows for chassis $chassis")
+            console.log("💾 Stored ${allRows.size} rows for chassis $chassisCode")
             
             // Extract unique values for dropdown population
             // Backend returns 'uniqueValues' or we need to calculate from allRows
@@ -14515,7 +14632,7 @@ fun fetchMappingByChassisOnly(
             val ccsForDropdown = flattenSemicolonChoices(uniqueCcs.toList())
             val doorsForDropdown = flattenSemicolonChoices(uniqueDoors.toList())
             
-            console.log("📊 Unique values for chassis $chassis:")
+            console.log("📊 Unique values for chassis $chassisCode:")
             console.log("  - Brands: $uniqueBrands -> expanded: $brandsForDropdown")
             console.log("  - Car Names: $uniqueCarNames")
             console.log("  - Fuels: $uniqueFuels -> expanded: $fuelsForDropdown")
@@ -14608,7 +14725,7 @@ fun fetchMappingByChassisOnly(
                 recycleFeeDigits = digitsDotOnlyFromMappingMoney(extractNumericFromDbValue(pd.recycleFee))
             }
             
-            console.log("✅ Found mapping for chassis $chassis: brand=$brand, carName=$carName, fuel=$fuel, wd=$wd, cc=$cc, door=$door, seat=$seat, grade=$grade, recycleFeeDigits=$recycleFeeDigits")
+            console.log("✅ Found mapping for chassis $chassisCode: brand=$brand, carName=$carName, fuel=$fuel, wd=$wd, cc=$cc, door=$door, seat=$seat, grade=$grade, recycleFeeDigits=$recycleFeeDigits")
             
             // Auto-fill other fields - but wait for dropdowns to be populated first
             val prefix = if (isEditForm) "edit" else ""
@@ -14629,7 +14746,7 @@ fun fetchMappingByChassisOnly(
             window.asDynamic().__tempPrefix = prefix
             
             // Store unique values in global variable for dropdown population (create object from arrays)
-            val uniqueValuesKey = "__chassisUniqueValues_$chassis"
+            val uniqueValuesKey = "__chassisUniqueValues_$chassisCode"
             val uniqueValuesObj = js("({})").unsafeCast<dynamic>()
             uniqueValuesObj.brands = brandsForDropdown.toTypedArray()
             uniqueValuesObj.carNames = flattenSemicolonChoices(uniqueCarNames.toList()).toTypedArray()
@@ -14643,6 +14760,12 @@ fun fetchMappingByChassisOnly(
             uniqueValuesObj.ranks = flattenSemicolonChoices(uniqueRanks.toList()).toTypedArray()
             uniqueValuesObj.colors = flattenSemicolonChoices(uniqueColors.toList()).toTypedArray()
             uniqueValuesObj.driveTypes = flattenSemicolonChoices(uniqueDriveTypes.toList()).toTypedArray()
+            val chassisNumberTokens = parseChassisNumberTokensFromDynamicList(
+                if (uniqueValuesRaw != null && uniqueValuesRaw != js("undefined")) {
+                    uniqueValuesRaw.unsafeCast<dynamic>().chassisNumbers
+                } else null
+            ).ifEmpty { parseChassisNumberTokensFromMapping(chassisNumberRaw) }
+            uniqueValuesObj.chassisNumbers = chassisNumberTokens.toTypedArray()
             window.asDynamic().__tempUniqueValuesKey = uniqueValuesKey
             window.asDynamic().__tempUniqueValues = uniqueValuesObj
             js("window[window.__tempUniqueValuesKey] = window.__tempUniqueValues")
@@ -14668,7 +14791,7 @@ fun fetchMappingByChassisOnly(
             }
             
             // Populate dropdowns with per-token options (WD uses radio buttons — no &lt;select&gt;)
-            console.log("🔄 Populating dropdowns with expanded tokens for chassis $chassis")
+            console.log("🔄 Populating dropdowns with expanded tokens for chassis $chassisCode")
 
             if (quickPurchaseOnly) {
                 resetChassisMasterComboIds()
@@ -14843,10 +14966,24 @@ fun fetchMappingByChassisOnly(
             updateConditionalComboboxButtonVisibility(seatId, seatOptions, seat)
             updateConditionalComboboxButtonVisibility(doorId, doorsForDropdown, door)
             updateConditionalComboboxButtonVisibility(ccId, ccsForDropdown, cc)
+
+            // Chassis Number: from chassis map tokens (preserve existing suffix on Edit hydrate)
+            if (!quickPurchaseOnly) {
+                val existingNumber = purchaseChassisNumberInputEl(isEditForm)?.value?.trim().orEmpty()
+                val preserveNumber = isEditForm && (
+                    (purchaseForMerge != null && !js("purchaseForMerge === void 0").unsafeCast<Boolean>()) ||
+                        existingNumber.isNotEmpty()
+                    )
+                applyPurchaseChassisNumberFromMapping(
+                    isEditForm = isEditForm,
+                    numberTokens = chassisNumberTokens,
+                    preserveExisting = preserveNumber,
+                )
+            }
             
             // Now auto-fill form fields with first row values
             // Store current chassis for matching logic
-            window.asDynamic().__currentChassis = chassis
+            window.asDynamic().__currentChassis = chassisCode
             
             // Auto-fill fields with first row values (no need to fetch brand mappings anymore)
             // Set field values directly (chain promise so callers run after this microtask)
@@ -15270,6 +15407,12 @@ fun fetchMappingByChassisOnly(
                     if (isEditForm && purchaseForMerge != null && !js("purchaseForMerge === void 0").unsafeCast<Boolean>()) {
                         applySavedPurchaseFieldSnapshot(purchaseForMerge)
                         scheduleSavedPurchaseFieldSnapshotReapply(purchaseForMerge)
+                        // Always refresh Chassis Number options/▼ after snapshot (preserve filled value when present)
+                        applyPurchaseChassisNumberFromMapping(
+                            isEditForm = true,
+                            numberTokens = chassisNumberTokens,
+                            preserveExisting = true,
+                        )
                         js("setTimeout(function() { window.__editPurchaseHydrating = false; }, 1200);")
                     }
 
@@ -15578,14 +15721,15 @@ fun findMatchingRowForChassis(chassis: String, changedField: String, changedValu
         return
     }
     
-    // Get stored rows for this chassis
-    val chassisKey = "__chassisRows_$chassis"
+    // Get stored rows for this chassis (keys use code prefix only)
+    val chassisCode = chassis.trim().substringBefore('-').trim()
+    val chassisKey = "__chassisRows_$chassisCode"
     window.asDynamic().__tempChassisKey = chassisKey
     val allRowsRaw = js("window[window.__tempChassisKey]")
     val allRows = (allRowsRaw as? Array<dynamic>) ?: emptyArray()
     
     if (allRows.isEmpty()) {
-        console.log("⚠️ No rows stored for chassis $chassis")
+        console.log("⚠️ No rows stored for chassis $chassisCode")
         return
     }
     
@@ -16102,10 +16246,9 @@ fun setupBrandSelectionHandlers() {
                     
                     js("setTimeout(function() { window.__syncingChassis = false; }, 100);")
                     
-                    if (js("window.__purchaseFormSyncInProgress !== true").unsafeCast<Boolean>()) {
-                        beginChassisChangePreserve(isEditForm)
-                        fetchMappingByChassisOnly(part1, isEditForm, null)
-                    }
+                    beginChassisChangePreserve(isEditForm)
+                    // Always invoke: if form sync is in progress, fetchMappingByChassisOnly queues a retry
+                    fetchMappingByChassisOnly(part1, isEditForm, null)
                 } else {
                     if (chassisCodeInput != null) {
                         chassisCodeInput.value = ""
@@ -16123,6 +16266,7 @@ fun setupBrandSelectionHandlers() {
                         sel?.style?.display = "none"
                         inp?.style?.paddingRight = "8px"
                     }
+                    clearPurchaseChassisNumberFromMapping(isEditForm)
                     js("if (window.autoFilledBrand) { window.autoFilledBrand = null; }")
                     js("window.__chassisMasterComboIds = []")
                     populateBrandOptions(if (isEditForm) "editBrand" else "brand")
@@ -16157,10 +16301,8 @@ fun setupBrandSelectionHandlers() {
                         }
                     }
                     js("setTimeout(function() { window.__syncingChassis = false; }, 100);")
-                    if (js("window.__purchaseFormSyncInProgress !== true").unsafeCast<Boolean>()) {
-                        beginChassisChangePreserve(isEditForm = false)
-                        fetchMappingByChassisOnly(part1, isEditForm = false, purchaseForMerge = null, quickPurchaseOnly = true)
-                    }
+                    beginChassisChangePreserve(isEditForm = false)
+                    fetchMappingByChassisOnly(part1, isEditForm = false, purchaseForMerge = null, quickPurchaseOnly = true)
                 } else if (chassisInput != null) {
                     chassisInput.value = ""
                     (document.getElementById("qpCarName") as? HTMLSelectElement)?.value = ""
@@ -16250,6 +16392,124 @@ fun purchaseChassisCodeFieldId(isEditForm: Boolean): String =
 fun purchaseChassisNumberFieldId(isEditForm: Boolean): String =
     if (isEditForm) "editChassisNumber" else "chassisNumber"
 
+/** Text input for chassis number (combobox uses `${id}Input`). */
+fun purchaseChassisNumberInputEl(isEditForm: Boolean): HTMLInputElement? {
+    val id = purchaseChassisNumberFieldId(isEditForm)
+    return (document.getElementById("${id}Input") as? HTMLInputElement)
+        ?: (document.getElementById(id) as? HTMLInputElement)
+}
+
+/** Parses chassis-map `number:year;number:year` (or plain numbers) into suffix tokens. */
+fun parseChassisNumberTokensFromMapping(raw: String?): List<String> {
+    if (raw.isNullOrBlank()) return emptyList()
+    val out = mutableListOf<String>()
+    val seen = mutableSetOf<String>()
+    for (pair in raw.split(';')) {
+        val t = pair.trim()
+        if (t.isEmpty()) continue
+        val colonIdx = t.lastIndexOf(':')
+        val num = if (colonIdx > 0) t.substring(0, colonIdx).trim() else t
+        if (num.isNotEmpty() && seen.add(num.lowercase())) out.add(num)
+    }
+    return out
+}
+
+fun parseChassisNumberTokensFromDynamicList(raw: dynamic): List<String> {
+    if (raw == null || raw == js("undefined")) return emptyList()
+    if (!(js("Array.isArray(raw)").unsafeCast<Boolean>())) {
+        return parseChassisNumberTokensFromMapping(raw.toString())
+    }
+    val out = mutableListOf<String>()
+    val seen = mutableSetOf<String>()
+    val n = js("raw.length").unsafeCast<Int>()
+    for (i in 0 until n) {
+        val v = js("raw[i]")?.toString()?.trim().orEmpty()
+        if (v.isEmpty()) continue
+        // Items may already be plain numbers from uniqueValues.chassisNumbers
+        val colonIdx = v.lastIndexOf(':')
+        val num = if (colonIdx > 0) v.substring(0, colonIdx).trim() else v
+        if (num.isNotEmpty() && seen.add(num.lowercase())) out.add(num)
+    }
+    return out
+}
+
+/**
+ * Apply chassis-map number options to Add/Edit Chassis Number field.
+ * 0 → empty, hide dropdown; 1 → autofill, hide dropdown; 2+ → autofill first (unless preserved), show dropdown.
+ */
+/** Clear Chassis Number text + options and hide the conditional ▼ (when chassis code cleared / no mapping). */
+fun clearPurchaseChassisNumberFromMapping(isEditForm: Boolean) {
+    applyPurchaseChassisNumberFromMapping(
+        isEditForm = isEditForm,
+        numberTokens = emptyList(),
+        preserveExisting = false,
+    )
+}
+
+fun applyPurchaseChassisNumberFromMapping(
+    isEditForm: Boolean,
+    numberTokens: List<String>,
+    preserveExisting: Boolean,
+) {
+    val fieldId = purchaseChassisNumberFieldId(isEditForm)
+    val select = document.getElementById(fieldId) as? HTMLSelectElement
+    val input = purchaseChassisNumberInputEl(isEditForm)
+    if (select == null && input == null) return
+
+    val tokens = numberTokens.map { it.trim() }.filter { it.isNotEmpty() }
+        .distinctBy { it.lowercase() }
+    val existing = input?.value?.trim().orEmpty()
+    val prefer = if (preserveExisting && existing.isNotEmpty()) existing else ""
+
+    if (select != null) {
+        select.innerHTML = ""
+        val def = document.createElement("option") as HTMLOptionElement
+        def.value = ""
+        def.textContent = "▼"
+        select.appendChild(def)
+        for (t in tokens) {
+            val opt = document.createElement("option") as HTMLOptionElement
+            opt.value = t
+            opt.textContent = t
+            select.appendChild(opt)
+        }
+        if (prefer.isNotEmpty() && tokens.none { it.equals(prefer, ignoreCase = true) }) {
+            val opt = document.createElement("option") as HTMLOptionElement
+            opt.value = prefer
+            opt.textContent = prefer
+            select.appendChild(opt)
+        }
+        // Always refresh ▼ visibility from token count (preserve only affects the selected value)
+        updateConditionalComboboxButtonVisibility(fieldId, tokens, prefer)
+        if (prefer.isNotEmpty()) {
+            val match = tokens.firstOrNull { it.equals(prefer, ignoreCase = true) } ?: prefer
+            select.value = match
+            input?.value = match
+        } else if (tokens.isEmpty()) {
+            select.value = ""
+            input?.value = ""
+        } else if (tokens.size == 1) {
+            input?.value = tokens.first()
+            select.value = tokens.first()
+        } else {
+            input?.value = tokens.first()
+            select.value = tokens.first()
+        }
+        console.log(
+            "Chassis Number options: ${tokens.size} → button=${if (tokens.size >= 2) "show" else "hide"}" +
+                " (field=$fieldId, prefer='$prefer')",
+        )
+    } else if (input != null) {
+        if (prefer.isNotEmpty()) {
+            // keep
+        } else if (tokens.isEmpty()) {
+            input.value = ""
+        } else {
+            input.value = tokens.first()
+        }
+    }
+}
+
 fun splitPurchaseChassisForForm(full: String): Pair<String, String> {
     val trimmed = full.trim()
     if (trimmed.isBlank()) return Pair("", "")
@@ -16277,7 +16537,7 @@ fun readPurchaseChassisCode(isEditForm: Boolean): String {
 }
 
 fun readPurchaseChassisNumber(isEditForm: Boolean): String =
-    (document.getElementById(purchaseChassisNumberFieldId(isEditForm)) as? HTMLInputElement)?.value?.trim() ?: ""
+    purchaseChassisNumberInputEl(isEditForm)?.value?.trim() ?: ""
 
 fun readPurchaseChassisForSave(isEditForm: Boolean): String =
     composePurchaseChassisForSave(readPurchaseChassisCode(isEditForm), readPurchaseChassisNumber(isEditForm))
@@ -16307,7 +16567,10 @@ fun validatePurchaseChassisForSave(isEditForm: Boolean): Pair<String?, String?> 
 }
 
 fun bindPurchaseChassisNumberInput(fieldId: String) {
-    val input = document.getElementById(fieldId) as? HTMLInputElement ?: return
+    val input = (document.getElementById("${fieldId}Input") as? HTMLInputElement)
+        ?: (document.getElementById(fieldId) as? HTMLInputElement)
+        ?: return
+    val select = document.getElementById(fieldId) as? HTMLSelectElement
     val isEditForm = fieldId.startsWith("edit")
     val manufactureYearBaseId = if (isEditForm) "editManufactureYear" else "manufactureYear"
     fun sanitize() {
@@ -16327,6 +16590,14 @@ fun bindPurchaseChassisNumberInput(fieldId: String) {
     input.addEventListener("blur", { _: Event ->
         sanitize()
         maybeLookupManufactureYear()
+    })
+    select?.addEventListener("change", { _: Event ->
+        val v = select.value.trim()
+        if (v.isNotEmpty() && v != CHASSIS_MASTER_SEP_VALUE) {
+            input.value = v
+            sanitize()
+            maybeLookupManufactureYear()
+        }
     })
 }
 
@@ -17055,8 +17326,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label>Chassis Number</label>
-                        <input type="text" id="editChassisNumber" value="${escapeHtml(editChassisNumberDisp)}" placeholder="Suffix (optional)" autocomplete="off"
-                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;" />
+                        ${createEditableCombobox("editChassisNumber", "Suffix (optional)", initialValue = editChassisNumberDisp, showDropdownButton = false)}
                     </div>
                     <div>
                         <label>Brand</label>

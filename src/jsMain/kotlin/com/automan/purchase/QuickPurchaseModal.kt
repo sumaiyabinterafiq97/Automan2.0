@@ -235,6 +235,7 @@ fun populateQuickSupplierDropdownsFromAuction(auctionName: String) {
             var stocks = window.getUniqueValuesCaseInsensitive(mappings.map(function(m) { return m.stockLocation; }).filter(function(s) { return s && String(s).trim() !== ''; }));
             var rixos = window.getUniqueValuesCaseInsensitive(mappings.map(function(m) { return m.rixoCompany; }).filter(function(c) { return c && String(c).trim() !== ''; }));
             if (typeof window.updateDropdown === 'function') {
+                // mergeSupplierThenMaster=true → mapping values + Other Options + master list
                 window.updateDropdown('qpStockLocation', 'qpStockLocation', stocks, true);
                 window.updateDropdown('qpRixoCompany', 'qpRixoCompany', rixos, true);
             }

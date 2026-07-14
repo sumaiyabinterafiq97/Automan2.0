@@ -63,6 +63,8 @@ function __rixoSkipAutoEditField(editFieldId) {
     if (!editFieldId) return false;
     var id = String(editFieldId);
     if (id.indexOf('edit') !== 0) return false;
+    // Open-dropdown rebuild must refresh option lists even when suppress/override are set.
+    if (typeof isSupplierMasterForceBuild === 'function' && isSupplierMasterForceBuild(id)) return false;
     // User-initiated supplier apply must write edit* fields even while programmatic guard is active.
     if (window.__supplierApplyInFlight === true) return false;
     if (window.__suppressRixoAutoSelect === true) return true;
@@ -2941,8 +2943,8 @@ var MASTER_FIELD_IDS = {
     venueId: true, editVenueId: true,
     typeOfVehicle: true, editTypeOfVehicle: true,
     shipmentSize: true, editShipmentSize: true,
-    rixoCompany: true, editRixoCompany: true,
-    stockLocation: true, editStockLocation: true,
+    rixoCompany: true, editRixoCompany: true, qpRixoCompany: true,
+    stockLocation: true, editStockLocation: true, qpStockLocation: true,
     pol: true, editPol: true
 };
 var SEE_MORE_VALUE = '__SEE_MORE__';
@@ -2962,7 +2964,9 @@ function masterApiPathForSupplierField(selectId) {
         'typeOfVehicle': 'master-menu/type_of_vehicle', 'editTypeOfVehicle': 'master-menu/type_of_vehicle',
         'shipmentSize': 'master-menu/type_of_vehicle', 'editShipmentSize': 'master-menu/type_of_vehicle',
         'stockLocation': 'master-menu/stock_location', 'editStockLocation': 'master-menu/stock_location',
+        'qpStockLocation': 'master-menu/stock_location',
         'rixoCompany': 'rixo-mapping/distinct-rixo-companies', 'editRixoCompany': 'rixo-mapping/distinct-rixo-companies',
+        'qpRixoCompany': 'rixo-mapping/distinct-rixo-companies',
         'pol': 'master-menu/pol', 'editPol': 'master-menu/pol'
     };
     return map[selectId] || null;
@@ -2974,9 +2978,14 @@ window.__supplierMasterMenuInflight = window.__supplierMasterMenuInflight || {};
 function appendMasterListToSupplierSelect(selectId, list) {
     var sel = document.getElementById(selectId);
     if (!sel) return;
-    if (window.__suppressRixoAutoSelect === true &&
+    var forceOpenBuild = isSupplierMasterForceBuild(selectId);
+    // Skip master append only when suppress is active AND the select already has real options.
+    // Never skip when force-building for ▼ open, or when options were wiped (empty list → dead dropdown).
+    if (!forceOpenBuild &&
+        window.__suppressRixoAutoSelect === true &&
         window.__supplierApplyInFlight !== true &&
-        String(selectId).indexOf('edit') === 0) {
+        String(selectId).indexOf('edit') === 0 &&
+        supplierSelectRealOptionCount(selectId) > 0) {
         return;
     }
     var seen = {};
@@ -2996,6 +3005,9 @@ function appendMasterListToSupplierSelect(selectId, list) {
         opt.textContent = it;
         sel.appendChild(opt);
     });
+    if (forceOpenBuild) {
+        clearSupplierMasterForceBuild(selectId);
+    }
     if (typeof window.syncComboboxInput === 'function') {
         var suppressMaster = typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate();
         window.syncComboboxInput(selectId, suppressMaster ? { suppressCascade: true } : undefined);
@@ -3118,6 +3130,101 @@ function supplierSelectHasMasterSep(selectId) {
         if (sel.options[i].value === SUPPLIER_MASTER_SEP_VALUE) return true;
     }
     return false;
+}
+
+function supplierSelectRealOptionCount(selectId) {
+    var sel = document.getElementById(selectId);
+    if (!sel) return 0;
+    var n = 0;
+    for (var i = 0; i < sel.options.length; i++) {
+        var v = (sel.options[i].value || '').trim();
+        if (v && v !== SUPPLIER_MASTER_SEP_VALUE && v !== SEE_MORE_VALUE && v !== '__SEE_LESS__') n++;
+    }
+    return n;
+}
+
+/** Timed force-build allowlist so Edit ▼ can refresh options despite suppress/override races. */
+window.__supplierMasterForceBuildUntil = window.__supplierMasterForceBuildUntil || {};
+
+function isSupplierMasterForceBuild(selectId) {
+    if (!selectId) return false;
+    var until = window.__supplierMasterForceBuildUntil && window.__supplierMasterForceBuildUntil[selectId];
+    if (!until) return false;
+    if (Date.now() > until) {
+        delete window.__supplierMasterForceBuildUntil[selectId];
+        return false;
+    }
+    return true;
+}
+
+function markSupplierMasterForceBuild(selectId, ms) {
+    if (!selectId) return;
+    window.__supplierMasterForceBuildUntil = window.__supplierMasterForceBuildUntil || {};
+    window.__supplierMasterForceBuildUntil[selectId] = Date.now() + (ms != null ? ms : 5000);
+}
+
+function clearSupplierMasterForceBuild(selectId) {
+    if (!selectId || !window.__supplierMasterForceBuildUntil) return;
+    delete window.__supplierMasterForceBuildUntil[selectId];
+}
+
+function mappingTokensForSupplierMasterField(selectId, mappings) {
+    mappings = mappings || [];
+    var pick = function(getter) {
+        return window.getUniqueValuesCaseInsensitive
+            ? window.getUniqueValuesCaseInsensitive(mappings.map(getter).filter(function(s) { return s && String(s).trim() !== ''; }))
+            : window.getUniqueValues(mappings.map(getter).filter(function(s) { return s && String(s).trim() !== ''; }));
+    };
+    if (selectId === 'stockLocation' || selectId === 'editStockLocation' || selectId === 'qpStockLocation') {
+        return pick(function(m) { return m.stockLocation; });
+    }
+    if (selectId === 'rixoCompany' || selectId === 'editRixoCompany' || selectId === 'qpRixoCompany') {
+        return pick(function(m) { return m.rixoCompany; });
+    }
+    if (selectId === 'venueId' || selectId === 'editVenueId') {
+        return pick(function(m) { return m.venueId; });
+    }
+    if (selectId === 'pol' || selectId === 'editPol') {
+        return window.flattenPolTokensFromMappings
+            ? window.flattenPolTokensFromMappings(mappings)
+            : pick(function(m) { return m.pol; });
+    }
+    if (selectId === 'shipmentSize' || selectId === 'editShipmentSize' ||
+        selectId === 'typeOfVehicle' || selectId === 'editTypeOfVehicle') {
+        return typeof __vehicleTypesFromMappings === 'function'
+            ? __vehicleTypesFromMappings(mappings)
+            : pick(function(m) { return m.typeOfVehicle || m.vehicleType; });
+    }
+    return [];
+}
+
+function applyPreservedValueToSupplierSelect(selectId, value) {
+    if (value == null || String(value).trim() === '') return;
+    var val = String(value).trim();
+    var sel = document.getElementById(selectId);
+    if (!sel) return;
+    var matched = false;
+    for (var i = 0; i < sel.options.length; i++) {
+        var ov = (sel.options[i].value || '').trim();
+        var ot = (sel.options[i].text || '').trim();
+        if (ov === val || ot === val || ov.toLowerCase() === val.toLowerCase() || ot.toLowerCase() === val.toLowerCase()) {
+            sel.value = ov || val;
+            matched = true;
+            break;
+        }
+    }
+    if (!matched) {
+        var o = document.createElement('option');
+        o.value = val;
+        o.textContent = val;
+        sel.appendChild(o);
+        sel.value = val;
+    }
+    var inp = document.getElementById(selectId + 'Input');
+    if (inp) inp.value = sel.value || val;
+    if (typeof window.syncComboboxInput === 'function') {
+        window.syncComboboxInput(selectId, { suppressCascade: true });
+    }
 }
 
 /** Set value on a supplier master combobox after buildSupplierMappingPlusMasterSelect. */
@@ -3254,21 +3361,69 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
     return true;
 };
 
+/**
+ * Ensure a supplier master combobox has mapping options (+ separator) before ▼ opens.
+ * Does a single-field force rebuild when the select was cleared or skipped by suppress/override
+ * races — does not change supplier auto-select behavior.
+ */
 window.ensureSupplierMasterComboboxReady = function(selectId) {
     if (!MASTER_FIELD_IDS[selectId]) return true;
-    if (supplierSelectHasMasterSep(selectId)) return true;
-    var auction = getCurrentAuctionNameForPurchaseForm();
-    if (!auction) return true;
-    var snap = (typeof window.__snapshotSupplierFormForPreserve === 'function')
-        ? window.__snapshotSupplierFormForPreserve()
-        : null;
-    var opts = { autoSelect: false, restoreDelay: 0 };
-    if (snap && (snap.auction || snap.stock || snap.venue || snap.rixo || snap.pol || snap.vehicleType)) {
-        opts.preserveSnapshot = snap;
-    } else {
-        opts.restoreValues = true;
+    var sel = document.getElementById(selectId);
+    if (!sel) return true;
+
+    var needsRebuild = !supplierSelectHasMasterSep(selectId) || supplierSelectRealOptionCount(selectId) === 0;
+    if (!needsRebuild) return true;
+
+    var preserved = '';
+    if (typeof window.getComboboxValue === 'function') {
+        preserved = (window.getComboboxValue(selectId) || '').trim();
     }
-    window.rebuildSupplierDependentDropdowns(auction, opts);
+    if (!preserved) {
+        preserved = (sel.value || '').trim();
+        var inp = document.getElementById(selectId + 'Input');
+        if (!preserved && inp) preserved = (inp.value || '').trim();
+    }
+
+    var auction = getCurrentAuctionNameForPurchaseForm();
+    var normalized = auction && typeof resolveRixoMappingKey === 'function'
+        ? resolveRixoMappingKey(auction)
+        : (auction || '');
+    var mappings = (normalized && window.rixoPriceMapping[normalized] && window.rixoPriceMapping[normalized].mappings)
+        ? window.rixoPriceMapping[normalized].mappings
+        : [];
+    var supplierOptions = mappingTokensForSupplierMasterField(selectId, mappings);
+    var labelBase = String(selectId)
+        .replace(/^edit/, '')
+        .replace(/^qp/, '')
+        .replace(/([A-Z])/g, ' $1')
+        .trim();
+    var placeholder = 'Select ' + (labelBase || selectId);
+
+    markSupplierMasterForceBuild(selectId, 5000);
+    try {
+        buildSupplierMappingPlusMasterSelect(selectId, supplierOptions, placeholder);
+        if (preserved) applyPreservedValueToSupplierSelect(selectId, preserved);
+    } catch (err) {
+        clearSupplierMasterForceBuild(selectId);
+        console.warn('[supplier+master] ensureSupplierMasterComboboxReady failed for', selectId, err);
+        // Fall back to full rebuild if single-field build threw
+        if (auction && typeof window.rebuildSupplierDependentDropdowns === 'function') {
+            var snap = (typeof window.__snapshotSupplierFormForPreserve === 'function')
+                ? window.__snapshotSupplierFormForPreserve()
+                : null;
+            var opts = { autoSelect: false, restoreDelay: 0 };
+            if (snap && (snap.auction || snap.stock || snap.venue || snap.rixo || snap.pol || snap.vehicleType)) {
+                opts.preserveSnapshot = snap;
+            } else {
+                opts.restoreValues = true;
+            }
+            window.rebuildSupplierDependentDropdowns(auction, opts);
+        }
+    }
+    // If master list came from cache, append already cleared the force flag; otherwise keep until async append.
+    if (supplierSelectRealOptionCount(selectId) > 0 && supplierSelectHasMasterSep(selectId)) {
+        // Mapping options are enough for ▼ to work even if master append is still in flight.
+    }
     return true;
 };
 

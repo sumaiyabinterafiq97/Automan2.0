@@ -5070,14 +5070,18 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                 e.preventDefault();
                 syncRecycleFeeCanonical();
                 var canonical = (canonicalInput.value || '').trim();
-                if (canonical.endsWith('-00')) return;
                 var picker = ensureMonthPicker();
                 if (typeof window.positionHiddenPickerOverButton === 'function') {
                     window.positionHiddenPickerOverButton(picker, dateBtn);
                 }
-                picker.value = canonical.match(/^\d{4}-\d{2}$/) && !canonical.endsWith('-00')
-                    ? canonical
-                    : (new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0'));
+                // Month input cannot represent 00 — seed January so 📅 still opens (typing 00 remains allowed).
+                if (/^\d{4}-00$/.test(canonical)) {
+                    picker.value = canonical.substring(0, 4) + '-01';
+                } else if (/^\d{4}-\d{2}$/.test(canonical)) {
+                    picker.value = canonical;
+                } else {
+                    picker.value = new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0');
+                }
                 try {
                     picker.showPicker();
                 } catch (err) {
