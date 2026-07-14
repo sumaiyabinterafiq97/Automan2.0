@@ -25,6 +25,26 @@ private data class SmLeafRow(val id: Long, val type: String, val priceDisplay: S
 
 private const val SM_PLACEHOLDER_VENUE = "(no venue id)"
 private const val SM_PLACEHOLDER_POL = "(no pol)"
+private const val SM_SEMICOLON_REJECT_MSG =
+    "Use a single value only. Do not use \";\" to join multiple values. Add separate mappings instead."
+
+private fun smNormalizeSemicolons(raw: String): String =
+    raw.replace("\uFF1B", ";").replace("\uFE55", ";")
+
+private fun smContainsSemicolon(raw: String?): Boolean {
+    val t = raw?.trim().orEmpty()
+    if (t.isEmpty()) return false
+    return smNormalizeSemicolons(t).contains(';')
+}
+
+/** Returns false and shows an error if any value contains `;`. */
+private fun smRejectIfSemicolon(vararg values: String?): Boolean {
+    if (values.any { smContainsSemicolon(it) }) {
+        showMessage(SM_SEMICOLON_REJECT_MSG, "error")
+        return true
+    }
+    return false
+}
 
 private var smTreeRowsCache: List<SupplierMapTreeRowLite> = emptyList()
 private var smSelectedSupplier: String? = null
@@ -57,12 +77,44 @@ private var smCardInlineEditPol: String = ""
 private var smCardInlineEditCurrentLabel: String = ""
 
 private var smFullRowAddOpen: Boolean = false
+private var smSearchQuery: String = ""
+private var smSupplierSortOrder: String? = null // null = newest-first; "asc" | "desc"
+private var smSearchDebounceTimer: dynamic = null
 
-private fun smSortedSuppliers(list: List<SupplierMapTreeRowLite>): List<String> =
-    list.groupBy { smNormSupplier(it.supplier) }
+private fun smSortedSuppliers(list: List<SupplierMapTreeRowLite>): List<String> {
+    val grouped = list.groupBy { smNormSupplier(it.supplier) }
         .map { (name, rows) -> name to rows.maxOf { it.id.toLongOrNull() ?: 0L } }
-        .sortedWith(compareByDescending<Pair<String, Long>> { it.second }.thenBy { it.first.lowercase() })
-        .map { it.first }
+    val q = smSearchQuery.trim().lowercase()
+    val filtered = if (q.isEmpty()) grouped else grouped.filter { (name, _) -> name.lowercase().contains(q) }
+    return when (smSupplierSortOrder) {
+        "asc" -> filtered.sortedBy { it.first.lowercase() }.map { it.first }
+        "desc" -> filtered.sortedByDescending { it.first.lowercase() }.map { it.first }
+        else -> filtered.sortedWith(
+            compareByDescending<Pair<String, Long>> { it.second }.thenBy { it.first.lowercase() },
+        ).map { it.first }
+    }
+}
+
+private fun smSearchToolbarHtml(): String = """
+    <div class="tree-map-search-toolbar" data-sm-search-toolbar="1">
+        <div class="tree-map-search-pill">
+            <span class="tree-map-search-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </span>
+            <input type="text" id="smSupplierSearchInput" role="searchbox" autocomplete="off" inputmode="search"
+                placeholder="Type to search…" aria-label="Search supplier name"
+                value="${escapeHtml(smSearchQuery)}" />
+            <button type="button" id="smSupplierSearchClearBtn" class="tree-map-search-clear" title="Clear search"
+                style="${if (smSearchQuery.isBlank()) "visibility:hidden;" else ""}">×</button>
+        </div>
+    </div>
+""".trimIndent()
+
+private fun smSupplierSortTooltip(): String = when (smSupplierSortOrder) {
+    "asc" -> "Sorted A-Z (click to sort Z-A)"
+    "desc" -> "Sorted Z-A (click to sort A-Z)"
+    else -> "Sort supplier names A-Z"
+}
 
 private fun clearSmFullRowAdd() {
     smFullRowAddOpen = false
@@ -408,7 +460,12 @@ private fun buildSmLeafInlineAddHtml(): String = """
 
 private fun smTreeHeadersHtml(): String = """
     <div class="rixo-tree-headers supplier-map-tree-headers">
-        <div class="rixo-tree-header">Supplier Name</div>
+        <div class="rixo-tree-header rixo-tree-header--with-sort">
+            <button type="button" id="smSupplierSortBtn" class="tree-map-col-sort-btn" data-sm-sort="supplier" title="${escapeHtml(smSupplierSortTooltip())}">
+                <span>Supplier Name</span>
+                <span class="tree-map-col-sort-icon" aria-hidden="true">↕</span>
+            </button>
+        </div>
         <div class="rixo-tree-header">Venue ID</div>
         <div class="rixo-tree-header">Stock Location</div>
         <div class="rixo-tree-header">POL</div>
@@ -598,6 +655,12 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
     sb.append(smTreeHeadersHtml())
     if (smFullRowAddOpen) {
         sb.append(buildSmFullRowAddHtml())
+    }
+
+    if (suppliers.isEmpty() && smSearchQuery.isNotBlank()) {
+        sb.append("""<div class="rixo-tree-note" style="max-width:560px;">No suppliers match “${escapeHtml(smSearchQuery.trim())}”.</div>""")
+        sb.append("</div>")
+        return sb.toString()
     }
 
     for (supplier in suppliers) {
@@ -922,6 +985,7 @@ private fun postSmMappingBulkOneRow(
     price: String,
     onSuccess: () -> Unit,
 ) {
+    if (smRejectIfSemicolon(supplier, venue, stock, pol, company, vtype, price)) return
     val mode = insertMode ?: "FULL"
     val obj: dynamic = js("{}")
     when (mode) {
@@ -1127,6 +1191,56 @@ private fun bindSmTopAddButton() {
     btn.addEventListener("click", handler)
 }
 
+private fun toggleSmSupplierSort() {
+    smSupplierSortOrder = when (smSupplierSortOrder) {
+        "asc" -> "desc"
+        "desc" -> "asc"
+        else -> "asc"
+    }
+}
+
+private fun smApplySearchAndRerender() {
+    val root = document.getElementById("supplierMapTreeRoot") as? HTMLElement ?: return
+    val clearBtn = document.getElementById("smSupplierSearchClearBtn") as? HTMLElement
+    if (clearBtn != null) {
+        clearBtn.style.visibility = if (smSearchQuery.isBlank()) "hidden" else "visible"
+    }
+    smRerenderTree(root)
+}
+
+private fun bindSmSearchToolbar() {
+    val input = document.getElementById("smSupplierSearchInput") as? HTMLInputElement ?: return
+    val clearBtn = document.getElementById("smSupplierSearchClearBtn") as? HTMLElement
+
+    val prevInput = input.asDynamic().__smSearchInputHandler.unsafeCast<((Event) -> Unit)?>()
+    if (prevInput != null) input.removeEventListener("input", prevInput)
+    val inputHandler: (Event) -> Unit = {
+        val q = input.value
+        if (smSearchDebounceTimer != null) window.clearTimeout(smSearchDebounceTimer)
+        smSearchDebounceTimer = window.setTimeout({
+            smSearchQuery = q
+            smApplySearchAndRerender()
+        }, 180)
+    }
+    input.asDynamic().__smSearchInputHandler = inputHandler
+    input.addEventListener("input", inputHandler)
+
+    if (clearBtn != null) {
+        val prevClear = clearBtn.asDynamic().__smSearchClearHandler.unsafeCast<((Event) -> Unit)?>()
+        if (prevClear != null) clearBtn.removeEventListener("click", prevClear)
+        val clearHandler: (Event) -> Unit = { ev ->
+            ev.preventDefault()
+            if (smSearchDebounceTimer != null) window.clearTimeout(smSearchDebounceTimer)
+            input.value = ""
+            smSearchQuery = ""
+            smApplySearchAndRerender()
+            input.focus()
+        }
+        clearBtn.asDynamic().__smSearchClearHandler = clearHandler
+        clearBtn.addEventListener("click", clearHandler)
+    }
+}
+
 private fun startSmInlineAdd(
     level: String,
     pathSupplier: String,
@@ -1278,6 +1392,7 @@ private fun executeSmCardInlineSave(root: HTMLElement) {
     val comboboxId = smCardInlineEditId(level)
     val newVal = getEditableComboboxValue(comboboxId).trim()
     if (newVal.isEmpty()) { showMessage("Value is required", "error"); return }
+    if (smRejectIfSemicolon(newVal)) return
     if (newVal.equals(currentLabel, ignoreCase = true)) {
         cancelSmCardInlineEdit(root)
         return
@@ -1333,6 +1448,16 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
 
     val handler: (Event) -> Unit = click@{ ev ->
         val target = ev.target.asDynamic() as? Element ?: return@click
+
+        val sortBtn = target.closest("[data-sm-sort='supplier']") as? HTMLElement
+        if (sortBtn != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            toggleSmSupplierSort()
+            smRerenderTree(root)
+            return@click
+        }
+
         if (target.closest(".rixo-tree-card-menu-wrap") == null) smCloseAllMenus(root)
 
         val addBtn = target.closest(".rixo-tree-add-btn") as? HTMLElement
@@ -1406,15 +1531,42 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                             }
                     }.mapNotNull { it.id.toLongOrNull() }.distinct()
                     if (rowsToDelete.isEmpty()) return@click
-                    if (!window.confirm("Delete ${rowsToDelete.size} mapping row(s) in this branch?")) return@click
-                    fun deleteNext(idx: Int) {
-                        if (idx >= rowsToDelete.size) {
-                            refreshSupplierMapTreeData()
-                            return
-                        }
-                        smDeleteMappingRow(rowsToDelete[idx]) { deleteNext(idx + 1) }
+                    val pathBits = listOfNotNull(
+                        supplier.takeIf { it.isNotBlank() }?.let { "Supplier: ${escapeHtml(it)}" },
+                        when (level) {
+                            "venue" -> "Venue: ${escapeHtml(label)}"
+                            "stock" -> "Stock: ${escapeHtml(label)}"
+                            "pol" -> "POL: ${escapeHtml(label)}"
+                            "rixo_company" -> "Rixo company: ${escapeHtml(label)}"
+                            else -> null
+                        },
+                    ).joinToString(" · ")
+                    val levelNote = when (level) {
+                        "supplier" ->
+                            "<br><br><b>High impact:</b> Deleting this supplier branch removes all nested venues, stocks, POLs, and prices for this supplier."
+                        "rixo_company" ->
+                            "<br><br>This removes the Rixo company path under this supplier."
+                        else -> ""
                     }
-                    deleteNext(0)
+                    showRixoMappingDeleteConfirm(
+                        title = if (level == "supplier") "Delete entire supplier branch?" else "Delete branch?",
+                        messageHtml =
+                            (if (pathBits.isNotEmpty()) "$pathBits<br><br>" else "") +
+                                "<b>${rowsToDelete.size}</b> mapping row(s) will be permanently deleted.<br><br>" +
+                                "These rows are shared with <b>Rixo Price Map</b>. Deleting here also removes them there." +
+                                levelNote +
+                                "<br><br>This cannot be undone. Are you sure?",
+                        onConfirm = {
+                            fun deleteNext(idx: Int) {
+                                if (idx >= rowsToDelete.size) {
+                                    refreshSupplierMapTreeData()
+                                    return
+                                }
+                                smDeleteMappingRow(rowsToDelete[idx]) { deleteNext(idx + 1) }
+                            }
+                            deleteNext(0)
+                        },
+                    )
                 }
             }
             return@click
@@ -1508,8 +1660,28 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
             ev.stopPropagation()
             val row = leafDelete.closest(".rixo-tree-leaf-row--selectable") as? HTMLElement ?: return@click
             val id = row.getAttribute("data-mapping-id")?.toLongOrNull() ?: return@click
-            if (!window.confirm("Delete this mapping row?")) return@click
-            smDeleteMappingRow(id) { refreshSupplierMapTreeData() }
+            val typeLabel = row.getAttribute("data-mapping-type")?.trim().orEmpty()
+            val baseRow = smTreeRowsCache.firstOrNull { it.id.toLongOrNull() == id }
+            val path = if (baseRow != null) {
+                listOf(
+                    baseRow.supplier,
+                    baseRow.venueId ?: "",
+                    baseRow.stock,
+                    baseRow.pol ?: "",
+                    baseRow.company,
+                ).filter { it.isNotBlank() }.joinToString(" → ") { escapeHtml(it) }
+            } else ""
+            val typeDisp = typeLabel.ifBlank { "—" }
+            showRixoMappingDeleteConfirm(
+                title = "Delete mapping?",
+                messageHtml =
+                    "Vehicle type: <b>${escapeHtml(typeDisp)}</b>" +
+                        (if (baseRow != null) " · Price: <b>${escapeHtml(smFormatPriceDisplay(baseRow.price))}</b>" else "") +
+                        (if (path.isNotEmpty()) "<br>Path: $path" else "") +
+                        "<br><br>This row is shared with <b>Rixo Price Map</b>. It will disappear there too." +
+                        "<br><br>This cannot be undone. Are you sure?",
+                onConfirm = { smDeleteMappingRow(id) { refreshSupplierMapTreeData() } },
+            )
             return@click
         }
 
@@ -1547,6 +1719,7 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
             val prefix = rowEl.getAttribute("data-inline-field-id") ?: return@click
             val vtype = getEditableComboboxValue("${prefix}_type").trim()
             val price = (document.getElementById("${prefix}_price") as? HTMLInputElement)?.value?.trim().orEmpty()
+            if (smRejectIfSemicolon(vtype, price)) return@click
             if (vtype.isEmpty()) {
                 showMessage("Vehicle type is required", "error")
                 return@click
@@ -1678,12 +1851,14 @@ fun showSupplierMapTreePage() {
                 <h2 class="rixo-tree-title">Supplier Map</h2>
                 <button type="button" id="smTopAddBtn" class="rixo-tree-btn rixo-tree-btn--add">+ Add</button>
             </div>
+            ${smSearchToolbarHtml()}
             <div id="supplierMapTreeRoot" class="rixo-tree-root rixo-tree-root--supplier-map">
                 <div class="rixo-tree-loading">Loading…</div>
             </div>
         </div>
     """.trimIndent()
     bindSmTopAddButton()
+    bindSmSearchToolbar()
     loadSupplierMapTree()
 }
 

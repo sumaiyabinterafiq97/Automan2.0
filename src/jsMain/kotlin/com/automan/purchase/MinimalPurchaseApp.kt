@@ -5627,6 +5627,7 @@ fun createApp(root: Element) {
                                 <button id="masterConsigneeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee Map</button>
                                 <button id="masterShippingChargeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping Charge Map</button>
                                 <button id="masterSupplierMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
+                                <button id="masterRixoPriceMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Price Map</button>
                             </div>
                         </div>
                         
@@ -6139,6 +6140,10 @@ fun createApp(root: Element) {
         closeSidebar()
         navigateToApp("/master/supplier-map")
     })
+    document.getElementById("masterRixoPriceMapBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        navigateToApp("/master/rixo-mapping")
+    })
     
     // Load initial data only if we're on the purchase list page
     if (routeEquals("/purchase")) {
@@ -6390,6 +6395,12 @@ fun updateContent(root: Element) {
         }
         routeAtStartsWith(route, "master/supplier-map") -> {
             showSupplierMapTreePage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        routeAtStartsWith(route, "master/rixo-mapping") -> {
+            showRixoPriceMapTreePage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"

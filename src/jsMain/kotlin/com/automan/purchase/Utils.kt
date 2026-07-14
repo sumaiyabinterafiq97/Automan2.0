@@ -4,7 +4,9 @@ import com.automan.purchase.models.PurchaseResponse
 import kotlinx.browser.document
 import kotlinx.browser.window
 import kotlin.js.Date
+import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLInputElement
+import org.w3c.dom.events.Event
 
 /** Invoice line amount when CNF/FOB totals are not stored on the purchase row. */
 fun purchaseInvoiceLineAmountYenFromDynamic(purchase: dynamic): Double {
@@ -1714,6 +1716,53 @@ fun validateAndFormatCurrencyInput(field: HTMLInputElement) {
     
     // Format with commas
     field.value = formatCurrency(numericValue)
+}
+
+/**
+ * Modal confirm for Rixo mapping / Supplier Map / Rixo Price Map branch & leaf deletes.
+ * Prefer this over [window.confirm].
+ */
+fun showRixoMappingDeleteConfirm(
+    title: String,
+    messageHtml: String,
+    onConfirm: () -> Unit,
+) {
+    document.getElementById("rixoMappingDeleteConfirmOverlay")?.remove()
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = "rixoMappingDeleteConfirmOverlay"
+    overlay.setAttribute(
+        "style",
+        "position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;",
+    )
+    overlay.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="rixoMappingDeleteConfirmTitle"
+             style="background:#fff;border-radius:12px;box-shadow:0 18px 50px rgba(15,23,42,0.28);
+             max-width:480px;width:100%;padding:20px 22px;box-sizing:border-box;">
+            <h3 id="rixoMappingDeleteConfirmTitle" style="margin:0 0 12px;font-size:17px;color:#0f172a;">${escapeHtml(title)}</h3>
+            <div style="font-size:14px;line-height:1.5;color:#334155;margin-bottom:18px;">$messageHtml</div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;">
+                <button type="button" id="rixoMappingDeleteConfirmCancel"
+                    style="padding:8px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;">Cancel</button>
+                <button type="button" id="rixoMappingDeleteConfirmOk"
+                    style="padding:8px 14px;border:none;border-radius:8px;background:#dc2626;color:#fff;cursor:pointer;font-weight:600;">Delete</button>
+            </div>
+        </div>
+    """.trimIndent()
+    fun close() {
+        overlay.remove()
+    }
+    val cancelBtn = overlay.querySelector("#rixoMappingDeleteConfirmCancel") as? HTMLElement
+    val okBtn = overlay.querySelector("#rixoMappingDeleteConfirmOk") as? HTMLElement
+    cancelBtn?.addEventListener("click", { _: Event -> close() })
+    okBtn?.addEventListener("click", { _: Event ->
+        close()
+        onConfirm()
+    })
+    overlay.addEventListener("click", { ev: Event ->
+        if (ev.target == overlay) close()
+    })
+    document.body?.appendChild(overlay)
 }
 
 // Message display utility

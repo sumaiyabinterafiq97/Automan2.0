@@ -2,8 +2,10 @@ package com.automan.backend.service
 
 import com.automan.backend.model.RixoMapping
 import com.automan.backend.repository.RixoMappingRepository
+import com.automan.backend.util.RixoMappingSemicolon
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
 
 @Service
 class RixoMappingService(
@@ -17,6 +19,15 @@ class RixoMappingService(
         val pol: String? = null,
         val supportedVehicleType: String?,
         val rixoPrice: String?,
+    )
+
+    data class NormalizePolResult(
+        val dryRun: Boolean,
+        val scannedMultiPol: Int,
+        val inserted: Int,
+        val skippedDuplicates: Int,
+        val deletedOriginals: Int,
+        val sampleOriginalIds: List<Long>,
     )
 
     fun findRixoPrice(
@@ -106,11 +117,21 @@ class RixoMappingService(
                 pol = pol?.trim()?.takeIf { it.isNotEmpty() } ?: existing.pol,
                 createdAt = created,
             )
+            "RPM_STOCK" -> existing.copy(
+                stockLocation = stockLocation!!.trim(),
+                venueId = venueId?.trim()?.takeIf { it.isNotEmpty() } ?: existing.venueId,
+                pol = pol?.trim()?.takeIf { it.isNotEmpty() } ?: existing.pol,
+                createdAt = created,
+            )
+            "RPM_SUPPLIER" -> existing.copy(
+                auctionName = auctionName!!.trim().takeIf { it.isNotEmpty() },
+                createdAt = created,
+            )
             "VENUE" -> existing.copy(
                 venueId = venueId!!.trim().takeIf { it.isNotEmpty() },
                 createdAt = created,
             )
-            "POL" -> existing.copy(
+            "POL", "RPM_POL" -> existing.copy(
                 pol = pol!!.trim().takeIf { it.isNotEmpty() },
                 createdAt = created,
             )
@@ -118,7 +139,7 @@ class RixoMappingService(
                 rixoCompany = rixoCompany!!.trim(),
                 createdAt = created,
             )
-            "FULL" -> existing.copy(
+            "FULL", "RPM_FULL" -> existing.copy(
                 supportedVehicleType = supportedVehicleType!!.trim(),
                 rixoPrice = rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
                 createdAt = created,
@@ -163,6 +184,83 @@ class RixoMappingService(
         if (!rixoMappingRepository.existsById(id)) return false
         rixoMappingRepository.deleteById(id)
         return true
+    }
+
+    /**
+     * Surgical expand: rows whose [RixoMapping.pol] contains `;` become one row per token.
+     * Single-POL rows (client-added or otherwise) are never modified.
+     * Never truncates the table.
+     */
+    @Transactional
+    fun normalizePolSemicolons(dryRun: Boolean = true): NormalizePolResult {
+        val all = rixoMappingRepository.findAll()
+        val keySet = all.map { rowIdentityKey(it) }.toMutableSet()
+        val multiPol = all.filter { RixoMappingSemicolon.splitTokens(it.pol).size >= 2 }
+            .sortedBy { it.id ?: 0L }
+
+        var inserted = 0
+        var skippedDuplicates = 0
+        var deletedOriginals = 0
+        val sampleIds = multiPol.mapNotNull { it.id }.take(20)
+        val toInsert = mutableListOf<RixoMapping>()
+        val toDeleteIds = mutableListOf<Long>()
+
+        for (source in multiPol) {
+            val tokens = RixoMappingSemicolon.splitTokens(source.pol)
+            var ensuredTokenRow = false
+            for (token in tokens) {
+                val clone = source.copy(id = null, pol = token)
+                val key = rowIdentityKey(clone)
+                if (keySet.contains(key)) {
+                    skippedDuplicates++
+                    ensuredTokenRow = true
+                    continue
+                }
+                keySet.add(key)
+                toInsert.add(clone)
+                inserted++
+                ensuredTokenRow = true
+            }
+            val sourceId = source.id
+            if (ensuredTokenRow && sourceId != null) {
+                toDeleteIds.add(sourceId)
+                deletedOriginals++
+                // Remove original multi-POL identity so re-runs stay clean
+                keySet.remove(rowIdentityKey(source))
+            }
+        }
+
+        if (!dryRun) {
+            if (toInsert.isNotEmpty()) {
+                rixoMappingRepository.saveAll(toInsert)
+            }
+            for (id in toDeleteIds) {
+                rixoMappingRepository.deleteById(id)
+            }
+        }
+
+        return NormalizePolResult(
+            dryRun = dryRun,
+            scannedMultiPol = multiPol.size,
+            inserted = inserted,
+            skippedDuplicates = skippedDuplicates,
+            deletedOriginals = deletedOriginals,
+            sampleOriginalIds = sampleIds,
+        )
+    }
+
+    /** Case-insensitive identity for dedupe across expand (includes pol + vehicle + price). */
+    private fun rowIdentityKey(row: RixoMapping): String {
+        fun n(s: String?) = s?.trim()?.lowercase().orEmpty()
+        return listOf(
+            n(row.rixoCompany),
+            n(row.auctionName),
+            n(row.stockLocation),
+            n(row.venueId),
+            n(row.pol),
+            n(row.supportedVehicleType),
+            n(row.rixoPrice),
+        ).joinToString("\u0001")
     }
 }
 

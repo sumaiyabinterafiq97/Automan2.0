@@ -8351,6 +8351,102 @@ input.client-form-readonly:read-only {
     align-items: end;
     margin-bottom: 4px;
 }
+/* Shared search + column sort for Supplier Map / Rixo Price Map trees */
+#supplierMapTreePage .tree-map-search-toolbar,
+#rixoPriceMapTreePage .tree-map-search-toolbar {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 0 0 16px;
+    box-sizing: border-box;
+}
+#supplierMapTreePage .tree-map-search-pill,
+#rixoPriceMapTreePage .tree-map-search-pill {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    max-width: 720px;
+    border: 1px solid #e5e7eb;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+#supplierMapTreePage .tree-map-search-icon,
+#rixoPriceMapTreePage .tree-map-search-icon {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: #9ca3af;
+    display: flex;
+}
+#supplierMapTreePage .tree-map-search-pill input,
+#rixoPriceMapTreePage .tree-map-search-pill input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px 40px 12px 44px;
+    border: none;
+    font-size: 14px;
+    background: transparent;
+    border-radius: 999px;
+    outline: none;
+    color: #111827;
+}
+#supplierMapTreePage .tree-map-search-clear,
+#rixoPriceMapTreePage .tree-map-search-clear {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 8px;
+}
+#supplierMapTreePage .tree-map-search-clear:hover,
+#rixoPriceMapTreePage .tree-map-search-clear:hover {
+    color: #4b5563;
+    background: #f3f4f6;
+}
+#supplierMapTreePage .rixo-tree-header--with-sort,
+#rixoPriceMapTreePage .rixo-tree-header--with-sort {
+    padding-left: 10px;
+}
+#supplierMapTreePage .tree-map-col-sort-btn,
+#rixoPriceMapTreePage .tree-map-col-sort-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    margin: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #64748b;
+    font-family: inherit;
+}
+#supplierMapTreePage .tree-map-col-sort-btn:hover,
+#rixoPriceMapTreePage .tree-map-col-sort-btn:hover {
+    color: #334155;
+}
+#supplierMapTreePage .tree-map-col-sort-icon,
+#rixoPriceMapTreePage .tree-map-col-sort-icon {
+    font-size: 13px;
+    line-height: 1;
+    color: #94a3b8;
+}
+
 .supplier-map-tree-headers {
     min-width: 1380px;
 }
@@ -10169,6 +10265,540 @@ input.client-form-readonly:read-only {
     }
 
     #supplierMapTreePage .sm-full-row-add-save {
+        padding: 8px 14px;
+        font-size: 12px;
+    }
+}
+
+.rixo-price-map-tree-headers {
+    min-width: 1280px;
+}
+
+/* Rixo Price Map tree — 6-col company → supplier → stock → pol → vehicle + price */
+@media (max-width: 1024px) {
+    #rixoPriceMapTreePage .rixo-tree-headers {
+        display: none;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree {
+        min-width: 0;
+        width: 100%;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-node {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper,
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper--company,
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper--stock,
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper--pol,
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper--field {
+        width: 100%;
+        max-width: 100%;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level="rixo_company"]::before { content: "Rixo Company"; }
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level="supplier"]::before { content: "Supplier Name"; }
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level="stock"]::before { content: "Stock Location"; }
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level="pol"]::before { content: "POL"; }
+
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level]::before {
+        display: block;
+        grid-column: 1 / -1;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        margin-bottom: 4px;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper > .rixo-tree-card {
+        grid-column: 1;
+        grid-row: 2;
+        width: 100% !important;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper > .rixo-tree-card-menu-wrap {
+        grid-column: 2;
+        grid-row: 2;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-add {
+        background: #fff;
+        border: 1px solid rgba(76, 201, 255, 0.45);
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-add-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        margin-bottom: 0;
+        box-shadow: none;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-col::before {
+        display: block;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #64748b;
+        margin-bottom: 4px;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-col--company::before { content: "Rixo Company"; }
+    #rixoPriceMapTreePage .rpm-tree-full-row-col--supplier::before { content: "Supplier Name"; }
+    #rixoPriceMapTreePage .rpm-tree-full-row-col--stock::before { content: "Stock Location"; }
+    #rixoPriceMapTreePage .rpm-tree-full-row-col--pol::before { content: "POL"; }
+    #rixoPriceMapTreePage .rpm-tree-full-row-col--vtype::before { content: "Vehicle Type"; }
+    #rixoPriceMapTreePage .rpm-tree-full-row-col--price::before { content: "Rixo Price"; }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-actions {
+        display: flex;
+        flex-direction: row;
+        justify-content: flex-end;
+        gap: 8px;
+        width: 100%;
+    }
+}
+
+#rixoPriceMapTreePage .rixo-tree-root--rixo-price-map {
+    overflow-x: visible;
+    width: 100%;
+}
+
+@media (min-width: 1025px) {
+    #rixoPriceMapTreePage.rixo-tree-page {
+        --rpm-col-company: minmax(110px, 1.1fr);
+        --rpm-col-supplier: minmax(110px, 1.1fr);
+        --rpm-col-stock: minmax(100px, 1fr);
+        --rpm-col-pol: minmax(80px, 0.85fr);
+        --rpm-col-vtype: minmax(100px, 1fr);
+        --rpm-col-price: minmax(80px, 0.85fr);
+        --rpm-col-gap: 8px;
+        --rpm-card-company: 140px;
+        --rpm-card-stock: 120px;
+        --rpm-card-pol: 100px;
+        max-width: none;
+        width: 100%;
+        padding: 8px 16px 32px;
+        box-sizing: border-box;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-root--rixo-price-map {
+        overflow-x: auto;
+        width: 100%;
+    }
+
+    #rixoPriceMapTreePage .rixo-price-map-tree {
+        min-width: 0;
+        width: 100%;
+    }
+
+    #rixoPriceMapTreePage .rixo-price-map-tree-headers {
+        min-width: 0;
+        width: 100%;
+        display: grid;
+        grid-template-columns:
+            var(--rpm-col-company)
+            var(--rpm-col-supplier)
+            var(--rpm-col-stock)
+            var(--rpm-col-pol)
+            var(--rpm-col-vtype)
+            var(--rpm-col-price);
+        gap: var(--rpm-col-gap);
+        padding-right: 4px;
+        box-sizing: border-box;
+        align-items: end;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-header {
+        font-size: 10px;
+        letter-spacing: 0.04em;
+        line-height: 1.25;
+        overflow: hidden;
+        word-break: break-word;
+        hyphens: auto;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+        text-align: left;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-header:nth-child(1) {
+        padding-left: 8px !important;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-header:nth-child(6).rixo-tree-header--price {
+        text-align: right;
+        padding-right: 4px !important;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-node {
+        gap: 0;
+    }
+
+    #rixoPriceMapTreePage .rixo-price-map-tree > .rixo-tree-node {
+        display: grid;
+        grid-template-columns:
+            var(--rpm-col-company)
+            var(--rpm-col-supplier)
+            var(--rpm-col-stock)
+            var(--rpm-col-pol)
+            var(--rpm-col-vtype)
+            var(--rpm-col-price);
+        column-gap: var(--rpm-col-gap);
+        row-gap: 8px;
+        align-items: start;
+        width: 100%;
+        max-width: 100%;
+        flex: none;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    #rixoPriceMapTreePage .rixo-price-map-tree > .rixo-tree-node > .rixo-tree-card-wrapper {
+        grid-column: 1;
+        width: auto !important;
+        max-width: none !important;
+        flex: none !important;
+        min-width: 0;
+    }
+
+    #rixoPriceMapTreePage .rixo-price-map-tree > .rixo-tree-node > .rixo-tree-children {
+        grid-column: 2 / -1;
+        display: grid;
+        grid-template-columns: subgrid;
+        margin: 0;
+        padding: 0 0 6px;
+        gap: 10px;
+        min-width: 0;
+        flex: none;
+        max-width: none;
+        position: relative;
+        box-sizing: border-box;
+    }
+
+    #rixoPriceMapTreePage .rixo-price-map-tree > .rixo-tree-col-footer {
+        width: auto;
+        max-width: none;
+        justify-self: start;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-children > .rixo-tree-node {
+        display: grid;
+        grid-template-columns: subgrid;
+        grid-column: 1 / -1;
+        column-gap: var(--rpm-col-gap);
+        row-gap: 8px;
+        align-items: start;
+        width: auto;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-children > .rixo-tree-node > .rixo-tree-card-wrapper {
+        grid-column: 1;
+        width: auto !important;
+        max-width: none !important;
+        flex: none !important;
+        min-width: 0;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-children > .rixo-tree-node > .rixo-tree-children {
+        grid-column: 2 / -1;
+        display: grid;
+        grid-template-columns: subgrid;
+        margin: 0;
+        padding: 0 0 6px;
+        gap: 10px;
+        min-width: 0;
+        flex: none;
+        max-width: none;
+        position: relative;
+        box-sizing: border-box;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-children > .rixo-tree-col-footer,
+    #rixoPriceMapTreePage .rixo-tree-children > .rixo-tree-node > .rixo-tree-inline-add-outer,
+    #rixoPriceMapTreePage .rixo-tree-children > .rixo-tree-inline-add-outer {
+        grid-column: 1;
+        width: auto;
+        max-width: none;
+        min-width: 0;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-children::before {
+        left: -6px;
+        top: 4px;
+        bottom: 4px;
+        opacity: 0.7;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-children > .rixo-tree-node::before {
+        left: -6px;
+        width: 6px;
+        top: 18px;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-children > .rixo-tree-col-footer::before {
+        left: -6px;
+        width: 6px;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper {
+        flex-shrink: 0;
+        flex-grow: 0;
+        min-width: 0;
+        box-sizing: border-box;
+        width: auto;
+        max-width: none;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper--company,
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper--stock,
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper--pol,
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper--field {
+        width: auto !important;
+        max-width: none !important;
+        flex: none !important;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-card--company,
+    #rixoPriceMapTreePage .rixo-tree-card--stock {
+        width: 100% !important;
+        min-width: 0;
+        padding: 5px 6px;
+        min-height: 36px;
+        gap: 6px;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+        font-size: 12px;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-wrap {
+        grid-column: 1 / -1;
+        display: block;
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        flex: none;
+        box-sizing: border-box;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 0;
+        width: 100%;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-row {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 8px 10px;
+        box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+        gap: 0;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-row--selected {
+        border-color: #4CC9FF;
+        box-shadow: 0 0 0 2px rgba(76, 201, 255, 0.25);
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-cells {
+        display: block;
+        width: 100%;
+        min-width: 0;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-view {
+        display: grid;
+        grid-template-columns: 1fr 0.85fr;
+        column-gap: var(--rpm-col-gap);
+        align-items: center;
+        width: 100%;
+        min-width: 0;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-type {
+        font-size: 12px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+        background: none;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-price-cell {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 6px;
+        max-width: none;
+        flex-shrink: 0;
+        min-width: 0;
+        background: none;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-price {
+        font-size: 12px;
+        white-space: nowrap;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-edit {
+        display: none;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-row--inline-editing .rixo-tree-leaf-view {
+        display: none;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-leaf-row--inline-editing .rixo-tree-leaf-edit {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-col-footer,
+    #rixoPriceMapTreePage .rixo-tree-add-wrap {
+        flex-shrink: 0;
+        min-width: 0;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-add-btn {
+        padding: 6px 10px;
+        font-size: 11px;
+    }
+
+    #rixoPriceMapTreePage .rixo-tree-children > .rixo-tree-add-wrap--leaf {
+        grid-column: 1 / -1;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-add {
+        margin: 8px 0 14px;
+        width: 100%;
+        box-sizing: border-box;
+        background: #fff;
+        border: 1px solid rgba(76, 201, 255, 0.45);
+        border-radius: 12px;
+        padding: 10px 12px;
+        box-shadow: 0 1px 6px rgba(15, 23, 42, 0.08);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-add-grid {
+        display: grid;
+        grid-template-columns:
+            var(--rpm-col-company)
+            var(--rpm-col-supplier)
+            var(--rpm-col-stock)
+            var(--rpm-col-pol)
+            var(--rpm-col-vtype)
+            var(--rpm-col-price);
+        gap: var(--rpm-col-gap);
+        align-items: center;
+        width: 100%;
+        box-sizing: border-box;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-col {
+        min-width: 0;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-col .rixo-tree-card-combobox-wrap,
+    #rixoPriceMapTreePage .rpm-tree-full-row-col > div {
+        width: 100%;
+        min-width: 0;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-col input[type="text"] {
+        font-size: 12px !important;
+        min-height: 32px !important;
+        padding: 6px 8px !important;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-col .rixo-tree-card-combobox-wrap input[type="text"] {
+        padding-right: 32px !important;
+    }
+
+    #rixoPriceMapTreePage .rpm-full-row-price-input {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 32px;
+        padding: 6px 8px;
+        border: 1px solid #d1d5db;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    #rixoPriceMapTreePage .rpm-tree-full-row-actions {
+        display: flex;
+        flex-direction: row;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        flex-shrink: 0;
+    }
+
+    #rixoPriceMapTreePage .rpm-full-row-add-cancel {
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        color: #475569;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    #rixoPriceMapTreePage .rpm-full-row-add-save {
         padding: 8px 14px;
         font-size: 12px;
     }
