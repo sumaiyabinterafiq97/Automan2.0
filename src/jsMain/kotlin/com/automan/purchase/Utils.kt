@@ -726,7 +726,7 @@ fun purchaseListColumnLabels(): Map<String, String> {
         "totalPrice" to "Total Price",
         "paymentDate" to "Payment Date",
         "rixoRequested" to "Rixo Requested",
-        "rixoConfirmed" to "Rixo Sent",
+        "rixoConfirmed" to "Rixo Confirmed",
         "rixoPrice" to "Rixo Price",
         "notes" to "Notes",
         "shipmentDate" to "Shipment Date",

@@ -1281,7 +1281,7 @@ fun showShippingHistoryPage() {
             .shipping-history-toolbar{
                 display:grid;
                 grid-template-columns:1fr;
-                grid-template-areas:"title" "search";
+                grid-template-areas:"title" "search" "actions";
                 gap:12px;
                 margin-bottom:16px;
                 align-items:center;
@@ -1291,6 +1291,9 @@ fun showShippingHistoryPage() {
             .shipping-search input{width:100%;box-sizing:border-box;padding:11px 36px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
             .shipping-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;}
             .shipping-search-clear:hover{background:#f3f4f6;color:#111827;}
+            .shipping-history-actions{grid-area:actions;display:flex;justify-content:flex-end;align-items:center;gap:10px;}
+            .shipping-export-btn{padding:8px 16px;background-color:#198754;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap;}
+            .shipping-export-btn:disabled{opacity:0.7;cursor:not-allowed;}
             .shipping-history-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
             table.purchase-list-table thead th{position:sticky;top:0;z-index:1;}
             .shipping-history-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
@@ -1308,11 +1311,12 @@ fun showShippingHistoryPage() {
                 .shipping-history-toolbar{gap:14px;margin-bottom:14px;}
                 .shipping-history-title{font-size:17px;}
                 .shipping-search input{font-size:13px;padding:10px 34px 10px 38px;}
+                .shipping-history-actions{justify-self:end;}
             }
             @media (min-width: 1025px){
                 .shipping-history-toolbar{
-                    grid-template-columns:auto 1fr minmax(200px,25%);
-                    grid-template-areas:"title . search";
+                    grid-template-columns:auto 1fr minmax(200px,25%) auto;
+                    grid-template-areas:"title . search actions";
                     column-gap:12px;
                     row-gap:0;
                 }
@@ -1328,6 +1332,15 @@ fun showShippingHistoryPage() {
                     </span>
                     <input type="text" id="shippingHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search country, consignee, chassis, client…" aria-label="Search shipping history" />
                     <button type="button" id="shippingHistorySearchClearBtn" class="shipping-search-clear" title="Clear search" aria-label="Clear search">×</button>
+                </div>
+                <div class="shipping-history-actions">
+                    <button type="button" id="exportShippingHistoryExcelBtn" class="shipping-export-btn" title="Export shipping history to Excel">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
+                            <path d="M14 2v6h6M8 13h8M8 17h8M8 9h2" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                        </svg>
+                        Export Excel
+                    </button>
                 </div>
             </div>
             <div id="shippingHistoryTableWrap">
@@ -1348,6 +1361,9 @@ fun showShippingHistoryPage() {
     document.getElementById("shippingHistorySearchClearBtn")?.addEventListener("click", { _: Event ->
         searchInput?.value = ""
         renderShippingHistoryTableFromCache()
+    })
+    document.getElementById("exportShippingHistoryExcelBtn")?.addEventListener("click", { _: Event ->
+        exportShippingHistoryToExcel()
     })
 
     setupShippingHistoryResizeListener()
@@ -2304,6 +2320,53 @@ fun exportPurchasesToExcel() {
                 a.click()
                 document.body?.removeChild(a)
                 showMessage("Purchase list exported successfully", "success")
+            } finally {
+                js("URL.revokeObjectURL(url)")
+            }
+        } catch (e: dynamic) {
+            ErrorHandler.showError("Export failed: ${e.toString()}")
+        } finally {
+            if (btn != null) {
+                btn.disabled = false
+                btn.style.opacity = "1"
+                if (originalHtml != null) btn.innerHTML = originalHtml
+                else btn.textContent = "Export Excel"
+            }
+        }
+    }
+}
+
+fun exportShippingHistoryToExcel() {
+    val btn = document.getElementById("exportShippingHistoryExcelBtn") as? HTMLButtonElement
+    val originalHtml = btn?.innerHTML
+    if (btn != null) {
+        btn.disabled = true
+        btn.style.opacity = "0.7"
+        btn.textContent = "Exporting…"
+    }
+    MainScope().launch {
+        try {
+            showMessage("Preparing Excel export…", "info")
+            val response = window.fetch(apiUrl("shipping-history/export/xlsx")).await()
+            if (!response.ok) {
+                val errorText = response.text().await()
+                ErrorHandler.showError("Export failed: ${ErrorHandler.extractErrorMessage(errorText)}")
+                return@launch
+            }
+            val blob = response.blob().await()
+            val url = js("URL.createObjectURL(blob)") as String
+            try {
+                val disposition = response.headers.get("Content-Disposition") ?: ""
+                val filenameMatch = Regex("filename=\"?([^\";]+)\"?").find(disposition)
+                val filename = filenameMatch?.groupValues?.get(1)
+                    ?: "shipping_history_export_${js("Date.now()")}.xlsx"
+                val a = document.createElement("a") as HTMLAnchorElement
+                a.href = url
+                a.download = filename
+                document.body?.appendChild(a)
+                a.click()
+                document.body?.removeChild(a)
+                showMessage("Shipping history exported successfully", "success")
             } finally {
                 js("URL.revokeObjectURL(url)")
             }

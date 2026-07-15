@@ -88,7 +88,7 @@ class PurchaseExportService(
             return
         }
         when (kind) {
-            PurchaseExportCellKind.STRING -> cell.setCellValue(raw.toString())
+            PurchaseExportCellKind.STRING -> cell.setCellValue(clipExcelText(raw.toString()))
             PurchaseExportCellKind.INTEGER -> {
                 cell.cellType = CellType.NUMERIC
                 cell.setCellValue((raw as Number).toLong().toDouble())
@@ -101,7 +101,7 @@ class PurchaseExportService(
                     else -> {
                         val parsed = parseMoney(raw.toString())
                         if (parsed != null) cell.setCellValue(parsed)
-                        else cell.setCellValue(raw.toString())
+                        else cell.setCellValue(clipExcelText(raw.toString()))
                     }
                 }
             }
@@ -111,9 +111,20 @@ class PurchaseExportService(
                     is LocalDateTime -> TS_FORMAT.format(raw)
                     else -> raw.toString()
                 }
-                cell.setCellValue(text)
+                cell.setCellValue(clipExcelText(text))
             }
         }
+    }
+
+    /**
+     * Excel / Apache POI reject string cells longer than 32,767 chars
+     * (common with hydrated Car Pictures JSON). Truncate so export can finish.
+     */
+    private fun clipExcelText(value: String): String {
+        if (value.length <= EXCEL_MAX_CELL_CHARS) return value
+        val marker = EXCEL_TRUNCATED_MARKER
+        val keep = EXCEL_MAX_CELL_CHARS - marker.length
+        return value.take(keep) + marker
     }
 
     private fun parseMoney(raw: String): Double? =
@@ -199,6 +210,9 @@ class PurchaseExportService(
     companion object {
         private const val EXPORT_PAGE_SIZE = 500
         private const val SXSSF_ROW_WINDOW = 200
+        /** Apache POI / Excel hard limit for text cell content. */
+        private const val EXCEL_MAX_CELL_CHARS = 32767
+        private const val EXCEL_TRUNCATED_MARKER = "…[truncated]"
         private val TS_FORMAT: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE_TIME
     }
 }

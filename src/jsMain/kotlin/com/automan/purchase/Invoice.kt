@@ -1789,7 +1789,7 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
                                 if (info.isNotEmpty()) {
                                     showMessage(info, "info")
                                 }
-                                showMessage("Invoice saved successfully", "success")
+                                showSuccessModal("Saved", "Invoice saved successfully")
                             }
                         } else {
                             response.text().then { errorText ->

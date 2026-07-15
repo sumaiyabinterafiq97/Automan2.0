@@ -3,8 +3,11 @@ package com.automan.backend.controller
 import com.automan.backend.dto.ShippingHistoryBatchRequest
 import com.automan.backend.dto.ShippingHistoryDeleteBatchRequest
 import com.automan.backend.dto.ShippingHistoryRowDto
+import com.automan.backend.service.ShippingHistoryExportService
 import com.automan.backend.service.ShippingHistoryService
 import com.automan.backend.util.Logger
+import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.CrossOrigin
 import org.springframework.web.bind.annotation.DeleteMapping
@@ -14,16 +17,42 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 @RestController
 @RequestMapping("/shipping-history")
 @CrossOrigin(origins = ["http://localhost:8080", "http://localhost:8084", "http://localhost:8085", "http://localhost:8089", "http://localhost:8090", "http://localhost:9090"])
 class ShippingHistoryController(
     private val shippingHistoryService: ShippingHistoryService,
+    private val shippingHistoryExportService: ShippingHistoryExportService,
 ) {
 
     @GetMapping
     fun list(): List<ShippingHistoryRowDto> = shippingHistoryService.listAllRows()
+
+    /** Full-table shipping history export as Excel (.xlsx). */
+    @GetMapping("/export/xlsx")
+    fun exportShippingHistoryXlsx(): ResponseEntity<ByteArray> {
+        return try {
+            val bytes = shippingHistoryExportService.exportAllShippingHistoryXlsx()
+            val ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+            ResponseEntity.ok()
+                .header(
+                    "Content-Disposition",
+                    "attachment; filename=\"shipping_history_export_$ts.xlsx\"",
+                )
+                .contentType(
+                    MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ),
+                )
+                .body(bytes)
+        } catch (e: Exception) {
+            Logger.error("Shipping History XLSX export failed: ${e.message}", e)
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+        }
+    }
 
     @GetMapping("/for-invoice/client-names")
     fun clientNamesForInvoice(): ResponseEntity<Map<String, Any>> {

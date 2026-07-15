@@ -1979,8 +1979,8 @@ div[id$="_dropdown"] {
 }
 
 .rixo-textarea-contact {
-    background-color: #f9fafb;
-    cursor: default;
+    background-color: #ffffff;
+    cursor: text;
 }
 
 /* Contact Details Collapsible */

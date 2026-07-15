@@ -173,13 +173,18 @@ class PurchaseService(
 
     /**
      * Unique purchase dates from [Purchase.date] as ISO [yyyy-MM-dd], newest first, for Rixo Buying Date.
-     * Only includes dates that still have at least one purchase with rixo_requested not TRUE/1.
+     * Only includes dates that still have at least one purchase with rixo_requested not TRUE/1
+     * (same pending rule as [getPurchasesForRixo]).
      * Unparseable date strings are skipped.
      */
     fun getDistinctPurchaseDatesIso(): List<String> {
-        val raw = purchaseRepository.findDistinctPurchaseDateStrings()
-        val dates = raw.mapNotNull { PurchaseDateParseUtils.parseToLocalDate(it) }
-        return dates.distinct().sortedDescending().map { it.toString() }
+        return purchaseRepository.findAll().asSequence()
+            .filter { isRixoRequestedPendingForTransport(it.rixoRequested) }
+            .mapNotNull { PurchaseDateParseUtils.parseToLocalDate(it.date?.trim().orEmpty()) }
+            .distinct()
+            .sortedDescending()
+            .map { it.toString() }
+            .toList()
     }
 
     /**

@@ -8320,7 +8320,7 @@ fun createAddFormHTML(): String {
                         </div>
                     </div>
                     <div>
-                        <label>Rixo Sent</label>
+                        <label>Rixo Confirmed</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
                                 <input type="radio" name="statusRixoConfirmed" value="TRUE">
@@ -9864,7 +9864,7 @@ fun setupRixoDropdowns() {
                     }
                 }
                 
-                // Set Rixo Sent radio button
+                // Set Rixo Confirmed radio button
                 if (purchaseData.rixoConfirmed) {
                     var rixoConfirmedRadio = document.querySelector('input[name="editRixoConfirmed"][value="' + purchaseData.rixoConfirmed + '"]');
                     if (rixoConfirmedRadio) {
@@ -14350,26 +14350,41 @@ private fun mergeSpecWithPreserve(snapshot: dynamic?, mappingValue: String, key:
 private fun specPreserveOrEmpty(snapshot: dynamic?, key: String): String =
     if (snapshot == null) "" else preserveSpecFieldValue(snapshot, key)
 
+/** Result of merging chassis-map defaults with a preserve snapshot (named fields — no positional unpack). */
+private data class ChassisSpecPreserveMerged(
+    val fuel: String,
+    val wd: String,
+    val shift: String,
+    val grade: String,
+    val vehicleType: String,
+    val rank: String,
+    val color: String,
+    val driveType: String,
+    val cc: String,
+    val door: String,
+    val seat: String,
+)
+
 private fun applyChassisSpecPreserveMerge(
     preserveSnap: dynamic?,
     fuel: String, wd: String, shift: String, grade: String, vehicleType: String,
     rank: String, color: String, driveType: String, cc: String, door: String, seat: String,
-): Array<String> {
+): ChassisSpecPreserveMerged {
     if (preserveSnap == null) {
-        return arrayOf(fuel, wd, shift, grade, vehicleType, rank, color, driveType, cc, door, seat)
+        return ChassisSpecPreserveMerged(fuel, wd, shift, grade, vehicleType, rank, color, driveType, cc, door, seat)
     }
-    return arrayOf(
-        mergeSpecWithPreserve(preserveSnap, fuel, "fuel"),
-        mergeSpecWithPreserve(preserveSnap, wd, "wd"),
-        mergeSpecWithPreserve(preserveSnap, shift, "shift"),
-        mergeSpecWithPreserve(preserveSnap, grade, "grade"),
-        mergeSpecWithPreserve(preserveSnap, vehicleType, "vehicleType"),
-        mergeSpecWithPreserve(preserveSnap, rank, "rank"),
-        mergeSpecWithPreserve(preserveSnap, color, "color"),
-        mergeSpecWithPreserve(preserveSnap, driveType, "driveType"),
-        mergeSpecWithPreserve(preserveSnap, cc, "cc"),
-        mergeSpecWithPreserve(preserveSnap, door, "door"),
-        mergeSpecWithPreserve(preserveSnap, seat, "seat"),
+    return ChassisSpecPreserveMerged(
+        fuel = mergeSpecWithPreserve(preserveSnap, fuel, "fuel"),
+        wd = mergeSpecWithPreserve(preserveSnap, wd, "wd"),
+        shift = mergeSpecWithPreserve(preserveSnap, shift, "shift"),
+        grade = mergeSpecWithPreserve(preserveSnap, grade, "grade"),
+        vehicleType = mergeSpecWithPreserve(preserveSnap, vehicleType, "vehicleType"),
+        rank = mergeSpecWithPreserve(preserveSnap, rank, "rank"),
+        color = mergeSpecWithPreserve(preserveSnap, color, "color"),
+        driveType = mergeSpecWithPreserve(preserveSnap, driveType, "driveType"),
+        cc = mergeSpecWithPreserve(preserveSnap, cc, "cc"),
+        door = mergeSpecWithPreserve(preserveSnap, door, "door"),
+        seat = mergeSpecWithPreserve(preserveSnap, seat, "seat"),
     )
 }
 
@@ -14713,16 +14728,16 @@ fun fetchMappingByChassisOnly(
                 val merged = applyChassisSpecPreserveMerge(
                     preserveSnap, fuel, wd, shift, grade, "", rank, color, driveType, cc, door, seat,
                 )
-                fuel = merged[0]
-                wd = merged[1]
-                shift = merged[2]
-                grade = merged[3]
-                rank = merged[4]
-                color = merged[5]
-                driveType = merged[6]
-                cc = merged[7]
-                door = merged[8]
-                seat = merged[9]
+                fuel = merged.fuel
+                wd = merged.wd
+                shift = merged.shift
+                grade = merged.grade
+                rank = merged.rank
+                color = merged.color
+                driveType = merged.driveType
+                cc = merged.cc
+                door = merged.door
+                seat = merged.seat
             }
 
             if (isChassisUserChangeActive()) {
@@ -15112,16 +15127,16 @@ fun fetchMappingByChassisOnly(
                     val merged = applyChassisSpecPreserveMerge(
                         innerPreserveSnap, fuel, wd, shift, grade, "", rank, color, driveType, cc, door, seat,
                     )
-                    fuel = merged[0]
-                    wd = merged[1]
-                    shift = merged[2]
-                    grade = merged[3]
-                    rank = merged[4]
-                    color = merged[5]
-                    driveType = merged[6]
-                    cc = merged[7]
-                    door = merged[8]
-                    seat = merged[9]
+                    fuel = merged.fuel
+                    wd = merged.wd
+                    shift = merged.shift
+                    grade = merged.grade
+                    rank = merged.rank
+                    color = merged.color
+                    driveType = merged.driveType
+                    cc = merged.cc
+                    door = merged.door
+                    seat = merged.seat
                 }
 
                 // Overwrite dynamic variables on window so the rest of the setting code can read them
@@ -17633,7 +17648,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         </div>
                     </div>
                     <div>
-                        <label>Rixo Sent</label>
+                        <label>Rixo Confirmed</label>
                         <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
                             <label class="checkwrap">
                                 <input type="radio" name="editStatusRixoConfirmed" value="TRUE" ${if (purchaseData.rixoConfirmed == "TRUE") "checked" else ""}>
@@ -18955,7 +18970,7 @@ fun getFieldDisplayName(fieldName: String): String {
         "totalPrice" -> "Total Price"
         "paymentDate" -> "Payment Date"
         "rixoRequested" -> "Rixo Requested"
-        "rixoConfirmed" -> "Rixo Sent"
+        "rixoConfirmed" -> "Rixo Confirmed"
         "rixoPrice" -> "Rixo Price"
         "shipmentDate" -> "Shipment Date"
         "blNo" -> "BL No"
@@ -21826,7 +21841,7 @@ fun showMissingDataModal(purchases: List<dynamic>) {
                 "clientName" -> "Client Name"
                 "rixoCompany" -> "Rixo Company"
                 "rixoRequested" -> "Rixo Requested"
-                "rixoConfirmed" -> "Rixo Sent"
+                "rixoConfirmed" -> "Rixo Confirmed"
                 "rixoPrice" -> "Rixo Price"
 
 
@@ -22370,7 +22385,7 @@ fun showRixoRequestGeneratorPage() {
                                 </button>
                             </div>
                             <div class="rixo-contact-content" id="contactContent">
-                                <textarea id="contactDetails" rows="3" class="rixo-textarea rixo-textarea-contact" readonly>担当：芽紋 080-3918-1478
+                                <textarea id="contactDetails" rows="3" class="rixo-textarea rixo-textarea-contact">担当：芽紋 080-3918-1478
 FAX: 047-711-0409
 有限会社メモン</textarea>
                             </div>
@@ -24876,7 +24891,7 @@ fun generateRixoRequestPdfViaBackend(
             return@then Unit
         }
         if (!generatePdf) {
-            showMessage("Rixo history saved.", "success")
+            showSuccessModal("Saved", "Rixo history saved.")
             return@then Unit
         }
         response.blob().then { blob ->
@@ -26318,6 +26333,59 @@ fun showErrorModal(title: String, message: String) {
     })
     
     // Close modal on Escape key
+    fun handleEscape(event: Event) {
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            closeModal()
+            document.removeEventListener("keydown", ::handleEscape)
+        }
+    }
+    document.addEventListener("keydown", ::handleEscape)
+}
+
+/** Centered success confirmation (replaces small toasts for important save flows). */
+fun showSuccessModal(title: String, message: String) {
+    document.getElementById("successModal")?.remove()
+
+    val modal = document.createElement("div")
+    modal.id = "successModal"
+    modal.setAttribute(
+        "style",
+        "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10001; display: flex; justify-content: center; align-items: center;",
+    )
+
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 8px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" role="dialog" aria-modal="true" aria-labelledby="successModalTitle">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 id="successModalTitle" style="margin: 0; color: #198754; font-size: 24px;">$title</h2>
+                <button type="button" id="closeSuccessModal" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 0; width: 30px; height: 30px; line-height: 30px;" aria-label="Close">&times;</button>
+            </div>
+            <div style="margin-bottom: 25px; color: #333; font-size: 16px; line-height: 1.5;">
+                $message
+            </div>
+            <div style="text-align: right;">
+                <button type="button" id="okSuccessModalBtn" style="padding: 10px 24px; background-color: #198754; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: 500;">
+                    OK
+                </button>
+            </div>
+        </div>
+    """.trimIndent()
+
+    document.body?.appendChild(modal)
+
+    val closeModal = {
+        document.getElementById("successModal")?.remove()
+    }
+
+    document.getElementById("closeSuccessModal")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("okSuccessModalBtn")?.addEventListener("click", { _: Event -> closeModal() })
+
+    modal.addEventListener("click", { event ->
+        if (event.target == modal) {
+            closeModal()
+        }
+    })
+
     fun handleEscape(event: Event) {
         val keyEvent = event.asDynamic()
         if (keyEvent.key == "Escape") {

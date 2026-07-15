@@ -264,17 +264,6 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     )
     fun findInvoiceFilterCandidatesByClientName(@Param("clientName") clientName: String?): List<Purchase>
 
-    /**
-     * Distinct non-blank [Purchase.date] for Rixo "Buying date" — dates that still have at least one
-     * purchase in PURCHASED workflow (Rixo request not yet sent).
-     */
-    @Query(
-        "SELECT DISTINCT p.date FROM Purchase p " +
-            "WHERE p.date IS NOT NULL AND p.date <> '' " +
-            "AND (p.workflowStatus IS NULL OR p.workflowStatus = com.automan.backend.model.WorkflowStatus.PURCHASED)",
-    )
-    fun findDistinctPurchaseDateStrings(): List<String>
-
     /** Match a history chassis token to purchases: exact chassis match only. */
     @Query(
         "SELECT p FROM Purchase p WHERE " +
