@@ -2029,31 +2029,18 @@ fun showConsigneeMapPage() {
     val content = document.getElementById("content")!!
     consigneeMapLastRenderSlice = null
     content.innerHTML = """
-        <div id="consigneeMapRoot">
+        <div id="consigneeMapRoot" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; max-width: 1400px; margin: 0 auto; width: 100%; box-sizing: border-box;">
             <style>
-                #consigneeMapRoot{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:20px;width:100%;max-width:100%;box-sizing:border-box;}
-                .consignee-map-toolbar{display:grid;grid-template-columns:1fr 1fr;grid-template-areas:"title title" "search search" "colfilter add";gap:12px;margin-bottom:16px;align-items:center;}
-                .consignee-map-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;grid-area:title;text-align:center;letter-spacing:-0.01em;}
-                .consignee-map-col-btn{grid-area:colfilter;justify-self:start;}
-                .consignee-map-add-btn{grid-area:add;justify-self:end;}
-                .consignee-map-search-row{grid-area:search;grid-column:1/-1;display:flex;align-items:center;gap:10px;width:100%;min-width:0;}
-                .consignee-map-search{position:relative;flex:1;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
-                .consignee-map-search input{width:100%;box-sizing:border-box;padding:11px 38px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
-                .consignee-map-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:4px 8px;min-height:36px;min-width:36px;}
-                .consignee-map-search-clear:hover{background:#f3f4f6;color:#111827;}
-                .consignee-map-filter-wrap{position:relative;flex-shrink:0;}
-                .consignee-map-col-btn{padding:10px 14px;background:#6b7280;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px;}
-                .consignee-map-add-btn{padding:10px 16px;background:#059669;color:#fff;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600;min-height:40px;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;}
-                .consignee-map-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
-                #consigneeMapRoot table.purchase-list-table thead th{position:sticky;top:0;z-index:1;background:#f9fafb;}
-                .consignee-map-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
-                .consignee-map-empty strong{color:#0f172a;}
-                .consignee-map-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:14px 4px 4px;color:#475569;font-size:14px;}
                 #consigneeMapRoot .consignee-map-search-filter-opt:hover{background:#f3f4f6!important;}
                 #consigneeMapRoot .consignee-map-search-filter-opt--active{background:#eef2ff!important;font-weight:600;}
                 #consigneeMapRoot .consignee-map-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
                 #consigneeMapRoot #consigneeMapSearchFilterBtn:hover{background:#e8eaed!important;box-shadow:0 2px 8px rgba(0,0,0,0.08)!important;}
                 #consigneeMapRoot #consigneeMapSearchFilterBtn:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
+                .consignee-map-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
+                #consigneeMapRoot table.purchase-list-table thead th{position:sticky;top:0;z-index:1;background:#f9fafb;}
+                .consignee-map-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+                .consignee-map-empty strong{color:#0f172a;}
+                .consignee-map-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:14px 4px 4px;color:#475569;font-size:14px;}
                 #consigneeMapRoot .consignee-cards-container{display:flex;flex-direction:column;gap:12px;width:100%;max-width:100%;min-width:0;}
                 #consigneeMapRoot .consignee-card{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px;box-shadow:0 2px 4px rgba(0,0,0,0.08);max-width:100%;box-sizing:border-box;overflow:hidden;}
                 #consigneeMapRoot .consignee-card .card-header{display:flex;justify-content:flex-start;align-items:center;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #f0f0f0;gap:8px;max-width:100%;}
@@ -2066,44 +2053,31 @@ fun showConsigneeMapPage() {
                 #consigneeMapRoot .consignee-card .card-edit-btn{width:24px!important;height:24px!important;min-width:24px!important;min-height:24px!important;padding:4px!important;display:inline-flex;align-items:center;justify-content:center;background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 1px 3px rgba(76,201,255,0.25);flex-shrink:0;}
                 #consigneeMapRoot .consignee-cards-container .card-edit-btn svg,
                 #consigneeMapRoot .consignee-card .card-edit-btn svg{width:10px!important;height:10px!important;}
-                @media (max-width:1024px){
-                    #consigneeMapRoot{padding:14px;border-radius:14px;}
-                    .consignee-map-toolbar{gap:14px;margin-bottom:14px;}
-                    .consignee-map-title{font-size:17px;}
-                    .consignee-map-search input{font-size:13px;padding:10px 34px 10px 38px;}
-                }
                 @media (max-width:767px){
-                    .consignee-map-toolbar{grid-template-columns:1fr;grid-template-areas:"title" "colfilter" "search" "add";gap:12px;}
-                    .consignee-map-col-btn{justify-self:stretch;width:100%;max-width:100%;min-height:44px;}
-                    .consignee-map-add-btn{justify-self:stretch;width:100%;max-width:100%;min-height:44px;white-space:normal;text-align:center;}
-                }
-                @media (min-width:1025px){
-                    #consigneeMapRoot{max-width:1200px;margin:0 auto;}
-                    .consignee-map-toolbar{
-                        grid-template-columns:auto 1fr minmax(260px,32%);
-                        grid-template-areas:"title . search" "colfilter add .";
-                        column-gap:12px;
-                        row-gap:10px;
-                    }
-                    .consignee-map-title{text-align:left;justify-self:start;font-size:22px;}
-                    .consignee-map-col-btn,.consignee-map-add-btn{width:auto;white-space:nowrap;}
+                    #consigneeMapRoot{padding:14px;}
+                    #consigneeMapRoot .consignee-map-header-row{flex-direction:column;align-items:stretch;gap:12px;}
+                    #consigneeMapRoot .consignee-map-header-row h2{font-size:22px;}
+                    #consigneeMapRoot #consigneeColumnFilterBtn,
+                    #consigneeMapRoot #addConsigneeBtn{width:100%;justify-content:center;}
                 }
             </style>
-            <div class="consignee-map-toolbar">
-                <h2 class="consignee-map-title">Consignee Map</h2>
-                <button type="button" id="consigneeColumnFilterBtn" class="consignee-map-col-btn" title="Column filter">
+            <div class="consignee-map-header-row" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:12px;">
+                <h2 style="margin:0;color:#111827;font-size:28px;font-weight:700;">Consignee Map</h2>
+                <button type="button" id="consigneeColumnFilterBtn" title="Column filter" style="padding:8px 16px;background-color:#6c757d;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;gap:6px;flex-shrink:0;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/></svg>
                     Column Filter
                 </button>
-                <div class="consignee-map-search-row">
-                    <div class="consignee-map-search">
+            </div>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:20px;">
+                <div style="display:flex;align-items:center;gap:10px;width:100%;min-width:0;">
+                    <div style="position:relative;flex:1;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);">
                         <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:#9ca3af;display:flex;" aria-hidden="true">
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                         </span>
-                        <input type="text" id="consigneeMapSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Type to search…" aria-label="Search consignee map" />
-                        <button type="button" id="consigneeMapSearchClearBtn" class="consignee-map-search-clear" title="Clear search" aria-label="Clear search">×</button>
+                        <input type="text" id="consigneeMapSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Type to search…" aria-label="Search consignee map" style="width:100%;box-sizing:border-box;padding:11px 38px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;" />
+                        <button type="button" id="consigneeMapSearchClearBtn" title="Clear search" aria-label="Clear search" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:4px 8px;min-height:36px;min-width:36px;">×</button>
                     </div>
-                    <div class="consignee-map-filter-wrap">
+                    <div style="position:relative;flex-shrink:0;">
                         <span id="consigneeMapSearchFieldLabel" class="consignee-map-sr-only" aria-live="polite">All fields</span>
                         <button type="button" id="consigneeMapSearchFilterBtn" title="Filter — search in: All fields" aria-haspopup="true" aria-expanded="false" aria-label="Open filter for which field to search. Current: All fields." style="width:46px;height:46px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#4b5563;padding:0;">
                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -2123,7 +2097,11 @@ fun showConsigneeMapPage() {
                         </div>
                     </div>
                 </div>
-                <button type="button" id="addConsigneeBtn" class="consignee-map-add-btn">+ Add New Consignee</button>
+            </div>
+            <div style="margin-bottom:20px;">
+                <button type="button" id="addConsigneeBtn" style="padding:12px 24px;background-color:#059669;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600;box-shadow:0 2px 4px rgba(0,0,0,0.1);">
+                    + Add New Consignee
+                </button>
             </div>
             <div id="consigneeMapTableWrap">
                 <div id="consigneeTable">

@@ -1678,14 +1678,20 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
         
         val chAttr = chStr.replace("&", "&amp;").replace("\"", "&quot;")
         val historyId = carBookingShippingRecreateChassisToHistoryId[chStr.uppercase()] ?: 0L
+        val isSold = purchaseDynIsSold(purchase)
         val selectCellHtml = if (isCarBookingRecreateSession()) {
-            bookingListRemoveButtonHtml(purchaseId, chAttr, historyId)
+            if (isSold) {
+                bookingListSoldLockedHtml()
+            } else {
+                bookingListRemoveButtonHtml(purchaseId, chAttr, historyId)
+            }
         } else {
             """<input type="checkbox" class="car-checkbox" data-purchase-id="$purchaseId" data-chassis="$chAttr" aria-label="Select row">"""
         }
         val row = document.createElement("tr")
         row.setAttribute("data-purchase-id", purchaseId.toString())
         row.setAttribute("data-chassis", chStr)
+        if (isSold) row.setAttribute("data-sold", "true")
         row.innerHTML = """
             <td class="booking-td booking-td-select">
                 $selectCellHtml
@@ -2544,6 +2550,23 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
     }
 }
 
+private fun purchaseDynIsSold(p: dynamic): Boolean {
+    val ic = p.invoiceConfirmed
+    if (ic == true || ic == 1 || ic == "1" || ic?.toString()?.equals("true", ignoreCase = true) == true) {
+        return true
+    }
+    val sold = p.sold
+    if (sold == true || sold == 1 || sold == "1" || sold?.toString()?.equals("true", ignoreCase = true) == true) {
+        return true
+    }
+    val status = p.workflowStatus?.toString()?.trim()?.uppercase().orEmpty()
+    return status == "INVOICE_CONFIRMED"
+}
+
+private fun bookingListSoldLockedHtml(): String {
+    return """<span class="booking-row-sold-locked" title="Cannot remove: Sold is true" aria-label="Sold — cannot remove" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#f3f4f6;color:#6b7280;font-size:11px;font-weight:700;user-select:none;">Sold</span>"""
+}
+
 private fun bookingListRemoveButtonHtml(purchaseId: Long, chassisAttr: String, historyId: Long): String {
     val hid = if (historyId > 0L) historyId.toString() else ""
     return """<button type="button" class="booking-row-remove-btn" data-purchase-id="$purchaseId" data-chassis="$chassisAttr" data-history-id="$hid" title="Remove car" aria-label="Remove car" style="width:28px;height:28px;border:none;border-radius:6px;background:#fee2e2;color:#b91c1c;cursor:pointer;line-height:1;font-size:18px;font-weight:700;padding:0;display:inline-flex;align-items:center;justify-content:center;">×</button>"""
@@ -2582,15 +2605,34 @@ private fun handleRemoveChassisFromBookingRecreate(btn: HTMLButtonElement) {
         showMessage("Chassis is missing for this row.", "error")
         return
     }
+    val purchaseId = btn.getAttribute("data-purchase-id")?.toLongOrNull()
+    val soldFromList = carBookingDisplayedCars.any { car ->
+        val idMatch = purchaseId != null && (car.id as? Number)?.toLong() == purchaseId
+        val chMatch = car.chassis?.toString()?.trim()?.equals(chassis, ignoreCase = true) == true
+        (idMatch || chMatch) && purchaseDynIsSold(car)
+    }
+    if (soldFromList) {
+        val soldChassis = carBookingDisplayedCars.mapNotNull { car ->
+            val idMatch = purchaseId != null && (car.id as? Number)?.toLong() == purchaseId
+            val chMatch = car.chassis?.toString()?.trim()?.equals(chassis, ignoreCase = true) == true
+            if ((idMatch || chMatch) && purchaseDynIsSold(car)) {
+                car.chassis?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            } else null
+        }
+        showNoticeModal("Notice", alreadySoldOkMessage(soldChassis.ifEmpty { listOf(chassis) }))
+        return
+    }
     val ok = window.confirm("Are you sure you want to remove the car?")
     if (!ok) return
     val historyId = btn.getAttribute("data-history-id")?.trim()?.toLongOrNull()
-    val purchaseId = btn.getAttribute("data-purchase-id")?.toLongOrNull()
     MainScope().launch {
         val body = js("{}")
         body.chassisToken = chassis
         if (historyId != null && historyId > 0L) {
             body.historyId = historyId
+        }
+        if (purchaseId != null && purchaseId > 0L) {
+            body.purchaseId = purchaseId
         }
         ApiClient.post<dynamic>("shipping-history/remove-chassis", body).fold(
             onSuccess = { data ->
@@ -2621,10 +2663,15 @@ private fun handleRemoveChassisFromBookingRecreate(btn: HTMLButtonElement) {
                 }
             },
             onError = { message, statusCode ->
-                val msg =
-                    if (statusCode == 400 && message.isNotBlank()) message
-                    else "Failed to remove car: $message"
-                showMessage(msg, "error")
+                val soldHint = statusCode == 400 && message.contains("Sold", ignoreCase = true)
+                if (soldHint) {
+                    showNoticeModal("Notice", alreadySoldOkMessage(listOf(chassis)))
+                } else {
+                    val msg =
+                        if (statusCode == 400 && message.isNotBlank()) message
+                        else "Failed to remove car: $message"
+                    showMessage(msg, "error")
+                }
             },
         )
     }
@@ -2661,6 +2708,12 @@ private fun renumberBookingListTable() {
 }
 
 private fun handleDeleteShippingHistoryFromRecreate() {
+    val soldCars = carBookingDisplayedCars.filter { purchaseDynIsSold(it) }
+    if (soldCars.isNotEmpty()) {
+        val chassisList = soldCars.mapNotNull { it.chassis?.toString()?.trim()?.takeIf { c -> c.isNotEmpty() } }
+        showNoticeModal("Notice", alreadySoldOkMessage(chassisList))
+        return
+    }
     val ok = window.confirm("Are you sure you want to remove the history?")
     if (!ok) return
     MainScope().launch {
@@ -2676,14 +2729,21 @@ private fun handleDeleteShippingHistoryFromRecreate() {
                 clearCarBookingShippingRecreateSessionData()
                 carBookingDisplayedCars = emptyArray()
                 carBookingShippingHistoryEditBookingIdNormalized = null
-                showMessage("Shipping history removed.", "success")
+                showSuccessModal("Deleted", "Shipping history removed.")
                 navigateToApp("/shipping-history")
             },
             onError = { message, statusCode ->
-                val msg =
-                    if (statusCode == 400 && message.isNotBlank()) message
-                    else "Failed to delete shipping history: $message"
-                showMessage(msg, "error")
+                val soldHint = statusCode == 400 && message.contains("Sold", ignoreCase = true)
+                if (soldHint) {
+                    val chassisList = carBookingDisplayedCars
+                        .mapNotNull { it.chassis?.toString()?.trim()?.takeIf { c -> c.isNotEmpty() } }
+                    showNoticeModal("Notice", alreadySoldOkMessage(chassisList))
+                } else {
+                    val msg =
+                        if (statusCode == 400 && message.isNotBlank()) message
+                        else "Failed to delete shipping history: $message"
+                    showMessage(msg, "error")
+                }
             },
         )
     }
@@ -2808,7 +2868,7 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
                     cont.resume(Unit)
                     return@then Unit
                 }
-                showMessage("Shipping history updated.", "success")
+                showSuccessModal("Saved", "Shipping history updated.")
                 saveCarBookingState()
                 cont.resume(Unit)
                 Unit

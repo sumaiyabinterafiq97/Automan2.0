@@ -22,7 +22,6 @@ class ShippingHistoryService(
     private val shippingHistoryRepository: ShippingHistoryRepository,
     private val purchaseService: PurchaseService,
     private val invoiceHistoryLineRepository: InvoiceHistoryLineRepository,
-    private val invoiceHistoryService: InvoiceHistoryService,
 ) {
 
     fun listAllRows(): List<ShippingHistoryRowDto> {
@@ -215,20 +214,20 @@ class ShippingHistoryService(
     }
 
     /**
-     * Deletes shipping-history rows by [ids] and:
-     * - sets `booking_requested = false` on purchases for those chassis;
-     * - sets `invoice_confirmed = false` (Sold) on those purchases;
-     * - removes invoice_history rows whose lines are **only** chassis from this delete set
-     *   (invoices that still list other chassis are kept).
-     */
-    /**
      * Removes one chassis token from a shipping-history row (by [historyId] or latest row for [chassisTokenRaw]).
-     * Deletes the row when no chassis segments remain. Resets booking_requested and invoice_confirmed on that chassis.
+     * Deletes the row when no chassis segments remain. Clears booking_requested on the matching purchase
+     * (Sold / invoice-confirmed chassis are rejected — they cannot be removed from booking history).
      */
     @Transactional
-    fun removeChassisTokenFromHistoryRow(historyId: Long?, chassisTokenRaw: String): Map<String, Any> {
+    fun removeChassisTokenFromHistoryRow(
+        historyId: Long?,
+        chassisTokenRaw: String,
+        purchaseId: Long? = null,
+    ): Map<String, Any> {
         val tokenClean = chassisTokenRaw.trim()
         if (tokenClean.isEmpty()) throw IllegalArgumentException("chassisToken is required")
+
+        rejectIfAnySold(listOf(tokenClean), purchaseId)
 
         val row = when (historyId) {
             null -> shippingHistoryRepository.findFirstByChassisOrderByIdDesc(tokenClean)
@@ -244,18 +243,24 @@ class ShippingHistoryService(
             else -> shippingHistoryRepository.save(row.copy(chassis = newChassis, createdAt = row.createdAt))
         }
 
-        val chassisList = listOf(tokenClean)
-        purchaseService.unmarkBookingRequestedForChassis(chassisList)
-        purchaseService.unmarkInvoiceConfirmedForChassis(chassisList)
-        invoiceHistoryService.deleteInvoicesFullyCoveredByChassis(chassisList)
+        val unbookedCount = if (purchaseId != null && purchaseId > 0L) {
+            purchaseService.unmarkBookingRequestedForPurchaseIds(listOf(purchaseId))
+        } else {
+            purchaseService.unmarkBookingRequestedForChassis(listOf(tokenClean))
+        }
 
         return mapOf(
             "deletedRow" to newChassis.isNullOrBlank(),
             "remainingChassis" to (newChassis ?: ""),
             "historyId" to rowId,
+            "unbookedPurchases" to unbookedCount,
         )
     }
 
+    /**
+     * Deletes shipping-history rows by [ids] and clears booking_requested on matching purchases.
+     * Rejects the whole batch if any chassis is Sold (invoice confirmed).
+     */
     @Transactional
     fun deleteAndUnbookByIds(ids: List<Long>): Map<String, Any> {
         if (ids.isEmpty()) {
@@ -276,24 +281,38 @@ class ShippingHistoryService(
         }
 
         val chassisList = chassisToUnbook.toList()
+        rejectIfAnySold(chassisList, purchaseId = null)
 
         // Delete the shipping history rows
         shippingHistoryRepository.deleteAllById(ids)
 
-        // Reset booking_requested on matching purchases
+        // Reset booking_requested on matching purchases (not Sold — already rejected above)
         val unbookedCount = purchaseService.unmarkBookingRequestedForChassis(chassisList)
-
-        // Clear Sold / invoice_confirmed for those chassis (workflow recomputed in PurchaseService)
-        purchaseService.unmarkInvoiceConfirmedForChassis(chassisList)
-
-        // Drop invoice_history rows that reference only chassis from this shipping delete
-        val invoiceHistoryRemoved = invoiceHistoryService.deleteInvoicesFullyCoveredByChassis(chassisList)
 
         return mapOf(
             "deleted" to ids.size,
             "unbookedPurchases" to unbookedCount,
-            "invoiceHistoryRemoved" to invoiceHistoryRemoved,
+            "invoiceHistoryRemoved" to 0,
         )
+    }
+
+    /** Throws when any token (or [purchaseId]) is invoice-confirmed / Sold. */
+    private fun rejectIfAnySold(chassisTokens: List<String>, purchaseId: Long?) {
+        if (purchaseId != null && purchaseId > 0L) {
+            val p = purchaseService.getPurchaseById(purchaseId)
+            if (p != null && p.workflowStatus == com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED) {
+                throw IllegalArgumentException(
+                    "Cannot remove chassis ${p.chassis}: Sold is true. Remove the invoice first.",
+                )
+            }
+        }
+        val sold = purchaseService.findSoldChassisTokens(chassisTokens)
+        if (sold.isNotEmpty()) {
+            throw IllegalArgumentException(
+                "Cannot remove/delete booking history for Sold chassis: ${sold.joinToString(", ")}. " +
+                    "Remove the invoice first.",
+            )
+        }
     }
 
     /** Remove one segment matching [tokenToRemove]; returns new joined string or null when empty; [removed] iff a segment was removed. */

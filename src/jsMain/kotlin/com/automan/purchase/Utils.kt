@@ -298,6 +298,42 @@ fun formatPurchaseListCellChipHtml(raw: String): String {
     return """<span class="purchase-list-cell-chip" style="display:inline-block;padding:4px 12px;border-radius:9999px;font-size:13px;font-weight:500;background:#eff6ff;color:#1e40af;line-height:1.35;max-width:100%;white-space:normal;word-break:break-word;">$esc</span>"""
 }
 
+/** History list tables (Shipping / Invoice History): rectangular neutral chips. */
+fun formatHistoryListRectChipHtml(raw: String): String {
+    if (raw.trim().length == 0) return ""
+    val esc = escapeHtml(raw.trim())
+    return """<span class="purchase-list-cell-chip history-list-rect-chip" style="display:inline-block;padding:4px 10px;border-radius:4px;font-size:13px;font-weight:500;background:#f8fafc;color:#111827;line-height:1.35;max-width:100%;white-space:normal;word-break:break-word;box-shadow:0 1px 6px rgba(15,23,42,0.18);">$esc</span>"""
+}
+
+/** Distinct values for Shipping History grouped columns → rectangular chips. */
+fun formatHistoryListDistinctChipsHtml(values: List<String>): String {
+    if (values.isEmpty()) return ""
+    if (values.size == 1) return formatHistoryListRectChipHtml(values[0])
+    val inner = values.joinToString("") { formatHistoryListRectChipHtml(it) }
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$inner</span>"""
+}
+
+/**
+ * Collapsible chip list for history tables (Shipping / Invoice History).
+ * Same behaviour as [formatCollapsibleChipsHtml] but rectangular chips.
+ */
+fun formatHistoryListCollapsibleChipsHtml(values: List<String>, threshold: Int = 3): String {
+    if (values.isEmpty()) return ""
+    val visible = values.take(threshold)
+    val hidden = values.drop(threshold)
+    val visibleHtml = visible.joinToString("") { formatHistoryListRectChipHtml(it) }
+    if (hidden.isEmpty()) {
+        return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$visibleHtml</span>"""
+    }
+    val hiddenHtml = hidden.joinToString("") { formatHistoryListRectChipHtml(it) }
+    return """<span style="display:inline-flex;flex-direction:column;gap:4px;align-items:flex-start;">""" +
+        """<span class="chips-visible" style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$visibleHtml</span>""" +
+        """<span class="chips-hidden" style="display:none;flex-wrap:wrap;gap:6px;align-items:center;">$hiddenHtml</span>""" +
+        """<button type="button" class="chips-toggle-btn" data-chips-expanded="false" """ +
+        """style="background:none;border:none;padding:0;margin-top:2px;cursor:pointer;font-size:12px;color:#6366f1;font-weight:600;white-space:nowrap;">""" +
+        """See more ▾</button></span>"""
+}
+
 /** Purchase List neutral chip style (standard-consignee-chip-style visual language). */
 fun formatPurchaseListNeutralChipHtml(raw: String): String {
     if (raw.trim().length == 0) return ""

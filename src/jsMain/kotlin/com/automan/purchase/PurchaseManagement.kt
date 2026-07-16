@@ -1103,6 +1103,20 @@ fun invalidatePurchaseListLoads() {
     purchaseListLoadGeneration++
 }
 
+private fun purchaseListViewButtonHtml(purchaseId: Long, chassisAttr: String, extraClass: String = ""): String {
+    val cls = listOf("purchase-view-btn", extraClass).filter { it.isNotEmpty() }.joinToString(" ")
+    return """
+        <button type="button" class="$cls" data-id="$purchaseId" data-chassis="$chassisAttr"
+                aria-label="View summary" title="Vehicle Summary"
+                style="display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;background:#fff;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;color:#374151;box-shadow:0 1px 2px rgba(0,0,0,0.06);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+            </svg>
+        </button>
+    """.trimIndent()
+}
+
 fun setupPurchaseEditDelegationOnTable() {
     val table = document.getElementById("purchaseTable") ?: return
     if (table.hasAttribute("data-purchase-edit-delegation")) return
@@ -1110,11 +1124,147 @@ fun setupPurchaseEditDelegationOnTable() {
     table.addEventListener("click", { event ->
         // Use Element (not HTMLElement): clicks on SVG/path inside buttons are not HTMLElements.
         val target = event.target as? Element ?: return@addEventListener
+        val viewBtn = target.closest(".purchase-view-btn, .card-view-btn") as? HTMLElement
+        if (viewBtn != null) {
+            event.preventDefault()
+            event.stopPropagation()
+            handlePurchaseViewButtonClick(viewBtn)
+            return@addEventListener
+        }
         val btn = target.closest(".edit-btn, .card-edit-btn") as? HTMLElement ?: return@addEventListener
         event.preventDefault()
         event.stopPropagation()
         handlePurchaseEditButtonClick(btn)
     })
+}
+
+private fun findPurchaseInListById(id: Long): dynamic? {
+    if (id <= 0L) return null
+    for (p in allPurchases) {
+        val pid = (p.id as? Number)?.toLong() ?: continue
+        if (pid == id) return p
+    }
+    for (p in purchaseBaseRows) {
+        val pid = (p.id as? Number)?.toLong() ?: continue
+        if (pid == id) return p
+    }
+    return null
+}
+
+private fun purchaseSummaryField(p: dynamic, key: String): String {
+    val raw = when (key) {
+        "price" -> {
+            val priceStr = (p.price as? String) ?: p.price?.toString().orEmpty()
+            val priceValue = parseCurrency(priceStr)
+            if (priceValue > 0.0) formatCurrency(priceValue) else priceStr.trim()
+        }
+        "distance" -> {
+            val d = p.distance?.toString()?.trim().orEmpty()
+            if (d.isEmpty()) "" else if (d.contains("km", ignoreCase = true)) d else "$d km"
+        }
+        "chassis" -> p.chassis?.toString()?.trim().orEmpty()
+        "grade" -> p.grade?.toString()?.trim().orEmpty()
+        "carName" -> p.carName?.toString()?.trim().orEmpty()
+        "color" -> p.color?.toString()?.trim().orEmpty()
+        "fuel" -> p.fuel?.toString()?.trim().orEmpty()
+        "auctionHouse" -> p.auctionHouse?.toString()?.trim().orEmpty()
+        "stockLocation" -> p.stockLocation?.toString()?.trim().orEmpty()
+        "rixoCompany" -> p.rixoCompany?.toString()?.trim().orEmpty()
+        "clientName" -> p.clientName?.toString()?.trim().orEmpty()
+        "country" -> p.country?.toString()?.trim().orEmpty()
+        else -> ""
+    }
+    return raw
+}
+
+private fun handlePurchaseViewButtonClick(btn: HTMLElement) {
+    val id = btn.getAttribute("data-id")?.trim()?.toLongOrNull() ?: 0L
+    if (id <= 0L) {
+        showMessage("Cannot open summary: missing purchase id.", "error")
+        return
+    }
+    val cached = findPurchaseInListById(id)
+    if (cached != null) {
+        showVehicleSummaryModal(cached)
+        return
+    }
+    MainScope().launch {
+        ApiClient.get<dynamic>("purchases/purchase/$id").fold(
+            onSuccess = { purchase -> showVehicleSummaryModal(purchase) },
+            onError = { message, _ ->
+                showMessage("Failed to load vehicle summary: $message", "error")
+            },
+        )
+    }
+}
+
+/** Read-only Vehicle Summary modal (Purchase List eye icon). */
+fun showVehicleSummaryModal(purchase: dynamic) {
+    document.getElementById("vehicleSummaryModal")?.remove()
+
+    fun cell(label: String, value: String): String {
+        val v = if (value.isBlank()) "—" else escapeHtml(value)
+        return """
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
+                <label style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">${escapeHtml(label)}</label>
+                <div style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:#111827;font-size:14px;line-height:1.4;word-break:break-word;">$v</div>
+            </div>
+        """.trimIndent()
+    }
+
+    val fields = listOf(
+        "Chassis" to purchaseSummaryField(purchase, "chassis"),
+        "Grade" to purchaseSummaryField(purchase, "grade"),
+        "Car Name" to purchaseSummaryField(purchase, "carName"),
+        "Color" to purchaseSummaryField(purchase, "color"),
+        "Mileage" to purchaseSummaryField(purchase, "distance"),
+        "Fuel" to purchaseSummaryField(purchase, "fuel"),
+        "Supplier Name" to purchaseSummaryField(purchase, "auctionHouse"),
+        "Stock Location" to purchaseSummaryField(purchase, "stockLocation"),
+        "Rixo Company" to purchaseSummaryField(purchase, "rixoCompany"),
+        "Car Price" to purchaseSummaryField(purchase, "price"),
+        "Client Name" to purchaseSummaryField(purchase, "clientName"),
+        "Country" to purchaseSummaryField(purchase, "country"),
+    )
+    val gridHtml = fields.joinToString("") { (label, value) -> cell(label, value) }
+
+    val modal = document.createElement("div") as HTMLDivElement
+    modal.id = "vehicleSummaryModal"
+    modal.setAttribute(
+        "style",
+        "position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:10020;display:flex;align-items:center;justify-content:center;padding:16px;",
+    )
+    modal.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="vehicleSummaryTitle"
+             style="background:#fff;border-radius:10px;max-width:720px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 50px rgba(0,0,0,0.2);">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid #e5e7eb;">
+                <h2 id="vehicleSummaryTitle" style="margin:0;font-size:20px;font-weight:700;color:#111827;">Vehicle Summary</h2>
+                <button type="button" id="closeVehicleSummaryModal" aria-label="Close"
+                        style="background:none;border:none;font-size:26px;line-height:1;cursor:pointer;color:#6b7280;padding:4px 8px;">&times;</button>
+            </div>
+            <div style="padding:20px 22px 24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px 16px;">
+                $gridHtml
+            </div>
+        </div>
+    """.trimIndent()
+
+    document.body?.appendChild(modal)
+
+    val closeModal = {
+        document.getElementById("vehicleSummaryModal")?.remove()
+    }
+    document.getElementById("closeVehicleSummaryModal")?.addEventListener("click", { _: Event -> closeModal() })
+    modal.addEventListener("click", { event ->
+        if (event.target == modal) closeModal()
+    })
+    fun handleEscape(event: Event) {
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            closeModal()
+            document.removeEventListener("keydown", ::handleEscape)
+        }
+    }
+    document.addEventListener("keydown", ::handleEscape)
 }
 
 /** One-shot purchase id used if chassis lookup fails after navigating to /edit/{chassis}. */
@@ -1773,10 +1923,10 @@ private fun autoCreateInvoicesFromShippingHistory(gRows: List<dynamic>) {
 
             dismiss()
             if (savedCount > 0) {
-                showMessage(
+                showSuccessModal(
+                    "Saved",
                     if (savedCount == 1) "1 invoice created successfully."
                     else "$savedCount invoices created successfully.",
-                    "success"
                 )
                 navigateToApp("/invoice-history")
             } else if (hasErrors) {
@@ -1834,10 +1984,10 @@ private fun shippingHistoryGroupIdsCsv(gRows: List<dynamic>): String =
         .joinToString(",")
 
 private fun shippingHistoryDisplayCellHtml(gRows: List<dynamic>, key: String): String = when (key) {
-    "country" -> formatPurchaseListNeutralChipHtml(shippingHistoryRepresentativeCountry(gRows))
+    "country" -> formatHistoryListRectChipHtml(shippingHistoryRepresentativeCountry(gRows))
     "chassis", "clientName", "amount" ->
-        formatCollapsibleChipsHtml(shippingHistoryUniqueSortedValues(gRows, key))
-    else -> formatDistinctValueChipsHtml(shippingHistoryUniqueSortedValues(gRows, key))
+        formatHistoryListCollapsibleChipsHtml(shippingHistoryUniqueSortedValues(gRows, key))
+    else -> formatHistoryListDistinctChipsHtml(shippingHistoryUniqueSortedValues(gRows, key))
 }
 
 private fun appendShippingHistoryGroupTableRow(html: StringBuilder, gRows: List<dynamic>) {
@@ -1878,7 +2028,7 @@ private fun appendShippingHistoryGroupCard(html: StringBuilder, gRows: List<dyna
     val booking = shippingHistoryRepresentativeBookingDisplay(gRows)
     if (booking.isNotEmpty() && booking != "—") {
         html.append(
-            """<div class="shipping-kv"><div class="shipping-k">Booking ID</div><div class="shipping-v">${formatPurchaseListNeutralChipHtml(booking)}</div></div>"""
+            """<div class="shipping-kv"><div class="shipping-k">Booking ID</div><div class="shipping-v">${formatHistoryListRectChipHtml(booking)}</div></div>"""
         )
     }
     for (key in shippingHistoryDisplayColumnKeys()) {
@@ -3167,10 +3317,10 @@ fun displayPurchasesWithPagination() {
     val purchaseColCount = 1 + selectedColumns.size
     tableHTML.append("""
         <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
-        <table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupNarrowActionEqualRest(purchaseColCount, 48)}
+        <table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupNarrowActionEqualRest(purchaseColCount, 88)}
             <thead>
                 <tr style="background-color: #f8f9fa;">
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; width: 44px;"></th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; width: 88px;"></th>
     """)
     
     for (columnKey in selectedColumns) {
@@ -3214,13 +3364,18 @@ fun displayPurchasesWithPagination() {
             <tr>
                 <td style="padding: 8px 12px;">
                     ${if (isEditor() && purchaseId > 0L && chassisStr.isNotEmpty()) """
-                    <button type="button" class="edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit"
-                            style="display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
-                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
-                            <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
-                        </svg>
-                    </button>
+                    <div style="display:inline-flex;align-items:center;gap:8px;">
+                        ${purchaseListViewButtonHtml(purchaseId, chassisAttr)}
+                        <button type="button" class="edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit"
+                                style="display:inline-flex; align-items:center; justify-content:center; background-color:#4CC9FF; border:none; border-radius:50%; cursor:pointer; box-shadow: 0 2px 4px rgba(76,201,255,0.30);">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                            </svg>
+                        </button>
+                    </div>
+                    """ else if (purchaseId > 0L && chassisStr.isNotEmpty()) """
+                    ${purchaseListViewButtonHtml(purchaseId, chassisAttr)}
                     """ else if (isEditor()) """
                     <span style="color: #ccc; font-size: 12px;">Invalid ID</span>
                     """ else """
@@ -3231,7 +3386,7 @@ fun displayPurchasesWithPagination() {
         for (columnKey in selectedColumns) {
             val cellValue = purchaseTableCellValue(purchase, columnKey)
             val raw = cellValue.toString().trim()
-            val cellHtml = if (raw.length == 0) "" else formatPurchaseListNeutralChipHtml(raw)
+            val cellHtml = if (raw.length == 0) "" else escapeHtml(raw)
             tableHTML.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
         }
         
@@ -3354,7 +3509,7 @@ fun displayPurchasesAsCards() {
             val isValueNotEmpty = valueStr.length > 0 && valueStr.trim().length > 0
             
             if (isValueNotEmpty) {
-                val cellDisplay = formatPurchaseListNeutralChipHtml(valueStr.trim())
+                val cellDisplay = escapeHtml(valueStr.trim())
                 cardFields.append("""
                     <div class="card-field">
                         <span class="card-label">$label:</span>
@@ -3371,13 +3526,18 @@ fun displayPurchasesAsCards() {
         cardsHTML.append("""
             <div class="purchase-card">
                 <div class="card-header">
-                    ${if (isEditor() && purchaseId > 0L && hasChassis) """
-                    <button type="button" class="card-edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit">
-                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
-                            <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
-                        </svg>
-                    </button>
+                    ${if (purchaseId > 0L && hasChassis) """
+                    <div style="display:inline-flex;align-items:center;gap:8px;flex-shrink:0;">
+                        ${purchaseListViewButtonHtml(purchaseId, chassisAttr, "card-view-btn")}
+                        ${if (isEditor()) """
+                        <button type="button" class="card-edit-btn" data-id="${purchaseId}" data-chassis="$chassisAttr" aria-label="Edit" title="Edit">
+                            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
+                                <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
+                            </svg>
+                        </button>
+                        """ else ""}
+                    </div>
                     """ else ""}
                     <div class="card-title">${if (hasChassis) chassisStr else "Purchase #$purchaseId"}</div>
                 </div>

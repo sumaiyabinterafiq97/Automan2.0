@@ -260,9 +260,9 @@ private fun confirmSelectedRixoHistoryRows() {
                             "warning",
                         )
                     else ->
-                        showMessage(
+                        showSuccessModal(
+                            "Saved",
                             "Rixo Confirmed for $updated purchase row(s) from $rows selected history row(s).",
-                            "success",
                         )
                 }
                 rixoHistorySelectedIds.clear()

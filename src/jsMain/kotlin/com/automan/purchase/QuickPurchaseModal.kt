@@ -331,10 +331,10 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
             if (response.ok) {
                 if (saveAndMore) {
                     resetQuickPurchaseModalForm()
-                    showMessage("Purchase saved. You can add another.", "success")
+                    showSuccessModal("Saved", "Purchase saved. You can add another.")
                 } else {
                     closeQuickPurchaseModal()
-                    showMessage("Purchase created successfully!", "success")
+                    showSuccessModal("Saved", "Purchase created successfully!")
                 }
                 if (document.getElementById("purchaseTable") != null) {
                     loadPurchases()

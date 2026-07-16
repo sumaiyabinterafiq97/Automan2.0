@@ -8186,7 +8186,7 @@ fun createAddFormHTML(): String {
                         ${createEditableCombobox("door", "Select Door", showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
-                        <label>Distance</label>
+                        <label>Mileage</label>
                         <input type="text" id="distance" class="comma-int-input km-suffix-input" placeholder="e.g., 50,000 km" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
@@ -17146,10 +17146,10 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
                 reloadAddPurchaseForm()
                 window.setTimeout({
                     scrollPurchaseFormToTop()
-                    showMessage("Purchase saved. You can add another.", "success")
+                    showSuccessModal("Saved", "Purchase saved. You can add another.")
                 }, 0)
             } else {
-                showMessage("Purchase created successfully!", "success")
+                showSuccessModal("Saved", "Purchase created successfully!")
                 navigateToPurchaseList(forceClearFilters = true)
             }
                 }.catch { uploadErr: dynamic ->
@@ -17496,7 +17496,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         ${createEditableCombobox("editDoor", "Select Door", initialValue = editDoorDisp, showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
-                        <label>Distance</label>
+                        <label>Mileage</label>
                         <input type="text" id="editDistance" class="comma-int-input km-suffix-input" value="${extractNumericFromSuffixedValue(purchaseData.distance)}" placeholder="e.g., 50,000 km" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
@@ -19969,13 +19969,13 @@ fun submitEditPurchase(id: Long, purchaseData: dynamic) {
             response.json().then { updatedPurchase: dynamic ->
                 refreshEditPurchaseAfterSuccessfulSave(id, updatedPurchase)
                 pendingEditAuditChangedFields = null
-                showMessage("Purchase updated successfully!", "success")
+                showSuccessModal("Saved", "Purchase updated successfully!")
                 clearRixoAutoSelectSuppress()
             }.catch { err: dynamic ->
                 console.warn("Edit save OK but response parse failed:", err)
                 refreshEditPurchaseAfterSuccessfulSave(id, null)
                 pendingEditAuditChangedFields = null
-                showMessage("Purchase updated successfully!", "success")
+                showSuccessModal("Saved", "Purchase updated successfully!")
                 clearRixoAutoSelectSuppress()
             }
         } else {
@@ -22911,9 +22911,9 @@ private fun handleDeleteRixoHistoryFromUpdater() {
         return
     }
     if (rixoUpdaterHistoryRowHasBookingRequested) {
-        showMessage(
+        showNoticeModal(
+            "Notice",
             "Cannot delete: at least one car on this Rixo history row is already booking requested.",
-            "error",
         )
         return
     }
@@ -22926,7 +22926,7 @@ private fun handleDeleteRixoHistoryFromUpdater() {
             onSuccess = {
                 rixoUpdaterHistoryId = null
                 rixoUpdaterHistoryRowHasBookingRequested = false
-                showMessage("Rixo history row deleted.", "success")
+                showSuccessModal("Deleted", "Rixo history row deleted.")
                 navigateToApp("/rixo-history")
             },
             onError = { message, statusCode ->
@@ -26343,9 +26343,50 @@ fun showErrorModal(title: String, message: String) {
     document.addEventListener("keydown", ::handleEscape)
 }
 
-/** Centered success confirmation (replaces small toasts for important save flows). */
+/** Escape text embedded in modal HTML. */
+fun escapeHtmlForModal(raw: String): String =
+    raw.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+
+/**
+ * Sold-blocker copy: one chassis → "This X is already sold.";
+ * multiple → "These A, B are already sold."
+ */
+fun alreadySoldOkMessage(chassisValues: Collection<String>): String {
+    val list = chassisValues.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    if (list.isEmpty()) return "This purchase is already sold."
+    if (list.size == 1) return "This ${list[0]} is already sold."
+    return "These ${list.joinToString(", ")} are already sold."
+}
+
+/** Centered confirmation with OK (success accent). */
 fun showSuccessModal(title: String, message: String) {
+    showOkModal(title, message, accent = OkModalAccent.SUCCESS)
+}
+
+/** Centered notice/error confirmation with OK (neutral/danger accent). */
+fun showNoticeModal(title: String, message: String) {
+    showOkModal(title, message, accent = OkModalAccent.NOTICE)
+}
+
+enum class OkModalAccent { SUCCESS, NOTICE }
+
+/** Centered OK dialog used instead of toasts for important confirmations. */
+fun showOkModal(title: String, message: String, accent: OkModalAccent = OkModalAccent.SUCCESS) {
     document.getElementById("successModal")?.remove()
+
+    val titleColor = when (accent) {
+        OkModalAccent.SUCCESS -> "#198754"
+        OkModalAccent.NOTICE -> "#b91c1c"
+    }
+    val btnColor = when (accent) {
+        OkModalAccent.SUCCESS -> "#198754"
+        OkModalAccent.NOTICE -> "#b91c1c"
+    }
+    val safeTitle = escapeHtmlForModal(title)
+    val safeMessage = escapeHtmlForModal(message)
 
     val modal = document.createElement("div")
     modal.id = "successModal"
@@ -26357,14 +26398,14 @@ fun showSuccessModal(title: String, message: String) {
     modal.innerHTML = """
         <div style="background: white; border-radius: 8px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 4px 6px rgba(0,0,0,0.1);" role="dialog" aria-modal="true" aria-labelledby="successModalTitle">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                <h2 id="successModalTitle" style="margin: 0; color: #198754; font-size: 24px;">$title</h2>
+                <h2 id="successModalTitle" style="margin: 0; color: $titleColor; font-size: 24px;">$safeTitle</h2>
                 <button type="button" id="closeSuccessModal" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 0; width: 30px; height: 30px; line-height: 30px;" aria-label="Close">&times;</button>
             </div>
             <div style="margin-bottom: 25px; color: #333; font-size: 16px; line-height: 1.5;">
-                $message
+                $safeMessage
             </div>
             <div style="text-align: right;">
-                <button type="button" id="okSuccessModalBtn" style="padding: 10px 24px; background-color: #198754; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: 500;">
+                <button type="button" id="okSuccessModalBtn" style="padding: 10px 24px; background-color: $btnColor; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: 500;">
                     OK
                 </button>
             </div>

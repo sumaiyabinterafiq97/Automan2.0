@@ -446,7 +446,7 @@ private fun buildSmLeafInlineAddHtml(): String = """
         <div class="rixo-tree-leaf-cells">
             <div class="rixo-tree-leaf-edit rixo-tree-leaf-edit--inline-add-stack">
                 <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--inputs">
-                    <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("smCardInlineAddLeafType", "Select Vehicle Type", required = true)}</div>
+                    <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("smCardInlineAddLeafType", "Select Vehicle Type", required = false)}</div>
                     <input id="smCardInlineAddLeafPrice" class="rixo-tree-leaf-inline-price money-input" type="text" value="" placeholder="0" inputmode="decimal">
                 </div>
                 <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--actions">
@@ -494,7 +494,7 @@ private fun buildSmFullRowAddHtml(): String = """
                 ${createEditableCombobox("smFullRowCompany", "Select Rixo Company", required = true)}
             </div>
             <div class="sm-tree-full-row-col sm-tree-full-row-col--vtype">
-                ${createEditableCombobox("smFullRowVehicleType", "Select Vehicle Type", required = true)}
+                ${createEditableCombobox("smFullRowVehicleType", "Select Vehicle Type", required = false)}
             </div>
             <div class="sm-tree-full-row-col sm-tree-full-row-col--price">
                 <input id="smFullRowPrice" class="rixo-tree-leaf-inline-price money-input sm-full-row-price-input" type="text" value="" placeholder="0" inputmode="decimal">
@@ -619,7 +619,7 @@ private fun smBuildLeafRowHtml(leaf: SmLeafRow, baseRow: SupplierMapTreeRowLite,
                     </div>
                 </div>
                 <div class="rixo-tree-leaf-edit">
-                    <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("${prefix}_type", "Select Vehicle Type", required = true)}</div>
+                    <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("${prefix}_type", "Select Vehicle Type", required = false)}</div>
                     <input id="${prefix}_price" class="rixo-tree-leaf-inline-price money-input" type="text" value="${escapeHtml(normalizedPrice)}" placeholder="0" inputmode="decimal">
                     <button type="button" class="rixo-tree-leaf-update-btn" aria-label="Update mapping"><span class="rixo-tree-leaf-update-icon">&gt;&gt;</span></button>
                 </div>
@@ -1035,18 +1035,22 @@ private fun postSmMappingBulkOneRow(
             obj.rixoCompany = company.trim()
         }
         else -> {
-            if (supplier.isBlank() || stock.isBlank() || company.isBlank() || vtype.isBlank()) {
-                showMessage("Complete the path and vehicle type", "error"); return
+            if (supplier.isBlank() || stock.isBlank() || company.isBlank()) {
+                showMessage("Complete the path (supplier, stock location, and Rixo company)", "error"); return
+            }
+            if (vtype.isNotBlank() && !smListContains(smMasterVehicleTypes, vtype)) {
+                showMessage("Please select a vehicle type from the list", "error"); return
             }
             if (price.isNotBlank() && smParseMoney(price) == null) {
                 showMessage("Rixo price must be numeric", "error"); return
             }
+            obj.insertMode = "FULL"
             obj.auctionName = supplier.trim()
             obj.venueId = venue.trim().takeIf { it.isNotEmpty() && it != SM_PLACEHOLDER_VENUE }
             obj.stockLocation = stock.trim()
             obj.pol = pol.trim().takeIf { it.isNotEmpty() && it != SM_PLACEHOLDER_POL }
             obj.rixoCompany = company.trim()
-            obj.supportedVehicleType = vtype.trim()
+            obj.supportedVehicleType = vtype.trim().takeIf { it.isNotEmpty() }
             obj.rixoPrice = if (price.isBlank()) price else smNormalizePriceForDb(price)
         }
     }
@@ -1161,7 +1165,7 @@ private fun executeSmFullRowAddSave() {
     if (company.isEmpty() || !smListContains(smMasterCompanies, company)) {
         showMessage("Please select a Rixo company from the list", "error"); return
     }
-    if (vtype.isEmpty() || !smListContains(smMasterVehicleTypes, vtype)) {
+    if (vtype.isNotBlank() && !smListContains(smMasterVehicleTypes, vtype)) {
         showMessage("Please select a vehicle type from the list", "error"); return
     }
     if (price.isNotBlank() && smParseMoney(price) == null) {
@@ -1367,8 +1371,11 @@ private fun executeSmLeafInlineAddSave() {
     val company = smFirstNonBlank(smCardInlineAddCompany, smSelectedCompany)
     val vtype = getEditableComboboxValue("smCardInlineAddLeafType").trim()
     val price = (document.getElementById("smCardInlineAddLeafPrice") as? HTMLInputElement)?.value?.trim().orEmpty()
-    if (vtype.isEmpty() || !smListContains(smMasterVehicleTypes, vtype)) {
+    if (vtype.isNotBlank() && !smListContains(smMasterVehicleTypes, vtype)) {
         showMessage("Please select a vehicle type from the list", "error"); return
+    }
+    if (price.isNotBlank() && smParseMoney(price) == null) {
+        showMessage("Rixo price must be numeric", "error"); return
     }
     postSmMappingBulkOneRow(null, supplier, venue, stock, pol, company, vtype, price) {
         clearSmCardInlineAdd()
@@ -1720,8 +1727,8 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
             val vtype = getEditableComboboxValue("${prefix}_type").trim()
             val price = (document.getElementById("${prefix}_price") as? HTMLInputElement)?.value?.trim().orEmpty()
             if (smRejectIfSemicolon(vtype, price)) return@click
-            if (vtype.isEmpty()) {
-                showMessage("Vehicle type is required", "error")
+            if (vtype.isNotBlank() && !smListContains(smMasterVehicleTypes, vtype)) {
+                showMessage("Please select a vehicle type from the list", "error")
                 return@click
             }
             if (price.isEmpty() || smParseMoney(price) == null) {
@@ -1734,7 +1741,7 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
             payload.stockLocation = baseRow.stock
             payload.venueId = baseRow.venueId
             payload.pol = baseRow.pol
-            payload.supportedVehicleType = vtype
+            payload.supportedVehicleType = vtype.takeIf { it.isNotEmpty() }
             payload.rixoPrice = smNormalizePriceForDb(price)
             window.fetch(apiUrl("rixo-mapping/$id"), js("""{ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
                 .then { resp: dynamic ->

@@ -1955,15 +1955,18 @@ private fun handleDeleteInvoiceFromRecreate() {
                 clearInvoiceRecreateSessionData()
                 when {
                     ledgerWarnings.isNotEmpty() -> {
-                        showMessage(
+                        showNoticeModal(
+                            "Notice",
                             "Invoice deleted. Ledger warning: ${ledgerWarnings.joinToString(" ")}",
-                            "warning",
                         )
                     }
                     ledgerReversed > 0 -> {
-                        showMessage("Invoice deleted. $ledgerReversed ledger reversal(s) posted.", "success")
+                        showSuccessModal(
+                            "Deleted",
+                            "Invoice deleted. $ledgerReversed ledger reversal(s) posted.",
+                        )
                     }
-                    else -> showMessage("Invoice deleted.", "success")
+                    else -> showSuccessModal("Deleted", "Invoice deleted.")
                 }
                 navigateToApp("/invoice-history")
             },

@@ -245,7 +245,6 @@ class RixoMappingController(
                 if (req.rixoCompany.isNullOrBlank()) return "Rixo company is required"
                 if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
                 if (req.stockLocation.isNullOrBlank()) return "Stock location is required"
-                if (req.supportedVehicleType.isNullOrBlank()) return "Supported vehicle type is required"
                 validateRixoPriceIfPresent(req.rixoPrice)
             }
             "SUPPLIER" -> {
@@ -269,6 +268,13 @@ class RixoMappingController(
                 validateRixoPriceIfPresent(req.rixoPrice)
             }
             "RIXO_COMPANY" -> {
+                if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
+                if (req.stockLocation.isNullOrBlank()) return "Stock location is required"
+                if (req.rixoCompany.isNullOrBlank()) return "Rixo company is required"
+                validateRixoPriceIfPresent(req.rixoPrice)
+            }
+            "FULL" -> {
+                // Supplier Map full leaf: vehicle type is optional (nullable DB column).
                 if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
                 if (req.stockLocation.isNullOrBlank()) return "Stock location is required"
                 if (req.rixoCompany.isNullOrBlank()) return "Rixo company is required"
@@ -385,6 +391,15 @@ class RixoMappingController(
                 pol = req.pol?.trim()?.takeIf { it.isNotEmpty() },
                 supportedVehicleType = null,
                 rixoPrice = null,
+            )
+            "FULL" -> RixoMappingService.UpsertInput(
+                rixoCompany = req.rixoCompany!!.trim(),
+                auctionName = req.auctionName?.trim()?.takeIf { it.isNotEmpty() },
+                stockLocation = req.stockLocation!!.trim(),
+                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                pol = req.pol?.trim()?.takeIf { it.isNotEmpty() },
+                supportedVehicleType = req.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
+                rixoPrice = req.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
             )
             "COMPANY" -> RixoMappingService.UpsertInput(
                 rixoCompany = req.rixoCompany!!.trim(),

@@ -415,7 +415,7 @@ private fun buildRpmLeafInlineAddHtml(): String = """
         <div class="rixo-tree-leaf-cells">
             <div class="rixo-tree-leaf-edit rixo-tree-leaf-edit--inline-add-stack">
                 <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--inputs">
-                    <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("rpmCardInlineAddLeafType", "Select Vehicle Type", required = true)}</div>
+                    <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("rpmCardInlineAddLeafType", "Select Vehicle Type", required = false)}</div>
                     <input id="rpmCardInlineAddLeafPrice" class="rixo-tree-leaf-inline-price money-input" type="text" value="" placeholder="0" inputmode="decimal">
                 </div>
                 <div class="rixo-tree-inline-add-row rixo-tree-inline-add-row--actions">
@@ -459,7 +459,7 @@ private fun buildRpmFullRowAddHtml(): String = """
                 ${createEditableCombobox("rpmFullRowPol", "Select POL", required = false)}
             </div>
             <div class="rpm-tree-full-row-col rpm-tree-full-row-col--vtype">
-                ${createEditableCombobox("rpmFullRowVehicleType", "Select Vehicle Type", required = true)}
+                ${createEditableCombobox("rpmFullRowVehicleType", "Select Vehicle Type", required = false)}
             </div>
             <div class="rpm-tree-full-row-col rpm-tree-full-row-col--price">
                 <input id="rpmFullRowPrice" class="rixo-tree-leaf-inline-price money-input rpm-full-row-price-input" type="text" value="" placeholder="0" inputmode="decimal">
@@ -578,7 +578,7 @@ private fun rpmBuildLeafRowHtml(leaf: RpmLeafRow, baseRow: RixoPriceMapTreeRowLi
                     </div>
                 </div>
                 <div class="rixo-tree-leaf-edit">
-                    <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("${prefix}_type", "Select Vehicle Type", required = true)}</div>
+                    <div class="rixo-tree-leaf-vtype-wrap">${createEditableCombobox("${prefix}_type", "Select Vehicle Type", required = false)}</div>
                     <input id="${prefix}_price" class="rixo-tree-leaf-inline-price money-input" type="text" value="${escapeHtml(normalizedPrice)}" placeholder="0" inputmode="decimal">
                     <button type="button" class="rixo-tree-leaf-update-btn" aria-label="Update mapping"><span class="rixo-tree-leaf-update-icon">&gt;&gt;</span></button>
                 </div>
@@ -960,8 +960,11 @@ private fun postRpmMappingBulkOneRow(
             obj.pol = pol.trim()
         }
         else -> {
-            if (company.isBlank() || supplier.isBlank() || stock.isBlank() || vtype.isBlank()) {
-                showMessage("Complete the path and vehicle type", "error"); return
+            if (company.isBlank() || supplier.isBlank() || stock.isBlank()) {
+                showMessage("Complete the path (Rixo company, supplier, and stock location)", "error"); return
+            }
+            if (vtype.isNotBlank() && !rpmListContains(rpmMasterVehicleTypes, vtype)) {
+                showMessage("Please select a vehicle type from the list", "error"); return
             }
             if (price.isNotBlank() && rpmParseMoney(price) == null) {
                 showMessage("Rixo price must be numeric", "error"); return
@@ -971,7 +974,7 @@ private fun postRpmMappingBulkOneRow(
             obj.auctionName = supplier.trim()
             obj.stockLocation = stock.trim()
             obj.pol = pol.trim().takeIf { it.isNotEmpty() && it != RPM_PLACEHOLDER_POL }
-            obj.supportedVehicleType = vtype.trim()
+            obj.supportedVehicleType = vtype.trim().takeIf { it.isNotEmpty() }
             obj.rixoPrice = if (price.isBlank()) price else rpmNormalizePriceForDb(price)
         }
     }
@@ -1078,7 +1081,7 @@ private fun executeRpmFullRowAddSave() {
     if (stock.isEmpty() || !rpmListContains(rpmMasterStocks, stock)) {
         showMessage("Please select a stock location from the list", "error"); return
     }
-    if (vtype.isEmpty() || !rpmListContains(rpmMasterVehicleTypes, vtype)) {
+    if (vtype.isNotBlank() && !rpmListContains(rpmMasterVehicleTypes, vtype)) {
         showMessage("Please select a vehicle type from the list", "error"); return
     }
     if (price.isNotBlank() && rpmParseMoney(price) == null) {
@@ -1283,8 +1286,11 @@ private fun executeRpmLeafInlineAddSave() {
     val pol = rpmFirstNonBlank(rpmCardInlineAddPol, rpmSelectedPol)
     val vtype = getEditableComboboxValue("rpmCardInlineAddLeafType").trim()
     val price = (document.getElementById("rpmCardInlineAddLeafPrice") as? HTMLInputElement)?.value?.trim().orEmpty()
-    if (vtype.isEmpty() || !rpmListContains(rpmMasterVehicleTypes, vtype)) {
+    if (vtype.isNotBlank() && !rpmListContains(rpmMasterVehicleTypes, vtype)) {
         showMessage("Please select a vehicle type from the list", "error"); return
+    }
+    if (price.isNotBlank() && rpmParseMoney(price) == null) {
+        showMessage("Rixo price must be numeric", "error"); return
     }
     postRpmMappingBulkOneRow(null, company, supplier, stock, pol, vtype, price) {
         clearRpmCardInlineAdd()
@@ -1655,8 +1661,8 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
             val vtype = getEditableComboboxValue("${prefix}_type").trim()
             val price = (document.getElementById("${prefix}_price") as? HTMLInputElement)?.value?.trim().orEmpty()
             if (rpmRejectIfSemicolon(vtype, price)) return@click
-            if (vtype.isEmpty()) {
-                showMessage("Vehicle type is required", "error")
+            if (vtype.isNotBlank() && !rpmListContains(rpmMasterVehicleTypes, vtype)) {
+                showMessage("Please select a vehicle type from the list", "error")
                 return@click
             }
             if (price.isEmpty() || rpmParseMoney(price) == null) {
@@ -1669,7 +1675,7 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
             payload.stockLocation = baseRow.stock
             payload.venueId = baseRow.venueId
             payload.pol = baseRow.pol
-            payload.supportedVehicleType = vtype
+            payload.supportedVehicleType = vtype.takeIf { it.isNotEmpty() }
             payload.rixoPrice = rpmNormalizePriceForDb(price)
             window.fetch(apiUrl("rixo-mapping/$id"), js("""{ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
                 .then { resp: dynamic ->

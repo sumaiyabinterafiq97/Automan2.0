@@ -932,30 +932,67 @@ class PurchaseService(
     }
 
     /**
-     * Resets [Purchase.bookingRequested] to `false` for all purchases whose chassis
-     * matches any value in [chassisValues]. Called when shipping-history rows are deleted.
+     * True when any purchase matching [chassisValues] is Sold ([WorkflowStatus.INVOICE_CONFIRMED]).
+     * Token match is trim + case-insensitive ([PurchaseRepository.findByChassisToken]).
+     */
+    fun findSoldChassisTokens(chassisValues: List<String>): List<String> {
+        if (chassisValues.isEmpty()) return emptyList()
+        val sold = linkedSetOf<String>()
+        for (raw in chassisValues) {
+            val token = raw.trim()
+            if (token.isEmpty()) continue
+            for (p in purchaseRepository.findByChassisToken(token)) {
+                if (p.workflowStatus == com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED) {
+                    sold.add(p.chassis.trim().ifEmpty { token })
+                }
+            }
+        }
+        return sold.toList()
+    }
+
+    /**
+     * Clears booking_requested by stepping [WorkflowStatus.BOOKING_REQUESTED] → [WorkflowStatus.RIXO_CONFIRMED]
+     * for matching chassis. Does not touch Sold / [WorkflowStatus.INVOICE_CONFIRMED] purchases
+     * (shipping remove must reject those separately). Uses trim+ignore-case chassis match.
      */
     @Transactional
     fun unmarkBookingRequestedForChassis(chassisValues: List<String>): Int {
         if (chassisValues.isEmpty()) return 0
-        val affectedIds = mutableListOf<Long>()
         var count = 0
-        for (chassis in chassisValues) {
-            val purchases = purchaseRepository.findByChassis(chassis)
-            for (p in purchases) {
-                val next = when (p.workflowStatus) {
-                    com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED ->
-                        com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED
-                    com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED ->
-                        com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED
-                    else -> p.workflowStatus ?: com.automan.backend.model.WorkflowStatus.PURCHASED
-                }
-                purchaseWorkflowService.setWorkflowStatus(p, next)
+        val seenIds = mutableSetOf<Long>()
+        for (raw in chassisValues) {
+            val token = raw.trim()
+            if (token.isEmpty()) continue
+            for (p in purchaseRepository.findByChassisToken(token)) {
+                val id = p.id ?: continue
+                if (!seenIds.add(id)) continue
+                if (p.workflowStatus != com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED) continue
+                purchaseWorkflowService.setWorkflowStatus(
+                    p,
+                    com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED,
+                )
                 count++
-                p.id?.let { affectedIds.add(it) }
             }
         }
         Logger.log("Unset booking_requested for $count purchase(s) across ${chassisValues.size} chassis values")
+        return count
+    }
+
+    /** Same as [unmarkBookingRequestedForChassis] but keyed by purchase ids (preferred when UI has them). */
+    @Transactional
+    fun unmarkBookingRequestedForPurchaseIds(purchaseIds: List<Long>): Int {
+        if (purchaseIds.isEmpty()) return 0
+        var count = 0
+        for (id in purchaseIds.toSet()) {
+            val p = purchaseRepository.findById(id).orElse(null) ?: continue
+            if (p.workflowStatus != com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED) continue
+            purchaseWorkflowService.setWorkflowStatus(
+                p,
+                com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED,
+            )
+            count++
+        }
+        Logger.log("Unset booking_requested for $count purchase(s) by id")
         return count
     }
 

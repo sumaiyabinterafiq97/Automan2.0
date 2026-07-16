@@ -113,7 +113,16 @@ class ShippingHistoryController(
                 is String -> v.toLongOrNull()
                 else -> null
             }
-            val result = shippingHistoryService.removeChassisTokenFromHistoryRow(historyId, chassisToken)
+            val purchaseId = when (val v = body["purchaseId"]) {
+                is Number -> v.toLong()
+                is String -> v.toLongOrNull()
+                else -> null
+            }
+            val result = shippingHistoryService.removeChassisTokenFromHistoryRow(
+                historyId,
+                chassisToken,
+                purchaseId,
+            )
             ResponseEntity.ok(result)
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
@@ -141,6 +150,8 @@ class ShippingHistoryController(
             Logger.log("[ShippingHistory] DELETE batch: $ids")
             val result = shippingHistoryService.deleteAndUnbookByIds(ids)
             ResponseEntity.ok(mapOf("success" to true) + result)
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         } catch (e: Exception) {
             Logger.error("[ShippingHistory] DELETE batch failed: ${e.message}", e)
             ResponseEntity.status(500).body(mapOf("error" to (e.message ?: "Internal error")))

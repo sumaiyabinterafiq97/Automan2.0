@@ -1725,9 +1725,9 @@ fun saveShippingHistoryAndBooking() {
                             postBookingRequestedThen(
                                 purchaseIds = idsToMark,
                                 onDone = {
-                                    showMessage(
+                                    showSuccessModal(
+                                        "Saved",
                                         "Shipping history saved; booking requested updated for selected cars.",
-                                        "success",
                                     )
                                     finalizeSave()
                                 },

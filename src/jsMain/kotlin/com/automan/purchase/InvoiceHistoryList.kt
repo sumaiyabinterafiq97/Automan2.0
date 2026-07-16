@@ -248,10 +248,16 @@ private fun invoiceHistoryDisplayCellHtml(row: dynamic, key: String): String {
     return when (key) {
         "chassis", "totalAmount" -> {
             val tokens = raw.split(';').map { it.trim() }.filter { it.isNotEmpty() }
-            formatCollapsibleChipsHtml(tokens)
+            formatHistoryListCollapsibleChipsHtml(tokens)
         }
-        "bank" -> formatClientMapBankInfoCellHtml(raw)
-        else -> formatPurchaseListNeutralChipHtml(raw)
+        "bank" -> {
+            val tokens = raw.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+            if (tokens.isEmpty()) return ""
+            if (tokens.size == 1) return formatHistoryListRectChipHtml(tokens[0])
+            val inner = tokens.joinToString("") { formatHistoryListRectChipHtml(it) }
+            """<span style="display:inline-flex;flex-direction:column;gap:4px;align-items:flex-start;">$inner</span>"""
+        }
+        else -> formatHistoryListRectChipHtml(raw)
     }
 }
 
