@@ -93,8 +93,13 @@ class PurchaseVehicleOverrideService(
         return candidates.first()
     }
 
+    /**
+     * @param snapshotSpecs when true (edit/Update path), non-empty spec values are stored as
+     * overrides even when they equal the car_brand_mapping baseline. This "freezes" the specs
+     * shown on the edit form onto the purchase so they persist independently of the mapping.
+     */
     @Transactional
-    fun syncFromPurchase(purchase: Purchase) {
+    fun syncFromPurchase(purchase: Purchase, snapshotSpecs: Boolean = false) {
         val purchaseId = purchase.id ?: return
         val baseline = resolveMapBaseline(purchase)
         val existing = purchaseVehicleOverrideRepository.findByPurchaseId(purchaseId)
@@ -117,6 +122,8 @@ class PurchaseVehicleOverrideService(
                 mapping.alwaysOverrideWhenSet && actual.isNotEmpty() ->
                     overrides[mapping.jsonKey] = actual
                 actual.isEmpty() -> Unit // explicit clear — drop override key
+                snapshotSpecs ->
+                    overrides[mapping.jsonKey] = actual // snapshot: store even when == baseline
                 mapping.jsonKey == "cc" -> {
                     val actualNorm = normalize(firstSemicolonToken(actual))
                     if (baseline == null || actualNorm != baselineNorm) {
@@ -160,7 +167,19 @@ class PurchaseVehicleOverrideService(
             val overrideValue = overrides[mapping.jsonKey] ?: continue
             merged = mapping.apply(merged, overrideValue.trim().ifBlank { null })
         }
-        return merged
+        // Expose explicitly-stored specs (deviations from baseline) so consumers can
+        // distinguish them from baseline-inferred values. Null/absent when they came from mapping.
+        val specKeys = SPEC_FIELD_MAPPINGS.mapTo(HashSet()) { it.jsonKey }
+        val explicitSpecs = overrides
+            .filterKeys { it in specKeys }
+            .mapValues { it.value.trim() }
+            .filterValues { it.isNotEmpty() }
+        return merged.copy(
+            gradeExplicit = overrides["grade"]?.trim()?.ifBlank { null },
+            fuelExplicit = overrides["fuel"]?.trim()?.ifBlank { null },
+            colorExplicit = overrides["color"]?.trim()?.ifBlank { null },
+            vehicleSpecExplicit = explicitSpecs,
+        )
     }
 
     /** Fills empty spec fields from [car_brand_mapping] baseline (lowest read priority). */

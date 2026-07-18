@@ -612,6 +612,37 @@ private fun purchaseComparableNumber(p: dynamic, field: String): Double? {
     return parseCurrency(raw).takeIf { !it.isNaN() }
 }
 
+/**
+ * Vehicle specs that the backend fills from the car_brand_mapping baseline on read.
+ * In the Purchase List we want to show ONLY what's actually stored on the purchase, so these
+ * columns read from `vehicleSpecExplicit` (stored overrides) and stay blank when inherited.
+ */
+private val purchaseListStoredOnlySpecColumns = setOf(
+    "grade", "rank", "color", "fuel", "seat", "door", "cc", "shift", "wd", "driveType", "shipmentSize",
+)
+
+/** Explicitly-stored spec value for [key] from `purchase.vehicleSpecExplicit`; blank when inherited from mapping. */
+private fun purchaseStoredSpecValue(purchase: dynamic, key: String): String {
+    if (purchase == null || purchase == js("undefined")) return ""
+    val explicit = purchase.vehicleSpecExplicit
+    if (explicit == null || explicit == js("undefined")) return ""
+    val v = js("explicit[key]")
+    if (v == null || v == js("undefined")) return ""
+    return v.toString().trim()
+}
+
+/**
+ * Purchase List cell value: same as [purchaseTableCellValue] except mapping-derived specs show
+ * only the value stored on the purchase (blank when inherited). Scoped to the Purchase List
+ * table + card view; sorting, the Rixo table, and other consumers keep using the merged value.
+ */
+private fun purchaseListCellValue(purchase: dynamic, columnKey: String): String {
+    if (columnKey in purchaseListStoredOnlySpecColumns) {
+        return purchaseStoredSpecValue(purchase, columnKey)
+    }
+    return purchaseTableCellValue(purchase, columnKey)
+}
+
 private fun purchaseComparableDateTs(p: dynamic, field: String): Long? {
     val raw = purchaseRawFieldValue(p, field)
     if (raw.trim().length == 0) return null
@@ -1164,9 +1195,12 @@ private fun purchaseSummaryField(p: dynamic, key: String): String {
         }
         "chassis" -> p.chassis?.toString()?.trim().orEmpty()
         "grade" -> p.grade?.toString()?.trim().orEmpty()
+        "gradeExplicit" -> p.gradeExplicit?.toString()?.trim().orEmpty()
         "carName" -> p.carName?.toString()?.trim().orEmpty()
         "color" -> p.color?.toString()?.trim().orEmpty()
+        "colorExplicit" -> p.colorExplicit?.toString()?.trim().orEmpty()
         "fuel" -> p.fuel?.toString()?.trim().orEmpty()
+        "fuelExplicit" -> p.fuelExplicit?.toString()?.trim().orEmpty()
         "auctionHouse" -> p.auctionHouse?.toString()?.trim().orEmpty()
         "stockLocation" -> p.stockLocation?.toString()?.trim().orEmpty()
         "rixoCompany" -> p.rixoCompany?.toString()?.trim().orEmpty()
@@ -1214,11 +1248,11 @@ fun showVehicleSummaryModal(purchase: dynamic) {
 
     val fields = listOf(
         "Chassis" to purchaseSummaryField(purchase, "chassis"),
-        "Grade" to purchaseSummaryField(purchase, "grade"),
+        "Grade" to purchaseSummaryField(purchase, "gradeExplicit"),
         "Car Name" to purchaseSummaryField(purchase, "carName"),
-        "Color" to purchaseSummaryField(purchase, "color"),
+        "Color" to purchaseSummaryField(purchase, "colorExplicit"),
         "Mileage" to purchaseSummaryField(purchase, "distance"),
-        "Fuel" to purchaseSummaryField(purchase, "fuel"),
+        "Fuel" to purchaseSummaryField(purchase, "fuelExplicit"),
         "Supplier Name" to purchaseSummaryField(purchase, "auctionHouse"),
         "Stock Location" to purchaseSummaryField(purchase, "stockLocation"),
         "Rixo Company" to purchaseSummaryField(purchase, "rixoCompany"),
@@ -3384,7 +3418,7 @@ fun displayPurchasesWithPagination() {
         """)
         
         for (columnKey in selectedColumns) {
-            val cellValue = purchaseTableCellValue(purchase, columnKey)
+            val cellValue = purchaseListCellValue(purchase, columnKey)
             val raw = cellValue.toString().trim()
             val cellHtml = if (raw.length == 0) "" else escapeHtml(raw)
             tableHTML.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
@@ -3502,7 +3536,7 @@ fun displayPurchasesAsCards() {
         val cardFields = StringBuilder()
         for (columnKey in selectedColumns) {
             val label = columnLabels[columnKey] ?: columnKey
-            val value = purchaseTableCellValue(purchase, columnKey)
+            val value = purchaseListCellValue(purchase, columnKey)
             
             // Convert to string and check if not blank (safe for JS strings)
             val valueStr = value.toString()

@@ -820,6 +820,9 @@ private fun rpmPopulateCombobox(selectId: String, values: List<String>, selected
     setEditableComboboxValue(selectId, selected)
     val sync = window.asDynamic().syncComboboxInput
     if (sync != null) sync(selectId)
+    // Arrow-key nav for eligible tree comboboxes (no-op for non-registered ids).
+    val wireKeyNav = window.asDynamic().wireComboboxKeyboardNav
+    if (wireKeyNav != null) wireKeyNav(selectId)
 }
 
 private fun rpmRowsForBranch(

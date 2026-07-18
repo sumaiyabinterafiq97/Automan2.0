@@ -89,10 +89,34 @@ fun openQuickPurchaseModal() {
                 </div>
                 <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Car Price</label>
-                    <div class="currency-input" style="display:flex;gap:8px;align-items:center;">
-                        <span style="font-weight:600;color:#374151;">¥</span>
-                        <input type="text" inputmode="decimal" id="qpPrice" class="money-input" placeholder="0"
-                               style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <div class="currency-input" style="display:flex;gap:8px;align-items:center;flex:1;min-width:0;">
+                            <span style="font-weight:600;color:#374151;">¥</span>
+                            <input type="text" inputmode="decimal" id="qpPrice" class="money-input" placeholder="0"
+                                   style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;">
+                        </div>
+                        <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#374151;cursor:pointer;white-space:nowrap;margin:0;">
+                            <input type="checkbox" id="qpNegotiate" style="width:18px;height:18px;accent-color:#007bff;">
+                            NEGOTIATE
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:20px;">
+                <h3 style="color:#333;margin:0 0 10px 0;border-bottom:1px solid #eee;padding-bottom:5px;font-size:16px;">Car Pictures</h3>
+                <div style="padding:20px;border:2px dashed #ddd;border-radius:8px;background-color:#f9f9f9;">
+                    <div style="text-align:center;">
+                        <label for="carPictures" style="display:inline-block;padding:12px 24px;background-color:#007bff;color:white;border-radius:6px;cursor:pointer;font-weight:600;transition:background-color 0.3s;">
+                            📷 Upload Car Pictures
+                        </label>
+                        <input type="file" id="carPictures" multiple accept="image/*" style="display:none;" onchange="handleCarPictureUpload(this)">
+                    </div>
+                    <div id="carPicturePreview" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:15px;margin-top:20px;"></div>
+                    <div id="uploadProgress" style="display:none;margin-top:15px;">
+                        <div style="background-color:#e9ecef;border-radius:4px;height:20px;overflow:hidden;">
+                            <div id="progressBar" style="background-color:#007bff;height:100%;width:0%;transition:width 0.3s;"></div>
+                        </div>
+                        <div id="progressText" style="text-align:center;margin-top:5px;font-size:14px;color:#666;"></div>
                     </div>
                 </div>
             </div>
@@ -106,6 +130,10 @@ fun openQuickPurchaseModal() {
 
     document.body?.appendChild(modal)
 
+    // Car pictures use the same staging/upload machinery as the Add Purchase form.
+    resetPendingCarPictureUploads()
+    ensureCarPictureMediaConfig()
+
     bindStrictDateTextMask("qpDate", null)
     bindStrictMonthYearTextMask("qpCarModelYear", "qpCarModelYearHint")
     setupQuickPurchaseModalListeners()
@@ -118,6 +146,8 @@ fun openQuickPurchaseModal() {
 
 fun closeQuickPurchaseModal() {
     document.getElementById(QP_MODAL_ID)?.remove()
+    // Drop any staged-but-unsaved car pictures so they don't leak into a later Add/Quick Purchase.
+    resetPendingCarPictureUploads()
 }
 
 private fun resetQuickPurchaseModalForm() {
@@ -129,6 +159,10 @@ private fun resetQuickPurchaseModalForm() {
         inp?.value = ""
     }
     (document.getElementById("qpPrice") as? HTMLInputElement)?.value = ""
+    (document.getElementById("qpNegotiate") as? HTMLInputElement)?.checked = false
+    (document.getElementById("carPicturePreview") as? org.w3c.dom.HTMLElement)?.innerHTML = ""
+    (document.getElementById("carPictures") as? HTMLInputElement)?.value = ""
+    resetPendingCarPictureUploads()
     writeCarModelYearInput("qpCarModelYear", "")
     window.asDynamic().__qpChassisMappingCache = null
     window.asDynamic().__qpResolvedSupplier = null
@@ -221,6 +255,9 @@ private fun setupQuickPurchaseModalListeners() {
     }
     document.getElementById("qpClientName")?.addEventListener("change", { _: Event -> onClientChange() })
     document.getElementById("qpClientNameInput")?.addEventListener("change", { _: Event -> onClientChange() })
+
+    // Arrow-key nav for Quick Purchase comboboxes (attach once even before first dropdown open)
+    js("if (typeof window.wireAddPurchaseComboboxKeyboardNav === 'function') window.wireAddPurchaseComboboxKeyboardNav();")
 }
 
 fun populateQuickSupplierDropdownsFromAuction(auctionName: String) {
@@ -301,11 +338,15 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
         return
     }
 
+    // Quick Purchase stores the chassis CODE only (drop any typed "-number" suffix). The chassis
+    // number belongs to the full Add/Edit form; QP is a minimal quick entry keyed by code.
+    val chassisCodeOnly = chassis.substringBefore("-").trim()
+
     val purchaseData = js("{}")
     val dateIso = (document.getElementById("qpDate") as? HTMLInputElement)?.value ?: ""
     purchaseData.date = if (dateIso.isNotBlank()) formatWithWeekday(dateIso) else ""
     purchaseData.auctionNo = (document.getElementById("qpAuctionNo") as? HTMLInputElement)?.value?.trim() ?: ""
-    purchaseData.chassis = chassis
+    purchaseData.chassis = chassisCodeOnly
     purchaseData.carName = getComboboxValueSafe("qpCarName")
     purchaseData.auctionHouse = getComboboxValueSafe("qpAuctionName")
     purchaseData.stockLocation = getComboboxValueSafe("qpStockLocation")
@@ -314,8 +355,17 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
     purchaseData.country = getComboboxValueSafe("qpCountry")
     val priceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpPrice') : ''").unsafeCast<String>().trim()
     purchaseData.price = if (priceValue.isNotBlank()) "¥$priceValue" else ""
+    purchaseData.negotiate = (document.getElementById("qpNegotiate") as? HTMLInputElement)?.checked ?: false
     val regDate = readCarModelYearInput("qpCarModelYear")
     if (regDate.isNotBlank()) purchaseData.carModelYear = regDate
+
+    // Car pictures: same mechanism as Add Purchase. With R2 storage the files are staged and
+    // uploaded after create; without R2 they are embedded as base64 on the payload.
+    if (!isR2CarPictureStorageEnabled()) {
+        val pics = collectCarPictures()
+        val picsCount = js("pics.length").unsafeCast<Int>()
+        purchaseData.carPictures = if (picsCount > 0) JSON.stringify(pics) else null
+    }
 
     enrichQuickPurchasePayload(purchaseData)
 
@@ -329,20 +379,46 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
         requestInit.body = JSON.stringify(enriched)
         window.fetch(apiUrl("purchases"), requestInit).then { response ->
             if (response.ok) {
-                if (saveAndMore) {
-                    resetQuickPurchaseModalForm()
-                    showSuccessModal("Saved", "Purchase saved. You can add another.")
-                } else {
-                    closeQuickPurchaseModal()
-                    showSuccessModal("Saved", "Purchase created successfully!")
+                response.json().then { created: dynamic ->
+                    val createdId = (created.id as? Number)?.toLong()
+                    // Upload any staged car pictures (R2) before the modal/form is reset/closed.
+                    val uploadChain: dynamic = if (createdId != null && isR2CarPictureStorageEnabled()) {
+                        uploadPendingCarPicturesAfterCreate(createdId)
+                    } else {
+                        js("Promise.resolve(null)")
+                    }
+                    uploadChain.then { _: dynamic ->
+                        saveBtn?.disabled = false
+                        saveMoreBtn?.disabled = false
+                        saveBtn?.textContent = originalSave
+                        saveMoreBtn?.textContent = originalMore
+                        if (saveAndMore) {
+                            resetQuickPurchaseModalForm()
+                            showSuccessModal("Saved", "Purchase saved. You can add another.")
+                        } else {
+                            closeQuickPurchaseModal()
+                            showSuccessModal("Saved", "Purchase created successfully!")
+                        }
+                        if (document.getElementById("purchaseTable") != null) {
+                            loadPurchases()
+                        }
+                    }.catch { uploadErr: dynamic ->
+                        saveBtn?.disabled = false
+                        saveMoreBtn?.disabled = false
+                        saveBtn?.textContent = originalSave
+                        saveMoreBtn?.textContent = originalMore
+                        console.error("Quick purchase: car picture upload after create failed:", uploadErr)
+                        showMessage("Purchase saved, but some pictures failed to upload.", "warning")
+                        if (saveAndMore) {
+                            resetQuickPurchaseModalForm()
+                        } else {
+                            closeQuickPurchaseModal()
+                        }
+                        if (document.getElementById("purchaseTable") != null) {
+                            loadPurchases()
+                        }
+                    }
                 }
-                if (document.getElementById("purchaseTable") != null) {
-                    loadPurchases()
-                }
-                saveBtn?.disabled = false
-                saveMoreBtn?.disabled = false
-                saveBtn?.textContent = originalSave
-                saveMoreBtn?.textContent = originalMore
             } else {
                 response.text().then { errorText ->
                     saveBtn?.disabled = false

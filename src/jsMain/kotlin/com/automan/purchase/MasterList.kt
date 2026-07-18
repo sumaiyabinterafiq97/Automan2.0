@@ -2876,6 +2876,8 @@ fun showConsigneeModal(mappingId: Long?, duplicateFromId: Long? = null) {
     
     ensureSupplierChipJs()
     populateConsigneeMapModalComboboxes()
+    // Arrow-key nav for chip multi-select comboboxes (Country, POD)
+    js("if (typeof window.wireAddPurchaseComboboxKeyboardNav === 'function') window.wireAddPurchaseComboboxKeyboardNav();")
 
     when {
         isDuplicate && duplicateFromId != null -> loadConsigneeDataForEdit(duplicateFromId, clearConsigneeNameAndAddressForDuplicate = true)
@@ -5256,6 +5258,9 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
             closeCarBrandModal()
         }
     })
+
+    // Arrow-key nav for chip multi-select comboboxes (Brand, Fuel, WD, Shift, Color, Drive Type)
+    js("if (typeof window.wireAddPurchaseComboboxKeyboardNav === 'function') window.wireAddPurchaseComboboxKeyboardNav();")
 }
 
 fun closeCarBrandModal() {

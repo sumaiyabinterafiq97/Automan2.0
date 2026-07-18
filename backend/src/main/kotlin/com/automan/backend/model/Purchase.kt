@@ -39,15 +39,39 @@ data class Purchase(
     
     @Transient
     val grade: String? = null,
+
+    /**
+     * Read-only: grade that was explicitly entered/stored (from purchase_vehicle_overrides),
+     * null when [grade] was only inferred from the car_brand_mapping baseline. Used by the
+     * Vehicle Summary modal so guessed grades render blank instead of a misleading value.
+     */
+    @Transient
+    val gradeExplicit: String? = null,
     
     @Transient
     val rank: String? = null,
     
     @Transient
     val color: String? = null,
+
+    /**
+     * Read-only: color that was explicitly entered/stored (from purchase_vehicle_overrides),
+     * null when [color] was only inferred from the car_brand_mapping baseline. Used by the
+     * Vehicle Summary modal so guessed color renders blank instead of a misleading value.
+     */
+    @Transient
+    val colorExplicit: String? = null,
     
     @Transient
     val fuel: String? = null,
+
+    /**
+     * Read-only: fuel that was explicitly entered/stored (from purchase_vehicle_overrides),
+     * null when [fuel] was only inferred from the car_brand_mapping baseline. Used by the
+     * Vehicle Summary modal so guessed fuel renders blank instead of a misleading value.
+     */
+    @Transient
+    val fuelExplicit: String? = null,
     
     @Transient
     val seat: String? = null,
@@ -73,6 +97,15 @@ data class Purchase(
     
     @Transient
     val driveType: String? = null,
+
+    /**
+     * Read-only: vehicle spec values that are explicitly stored on this purchase
+     * (from purchase_vehicle_overrides), i.e. NOT inherited from the car_brand_mapping
+     * baseline. Lets the edit page tell stored specs from mapping-inherited ones so a
+     * first-time Update can snapshot the inherited values onto the purchase.
+     */
+    @Transient
+    val vehicleSpecExplicit: Map<String, String>? = null,
     
     @Transient
     val auctionNo: String? = null,

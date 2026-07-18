@@ -671,6 +671,8 @@ fun showClientMapModal(mappingId: Long?, duplicateFromId: Long? = null) {
     """
     document.body?.insertAdjacentHTML("beforeend", html)
     wireClientMapModalComboboxes()
+    // Arrow-key nav for chip multi-select comboboxes (Country, POD, Bank Info, Consignee)
+    js("if (typeof window.wireAddPurchaseComboboxKeyboardNav === 'function') window.wireAddPurchaseComboboxKeyboardNav();")
     if (isEdit && mappingId != null) {
         loadClientMapDataForEdit(mappingId, clearNameForDup = false)
     } else if (isDup && duplicateFromId != null) {

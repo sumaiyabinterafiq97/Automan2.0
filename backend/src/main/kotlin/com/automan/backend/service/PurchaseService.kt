@@ -45,12 +45,15 @@ class PurchaseService(
         return if (matches.size == 1) matches.first().id else null
     }
 
-    /** Phase 2–4 write sync + read adapters for API responses. */
-    private fun finalizePurchaseWrite(purchase: Purchase): Purchase {
+    /**
+     * Phase 2–4 write sync + read adapters for API responses.
+     * @param snapshotSpecs edit/Update path only: freeze mapping-inherited vehicle specs onto the purchase.
+     */
+    private fun finalizePurchaseWrite(purchase: Purchase, snapshotSpecs: Boolean = false): Purchase {
         val sanitized = localPurchaseSanitizer.apply(purchase)
         val withWorkflow = purchaseWorkflowService.applyWorkflowWrite(sanitized)
         purchaseCostLineService.syncFromPurchase(withWorkflow)
-        purchaseVehicleOverrideService.syncFromPurchase(withWorkflow)
+        purchaseVehicleOverrideService.syncFromPurchase(withWorkflow, snapshotSpecs = snapshotSpecs)
         // Shipping fields are @Transient on Purchase; sync before extended-attributes JPA save.
         shippingSnapshotService.syncFromPurchase(withWorkflow)
         val withExtended = purchaseExtendedAttributesService.syncFromPurchase(withWorkflow)
@@ -885,6 +888,8 @@ class PurchaseService(
                     bookingId = refreshed.bookingId,
                     updatedAt = refreshed.updatedAt,
                 ),
+                // Edit/Update: snapshot mapping-inherited specs onto the purchase so they persist.
+                snapshotSpecs = true,
             )
         } else {
             Logger.error("Purchase with ID $id not found")

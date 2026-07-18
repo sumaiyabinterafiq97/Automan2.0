@@ -1077,7 +1077,7 @@ fun initializeAppSetup() {
                 backdrop.style.display = 'flex';
                 backdrop.style.alignItems = 'center';
                 backdrop.style.justifyContent = 'center';
-                backdrop.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+                backdrop.style.fontFamily = '"Plus Jakarta Sans", system-ui, -apple-system, sans-serif';
 
                 var modal = document.createElement('div');
                 modal.style.backgroundColor = '#ffffff';
@@ -3297,6 +3297,304 @@ fun setupEditableComboboxHandlers() {
         window.isChassisComboboxSelectId = function(selectId) {
             return selectId === 'chassisCode' || selectId === 'editChassisCode' || selectId === 'qpChassis';
         };
+
+        // Add/Edit Purchase editable comboboxes: arrow-key nav + light-ash hover (preview without change/cascade).
+        window.ADD_PURCHASE_COMBOBOX_KEY_NAV_IDS = [
+            'auctionName', 'chassisCode', 'brand', 'carName', 'color', 'fuel', 'shift', 'shipmentSize',
+            'rixoCompany', 'stockLocation', 'clientName', 'country', 'pol',
+            'consignee', 'pod', 'repairCompany',
+            // Edit Purchase
+            'editChassisCode', 'editBrand', 'editCarName', 'editColor', 'editFuel', 'editShift', 'editShipmentSize',
+            'editRixoCompany', 'editStockLocation', 'editClientName', 'editCountry', 'editPol',
+            'editConsignee', 'editPod', 'editRepairCompany',
+            // Add Quick Purchase modal
+            'qpChassis', 'qpCarName', 'qpAuctionName', 'qpRixoCompany', 'qpStockLocation', 'qpClientName', 'qpCountry',
+            // Chassis Map (Car Brand) Add/Edit/Duplicate modals — chip multi-select comboboxes
+            'carBrandBrand', 'carBrandFuel', 'carBrandWd', 'carBrandShift', 'carBrandColor', 'carBrandDriveType',
+            // Client Map Add/Edit/Duplicate modals — chip multi-select comboboxes
+            'clientMapMmCountry', 'clientMapMmPod', 'clientMapMmBankInfo', 'clientMapMmConsignee',
+            // Consignee Map Add/Edit/Duplicate modals — chip multi-select comboboxes
+            'consigneeMapCountry', 'consigneeMapPod',
+            // Supplier Map tree — inline add / inline edit / full-row add editable comboboxes
+            // (Stock Location, POL, Rixo Company, Supported Vehicle Type)
+            'smCardInlineAddStock', 'smCardInlineAddPol', 'smCardInlineAddCompany', 'smCardInlineAddLeafType',
+            'smCardInlineEditStock', 'smCardInlineEditPol', 'smCardInlineEditCompany',
+            'smFullRowStock', 'smFullRowPol', 'smFullRowCompany', 'smFullRowVehicleType',
+            // Rixo Price Map tree — inline add / inline edit / full-row add editable comboboxes
+            // (Rixo Company, Supplier Name, Stock Location, POL, Supported Vehicle Type)
+            'rpmCardInlineAddCompany', 'rpmCardInlineAddSupplier', 'rpmCardInlineAddStock', 'rpmCardInlineAddPol', 'rpmCardInlineAddLeafType',
+            'rpmCardInlineEditCompany', 'rpmCardInlineEditSupplier', 'rpmCardInlineEditStock', 'rpmCardInlineEditPol',
+            'rpmFullRowCompany', 'rpmFullRowSupplier', 'rpmFullRowStock', 'rpmFullRowPol', 'rpmFullRowVehicleType'
+        ];
+
+        window.isAddPurchaseComboboxKeyNavEnabled = function(selectId) {
+            if (!selectId) return false;
+            var ids = window.ADD_PURCHASE_COMBOBOX_KEY_NAV_IDS;
+            if (ids && ids.indexOf(selectId) !== -1) return true;
+            // Tree leaf inline-edit Vehicle Type uses a dynamic id: {sm|rpm}LeafInline_{id}_{seq}_type
+            if (/^smLeafInline_.+_type$/.test(selectId)) return true;
+            if (/^rpmLeafInline_.+_type$/.test(selectId)) return true;
+            return false;
+        };
+
+        window.getComboboxInputIdForKeyNav = function(selectId) {
+            if (selectId === 'rixoPriceDropdown') return 'rixoPriceInput';
+            if (selectId === 'editRixoPriceDropdown') return 'editRixoPriceInput';
+            return selectId + 'Input';
+        };
+
+        window.getComboboxSelectableOptions = function(dropdown) {
+            if (!dropdown) return [];
+            var nodes = dropdown.querySelectorAll('[data-combobox-option="1"]');
+            return Array.prototype.slice.call(nodes).filter(function(el) {
+                var v = (el.getAttribute('data-combobox-value') || '').trim();
+                return v !== '' && v !== '__SEE_MORE__' && v !== '__SEE_LESS__' && v !== '__CHASSIS_MASTER_SEP__';
+            });
+        };
+
+        window.previewComboboxOption = function(selectId, optionEl) {
+            if (!optionEl || !selectId) return;
+            var value = (optionEl.getAttribute('data-combobox-value') || optionEl.textContent || '').trim();
+            var input = document.getElementById(window.getComboboxInputIdForKeyNav(selectId));
+            var select = document.getElementById(selectId);
+            if (input) input.value = value;
+            if (select) select.value = value;
+            // Intentionally no change event — avoid cascade/autofill spam while arrowing.
+        };
+
+        window.setComboboxActiveIndex = function(selectId, dropdown, index, doPreview) {
+            var opts = window.getComboboxSelectableOptions(dropdown);
+            if (!opts.length) {
+                if (dropdown) dropdown.dataset.activeIndex = '-1';
+                return -1;
+            }
+            var i = index;
+            if (i < 0) i = 0;
+            if (i >= opts.length) i = opts.length - 1;
+            dropdown.dataset.activeIndex = String(i);
+            opts.forEach(function(el, idx) {
+                if (idx === i) {
+                    el.classList.add('combobox-option-ash-hover');
+                    el.style.backgroundColor = '#e9ecef';
+                    el.style.color = '#333333';
+                    el.style.fontWeight = 'normal';
+                    el.setAttribute('data-keyboard-active', '1');
+                } else {
+                    el.classList.remove('combobox-option-ash-hover');
+                    el.removeAttribute('data-keyboard-active');
+                    el.style.backgroundColor = 'transparent';
+                    el.style.color = '#333333';
+                    el.style.fontWeight = 'normal';
+                }
+            });
+            var activeEl = opts[i];
+            if (activeEl && dropdown) {
+                var top = activeEl.offsetTop;
+                var bottom = top + activeEl.offsetHeight;
+                var viewTop = dropdown.scrollTop;
+                var viewBottom = viewTop + dropdown.clientHeight;
+                if (top < viewTop) {
+                    dropdown.scrollTop = top;
+                } else if (bottom > viewBottom) {
+                    dropdown.scrollTop = bottom - dropdown.clientHeight;
+                }
+            }
+            if (doPreview !== false) {
+                window.previewComboboxOption(selectId, opts[i]);
+            }
+            return i;
+        };
+
+        window.commitComboboxFromKeyboard = function(selectId, optionEl) {
+            if (!optionEl || !selectId) return;
+            var value = (optionEl.getAttribute('data-combobox-value') || optionEl.textContent || '').trim();
+            if (!value) return;
+            var inputId = window.getComboboxInputIdForKeyNav(selectId);
+            var input = document.getElementById(inputId);
+            var select = document.getElementById(selectId);
+            if (!input || !select) return;
+            var valueToSet = value;
+            var preserveChassisSuffix = false;
+            if (selectId === 'qpChassis') {
+                var currentInputVal = (input.value || '').trim();
+                if (currentInputVal.indexOf('-') !== -1 && currentInputVal.toLowerCase().indexOf(value.toLowerCase()) === 0) {
+                    valueToSet = currentInputVal;
+                    preserveChassisSuffix = true;
+                }
+            }
+            input.value = valueToSet;
+            select.value = value;
+            if (typeof window.isChassisComboboxSelectId === 'function' && window.isChassisComboboxSelectId(selectId)) {
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            if (selectId === 'rixoCompany' || selectId === 'editRixoCompany') {
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            if (typeof window.clearInvalidFieldMarker === 'function') {
+                window.clearInvalidFieldMarker(selectId);
+            }
+            if (typeof window.syncComboboxInput === 'function') {
+                window.syncComboboxInput(selectId);
+            }
+            if (preserveChassisSuffix && selectId === 'qpChassis' && input) {
+                input.value = valueToSet;
+            }
+            if (typeof window.closeComboboxDropdown === 'function') {
+                window.closeComboboxDropdown(selectId);
+            }
+        };
+
+        window.findOpenAddPurchaseComboboxKeyNav = function() {
+            // Scan open dropdowns and match against the gate so dynamically-id'd fields
+            // (e.g. Supplier Map leaf edit smLeafInline_{id}_{seq}_type) are detected too.
+            var openDropdowns = document.querySelectorAll('[id$="_dropdown"]');
+            for (var i = 0; i < openDropdowns.length; i++) {
+                var dd = openDropdowns[i];
+                var selectId = dd.id.replace(/_dropdown$/, '');
+                if (window.isAddPurchaseComboboxKeyNavEnabled(selectId)) {
+                    return { selectId: selectId, dropdown: dd };
+                }
+            }
+            return null;
+        };
+
+        window.handleComboboxDropdownKeydown = function(e) {
+            var open = window.findOpenAddPurchaseComboboxKeyNav();
+            if (!open) return false;
+            var selectId = open.selectId;
+            var dropdown = open.dropdown;
+            var key = e.key;
+            var isArrowDown = key === 'ArrowDown';
+            var isArrowUp = key === 'ArrowUp';
+            var isEnter = key === 'Enter';
+            var isEscape = key === 'Escape';
+            if (!isArrowDown && !isArrowUp && !isEnter && !isEscape) return false;
+
+            if (isArrowDown || isArrowUp) {
+                e.preventDefault();
+                e.stopPropagation();
+                var opts = window.getComboboxSelectableOptions(dropdown);
+                if (!opts.length) return true;
+                var cur = parseInt(dropdown.dataset.activeIndex || '-1', 10);
+                if (isNaN(cur)) cur = -1;
+                var next = isArrowDown
+                    ? ((cur < 0) ? 0 : cur + 1)
+                    : ((cur < 0) ? opts.length - 1 : cur - 1);
+                window.setComboboxActiveIndex(selectId, dropdown, next, true);
+                return true;
+            }
+
+            if (isEnter) {
+                var optsEnter = window.getComboboxSelectableOptions(dropdown);
+                var curEnter = parseInt(dropdown.dataset.activeIndex || '-1', 10);
+                if (!isNaN(curEnter) && curEnter >= 0 && curEnter < optsEnter.length) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.commitComboboxFromKeyboard(selectId, optsEnter[curEnter]);
+                }
+                return true;
+            }
+
+            if (isEscape) {
+                e.preventDefault();
+                e.stopPropagation();
+                var restore = (dropdown.dataset.keyboardNavRestore != null)
+                    ? dropdown.dataset.keyboardNavRestore
+                    : '';
+                var inp = document.getElementById(window.getComboboxInputIdForKeyNav(selectId));
+                var sel = document.getElementById(selectId);
+                if (inp) inp.value = restore;
+                if (sel) sel.value = restore;
+                if (typeof window.closeComboboxDropdown === 'function') {
+                    window.closeComboboxDropdown(selectId);
+                }
+                return true;
+            }
+            return false;
+        };
+
+        window.wireComboboxDocumentKeyNav = function() {
+            if (window.__comboboxDocKeyNavWired) return;
+            window.__comboboxDocKeyNavWired = true;
+            document.addEventListener('keydown', function(e) {
+                window.handleComboboxDropdownKeydown(e);
+            }, true);
+        };
+
+        window.wireComboboxKeyboardNav = function(selectId) {
+            if (!window.isAddPurchaseComboboxKeyNavEnabled(selectId)) return;
+            window.wireComboboxDocumentKeyNav();
+            var inputId = window.getComboboxInputIdForKeyNav(selectId);
+            var input = document.getElementById(inputId);
+            if (!input || input.getAttribute('data-combobox-key-nav') === '1') return;
+            input.setAttribute('data-combobox-key-nav', '1');
+            input.addEventListener('keydown', function(e) {
+                if (e.key !== 'ArrowDown') return;
+                if (document.getElementById(selectId + '_dropdown')) return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof window.openComboboxDropdown === 'function') {
+                    window.openComboboxDropdown(selectId);
+                }
+                var dropdown = document.getElementById(selectId + '_dropdown');
+                if (dropdown) {
+                    window.setComboboxActiveIndex(selectId, dropdown, 0, true);
+                }
+            });
+        };
+
+        window.wireAddPurchaseComboboxKeyboardNav = function() {
+            var ids = window.ADD_PURCHASE_COMBOBOX_KEY_NAV_IDS || [];
+            for (var i = 0; i < ids.length; i++) {
+                window.wireComboboxKeyboardNav(ids[i]);
+            }
+        };
+
+        window.focusComboboxInputForNav = function(selectId) {
+            var input = document.getElementById(window.getComboboxInputIdForKeyNav(selectId));
+            if (!input || typeof input.focus !== 'function') return;
+            try {
+                input.focus({ preventScroll: true });
+            } catch (err) {
+                input.focus();
+            }
+        };
+
+        window.setupComboboxKeyNavOnOpen = function(selectId, input, select, dropdown) {
+            if (!window.isAddPurchaseComboboxKeyNavEnabled(selectId) || !dropdown) return;
+            var restoreVal = ((input && input.value) || (select && select.value) || '').trim();
+            dropdown.dataset.keyboardNavRestore = restoreVal;
+            dropdown.dataset.activeIndex = '-1';
+            window.wireComboboxKeyboardNav(selectId);
+            window.focusComboboxInputForNav(selectId);
+        };
+
+        window.syncComboboxHighlightFromValue = function(selectId, dropdown) {
+            if (!window.isAddPurchaseComboboxKeyNavEnabled(selectId)) return;
+            dropdown = dropdown || document.getElementById(selectId + '_dropdown');
+            if (!dropdown) return;
+            var input = document.getElementById(window.getComboboxInputIdForKeyNav(selectId));
+            var select = document.getElementById(selectId);
+            var current = ((input && input.value) || (select && select.value) || '').trim().toLowerCase();
+            var opts = window.getComboboxSelectableOptions(dropdown);
+            if (!opts.length || !current) {
+                dropdown.dataset.activeIndex = '-1';
+                return;
+            }
+            var matchIdx = -1;
+            for (var i = 0; i < opts.length; i++) {
+                var v = (opts[i].getAttribute('data-combobox-value') || opts[i].textContent || '').trim().toLowerCase();
+                if (v === current) {
+                    matchIdx = i;
+                    break;
+                }
+            }
+            if (matchIdx >= 0) {
+                window.setComboboxActiveIndex(selectId, dropdown, matchIdx, false);
+            } else {
+                dropdown.dataset.activeIndex = '-1';
+            }
+        };
         
         window.syncComboboxInput = function(selectId, options) {
             options = options || {};
@@ -4145,6 +4443,8 @@ fun setupEditableComboboxHandlers() {
                         return;
                     }
                     var optionDiv = document.createElement('div');
+                    optionDiv.setAttribute('data-combobox-option', '1');
+                    optionDiv.setAttribute('data-combobox-value', opt.value);
                     optionDiv.style.padding = '8px 12px';
                     optionDiv.style.cursor = 'pointer';
                     optionDiv.style.whiteSpace = 'nowrap';
@@ -4156,18 +4456,34 @@ fun setupEditableComboboxHandlers() {
                     
                     // Check if this is the selected value (never highlight See More; case-insensitive for Brand and master fields)
                     var isSelected = optionMatchesSelected(opt);
+                    var useAshKeyNav = (typeof window.isAddPurchaseComboboxKeyNavEnabled === 'function' &&
+                        window.isAddPurchaseComboboxKeyNavEnabled(selectId));
                     
-                    // Highlight selected value with blue background (like image 4)
+                    // Highlight selected: ash for Add Purchase key-nav comboboxes, blue for others
                     if (isSelected) {
-                        optionDiv.style.backgroundColor = '#007bff';
-                        optionDiv.style.color = '#ffffff';
-                        optionDiv.style.fontWeight = '500';
+                        if (useAshKeyNav) {
+                            optionDiv.classList.add('combobox-option-ash-hover');
+                            optionDiv.style.backgroundColor = '#e9ecef';
+                            optionDiv.style.color = '#333333';
+                            optionDiv.style.fontWeight = 'normal';
+                        } else {
+                            optionDiv.style.backgroundColor = '#007bff';
+                            optionDiv.style.color = '#ffffff';
+                            optionDiv.style.fontWeight = '500';
+                        }
                     } else {
+                        optionDiv.classList.remove('combobox-option-ash-hover');
                         optionDiv.style.backgroundColor = 'transparent';
                         optionDiv.style.color = '#333333';
                     }
                     
                     optionDiv.onmouseenter = function() {
+                        if (useAshKeyNav) {
+                            this.classList.add('combobox-option-ash-hover');
+                            this.style.backgroundColor = '#e9ecef';
+                            this.style.color = '#333333';
+                            return;
+                        }
                         // Don't change color if it's the selected option
                         if (!isSelected) {
                             this.style.backgroundColor = '#e9ecef';
@@ -4175,6 +4491,27 @@ fun setupEditableComboboxHandlers() {
                         }
                     };
                     optionDiv.onmouseleave = function() {
+                        if (useAshKeyNav) {
+                            // Keep ash when this row is the keyboard-active target
+                            if (this.getAttribute('data-keyboard-active') === '1') {
+                                this.classList.add('combobox-option-ash-hover');
+                                this.style.backgroundColor = '#e9ecef';
+                                this.style.color = '#333333';
+                                this.style.fontWeight = 'normal';
+                                return;
+                            }
+                            if (isSelected) {
+                                this.classList.add('combobox-option-ash-hover');
+                                this.style.backgroundColor = '#e9ecef';
+                                this.style.color = '#333333';
+                                this.style.fontWeight = 'normal';
+                            } else {
+                                this.classList.remove('combobox-option-ash-hover');
+                                this.style.backgroundColor = 'transparent';
+                                this.style.color = '#333333';
+                            }
+                            return;
+                        }
                         // Restore selected styling if it's the selected option
                         if (isSelected) {
                             this.style.backgroundColor = '#007bff';
@@ -4246,6 +4583,15 @@ fun setupEditableComboboxHandlers() {
                     
                     dropdown.appendChild(optionDiv);
                 });
+            }
+            // Typing/filter rebuilds option nodes — re-sync ash highlight to current value.
+            if (typeof window.isAddPurchaseComboboxKeyNavEnabled === 'function' &&
+                window.isAddPurchaseComboboxKeyNavEnabled(selectId)) {
+                if (typeof window.syncComboboxHighlightFromValue === 'function') {
+                    window.syncComboboxHighlightFromValue(selectId, dropdown);
+                } else {
+                    dropdown.dataset.activeIndex = '-1';
+                }
             }
         };
         
@@ -4352,6 +4698,15 @@ fun setupEditableComboboxHandlers() {
                     if (isSupplierMasterOpen && refreshed && refreshed.children && refreshed.children.length === 0) {
                         refreshed.remove();
                     } else {
+                        if (typeof window.isAddPurchaseComboboxKeyNavEnabled === 'function' &&
+                            window.isAddPurchaseComboboxKeyNavEnabled(selectId) && refreshed) {
+                            if (refreshed.dataset.keyboardNavRestore == null) {
+                                refreshed.dataset.keyboardNavRestore = ((input && input.value) || (select && select.value) || '').trim();
+                            }
+                            if (typeof window.setupComboboxKeyNavOnOpen === 'function') {
+                                window.setupComboboxKeyNavOnOpen(selectId, input, select, refreshed);
+                            }
+                        }
                         // Ensure scrolling is restored (in case it was stuck)
                         window.ensureScrollingRestored();
                         return;
@@ -4444,7 +4799,7 @@ fun setupEditableComboboxHandlers() {
             // Keep combobox overlays above any modal/backdrop stacking context.
             dropdown.style.zIndex = '2147483647';
             dropdown.style.fontSize = '14px';
-            dropdown.style.fontFamily = 'Arial, sans-serif';
+            dropdown.style.fontFamily = '"Plus Jakarta Sans", Arial, sans-serif';
             dropdown.style.color = '#333333';
             dropdown.style.padding = '0';
             dropdown.style.margin = '0';
@@ -4478,7 +4833,15 @@ fun setupEditableComboboxHandlers() {
             // Re-get dropdown after filtering
             dropdown = document.getElementById(selectId + '_dropdown');
             if (!dropdown) return;
-            
+
+            // Add Purchase comboboxes: store restore value + wire arrow-key nav once.
+            if (typeof window.isAddPurchaseComboboxKeyNavEnabled === 'function' &&
+                window.isAddPurchaseComboboxKeyNavEnabled(selectId)) {
+                if (typeof window.setupComboboxKeyNavOnOpen === 'function') {
+                    window.setupComboboxKeyNavOnOpen(selectId, input, select, dropdown);
+                }
+            }
+                    
                     // Ensure styling is applied (in case it was reset during filtering)
                     dropdown.style.backgroundColor = '#ffffff';
                     dropdown.style.color = '#333333';
@@ -5448,7 +5811,7 @@ private fun setupDynamicMasterSetListeners() {
 
 fun createApp(root: Element) {
     root.innerHTML = """
-        <div style="padding: 20px; font-family: Arial, sans-serif;">
+        <div style="padding: 20px; font-family: 'Plus Jakarta Sans', Arial, sans-serif;">
             <style>
                 .checkwrap { display: inline-flex; align-items: center; cursor: pointer; user-select: none; }
                 .checkwrap input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -6669,7 +7032,7 @@ fun showAuthPage(signInMode: Boolean = false) {
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 overflow: hidden;
             }
             
@@ -8656,14 +9019,58 @@ private fun normalizeApiPurchaseForClient(p: dynamic) {
     }
 }
 
+/**
+ * Non-spec fields the edit form auto-fills from supplier & rixo maps (and stored columns).
+ * When one of these was EMPTY in the stored record, we keep the baseline empty so the autofilled
+ * value is detected as a genuine change and gets persisted (fixes Quick Purchase venueId/rixoPrice
+ * being silently swallowed). Fields that already had a stored value keep the DOM re-baseline below,
+ * so re-derivation from current mapping never silently overwrites them or shows phantom changes.
+ */
+private val editAutofillPreserveIfEmptyFields = arrayOf(
+    "venueId", "rixoPrice", "pol", "stockLocation", "rixoCompany", "brand", "carName",
+)
+
+/**
+ * Vehicle specs that are DERIVED on read from car_brand_mapping (not stored on the purchase
+ * unless explicitly overridden). For change detection we baseline these against the explicitly
+ * STORED value (from `vehicleSpecExplicit`), so a mapping-inherited value shown on the form
+ * counts as a real change and gets snapshotted onto the purchase on Update. `vehicleType` is an
+ * alias of the `shipmentSize` override key.
+ */
+private val editMappingSpecFields = arrayOf(
+    "grade", "rank", "color", "fuel", "seat", "door", "cc", "shift", "wd", "driveType",
+    "shipmentSize", "vehicleType",
+)
+
+private fun isBlankSnapshotValue(v: dynamic): Boolean {
+    if (v == null || v == js("undefined")) return true
+    return v.toString().trim().isEmpty()
+}
+
 /** After supplier/rixo async mapping settles, baseline must match the form or Venue/Stock look "changed" when only pictures were edited. */
 private fun finalizeEditFormOriginalBaselineFromDom() {
     if (document.getElementById("editForm") == null) return
-    if (originalPurchaseData == null) return
+    val apiSnap = originalPurchaseData ?: return
     try {
         val baseline = collectCurrentEditFormData()
         // Registration Date baseline always from API snapshot — never typed DOM (avoids false "no change").
         baseline.carModelYear = editCarModelYearApiBaseline()
+        // Chassis baseline always from the stored API value so a mapping-autofilled suffix
+        // (e.g. "ggg" → "ggg-1234") registers as a change and is saved on Update.
+        js("baseline.chassis = (apiSnap.chassis != null ? String(apiSnap.chassis) : '')")
+        // Preserve empty API-snapshot values for non-spec autofilled fields so first-time autofills persist.
+        for (field in editAutofillPreserveIfEmptyFields) {
+            if (isBlankSnapshotValue(js("apiSnap[field]"))) {
+                js("baseline[field] = apiSnap[field]")
+            }
+        }
+        // Baseline mapping-derived specs against the explicitly-stored value (empty when inherited)
+        // so inherited specs count as changes and get snapshotted onto the purchase on Update.
+        val explicit = js("apiSnap.vehicleSpecExplicit || {}")
+        for (field in editMappingSpecFields) {
+            val key = if (field == "vehicleType") "shipmentSize" else field
+            js("baseline[field] = (explicit[key] != null && String(explicit[key]).trim() !== '') ? String(explicit[key]) : ''")
+        }
         originalPurchaseData = JSON.parse(JSON.stringify(baseline))
     } catch (e: Throwable) {
         console.log("finalizeEditFormOriginalBaselineFromDom:", e.message)
@@ -9948,7 +10355,9 @@ fun setupRixoDropdowns() {
                             editChassisCodeInput.value = part1;
                             console.log('Set edit chassis code input:', part1);
                         }
-                        if (editChassisNumber) {
+                        // Only overwrite the suffix when the stored chassis actually has one (dash).
+                        // For a dash-less code (e.g. "ggg"), keep any mapping-autofilled suffix instead of wiping it.
+                        if (editChassisNumber && part2) {
                             editChassisNumber.value = part2;
                             console.log('Set edit chassis number:', part2);
                         }
@@ -10883,6 +11292,8 @@ fun setupAddFormListeners() {
             }
         """)
     })
+    // Arrow-key nav for Add Purchase comboboxes (attach once even before first dropdown open)
+    js("if (typeof window.wireAddPurchaseComboboxKeyboardNav === 'function') window.wireAddPurchaseComboboxKeyboardNav();")
     
     js("if (typeof window.wireSupplierMapCascadeAutofill === 'function') window.wireSupplierMapCascadeAutofill();")
     
@@ -12206,14 +12617,7 @@ internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
         if (mfgYear.isNotBlank()) purchaseData.manufactureYear = mfgYear
         val feeDigits = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
         if (feeDigits.isNotBlank()) purchaseData.recycleFee = "¥$feeDigits"
-        // Compose chassis code + first map number when QP only has the code
-        val chassisSaved = (purchaseData.chassis?.toString() ?: "").trim()
-        if (chassisSaved.isNotEmpty() && !chassisSaved.contains('-')) {
-            val nums = parseChassisNumberTokensFromMapping(chassisNumberRaw)
-            if (nums.isNotEmpty()) {
-                purchaseData.chassis = composePurchaseChassisForSave(chassisSaved, nums.first())
-            }
-        }
+        // Quick Purchase saves the chassis code only; do not append the mapping chassis number.
     }
     return purchaseData
 }
@@ -18356,6 +18760,9 @@ fun setupEditFormListeners() {
             }
         """)
     })
+
+    // Arrow-key nav for Edit Purchase comboboxes (attach once even before first dropdown open)
+    js("if (typeof window.wireAddPurchaseComboboxKeyboardNav === 'function') window.wireAddPurchaseComboboxKeyboardNav();")
 
     js("if (typeof window.wireSupplierMapCascadeAutofill === 'function') window.wireSupplierMapCascadeAutofill();")
 
