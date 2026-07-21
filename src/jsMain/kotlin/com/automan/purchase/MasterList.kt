@@ -354,6 +354,32 @@ fun populateEditableComboboxFromBookingConsigneeNames(selectId: String) {
         .catch { _: dynamic -> }
 }
 
+/** Distinct Notify party values from Consignee Map (`GET booking/mappings/notify-parties`). */
+fun populateEditableComboboxFromBookingNotifyParties(selectId: String) {
+    val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
+    window.fetch(apiUrl("booking/mappings/notify-parties"))
+        .then { resp: dynamic ->
+            if (resp.ok) resp.json() else js("Promise.resolve({})")
+        }
+        .then { raw: dynamic ->
+            val list = parseConsigneeNamesApiResponse(raw).distinct().sortedBy { it.lowercase() }
+            while (select.options.length > 1) {
+                select.remove(1)
+            }
+            for (v in list) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = v
+                opt.text = v
+                select.add(opt)
+            }
+            val current = (document.getElementById("${selectId}Input") as? HTMLInputElement)?.value?.trim() ?: ""
+            if (current.isNotEmpty()) {
+                setEditableComboboxValue(selectId, current)
+            }
+        }
+        .catch { _: dynamic -> }
+}
+
 private fun parseConsigneeNamesApiResponse(raw: dynamic): List<String> {
     return try {
         val data = js("raw && raw.data")
@@ -968,12 +994,12 @@ var lastCarBrandDeviceType: String? = getDeviceType()
  */
 fun getDefaultConsigneeColumnsForDevice(deviceType: String? = null): List<String> {
     val device = deviceType ?: getDeviceType()
-    // Display order: Consignee Name → Consignee Address → Country → POD
+    // Display order: Consignee Name → Consignee Address → Country → POD → Notify party
     return when (device) {
-        "mobile" -> listOf("consigneeName", "consigneeAddress", "country", "pod")
-        "tablet" -> listOf("consigneeName", "consigneeAddress", "country", "pod")
-        "desktop" -> listOf("consigneeName", "consigneeAddress", "country", "pod")
-        else -> listOf("consigneeName", "consigneeAddress", "country", "pod")
+        "mobile" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
+        "tablet" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
+        "desktop" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
+        else -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
     }
 }
 
@@ -1108,7 +1134,7 @@ fun getSelectedConsigneeColumns(): List<String> {
     if (filteredColumns.isEmpty()) {
         return defaultColumns
     }
-    val preferredConsigneeColumnOrder = listOf("consigneeName", "consigneeAddress", "country", "pod")
+    val preferredConsigneeColumnOrder = listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
     val sortedColumns = filteredColumns.sortedBy { col ->
         val idx = preferredConsigneeColumnOrder.indexOf(col)
         if (idx >= 0) idx else 999
@@ -2228,7 +2254,8 @@ private fun buildConsigneeTableUi(
                 "country" to "Country",
                 "consigneeName" to "Consignee Name",
                 "consigneeAddress" to "Consignee Address",
-        "pod" to "POD"
+        "pod" to "POD",
+                "notifyParty" to "Notify party"
             )
             
             val consigneeColCount = 1 + selectedColumns.size
@@ -2264,6 +2291,7 @@ private fun buildConsigneeTableUi(
                 val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
                 val consigneeAddressShort = if (consigneeAddress.length > 60) consigneeAddress.take(60) + "..." else consigneeAddress
                 val pod = (mapping.pod ?: "").toString()
+                val notifyParty = (mapping.notifyParty ?: "").toString()
                 
                 html += """
                     <tr>
@@ -2292,6 +2320,7 @@ private fun buildConsigneeTableUi(
                         "consigneeName" -> consigneeName
                         "consigneeAddress" -> consigneeAddressShort
                         "pod" -> pod
+                        "notifyParty" -> notifyParty
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
@@ -2531,7 +2560,8 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
         "country" to "Country",
         "consigneeName" to "Consignee Name",
         "consigneeAddress" to "Consignee Address",
-        "pod" to "POD"
+        "pod" to "POD",
+        "notifyParty" to "Notify party"
     )
     
     val cardsHTML = StringBuilder()
@@ -2543,6 +2573,7 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
         val consigneeName = (mapping.consigneeName ?: "").toString()
         val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
         val pod = (mapping.pod ?: "").toString()
+        val notifyParty = (mapping.notifyParty ?: "").toString()
         
         // Build card content based on selected columns
         val cardFields = StringBuilder()
@@ -2553,6 +2584,7 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
                 "consigneeName" -> consigneeName
                 "consigneeAddress" -> consigneeAddress
                 "pod" -> pod
+                "notifyParty" -> notifyParty
                 else -> ""
             }
             
@@ -2702,12 +2734,13 @@ fun showConsigneeColumnFilterModal() {
     
     document.body?.appendChild(modal)
     
-    // Populate column checkboxes (order matches table default: Name → Address → Country → POD)
+    // Populate column checkboxes (order matches table default: Name → Address → Country → POD → Notify party)
     val columnLabels = listOf(
         "consigneeName" to "Consignee Name",
         "consigneeAddress" to "Consignee Address",
         "country" to "Country",
-        "pod" to "POD"
+        "pod" to "POD",
+        "notifyParty" to "Notify party"
     )
     
     val checkboxesDiv = document.getElementById("consigneeColumnCheckboxes")
@@ -2859,6 +2892,10 @@ fun showConsigneeModal(mappingId: Long?, duplicateFromId: Long? = null) {
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">POD (Port of Discharge)</label>
                             ${createChipMultiSelectCombobox("consigneeMapPod", "Select POD")}
                         </div>
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Notify party</label>
+                            <input type="text" id="consigneeNotifyParty" placeholder="Optional" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                        </div>
                         <div class="consignee-modal-actions">
                             <button type="button" id="cancelConsigneeBtn" class="consignee-modal-btn consignee-modal-btn-cancel">Cancel</button>
                             ${if (isEdit) """
@@ -2934,12 +2971,14 @@ fun loadConsigneeDataForEdit(mappingId: Long, clearConsigneeNameAndAddressForDup
                 val nameRaw = (mapping.consigneeName ?: "").toString()
                 val podRaw = (mapping.pod ?: "").toString()
                 val addrRaw = (mapping.consigneeAddress ?: "").toString()
+                val notifyRaw = (mapping.notifyParty ?: "").toString()
                 window.setTimeout({
                     setChipFieldValue("consigneeMapCountry", normalizeStoredListForChips(countryRaw))
                     setEditableComboboxValue("consigneeMapConsigneeName", if (clearConsigneeNameAndAddressForDuplicate) "" else nameRaw.trim())
                     setChipFieldValue("consigneeMapPod", normalizeStoredListForChips(podRaw))
                     (document.getElementById("consigneeAddress") as? HTMLTextAreaElement)?.value =
                         if (clearConsigneeNameAndAddressForDuplicate) "" else addrRaw
+                    (document.getElementById("consigneeNotifyParty") as? HTMLInputElement)?.value = notifyRaw.trim()
                 }, 450)
             }
         }
@@ -3048,6 +3087,7 @@ fun performConsigneeSave(mappingId: Long?) {
     consigneeData.consigneeName = getEditableComboboxValue("consigneeMapConsigneeName").takeUnless { it.isBlank() }
     consigneeData.consigneeAddress = (document.getElementById("consigneeAddress") as? HTMLTextAreaElement)?.value?.trim() ?: null
     consigneeData.pod = getChipFieldValue("consigneeMapPod").takeUnless { it.isBlank() }
+    consigneeData.notifyParty = (document.getElementById("consigneeNotifyParty") as? HTMLInputElement)?.value?.trim()?.takeUnless { it.isBlank() }
     consigneeData.stockLocation = null
     consigneeData.pols = null
     consigneeData.notes = consigneeModalNotesSnapshot?.takeUnless { it.isBlank() }

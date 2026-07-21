@@ -756,6 +756,18 @@ fun storeBookingDetailsForPdf() {
         .ifEmpty { bookingDynString(carBookingFormState.carrierSelect) }
     val polValue = polSelect?.selectedOptions?.item(0)?.textContent?.trim() ?: ""
     val shippingDateValue = etdField?.value?.trim() ?: ""
+    fun optionalBookingDateIso(hiddenId: String, textId: String): String {
+        val fromHidden = (document.getElementById(hiddenId) as? HTMLInputElement)?.value?.trim().orEmpty()
+        if (fromHidden.isNotEmpty()) return fromHidden
+        val textVal = (document.getElementById(textId) as? HTMLInputElement)?.value?.trim().orEmpty()
+        return strictMmDdYyyySlashToIso(textVal).orEmpty()
+    }
+    val cyCutValue = optionalBookingDateIso("cyCutDate", "cyCutDateText")
+    val etaValue = optionalBookingDateIso("etaDate", "etaDateText")
+    val finalDestinationValue = (document.getElementById("finalDestination") as? HTMLInputElement)?.value?.trim().orEmpty()
+        .ifEmpty { bookingDynString(carBookingFormState.finalDestination) }
+    val notifyPartyValue = getEditableComboboxValue("notifyParty")
+        .ifEmpty { bookingDynString(carBookingFormState.notifyParty) }
     
     Logger.debug("Reading form values - Booking No: $bookingNoValue, Vessel: $vesselNameValue, Carrier: $carrierValue, POL: $polValue, POD: $podValue, ETD: $shippingDateValue")
     
@@ -773,6 +785,10 @@ fun storeBookingDetailsForPdf() {
     bookingDetails.pol = if (polValue.isNotEmpty()) polValue else "HAKATA"
     bookingDetails.pod = if (podValue.isNotEmpty()) podValue else "KARACHI"
     bookingDetails.shippingDate = if (shippingDateValue.isNotEmpty()) shippingDateValue else "2025-09-27"
+    bookingDetails.cyCutDate = cyCutValue
+    bookingDetails.eta = etaValue
+    bookingDetails.finalDestination = finalDestinationValue
+    bookingDetails.notifyParty = notifyPartyValue
     bookingDetails.consigneeName = if (consigneeNameValue.isNotEmpty()) consigneeNameValue else "OVERSEAS TRANSIT AGENCY (PVT) LTD."
     bookingDetails.consigneeAddress = ""
     bookingDetails.consigneeCountry = consigneeCountryForPdf
@@ -10217,6 +10233,31 @@ fun setupRixoDropdowns() {
                     }
                 }
                 var OPTIONS_NORMALIZE = { 'Navigation': 'Navigation/TV', 'TV': 'Navigation/TV' };
+                function optionLabelEqualsLocal(a, b) {
+                    if (typeof window.optionLabelEquals === 'function') return window.optionLabelEquals(a, b);
+                    return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+                }
+                function normalizeOptionLabel(opt) {
+                    if (OPTIONS_NORMALIZE[opt]) return OPTIONS_NORMALIZE[opt];
+                    var lower = String(opt || '').trim().toLowerCase();
+                    for (var k in OPTIONS_NORMALIZE) {
+                        if (Object.prototype.hasOwnProperty.call(OPTIONS_NORMALIZE, k) &&
+                            String(k).toLowerCase() === lower) {
+                            return OPTIONS_NORMALIZE[k];
+                        }
+                    }
+                    return opt;
+                }
+                function matchPredefinedCanonical(opt) {
+                    var normalized = normalizeOptionLabel(opt);
+                    for (var i = 0; i < PREDEFINED_OPTIONS.length; i++) {
+                        if (optionLabelEqualsLocal(PREDEFINED_OPTIONS[i], normalized) ||
+                            optionLabelEqualsLocal(PREDEFINED_OPTIONS[i], opt)) {
+                            return PREDEFINED_OPTIONS[i];
+                        }
+                    }
+                    return null;
+                }
                 var editOptions = document.getElementById('editOptions');
                 var editOptionsPredefined = document.getElementById('editOptionsPredefined');
                 if (editOptions && editOptionsPredefined) {
@@ -10226,9 +10267,9 @@ fun setupRixoDropdowns() {
                         var predefined = [];
                         var custom = [];
                         optionsArray.forEach(function(opt) {
-                            var normalized = OPTIONS_NORMALIZE[opt] || opt;
-                            if (PREDEFINED_OPTIONS.indexOf(normalized) > -1) {
-                                predefined.push(normalized);
+                            var canonical = matchPredefinedCanonical(opt);
+                            if (canonical) {
+                                predefined.push(canonical);
                             } else {
                                 custom.push(opt);
                             }
@@ -10239,7 +10280,9 @@ fun setupRixoDropdowns() {
                         var optionButtons = editForm ? editForm.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn');
                         optionButtons.forEach(function(btn) {
                             var optionValue = btn.getAttribute('data-option');
-                            if (predefined.indexOf(optionValue) > -1) {
+                            if (optionValue === 'Basic') return;
+                            var isSelected = predefined.some(function(p) { return optionLabelEqualsLocal(p, optionValue); });
+                            if (isSelected) {
                                 btn.classList.add('selected');
                             } else {
                                 btn.classList.remove('selected');
@@ -10249,8 +10292,11 @@ fun setupRixoDropdowns() {
                         if (editForm) {
                             var basicBtn = editForm.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
                             var required = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'AC'];
+                            var grid = editForm.querySelector('.options-buttons-grid');
                             var allSelected = required.every(function(opt) {
-                                var b = editForm.querySelector('.options-buttons-grid .option-btn[data-option="' + opt + '"]');
+                                var b = (typeof window.findOptionBtnByLabel === 'function')
+                                    ? window.findOptionBtnByLabel(grid, opt)
+                                    : (grid ? grid.querySelector('.option-btn[data-option="' + opt + '"]') : null);
                                 return !!(b && b.classList.contains('selected'));
                             });
                             if (basicBtn) basicBtn.classList.toggle('selected', allSelected);
@@ -10527,11 +10573,25 @@ fun setupRixoDropdowns() {
                 var editOptionsPredefined = document.getElementById('editOptionsPredefined');
                 var editOptionsInput = document.getElementById('editOptions');
                 var BASIC_OPTIONS = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'AC'];
+                function findBtnByLabel(grid, label) {
+                    if (typeof window.findOptionBtnByLabel === 'function') return window.findOptionBtnByLabel(grid, label);
+                    if (!grid || !label) return null;
+                    var buttons = grid.querySelectorAll('.option-btn[data-option]');
+                    for (var i = 0; i < buttons.length; i++) {
+                        var v = buttons[i].getAttribute('data-option');
+                        if (!v || v === 'Basic') continue;
+                        if (String(v).trim().toLowerCase() === String(label).trim().toLowerCase()) return buttons[i];
+                    }
+                    return null;
+                }
                 function updatePredefined(option, add) {
                     if (!editOptionsPredefined) return;
                     var current = editOptionsPredefined.value.trim();
                     var opts = current ? current.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
-                    var idx = opts.indexOf(option);
+                    var idx = -1;
+                    for (var i = 0; i < opts.length; i++) {
+                        if (String(opts[i]).trim().toLowerCase() === String(option).trim().toLowerCase()) { idx = i; break; }
+                    }
                     if (add && idx === -1) opts.push(option);
                     if (!add && idx > -1) opts.splice(idx, 1);
                     editOptionsPredefined.value = opts.join(', ');
@@ -10542,7 +10602,7 @@ fun setupRixoDropdowns() {
                     var grid = editForm.querySelector('.options-buttons-grid');
                     if (!basicBtn || !grid) return;
                     var allSelected = BASIC_OPTIONS.every(function(opt) {
-                        var b = grid.querySelector('.option-btn[data-option="' + opt + '"]');
+                        var b = findBtnByLabel(grid, opt);
                         return !!(b && b.classList.contains('selected'));
                     });
                     basicBtn.classList.toggle('selected', allSelected);
@@ -10555,11 +10615,10 @@ fun setupRixoDropdowns() {
                             var willSelect = !this.classList.contains('selected');
                             this.classList.toggle('selected', willSelect);
                             BASIC_OPTIONS.forEach(function(opt) {
-                                updatePredefined(opt, willSelect);
-                                if (grid) {
-                                    var ob = grid.querySelector('.option-btn[data-option="' + opt + '"]');
-                                    if (ob) ob.classList.toggle('selected', willSelect);
-                                }
+                                var ob = findBtnByLabel(grid, opt);
+                                var actual = (ob && ob.getAttribute('data-option')) || opt;
+                                updatePredefined(actual, willSelect);
+                                if (ob) ob.classList.toggle('selected', willSelect);
                             });
                             return;
                         }
@@ -11451,11 +11510,28 @@ fun setupAddFormListeners() {
     // Option buttons: highlight selected only; text box is for custom options only (no predefined in text box)
     // Use event delegation so Add and Edit forms both work (form can be rendered after initial load)
     js("""
+        // Case-insensitive option matching so Basic works when master_menu uses AIR BAG vs Air Bag.
+        window.optionLabelEquals = function(a, b) {
+            return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+        };
+        window.findOptionBtnByLabel = function(grid, label) {
+            if (!grid || !label) return null;
+            var buttons = grid.querySelectorAll('.option-btn[data-option]');
+            for (var i = 0; i < buttons.length; i++) {
+                var v = buttons[i].getAttribute('data-option');
+                if (!v || v === 'Basic') continue;
+                if (window.optionLabelEquals(v, label)) return buttons[i];
+            }
+            return null;
+        };
         function updatePredefinedInput(predefinedInput, option, add) {
             if (!predefinedInput) return;
             var current = predefinedInput.value.trim();
             var opts = current ? current.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
-            var idx = opts.indexOf(option);
+            var idx = -1;
+            for (var i = 0; i < opts.length; i++) {
+                if (window.optionLabelEquals(opts[i], option)) { idx = i; break; }
+            }
             if (add && idx === -1) { opts.push(option); }
             if (!add && idx > -1) { opts.splice(idx, 1); }
             predefinedInput.value = opts.join(', ');
@@ -11468,7 +11544,7 @@ fun setupAddFormListeners() {
             var grid = form.querySelector('.options-buttons-grid');
             if (!grid) return;
             var allSelected = BASIC_OPTIONS.every(function(opt) {
-                var b = grid.querySelector('.option-btn[data-option="' + opt + '"]');
+                var b = window.findOptionBtnByLabel(grid, opt);
                 return !!(b && b.classList.contains('selected'));
             });
             basicBtn.classList.toggle('selected', allSelected);
@@ -11486,11 +11562,11 @@ fun setupAddFormListeners() {
                 var willSelect = !btn.classList.contains('selected');
                 btn.classList.toggle('selected', willSelect);
                 BASIC_OPTIONS.forEach(function(opt) {
-                    updatePredefinedInput(predefinedInput, opt, willSelect);
-                    if (grid) {
-                    var otherBtn = grid.querySelector('.option-btn[data-option="' + opt + '"]');
+                    var otherBtn = grid ? window.findOptionBtnByLabel(grid, opt) : null;
+                    // Prefer the live chip's casing (e.g. AIR BAG) when writing the hidden field.
+                    var actual = (otherBtn && otherBtn.getAttribute('data-option')) || opt;
+                    updatePredefinedInput(predefinedInput, actual, willSelect);
                     if (otherBtn) otherBtn.classList.toggle('selected', willSelect);
-                    }
                 });
                 return;
             }
@@ -21080,8 +21156,12 @@ private fun persistCarBookingFormToSessionStorage() {
         s.asDynamic().consigneeCountry = carBookingFormState.consigneeCountry ?: ""
         s.asDynamic().consigneeName = carBookingFormState.consigneeName ?: ""
         s.asDynamic().etdDate = carBookingFormState.etdDate ?: ""
+        s.asDynamic().cyCutDate = carBookingFormState.cyCutDate ?: ""
+        s.asDynamic().etaDate = carBookingFormState.etaDate ?: ""
         s.asDynamic().polPort = carBookingFormState.polPort ?: ""
         s.asDynamic().podPort = carBookingFormState.podPort ?: ""
+        s.asDynamic().finalDestination = carBookingFormState.finalDestination ?: ""
+        s.asDynamic().notifyParty = carBookingFormState.notifyParty ?: ""
         s.asDynamic().bookingNo = carBookingFormState.bookingNo ?: ""
         s.asDynamic().vesselSelect = carBookingFormState.vesselSelect ?: ""
         s.asDynamic().carrierSelect = carBookingFormState.carrierSelect ?: ""
@@ -21225,8 +21305,12 @@ fun saveCarBookingState() {
         carBookingFormState.consigneeCountry = countryVal
         carBookingFormState.consigneeName = consigneeNameEl?.value ?: ""
         carBookingFormState.etdDate = etdDateEl?.value ?: ""
+        carBookingFormState.cyCutDate = (document.getElementById("cyCutDate") as? HTMLInputElement)?.value ?: ""
+        carBookingFormState.etaDate = (document.getElementById("etaDate") as? HTMLInputElement)?.value ?: ""
         carBookingFormState.polPort = polVal
         carBookingFormState.podPort = podPortValue
+        carBookingFormState.finalDestination = (document.getElementById("finalDestination") as? HTMLInputElement)?.value ?: ""
+        carBookingFormState.notifyParty = getEditableComboboxValue("notifyParty")
         carBookingFormState.bookingNo = bookingNoEl?.value ?: ""
         carBookingFormState.vesselSelect = vesselInputEl?.value ?: ""
         carBookingFormState.carrierSelect = carrierSelectEl?.value ?: ""
@@ -21362,6 +21446,19 @@ fun restoreCarBookingState() {
     }
     consigneeNameEl?.value = bookingDynString(carBookingFormState.consigneeName)
     etdDateEl?.value = bookingDynString(carBookingFormState.etdDate)
+    val restoredCyCut = bookingDynString(carBookingFormState.cyCutDate)
+    if (restoredCyCut.isNotEmpty()) {
+        (document.getElementById("cyCutDate") as? HTMLInputElement)?.value = restoredCyCut
+        (document.getElementById("cyCutDateText") as? HTMLInputElement)?.value = isoToMmDdYyyy(restoredCyCut)
+    }
+    val restoredEta = bookingDynString(carBookingFormState.etaDate)
+    if (restoredEta.isNotEmpty()) {
+        (document.getElementById("etaDate") as? HTMLInputElement)?.value = restoredEta
+        (document.getElementById("etaDateText") as? HTMLInputElement)?.value = isoToMmDdYyyy(restoredEta)
+    }
+    (document.getElementById("finalDestination") as? HTMLInputElement)?.value =
+        bookingDynString(carBookingFormState.finalDestination)
+    setEditableComboboxValue("notifyParty", bookingDynString(carBookingFormState.notifyParty))
     // POL options come from purchases only after country is set — repopulate before restoring POL value
     val restoredCountry = syncCountry
     if (restoredCountry.isNotEmpty()) {

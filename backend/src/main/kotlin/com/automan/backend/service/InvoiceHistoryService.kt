@@ -34,6 +34,8 @@ class InvoiceHistoryService(
     private val clientRepository: ClientRepository,
     private val clientService: ClientService,
     private val eventService: EventService,
+    private val shippingHistoryService: ShippingHistoryService,
+    private val bookingMappingService: BookingMappingService,
 ) {
 
     fun listAllRows(): List<InvoiceHistoryRowDto> {
@@ -64,18 +66,20 @@ class InvoiceHistoryService(
 
     @Transactional
     fun confirmAndDownload(request: InvoiceConfirmAndDownloadRequest): InvoiceConfirmResult {
-        val pdf = request.pdf
-        val inv = pdf.invoiceNumber.trim()
+        val chassisTokens = request.chassisJoined.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+        val enrichedPdf = finalizeInvoicePdfRequest(request.pdf, chassisTokens)
+        val enrichedRequest = request.copy(pdf = enrichedPdf)
+        val inv = enrichedPdf.invoiceNumber.trim()
         if (inv.isEmpty()) {
             throw IllegalArgumentException("Invoice number is required")
         }
 
-        val creditAssessment = enforceCreditBeforeSave(request, pdf)
+        val creditAssessment = enforceCreditBeforeSave(enrichedRequest, enrichedPdf)
         val priorLineTotal = computePersistedLineTotal(inv)
-        persistInvoiceHistory(request)
-        val ledger = applyLedgerForInvoice(request, pdf, creditAssessment, priorLineTotal)
+        persistInvoiceHistory(enrichedRequest)
+        val ledger = applyLedgerForInvoice(enrichedRequest, enrichedPdf, creditAssessment, priorLineTotal)
         return InvoiceConfirmResult(
-            pdfBytes = pdfService.generateInvoicePdf(pdf),
+            pdfBytes = pdfService.generateInvoicePdf(enrichedPdf),
             ledger = ledger,
         )
     }
@@ -86,16 +90,36 @@ class InvoiceHistoryService(
      */
     @Transactional
     fun saveOnly(request: InvoiceConfirmAndDownloadRequest): InvoiceLedgerResult {
-        val pdf = request.pdf
-        val inv = pdf.invoiceNumber.trim()
+        val chassisTokens = request.chassisJoined.split(';').map { it.trim() }.filter { it.isNotEmpty() }
+        val enrichedPdf = finalizeInvoicePdfRequest(request.pdf, chassisTokens)
+        val enrichedRequest = request.copy(pdf = enrichedPdf)
+        val inv = enrichedPdf.invoiceNumber.trim()
         if (inv.isEmpty()) {
             throw IllegalArgumentException("Invoice number is required")
         }
 
-        val creditAssessment = enforceCreditBeforeSave(request, pdf)
+        val creditAssessment = enforceCreditBeforeSave(enrichedRequest, enrichedPdf)
         val priorLineTotal = computePersistedLineTotal(inv)
-        persistInvoiceHistory(request)
-        return applyLedgerForInvoice(request, pdf, creditAssessment, priorLineTotal)
+        persistInvoiceHistory(enrichedRequest)
+        return applyLedgerForInvoice(enrichedRequest, enrichedPdf, creditAssessment, priorLineTotal)
+    }
+
+    /**
+     * Fills shipping_history extras + Consignee Map address onto an [InvoicePdfRequest]
+     * before save or PDF generation.
+     */
+    fun finalizeInvoicePdfRequest(
+        pdf: InvoicePdfRequest,
+        chassisTokens: Collection<String> = emptyList(),
+    ): InvoicePdfRequest {
+        val (fromShipping, country) = shippingHistoryService.enrichInvoicePdfFromShippingHistory(pdf, chassisTokens)
+        val address = fromShipping.consigneeAddress?.trim()?.takeIf { it.isNotEmpty() }
+            ?: bookingMappingService.resolveConsigneeAddress(
+                fromShipping.consignee,
+                country,
+                fromShipping.to.takeIf { it.isNotBlank() && it != "-" },
+            ).takeIf { it.isNotEmpty() }
+        return if (address != null) fromShipping.copy(consigneeAddress = address) else fromShipping
     }
 
     private fun computePersistedLineTotal(invoiceNumber: String): Double? {
@@ -125,10 +149,17 @@ class InvoiceHistoryService(
             id = existing?.id,
             invoiceNumber = inv,
             vessel = pdf.vessel.trim().takeIf { it.isNotEmpty() },
+            bookingNo = pdf.bookingNo?.trim()?.takeIf { it.isNotEmpty() },
+            carrier = pdf.carrier?.trim()?.takeIf { it.isNotEmpty() },
             clientName = pdf.clientName.trim().takeIf { it.isNotEmpty() },
+            consignee = pdf.consignee?.trim()?.takeIf { it.isNotEmpty() },
+            notifyParty = pdf.notifyParty?.trim()?.takeIf { it.isNotEmpty() },
             shippingDate = shipDate,
+            cyCutDate = parseFlexibleLocalDate(pdf.cyCutDate?.trim()?.take(10)),
+            eta = parseFlexibleLocalDate(pdf.eta?.trim()?.take(10)),
             pol = pdf.from.trim().takeIf { it.isNotEmpty() },
             pod = pdf.to.trim().takeIf { it.isNotEmpty() },
+            finalDestination = pdf.finalDestination?.trim()?.takeIf { it.isNotEmpty() },
             lcNo = pdf.lcNumber?.trim()?.takeIf { it.isNotEmpty() },
             priceType = pdf.priceType.trim().takeIf { it.isNotEmpty() },
             bank = pdf.bankAccount?.trim()?.takeIf { it.isNotEmpty() },
@@ -512,6 +543,11 @@ class InvoiceHistoryService(
                     unit = unit,
                     description = description,
                     amount = formattedAmount,
+                    maker = purchase?.brand?.trim()?.takeIf { it.isNotEmpty() },
+                    model = purchase?.carName?.trim()?.takeIf { it.isNotEmpty() },
+                    chassisNo = chassis.takeIf { it.isNotEmpty() },
+                    year = purchase?.manufactureYear?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: purchase?.carModelYear?.trim()?.takeIf { it.isNotEmpty() },
                 ),
             )
             unit++
@@ -535,8 +571,17 @@ class InvoiceHistoryService(
             totalAmount = formatInvoiceYenInt(totalAmount),
             bankAccount = header.bank?.trim()?.takeIf { it.isNotEmpty() },
             message = header.messages?.trim()?.takeIf { it.isNotEmpty() },
+            consignee = header.consignee?.trim()?.takeIf { it.isNotEmpty() },
+            notifyParty = header.notifyParty?.trim()?.takeIf { it.isNotEmpty() },
+            bookingNo = header.bookingNo?.trim()?.takeIf { it.isNotEmpty() },
+            carrier = header.carrier?.trim()?.takeIf { it.isNotEmpty() },
+            cyCutDate = header.cyCutDate?.toString(),
+            eta = header.eta?.toString(),
+            finalDestination = header.finalDestination?.trim()?.takeIf { it.isNotEmpty() },
         )
-        return pdfService.generateInvoicePdf(pdf)
+        val chassisTokens = lines.map { it.chassis.trim() }.filter { it.isNotEmpty() }
+        val enriched = finalizeInvoicePdfRequest(pdf, chassisTokens)
+        return pdfService.generateInvoicePdf(enriched)
     }
 
     private fun buildInvoicePdfDescription(purchase: Purchase): String {

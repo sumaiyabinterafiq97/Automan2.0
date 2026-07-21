@@ -1685,9 +1685,13 @@ fun saveShippingHistoryAndBooking() {
                 val req: dynamic = js("{}")
                 req.country = bd.consigneeCountry
                 req.consignee = bd.consigneeName
+                req.notifyParty = bd.notifyParty
                 req.shipmentDate = bd.shippingDate
+                req.cyCutDate = bd.cyCutDate
+                req.eta = bd.eta
                 req.pol = bd.pol
                 req.pod = bd.pod
+                req.finalDestination = bd.finalDestination
                 req.bookingId = bd.bookingNo
                 req.vessel = bd.vesselName
                 req.carrier = bd.carrier

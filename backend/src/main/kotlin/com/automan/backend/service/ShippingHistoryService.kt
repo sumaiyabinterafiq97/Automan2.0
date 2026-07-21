@@ -1,6 +1,7 @@
 package com.automan.backend.service
 
 import com.automan.backend.dto.ShippingHistoryBatchRequest
+import com.automan.backend.dto.InvoicePdfRequest
 import com.automan.backend.dto.ShippingHistoryInvoiceHeaderDto
 import com.automan.backend.dto.ShippingHistoryInvoiceLineDto
 import com.automan.backend.dto.ShippingHistoryInvoiceSliceDto
@@ -31,9 +32,13 @@ class ShippingHistoryService(
                 id = e.id ?: 0L,
                 country = e.country,
                 consignee = e.consignee,
+                notifyParty = e.notifyParty,
                 shipmentDate = e.shipmentDate?.toString(),
+                cyCutDate = e.cyCutDate?.toString(),
+                eta = e.eta?.toString(),
                 pol = e.pol,
                 pod = e.pod,
+                finalDestination = e.finalDestination,
                 bookingId = e.bookingId,
                 vessel = e.vessel,
                 carrier = e.carrier,
@@ -47,24 +52,31 @@ class ShippingHistoryService(
         }
     }
 
+    private fun parseIsoLocalDate(raw: String?): LocalDate? {
+        val s = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return try {
+            LocalDate.parse(s.take(10))
+        } catch (_: DateTimeParseException) {
+            null
+        }
+    }
+
     @Transactional
     fun saveBatch(request: ShippingHistoryBatchRequest): Int {
         if (request.items.isEmpty()) {
             throw IllegalArgumentException("items must not be empty")
         }
-        val shipmentDate: LocalDate? = request.shipmentDate?.trim()?.takeIf { it.isNotEmpty() }?.let { s ->
-            try {
-                LocalDate.parse(s)
-            } catch (_: DateTimeParseException) {
-                null
-            }
-        }
+        val shipmentDate = parseIsoLocalDate(request.shipmentDate)
+        val cyCutDate = parseIsoLocalDate(request.cyCutDate)
+        val eta = parseIsoLocalDate(request.eta)
         val priceType = request.priceType?.trim()?.takeIf { it.isNotEmpty() }
         val bookingKey = request.bookingId?.trim().orEmpty()
         val country = request.country?.trim()?.takeIf { it.isNotEmpty() }
         val consignee = request.consignee?.trim()?.takeIf { it.isNotEmpty() }
+        val notifyParty = request.notifyParty?.trim()?.takeIf { it.isNotEmpty() }
         val pol = request.pol?.trim()?.takeIf { it.isNotEmpty() }
         val pod = request.pod?.trim()?.takeIf { it.isNotEmpty() }
+        val finalDestination = request.finalDestination?.trim()?.takeIf { it.isNotEmpty() }
         val vessel = request.vessel?.trim()?.takeIf { it.isNotEmpty() }
         val carrier = request.carrier?.trim()?.takeIf { it.isNotEmpty() }
         val blNo = request.blNo?.trim()?.takeIf { it.isNotEmpty() }
@@ -89,9 +101,13 @@ class ShippingHistoryService(
                 existing.copy(
                     country = country,
                     consignee = consignee,
+                    notifyParty = notifyParty,
                     shipmentDate = shipmentDate,
+                    cyCutDate = cyCutDate,
+                    eta = eta,
                     pol = pol,
                     pod = pod,
+                    finalDestination = finalDestination,
                     bookingId = bookingIdStored,
                     vessel = vessel,
                     carrier = carrier,
@@ -106,9 +122,13 @@ class ShippingHistoryService(
                 ShippingHistory(
                     country = country,
                     consignee = consignee,
+                    notifyParty = notifyParty,
                     shipmentDate = shipmentDate,
+                    cyCutDate = cyCutDate,
+                    eta = eta,
                     pol = pol,
                     pod = pod,
+                    finalDestination = finalDestination,
                     bookingId = bookingIdStored,
                     vessel = vessel,
                     carrier = carrier,
@@ -166,9 +186,17 @@ class ShippingHistoryService(
         val first = included.first().first
         val header = ShippingHistoryInvoiceHeaderDto(
             shipmentDate = first.shipmentDate?.toString(),
+            cyCutDate = first.cyCutDate?.toString(),
+            eta = first.eta?.toString(),
             pol = first.pol,
             pod = first.pod,
+            finalDestination = first.finalDestination,
             priceType = first.priceType,
+            consignee = first.consignee,
+            notifyParty = first.notifyParty,
+            bookingId = first.bookingId,
+            vessel = first.vessel,
+            carrier = first.carrier,
         )
         val lines = included.map { (row, p) ->
             ShippingHistoryInvoiceLineDto(
@@ -181,6 +209,67 @@ class ShippingHistoryService(
             )
         }
         return ShippingHistoryInvoiceSliceDto(header, lines)
+    }
+
+    /**
+     * Fills blank MEMON invoice header fields from [shipping_history] for the same client+vessel
+     * (or first matching chassis). Does not overwrite non-blank request values.
+     * Returns Pair(enrichedPdf, countryFromShipping) — country is for Consignee Map address lookup.
+     */
+    @Transactional(readOnly = true)
+    fun enrichInvoicePdfFromShippingHistory(
+        pdf: InvoicePdfRequest,
+        chassisTokens: Collection<String> = emptyList(),
+    ): Pair<InvoicePdfRequest, String?> {
+        val row = resolveShippingRowForInvoice(pdf, chassisTokens) ?: return pdf to null
+
+        fun blank(s: String?): Boolean {
+            val t = s?.trim().orEmpty()
+            return t.isEmpty() || t == "-"
+        }
+        fun pick(existing: String?, fromRow: String?): String? =
+            if (!blank(existing)) existing?.trim() else fromRow?.trim()?.takeIf { it.isNotEmpty() }
+
+        val enriched = pdf.copy(
+            consignee = pick(pdf.consignee, row.consignee),
+            notifyParty = pick(pdf.notifyParty, row.notifyParty),
+            bookingNo = pick(pdf.bookingNo, row.bookingId),
+            carrier = pick(pdf.carrier, row.carrier),
+            cyCutDate = pick(pdf.cyCutDate, row.cyCutDate?.toString()),
+            eta = pick(pdf.eta, row.eta?.toString()),
+            finalDestination = pick(pdf.finalDestination, row.finalDestination),
+            vessel = if (!blank(pdf.vessel)) pdf.vessel else (row.vessel?.trim()?.takeIf { it.isNotEmpty() } ?: pdf.vessel),
+            from = if (!blank(pdf.from)) pdf.from else (row.pol?.trim()?.takeIf { it.isNotEmpty() } ?: pdf.from),
+            to = if (!blank(pdf.to)) pdf.to else (row.pod?.trim()?.takeIf { it.isNotEmpty() } ?: pdf.to),
+        )
+        return enriched to row.country?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    private fun resolveShippingRowForInvoice(
+        pdf: InvoicePdfRequest,
+        chassisTokens: Collection<String>,
+    ): ShippingHistory? {
+        val client = pdf.clientName.trim()
+        val vessel = pdf.vessel.trim().takeIf { it.isNotEmpty() && it != "-" }.orEmpty()
+        if (client.isNotEmpty() && vessel.isNotEmpty()) {
+            val rows = shippingHistoryRepository.findInvoiceRowsOrderByIdAsc(client, vessel)
+            if (rows.isNotEmpty()) return rows.first()
+        }
+        for (raw in chassisTokens) {
+            val chassis = raw.trim()
+            if (chassis.isEmpty()) continue
+            val found = shippingHistoryRepository.findFirstByChassisOrderByIdDesc(chassis)
+            if (found != null) return found
+        }
+        // Also try chassis from PDF line items
+        for (item in pdf.items) {
+            val chassis = item.chassisNo?.trim().orEmpty()
+                .ifEmpty { item.description.lineSequence().firstOrNull()?.trim()?.split(Regex("\\s{2,}"))?.firstOrNull().orEmpty() }
+            if (chassis.isEmpty()) continue
+            val found = shippingHistoryRepository.findFirstByChassisOrderByIdDesc(chassis)
+            if (found != null) return found
+        }
+        return null
     }
 
     /**

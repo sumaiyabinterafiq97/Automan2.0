@@ -22,17 +22,38 @@ data class InvoiceHistory(
     @Column(name = "vessel")
     val vessel: String? = null,
 
+    @Column(name = "booking_no")
+    val bookingNo: String? = null,
+
+    @Column(name = "carrier")
+    val carrier: String? = null,
+
     @Column(name = "client_name")
     val clientName: String? = null,
 
+    @Column(name = "consignee")
+    val consignee: String? = null,
+
+    @Column(name = "notify_party")
+    val notifyParty: String? = null,
+
     @Column(name = "shipping_date")
     val shippingDate: LocalDate? = null,
+
+    @Column(name = "cy_cut_date")
+    val cyCutDate: LocalDate? = null,
+
+    @Column(name = "eta")
+    val eta: LocalDate? = null,
 
     @Column(name = "pol")
     val pol: String? = null,
 
     @Column(name = "pod")
     val pod: String? = null,
+
+    @Column(name = "final_destination")
+    val finalDestination: String? = null,
 
     @Column(name = "lc_no")
     val lcNo: String? = null,

@@ -680,8 +680,11 @@ class PurchaseController(
     fun generateInvoicePdf(@RequestBody request: com.automan.backend.dto.InvoicePdfRequest): ResponseEntity<ByteArray> {
         try {
             Logger.debug("[Controller] Generating invoice PDF for invoice number: ${request.invoiceNumber}")
-            
-            val pdfBytes = pdfService.generateInvoicePdf(request)
+            val chassisTokens = request.items.mapNotNull { item ->
+                item.chassisNo?.trim()?.takeIf { it.isNotEmpty() }
+            }
+            val enriched = invoiceHistoryService.finalizeInvoicePdfRequest(request, chassisTokens)
+            val pdfBytes = pdfService.generateInvoicePdf(enriched)
             
             val headers = org.springframework.http.HttpHeaders()
             headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF

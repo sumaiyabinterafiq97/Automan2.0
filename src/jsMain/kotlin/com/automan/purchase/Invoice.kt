@@ -741,6 +741,13 @@ private fun shippingHistoryInvoiceRowDynStr(row: dynamic, key: String): String {
         "pod" -> d.pod
         "shipmentDate" -> d.shipmentDate
         "priceType" -> d.priceType
+        "consignee" -> d.consignee
+        "notifyParty" -> d.notifyParty
+        "bookingId" -> d.bookingId
+        "carrier" -> d.carrier
+        "cyCutDate" -> d.cyCutDate
+        "eta" -> d.eta
+        "finalDestination" -> d.finalDestination
         else -> null
     }
     if (v == null) return ""
@@ -814,6 +821,31 @@ private suspend fun applyShippingHistoryInvoicePrefillFromJson(raw: String) {
     val priceTypeFromHistory = sortedList.firstNotNullOfOrNull { r ->
         shippingHistoryInvoiceRowDynStr(r, "priceType").takeIf { it.isNotBlank() }
     }.orEmpty()
+
+    val extras = js("{}")
+    extras.consignee = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "consignee").takeIf { it.isNotBlank() }
+    }.orEmpty()
+    extras.notifyParty = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "notifyParty").takeIf { it.isNotBlank() }
+    }.orEmpty()
+    extras.bookingNo = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "bookingId").takeIf { it.isNotBlank() }
+    }.orEmpty()
+    extras.carrier = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "carrier").takeIf { it.isNotBlank() }
+    }.orEmpty()
+    extras.cyCutDate = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "cyCutDate").takeIf { it.isNotBlank() }?.take(10)
+    }.orEmpty()
+    extras.eta = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "eta").takeIf { it.isNotBlank() }?.take(10)
+    }.orEmpty()
+    extras.finalDestination = sortedList.firstNotNullOfOrNull { r ->
+        shippingHistoryInvoiceRowDynStr(r, "finalDestination").takeIf { it.isNotBlank() }
+    }.orEmpty()
+    extras.vessel = vessel
+    js("window.__invoiceShippingExtras = extras")
 
     invoicePrefillApplyHeaderRadiosPurchasesMatch(
         clientName = clientName,
@@ -1029,6 +1061,7 @@ private fun clearInvoiceShippingHeaderFields() {
     (document.getElementById("invoiceTo") as? HTMLInputElement)?.value = ""
     (document.getElementById("invoiceShippingDate") as? HTMLInputElement)?.value = ""
     (document.getElementById("invoiceShippingDateText") as? HTMLInputElement)?.value = ""
+    js("window.__invoiceShippingExtras = {}")
 }
 
 private fun clearInvoiceListAndTotals() {
@@ -1361,6 +1394,12 @@ private fun buildInvoicePdfItemsAndTotal(
             item.unit = unitNumber
             item.description = buildInvoicePdfDescription(purchase)
             item.amount = formattedAmount
+            item.maker = js("purchase.brand")?.toString()?.trim() ?: ""
+            item.model = js("purchase.carName")?.toString()?.trim() ?: ""
+            item.chassisNo = js("purchase.chassis")?.toString()?.trim() ?: ""
+            val mfg = js("purchase.manufactureYear")?.toString()?.trim() ?: ""
+            val cmy = js("purchase.carModelYear")?.toString()?.trim() ?: ""
+            item.year = if (mfg.isNotEmpty()) mfg else cmy
             itemsList.add(item)
             unitNumber++
             }
@@ -1373,6 +1412,12 @@ private fun buildInvoicePdfItemsAndTotal(
             item.unit = unitNumber
             item.description = buildInvoicePdfDescription(purchase)
             item.amount = formatInvoiceYenInt(amount)
+            item.maker = js("purchase.brand")?.toString()?.trim() ?: ""
+            item.model = js("purchase.carName")?.toString()?.trim() ?: ""
+            item.chassisNo = js("purchase.chassis")?.toString()?.trim() ?: ""
+            val mfg = js("purchase.manufactureYear")?.toString()?.trim() ?: ""
+            val cmy = js("purchase.carModelYear")?.toString()?.trim() ?: ""
+            item.year = if (mfg.isNotEmpty()) mfg else cmy
             itemsList.add(item)
             unitNumber++
         }
@@ -1503,6 +1548,18 @@ private fun applyInvoiceHeaderFromShipping(payload: dynamic) {
         }
         else -> { }
     }
+
+    // Stash shipping_history extras for invoice PDF (not shown on Shipping History UI).
+    val extras = js("{}")
+    extras.consignee = header.consignee?.toString()?.trim() ?: ""
+    extras.notifyParty = header.notifyParty?.toString()?.trim() ?: ""
+    extras.bookingNo = header.bookingId?.toString()?.trim() ?: ""
+    extras.carrier = header.carrier?.toString()?.trim() ?: ""
+    extras.cyCutDate = header.cyCutDate?.toString()?.trim()?.take(10) ?: ""
+    extras.eta = header.eta?.toString()?.trim()?.take(10) ?: ""
+    extras.finalDestination = header.finalDestination?.toString()?.trim() ?: ""
+    extras.vessel = header.vessel?.toString()?.trim() ?: ""
+    js("window.__invoiceShippingExtras = extras")
 }
 
 private fun escapeJsonStringForInvoice(str: String): String =
@@ -1708,7 +1765,17 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
                 val unit = itemDynamic.unit?.toString() ?: "0"
                 val description = escapeJsonStringForInvoice((itemDynamic.description as? String) ?: "")
                 val amount = escapeJsonStringForInvoice((itemDynamic.amount as? String) ?: "")
-                "{\"unit\":" + unit + ",\"description\":\"" + description + "\",\"amount\":\"" + amount + "\"}"
+                val maker = escapeJsonStringForInvoice((itemDynamic.maker as? String) ?: "")
+                val model = escapeJsonStringForInvoice((itemDynamic.model as? String) ?: "")
+                val chassisNo = escapeJsonStringForInvoice((itemDynamic.chassisNo as? String) ?: "")
+                val year = escapeJsonStringForInvoice((itemDynamic.year as? String) ?: "")
+                "{\"unit\":" + unit +
+                    ",\"description\":\"" + description +
+                    "\",\"amount\":\"" + amount +
+                    "\",\"maker\":\"" + maker +
+                    "\",\"model\":\"" + model +
+                    "\",\"chassisNo\":\"" + chassisNo +
+                    "\",\"year\":\"" + year + "\"}"
             }
             
             val lcNumberPart = if (invoiceLcNo.isNotEmpty()) {
@@ -1731,7 +1798,16 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
             } else {
                 "null"
             }
-            
+
+            val extras = js("window.__invoiceShippingExtras || {}")
+            fun extraStr(key: String): String {
+                val v = extras[key]
+                if (v == null || v == js("undefined")) return ""
+                return v.toString().trim()
+            }
+            fun jsonNullableString(raw: String): String =
+                if (raw.isNotEmpty()) "\"" + escapeJsonStringForInvoice(raw) + "\"" else "null"
+
             val requestBodyJson = "{\"invoiceNumber\":\"" + escapeJsonStringForInvoice(invoiceNumber) + 
                 "\",\"invoiceDate\":\"" + escapeJsonStringForInvoice(invoiceDate) + 
                 "\",\"lcNumber\":" + lcNumberPart + 
@@ -1745,7 +1821,14 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
                 "\",\"items\":[" + itemsJsonArray + 
                 "],\"totalAmount\":\"" + escapeJsonStringForInvoice(formattedTotal) + 
                 "\",\"bankAccount\":" + bankAccountPart + 
-                ",\"message\":" + messagePart + 
+                ",\"message\":" + messagePart +
+                ",\"consignee\":" + jsonNullableString(extraStr("consignee")) +
+                ",\"notifyParty\":" + jsonNullableString(extraStr("notifyParty")) +
+                ",\"bookingNo\":" + jsonNullableString(extraStr("bookingNo")) +
+                ",\"carrier\":" + jsonNullableString(extraStr("carrier")) +
+                ",\"cyCutDate\":" + jsonNullableString(extraStr("cyCutDate")) +
+                ",\"eta\":" + jsonNullableString(extraStr("eta")) +
+                ",\"finalDestination\":" + jsonNullableString(extraStr("finalDestination")) +
                 "}"
 
             val chassisList = js("window.currentInvoiceChassisList || []") as Array<dynamic>

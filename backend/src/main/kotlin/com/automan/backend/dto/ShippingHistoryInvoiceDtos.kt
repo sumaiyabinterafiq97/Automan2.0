@@ -2,9 +2,17 @@ package com.automan.backend.dto
 
 data class ShippingHistoryInvoiceHeaderDto(
     val shipmentDate: String? = null,
+    val cyCutDate: String? = null,
+    val eta: String? = null,
     val pol: String? = null,
     val pod: String? = null,
+    val finalDestination: String? = null,
     val priceType: String? = null,
+    val consignee: String? = null,
+    val notifyParty: String? = null,
+    val bookingId: String? = null,
+    val vessel: String? = null,
+    val carrier: String? = null,
 )
 
 data class ShippingHistoryInvoiceLineDto(

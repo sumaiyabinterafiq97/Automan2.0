@@ -24,6 +24,13 @@ class BookingMappingService(
             .filter { it.isNotEmpty() }
     }
 
+    @Transactional(readOnly = true)
+    fun getDistinctNotifyParties(): List<String> {
+        return repo.findDistinctNotifyParties()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+
     @Transactional
     fun add(payload: BookingMapping): BookingMappingSaveResult {
         val name = payload.consigneeName?.trim().orEmpty()
@@ -39,6 +46,7 @@ class BookingMappingService(
             id = 0,
             country = ensureCountryColumn(payload.country),
             consigneeName = name,
+            notifyParty = payload.notifyParty?.trim()?.takeIf { it.isNotEmpty() },
         )
         return BookingMappingSaveResult(repo.save(toSave), mergedIntoExisting = false)
     }
@@ -62,6 +70,7 @@ class BookingMappingService(
                 id = id,
                 country = ensureCountryColumn(payload.country),
                 consigneeName = name,
+                notifyParty = payload.notifyParty?.trim()?.takeIf { it.isNotEmpty() },
                 createdAt = current.createdAt,
             ),
         )
@@ -80,12 +89,14 @@ class BookingMappingService(
             incoming.consigneeAddress,
             TokenSplit.SEMICOLON_NEWLINE_ONLY,
         )
+        val incomingNotify = incoming.notifyParty?.trim()?.takeIf { it.isNotEmpty() }
         return repo.save(
             target.copy(
                 country = ensureCountryColumn(mergedCountry ?: target.country),
                 consigneeName = target.consigneeName,
                 consigneeAddress = mergedAddress ?: target.consigneeAddress,
                 pod = mergedPod ?: target.pod,
+                notifyParty = incomingNotify ?: target.notifyParty,
                 createdAt = target.createdAt,
             ),
         )
@@ -164,4 +175,40 @@ class BookingMappingService(
 
     private fun sanitizeConsigneeMapSearchToken(raw: String): String =
         raw.trim().replace("%", "").replace("_", "").take(120)
+
+    /**
+     * Resolves consignee address from Consignee Map (`booking_mappings`).
+     * When multiple rows share the same name, prefers matches on [country] and/or [pod].
+     */
+    @Transactional(readOnly = true)
+    fun resolveConsigneeAddress(consigneeName: String?, country: String?, pod: String?): String {
+        val name = consigneeName?.trim().orEmpty()
+        if (name.isEmpty()) return ""
+        val rows = repo.findAllByConsigneeNameIgnoreCaseOrderByIdAsc(name)
+        if (rows.isEmpty()) return ""
+        if (rows.size == 1) return rows.first().consigneeAddress?.trim().orEmpty()
+        val countryQ = country?.trim()?.lowercase().orEmpty()
+        val podQ = pod?.trim()?.lowercase().orEmpty()
+        fun tokens(raw: String?): List<String> =
+            raw.orEmpty().split(Regex("[;,\\n]")).map { it.trim() }.filter { it.isNotEmpty() }
+        fun matchesCountry(m: BookingMapping): Boolean {
+            if (countryQ.isEmpty()) return false
+            return tokens(m.country).any { it.equals(countryQ, ignoreCase = true) }
+        }
+        fun matchesPod(m: BookingMapping): Boolean {
+            if (podQ.isEmpty()) return false
+            return tokens(m.pod).any { t ->
+                t.equals(podQ, ignoreCase = true) ||
+                    podQ.contains(t, ignoreCase = true) ||
+                    t.contains(podQ, ignoreCase = true)
+            }
+        }
+        val both = rows.filter { matchesCountry(it) && matchesPod(it) }
+        if (both.isNotEmpty()) return both.first().consigneeAddress?.trim().orEmpty()
+        val byCountry = rows.filter { matchesCountry(it) }
+        if (byCountry.isNotEmpty()) return byCountry.first().consigneeAddress?.trim().orEmpty()
+        val byPod = rows.filter { matchesPod(it) }
+        if (byPod.isNotEmpty()) return byPod.first().consigneeAddress?.trim().orEmpty()
+        return rows.first().consigneeAddress?.trim().orEmpty()
+    }
 }

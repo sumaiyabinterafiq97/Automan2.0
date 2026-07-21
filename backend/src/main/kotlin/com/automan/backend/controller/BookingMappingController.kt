@@ -74,6 +74,17 @@ class BookingMappingController(
             ResponseEntity.status(500).body(ApiResponse(false, null, "Error: ${e.message}"))
         }
     }
+
+    @GetMapping("/notify-parties")
+    fun getDistinctNotifyParties(): ResponseEntity<ApiResponse<List<String>>> {
+        return try {
+            val parties = bookingMappingService.getDistinctNotifyParties()
+            ResponseEntity.ok(ApiResponse(true, parties))
+        } catch (e: Exception) {
+            Logger.error("Error in BookingMappingController.getDistinctNotifyParties: ${e.message}")
+            ResponseEntity.status(500).body(ApiResponse(false, null, "Error: ${e.message}"))
+        }
+    }
     
     @GetMapping("/by-country/{country}")
     fun byCountry(@PathVariable country: String): ResponseEntity<ApiResponse<List<BookingMapping>>> {

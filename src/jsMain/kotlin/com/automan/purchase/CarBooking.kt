@@ -145,6 +145,26 @@ private fun bookingFormEtdIso(): String {
     return strictMmDdYyyySlashToIso(text?.value?.trim().orEmpty()).orEmpty()
 }
 
+/** ISO yyyy-MM-dd helper for booking optional date fields (CY CUT / ETA). */
+private fun bookingFormOptionalDateIso(hiddenId: String, textId: String): String {
+    val hidden = document.getElementById(hiddenId) as? HTMLInputElement
+    val text = document.getElementById(textId) as? HTMLInputElement
+    val fromHidden = hidden?.value?.trim().orEmpty()
+    if (fromHidden.isNotEmpty()) return fromHidden
+    return strictMmDdYyyySlashToIso(text?.value?.trim().orEmpty()).orEmpty()
+}
+
+private fun bookingFormCyCutIso(): String = bookingFormOptionalDateIso("cyCutDate", "cyCutDateText")
+
+private fun bookingFormEtaIso(): String = bookingFormOptionalDateIso("etaDate", "etaDateText")
+
+private fun setBookingOptionalDateFields(hiddenId: String, textId: String, isoRaw: String) {
+    val iso = toIsoFromLabel(isoRaw).ifBlank { isoRaw.trim().take(10) }
+    if (iso.isBlank()) return
+    (document.getElementById(hiddenId) as? HTMLInputElement)?.value = iso
+    (document.getElementById(textId) as? HTMLInputElement)?.value = isoToMmDdYyyy(iso)
+}
+
 fun showCarBookingPage() {
     try {
         Logger.debug("showCarBookingPage() function called")
@@ -300,11 +320,55 @@ fun showCarBookingPage() {
                                        style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
                             </div>
                         </div>
+
+                        <!-- CY CUT Date -->
+                        <div class="booking-form-group">
+                            <label>CY CUT Date:</label>
+                            <div style="position:relative; width:100%;">
+                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                                    <input type="text" id="cyCutDateText" maxlength="10" inputmode="numeric" autocomplete="off"
+                                           placeholder="MM/DD/YYYY"
+                                           style="flex:1; min-width:0; color:#000000; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                                    <button type="button" id="cyCutDateCalendarBtn" title="Open calendar"
+                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                </div>
+                                <input type="date" id="cyCutDate" tabindex="-1" aria-hidden="true"
+                                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                            </div>
+                        </div>
+
+                        <!-- ETA -->
+                        <div class="booking-form-group">
+                            <label>ETA:</label>
+                            <div style="position:relative; width:100%;">
+                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                                    <input type="text" id="etaDateText" maxlength="10" inputmode="numeric" autocomplete="off"
+                                           placeholder="MM/DD/YYYY"
+                                           style="flex:1; min-width:0; color:#000000; padding:8px; border:1px solid #ddd; border-radius:4px;">
+                                    <button type="button" id="etaDateCalendarBtn" title="Open calendar"
+                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                </div>
+                                <input type="date" id="etaDate" tabindex="-1" aria-hidden="true"
+                                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                            </div>
+                        </div>
                         
                         <!-- POD -->
                         <div class="booking-form-group">
                             <label>POD:</label>
                             <input type="text" id="podPort" placeholder="PORT OF DISCHARGE" style="color: #000000;">
+                        </div>
+
+                        <!-- Final Destination (optional) -->
+                        <div class="booking-form-group">
+                            <label>Final Destination:</label>
+                            <input type="text" id="finalDestination" placeholder="Optional" style="color: #000000;">
+                        </div>
+
+                        <!-- Notify party (optional) — values from Consignee Map -->
+                        <div class="booking-form-group">
+                            <label>Notify party:</label>
+                            ${createEditableCombobox("notifyParty", "Optional", required = false)}
                         </div>
                         
                         <!-- BOOKING NO -->
@@ -404,6 +468,8 @@ fun showCarBookingPage() {
     val etdToShow = if (savedEtdEarly.isNotEmpty()) savedEtdEarly else today
     (document.getElementById("etdDate") as? HTMLInputElement)?.value = etdToShow
     bindStrictDateTextMask("etdDate")
+    bindStrictDateTextMask("cyCutDate")
+    bindStrictDateTextMask("etaDate")
     
     // Setup event listeners
     setupCarBookingPageListeners()
@@ -453,9 +519,10 @@ fun showCarBookingPage() {
         clearPolDropdownNoCountry()
     }
     
-    // Load countries first, then carriers, then restore — otherwise a late API response rebuilds the country dropdown and clears the restored value.
+    // Load countries first, then carriers + notify parties, then restore — otherwise a late API response rebuilds the country dropdown and clears the restored value.
     loadCountries {
         loadCarriers {
+            populateEditableComboboxFromBookingNotifyParties("notifyParty")
             window.setTimeout({
                 if (shippingHistoryEditPrefillRaw != null) {
                     MainScope().launch {
@@ -2438,6 +2505,22 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
             // Prefill runs after bindStrictDateTextMask; visible field is not updated when only hidden changes.
             (document.getElementById("etdDateText") as? HTMLInputElement)?.value = isoToMmDdYyyy(etdIso)
         }
+        val cyCutRaw = (first.cyCutDate?.toString() ?: "").trim()
+        if (cyCutRaw.isNotEmpty()) {
+            setBookingOptionalDateFields("cyCutDate", "cyCutDateText", cyCutRaw)
+            carBookingFormState.cyCutDate = toIsoFromLabel(cyCutRaw).ifBlank { cyCutRaw.take(10) }
+        }
+        val etaRaw = (first.eta?.toString() ?: "").trim()
+        if (etaRaw.isNotEmpty()) {
+            setBookingOptionalDateFields("etaDate", "etaDateText", etaRaw)
+            carBookingFormState.etaDate = toIsoFromLabel(etaRaw).ifBlank { etaRaw.take(10) }
+        }
+        val finalDestination = (first.finalDestination?.toString() ?: "").trim()
+        (document.getElementById("finalDestination") as? HTMLInputElement)?.value = finalDestination
+        carBookingFormState.finalDestination = finalDestination
+        val notifyParty = (first.notifyParty?.toString() ?: "").trim()
+        setEditableComboboxValue("notifyParty", notifyParty)
+        carBookingFormState.notifyParty = notifyParty
         (document.getElementById("bookingNo") as? HTMLInputElement)?.value = bookingId
         carBookingFormState.bookingNo = bookingId
         (document.getElementById("vesselSelect") as? HTMLInputElement)?.value = vessel
@@ -2846,9 +2929,13 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
                 val req: dynamic = js("{}")
                 req.country = selectedCountry
                 req.consignee = consigneeName
+                req.notifyParty = getEditableComboboxValue("notifyParty")
                 req.shipmentDate = etd
+                req.cyCutDate = bookingFormCyCutIso()
+                req.eta = bookingFormEtaIso()
                 req.pol = pol
                 req.pod = pod
+                req.finalDestination = (document.getElementById("finalDestination") as? HTMLInputElement)?.value?.trim().orEmpty()
                 req.bookingId = bookingNo
                 req.vessel = vessel
                 req.carrier = carrier

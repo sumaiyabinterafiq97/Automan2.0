@@ -140,7 +140,8 @@ class RixoMappingService(
                 createdAt = created,
             )
             "FULL", "RPM_FULL" -> existing.copy(
-                supportedVehicleType = supportedVehicleType!!.trim(),
+                // Vehicle type is optional (nullable DB column); blank clears / leaves null.
+                supportedVehicleType = supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
                 rixoPrice = rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
                 createdAt = created,
             )

@@ -1678,7 +1678,8 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
             payload.stockLocation = baseRow.stock
             payload.venueId = baseRow.venueId
             payload.pol = baseRow.pol
-            payload.supportedVehicleType = vtype.takeIf { it.isNotEmpty() }
+            // Always send string (incl. "") so PUT can clear vehicle type; omit/null would coalesce to old value.
+            payload.supportedVehicleType = vtype
             payload.rixoPrice = rpmNormalizePriceForDb(price)
             window.fetch(apiUrl("rixo-mapping/$id"), js("""{ method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
                 .then { resp: dynamic ->

@@ -436,13 +436,19 @@ class RixoMappingController(
             if (bt.isNotEmpty()) return b?.trim()
             return null
         }
+        // Vehicle type: omitted (null) → keep existing (path renames); "" → clear; non-blank → set.
+        val mergedVehicleType = when {
+            req.supportedVehicleType == null -> existing.supportedVehicleType
+            req.supportedVehicleType.trim().isEmpty() -> null
+            else -> req.supportedVehicleType.trim()
+        }
         return req.copy(
             rixoCompany = coalesce(req.rixoCompany, existing.rixoCompany) ?: "",
             auctionName = coalesce(req.auctionName, existing.auctionName),
             stockLocation = coalesce(req.stockLocation, existing.stockLocation) ?: "",
             venueId = coalesce(req.venueId, existing.venueId),
             pol = coalesce(req.pol, existing.pol),
-            supportedVehicleType = coalesce(req.supportedVehicleType, existing.supportedVehicleType),
+            supportedVehicleType = mergedVehicleType,
             rixoPrice = coalesce(req.rixoPrice, existing.rixoPrice),
             insertMode = req.insertMode,
         )

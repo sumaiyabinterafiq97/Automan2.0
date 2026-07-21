@@ -27,15 +27,27 @@ interface BookingMappingRepository : JpaRepository<BookingMapping, Long> {
     fun findDistinctConsigneeNames(): List<String>
 
     @Query(
+        """
+        SELECT DISTINCT TRIM(COALESCE(b.notifyParty, ''))
+        FROM BookingMapping b
+        WHERE COALESCE(TRIM(b.notifyParty), '') <> ''
+        ORDER BY TRIM(COALESCE(b.notifyParty, '')) ASC
+        """
+    )
+    fun findDistinctNotifyParties(): List<String>
+
+    @Query(
         value = """
             SELECT b FROM BookingMapping b WHERE
             LOWER(COALESCE(b.consigneeName, '')) LIKE LOWER(CONCAT('%', :q, '%')) OR
-            LOWER(b.country) LIKE LOWER(CONCAT('%', :q, '%'))
+            LOWER(b.country) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(b.notifyParty, '')) LIKE LOWER(CONCAT('%', :q, '%'))
             """,
         countQuery = """
             SELECT count(b) FROM BookingMapping b WHERE
             LOWER(COALESCE(b.consigneeName, '')) LIKE LOWER(CONCAT('%', :q, '%')) OR
-            LOWER(b.country) LIKE LOWER(CONCAT('%', :q, '%'))
+            LOWER(b.country) LIKE LOWER(CONCAT('%', :q, '%')) OR
+            LOWER(COALESCE(b.notifyParty, '')) LIKE LOWER(CONCAT('%', :q, '%'))
             """
     )
     fun searchConsigneeMapAllFields(@Param("q") q: String, pageable: Pageable): Page<BookingMapping>

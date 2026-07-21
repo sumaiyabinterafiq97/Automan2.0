@@ -29,14 +29,26 @@ data class ShippingHistory(
     @Column(name = "consignee")
     val consignee: String? = null,
 
+    @Column(name = "notify_party")
+    val notifyParty: String? = null,
+
     @Column(name = "shipment_date")
     val shipmentDate: LocalDate? = null,
+
+    @Column(name = "cy_cut_date")
+    val cyCutDate: LocalDate? = null,
+
+    @Column(name = "eta")
+    val eta: LocalDate? = null,
 
     @Column(name = "pol")
     val pol: String? = null,
 
     @Column(name = "pod")
     val pod: String? = null,
+
+    @Column(name = "final_destination")
+    val finalDestination: String? = null,
 
     @Column(name = "booking_id")
     val bookingId: String? = null,
