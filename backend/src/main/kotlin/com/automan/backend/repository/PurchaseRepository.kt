@@ -281,6 +281,103 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     )
     fun findDateAndWorkflowPairs(): List<PurchaseDateWorkflowProjection>
 
+    /** Lightweight id+date for purchase-list date filtering (parse labels in service). */
+    @Query("SELECT p.id AS id, p.date AS date FROM Purchase p")
+    fun findIdAndDateAll(): List<PurchaseIdDateProjection>
+
+    @Query(
+        """
+        SELECT p.id AS id, p.date AS date FROM Purchase p WHERE
+        LOWER(COALESCE(p.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+        LOWER(COALESCE(p.carName,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+        LOWER(COALESCE(p.brand,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+        LOWER(COALESCE(p.clientName,'')) LIKE LOWER(CONCAT('%', :q, '%')) OR
+        LOWER(COALESCE(p.auctionHouse,'')) LIKE LOWER(CONCAT('%', :q, '%'))
+        """,
+    )
+    fun searchPurchasesKeyFieldsIdDate(@Param("q") q: String): List<PurchaseIdDateProjection>
+
+    @Query(
+        "SELECT p.id AS id, p.date AS date FROM Purchase p WHERE LOWER(COALESCE(p.chassis,'')) LIKE LOWER(CONCAT(:q, '%'))",
+    )
+    fun searchPurchasesChassisPrefixIdDate(@Param("q") q: String): List<PurchaseIdDateProjection>
+
+    @Query(
+        "SELECT p.id AS id, p.date AS date FROM Purchase p WHERE LOWER(COALESCE(p.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))",
+    )
+    fun searchPurchasesCarNameContainsIdDate(@Param("q") q: String): List<PurchaseIdDateProjection>
+
+    @Query(
+        "SELECT p.id AS id, p.date AS date FROM Purchase p WHERE LOWER(COALESCE(p.brand,'')) LIKE LOWER(CONCAT('%', :q, '%'))",
+    )
+    fun searchPurchasesBrandContainsIdDate(@Param("q") q: String): List<PurchaseIdDateProjection>
+
+    @Query(
+        "SELECT p.id AS id, p.date AS date FROM Purchase p WHERE LOWER(COALESCE(p.clientName,'')) LIKE LOWER(CONCAT('%', :q, '%'))",
+    )
+    fun searchPurchasesClientNameContainsIdDate(@Param("q") q: String): List<PurchaseIdDateProjection>
+
+    @Query(
+        "SELECT p.id AS id, p.date AS date FROM Purchase p WHERE LOWER(COALESCE(p.auctionHouse,'')) LIKE LOWER(CONCAT('%', :q, '%'))",
+    )
+    fun searchPurchasesSupplierContainsIdDate(@Param("q") q: String): List<PurchaseIdDateProjection>
+
+    /** Paged hydrate after date/advanced filter ID narrowing. */
+    fun findByIdIn(ids: Collection<Long>, pageable: Pageable): Page<Purchase>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.chassis,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsChassisContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.brand,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsBrandContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.carName,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsCarNameContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.auctionHouse,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsAuctionHouseContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.stockLocation,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsStockLocationContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.pol,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsPolContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.pod,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsPodContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.rixoCompany,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsRixoCompanyContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.clientName,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsClientNameContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.consignee,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsConsigneeContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.country,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsCountryContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.totalPrice,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsTotalPriceContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.repairCompany,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsRepairCompanyContains(@Param("q") q: String): List<Long>
+
+    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.manufactureYear,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
+    fun findIdsManufactureYearContains(@Param("q") q: String): List<Long>
+
+    @Query(
+        "SELECT p.id FROM Purchase p WHERE p.bookingId IS NOT NULL AND " +
+            "LOWER(CONCAT('', p.bookingId)) LIKE LOWER(CONCAT('%', :q, '%'))",
+    )
+    fun findIdsBookingIdContains(@Param("q") q: String): List<Long>
+
+    @Query(
+        "SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(CAST(p.workflowStatus AS string), '')) LIKE LOWER(CONCAT('%', :q, '%'))",
+    )
+    fun findIdsWorkflowStatusContains(@Param("q") q: String): List<Long>
+
     @Query(
         "SELECT p FROM Purchase p WHERE p.workflowStatus IN (" +
             "com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED, " +
@@ -294,4 +391,10 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
 interface PurchaseDateWorkflowProjection {
     fun getDate(): String?
     fun getWorkflowStatus(): com.automan.backend.model.WorkflowStatus?
+}
+
+/** Closed projection: purchase id + date label for server-side date range filtering. */
+interface PurchaseIdDateProjection {
+    fun getId(): Long?
+    fun getDate(): String?
 }

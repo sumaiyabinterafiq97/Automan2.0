@@ -6,6 +6,7 @@ import com.automan.backend.dto.PurchaseChangeHistorySingleRowDto
 import com.automan.backend.dto.CreateTransactionRequest
 import com.automan.backend.dto.InvoiceConfirmAndDownloadRequest
 import com.automan.backend.dto.InvoiceLedgerResult
+import com.automan.backend.dto.PurchasePageFilterRequest
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
 import com.automan.backend.service.PurchaseExportService
@@ -54,9 +55,11 @@ class PurchaseController(
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) sort: String?,
         @RequestParam(required = false) order: String?,
+        @RequestParam(required = false) dateFrom: String?,
+        @RequestParam(required = false) dateTo: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(purchaseService.listPurchasesPage(page, size, sort, order))
+            ResponseEntity.ok(purchaseService.listPurchasesPage(page, size, sort, order, dateFrom, dateTo))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }
@@ -155,9 +158,28 @@ class PurchaseController(
         @RequestParam(defaultValue = "25") size: Int,
         @RequestParam(required = false) sort: String?,
         @RequestParam(required = false) order: String?,
+        @RequestParam(required = false) dateFrom: String?,
+        @RequestParam(required = false) dateTo: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(purchaseService.searchPurchasesPage(q, field, page, size, sort, order))
+            ResponseEntity.ok(
+                purchaseService.searchPurchasesPage(q, field, page, size, sort, order, dateFrom, dateTo),
+            )
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    /**
+     * Unified filtered page for purchase list: search + date range + advanced filter chips.
+     * Prefer GET /page or /page-search when only browse/search (optionally with dateFrom/dateTo).
+     */
+    @PostMapping("/page-filter")
+    fun filterPurchasesPage(
+        @RequestBody body: PurchasePageFilterRequest,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(purchaseService.filterPurchasesPage(body))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }

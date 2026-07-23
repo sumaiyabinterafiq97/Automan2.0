@@ -1,11 +1,14 @@
 package com.automan.backend.service
 
+import com.automan.backend.dto.PurchasePageFilterClause
+import com.automan.backend.dto.PurchasePageFilterRequest
 import com.automan.backend.dto.PurchasePageResponse
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
 import com.automan.backend.model.BookingMapping
 import com.automan.backend.repository.BookingMappingRepository
 import com.automan.backend.repository.ClientRepository
+import com.automan.backend.repository.PurchaseIdDateProjection
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.ShippingHistoryRepository
 import com.automan.backend.util.CarModelYearUtils
@@ -17,6 +20,9 @@ import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
+import java.time.temporal.ChronoUnit
 
 @Service
 class PurchaseService(
@@ -1155,17 +1161,214 @@ class PurchaseService(
     /**
      * Paginated browse for purchase list UI (no search text). Newest [id] first by default.
      * Optional [sortField]/[sortOrder] for column headers (whitelist only).
+     * Optional [dateFrom]/[dateTo] (ISO yyyy-MM-dd) filter purchase.date labels via parse.
      */
     fun listPurchasesPage(
         page: Int,
         rawSize: Int,
         sortField: String? = null,
         sortOrder: String? = null,
+        dateFrom: String? = null,
+        dateTo: String? = null,
     ): PurchasePageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
+        val from = parseIsoLocalDateOrThrow(dateFrom, "dateFrom")
+        val to = parseIsoLocalDateOrThrow(dateTo, "dateTo")
+        if (from == null && to == null) {
+            val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
+            val pg = purchaseRepository.findAll(pageable)
+            return PurchasePageResponse(
+                content = applyReadAdapters(pg.content),
+                totalElements = pg.totalElements,
+                totalPages = pg.totalPages,
+                page = pg.number,
+                size = pg.size,
+            )
+        }
+        validateDateRangeBounds(from, to)
+        val matchingIds = filterIdDatePairsByRange(purchaseRepository.findIdAndDateAll(), from, to)
+        return pagePurchasesByIds(matchingIds, pageIdx, size, sortField, sortOrder)
+    }
+
+    /**
+     * Paginated search for purchase list UI (chassis, car name, brand, client, supplier).
+     * [field]: `all`, `chassis` (prefix match, index-friendly), `carName`, `brand`, `clientName`, `supplier`.
+     * Optional [dateFrom]/[dateTo] applied after search narrowing (label-date parse).
+     */
+    fun searchPurchasesPage(
+        rawQuery: String,
+        rawField: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+        dateFrom: String? = null,
+        dateTo: String? = null,
+    ): PurchasePageResponse {
+        val q = sanitizePurchaseListSearchToken(rawQuery)
+        require(q.isNotEmpty()) { "Search text is required" }
+        val field = rawField.trim().lowercase().ifEmpty { "all" }
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val from = parseIsoLocalDateOrThrow(dateFrom, "dateFrom")
+        val to = parseIsoLocalDateOrThrow(dateTo, "dateTo")
+        if (from == null && to == null) {
+            val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
+            val pg: Page<Purchase> = searchPurchasesPageEntity(q, field, pageable)
+            return PurchasePageResponse(
+                content = applyReadAdapters(pg.content),
+                totalElements = pg.totalElements,
+                totalPages = pg.totalPages,
+                page = pg.number,
+                size = pg.size,
+            )
+        }
+        validateDateRangeBounds(from, to)
+        val pairs = searchPurchasesIdDate(q, field)
+        val matchingIds = filterIdDatePairsByRange(pairs, from, to)
+        return pagePurchasesByIds(matchingIds, pageIdx, size, sortField, sortOrder)
+    }
+
+    /**
+     * Unified filtered page: search + date range + advanced filter chips.
+     * DB-column filters narrow by ID queries; Transient fields hydrate candidates then filter in memory.
+     */
+    fun filterPurchasesPage(request: PurchasePageFilterRequest): PurchasePageResponse {
+        val pageIdx = request.page.coerceAtLeast(0)
+        val size = request.size.coerceIn(1, 100)
+        val from = parseIsoLocalDateOrThrow(request.dateFrom, "dateFrom")
+        val to = parseIsoLocalDateOrThrow(request.dateTo, "dateTo")
+        if (from != null || to != null) validateDateRangeBounds(from, to)
+
+        val q = request.q?.let { sanitizePurchaseListSearchToken(it) }.orEmpty()
+        val searchField = request.field?.trim()?.lowercase().orEmpty().ifEmpty { "all" }
+        val clauses = request.filters
+            .map { it.copy(field = it.field.trim(), operator = it.operator.trim().ifEmpty { "contains" }, value = it.value.trim()) }
+            .filter { it.field.isNotEmpty() && it.value.isNotEmpty() }
+
+        val (dbClauses, transientClauses) = clauses.partition { isDbColumnFilterField(it.field) }
+
+        // 1) Candidate id+date (search-scoped or all)
+        val pairs: List<PurchaseIdDateProjection> = if (q.isNotEmpty()) {
+            searchPurchasesIdDate(q, searchField)
+        } else {
+            purchaseRepository.findIdAndDateAll()
+        }
+
+        // 2) Date range on labeled purchase.date
+        var candidateIds: Set<Long> = if (from != null || to != null) {
+            filterIdDatePairsByRange(pairs, from, to).toSet()
+        } else {
+            pairs.mapNotNull { it.getId() }.toSet()
+        }
+        if (candidateIds.isEmpty()) {
+            return emptyPurchasePage(pageIdx, size)
+        }
+
+        // 3) DB-column advanced filters (ID intersection)
+        for (clause in dbClauses) {
+            candidateIds = applyDbColumnFilter(candidateIds, clause)
+            if (candidateIds.isEmpty()) return emptyPurchasePage(pageIdx, size)
+        }
+
+        // 4) Transient filters → hydrate remaining candidates, filter in memory
+        if (transientClauses.isNotEmpty()) {
+            val hydrated = applyReadAdapters(purchaseRepository.findAllById(candidateIds))
+            val filtered = hydrated.filter { p ->
+                transientClauses.all { clause -> purchaseMatchesAdvancedFilter(p, clause) }
+            }
+            return pagePurchasesInMemory(filtered, pageIdx, size, request.sort, request.order)
+        }
+
+        // 5) DB-only path: page via findByIdIn + Sort
+        return pagePurchasesByIds(candidateIds.toList(), pageIdx, size, request.sort, request.order)
+    }
+
+    private fun searchPurchasesPageEntity(q: String, field: String, pageable: PageRequest): Page<Purchase> =
+        when (field) {
+            "chassis" -> purchaseRepository.searchPurchasesChassisPrefixPage(q, pageable)
+            "carname", "car_name" -> purchaseRepository.searchPurchasesCarNameContainsPage(q, pageable)
+            "brand" -> purchaseRepository.searchPurchasesBrandContainsPage(q, pageable)
+            "clientname", "client_name", "client" -> purchaseRepository.searchPurchasesClientNameContainsPage(q, pageable)
+            "supplier", "suppliername", "auctionhouse", "auction_house" ->
+                purchaseRepository.searchPurchasesSupplierContainsPage(q, pageable)
+            "all" -> purchaseRepository.searchPurchasesKeyFieldsContains(q, pageable)
+            else -> throw IllegalArgumentException(
+                "Invalid search field: $field. Use all, chassis, carName, brand, clientName, or supplier.",
+            )
+        }
+
+    private fun searchPurchasesIdDate(q: String, field: String): List<PurchaseIdDateProjection> =
+        when (field) {
+            "chassis" -> purchaseRepository.searchPurchasesChassisPrefixIdDate(q)
+            "carname", "car_name" -> purchaseRepository.searchPurchasesCarNameContainsIdDate(q)
+            "brand" -> purchaseRepository.searchPurchasesBrandContainsIdDate(q)
+            "clientname", "client_name", "client" -> purchaseRepository.searchPurchasesClientNameContainsIdDate(q)
+            "supplier", "suppliername", "auctionhouse", "auction_house" ->
+                purchaseRepository.searchPurchasesSupplierContainsIdDate(q)
+            "all" -> purchaseRepository.searchPurchasesKeyFieldsIdDate(q)
+            else -> throw IllegalArgumentException(
+                "Invalid search field: $field. Use all, chassis, carName, brand, clientName, or supplier.",
+            )
+        }
+
+    private fun parseIsoLocalDateOrThrow(raw: String?, label: String): LocalDate? {
+        val t = raw?.trim().orEmpty()
+        if (t.isEmpty()) return null
+        return try {
+            LocalDate.parse(t)
+        } catch (_: DateTimeParseException) {
+            throw IllegalArgumentException("Invalid $label: $t (expected yyyy-MM-dd)")
+        }
+    }
+
+    private fun parseIsoLocalDateOrNull(raw: String?): LocalDate? {
+        val t = raw?.trim().orEmpty()
+        if (t.isEmpty()) return null
+        return try {
+            LocalDate.parse(t)
+        } catch (_: DateTimeParseException) {
+            null
+        }
+    }
+
+    private fun validateDateRangeBounds(from: LocalDate?, to: LocalDate?) {
+        if (from != null && to != null) {
+            if (from.isAfter(to)) {
+                throw IllegalArgumentException("dateFrom must be on or before dateTo")
+            }
+            if (ChronoUnit.DAYS.between(from, to) > 366) {
+                throw IllegalArgumentException("Date range must be at most 366 days")
+            }
+        }
+    }
+
+    private fun filterIdDatePairsByRange(
+        pairs: List<PurchaseIdDateProjection>,
+        from: LocalDate?,
+        to: LocalDate?,
+    ): List<Long> {
+        return pairs.mapNotNull { pair ->
+            val id = pair.getId() ?: return@mapNotNull null
+            val parsed = PurchaseDateParseUtils.parseToLocalDate(pair.getDate()?.trim().orEmpty())
+                ?: return@mapNotNull null
+            if (from != null && parsed.isBefore(from)) return@mapNotNull null
+            if (to != null && parsed.isAfter(to)) return@mapNotNull null
+            id
+        }
+    }
+
+    private fun pagePurchasesByIds(
+        matchingIds: List<Long>,
+        pageIdx: Int,
+        size: Int,
+        sortField: String?,
+        sortOrder: String?,
+    ): PurchasePageResponse {
+        if (matchingIds.isEmpty()) return emptyPurchasePage(pageIdx, size)
         val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
-        val pg = purchaseRepository.findAll(pageable)
+        val pg = purchaseRepository.findByIdIn(matchingIds, pageable)
         return PurchasePageResponse(
             content = applyReadAdapters(pg.content),
             totalElements = pg.totalElements,
@@ -1175,42 +1378,36 @@ class PurchaseService(
         )
     }
 
-    /**
-     * Paginated search for purchase list UI (chassis, car name, brand, client, supplier).
-     * [field]: `all`, `chassis` (prefix match, index-friendly), `carName`, `brand`, `clientName`, `supplier`.
-     */
-    fun searchPurchasesPage(
-        rawQuery: String,
-        rawField: String,
-        page: Int,
-        rawSize: Int,
-        sortField: String? = null,
-        sortOrder: String? = null,
+    private fun pagePurchasesInMemory(
+        purchases: List<Purchase>,
+        pageIdx: Int,
+        size: Int,
+        sortField: String?,
+        sortOrder: String?,
     ): PurchasePageResponse {
-        val q = sanitizePurchaseListSearchToken(rawQuery)
-        require(q.isNotEmpty()) { "Search text is required" }
-        val field = rawField.trim().lowercase().ifEmpty { "all" }
-        val pageIdx = page.coerceAtLeast(0)
-        val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
-        val pg: Page<Purchase> = when (field) {
-            "chassis" -> purchaseRepository.searchPurchasesChassisPrefixPage(q, pageable)
-            "carname", "car_name" -> purchaseRepository.searchPurchasesCarNameContainsPage(q, pageable)
-            "brand" -> purchaseRepository.searchPurchasesBrandContainsPage(q, pageable)
-            "clientname", "client_name", "client" -> purchaseRepository.searchPurchasesClientNameContainsPage(q, pageable)
-            "supplier", "suppliername", "auctionhouse", "auction_house" ->
-                purchaseRepository.searchPurchasesSupplierContainsPage(q, pageable)
-            "all" -> purchaseRepository.searchPurchasesKeyFieldsContains(q, pageable)
-            else -> throw IllegalArgumentException("Invalid search field: $field. Use all, chassis, carName, brand, clientName, or supplier.")
-        }
+        val sorted = sortPurchasesForList(purchases, sortField, sortOrder)
+        val total = sorted.size.toLong()
+        val totalPages = if (total == 0L) 0 else ((total + size - 1) / size).toInt()
+        val fromIdx = (pageIdx * size).coerceAtMost(sorted.size)
+        val toIdx = (fromIdx + size).coerceAtMost(sorted.size)
+        val slice = if (fromIdx >= sorted.size) emptyList() else sorted.subList(fromIdx, toIdx)
         return PurchasePageResponse(
-            content = applyReadAdapters(pg.content),
-            totalElements = pg.totalElements,
-            totalPages = pg.totalPages,
-            page = pg.number,
-            size = pg.size,
+            content = slice,
+            totalElements = total,
+            totalPages = totalPages,
+            page = pageIdx,
+            size = size,
         )
     }
+
+    private fun emptyPurchasePage(pageIdx: Int, size: Int): PurchasePageResponse =
+        PurchasePageResponse(
+            content = emptyList(),
+            totalElements = 0,
+            totalPages = 0,
+            page = pageIdx,
+            size = size,
+        )
 
     /** Whitelisted sort for purchase list page/search. Unknown fields fall back to id DESC. */
     private fun resolvePurchaseListSort(sortField: String?, sortOrder: String?): Sort {
@@ -1236,8 +1433,251 @@ class PurchaseService(
         return Sort.by(dir, prop)
     }
 
+    private fun sortPurchasesForList(
+        purchases: List<Purchase>,
+        sortField: String?,
+        sortOrder: String?,
+    ): List<Purchase> {
+        val asc = sortOrder?.trim().equals("asc", ignoreCase = true) == true
+        val key = sortField?.trim()?.lowercase().orEmpty()
+        fun cmp(a: String?, b: String?): Int {
+            val left = a?.trim().orEmpty()
+            val right = b?.trim().orEmpty()
+            return left.compareTo(right, ignoreCase = true)
+        }
+        val sorted = when (key) {
+            "", "id" -> purchases.sortedBy { it.id ?: 0L }
+            "chassis" -> purchases.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.chassis })
+            "date" -> purchases.sortedWith { a, b -> cmp(a.date, b.date) }
+            "carname", "car_name" -> purchases.sortedWith { a, b -> cmp(a.carName, b.carName) }
+            "brand" -> purchases.sortedWith { a, b -> cmp(a.brand, b.brand) }
+            "clientname", "client_name", "client" -> purchases.sortedWith { a, b -> cmp(a.clientName, b.clientName) }
+            "auctionhouse", "auction_house", "supplier", "suppliername" ->
+                purchases.sortedWith { a, b -> cmp(a.auctionHouse, b.auctionHouse) }
+            "stocklocation", "stock_location" -> purchases.sortedWith { a, b -> cmp(a.stockLocation, b.stockLocation) }
+            "rixocompany", "rixo_company" -> purchases.sortedWith { a, b -> cmp(a.rixoCompany, b.rixoCompany) }
+            "country" -> purchases.sortedWith { a, b -> cmp(a.country, b.country) }
+            "repaircompany", "repair_company" -> purchases.sortedWith { a, b -> cmp(a.repairCompany, b.repairCompany) }
+            else -> purchases.sortedBy { it.id ?: 0L }
+        }
+        return if (asc) sorted else sorted.asReversed()
+    }
+
     private fun sanitizePurchaseListSearchToken(raw: String): String =
         raw.trim().replace("%", "").replace("_", "").take(120)
+
+    private fun normalizeFilterFieldKey(raw: String): String =
+        raw.trim().lowercase().replace("_", "")
+
+    /** Persistable `@Column` fields safe for JPQL contains narrowing. */
+    private fun isDbColumnFilterField(field: String): Boolean =
+        when (normalizeFilterFieldKey(field)) {
+            "chassis", "brand", "carname",
+            "auctionhouse", "supplier", "suppliername",
+            "stocklocation", "pol", "pod", "destination",
+            "rixocompany", "clientname", "client",
+            "consignee", "country", "totalprice",
+            "repaircompany", "bookingid", "manufactureyear",
+            "workflowstatus",
+            "date", // handled via label parse (equals day), not LIKE
+            -> true
+            else -> false
+        }
+
+    private fun applyDbColumnFilter(candidateIds: Set<Long>, clause: PurchasePageFilterClause): Set<Long> {
+        if (candidateIds.isEmpty()) return candidateIds
+        val key = normalizeFilterFieldKey(clause.field)
+        val value = clause.value.trim()
+        if (value.isEmpty()) return candidateIds
+
+        if (key == "date") {
+            val day = parseIsoLocalDateOrNull(value)
+                ?: PurchaseDateParseUtils.parseToLocalDate(value)
+                ?: return emptySet()
+            val pairs = purchaseRepository.findIdAndDateAll()
+            val dayIds = filterIdDatePairsByRange(pairs, day, day).toSet()
+            return candidateIds.intersect(dayIds)
+        }
+
+        val matchingIds: Set<Long> = when (key) {
+            "chassis" -> purchaseRepository.findIdsChassisContains(value).toSet()
+            "brand" -> purchaseRepository.findIdsBrandContains(value).toSet()
+            "carname" -> purchaseRepository.findIdsCarNameContains(value).toSet()
+            "auctionhouse", "supplier", "suppliername" ->
+                purchaseRepository.findIdsAuctionHouseContains(value).toSet()
+            "stocklocation" -> purchaseRepository.findIdsStockLocationContains(value).toSet()
+            "pol" -> purchaseRepository.findIdsPolContains(value).toSet()
+            "pod", "destination" -> purchaseRepository.findIdsPodContains(value).toSet()
+            "rixocompany" -> purchaseRepository.findIdsRixoCompanyContains(value).toSet()
+            "clientname", "client" -> purchaseRepository.findIdsClientNameContains(value).toSet()
+            "consignee" -> purchaseRepository.findIdsConsigneeContains(value).toSet()
+            "country" -> purchaseRepository.findIdsCountryContains(value).toSet()
+            "totalprice" -> purchaseRepository.findIdsTotalPriceContains(value).toSet()
+            "repaircompany" -> purchaseRepository.findIdsRepairCompanyContains(value).toSet()
+            "manufactureyear" -> purchaseRepository.findIdsManufactureYearContains(value).toSet()
+            "bookingid" -> purchaseRepository.findIdsBookingIdContains(value).toSet()
+            "workflowstatus" -> purchaseRepository.findIdsWorkflowStatusContains(value).toSet()
+            else -> {
+                Logger.warn("Ignoring unsupported DB filter field: ${clause.field}")
+                return candidateIds
+            }
+        }
+        return candidateIds.intersect(matchingIds)
+    }
+
+    private val moneyFilterFields: Set<String> = setOf(
+        "price", "totalprice", "auctionfee", "auctionpenaltyfee", "recyclefee", "roadtax", "rixoprice",
+        "shipmentcharges", "freight", "storagecharges", "misccharges", "inspectionfee", "commission",
+        "repaircharges", "taxtotal", "profit",
+    )
+
+    private val plainIntFilterFields: Set<String> = setOf("cc", "seat", "door")
+    private val commaIntFilterFields: Set<String> = setOf("distance")
+    private val dateFilterFields: Set<String> = setOf("date", "paymentdate", "shipmentdate", "carmodelyear")
+
+    /**
+     * Mirrors FE [purchaseMatchesFilter]: date → day/month equals; money/int → numeric or digit contains;
+     * else text contains (case-insensitive).
+     */
+    private fun purchaseMatchesAdvancedFilter(p: Purchase, clause: PurchasePageFilterClause): Boolean {
+        val key = normalizeFilterFieldKey(clause.field)
+        val v = clause.value.trim()
+        if (v.isEmpty()) return true
+
+        if (key in dateFilterFields) {
+            if (key == "carmodelyear") {
+                val rowYm = normalizeYearMonth(purchaseFieldRaw(p, "carModelYear")) ?: return false
+                val filterYm = normalizeYearMonth(v) ?: return false
+                return rowYm == filterYm
+            }
+            val rowDate = PurchaseDateParseUtils.parseToLocalDate(purchaseFieldRaw(p, clause.field))
+                ?: return false
+            val filterDate = parseIsoLocalDateOrNull(v)
+                ?: PurchaseDateParseUtils.parseToLocalDate(v)
+                ?: return false
+            return rowDate == filterDate
+        }
+
+        if (key in moneyFilterFields || key in plainIntFilterFields || key in commaIntFilterFields) {
+            return purchaseNumericFilterMatch(p, clause.field, v)
+        }
+
+        val text = purchaseFieldRaw(p, clause.field).lowercase()
+        return text.contains(v.lowercase())
+    }
+
+    private fun purchaseNumericFilterMatch(p: Purchase, field: String, filterValue: String): Boolean {
+        val filterNum = parseLooseNumber(filterValue)
+        if (filterNum != null) {
+            val rowNum = parseLooseNumber(purchaseFieldRaw(p, field))
+            if (rowNum != null && rowNum == filterNum) return true
+        }
+        val rowDigits = purchaseFieldRaw(p, field).replace(Regex("[^0-9]"), "")
+        val filterDigits = filterValue.replace(Regex("[^0-9]"), "")
+        if (filterDigits.isEmpty()) return false
+        return rowDigits.contains(filterDigits)
+    }
+
+    private fun parseLooseNumber(raw: String): Double? {
+        val cleaned = raw.replace(",", "").replace(Regex("[^0-9.\\-]"), "").trim()
+        if (cleaned.isEmpty() || cleaned == "-" || cleaned == ".") return null
+        return cleaned.toDoubleOrNull()
+    }
+
+    private fun normalizeYearMonth(raw: String): String? {
+        val t = raw.trim()
+        if (t.isEmpty()) return null
+        if (t.matches(Regex("^\\d{4}-\\d{2}$"))) return t
+        val slash = Regex("^(\\d{1,2})/(\\d{4})$").matchEntire(t)
+        if (slash != null) {
+            val m = slash.groupValues[1].toIntOrNull() ?: return null
+            val y = slash.groupValues[2]
+            if (m in 1..12) return "$y-${m.toString().padStart(2, '0')}"
+        }
+        // Fallback: yyyy-MM embedded or year-only → reject for month-equals filter
+        if (t.contains("-")) {
+            val parts = t.split("-")
+            if (parts.size >= 2) {
+                val y = parts[0].trim()
+                val m = parts[1].trim().take(2)
+                if (y.length == 4 && y.all { it.isDigit() } && m.length == 2 && m.all { it.isDigit() }) {
+                    return "$y-$m"
+                }
+            }
+        }
+        return null
+    }
+
+    private fun purchaseFieldRaw(p: Purchase, field: String): String {
+        val key = normalizeFilterFieldKey(field)
+        return when (key) {
+            "date" -> p.date.orEmpty()
+            "chassis" -> p.chassis
+            "brand" -> p.brand.orEmpty()
+            "carname" -> p.carName.orEmpty()
+            "carmodelyear" -> p.carModelYear.orEmpty()
+            "shipmentsize", "vehicletype" -> p.shipmentSize.orEmpty()
+            "grade" -> p.grade.orEmpty()
+            "rank" -> p.rank.orEmpty()
+            "color" -> p.color.orEmpty()
+            "fuel" -> p.fuel.orEmpty()
+            "seat" -> p.seat.orEmpty()
+            "door" -> p.door.orEmpty()
+            "distance" -> p.distance.orEmpty()
+            "options" -> p.options.orEmpty()
+            "cc" -> p.cc?.toString().orEmpty()
+            "shift" -> p.shift.orEmpty()
+            "wd" -> p.wd.orEmpty()
+            "drivetype" -> p.driveType.orEmpty()
+            "auctionno" -> p.auctionNo.orEmpty()
+            "auctionhouse", "supplier", "suppliername" -> p.auctionHouse.orEmpty()
+            "stocklocation" -> p.stockLocation.orEmpty()
+            "pol" -> p.pol.orEmpty()
+            "pod", "destination" -> p.pod.orEmpty()
+            "rixocompany" -> p.rixoCompany.orEmpty()
+            "clientname", "client" -> p.clientName.orEmpty()
+            "consignee" -> p.consignee.orEmpty()
+            "clientid" -> p.clientId?.toString().orEmpty()
+            "country" -> p.country.orEmpty()
+            "price" -> p.price.orEmpty()
+            "auctionfee" -> p.auctionFee.orEmpty()
+            "auctionpenaltyfee" -> p.auctionPenaltyFee.orEmpty()
+            "recyclefee" -> p.recycleFee.orEmpty()
+            "roadtax" -> p.roadTax.orEmpty()
+            "taxtotal" -> p.taxTotal.orEmpty()
+            "totalprice" -> p.totalPrice.orEmpty()
+            "paymentdate" -> p.paymentDate.orEmpty()
+            "rixorequested" -> p.rixoRequested.orEmpty()
+            "rixoconfirmed" -> p.rixoConfirmed.orEmpty()
+            "notes" -> p.notes.orEmpty()
+            "shipmentdate" -> p.shipmentDate.orEmpty()
+            "blno" -> p.blNo.orEmpty()
+            "vessel", "vesselno" -> p.vessel.orEmpty()
+            "bookingrequested" -> p.bookingRequested.toString()
+            "invoiceconfirmed" -> p.invoiceConfirmed?.toString().orEmpty()
+            "workflowstatus" -> p.workflowStatus?.name.orEmpty()
+            "shipmentcharges" -> p.shipmentCharges.orEmpty()
+            "freight" -> p.freight.orEmpty()
+            "storagecharges" -> p.storageCharges.orEmpty()
+            "misccharges" -> p.miscCharges.orEmpty()
+            "inspectionfee" -> p.inspectionFee.orEmpty()
+            "commission" -> p.commission.orEmpty()
+            "rixoprice" -> p.rixoPrice.orEmpty()
+            "venueid" -> p.venueId.orEmpty()
+            "numbercut" -> p.numberCut.orEmpty()
+            "shaken" -> p.shaken?.toString().orEmpty()
+            "negotiate" -> p.negotiate?.toString().orEmpty()
+            "local" -> p.local.toString()
+            "manufactureyear" -> p.manufactureYear.orEmpty()
+            "repaircompany" -> p.repairCompany.orEmpty()
+            "repaircharges" -> p.repairCharges.orEmpty()
+            "profit" -> p.profit?.toPlainString().orEmpty()
+            "ispackagemode" -> p.isPackageMode?.toString().orEmpty()
+            "bookingid" -> p.bookingId?.toString().orEmpty()
+            "carpictures" -> p.carPictures.orEmpty()
+            else -> ""
+        }
+    }
 
     /**
      * Car booking "SEARCH CHASSIS": prefix/substring on chassis for rows that are Rixo-confirmed

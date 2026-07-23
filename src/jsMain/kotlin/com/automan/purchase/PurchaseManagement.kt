@@ -790,27 +790,28 @@ private fun filterPurchasesByPurchaseDateRange(rows: Array<dynamic>, startIso: S
 }
 
 private fun applyPurchaseDateFilterRange(startIso: String, endIso: String, resetPage: Boolean = true) {
-    if (purchaseSearchServerMode) {
-        showMessage(
-            "Purchase date filter across the full database isn’t available with paged lists yet. Use the search box for now.",
-            "info",
-        )
-        return
-    }
     if (isoToLocalDayRangeTimestamps(startIso) == null || isoToLocalDayRangeTimestamps(endIso) == null) return
 
     purchaseDateFilterStartIso = startIso
     purchaseDateFilterEndIso = endIso
     purchaseDateFilterActive = true
-    refreshPurchaseRowsFromBase(resetPage)
+    if (purchaseSearchServerMode) {
+        loadPurchasesListPage(if (resetPage) 0 else purchaseSearchServerPageZeroBased.coerceAtLeast(0))
+    } else {
+        refreshPurchaseRowsFromBase(resetPage)
+    }
 }
 
 private fun clearPurchaseDateFilter() {
-    if (!purchaseDateFilterActive) return
+    if (!purchaseDateFilterActive && purchaseDateFilterStartIso.isEmpty() && purchaseDateFilterEndIso.isEmpty()) return
     purchaseDateFilterActive = false
     purchaseDateFilterStartIso = ""
     purchaseDateFilterEndIso = ""
-    refreshPurchaseRowsFromBase(resetPage = true)
+    if (purchaseSearchServerMode) {
+        loadPurchasesListPage(0)
+    } else {
+        refreshPurchaseRowsFromBase(resetPage = true)
+    }
 }
 
 /** Call when opening edit purchase so Cancel/back restores list filters. */
@@ -2901,7 +2902,8 @@ fun loadPurchases() {
 }
 
 /**
- * Unified loader: empty search → [GET /purchases/page], non-empty → [GET /purchases/page-search].
+ * Unified loader: advanced filters → [POST /purchases/page-filter];
+ * empty search → [GET /purchases/page]; non-empty → [GET /purchases/page-search].
  * Always server-paged (never downloads the full catalog for the list UI).
  */
 fun loadPurchasesListPage(page0: Int) {
@@ -2912,6 +2914,10 @@ fun loadPurchasesListPage(page0: Int) {
     if (q.isNotEmpty() && input != null && input.value.trim().isEmpty()) {
         input.value = q
     }
+    if (purchaseAdvancedFilters.isNotEmpty()) {
+        loadPurchasesFilterPage(page0)
+        return
+    }
     if (q.isNotEmpty()) {
         loadPurchasesSearchPage(page0)
         return
@@ -2921,7 +2927,8 @@ fun loadPurchasesListPage(page0: Int) {
     val order = purchaseTableSortOrderByField[sortField] ?: "desc"
     val encSort = js("encodeURIComponent")(sortField).unsafeCast<String>()
     val encOrder = js("encodeURIComponent")(order).unsafeCast<String>()
-    val endpoint = "purchases/page?page=$page0&size=$itemsPerPage&sort=$encSort&order=$encOrder"
+    val dateQs = purchaseDateFilterQuerySuffix()
+    val endpoint = "purchases/page?page=$page0&size=$itemsPerPage&sort=$encSort&order=$encOrder$dateQs"
     val scope = MainScope()
     scope.launch {
         val result = ApiClient.get<dynamic>(endpoint)
@@ -2950,6 +2957,85 @@ fun loadPurchasesListPage(page0: Int) {
                 if (!routeEquals("/purchase")) return@fold
                 Logger.error("Purchase page API failed: $message (status: $status)")
                 ErrorHandler.showError("Failed to load purchases: $message")
+            }
+        )
+    }
+}
+
+/** Appends `&dateFrom=&dateTo=` when the purchase-date quick filter is active. */
+private fun purchaseDateFilterQuerySuffix(): String {
+    if (!purchaseDateFilterActive) return ""
+    val from = purchaseDateFilterStartIso.trim()
+    val to = purchaseDateFilterEndIso.trim()
+    if (from.isEmpty() || to.isEmpty()) return ""
+    val encFrom = js("encodeURIComponent")(from).unsafeCast<String>()
+    val encTo = js("encodeURIComponent")(to).unsafeCast<String>()
+    return "&dateFrom=$encFrom&dateTo=$encTo"
+}
+
+/**
+ * POST /purchases/page-filter when advanced chips are active (includes search + date range).
+ */
+private fun loadPurchasesFilterPage(page0: Int) {
+    if (!routeEquals("/purchase")) return
+    val input = document.getElementById("purchaseSearchInput") as? HTMLInputElement
+    val qFromInput = input?.value?.trim().orEmpty()
+    val q = qFromInput.ifEmpty { purchaseSearchQuery.trim() }
+    if (q.isNotEmpty()) purchaseSearchQuery = q
+    val generation = purchaseListLoadGeneration
+    val sortField = purchaseTableSortField
+    val order = purchaseTableSortOrderByField[sortField] ?: "desc"
+    val filters = purchaseAdvancedFilters.map { f ->
+        val obj = js("{}")
+        obj.field = f.field
+        obj.operator = f.operator
+        obj.value = f.value
+        obj
+    }.toTypedArray()
+    val body = js("{}")
+    body.page = page0
+    body.size = itemsPerPage
+    body.sort = sortField
+    body.order = order
+    if (q.isNotEmpty()) {
+        body.q = q
+        body.field = purchaseSearchFieldChoice
+    }
+    if (purchaseDateFilterActive &&
+        purchaseDateFilterStartIso.isNotEmpty() &&
+        purchaseDateFilterEndIso.isNotEmpty()
+    ) {
+        body.dateFrom = purchaseDateFilterStartIso
+        body.dateTo = purchaseDateFilterEndIso
+    }
+    body.filters = filters
+    val scope = MainScope()
+    scope.launch {
+        val result = ApiClient.post<dynamic>("purchases/page-filter", body)
+        result.fold(
+            onSuccess = { resp ->
+                if (generation != purchaseListLoadGeneration) return@fold
+                if (!routeEquals("/purchase")) return@fold
+                if (resp == null) {
+                    ErrorHandler.showError("Empty filter page response")
+                    return@fold
+                }
+                val err = js("resp.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) {
+                    ErrorHandler.showError(err)
+                    return@fold
+                }
+                val restoring = restoringPurchaseListFromEdit
+                restoringPurchaseListFromEdit = false
+                displayPurchasesFromSearchPage(resp)
+                if (restoring) restorePurchaseListFilterUi()
+                purchaseReturnPageFromEdit = null
+            },
+            onError = { message, status ->
+                if (generation != purchaseListLoadGeneration) return@fold
+                if (!routeEquals("/purchase")) return@fold
+                Logger.error("Purchase page-filter API failed: $message (status: $status)")
+                ErrorHandler.showError("Failed to filter purchases: $message")
             }
         )
     }
@@ -3121,7 +3207,7 @@ private fun showPurchaseAdvancedFilterModal() {
 
         <div style="padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-shrink:0;">
           <div style="font-size:12px;color:#6b7280;white-space:nowrap;">
-            <strong>${purchaseAdvancedFilters.size}</strong> filter(s) active • Showing <strong id="purchaseAdvResultCount">0</strong> of <strong>${purchaseBaseRows.size}</strong>
+            <strong>${purchaseAdvancedFilters.size}</strong> filter(s) active • Showing <strong id="purchaseAdvResultCount">${if (purchaseSearchServerMode) "—" else "0"}</strong> of <strong>${if (purchaseSearchServerMode) "—" else purchaseBaseRows.size.toString()}</strong>
           </div>
           <div style="display:flex;gap:8px;">
             <button id="purchaseAdvFilterClear" type="button" style="padding:9px 14px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;color:#374151;font-size:13px;transition:all .2s ease;flex:1;">🗑️ Clear</button>
@@ -3357,15 +3443,15 @@ private fun showPurchaseAdvancedFilterModal() {
         }
         panel.style.display = "none"
         (document.getElementById("purchaseSearchFilterBtn") as? HTMLElement)?.setAttribute("aria-expanded", "false")
+        purchaseAdvancedFilters = next
+        updatePurchaseFilterBadge()
         if (purchaseSearchServerMode) {
-            updatePurchaseFilterBadge()
+            loadPurchasesListPage(0)
             showMessage(
-                "Advanced filters across the full database aren’t available with paged lists yet. Use the search box for now.",
-                "info",
+                if (purchaseAdvancedFilters.isEmpty()) "Filters cleared" else "${purchaseAdvancedFilters.size} filter(s) applied",
+                "success",
             )
         } else {
-            purchaseAdvancedFilters = next
-            updatePurchaseFilterBadge()
             refreshPurchaseRowsFromBase(resetPage = true)
             showMessage("${purchaseAdvancedFilters.size} filter(s) applied", "success")
         }
@@ -3394,14 +3480,17 @@ private fun showPurchaseAdvancedFilterModal() {
 private fun purchasePriceFields(): Set<String> = purchaseAdvMoneyFields()
 
 private fun updatePurchaseFilterResultCount() {
+    val el = document.getElementById("purchaseAdvResultCount") ?: return
+    if (purchaseSearchServerMode) {
+        el.textContent = "—"
+        return
+    }
     val count = applyPurchaseAdvancedFilters(purchaseBaseRows).size
-    val el = document.getElementById("purchaseAdvResultCount")
-    el?.textContent = count.toString()
+    el.textContent = count.toString()
 }
 
 fun displayPurchasesFromSearchPage(body: dynamic) {
     purchaseSearchServerMode = true
-    clearPurchaseDateFilter()
     val totalEl = js("body.totalElements")
     purchaseSearchServerTotal = when (totalEl) {
         is Number -> totalEl.toLong()
@@ -3436,6 +3525,11 @@ fun loadPurchasesSearchPage(page0: Int) {
         loadPurchasesListPage(page0)
         return
     }
+    if (purchaseAdvancedFilters.isNotEmpty()) {
+        purchaseSearchQuery = q
+        loadPurchasesFilterPage(page0)
+        return
+    }
     purchaseSearchQuery = q
     val generation = purchaseListLoadGeneration
     val scope = MainScope()
@@ -3447,8 +3541,9 @@ fun loadPurchasesSearchPage(page0: Int) {
         val order = purchaseTableSortOrderByField[sortField] ?: "desc"
         val encSort = js("encodeURIComponent")(sortField).unsafeCast<String>()
         val encOrder = js("encodeURIComponent")(order).unsafeCast<String>()
+        val dateQs = purchaseDateFilterQuerySuffix()
         val endpoint =
-            "purchases/page-search?q=$encQ&field=$encF&page=$page0&size=$itemsPerPage&sort=$encSort&order=$encOrder"
+            "purchases/page-search?q=$encQ&field=$encF&page=$page0&size=$itemsPerPage&sort=$encSort&order=$encOrder$dateQs"
         val result = ApiClient.get<dynamic>(endpoint)
         result.fold(
             onSuccess = { body ->
