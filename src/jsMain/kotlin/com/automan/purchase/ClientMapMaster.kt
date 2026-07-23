@@ -43,6 +43,10 @@ private fun extractClientMapSortKey(m: dynamic, field: String): String =
     clientMapCellText(m, field).trim().lowercase()
 
 private fun toggleClientMapSort(field: String) {
+    if (clientMapSearchServerMode) {
+        showMessage("Clear the search box to sort the full list.", "info")
+        return
+    }
     val cur = clientMapSortOrderByField[field] ?: "desc"
     clientMapSortOrderByField[field] = if (cur == "asc") "desc" else "asc"
     clientMapSortField = field
@@ -88,6 +92,8 @@ private fun applyClientMapAdvancedFilters(rows: List<dynamic>): List<dynamic> {
 }
 
 private fun applyClientMapTextSearch(rows: List<dynamic>): List<dynamic> {
+    // Server page / page-search already applied the text query.
+    if (clientMapSearchServerMode) return rows
     val q = clientMapSearchQuery.trim().lowercase()
     if (q.length == 0) return rows
     val keys = if (clientMapFilterSelectedColumns.isNotEmpty()) {
@@ -168,14 +174,14 @@ fun showClientMapPage() {
     document.getElementById("addClientMapBtn")?.addEventListener("click", { _: Event -> showClientMapModal(null) })
     document.getElementById("clientMapSearchInput")?.addEventListener("input", { _: Event ->
         clientMapSearchQuery = (document.getElementById("clientMapSearchInput") as? HTMLInputElement)?.value ?: ""
-        clientMapCurrentPage = 1
-        renderClientMapsFromState()
+        scheduleClientMapSearchDebounced()
     })
     document.getElementById("clientMapSearchClearBtn")?.addEventListener("click", { _: Event ->
         clientMapSearchQuery = ""
         (document.getElementById("clientMapSearchInput") as? HTMLInputElement)?.value = ""
+        clientMapSearchPageZeroBased = 0
         clientMapCurrentPage = 1
-        renderClientMapsFromState()
+        loadClientMaps()
     })
     document.getElementById("clientMapSearchFilterBtn")?.addEventListener("click", { ev: Event ->
         ev.stopPropagation()
@@ -236,26 +242,60 @@ fun loadClientMaps() {
             <div style="font-size: 14px; color: #9ca3af;">Please wait</div>
         </div>
     """
-    window.fetch(apiUrl("client-map/mappings"))
+    val searchQ = clientMapSearchQuery.trim()
+    val p = clientMapSearchPageZeroBased
+    val url = if (searchQ.isNotEmpty()) {
+        clientMapSearchServerMode = true
+        val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
+        val encF = js("encodeURIComponent")(clientMapSearchFieldChoice).unsafeCast<String>()
+        apiUrl("client-map/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$clientMapItemsPerPage")
+    } else {
+        clientMapSearchServerMode = true
+        apiUrl("client-map/mappings/page?page=$p&size=$clientMapItemsPerPage")
+    }
+    window.fetch(url)
         .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to load')") }
-        .then { result: dynamic ->
-            val ok = result.success as? Boolean ?: false
-            if (!ok) throw js("Error(result.message || 'Failed')")
-            val arr = result.data ?: js("[]")
-            val list = (js("Array.isArray(arr) ? arr : []") as Array<dynamic>).toList()
-            clientMapBaseRows = list.sortedByDescending { m ->
-                val id = m.id
-                when (id) {
-                    is Number -> id.toDouble()
-                    is String -> id.toDoubleOrNull() ?: 0.0
-                    else -> id?.toString()?.toDoubleOrNull() ?: 0.0
-                }
+        .then { body: dynamic ->
+            val err = js("body.error")?.toString()?.trim()
+            if (!err.isNullOrEmpty()) throw js("Error(err)")
+            val totalEl = js("body.totalElements")
+            clientMapSearchTotal = when (totalEl) {
+                is Number -> totalEl.toLong()
+                else -> totalEl?.toString()?.toLongOrNull() ?: 0L
             }
+            val tp = js("body.totalPages")
+            clientMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                is Number -> tp.toInt()
+                else -> tp?.toString()?.toIntOrNull() ?: 1
+            })
+            val num = js("body.page")
+            clientMapSearchPageZeroBased = when (num) {
+                is Number -> num.toInt()
+                else -> num?.toString()?.toIntOrNull() ?: 0
+            }
+            clientMapCurrentPage = clientMapSearchPageZeroBased + 1
+
+            val content = js("body.content") ?: js("[]")
+            val list = (js("Array.isArray(content) ? content : []") as Array<dynamic>).toList()
+            clientMapBaseRows = list
             renderClientMapsFromState()
         }
         .catch { e: dynamic ->
             tableDiv.innerHTML = """<div style="text-align:center;color:#b91c1c;padding:40px;">${escapeHtml(e.message?.toString() ?: "Error")}</div>"""
         }
+}
+
+private fun scheduleClientMapSearchDebounced() {
+    if (clientMapSearchDebounceTimer != null) {
+        window.clearTimeout(clientMapSearchDebounceTimer.unsafeCast<Int>())
+        clientMapSearchDebounceTimer = null
+    }
+    clientMapSearchDebounceTimer = window.setTimeout({
+        clientMapSearchDebounceTimer = null
+        clientMapSearchPageZeroBased = 0
+        clientMapCurrentPage = 1
+        loadClientMaps()
+    }, 420)
 }
 
 private fun renderClientMapsFromState() {
@@ -278,11 +318,22 @@ fun loadClientMapsWithTable() {
         """
         return
     }
-    val totalPages = kotlin.math.ceil(orderedForDisplay.size.toDouble() / clientMapItemsPerPage).toInt().coerceAtLeast(1)
-    if (clientMapCurrentPage > totalPages) clientMapCurrentPage = totalPages
-    val start = (clientMapCurrentPage - 1) * clientMapItemsPerPage
-    val end = kotlin.math.min(start + clientMapItemsPerPage, orderedForDisplay.size)
-    val pageRows = orderedForDisplay.subList(start, end)
+    val isServer = clientMapSearchServerMode
+    val totalPages = if (isServer) {
+        kotlin.math.max(1, clientMapSearchTotalPages)
+    } else {
+        kotlin.math.ceil(orderedForDisplay.size.toDouble() / clientMapItemsPerPage).toInt().coerceAtLeast(1)
+    }
+    if (!isServer && clientMapCurrentPage > totalPages) clientMapCurrentPage = totalPages
+    val pageRows = if (isServer) {
+        orderedForDisplay
+    } else {
+        val start = (clientMapCurrentPage - 1) * clientMapItemsPerPage
+        val end = kotlin.math.min(start + clientMapItemsPerPage, orderedForDisplay.size)
+        orderedForDisplay.subList(start, end)
+    }
+    val start = if (isServer) 0 else (clientMapCurrentPage - 1) * clientMapItemsPerPage
+    val end = start + pageRows.size
     val selectedColumns = getSelectedClientMapColumns()
     val colCount = 1 + selectedColumns.size
     var html = """<div class="client-map-table-wrap"><table class="client-map-table" style="table-layout: fixed; width: 100%;">${htmlTableColgroupNarrowActionEqualRest(colCount)}<thead><tr><th class="client-map-th-actions"></th>"""
@@ -329,9 +380,14 @@ fun loadClientMapsWithTable() {
     }
     html += """</tbody></table></div>"""
     if (totalPages > 1) {
+        val showingLabel = if (isServer) {
+            "Page $clientMapCurrentPage of $totalPages · ${clientMapSearchTotal} row(s) · ${pageRows.size} on this page"
+        } else {
+            "Showing ${start + 1} to $end of ${orderedForDisplay.size}"
+        }
         html += """
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; flex-wrap: wrap; gap: 12px;">
-                <div style="color: #6b7280; font-size: 14px;">Showing ${start + 1} to $end of ${orderedForDisplay.size}</div>
+                <div style="color: #6b7280; font-size: 14px;">$showingLabel</div>
                 <div class="car-brand-pagination-controls">
                     <button id="clientMapPrevPage" class="car-brand-pagination-btn" ${if (clientMapCurrentPage == 1) "disabled" else ""}>Previous</button>
                     <span class="car-brand-pagination-page">Page $clientMapCurrentPage of $totalPages</span>
@@ -342,16 +398,30 @@ fun loadClientMapsWithTable() {
     }
     tableDiv.innerHTML = html
     document.getElementById("clientMapPrevPage")?.addEventListener("click", { _: Event ->
-        if (clientMapCurrentPage > 1) {
+        if (isServer) {
+            if (clientMapSearchPageZeroBased > 0) {
+                clientMapSearchPageZeroBased--
+                clientMapCurrentPage = clientMapSearchPageZeroBased + 1
+                loadClientMaps()
+            }
+        } else if (clientMapCurrentPage > 1) {
             clientMapCurrentPage--
             renderClientMapsFromState()
         }
     })
     document.getElementById("clientMapNextPage")?.addEventListener("click", { _: Event ->
-        val tp = kotlin.math.ceil(allClientMaps.size.toDouble() / clientMapItemsPerPage).toInt()
-        if (clientMapCurrentPage < tp) {
-            clientMapCurrentPage++
-            renderClientMapsFromState()
+        if (isServer) {
+            if (clientMapSearchPageZeroBased < clientMapSearchTotalPages - 1) {
+                clientMapSearchPageZeroBased++
+                clientMapCurrentPage = clientMapSearchPageZeroBased + 1
+                loadClientMaps()
+            }
+        } else {
+            val tp = kotlin.math.ceil(allClientMaps.size.toDouble() / clientMapItemsPerPage).toInt()
+            if (clientMapCurrentPage < tp) {
+                clientMapCurrentPage++
+                renderClientMapsFromState()
+            }
         }
     })
     for (key in clientMapSortableCols) {
@@ -371,11 +441,20 @@ fun loadClientMapsWithCards() {
         tableDiv.innerHTML = """<div style="text-align:center;padding:40px;color:#6b7280;">No rows</div>"""
         return
     }
-    val totalPages = kotlin.math.ceil(orderedForDisplay.size.toDouble() / clientMapItemsPerPage).toInt().coerceAtLeast(1)
-    if (clientMapCurrentPage > totalPages) clientMapCurrentPage = totalPages
-    val start = (clientMapCurrentPage - 1) * clientMapItemsPerPage
-    val end = kotlin.math.min(start + clientMapItemsPerPage, orderedForDisplay.size)
-    val pageRows = orderedForDisplay.subList(start, end)
+    val isServer = clientMapSearchServerMode
+    val totalPages = if (isServer) {
+        kotlin.math.max(1, clientMapSearchTotalPages)
+    } else {
+        kotlin.math.ceil(orderedForDisplay.size.toDouble() / clientMapItemsPerPage).toInt().coerceAtLeast(1)
+    }
+    if (!isServer && clientMapCurrentPage > totalPages) clientMapCurrentPage = totalPages
+    val pageRows = if (isServer) {
+        orderedForDisplay
+    } else {
+        val start = (clientMapCurrentPage - 1) * clientMapItemsPerPage
+        val end = kotlin.math.min(start + clientMapItemsPerPage, orderedForDisplay.size)
+        orderedForDisplay.subList(start, end)
+    }
     val selectedColumns = getSelectedClientMapColumns()
     val sb = StringBuilder()
     sb.append("""<div class="car-brand-cards-container">""")
@@ -421,16 +500,30 @@ fun loadClientMapsWithCards() {
     }
     tableDiv.innerHTML = sb.toString()
     document.getElementById("clientMapPrevPage")?.addEventListener("click", { _: Event ->
-        if (clientMapCurrentPage > 1) {
+        if (isServer) {
+            if (clientMapSearchPageZeroBased > 0) {
+                clientMapSearchPageZeroBased--
+                clientMapCurrentPage = clientMapSearchPageZeroBased + 1
+                loadClientMaps()
+            }
+        } else if (clientMapCurrentPage > 1) {
             clientMapCurrentPage--
             renderClientMapsFromState()
         }
     })
     document.getElementById("clientMapNextPage")?.addEventListener("click", { _: Event ->
-        val tp = kotlin.math.ceil(allClientMaps.size.toDouble() / clientMapItemsPerPage).toInt()
-        if (clientMapCurrentPage < tp) {
-            clientMapCurrentPage++
-            renderClientMapsFromState()
+        if (isServer) {
+            if (clientMapSearchPageZeroBased < clientMapSearchTotalPages - 1) {
+                clientMapSearchPageZeroBased++
+                clientMapCurrentPage = clientMapSearchPageZeroBased + 1
+                loadClientMaps()
+            }
+        } else {
+            val tp = kotlin.math.ceil(allClientMaps.size.toDouble() / clientMapItemsPerPage).toInt()
+            if (clientMapCurrentPage < tp) {
+                clientMapCurrentPage++
+                renderClientMapsFromState()
+            }
         }
     })
 }

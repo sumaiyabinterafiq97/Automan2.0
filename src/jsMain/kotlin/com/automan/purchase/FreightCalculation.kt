@@ -61,7 +61,7 @@ fun resolveStockLocationForFreight(cars: List<dynamic>): String {
 }
 
 /**
- * Loads tiers from GET /shipping-charge-map/mappings; calls [onDone] with true if at least one tier exists for [stockLocation].
+ * Loads tiers from GET /shipping-charge-map/mappings/by-stock-location; calls [onDone] with true if at least one tier exists for [stockLocation].
  */
 fun fetchFreightScmTiersForStockLocation(stockLocation: String, onDone: (Boolean) -> Unit) {
     val stock = stockLocation.trim()
@@ -70,7 +70,8 @@ fun fetchFreightScmTiersForStockLocation(stockLocation: String, onDone: (Boolean
         onDone(false)
         return
     }
-    window.fetch(apiUrl("shipping-charge-map/mappings"))
+    val enc = js("encodeURIComponent")(stock).unsafeCast<String>()
+    window.fetch(apiUrl("shipping-charge-map/mappings/by-stock-location?stockLocation=$enc"))
         .then { r: dynamic ->
             if (js("r.ok") as Boolean) r.json() else throw js("Error('load')")
         }
@@ -80,6 +81,7 @@ fun fetchFreightScmTiersForStockLocation(stockLocation: String, onDone: (Boolean
             val pairs = mutableListOf<Pair<Int, Double>>()
             for (i in 0 until arr.size) {
                 val row = arr[i] ?: continue
+                // Server already filters by stock; equals check kept as safety.
                 if (!freightScmJsonStr(row, "stockLocation").equals(stock, ignoreCase = true)) continue
                 val carsN = freightScmJsonInt(row, "carsPerContainer") ?: continue
                 if (carsN <= 0) continue

@@ -365,10 +365,16 @@ fun showCarBookingPage() {
                             <input type="text" id="finalDestination" placeholder="Optional" style="color: #000000;">
                         </div>
 
-                        <!-- Notify party (optional) — values from Consignee Map -->
+                        <!-- Notify party (optional) — textarea; autofilled from Consignee Map -->
                         <div class="booking-form-group">
                             <label>Notify party:</label>
-                            ${createEditableCombobox("notifyParty", "Optional", required = false)}
+                            <textarea id="notifyParty" rows="4" placeholder="Optional" style="width:100%;color:#000000;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+                        </div>
+
+                        <!-- In-Transit Clause (optional) — textarea; autofilled from Consignee Map -->
+                        <div class="booking-form-group">
+                            <label>In-Transit Clause:</label>
+                            <textarea id="inTransitClause" rows="6" placeholder="Optional" style="width:100%;color:#000000;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
                         </div>
                         
                         <!-- BOOKING NO -->
@@ -522,7 +528,6 @@ fun showCarBookingPage() {
     // Load countries first, then carriers + notify parties, then restore — otherwise a late API response rebuilds the country dropdown and clears the restored value.
     loadCountries {
         loadCarriers {
-            populateEditableComboboxFromBookingNotifyParties("notifyParty")
             window.setTimeout({
                 if (shippingHistoryEditPrefillRaw != null) {
                     MainScope().launch {
@@ -784,6 +789,10 @@ fun setupCarBookingPageListeners() {
         }
         carBookingFormState.podPort = ""
         carBookingFormState.consigneeName = ""
+        (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.let { it.value = "" }
+        (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.let { it.value = "" }
+        carBookingFormState.notifyParty = ""
+        carBookingFormState.inTransitClause = ""
 
         // Apply booking mappings (POD and CONSIGNEE auto-fill) - Direct JS call
         Logger.debug("Attempting to call booking mappings for country: $selectedCountry")
@@ -2519,8 +2528,11 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
         (document.getElementById("finalDestination") as? HTMLInputElement)?.value = finalDestination
         carBookingFormState.finalDestination = finalDestination
         val notifyParty = (first.notifyParty?.toString() ?: "").trim()
-        setEditableComboboxValue("notifyParty", notifyParty)
+        (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value = notifyParty
         carBookingFormState.notifyParty = notifyParty
+        val inTransitClause = (first.inTransitClause?.toString() ?: "").trim()
+        (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value = inTransitClause
+        carBookingFormState.inTransitClause = inTransitClause
         (document.getElementById("bookingNo") as? HTMLInputElement)?.value = bookingId
         carBookingFormState.bookingNo = bookingId
         (document.getElementById("vesselSelect") as? HTMLInputElement)?.value = vessel
@@ -2929,7 +2941,8 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
                 val req: dynamic = js("{}")
                 req.country = selectedCountry
                 req.consignee = consigneeName
-                req.notifyParty = getEditableComboboxValue("notifyParty")
+                req.notifyParty = (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value?.trim().orEmpty()
+                req.inTransitClause = (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value?.trim().orEmpty()
                 req.shipmentDate = etd
                 req.cyCutDate = bookingFormCyCutIso()
                 req.eta = bookingFormEtaIso()

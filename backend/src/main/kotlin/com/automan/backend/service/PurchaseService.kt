@@ -181,9 +181,13 @@ class PurchaseService(
      * Unparseable date strings are skipped.
      */
     fun getDistinctPurchaseDatesIso(): List<String> {
-        return purchaseRepository.findAll().asSequence()
-            .filter { isRixoRequestedPendingForTransport(it.rixoRequested) }
-            .mapNotNull { PurchaseDateParseUtils.parseToLocalDate(it.date?.trim().orEmpty()) }
+        return purchaseRepository.findDateAndWorkflowPairs().asSequence()
+            .filter { pair ->
+                // Same pending rule as applyForRead: rixoRequested is TRUE only for RIXO_REQUESTED+.
+                val ws = pair.getWorkflowStatus()
+                ws == null || ws == com.automan.backend.model.WorkflowStatus.PURCHASED
+            }
+            .mapNotNull { PurchaseDateParseUtils.parseToLocalDate(it.getDate()?.trim().orEmpty()) }
             .distinct()
             .sortedDescending()
             .map { it.toString() }
@@ -221,13 +225,30 @@ class PurchaseService(
                 companyFilter.equals("__RIXO_COMPANY_UNDEFINED__", ignoreCase = true) ||
                 companyFilter.equals("Undefined", ignoreCase = true)
 
-        val candidates = purchaseRepository.findAll().asSequence().filter { p ->
+        val base: List<Purchase> = when {
+            chassisTokens.isNotEmpty() -> {
+                chassisTokens
+                    .flatMap { token -> purchaseRepository.findByChassisToken(token) }
+                    .distinctBy { it.id }
+            }
+            targetDate != null -> {
+                // Best-effort: date column often stores ISO or labeled strings containing yyyy-MM-dd.
+                purchaseRepository.findByDateContainingIgnoreCase(targetDate.toString())
+            }
+            else -> purchaseRepository.findAll()
+        }
+
+        val candidates = base.asSequence().filter { p ->
             if (targetDate != null) {
                 val parsed = PurchaseDateParseUtils.parseToLocalDate(p.date?.trim().orEmpty())
                 if (parsed != targetDate) return@filter false
             }
-            if (!includeNonPending && !isRixoRequestedPendingForTransport(p.rixoRequested)) {
-                return@filter false
+            if (!includeNonPending) {
+                // rixoRequested is @Transient; pending = not yet RIXO_REQUESTED+ (see applyForRead).
+                val ws = p.workflowStatus
+                if (ws != null && ws != com.automan.backend.model.WorkflowStatus.PURCHASED) {
+                    return@filter false
+                }
             }
             if (companyFilter != null) {
                 val raw = p.rixoCompany?.trim().orEmpty()
@@ -1132,16 +1153,46 @@ class PurchaseService(
     }
 
     /**
+     * Paginated browse for purchase list UI (no search text). Newest [id] first by default.
+     * Optional [sortField]/[sortOrder] for column headers (whitelist only).
+     */
+    fun listPurchasesPage(
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): PurchasePageResponse {
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
+        val pg = purchaseRepository.findAll(pageable)
+        return PurchasePageResponse(
+            content = applyReadAdapters(pg.content),
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    /**
      * Paginated search for purchase list UI (chassis, car name, brand, client, supplier).
      * [field]: `all`, `chassis` (prefix match, index-friendly), `carName`, `brand`, `clientName`, `supplier`.
      */
-    fun searchPurchasesPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): PurchasePageResponse {
+    fun searchPurchasesPage(
+        rawQuery: String,
+        rawField: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): PurchasePageResponse {
         val q = sanitizePurchaseListSearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }
         val field = rawField.trim().lowercase().ifEmpty { "all" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
         val pg: Page<Purchase> = when (field) {
             "chassis" -> purchaseRepository.searchPurchasesChassisPrefixPage(q, pageable)
             "carname", "car_name" -> purchaseRepository.searchPurchasesCarNameContainsPage(q, pageable)
@@ -1159,6 +1210,30 @@ class PurchaseService(
             page = pg.number,
             size = pg.size,
         )
+    }
+
+    /** Whitelisted sort for purchase list page/search. Unknown fields fall back to id DESC. */
+    private fun resolvePurchaseListSort(sortField: String?, sortOrder: String?): Sort {
+        val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
+            Sort.Direction.ASC
+        } else {
+            Sort.Direction.DESC
+        }
+        val prop = when (sortField?.trim()?.lowercase()) {
+            null, "", "id" -> "id"
+            "chassis" -> "chassis"
+            "date" -> "date"
+            "carname", "car_name" -> "carName"
+            "brand" -> "brand"
+            "clientname", "client_name", "client" -> "clientName"
+            "auctionhouse", "auction_house", "supplier", "suppliername" -> "auctionHouse"
+            "stocklocation", "stock_location" -> "stockLocation"
+            "rixocompany", "rixo_company" -> "rixoCompany"
+            "country" -> "country"
+            "repaircompany", "repair_company" -> "repairCompany"
+            else -> "id"
+        }
+        return Sort.by(dir, prop)
     }
 
     private fun sanitizePurchaseListSearchToken(raw: String): String =
@@ -2217,24 +2292,21 @@ class PurchaseService(
                 .ifEmpty { purchaseRepository.findByChassis(chassis) }
             val purchase = applyReadAdapterOrNull(rawPurchases.firstOrNull())
 
+            fun carDto(priceYen: String): com.automan.backend.dto.CarPdfDto {
+                val name = purchase?.carName ?: "Unknown"
+                return com.automan.backend.dto.CarPdfDto(
+                    no = index + 1,
+                    name = name,
+                    chassisNumber = purchase?.chassis ?: chassis,
+                    year = purchase?.let { CarModelYearUtils.extractYearFromCarModelYear(it.carModelYear) }.orEmpty(),
+                    cnfPrice = priceYen,
+                    maker = purchase?.brand?.trim()?.takeIf { it.isNotEmpty() },
+                    model = purchase?.carName?.trim()?.takeIf { it.isNotEmpty() },
+                )
+            }
+
             if (frontendYen != null) {
-                if (purchase != null) {
-                    com.automan.backend.dto.CarPdfDto(
-                        no = index + 1,
-                        name = purchase.carName ?: "Unknown",
-                        chassisNumber = purchase.chassis,
-                        year = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear),
-                        cnfPrice = "¥${frontendYen.toInt()}",
-                    )
-                } else {
-                    com.automan.backend.dto.CarPdfDto(
-                        no = index + 1,
-                        name = "Unknown",
-                        chassisNumber = chassis,
-                        year = "",
-                        cnfPrice = "¥${frontendYen.toInt()}",
-                    )
-                }
+                carDto("¥${frontendYen.toInt()}")
             } else if (purchase != null) {
                 val totalCnfPrice = if (historyRow != null) {
                     historyRow.amount
@@ -2259,22 +2331,10 @@ class PurchaseService(
                     }
                 }
 
-                com.automan.backend.dto.CarPdfDto(
-                    no = index + 1,
-                    name = purchase.carName ?: "Unknown",
-                    chassisNumber = purchase.chassis,
-                    year = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear),
-                    cnfPrice = "¥${totalCnfPrice.toInt()}",
-                )
+                carDto("¥${totalCnfPrice.toInt()}")
             } else {
                 val amountFromHistory = historyRow?.amount
-                com.automan.backend.dto.CarPdfDto(
-                    no = index + 1,
-                    name = "Unknown",
-                    chassisNumber = chassis,
-                    year = "",
-                    cnfPrice = if (amountFromHistory != null) "¥${amountFromHistory.toInt()}" else "¥0",
-                )
+                carDto(if (amountFromHistory != null) "¥${amountFromHistory.toInt()}" else "¥0")
             }
         }
         
@@ -2287,7 +2347,13 @@ class PurchaseService(
             shippingDate = formattedDate,
             consigneeDetails = consigneeDetails,
             carList = carList,
-            calculationMode = request.calculationMode // Pass calculation mode to PDF data
+            calculationMode = request.calculationMode,
+            carrier = request.carrier?.trim()?.takeIf { it.isNotEmpty() },
+            cyCutDate = request.cyCutDate?.trim()?.takeIf { it.isNotEmpty() },
+            eta = request.eta?.trim()?.takeIf { it.isNotEmpty() },
+            finalDestination = request.finalDestination?.trim()?.takeIf { it.isNotEmpty() },
+            notifyParty = request.notifyParty?.trim()?.takeIf { it.isNotEmpty() },
+            inTransitClause = request.inTransitClause?.trim()?.takeIf { it.isNotEmpty() },
         )
     }
 

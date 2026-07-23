@@ -5,10 +5,12 @@ import com.automan.backend.dto.InvoicePdfRequest
 import com.automan.backend.dto.ShippingHistoryInvoiceHeaderDto
 import com.automan.backend.dto.ShippingHistoryInvoiceLineDto
 import com.automan.backend.dto.ShippingHistoryInvoiceSliceDto
+import com.automan.backend.dto.ShippingHistoryPageResponse
 import com.automan.backend.dto.ShippingHistoryRowDto
 import com.automan.backend.model.ShippingHistory
 import com.automan.backend.repository.InvoiceHistoryLineRepository
 import com.automan.backend.repository.ShippingHistoryRepository
+import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -27,30 +29,76 @@ class ShippingHistoryService(
 
     fun listAllRows(): List<ShippingHistoryRowDto> {
         val sort = Sort.by(Sort.Direction.DESC, "id")
-        return shippingHistoryRepository.findAll(sort).map { e ->
-            ShippingHistoryRowDto(
-                id = e.id ?: 0L,
-                country = e.country,
-                consignee = e.consignee,
-                notifyParty = e.notifyParty,
-                shipmentDate = e.shipmentDate?.toString(),
-                cyCutDate = e.cyCutDate?.toString(),
-                eta = e.eta?.toString(),
-                pol = e.pol,
-                pod = e.pod,
-                finalDestination = e.finalDestination,
-                bookingId = e.bookingId,
-                vessel = e.vessel,
-                carrier = e.carrier,
-                priceType = e.priceType,
-                chassis = e.chassis,
-                clientName = e.clientName,
-                amount = e.amount.setScale(2, RoundingMode.HALF_UP).toPlainString(),
-                createdAt = e.createdAt?.toString(),
-                invoiceCreated = invoiceHistoryLineRepository.existsByChassis(e.chassis),
-            )
-        }
+        return mapRowsWithInvoiceFlags(shippingHistoryRepository.findAll(sort))
     }
+
+    fun listRowsPage(page: Int, rawSize: Int): ShippingHistoryPageResponse {
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg = shippingHistoryRepository.findAll(pageable)
+        return ShippingHistoryPageResponse(
+            content = mapRowsWithInvoiceFlags(pg.content),
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    fun searchRowsPage(rawQuery: String, page: Int, rawSize: Int): ShippingHistoryPageResponse {
+        val q = sanitizeHistorySearchToken(rawQuery)
+        require(q.isNotEmpty()) { "Search text is required" }
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg = shippingHistoryRepository.searchKeyFields(q, pageable)
+        return ShippingHistoryPageResponse(
+            content = mapRowsWithInvoiceFlags(pg.content),
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    private fun mapRowsWithInvoiceFlags(entities: List<ShippingHistory>): List<ShippingHistoryRowDto> {
+        if (entities.isEmpty()) return emptyList()
+        val chassisList = entities.map { it.chassis }.distinct()
+        val invoicedChassis = if (chassisList.isEmpty()) {
+            emptySet()
+        } else {
+            invoiceHistoryLineRepository.findDistinctChassisByChassisIn(chassisList).toSet()
+        }
+        return entities.map { e -> toRowDto(e, e.chassis in invoicedChassis) }
+    }
+
+    private fun toRowDto(e: ShippingHistory, invoiceCreated: Boolean): ShippingHistoryRowDto =
+        ShippingHistoryRowDto(
+            id = e.id ?: 0L,
+            country = e.country,
+            consignee = e.consignee,
+            notifyParty = e.notifyParty,
+            inTransitClause = e.inTransitClause,
+            shipmentDate = e.shipmentDate?.toString(),
+            cyCutDate = e.cyCutDate?.toString(),
+            eta = e.eta?.toString(),
+            pol = e.pol,
+            pod = e.pod,
+            finalDestination = e.finalDestination,
+            bookingId = e.bookingId,
+            vessel = e.vessel,
+            carrier = e.carrier,
+            priceType = e.priceType,
+            chassis = e.chassis,
+            clientName = e.clientName,
+            amount = e.amount.setScale(2, RoundingMode.HALF_UP).toPlainString(),
+            createdAt = e.createdAt?.toString(),
+            invoiceCreated = invoiceCreated,
+        )
+
+    private fun sanitizeHistorySearchToken(raw: String): String =
+        raw.trim().replace("%", "").replace("_", "").take(120)
 
     private fun parseIsoLocalDate(raw: String?): LocalDate? {
         val s = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
@@ -74,6 +122,7 @@ class ShippingHistoryService(
         val country = request.country?.trim()?.takeIf { it.isNotEmpty() }
         val consignee = request.consignee?.trim()?.takeIf { it.isNotEmpty() }
         val notifyParty = request.notifyParty?.trim()?.takeIf { it.isNotEmpty() }
+        val inTransitClause = request.inTransitClause?.trim()?.takeIf { it.isNotEmpty() }
         val pol = request.pol?.trim()?.takeIf { it.isNotEmpty() }
         val pod = request.pod?.trim()?.takeIf { it.isNotEmpty() }
         val finalDestination = request.finalDestination?.trim()?.takeIf { it.isNotEmpty() }
@@ -102,6 +151,7 @@ class ShippingHistoryService(
                     country = country,
                     consignee = consignee,
                     notifyParty = notifyParty,
+                    inTransitClause = inTransitClause,
                     shipmentDate = shipmentDate,
                     cyCutDate = cyCutDate,
                     eta = eta,
@@ -123,6 +173,7 @@ class ShippingHistoryService(
                     country = country,
                     consignee = consignee,
                     notifyParty = notifyParty,
+                    inTransitClause = inTransitClause,
                     shipmentDate = shipmentDate,
                     cyCutDate = cyCutDate,
                     eta = eta,

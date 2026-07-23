@@ -172,6 +172,21 @@ class CarBrandMappingController(
     }
 
     /**
+     * Paginated browse for Car Brands Map (no search text). Prefer this over [getAllMappings] for UI.
+     */
+    @GetMapping("/mappings/page")
+    fun listMappingsPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(carBrandMappingService.listMappingsPage(page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    /**
      * Paginated search for Car Brands Map (chassis / car brand / car name / all).
      */
     @GetMapping("/mappings/page-search")

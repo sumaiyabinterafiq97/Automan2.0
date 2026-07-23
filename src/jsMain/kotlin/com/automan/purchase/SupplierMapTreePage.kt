@@ -47,6 +47,8 @@ private fun smRejectIfSemicolon(vararg values: String?): Boolean {
 }
 
 private var smTreeRowsCache: List<SupplierMapTreeRowLite> = emptyList()
+private var smRootSuppliers: List<String> = emptyList()
+private var smLoadedSupplierKeys: MutableSet<String> = mutableSetOf()
 private var smSelectedSupplier: String? = null
 private var smSelectedVenue: String? = null
 private var smSelectedStock: String? = null
@@ -82,6 +84,29 @@ private var smSupplierSortOrder: String? = null // null = newest-first; "asc" | 
 private var smSearchDebounceTimer: dynamic = null
 
 private fun smSortedSuppliers(list: List<SupplierMapTreeRowLite>): List<String> {
+    if (smRootSuppliers.isNotEmpty()) {
+        val names = smRootSuppliers.map { smNormSupplier(it) }.distinctBy { it.lowercase() }
+        val q = smSearchQuery.trim().lowercase()
+        val filtered = if (q.isEmpty()) names else names.filter { it.lowercase().contains(q) }
+        return when (smSupplierSortOrder) {
+            "asc" -> filtered.sortedBy { it.lowercase() }
+            "desc" -> filtered.sortedByDescending { it.lowercase() }
+            else -> {
+                // Newest without row ids (roots-only): fall back to A-Z.
+                val withIds = filtered.map { name ->
+                    name to (list.filter { smNormSupplier(it.supplier) == name }
+                        .maxOfOrNull { it.id.toLongOrNull() ?: 0L } ?: 0L)
+                }
+                if (withIds.all { it.second == 0L }) {
+                    filtered.sortedBy { it.lowercase() }
+                } else {
+                    withIds.sortedWith(
+                        compareByDescending<Pair<String, Long>> { it.second }.thenBy { it.first.lowercase() },
+                    ).map { it.first }
+                }
+            }
+        }
+    }
     val grouped = list.groupBy { smNormSupplier(it.supplier) }
         .map { (name, rows) -> name to rows.maxOf { it.id.toLongOrNull() ?: 0L } }
     val q = smSearchQuery.trim().lowercase()
@@ -631,7 +656,8 @@ private fun smBuildLeafRowHtml(leaf: SmLeafRow, baseRow: SupplierMapTreeRowLite,
 private fun buildSupplierMapTreeHtmlFromCache(): String {
     val list = smTreeRowsCache
     val fullRowHtml = if (smFullRowAddOpen) buildSmFullRowAddHtml() else ""
-    if (list.isEmpty()) {
+    // Roots may be present with an empty cache until a supplier branch is expanded.
+    if (smRootSuppliers.isEmpty() && list.isEmpty()) {
         return """
             <div class="rixo-tree supplier-map-tree">
                 ${smTreeHeadersHtml()}
@@ -1526,57 +1552,60 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                     }
                 }
                 "delete" -> {
-                    val rowsToDelete = smTreeRowsCache.filter { row ->
-                        smNormSupplier(row.supplier) == smNormSupplier(supplier) &&
-                            when (level) {
-                                "supplier" -> true
-                                "venue" -> smRowVenueKey(row) == label
-                                "stock" -> smRowVenueKey(row) == smNormVenue(venue) && smNormStock(row.stock) == label
-                                "pol" -> smRowVenueKey(row) == smNormVenue(venue) &&
-                                    smNormStock(row.stock) == smNormStock(stock) && smRowPolKey(row) == label
-                                "rixo_company" -> smRowVenueKey(row) == smNormVenue(venue) &&
-                                    smNormStock(row.stock) == smNormStock(stock) &&
-                                    smRowPolKey(row) == smNormPol(pol) && smNormCompany(row.company) == label
-                                else -> false
-                            }
-                    }.mapNotNull { it.id.toLongOrNull() }.distinct()
-                    if (rowsToDelete.isEmpty()) return@click
-                    val pathBits = listOfNotNull(
-                        supplier.takeIf { it.isNotBlank() }?.let { "Supplier: ${escapeHtml(it)}" },
-                        when (level) {
-                            "venue" -> "Venue: ${escapeHtml(label)}"
-                            "stock" -> "Stock: ${escapeHtml(label)}"
-                            "pol" -> "POL: ${escapeHtml(label)}"
-                            "rixo_company" -> "Rixo company: ${escapeHtml(label)}"
-                            else -> null
-                        },
-                    ).joinToString(" · ")
-                    val levelNote = when (level) {
-                        "supplier" ->
-                            "<br><br><b>High impact:</b> Deleting this supplier branch removes all nested venues, stocks, POLs, and prices for this supplier."
-                        "rixo_company" ->
-                            "<br><br>This removes the Rixo company path under this supplier."
-                        else -> ""
-                    }
-                    showRixoMappingDeleteConfirm(
-                        title = if (level == "supplier") "Delete entire supplier branch?" else "Delete branch?",
-                        messageHtml =
-                            (if (pathBits.isNotEmpty()) "$pathBits<br><br>" else "") +
-                                "<b>${rowsToDelete.size}</b> mapping row(s) will be permanently deleted.<br><br>" +
-                                "These rows are shared with <b>Rixo Price Map</b>. Deleting here also removes them there." +
-                                levelNote +
-                                "<br><br>This cannot be undone. Are you sure?",
-                        onConfirm = {
-                            fun deleteNext(idx: Int) {
-                                if (idx >= rowsToDelete.size) {
-                                    refreshSupplierMapTreeData()
-                                    return
+                    // Ensure branch rows (ids) are loaded before cascade delete.
+                    ensureSmSupplierBranchLoaded(supplier) {
+                        val rowsToDelete = smTreeRowsCache.filter { row ->
+                            smNormSupplier(row.supplier) == smNormSupplier(supplier) &&
+                                when (level) {
+                                    "supplier" -> true
+                                    "venue" -> smRowVenueKey(row) == label
+                                    "stock" -> smRowVenueKey(row) == smNormVenue(venue) && smNormStock(row.stock) == label
+                                    "pol" -> smRowVenueKey(row) == smNormVenue(venue) &&
+                                        smNormStock(row.stock) == smNormStock(stock) && smRowPolKey(row) == label
+                                    "rixo_company" -> smRowVenueKey(row) == smNormVenue(venue) &&
+                                        smNormStock(row.stock) == smNormStock(stock) &&
+                                        smRowPolKey(row) == smNormPol(pol) && smNormCompany(row.company) == label
+                                    else -> false
                                 }
-                                smDeleteMappingRow(rowsToDelete[idx]) { deleteNext(idx + 1) }
-                            }
-                            deleteNext(0)
-                        },
-                    )
+                        }.mapNotNull { it.id.toLongOrNull() }.distinct()
+                        if (rowsToDelete.isEmpty()) return@ensureSmSupplierBranchLoaded
+                        val pathBits = listOfNotNull(
+                            supplier.takeIf { it.isNotBlank() }?.let { "Supplier: ${escapeHtml(it)}" },
+                            when (level) {
+                                "venue" -> "Venue: ${escapeHtml(label)}"
+                                "stock" -> "Stock: ${escapeHtml(label)}"
+                                "pol" -> "POL: ${escapeHtml(label)}"
+                                "rixo_company" -> "Rixo company: ${escapeHtml(label)}"
+                                else -> null
+                            },
+                        ).joinToString(" · ")
+                        val levelNote = when (level) {
+                            "supplier" ->
+                                "<br><br><b>High impact:</b> Deleting this supplier branch removes all nested venues, stocks, POLs, and prices for this supplier."
+                            "rixo_company" ->
+                                "<br><br>This removes the Rixo company path under this supplier."
+                            else -> ""
+                        }
+                        showRixoMappingDeleteConfirm(
+                            title = if (level == "supplier") "Delete entire supplier branch?" else "Delete branch?",
+                            messageHtml =
+                                (if (pathBits.isNotEmpty()) "$pathBits<br><br>" else "") +
+                                    "<b>${rowsToDelete.size}</b> mapping row(s) will be permanently deleted.<br><br>" +
+                                    "These rows are shared with <b>Rixo Price Map</b>. Deleting here also removes them there." +
+                                    levelNote +
+                                    "<br><br>This cannot be undone. Are you sure?",
+                            onConfirm = {
+                                fun deleteNext(idx: Int) {
+                                    if (idx >= rowsToDelete.size) {
+                                        refreshSupplierMapTreeData()
+                                        return
+                                    }
+                                    smDeleteMappingRow(rowsToDelete[idx]) { deleteNext(idx + 1) }
+                                }
+                                deleteNext(0)
+                            },
+                        )
+                    }
                 }
             }
             return@click
@@ -1800,13 +1829,18 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                     smSelectedStock = null
                     smSelectedPol = null
                     smSelectedCompany = null
+                    smSelectedMappingId = null
+                    smRerenderTree(root)
                 } else {
                     smSelectedSupplier = value
                     smSelectedVenue = null
                     smSelectedStock = null
                     smSelectedPol = null
                     smSelectedCompany = null
+                    smSelectedMappingId = null
+                    ensureSmSupplierBranchLoaded(value) { smRerenderTree(root) }
                 }
+                return@click
             }
             "venue" -> {
                 if (smSelectedVenue == value) {
@@ -1873,18 +1907,44 @@ fun showSupplierMapTreePage() {
     loadSupplierMapTree()
 }
 
-fun loadSupplierMapTree() {
-    val root = document.getElementById("supplierMapTreeRoot") as? HTMLElement ?: return
-    window.fetch(apiUrl("rixo-mapping/all"))
+private fun ensureSmSupplierBranchLoaded(supplier: String, onDone: () -> Unit) {
+    val key = smNormSupplier(supplier)
+    if (key in smLoadedSupplierKeys) {
+        onDone()
+        return
+    }
+    val enc = js("encodeURIComponent")(supplier.trim()).unsafeCast<String>()
+    window.fetch(apiUrl("rixo-mapping/by-auction?auctionName=$enc"))
         .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load supplier map')")
+            if (response.ok) response.json() else throw js("Error('Failed to load supplier branch')")
         }
         .then { result: dynamic ->
             val ok = result.success as? Boolean ?: false
-            if (!ok) throw js("Error(result.message || 'Failed to load supplier map')")
+            if (!ok) throw js("Error(result.message || 'Failed to load supplier branch')")
             val data = result.data
             val arr = if (js("Array.isArray(data)") as Boolean) (data as Array<dynamic>).toList() else emptyList()
-            smTreeRowsCache = parseSupplierMapTreeRows(arr)
+            val parsed = parseSupplierMapTreeRows(arr)
+            smTreeRowsCache = smTreeRowsCache.filter { smNormSupplier(it.supplier) != key } + parsed
+            smLoadedSupplierKeys.add(key)
+            onDone()
+        }
+        .catch { err: dynamic ->
+            Logger.error("Supplier map supplier branch: ${err.toString()}")
+            showMessage("Failed to load supplier branch", "error")
+            onDone()
+        }
+}
+
+fun loadSupplierMapTree() {
+    val root = document.getElementById("supplierMapTreeRoot") as? HTMLElement ?: return
+    window.fetch(apiUrl("rixo-mapping/distinct-auction-names"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load suppliers')")
+        }
+        .then { raw: dynamic ->
+            smRootSuppliers = parseMasterListArray(raw).distinct()
+            smTreeRowsCache = emptyList()
+            smLoadedSupplierKeys.clear()
             smSelectedSupplier = null
             smSelectedVenue = null
             smSelectedStock = null
@@ -1904,22 +1964,30 @@ fun loadSupplierMapTree() {
 
 fun refreshSupplierMapTreeData() {
     val root = document.getElementById("supplierMapTreeRoot") as? HTMLElement ?: return
-    window.fetch(apiUrl("rixo-mapping/all"))
+    window.fetch(apiUrl("rixo-mapping/distinct-auction-names"))
         .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load supplier map')")
+            if (response.ok) response.json() else throw js("Error('Failed to load suppliers')")
         }
-        .then { result: dynamic ->
-            val ok = result.success as? Boolean ?: false
-            if (!ok) throw js("Error(result.message || 'Failed to load supplier map')")
-            val data = result.data
-            val arr = if (js("Array.isArray(data)") as Boolean) (data as Array<dynamic>).toList() else emptyList()
-            smTreeRowsCache = parseSupplierMapTreeRows(arr)
+        .then { raw: dynamic ->
+            smRootSuppliers = parseMasterListArray(raw).distinct()
             smLeafInlineEditMappingId = null
             smLeafInlineEditLineType = ""
-            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
-            bindSupplierMapTreeClicks(root)
-            if (smFullRowAddOpen) {
-                window.setTimeout({ wireSmFullRowAddComboboxes() }, 0)
+            fun finishRender() {
+                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
+                bindSupplierMapTreeClicks(root)
+                if (smFullRowAddOpen) {
+                    window.setTimeout({ wireSmFullRowAddComboboxes() }, 0)
+                }
+            }
+            val selected = smSelectedSupplier
+            if (selected != null) {
+                // Force reload open branch so children stay visible after save.
+                smLoadedSupplierKeys.remove(smNormSupplier(selected))
+                ensureSmSupplierBranchLoaded(selected) { finishRender() }
+            } else {
+                smTreeRowsCache = emptyList()
+                smLoadedSupplierKeys.clear()
+                finishRender()
             }
         }
         .catch { err: dynamic ->

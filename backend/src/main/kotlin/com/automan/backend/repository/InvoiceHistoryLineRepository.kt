@@ -16,6 +16,10 @@ interface InvoiceHistoryLineRepository : JpaRepository<InvoiceHistoryLine, Long>
     /** Returns true if at least one invoice_history_line exists for the given chassis (case-sensitive). */
     fun existsByChassis(chassis: String): Boolean
 
+    /** Distinct chassis values that appear in invoice lines among the given set (batch invoiceCreated check). */
+    @Query("SELECT DISTINCT l.chassis FROM InvoiceHistoryLine l WHERE l.chassis IN :chassis")
+    fun findDistinctChassisByChassisIn(@Param("chassis") chassis: Collection<String>): List<String>
+
     /**
      * Count of lines whose chassis equals [chassis] ignoring case and outer whitespace.
      * Used after invoice history deletes to see if a chassis is still covered by another invoice.

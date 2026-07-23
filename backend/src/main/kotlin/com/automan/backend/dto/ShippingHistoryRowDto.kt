@@ -5,6 +5,7 @@ data class ShippingHistoryRowDto(
     val country: String? = null,
     val consignee: String? = null,
     val notifyParty: String? = null,
+    val inTransitClause: String? = null,
     val shipmentDate: String? = null,
     val cyCutDate: String? = null,
     val eta: String? = null,

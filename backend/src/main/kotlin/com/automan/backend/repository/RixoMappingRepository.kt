@@ -99,5 +99,7 @@ interface RixoMappingRepository : JpaRepository<RixoMapping, Long> {
 
     fun findByAuctionNameIgnoreCase(auctionName: String): List<RixoMapping>
 
+    fun findByRixoCompanyIgnoreCase(rixoCompany: String): List<RixoMapping>
+
     fun findFirstByAuctionNameIgnoreCase(auctionName: String): RixoMapping?
 }

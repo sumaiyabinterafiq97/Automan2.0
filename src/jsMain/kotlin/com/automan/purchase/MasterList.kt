@@ -12,7 +12,7 @@ var carBrandsCurrentPage = 1
 var carBrandsItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allCarBrands: List<dynamic> = emptyList()
 
-/** When true, list data comes from [car-brand-mapping/mappings/page-search]. */
+/** When true, list data comes from [car-brand-mapping/mappings/page] or page-search. */
 var carBrandMapSearchServerMode: Boolean = false
 var carBrandMapSearchTotal: Long = 0
 var carBrandMapSearchTotalPages: Int = 0
@@ -25,6 +25,15 @@ var clientMapCurrentPage = 1
 var clientMapItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allClientMaps: List<dynamic> = emptyList()
 var lastClientMapDeviceType: String? = getDeviceType()
+
+/** When true, list data comes from [client-map/mappings/page] or page-search. */
+var clientMapSearchServerMode: Boolean = false
+var clientMapSearchTotal: Long = 0
+var clientMapSearchTotalPages: Int = 0
+var clientMapSearchPageZeroBased: Int = 0
+/** API field: all | clientName | country */
+var clientMapSearchFieldChoice: String = "all"
+var clientMapSearchDebounceTimer: dynamic = null
 
 
 /** Active column sort for Car Brands Map / Consignee Map tables (same UX as purchase list / simple master). */
@@ -789,7 +798,7 @@ var consigneesCurrentPage = 1
 var consigneesItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
 var allConsignees: List<dynamic> = emptyList()
 
-/** When true, list data comes from [booking/mappings/page-search]. */
+/** When true, list data comes from [booking/mappings/page] or page-search. */
 var consigneeMapSearchServerMode: Boolean = false
 var consigneeMapSearchTotal: Long = 0
 var consigneeMapSearchTotalPages: Int = 0
@@ -996,10 +1005,10 @@ fun getDefaultConsigneeColumnsForDevice(deviceType: String? = null): List<String
     val device = deviceType ?: getDeviceType()
     // Display order: Consignee Name → Consignee Address → Country → POD → Notify party
     return when (device) {
-        "mobile" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
-        "tablet" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
-        "desktop" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
-        else -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
+        "mobile" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
+        "tablet" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
+        "desktop" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
+        else -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
     }
 }
 
@@ -1134,7 +1143,7 @@ fun getSelectedConsigneeColumns(): List<String> {
     if (filteredColumns.isEmpty()) {
         return defaultColumns
     }
-    val preferredConsigneeColumnOrder = listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty")
+    val preferredConsigneeColumnOrder = listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
     val sortedColumns = filteredColumns.sortedBy { col ->
         val idx = preferredConsigneeColumnOrder.indexOf(col)
         if (idx >= 0) idx else 999
@@ -2254,8 +2263,9 @@ private fun buildConsigneeTableUi(
                 "country" to "Country",
                 "consigneeName" to "Consignee Name",
                 "consigneeAddress" to "Consignee Address",
-        "pod" to "POD",
-                "notifyParty" to "Notify party"
+                "pod" to "POD",
+                "notifyParty" to "Notify party",
+                "inTransitClause" to "In-Transit Clause",
             )
             
             val consigneeColCount = 1 + selectedColumns.size
@@ -2292,6 +2302,9 @@ private fun buildConsigneeTableUi(
                 val consigneeAddressShort = if (consigneeAddress.length > 60) consigneeAddress.take(60) + "..." else consigneeAddress
                 val pod = (mapping.pod ?: "").toString()
                 val notifyParty = (mapping.notifyParty ?: "").toString()
+                val notifyPartyShort = if (notifyParty.length > 60) notifyParty.take(60) + "..." else notifyParty
+                val inTransitClause = (mapping.inTransitClause ?: "").toString()
+                val inTransitClauseShort = if (inTransitClause.length > 60) inTransitClause.take(60) + "..." else inTransitClause
                 
                 html += """
                     <tr>
@@ -2320,17 +2333,25 @@ private fun buildConsigneeTableUi(
                         "consigneeName" -> consigneeName
                         "consigneeAddress" -> consigneeAddressShort
                         "pod" -> pod
-                        "notifyParty" -> notifyParty
+                        "notifyParty" -> notifyPartyShort
+                        "inTransitClause" -> inTransitClauseShort
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
                 "country", "consigneeName" -> "padding: 12px 16px; color: #111827; font-size: 14px; font-weight: 500; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
-                "consigneeAddress" -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
+                "consigneeAddress", "notifyParty", "inTransitClause" -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
                 else -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
             }
-            val titleAttr = if (columnKey == "consigneeAddress" && consigneeAddress.length > 60) " title=\"${escapeHtml(consigneeAddress)}\"" else ""
+            val fullForTitle = when (columnKey) {
+                "consigneeAddress" -> consigneeAddress
+                "notifyParty" -> notifyParty
+                "inTransitClause" -> inTransitClause
+                else -> ""
+            }
+            val titleAttr = if (fullForTitle.length > 60) " title=\"${escapeHtml(fullForTitle)}\"" else ""
             val cellInner =
-                if (columnKey == "consigneeAddress") formatConsigneeMapAddressChipHtml(value)
+                if (columnKey == "consigneeAddress" || columnKey == "notifyParty" || columnKey == "inTransitClause")
+                    formatConsigneeMapAddressChipHtml(value)
                 else formatConsigneeMapValueChipHtml(value)
             html += """<td style="$cellStyle"$titleAttr>$cellInner</td>"""
                 }
@@ -2474,55 +2495,52 @@ fun loadMasterConsigneesWithTable() {
         return
     }
 
-    consigneeMapSearchServerMode = false
-    consigneeMapSearchTotal = 0
-    consigneeMapSearchTotalPages = 0
-    consigneeMapSearchPageZeroBased = 0
-
-    window.fetch(apiUrl("booking/mappings"))
+    consigneeMapSearchServerMode = true
+    val p = consigneeMapSearchPageZeroBased
+    val url = apiUrl("booking/mappings/page?page=$p&size=$consigneesItemsPerPage")
+    window.fetch(url)
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load consignee')")
         }
-        .then { result: dynamic ->
-            val mappings = result.data ?: js("[]")
-            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
-            val filteredMappings = mappingsArray.toList().sortedByDescending {
-                (it.id as? Number)?.toLong() ?: 0L
+        .then { body: dynamic ->
+            val err = js("body.error")?.toString()?.trim()
+            if (!err.isNullOrEmpty()) throw js("Error(err)")
+            val totalEl = js("body.totalElements")
+            consigneeMapSearchTotal = when (totalEl) {
+                is Number -> totalEl.toLong()
+                else -> totalEl?.toString()?.toLongOrNull() ?: 0L
             }
-            val consigneeSortable = setOf("consigneeName", "country", "pod")
-            var orderedForDisplay = filteredMappings
-            val cmsf = consigneeMapSortField
-            if (cmsf != null && cmsf in consigneeSortable) {
-                val ord = consigneeMapSortOrderByField[cmsf] ?: "desc"
-                orderedForDisplay = if (ord == "asc") {
-                    filteredMappings.sortedBy { extractConsigneeMapSortKey(it, cmsf) }
-                } else {
-                    filteredMappings.sortedByDescending { extractConsigneeMapSortKey(it, cmsf) }
-                }
+            val tp = js("body.totalPages")
+            consigneeMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                is Number -> tp.toInt()
+                else -> tp?.toString()?.toIntOrNull() ?: 1
+            })
+            val num = js("body.page")
+            consigneeMapSearchPageZeroBased = when (num) {
+                is Number -> num.toInt()
+                else -> num?.toString()?.toIntOrNull() ?: 0
             }
-            allConsignees = orderedForDisplay
+            consigneesCurrentPage = consigneeMapSearchPageZeroBased + 1
 
-            if (orderedForDisplay.isEmpty()) {
+            val content = js("body.content") ?: js("[]")
+            val arr = js("Array.isArray(content) ? content : []") as Array<dynamic>
+            val list = arr.toList()
+            allConsignees = list
+
+            if (list.isEmpty()) {
                 consigneeMapLastRenderSlice = null
                 tableDiv.innerHTML = """<div class="consignee-map-empty"><strong>No results</strong><div>No consignee data found yet.</div></div>"""
                 return@then
             }
 
-            val totalPages = kotlin.math.max(1, kotlin.math.ceil(orderedForDisplay.size.toDouble() / consigneesItemsPerPage).toInt())
-            val startIndex = (consigneesCurrentPage - 1) * consigneesItemsPerPage
-            val endIndex = kotlin.math.min(startIndex + consigneesItemsPerPage, orderedForDisplay.size)
-            val paginatedMappings = orderedForDisplay.subList(startIndex, endIndex)
-            val footerStart = startIndex + 1
-            val footerEnd = endIndex
-
             renderConsigneeMapList(
-                paginatedMappings = paginatedMappings,
-                orderedForDisplay = orderedForDisplay,
+                paginatedMappings = list,
+                orderedForDisplay = list,
                 filterLabel = "",
-                totalPages = totalPages,
-                isServerSearch = false,
-                footerStart = footerStart,
-                footerEnd = footerEnd,
+                totalPages = consigneeMapSearchTotalPages,
+                isServerSearch = true,
+                footerStart = 1,
+                footerEnd = list.size,
             )
         }
         .catch { error: dynamic ->
@@ -2561,7 +2579,8 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
         "consigneeName" to "Consignee Name",
         "consigneeAddress" to "Consignee Address",
         "pod" to "POD",
-        "notifyParty" to "Notify party"
+        "notifyParty" to "Notify party",
+        "inTransitClause" to "In-Transit Clause",
     )
     
     val cardsHTML = StringBuilder()
@@ -2574,6 +2593,7 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
         val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
         val pod = (mapping.pod ?: "").toString()
         val notifyParty = (mapping.notifyParty ?: "").toString()
+        val inTransitClause = (mapping.inTransitClause ?: "").toString()
         
         // Build card content based on selected columns
         val cardFields = StringBuilder()
@@ -2585,12 +2605,14 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
                 "consigneeAddress" -> consigneeAddress
                 "pod" -> pod
                 "notifyParty" -> notifyParty
+                "inTransitClause" -> inTransitClause
                 else -> ""
             }
             
             if (value.isNotEmpty()) {
                 val displayValue =
-                    if (columnKey == "consigneeAddress") formatConsigneeMapAddressChipHtml(value)
+                    if (columnKey == "consigneeAddress" || columnKey == "notifyParty" || columnKey == "inTransitClause")
+                        formatConsigneeMapAddressChipHtml(value)
                     else formatConsigneeMapValueChipHtml(value)
                 cardFields.append("""
                     <div class="consignee-map-field">
@@ -2734,13 +2756,14 @@ fun showConsigneeColumnFilterModal() {
     
     document.body?.appendChild(modal)
     
-    // Populate column checkboxes (order matches table default: Name → Address → Country → POD → Notify party)
+    // Populate column checkboxes (order matches table default: Name → Address → Country → POD → Notify → In-Transit)
     val columnLabels = listOf(
         "consigneeName" to "Consignee Name",
         "consigneeAddress" to "Consignee Address",
         "country" to "Country",
         "pod" to "POD",
-        "notifyParty" to "Notify party"
+        "notifyParty" to "Notify party",
+        "inTransitClause" to "In-Transit Clause",
     )
     
     val checkboxesDiv = document.getElementById("consigneeColumnCheckboxes")
@@ -2894,7 +2917,11 @@ fun showConsigneeModal(mappingId: Long?, duplicateFromId: Long? = null) {
                         </div>
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Notify party</label>
-                            <input type="text" id="consigneeNotifyParty" placeholder="Optional" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box;">
+                            <textarea id="consigneeNotifyParty" rows="4" placeholder="Optional" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; resize: vertical; font-family: inherit;"></textarea>
+                        </div>
+                        <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">In-Transit Clause</label>
+                            <textarea id="consigneeInTransitClause" rows="6" placeholder="Optional" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; resize: vertical; font-family: inherit;"></textarea>
                         </div>
                         <div class="consignee-modal-actions">
                             <button type="button" id="cancelConsigneeBtn" class="consignee-modal-btn consignee-modal-btn-cancel">Cancel</button>
@@ -2972,13 +2999,15 @@ fun loadConsigneeDataForEdit(mappingId: Long, clearConsigneeNameAndAddressForDup
                 val podRaw = (mapping.pod ?: "").toString()
                 val addrRaw = (mapping.consigneeAddress ?: "").toString()
                 val notifyRaw = (mapping.notifyParty ?: "").toString()
+                val inTransitRaw = (mapping.inTransitClause ?: "").toString()
                 window.setTimeout({
                     setChipFieldValue("consigneeMapCountry", normalizeStoredListForChips(countryRaw))
                     setEditableComboboxValue("consigneeMapConsigneeName", if (clearConsigneeNameAndAddressForDuplicate) "" else nameRaw.trim())
                     setChipFieldValue("consigneeMapPod", normalizeStoredListForChips(podRaw))
                     (document.getElementById("consigneeAddress") as? HTMLTextAreaElement)?.value =
                         if (clearConsigneeNameAndAddressForDuplicate) "" else addrRaw
-                    (document.getElementById("consigneeNotifyParty") as? HTMLInputElement)?.value = notifyRaw.trim()
+                    (document.getElementById("consigneeNotifyParty") as? HTMLTextAreaElement)?.value = notifyRaw
+                    (document.getElementById("consigneeInTransitClause") as? HTMLTextAreaElement)?.value = inTransitRaw
                 }, 450)
             }
         }
@@ -3087,7 +3116,8 @@ fun performConsigneeSave(mappingId: Long?) {
     consigneeData.consigneeName = getEditableComboboxValue("consigneeMapConsigneeName").takeUnless { it.isBlank() }
     consigneeData.consigneeAddress = (document.getElementById("consigneeAddress") as? HTMLTextAreaElement)?.value?.trim() ?: null
     consigneeData.pod = getChipFieldValue("consigneeMapPod").takeUnless { it.isBlank() }
-    consigneeData.notifyParty = (document.getElementById("consigneeNotifyParty") as? HTMLInputElement)?.value?.trim()?.takeUnless { it.isBlank() }
+    consigneeData.notifyParty = (document.getElementById("consigneeNotifyParty") as? HTMLTextAreaElement)?.value?.trim()?.takeUnless { it.isBlank() }
+    consigneeData.inTransitClause = (document.getElementById("consigneeInTransitClause") as? HTMLTextAreaElement)?.value?.trim()?.takeUnless { it.isBlank() }
     consigneeData.stockLocation = null
     consigneeData.pols = null
     consigneeData.notes = consigneeModalNotesSnapshot?.takeUnless { it.isBlank() }
@@ -3931,55 +3961,38 @@ fun loadMasterCarBrandsWithCards() {
         return
     }
 
-    carBrandMapSearchServerMode = false
-    carBrandMapSearchTotal = 0
-    carBrandMapSearchTotalPages = 0
-    carBrandMapSearchPageZeroBased = 0
-
-    window.fetch(apiUrl("car-brand-mapping/mappings"))
+    carBrandMapSearchServerMode = true
+    val pBrowse = carBrandMapSearchPageZeroBased
+    val browseUrl = apiUrl("car-brand-mapping/mappings/page?page=$pBrowse&size=$carBrandsItemsPerPage")
+    window.fetch(browseUrl)
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load car brands')")
         }
-        .then { result: dynamic ->
-            val success = result.success as? Boolean ?: false
-            if (!success) {
-                throw js("Error(result.message || 'Failed to load car brands')")
+        .then { body: dynamic ->
+            val err = js("body.error")?.toString()?.trim()
+            if (!err.isNullOrEmpty()) throw js("Error(err)")
+            val totalEl = js("body.totalElements")
+            carBrandMapSearchTotal = when (totalEl) {
+                is Number -> totalEl.toLong()
+                else -> totalEl?.toString()?.toLongOrNull() ?: 0L
             }
-            
-            val mappings = result.data ?: js("[]")
-            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
-            val mappingsList = mappingsArray.toList()
-            val sortedMappings = mappingsList.sortedByDescending { mapping ->
-                val id = mapping.id
-                try {
-                    when (id) {
-                        is Number -> id.toDouble()
-                        is String -> id.toDoubleOrNull() ?: 0.0
-                        else -> {
-                            val idStr = id?.toString() ?: "0"
-                            idStr.toDoubleOrNull() ?: 0.0
-                        }
-                    }
-                } catch (e: dynamic) {
-                    0.0
-                }
+            val tp = js("body.totalPages")
+            carBrandMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                is Number -> tp.toInt()
+                else -> tp?.toString()?.toIntOrNull() ?: 1
+            })
+            val num = js("body.page")
+            carBrandMapSearchPageZeroBased = when (num) {
+                is Number -> num.toInt()
+                else -> num?.toString()?.toIntOrNull() ?: 0
             }
-            
-            val groupedMappings = groupCarBrandMappingsForView(sortedMappings)
-            val carBrandSortable = setOf("chassis", "carBrand", "carName", "fuel")
-            var orderedForDisplay = groupedMappings
-            val cbsf = carBrandMapSortField
-            if (cbsf != null && cbsf in carBrandSortable) {
-                val ord = carBrandMapSortOrderByField[cbsf] ?: "desc"
-                orderedForDisplay = if (ord == "asc") {
-                    groupedMappings.sortedBy { extractCarBrandSortKey(it, cbsf) }
-            } else {
-                    groupedMappings.sortedByDescending { extractCarBrandSortKey(it, cbsf) }
-                }
-            }
+            carBrandsCurrentPage = carBrandMapSearchPageZeroBased + 1
 
-            allCarBrands = orderedForDisplay
-            displayCarBrandsAsCards(orderedForDisplay, "", false)
+            val content = js("body.content") ?: js("[]")
+            val mappingsArray = js("Array.isArray(content) ? content : []") as Array<dynamic>
+            val groupedMappings = groupCarBrandMappingsForView(mappingsArray.toList())
+            allCarBrands = groupedMappings
+            displayCarBrandsAsCards(groupedMappings, "", true)
         }
         .catch { error: dynamic ->
             Logger.error("Error loading car brands: ${error.toString()}")
@@ -4329,57 +4342,39 @@ fun loadMasterCarBrandsWithTable() {
         return
     }
 
-    carBrandMapSearchServerMode = false
-    carBrandMapSearchTotal = 0
-    carBrandMapSearchTotalPages = 0
-    carBrandMapSearchPageZeroBased = 0
-
-    window.fetch(apiUrl("car-brand-mapping/mappings"))
+    carBrandMapSearchServerMode = true
+    val pBrowse = carBrandMapSearchPageZeroBased
+    val browseUrl = apiUrl("car-brand-mapping/mappings/page?page=$pBrowse&size=$carBrandsItemsPerPage")
+    window.fetch(browseUrl)
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load car brands')")
         }
-        .then { result: dynamic ->
-            val success = result.success as? Boolean ?: false
-            if (!success) {
-                throw js("Error(result.message || 'Failed to load car brands')")
+        .then { body: dynamic ->
+            val err = js("body.error")?.toString()?.trim()
+            if (!err.isNullOrEmpty()) throw js("Error(err)")
+            val totalEl = js("body.totalElements")
+            carBrandMapSearchTotal = when (totalEl) {
+                is Number -> totalEl.toLong()
+                else -> totalEl?.toString()?.toLongOrNull() ?: 0L
             }
-
-            val mappings = result.data ?: js("[]")
-            val mappingsArray = js("Array.isArray(mappings) ? mappings : []") as Array<dynamic>
-
-            val mappingsList = mappingsArray.toList()
-            val sortedMappings = mappingsList.sortedByDescending { mapping ->
-                val id = mapping.id
-                try {
-                    when (id) {
-                        is Number -> id.toDouble()
-                        is String -> id.toDoubleOrNull() ?: 0.0
-                        else -> {
-                            val idStr = id?.toString() ?: "0"
-                            idStr.toDoubleOrNull() ?: 0.0
-                        }
-                    }
-                } catch (e: dynamic) {
-                    0.0
-                }
+            val tp = js("body.totalPages")
+            carBrandMapSearchTotalPages = kotlin.math.max(1, when (tp) {
+                is Number -> tp.toInt()
+                else -> tp?.toString()?.toIntOrNull() ?: 1
+            })
+            val num = js("body.page")
+            carBrandMapSearchPageZeroBased = when (num) {
+                is Number -> num.toInt()
+                else -> num?.toString()?.toIntOrNull() ?: 0
             }
+            carBrandsCurrentPage = carBrandMapSearchPageZeroBased + 1
 
-            val groupedMappings = groupCarBrandMappingsForView(sortedMappings)
-            val carBrandSortable = setOf("chassis", "carBrand", "carName", "fuel")
-            var orderedForDisplay = groupedMappings
-            val cbsf = carBrandMapSortField
-            if (cbsf != null && cbsf in carBrandSortable) {
-                val ord = carBrandMapSortOrderByField[cbsf] ?: "desc"
-                orderedForDisplay = if (ord == "asc") {
-                    groupedMappings.sortedBy { extractCarBrandSortKey(it, cbsf) }
-                } else {
-                    groupedMappings.sortedByDescending { extractCarBrandSortKey(it, cbsf) }
-                }
-            }
+            val content = js("body.content") ?: js("[]")
+            val mappingsArray = js("Array.isArray(content) ? content : []") as Array<dynamic>
+            val groupedMappings = groupCarBrandMappingsForView(mappingsArray.toList())
+            allCarBrands = groupedMappings
 
-            allCarBrands = orderedForDisplay
-
-            if (orderedForDisplay.isEmpty()) {
+            if (groupedMappings.isEmpty()) {
                 tableDiv.innerHTML = """
                     <div style="text-align: center; color: #6b7280; padding: 60px 20px;">
                         <div style="font-size: 16px; margin-bottom: 8px;">No car brand data found.</div>
@@ -4388,22 +4383,15 @@ fun loadMasterCarBrandsWithTable() {
                 return@then
             }
 
-            val totalPages = kotlin.math.max(1, kotlin.math.ceil(orderedForDisplay.size.toDouble() / carBrandsItemsPerPage).toInt())
-            val startIndex = (carBrandsCurrentPage - 1) * carBrandsItemsPerPage
-            val endIndex = kotlin.math.min(startIndex + carBrandsItemsPerPage, orderedForDisplay.size)
-            val paginatedMappings = orderedForDisplay.subList(startIndex, endIndex)
-            val footerStart = startIndex + 1
-            val footerEnd = endIndex
-
             buildCarBrandTableUi(
                 tableDiv,
-                paginatedMappings,
-                orderedForDisplay,
+                groupedMappings,
+                groupedMappings,
                 "",
-                totalPages,
-                false,
-                footerStart,
-                footerEnd
+                carBrandMapSearchTotalPages,
+                true,
+                1,
+                groupedMappings.size
             )
         }
         .catch { error: dynamic ->

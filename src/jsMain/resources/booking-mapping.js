@@ -19,11 +19,11 @@ window.bookingMappingsCache = {};
 /**
  * Fetch booking mappings from API by country
  */
-window.fetchBookingMappingsByCountry = async function(country) {
+window.fetchBookingMappingsByCountry = async function(country, forceRefresh) {
   if (!country) return [];
   
-  // Check cache first
-  if (window.bookingMappingsCache[country]) {
+  // Check cache first (skip when forceRefresh so Consignee Map edits are picked up)
+  if (!forceRefresh && window.bookingMappingsCache[country]) {
     return window.bookingMappingsCache[country];
   }
   
@@ -94,12 +94,46 @@ function getUniqueConsignees(mappings) {
       seen.add(key);
       consignees.push({
         name: m.consigneeName || '',
-        address: m.consigneeAddress || ''
+        address: m.consigneeAddress || '',
+        notifyParty: m.notifyParty || '',
+        inTransitClause: m.inTransitClause || ''
       });
     }
   });
   
   return consignees;
+}
+
+/**
+ * Autofill Notify party + In-Transit Clause textareas from Consignee Map row(s) for [name].
+ * @param {string} consigneeName
+ * @param {boolean} [onlyIfEmpty=false] — when true, do not overwrite non-empty fields (country load / recreate).
+ */
+function applyConsigneeMapNotifyAndInTransit(consigneeName, onlyIfEmpty) {
+  var mappings = window.__carBookingMappingsByCountry || [];
+  var name = (consigneeName || '').trim();
+  var notifyEl = document.getElementById('notifyParty');
+  var inTransitEl = document.getElementById('inTransitClause');
+  if (!notifyEl && !inTransitEl) return;
+  if (!name) {
+    if (!onlyIfEmpty) {
+      if (notifyEl) notifyEl.value = '';
+      if (inTransitEl) inTransitEl.value = '';
+    }
+    return;
+  }
+  var sub = filterMappingsByConsigneeName(mappings, name);
+  var row = (sub && sub.length) ? sub[0] : null;
+  if (notifyEl) {
+    if (!onlyIfEmpty || !String(notifyEl.value || '').trim()) {
+      notifyEl.value = row && row.notifyParty != null ? String(row.notifyParty) : '';
+    }
+  }
+  if (inTransitEl) {
+    if (!onlyIfEmpty || !String(inTransitEl.value || '').trim()) {
+      inTransitEl.value = row && row.inTransitClause != null ? String(row.inTransitClause) : '';
+    }
+  }
 }
 
 /**
@@ -292,10 +326,12 @@ function populateConsigneeField(mappings) {
       if (!sel || sel.value === '') {
         applyConsigneeNameOnly('');
         applyConsigneePodRefresh(false);
+        applyConsigneeMapNotifyAndInTransit('');
         return;
       }
       applyConsigneeNameOnly(sel.textContent || '');
       applyConsigneePodRefresh(false);
+      applyConsigneeMapNotifyAndInTransit(sel.textContent || '');
     });
     if (typeof window.registerBookingFabSelect === 'function') {
       window.registerBookingFabSelect({
@@ -328,8 +364,10 @@ function populateConsigneeField(mappings) {
     if (consigneeSelect.options.length > 1) {
       consigneeSelect.selectedIndex = 1;
     }
+    applyConsigneeMapNotifyAndInTransit(firstConsignee.name, true);
   } else {
     consigneeInput.value = '';
+    applyConsigneeMapNotifyAndInTransit('', true);
   }
 
   if (typeof window.refreshBookingFabSelect === 'function') {
@@ -408,13 +446,17 @@ window.applyBookingMappingsByCountry = async function(country) {
       legacyDisplay.innerHTML = '';
       legacyDisplay.style.display = 'none';
     }
+    if (typeof applyConsigneeMapNotifyAndInTransit === 'function') {
+      applyConsigneeMapNotifyAndInTransit('');
+    }
     refreshBookingMappingFabLabels();
     return;
   }
   
   console.log('🌍 Fetching booking mappings for country:', country);
   
-  const mappings = await window.fetchBookingMappingsByCountry(country);
+  // Always refresh so Notify / In-Transit match latest Consignee Map values
+  const mappings = await window.fetchBookingMappingsByCountry(country, true);
   console.log('📋 Found mappings:', mappings);
   
   if (mappings.length === 0) {

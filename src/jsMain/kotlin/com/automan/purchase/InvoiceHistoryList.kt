@@ -17,6 +17,13 @@ private var invoiceHistoryCachedRows: Array<dynamic> = emptyArray()
 private var invoiceHistorySortField: String = "invoiceNumber"
 private var invoiceHistorySortOrder: String = "desc"
 private var invoiceHistoryResizeDebounceHandle: Int? = null
+private var invoiceHistorySearchDebounceHandle: Int? = null
+private var invoiceHistoryServerMode: Boolean = true
+private var invoiceHistoryPageZeroBased: Int = 0
+private var invoiceHistoryTotalPages: Int = 1
+private var invoiceHistoryTotalElements: Long = 0L
+private var invoiceHistoryItemsPerPage: Int = AppConstants.DEFAULT_ITEMS_PER_PAGE
+private var invoiceHistoryActiveSearchQ: String = ""
 
 private const val INVOICE_HISTORY_COMPACT_MAX_WIDTH_PX = 860
 
@@ -26,6 +33,12 @@ fun showInvoiceHistoryPage() {
     invoiceHistoryCachedRows = emptyArray()
     invoiceHistorySortField = "invoiceNumber"
     invoiceHistorySortOrder = "desc"
+    invoiceHistoryServerMode = true
+    invoiceHistoryPageZeroBased = 0
+    invoiceHistoryTotalPages = 1
+    invoiceHistoryTotalElements = 0L
+    invoiceHistoryItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+    invoiceHistoryActiveSearchQ = ""
 
     content.innerHTML = """
         <style>
@@ -95,11 +108,13 @@ fun showInvoiceHistoryPage() {
 
     val searchInput = document.getElementById("invoiceHistorySearchInput") as? HTMLInputElement
     searchInput?.addEventListener("input", { _: Event ->
-        renderInvoiceHistoryTableFromCache()
+        scheduleInvoiceHistorySearchDebounced()
     })
     document.getElementById("invoiceHistorySearchClearBtn")?.addEventListener("click", { _: Event ->
         searchInput?.value = ""
-        renderInvoiceHistoryTableFromCache()
+        invoiceHistoryActiveSearchQ = ""
+        invoiceHistoryPageZeroBased = 0
+        loadInvoiceHistory(0)
     })
 
     setupInvoiceHistoryResizeListener()
@@ -295,14 +310,76 @@ private fun appendInvoiceHistoryCard(html: StringBuilder, row: dynamic) {
     html.append("""</div></div>""")
 }
 
-private fun loadInvoiceHistory() {
+private fun scheduleInvoiceHistorySearchDebounced() {
+    val prev = invoiceHistorySearchDebounceHandle
+    if (prev != null) window.clearTimeout(prev)
+    invoiceHistorySearchDebounceHandle = window.setTimeout({
+        invoiceHistorySearchDebounceHandle = null
+        invoiceHistoryPageZeroBased = 0
+        loadInvoiceHistory(0)
+    }, 420)
+}
+
+private fun applyInvoiceHistoryPageBody(body: dynamic) {
+    invoiceHistoryServerMode = true
+    val totalEl = js("body.totalElements")
+    invoiceHistoryTotalElements = when (totalEl) {
+        is Number -> totalEl.toLong()
+        else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+    }
+    val tp = js("body.totalPages")
+    invoiceHistoryTotalPages = kotlin.math.max(
+        1,
+        when (tp) {
+            is Number -> tp.toInt()
+            else -> tp?.toString()?.toIntOrNull() ?: 1
+        },
+    )
+    val num = js("body.page")
+    invoiceHistoryPageZeroBased = when (num) {
+        is Number -> num.toInt()
+        else -> num?.toString()?.toIntOrNull() ?: 0
+    }
+    val sz = js("body.size")
+    invoiceHistoryItemsPerPage = when (sz) {
+        is Number -> sz.toInt()
+        else -> sz?.toString()?.toIntOrNull() ?: AppConstants.DEFAULT_ITEMS_PER_PAGE
+    }
+    invoiceHistoryCachedRows = try {
+        js("Array.from((body && body.content) ? body.content : [])").unsafeCast<Array<dynamic>>()
+    } catch (_: dynamic) {
+        emptyArray()
+    }
+}
+
+private fun loadInvoiceHistory(page0: Int = invoiceHistoryPageZeroBased) {
     val tableHost = document.getElementById("invoiceHistoryTable") ?: return
     tableHost.innerHTML = """<div class="invoice-history-empty"><strong>Loading</strong><div>Loading invoice history…</div></div>"""
 
+    val q = (document.getElementById("invoiceHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    invoiceHistoryActiveSearchQ = q
+    invoiceHistoryPageZeroBased = page0.coerceAtLeast(0)
+    val size = invoiceHistoryItemsPerPage.coerceAtLeast(1)
+    val endpoint = if (q.isNotEmpty()) {
+        val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
+        "invoice-history/page-search?q=$encQ&page=$invoiceHistoryPageZeroBased&size=$size"
+    } else {
+        "invoice-history/page?page=$invoiceHistoryPageZeroBased&size=$size"
+    }
+
     MainScope().launch {
-        ApiClient.get<Array<dynamic>>("invoice-history").fold(
-            onSuccess = { rows ->
-                invoiceHistoryCachedRows = rows
+        ApiClient.get<dynamic>(endpoint).fold(
+            onSuccess = { body ->
+                if (body == null) {
+                    ErrorHandler.showError("Empty invoice history response")
+                    return@fold
+                }
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) {
+                    ErrorHandler.showError(err)
+                    return@fold
+                }
+                applyInvoiceHistoryPageBody(body)
                 renderInvoiceHistoryTableFromCache()
             },
             onError = { message, _ ->
@@ -414,16 +491,68 @@ private fun toggleInvoiceHistorySort(field: String) {
     renderInvoiceHistoryTableFromCache()
 }
 
+private fun appendInvoiceHistoryPager(html: StringBuilder) {
+    if (!invoiceHistoryServerMode) return
+    val totalPages = kotlin.math.max(1, invoiceHistoryTotalPages)
+    val currentPage = invoiceHistoryPageZeroBased + 1
+    if (totalPages <= 1 && invoiceHistoryTotalElements <= invoiceHistoryItemsPerPage) return
+    val prevDisabled = if (currentPage <= 1) "disabled" else ""
+    val nextDisabled = if (currentPage >= totalPages) "disabled" else ""
+    val prevStyle = if (currentPage <= 1) "#ccc" else "#007bff"
+    val nextStyle = if (currentPage >= totalPages) "#ccc" else "#007bff"
+    val prevCursor = if (currentPage <= 1) "not-allowed" else "pointer"
+    val nextCursor = if (currentPage >= totalPages) "not-allowed" else "pointer"
+    html.append(
+        """
+        <div id="invoiceHistoryPager" style="display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;">
+            <div style="color:#6b7280;font-size:14px;">Page $currentPage of $totalPages · $invoiceHistoryTotalElements row(s)</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <button type="button" id="invoiceHistoryPrevPage" $prevDisabled style="padding:8px 16px;background-color:$prevStyle;color:white;border:none;border-radius:4px;cursor:$prevCursor;">Previous</button>
+                <span style="color:#374151;font-size:14px;">Page $currentPage of $totalPages</span>
+                <button type="button" id="invoiceHistoryNextPage" $nextDisabled style="padding:8px 16px;background-color:$nextStyle;color:white;border:none;border-radius:4px;cursor:$nextCursor;">Next</button>
+            </div>
+        </div>
+        """
+    )
+}
+
+private fun wireInvoiceHistoryPager() {
+    document.getElementById("invoiceHistoryPrevPage")?.addEventListener("click", { _: Event ->
+        if (invoiceHistoryPageZeroBased > 0) loadInvoiceHistory(invoiceHistoryPageZeroBased - 1)
+    })
+    document.getElementById("invoiceHistoryNextPage")?.addEventListener("click", { _: Event ->
+        if (invoiceHistoryPageZeroBased + 1 < invoiceHistoryTotalPages) {
+            loadInvoiceHistory(invoiceHistoryPageZeroBased + 1)
+        }
+    })
+}
+
 private fun renderInvoiceHistoryTableFromCache() {
     val tableHost = document.getElementById("invoiceHistoryTable") ?: return
-    val q = (document.getElementById("invoiceHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    val q = if (invoiceHistoryServerMode) {
+        invoiceHistoryActiveSearchQ
+    } else {
+        (document.getElementById("invoiceHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    }
 
     if (invoiceHistoryCachedRows.isEmpty()) {
-        tableHost.innerHTML = """<div class="invoice-history-empty"><strong>No history yet</strong><div>No invoice history records yet.</div></div>"""
+        val emptyHtml = if (q.isNotEmpty()) {
+            """<div class="invoice-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
+        } else {
+            """<div class="invoice-history-empty"><strong>No history yet</strong><div>No invoice history records yet.</div></div>"""
+        }
+        val html = StringBuilder(emptyHtml)
+        appendInvoiceHistoryPager(html)
+        tableHost.innerHTML = html.toString()
+        wireInvoiceHistoryPager()
         return
     }
 
-    var rows = invoiceHistoryCachedRows.filter { invoiceHistoryRowMatchesQuery(it, q) }.toTypedArray()
+    var rows = if (invoiceHistoryServerMode) {
+        invoiceHistoryCachedRows
+    } else {
+        invoiceHistoryCachedRows.filter { invoiceHistoryRowMatchesQuery(it, q) }.toTypedArray()
+    }
 
     if (rows.isEmpty()) {
         tableHost.innerHTML = """<div class="invoice-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
@@ -496,6 +625,8 @@ private fun renderInvoiceHistoryTableFromCache() {
         html.append("</div>")
     }
 
+    appendInvoiceHistoryPager(html)
     tableHost.innerHTML = html.toString()
+    wireInvoiceHistoryPager()
 }
 

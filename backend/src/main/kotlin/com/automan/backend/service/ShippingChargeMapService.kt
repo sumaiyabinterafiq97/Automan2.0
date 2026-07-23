@@ -20,6 +20,34 @@ class ShippingChargeMapService(
         shippingChargeMapRepository.findAll(Sort.by(Sort.Direction.DESC, "id")).map { toDto(it) }
 
     @Transactional(readOnly = true)
+    fun findAsMapsByStockLocation(stockLocation: String): List<Map<String, Any>> {
+        val loc = stockLocation.trim()
+        if (loc.isEmpty()) return emptyList()
+        return shippingChargeMapRepository
+            .findByStockLocationIgnoreCaseOrderByCarsPerContainerAsc(loc)
+            .map { toDto(it) }
+    }
+
+    /**
+     * Paginated browse for Shipping Charge Map UI (no search text). Prefer this over [findAllAsMaps] for UI.
+     */
+    @Transactional(readOnly = true)
+    fun listPage(page: Int, rawSize: Int): SupplierMapPageResponse {
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg = shippingChargeMapRepository.findAll(pageable)
+        val content = pg.content.map { toDto(it) }
+        return SupplierMapPageResponse(
+            content = content,
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    @Transactional(readOnly = true)
     fun searchPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): SupplierMapPageResponse {
         val q = sanitizeSearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }

@@ -3,6 +3,7 @@ package com.automan.backend.service
 import com.automan.backend.model.Purchase
 import com.automan.backend.dto.ClientStatementDto
 import com.automan.backend.dto.InvoicePdfRequest
+import com.automan.backend.dto.ShippingSchedulePdfData
 import com.automan.backend.dto.UnpaidAgingReportDto
 import com.itextpdf.kernel.pdf.PdfDocument
 import com.itextpdf.kernel.pdf.PdfWriter
@@ -35,8 +36,8 @@ import java.time.format.DateTimeFormatter
 class PdfService {
 
     companion object {
-        /** Default footer when Create Invoice MESSAGE is empty (MEMON sample style). */
-        private val DEFAULT_INVOICE_CARGO_NOTE = listOf(
+        /** Default footer for MEMON-style shipping-schedule invoice when no message is provided. */
+        private val DEFAULT_SHIPPING_CARGO_NOTE = listOf(
             "CARGO IN TRANSIT TO FINAL DESTINATION:",
             "KENCONT CFS FOR STRIPPING",
             "ON MERCHANT'S FULL ACCOUNT, RESPONSIBILITY",
@@ -86,20 +87,134 @@ class PdfService {
         }
     }
 
+    private fun getVerdanaFont(bold: Boolean = false): PdfFont {
+        val resource = if (bold) "fonts/Verdana-Bold.ttf" else "fonts/Verdana.ttf"
+        return try {
+            val fontStream: InputStream = javaClass.classLoader.getResourceAsStream(resource)
+                ?: throw Exception("Font not found: $resource")
+            val bytes = fontStream.readBytes()
+            fontStream.close()
+            PdfFontFactory.createFont(bytes, PdfEncodings.IDENTITY_H)
+        } catch (e: Exception) {
+            Logger.warn("Verdana font failed (${e.message}); falling back to Japanese/default font")
+            getJapaneseFont()
+        }
+    }
+
+    /** Classic Create Invoice PDF (Invoice No / Description / Amount). */
     fun generateInvoicePdf(request: InvoicePdfRequest): ByteArray {
         val outputStream = ByteArrayOutputStream()
         val pdfWriter = PdfWriter(outputStream)
         val pdfDocument = PdfDocument(pdfWriter)
         val document = Document(pdfDocument)
 
-        val japaneseFont = getJapaneseFont()
-        document.setFont(japaneseFont)
+        val font = getJapaneseFont()
+        document.setFont(font)
+
+        val dash = { v: String? -> v?.trim()?.takeIf { it.isNotEmpty() } ?: "-" }
+
+        document.add(
+            Paragraph("INVOICE")
+                .setFontSize(20f)
+                .setBold()
+                .setTextAlignment(TextAlignment.CENTER)
+                .setMarginBottom(16f),
+        )
+
+        val meta = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginBottom(14f)
+
+        val left = Cell()
+            .add(Paragraph("Invoice No: ${dash(request.invoiceNumber)}").setFontSize(10f).setFixedLeading(14f))
+            .add(Paragraph("Invoice Date: ${dash(request.invoiceDate)}").setFontSize(10f).setFixedLeading(14f))
+            .add(Paragraph("LC No: ${dash(request.lcNumber)}").setFontSize(10f).setFixedLeading(14f))
+            .add(Paragraph("Client: ${dash(request.clientName)}").setFontSize(10f).setFixedLeading(14f))
+            .add(Paragraph("Client Address: ${dash(request.clientAddress)}").setFontSize(10f).setFixedLeading(14f))
+            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+            .setPadding(0f)
+            .setPaddingRight(8f)
+        meta.addCell(left)
+
+        val right = Cell()
+            .add(Paragraph("Vessel: ${dash(request.vessel)}").setFontSize(10f).setFixedLeading(14f))
+            .add(Paragraph("Shipping Date: ${dash(request.shippingDate)}").setFontSize(10f).setFixedLeading(14f))
+            .add(Paragraph("From: ${dash(request.from)}").setFontSize(10f).setFixedLeading(14f))
+            .add(Paragraph("To: ${dash(request.to)}").setFontSize(10f).setFixedLeading(14f))
+            .add(Paragraph("Price Type: ${dash(request.priceType)}").setFontSize(10f).setFixedLeading(14f))
+            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+            .setPadding(0f)
+        meta.addCell(right)
+        document.add(meta)
+
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(10f, 65f, 25f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginTop(4f)
+
+        listOf("No.", "Description", "Amount").forEach {
+            table.addHeaderCell(
+                Cell()
+                    .add(Paragraph(it).setBold().setFontSize(10f).setTextAlignment(TextAlignment.CENTER))
+                    .setBackgroundColor(ColorConstants.LIGHT_GRAY)
+                    .setPadding(6f)
+                    .setBorder(com.itextpdf.layout.borders.SolidBorder(ColorConstants.BLACK, 1f)),
+            )
+        }
+
+        request.items.forEach { item ->
+            table.addCell(
+                createCell(item.unit.toString(), font)
+                    .setFontSize(9f)
+                    .setTextAlignment(TextAlignment.CENTER),
+            )
+            table.addCell(createCell(item.description, font).setFontSize(9f))
+            table.addCell(
+                createCell(item.amount, font)
+                    .setFontSize(9f)
+                    .setTextAlignment(TextAlignment.RIGHT),
+            )
+        }
+        document.add(table)
+
+        document.add(
+            Paragraph("Total Amount: ${request.totalAmount}")
+                .setBold()
+                .setFontSize(12f)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setMarginTop(12f),
+        )
+
+        request.bankAccount?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            document.add(Paragraph("Bank Account: $it").setFontSize(9f).setMarginTop(12f))
+        }
+        request.message?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            document.add(Paragraph(it).setFontSize(9f).setMarginTop(8f))
+        }
+
+        document.close()
+        return outputStream.toByteArray()
+    }
+
+    /**
+     * Booking / shipping-schedule PDF in MEMON client layout (Verdana).
+     * Used by both C&F and FOB shipping-schedule endpoints.
+     */
+    fun generateShippingScheduleInvoicePdf(data: ShippingSchedulePdfData): ByteArray {
+        val outputStream = ByteArrayOutputStream()
+        val pdfWriter = PdfWriter(outputStream)
+        val pdfDocument = PdfDocument(pdfWriter)
+        val document = Document(pdfDocument)
+        document.setMargins(40f, 40f, 40f, 40f)
+
+        val font = getVerdanaFont(false)
+        val fontBold = getVerdanaFont(true)
+        document.setFont(font)
 
         val dash = { v: String? -> v?.trim()?.takeIf { it.isNotEmpty() } ?: "-" }
         val noBorder = com.itextpdf.layout.borders.Border.NO_BORDER
         val thinBorder = com.itextpdf.layout.borders.SolidBorder(ColorConstants.BLACK, 0.6f)
 
-        fun invoiceRule(marginTop: Float = 2f, marginBottom: Float = 2f): LineSeparator {
+        fun rule(marginTop: Float = 2f, marginBottom: Float = 2f): LineSeparator {
             val line = SolidLine(0.6f)
             line.color = ColorConstants.BLACK
             return LineSeparator(line).setMarginTop(marginTop).setMarginBottom(marginBottom)
@@ -113,14 +228,18 @@ class PdfService {
                 .setPaddingTop(2f)
                 .setPaddingBottom(2f)
 
-        fun invoiceItemCell(
+        fun itemCell(
             text: String,
             align: TextAlignment = TextAlignment.LEFT,
             bold: Boolean = false,
             top: Boolean = false,
             bottom: Boolean = false,
         ): Cell {
-            val p = Paragraph(text).setFontSize(9f).setTextAlignment(align).setFixedLeading(11f).setFont(japaneseFont)
+            val p = Paragraph(text)
+                .setFont(if (bold) fontBold else font)
+                .setFontSize(9f)
+                .setTextAlignment(align)
+                .setFixedLeading(11f)
             if (bold) p.setBold()
             return Cell()
                 .add(p)
@@ -132,20 +251,19 @@ class PdfService {
                 .setPaddingBottom(5f)
         }
 
-        // Top: company + date
         val topTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginBottom(6f)
         topTable.addCell(
             Cell()
-                .add(Paragraph("MEMON CO., LTD").setFontSize(12f).setBold())
+                .add(Paragraph("MEMON CO., LTD").setFont(fontBold).setFontSize(12f).setBold())
                 .add(
                     Paragraph(
                         "#112 taiyo mansion, 3-6-1 gyotoku ekimae, Ichikawa-Shi,\n" +
                             "Chiba-Ken. 272-0133\n" +
                             "Tel: +81-47-701-3770  Fax: +81-47-701-3771\n" +
                             "E-Mail: memonco@ymail.com",
-                    ).setFontSize(8f).setFixedLeading(10f),
+                    ).setFont(font).setFontSize(8f).setFixedLeading(10f),
                 )
                 .setBorder(noBorder)
                 .setPadding(0f),
@@ -154,8 +272,9 @@ class PdfService {
             Cell()
                 .add(
                     Paragraph()
-                        .add(Text("DATE ").setBold())
-                        .add(formatInvoiceDisplayDate(request.invoiceDate))
+                        .add(Text("DATE ").setFont(fontBold).setBold())
+                        .add(formatInvoiceDisplayDate(data.shippingDate))
+                        .setFont(font)
                         .setFontSize(10f)
                         .setTextAlignment(TextAlignment.RIGHT),
                 )
@@ -166,6 +285,7 @@ class PdfService {
 
         document.add(
             Paragraph("INVOICE")
+                .setFont(fontBold)
                 .setFontSize(18f)
                 .setBold()
                 .setTextAlignment(TextAlignment.CENTER)
@@ -173,23 +293,19 @@ class PdfService {
                 .setMarginBottom(10f),
         )
 
-        // Consignee / Notify | Shipping particulars (open line style like MEMON sample)
         val metaTable = Table(UnitValue.createPercentArray(floatArrayOf(48f, 52f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginBottom(6f)
 
-        val consigneeText = request.consignee?.trim()?.takeIf { it.isNotEmpty() } ?: "-"
-        val consigneeAddress = request.consigneeAddress?.trim()?.takeIf { it.isNotEmpty() }
-        val notifyText = request.notifyParty?.trim()?.takeIf { it.isNotEmpty() } ?: "-"
+        val consigneeText = data.consigneeDetails.name?.trim()?.takeIf { it.isNotEmpty() } ?: "-"
+        val consigneeAddress = data.consigneeDetails.address?.trim()?.takeIf { it.isNotEmpty() }
+        val notifyText = data.notifyParty?.trim()?.takeIf { it.isNotEmpty() } ?: "-"
         val leftConsignee = Cell()
-            .add(Paragraph().add(Text("CONSIGNEE").setBold()).setFontSize(9f).setMarginBottom(2f))
-            .add(Paragraph(consigneeText).setBold().setFontSize(9f).setFixedLeading(11f).setMarginBottom(2f))
+            .add(Paragraph().add(Text("CONSIGNEE").setFont(fontBold).setBold()).setFontSize(9f).setMarginBottom(2f))
+            .add(Paragraph(consigneeText).setFont(fontBold).setBold().setFontSize(9f).setFixedLeading(11f).setMarginBottom(2f))
         if (consigneeAddress != null) {
             leftConsignee.add(
-                Paragraph(consigneeAddress)
-                    .setFontSize(8f)
-                    .setFixedLeading(10f)
-                    .setMarginBottom(8f),
+                Paragraph(consigneeAddress).setFont(font).setFontSize(8f).setFixedLeading(10f).setMarginBottom(8f),
             )
         } else {
             leftConsignee.add(Paragraph("").setMarginBottom(8f))
@@ -197,8 +313,9 @@ class PdfService {
         leftConsignee
             .add(
                 Paragraph()
-                    .add(Text("NOTIFY PARTY ").setBold())
+                    .add(Text("NOTIFY PARTY ").setFont(fontBold).setBold())
                     .add(notifyText)
+                    .setFont(font)
                     .setFontSize(9f)
                     .setFixedLeading(11f),
             )
@@ -209,12 +326,12 @@ class PdfService {
 
         val shipBox = Table(UnitValue.createPercentArray(floatArrayOf(100f)))
             .setWidth(UnitValue.createPercentValue(100f))
-
         shipBox.addCell(
             openCell(
                 Paragraph()
-                    .add(Text("VESSEL: ").setBold())
-                    .add(dash(request.vessel))
+                    .add(Text("VESSEL: ").setFont(fontBold).setBold())
+                    .add(dash(data.vesselName))
+                    .setFont(font)
                     .setFontSize(8f)
                     .setFixedLeading(11f),
             ),
@@ -222,50 +339,43 @@ class PdfService {
         shipBox.addCell(
             openCell(
                 Paragraph()
-                    .add(Text("BOOKING NO. ").setBold())
-                    .add(dash(request.bookingNo))
+                    .add(Text("BOOKING NO. ").setFont(fontBold).setBold())
+                    .add(dash(data.bookingNo))
                     .add("     ")
-                    .add(Text("CARRIER: ").setBold())
-                    .add(dash(request.carrier))
+                    .add(Text("CARRIER: ").setFont(fontBold).setBold())
+                    .add(dash(data.carrier))
+                    .setFont(font)
                     .setFontSize(8f)
                     .setFixedLeading(11f),
             ),
         )
-        shipBox.addCell(
-            Cell()
-                .add(invoiceRule(4f, 4f))
-                .setBorder(noBorder)
-                .setPadding(0f),
-        )
+        shipBox.addCell(Cell().add(rule(4f, 4f)).setBorder(noBorder).setPadding(0f))
         shipBox.addCell(
             openCell(
                 Paragraph()
-                    .add(Text("CY CUT: ").setBold())
-                    .add(formatInvoiceShortDate(request.cyCutDate))
+                    .add(Text("CY CUT: ").setFont(fontBold).setBold())
+                    .add(formatInvoiceShortDate(data.cyCutDate))
                     .add(" | ")
-                    .add(Text("ETD: ").setBold())
-                    .add(formatInvoiceShortDate(request.shippingDate))
+                    .add(Text("ETD: ").setFont(fontBold).setBold())
+                    .add(formatInvoiceShortDate(data.shippingDate))
                     .add(" | ")
-                    .add(Text("ETA: ").setBold())
-                    .add(formatInvoiceEtaDate(request.eta))
+                    .add(Text("ETA: ").setFont(fontBold).setBold())
+                    .add(formatInvoiceEtaDate(data.eta))
+                    .setFont(font)
                     .setFontSize(8f)
                     .setFixedLeading(11f),
             ),
         )
-        shipBox.addCell(
-            Cell()
-                .add(invoiceRule(4f, 4f))
-                .setBorder(noBorder)
-                .setPadding(0f),
-        )
+        shipBox.addCell(Cell().add(rule(4f, 4f)).setBorder(noBorder).setPadding(0f))
         shipBox.addCell(
             openCell(
                 Paragraph()
-                    .add(Text("POL: ").setBold())
-                    .add(dash(request.from))
+                    .add(Text("POL: ").setFont(fontBold).setBold())
+                    .add(dash(data.pol))
                     .add("     ")
-                    .add(Text("POD: ").setBold())
-                    .add(dash(request.to))
+                    .add(Text("POD: ").setFont(fontBold).setBold())
+                    .add(dash(data.pod))
+                    .setFont(font)
                     .setFontSize(8f)
                     .setFixedLeading(11f),
             ),
@@ -273,125 +383,106 @@ class PdfService {
         shipBox.addCell(
             openCell(
                 Paragraph()
-                    .add(Text("FINAL DESTINATION: ").setBold())
-                    .add(dash(request.finalDestination))
+                    .add(Text("FINAL DESTINATION: ").setFont(fontBold).setBold())
+                    .add(dash(data.finalDestination))
+                    .setFont(font)
                     .setFontSize(8f)
                     .setFixedLeading(11f),
             ),
         )
-
-        metaTable.addCell(
-            Cell()
-                .add(shipBox)
-                .setBorder(noBorder)
-                .setPadding(0f),
-        )
+        metaTable.addCell(Cell().add(shipBox).setBorder(noBorder).setPadding(0f))
         document.add(metaTable)
 
-        // TRADE TERMS between full-width rules (MEMON sample)
-        document.add(invoiceRule(8f, 3f))
+        val tradeTerms = when (data.calculationMode?.trim()?.uppercase()) {
+            "FOB" -> "FOB"
+            "C&F", "CNF" -> "C&F"
+            else -> data.calculationMode?.trim()?.takeIf { it.isNotEmpty() } ?: "C&F"
+        }
+        document.add(rule(8f, 3f))
         document.add(
             Paragraph()
-                .add(Text("TRADE TERMS: ").setBold())
-                .add(dash(request.priceType))
-                .setFontSize(10f)
-                .setMarginBottom(0f)
-                .setMarginTop(0f),
+                .add(Text("TRADE TERMS: ").setFont(fontBold).setBold())
+                .add(tradeTerms)
+                .setFont(font)
+                .setFontSize(10f),
         )
-        document.add(invoiceRule(3f, 6f))
+        document.add(rule(3f, 6f))
 
-        // Items table — open style: horizontal rules + pipe-style header, no gray grid
-        val table = Table(UnitValue.createPercentArray(floatArrayOf(6f, 14f, 22f, 24f, 12f, 22f)))
+        // Refined columns: No | Maker | Model | Chassis | Year | Amount
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(6f, 14f, 20f, 26f, 12f, 22f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginTop(2f)
 
-        val headers = listOf(
-            "",
-            "MAKER |",
-            "MODEL |",
-            "CHASIS NO. |",
-            "YEAR |",
-            "AMOUNT JPY",
-        )
-        headers.forEachIndexed { index, label ->
+        listOf("", "MAKER |", "MODEL |", "CHASIS NO. |", "YEAR |", "AMOUNT JPY").forEachIndexed { index, label ->
             val align = when (index) {
                 0 -> TextAlignment.CENTER
                 5 -> TextAlignment.RIGHT
                 else -> TextAlignment.LEFT
             }
-            table.addHeaderCell(invoiceItemCell(label, align, bold = true, top = true, bottom = true))
+            table.addHeaderCell(itemCell(label, align, bold = true, top = true, bottom = true))
         }
 
-        request.items.forEach { item ->
-            val maker = item.maker?.trim()?.takeIf { it.isNotEmpty() }
-                ?: extractMakerFromDescription(item.description)
-            val model = item.model?.trim()?.takeIf { it.isNotEmpty() }
-                ?: extractModelFromDescription(item.description)
-            val chassis = item.chassisNo?.trim()?.takeIf { it.isNotEmpty() }
-                ?: extractChassisFromDescription(item.description)
-            val year = item.year?.trim()?.takeIf { it.isNotEmpty() }
-                ?: extractYearFromDescription(item.description)
+        var grandTotal = 0L
+        data.carList.forEach { car ->
+            val maker = car.maker?.trim()?.takeIf { it.isNotEmpty() } ?: "-"
+            val model = car.model?.trim()?.takeIf { it.isNotEmpty() }
+                ?: car.name.trim().takeIf { it.isNotEmpty() }
+                ?: "-"
+            val chassis = car.chassisNumber.trim().ifEmpty { "-" }
+            val year = car.year.trim().ifEmpty { "-" }
+            val amount = car.cnfPrice.trim().ifEmpty { "¥0" }
+            grandTotal += parseYenAmountToLong(amount)
 
-            table.addCell(invoiceItemCell(item.unit.toString(), TextAlignment.CENTER))
-            table.addCell(invoiceItemCell(maker))
-            table.addCell(invoiceItemCell(model))
-            table.addCell(invoiceItemCell(chassis))
-            table.addCell(invoiceItemCell(year, TextAlignment.CENTER))
-            table.addCell(invoiceItemCell(item.amount, TextAlignment.RIGHT))
+            table.addCell(itemCell(car.no.toString(), TextAlignment.CENTER))
+            table.addCell(itemCell(maker))
+            table.addCell(itemCell(model))
+            table.addCell(itemCell(chassis))
+            table.addCell(itemCell(year, TextAlignment.CENTER))
+            table.addCell(itemCell(amount, TextAlignment.RIGHT))
         }
-
         document.add(table)
 
-        val units = request.items.size
+        val units = data.carList.size
         val unitsLabel = if (units == 1) "1 UNIT" else "$units UNITS"
-        document.add(invoiceRule(4f, 4f))
-        val footerTable = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f)))
+        val grandFormatted = "¥${"%,d".format(grandTotal)}"
+        document.add(rule(4f, 4f))
+        val footer = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f)))
             .setWidth(UnitValue.createPercentValue(100f))
-        footerTable.addCell(
+        footer.addCell(
             Cell()
-                .add(Paragraph(unitsLabel).setBold().setFontSize(11f))
+                .add(Paragraph(unitsLabel).setFont(fontBold).setBold().setFontSize(11f))
                 .setBorder(noBorder)
-                .setPadding(0f)
-                .setPaddingTop(2f)
-                .setPaddingBottom(2f),
+                .setPadding(2f),
         )
-        footerTable.addCell(
+        footer.addCell(
             Cell()
                 .add(
-                    Paragraph("GRAND TOTAL ${request.totalAmount}")
+                    Paragraph("GRAND TOTAL $grandFormatted")
+                        .setFont(fontBold)
                         .setBold()
                         .setFontSize(11f)
                         .setTextAlignment(TextAlignment.RIGHT),
                 )
                 .setBorder(noBorder)
-                .setPadding(0f)
-                .setPaddingTop(2f)
-                .setPaddingBottom(2f),
+                .setPadding(2f),
         )
-        document.add(footerTable)
-        document.add(invoiceRule(4f, 10f))
+        document.add(footer)
+        document.add(rule(4f, 10f))
 
-        // Cargo note: MESSAGE if provided, else MEMON-style default (Option C)
-        val cargoLines = request.message?.trim()?.takeIf { it.isNotEmpty() }
+        val cargoNoteLines = data.inTransitClause?.trim()?.takeIf { it.isNotEmpty() }
             ?.lines()
-            ?.map { it.trim() }
+            ?.map { it.trimEnd() }
             ?.filter { it.isNotEmpty() }
-            ?: DEFAULT_INVOICE_CARGO_NOTE
-        cargoLines.forEachIndexed { index, line ->
+            ?.takeIf { it.isNotEmpty() }
+            ?: DEFAULT_SHIPPING_CARGO_NOTE
+
+        cargoNoteLines.forEach { line ->
             document.add(
-                Paragraph(line.uppercase())
+                Paragraph(line)
+                    .setFont(font)
                     .setFontSize(9f)
                     .setFixedLeading(12f)
-                    .setMarginTop(if (index == 0) 0f else 0f)
                     .setMarginBottom(0f),
-            )
-        }
-
-        request.bankAccount?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            document.add(
-                Paragraph("Bank Account: $it")
-                    .setFontSize(8f)
-                    .setMarginTop(10f),
             )
         }
 
@@ -399,14 +490,51 @@ class PdfService {
         return outputStream.toByteArray()
     }
 
+    private fun parseYenAmountToLong(raw: String): Long {
+        val digits = raw.replace(Regex("[^0-9-]"), "")
+        return digits.toLongOrNull() ?: 0L
+    }
+
     private fun formatInvoiceDisplayDate(raw: String?): String {
-        val iso = raw?.trim()?.take(10).orEmpty()
-        if (iso.isEmpty()) return "-"
+        val s = raw?.trim().orEmpty()
+        if (s.isEmpty()) return "-"
+        // Already like 27.SEP.2025
+        if (s.contains(".")) {
+            return try {
+                val parts = s.split(".")
+                if (parts.size >= 3) {
+                    val day = parts[0].toInt()
+                    val month = java.time.Month.valueOf(
+                        when (parts[1].uppercase()) {
+                            "JAN" -> "JANUARY"
+                            "FEB" -> "FEBRUARY"
+                            "MAR" -> "MARCH"
+                            "APR" -> "APRIL"
+                            "MAY" -> "MAY"
+                            "JUN" -> "JUNE"
+                            "JUL" -> "JULY"
+                            "AUG" -> "AUGUST"
+                            "SEP" -> "SEPTEMBER"
+                            "OCT" -> "OCTOBER"
+                            "NOV" -> "NOVEMBER"
+                            "DEC" -> "DECEMBER"
+                            else -> return s
+                        },
+                    )
+                    val year = parts[2].toInt()
+                    LocalDate.of(year, month, day)
+                        .format(DateTimeFormatter.ofPattern("MMMM d, yyyy", java.util.Locale.ENGLISH))
+                } else s
+            } catch (_: Exception) {
+                s
+            }
+        }
+        val iso = s.take(10)
         return try {
             val d = LocalDate.parse(iso)
             d.format(DateTimeFormatter.ofPattern("MMMM d, yyyy", java.util.Locale.ENGLISH))
         } catch (_: Exception) {
-            raw?.trim().orEmpty().ifEmpty { "-" }
+            s.ifEmpty { "-" }
         }
     }
 
@@ -414,7 +542,7 @@ class PdfService {
         val s = raw?.trim().orEmpty()
         if (s.isEmpty()) return "-"
         // Already display-formatted shipping dates like 27.SEP.2025
-        if (s.contains(".") || s.contains(" ")) return s
+        if (s.contains(".") || (s.contains(" ") && !s.contains("-"))) return s
         return try {
             val d = LocalDate.parse(s.take(10))
             "${d.monthValue}/${d.dayOfMonth}"
@@ -426,6 +554,7 @@ class PdfService {
     private fun formatInvoiceEtaDate(raw: String?): String {
         val s = raw?.trim().orEmpty()
         if (s.isEmpty()) return "-"
+        if (s.contains(".") || s.contains(" ")) return s.uppercase()
         return try {
             val d = LocalDate.parse(s.take(10))
             d.format(DateTimeFormatter.ofPattern("MMM-dd-yyyy", java.util.Locale.ENGLISH)).uppercase()

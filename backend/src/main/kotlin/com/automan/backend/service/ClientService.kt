@@ -4,6 +4,7 @@ import com.automan.backend.config.AppConstants
 import com.automan.backend.dto.ClientCreditLimitAssessment
 import com.automan.backend.dto.ClientLedgerPreview
 import com.automan.backend.dto.ClientNameLedgerResolution
+import com.automan.backend.dto.ClientPageResponse
 import com.automan.backend.dto.CreditLimitStatus
 import com.automan.backend.model.Client
 import com.automan.backend.model.ClientStatus
@@ -11,6 +12,8 @@ import com.automan.backend.model.EventType
 import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.EventRepository
 import com.automan.backend.util.Logger
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
@@ -25,6 +28,43 @@ class ClientService(
     fun getAllClients(): List<Client> {
         return clientRepository.findAll()
     }
+
+    /** Paginated browse for Client Accounts UI (no search text). Prefer this over [getAllClients] for lists. */
+    @Transactional(readOnly = true)
+    fun listPage(page: Int, rawSize: Int): ClientPageResponse {
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.ASC, "clientName"))
+        val pg = clientRepository.findAll(pageable)
+        return ClientPageResponse(
+            content = pg.content,
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    /** Paginated search for Client Accounts UI (client number / name). */
+    @Transactional(readOnly = true)
+    fun searchPage(rawQuery: String, page: Int, rawSize: Int): ClientPageResponse {
+        val q = sanitizeClientSearchToken(rawQuery)
+        require(q.isNotEmpty()) { "Search text is required" }
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.ASC, "clientName"))
+        val pg = clientRepository.searchClientsPage(q, pageable)
+        return ClientPageResponse(
+            content = pg.content,
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    private fun sanitizeClientSearchToken(raw: String): String =
+        raw.trim().replace("%", "").replace("_", "").take(120)
     
     fun getClientById(id: Long): Client? {
         return clientRepository.findById(id).orElse(null)

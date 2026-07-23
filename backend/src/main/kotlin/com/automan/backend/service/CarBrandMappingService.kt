@@ -325,6 +325,24 @@ class CarBrandMappingService(
     }
 
     /**
+     * Paginated browse for Car Brands Map UI (no search text). Prefer this over [getAllMappings] for UI.
+     */
+    fun listMappingsPage(page: Int, rawSize: Int): CarBrandMappingPageResponse {
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg = carBrandMappingRepository.findAll(pageable)
+        val content = pg.content.map { toMap(it) }
+        return CarBrandMappingPageResponse(
+            content = content,
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    /**
      * Paginated search for Car Brands Map UI.
      * [field]: `all`, `chassis`, `brand`, `carName`.
      */

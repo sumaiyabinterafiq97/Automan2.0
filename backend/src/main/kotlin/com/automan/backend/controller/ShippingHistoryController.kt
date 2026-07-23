@@ -31,6 +31,31 @@ class ShippingHistoryController(
     @GetMapping
     fun list(): List<ShippingHistoryRowDto> = shippingHistoryService.listAllRows()
 
+    @GetMapping("/page")
+    fun listPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(shippingHistoryService.listRowsPage(page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    @GetMapping("/page-search")
+    fun searchPage(
+        @RequestParam q: String,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(shippingHistoryService.searchRowsPage(q, page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
     /** Full-table shipping history export as Excel (.xlsx). */
     @GetMapping("/export/xlsx")
     fun exportShippingHistoryXlsx(): ResponseEntity<ByteArray> {

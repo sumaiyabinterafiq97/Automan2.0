@@ -46,6 +46,8 @@ private fun rpmRejectIfSemicolon(vararg values: String?): Boolean {
 }
 
 private var rpmTreeRowsCache: List<RixoPriceMapTreeRowLite> = emptyList()
+private var rpmRootCompanies: List<String> = emptyList()
+private var rpmLoadedCompanyKeys: MutableSet<String> = mutableSetOf()
 private var rpmSelectedCompany: String? = null
 private var rpmSelectedSupplier: String? = null
 private var rpmSelectedStock: String? = null
@@ -79,6 +81,29 @@ private var rpmCompanySortOrder: String? = null // null = newest-first; "asc" | 
 private var rpmSearchDebounceTimer: dynamic = null
 
 private fun rpmSortedCompanies(list: List<RixoPriceMapTreeRowLite>): List<String> {
+    if (rpmRootCompanies.isNotEmpty()) {
+        val names = rpmRootCompanies.map { rpmNormCompany(it) }.distinctBy { it.lowercase() }
+        val q = rpmSearchQuery.trim().lowercase()
+        val filtered = if (q.isEmpty()) names else names.filter { it.lowercase().contains(q) }
+        return when (rpmCompanySortOrder) {
+            "asc" -> filtered.sortedBy { it.lowercase() }
+            "desc" -> filtered.sortedByDescending { it.lowercase() }
+            else -> {
+                // Newest without row ids (roots-only): fall back to A-Z.
+                val withIds = filtered.map { name ->
+                    name to (list.filter { rpmNormCompany(it.company) == name }
+                        .maxOfOrNull { it.id.toLongOrNull() ?: 0L } ?: 0L)
+                }
+                if (withIds.all { it.second == 0L }) {
+                    filtered.sortedBy { it.lowercase() }
+                } else {
+                    withIds.sortedWith(
+                        compareByDescending<Pair<String, Long>> { it.second }.thenBy { it.first.lowercase() },
+                    ).map { it.first }
+                }
+            }
+        }
+    }
     val grouped = list.groupBy { rpmNormCompany(it.company) }
         .map { (name, rows) -> name to rows.maxOf { it.id.toLongOrNull() ?: 0L } }
     val q = rpmSearchQuery.trim().lowercase()
@@ -590,7 +615,8 @@ private fun rpmBuildLeafRowHtml(leaf: RpmLeafRow, baseRow: RixoPriceMapTreeRowLi
 private fun buildRixoPriceMapTreeHtmlFromCache(): String {
     val list = rpmTreeRowsCache
     val fullRowHtml = if (rpmFullRowAddOpen) buildRpmFullRowAddHtml() else ""
-    if (list.isEmpty()) {
+    // Roots may be present with an empty cache until a company branch is expanded.
+    if (rpmRootCompanies.isEmpty() && list.isEmpty()) {
         val emptyCompanyAdd = if (rpmCardInlineAddMatchesCompanyBranch()) {
             """<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("rixo_company")}</div>"""
         } else ""
@@ -1495,37 +1521,40 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
                     }
                 }
                 "delete" -> {
-                    val branchRows = rpmTreeRowsCache.filter { row ->
-                        rpmNormCompany(row.company) == rpmNormCompany(company) &&
-                            when (level) {
-                                "rixo_company" -> true
-                                "supplier" -> rpmRowSupplierKey(row) == rpmNormSupplier(label)
-                                "stock" -> rpmRowSupplierKey(row) == rpmNormSupplier(supplier) &&
-                                    rpmNormStock(row.stock) == label
-                                "pol" -> rpmRowSupplierKey(row) == rpmNormSupplier(supplier) &&
-                                    rpmNormStock(row.stock) == rpmNormStock(stock) &&
-                                    rpmRowPolKey(row) == label
-                                else -> false
-                            }
-                    }
-                    val rowsToDelete = branchRows.mapNotNull { it.id.toLongOrNull() }.distinct()
-                    if (rowsToDelete.isEmpty()) return@click
-                    showRixoMappingDeleteConfirm(
-                        title = rpmBranchDeleteTitle(level),
-                        messageHtml = rpmBranchDeleteMessageHtml(
-                            level, company, supplier, stock, label, rowsToDelete.size,
-                        ),
-                        onConfirm = {
-                            fun deleteNext(idx: Int) {
-                                if (idx >= rowsToDelete.size) {
-                                    refreshRixoPriceMapTreeData()
-                                    return
+                    // Ensure branch rows (ids) are loaded before cascade delete.
+                    ensureRpmCompanyBranchLoaded(company) {
+                        val branchRows = rpmTreeRowsCache.filter { row ->
+                            rpmNormCompany(row.company) == rpmNormCompany(company) &&
+                                when (level) {
+                                    "rixo_company" -> true
+                                    "supplier" -> rpmRowSupplierKey(row) == rpmNormSupplier(label)
+                                    "stock" -> rpmRowSupplierKey(row) == rpmNormSupplier(supplier) &&
+                                        rpmNormStock(row.stock) == label
+                                    "pol" -> rpmRowSupplierKey(row) == rpmNormSupplier(supplier) &&
+                                        rpmNormStock(row.stock) == rpmNormStock(stock) &&
+                                        rpmRowPolKey(row) == label
+                                    else -> false
                                 }
-                                rpmDeleteMappingRow(rowsToDelete[idx]) { deleteNext(idx + 1) }
-                            }
-                            deleteNext(0)
-                        },
-                    )
+                        }
+                        val rowsToDelete = branchRows.mapNotNull { it.id.toLongOrNull() }.distinct()
+                        if (rowsToDelete.isEmpty()) return@ensureRpmCompanyBranchLoaded
+                        showRixoMappingDeleteConfirm(
+                            title = rpmBranchDeleteTitle(level),
+                            messageHtml = rpmBranchDeleteMessageHtml(
+                                level, company, supplier, stock, label, rowsToDelete.size,
+                            ),
+                            onConfirm = {
+                                fun deleteNext(idx: Int) {
+                                    if (idx >= rowsToDelete.size) {
+                                        refreshRixoPriceMapTreeData()
+                                        return
+                                    }
+                                    rpmDeleteMappingRow(rowsToDelete[idx]) { deleteNext(idx + 1) }
+                                }
+                                deleteNext(0)
+                            },
+                        )
+                    }
                 }
             }
             return@click
@@ -1733,12 +1762,17 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
                     rpmSelectedSupplier = null
                     rpmSelectedStock = null
                     rpmSelectedPol = null
+                    rpmSelectedMappingId = null
+                    rpmRerenderTree(root)
                 } else {
                     rpmSelectedCompany = value
                     rpmSelectedSupplier = null
                     rpmSelectedStock = null
                     rpmSelectedPol = null
+                    rpmSelectedMappingId = null
+                    ensureRpmCompanyBranchLoaded(value) { rpmRerenderTree(root) }
                 }
+                return@click
             }
             "supplier" -> {
                 if (rpmSelectedSupplier == value) {
@@ -1792,18 +1826,44 @@ fun showRixoPriceMapTreePage() {
     loadRixoPriceMapTree()
 }
 
-fun loadRixoPriceMapTree() {
-    val root = document.getElementById("rixoPriceMapTreeRoot") as? HTMLElement ?: return
-    window.fetch(apiUrl("rixo-mapping/all"))
+private fun ensureRpmCompanyBranchLoaded(company: String, onDone: () -> Unit) {
+    val key = rpmNormCompany(company)
+    if (key in rpmLoadedCompanyKeys) {
+        onDone()
+        return
+    }
+    val enc = js("encodeURIComponent")(company.trim()).unsafeCast<String>()
+    window.fetch(apiUrl("rixo-mapping/by-company?rixoCompany=$enc"))
         .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load Rixo price map')")
+            if (response.ok) response.json() else throw js("Error('Failed to load company branch')")
         }
         .then { result: dynamic ->
             val ok = result.success as? Boolean ?: false
-            if (!ok) throw js("Error(result.message || 'Failed to load Rixo price map')")
+            if (!ok) throw js("Error(result.message || 'Failed to load company branch')")
             val data = result.data
             val arr = if (js("Array.isArray(data)") as Boolean) (data as Array<dynamic>).toList() else emptyList()
-            rpmTreeRowsCache = parseRixoPriceMapTreeRows(arr)
+            val parsed = parseRixoPriceMapTreeRows(arr)
+            rpmTreeRowsCache = rpmTreeRowsCache.filter { rpmNormCompany(it.company) != key } + parsed
+            rpmLoadedCompanyKeys.add(key)
+            onDone()
+        }
+        .catch { err: dynamic ->
+            Logger.error("Rixo price map company branch: ${err.toString()}")
+            showMessage("Failed to load company branch", "error")
+            onDone()
+        }
+}
+
+fun loadRixoPriceMapTree() {
+    val root = document.getElementById("rixoPriceMapTreeRoot") as? HTMLElement ?: return
+    window.fetch(apiUrl("rixo-mapping/distinct-rixo-companies"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else throw js("Error('Failed to load Rixo companies')")
+        }
+        .then { raw: dynamic ->
+            rpmRootCompanies = parseMasterListArray(raw).distinct()
+            rpmTreeRowsCache = emptyList()
+            rpmLoadedCompanyKeys.clear()
             rpmSelectedCompany = null
             rpmSelectedSupplier = null
             rpmSelectedStock = null
@@ -1822,24 +1882,30 @@ fun loadRixoPriceMapTree() {
 
 fun refreshRixoPriceMapTreeData() {
     val root = document.getElementById("rixoPriceMapTreeRoot") as? HTMLElement ?: return
-    window.fetch(apiUrl("rixo-mapping/all"))
+    window.fetch(apiUrl("rixo-mapping/distinct-rixo-companies"))
         .then { response: dynamic ->
-            if (response.ok) response.json() else throw js("Error('Failed to load Rixo price map')")
+            if (response.ok) response.json() else throw js("Error('Failed to load Rixo companies')")
         }
-        .then { result: dynamic ->
-            val ok = result.success as? Boolean ?: false
-            if (!ok) throw js("Error(result.message || 'Failed to load Rixo price map')")
-            val data = result.data
-            val arr = if (js("Array.isArray(data)") as Boolean) (data as Array<dynamic>).toList() else emptyList()
-            rpmTreeRowsCache = parseRixoPriceMapTreeRows(arr)
-            // Keep company/supplier/stock/pol selection so path stays expanded after save;
-            // invalid labels are cleared in buildRixoPriceMapTreeHtmlFromCache.
+        .then { raw: dynamic ->
+            rpmRootCompanies = parseMasterListArray(raw).distinct()
             rpmLeafInlineEditMappingId = null
             rpmLeafInlineEditLineType = ""
-            root.innerHTML = buildRixoPriceMapTreeHtmlFromCache()
-            bindRixoPriceMapTreeClicks(root)
-            if (rpmFullRowAddOpen) {
-                window.setTimeout({ wireRpmFullRowAddComboboxes() }, 0)
+            fun finishRender() {
+                root.innerHTML = buildRixoPriceMapTreeHtmlFromCache()
+                bindRixoPriceMapTreeClicks(root)
+                if (rpmFullRowAddOpen) {
+                    window.setTimeout({ wireRpmFullRowAddComboboxes() }, 0)
+                }
+            }
+            val selected = rpmSelectedCompany
+            if (selected != null) {
+                // Force reload open branch so children stay visible after save.
+                rpmLoadedCompanyKeys.remove(rpmNormCompany(selected))
+                ensureRpmCompanyBranchLoaded(selected) { finishRender() }
+            } else {
+                rpmTreeRowsCache = emptyList()
+                rpmLoadedCompanyKeys.clear()
+                finishRender()
             }
         }
         .catch { err: dynamic ->

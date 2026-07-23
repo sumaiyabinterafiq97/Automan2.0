@@ -44,6 +44,24 @@ class PurchaseController(
         return ResponseEntity.ok(purchases)
     }
 
+    /**
+     * Paginated browse for the purchase list (no search text). Prefer this over [getAllPurchases] for UI.
+     * Full [getAllPurchases] remains for Invoice / Booking / PDF dependents until they are migrated.
+     */
+    @GetMapping("/page")
+    fun listPurchasesPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(required = false) order: String?,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(purchaseService.listPurchasesPage(page, size, sort, order))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
     /** Full-database purchase export as Excel (.xlsx) with raw formula-friendly cell values. */
     @GetMapping("/export/xlsx")
     fun exportPurchasesXlsx(): ResponseEntity<ByteArray> {
@@ -135,9 +153,11 @@ class PurchaseController(
         @RequestParam(defaultValue = "all") field: String,
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "25") size: Int,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(required = false) order: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(purchaseService.searchPurchasesPage(q, field, page, size))
+            ResponseEntity.ok(purchaseService.searchPurchasesPage(q, field, page, size, sort, order))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }
@@ -989,24 +1009,16 @@ class PurchaseController(
     fun generateShippingSchedulePdf(@RequestBody request: com.automan.backend.dto.ShippingSchedulePdfRequest): ResponseEntity<ByteArray> {
         try {
             Logger.debug("Generating PDF for booking: ${request.bookingNo}")
-            
-            // Get PDF data from service
             val pdfData = purchaseService.getShippingSchedulePdfData(request)
-            
-            // Generate PDF
-            val pdfBytes = generatePdfDocument(pdfData)
-            
-            // Set response headers
+            val pdfBytes = pdfService.generateShippingScheduleInvoicePdf(pdfData)
             val headers = org.springframework.http.HttpHeaders()
             headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
             headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"shipping_schedule_${request.bookingNo}.pdf\"")
             headers.contentLength = pdfBytes.size.toLong()
-            
             Logger.debug("PDF generated successfully for booking: ${request.bookingNo}")
             return ResponseEntity.ok()
                 .headers(headers)
                 .body(pdfBytes)
-                
         } catch (e: Exception) {
             Logger.error("Error generating PDF: ${e.message}", e)
             return ResponseEntity.internalServerError().build()
@@ -1017,24 +1029,16 @@ class PurchaseController(
     fun generateFobShippingSchedulePdf(@RequestBody request: com.automan.backend.dto.ShippingSchedulePdfRequest): ResponseEntity<ByteArray> {
         try {
             Logger.debug("Generating FOB PDF for booking: ${request.bookingNo}")
-            
-            // Get PDF data from service (same as regular shipping schedule)
             val pdfData = purchaseService.getShippingSchedulePdfData(request)
-            
-            // Generate FOB PDF (same format but with FOB price column)
-            val pdfBytes = generateFobPdfDocument(pdfData)
-            
-            // Set response headers
+            val pdfBytes = pdfService.generateShippingScheduleInvoicePdf(pdfData)
             val headers = org.springframework.http.HttpHeaders()
             headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
             headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"fob_shipping_schedule_${request.bookingNo}.pdf\"")
             headers.contentLength = pdfBytes.size.toLong()
-            
             Logger.debug("FOB PDF generated successfully for booking: ${request.bookingNo}")
             return ResponseEntity.ok()
                 .headers(headers)
                 .body(pdfBytes)
-                
         } catch (e: Exception) {
             Logger.error("Error generating FOB PDF: ${e.message}", e)
             return ResponseEntity.internalServerError().build()

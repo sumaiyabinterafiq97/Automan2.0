@@ -66,6 +66,39 @@ class ClientMapController(
         }
     }
 
+    /**
+     * Paginated browse for Client Map (no search text). Prefer this over [getAllMappings] for UI.
+     * Declared before [getById] so `/mappings/page` is not captured by `/{id}`.
+     */
+    @GetMapping("/mappings/page")
+    fun listPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(clientMapService.listPage(page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    /**
+     * Paginated search for Client Map (client name / country / all).
+     */
+    @GetMapping("/mappings/page-search")
+    fun pageSearch(
+        @RequestParam q: String,
+        @RequestParam(defaultValue = "all") field: String,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(clientMapService.searchPage(q, field, page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
     @GetMapping("/mappings/{id}")
     fun getById(@PathVariable id: Long): ResponseEntity<Map<String, Any?>> {
         val row = clientMapService.findById(id)

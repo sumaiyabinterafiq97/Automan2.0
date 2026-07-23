@@ -47,6 +47,7 @@ class BookingMappingService(
             country = ensureCountryColumn(payload.country),
             consigneeName = name,
             notifyParty = payload.notifyParty?.trim()?.takeIf { it.isNotEmpty() },
+            inTransitClause = payload.inTransitClause?.trim()?.takeIf { it.isNotEmpty() },
         )
         return BookingMappingSaveResult(repo.save(toSave), mergedIntoExisting = false)
     }
@@ -71,6 +72,7 @@ class BookingMappingService(
                 country = ensureCountryColumn(payload.country),
                 consigneeName = name,
                 notifyParty = payload.notifyParty?.trim()?.takeIf { it.isNotEmpty() },
+                inTransitClause = payload.inTransitClause?.trim()?.takeIf { it.isNotEmpty() },
                 createdAt = current.createdAt,
             ),
         )
@@ -90,6 +92,7 @@ class BookingMappingService(
             TokenSplit.SEMICOLON_NEWLINE_ONLY,
         )
         val incomingNotify = incoming.notifyParty?.trim()?.takeIf { it.isNotEmpty() }
+        val incomingInTransit = incoming.inTransitClause?.trim()?.takeIf { it.isNotEmpty() }
         return repo.save(
             target.copy(
                 country = ensureCountryColumn(mergedCountry ?: target.country),
@@ -97,6 +100,7 @@ class BookingMappingService(
                 consigneeAddress = mergedAddress ?: target.consigneeAddress,
                 pod = mergedPod ?: target.pod,
                 notifyParty = incomingNotify ?: target.notifyParty,
+                inTransitClause = incomingInTransit ?: target.inTransitClause,
                 createdAt = target.createdAt,
             ),
         )
@@ -140,6 +144,24 @@ class BookingMappingService(
             TokenSplit.SEMICOLON_NEWLINE_ONLY -> Regex("""[;\n]+""")
         }
         return regex.split(s).map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    /**
+     * Paginated browse for Consignee Map UI (no search text). Prefer this over findAll for UI.
+     */
+    @Transactional(readOnly = true)
+    fun listConsigneeMapPage(page: Int, rawSize: Int): ConsigneeMapPageResponse {
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg = repo.findAll(pageable)
+        return ConsigneeMapPageResponse(
+            content = pg.content,
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
     }
 
     /**

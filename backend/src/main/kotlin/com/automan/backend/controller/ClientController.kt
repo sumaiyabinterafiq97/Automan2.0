@@ -39,6 +39,31 @@ class ClientController(
         val clients = clientService.getAllClients()
         return ResponseEntity.ok(clients)
     }
+
+    @GetMapping("/page")
+    fun listPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(clientService.listPage(page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    @GetMapping("/page-search")
+    fun searchPage(
+        @RequestParam q: String,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(clientService.searchPage(q, page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
     
     @GetMapping("/resolve-ledger")
     fun resolveLedgerClient(

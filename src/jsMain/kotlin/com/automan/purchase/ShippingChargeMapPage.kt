@@ -554,18 +554,38 @@ fun loadShippingChargeMapTable() {
         return
     }
 
-    scmSearchServerMode = false
-    scmSearchTotalFlat = 0
-    scmSearchTotalPages = 1
-    scmSearchPageZeroBased = 0
-
-    window.fetch(apiUrl("shipping-charge-map/mappings"))
+    scmSearchServerMode = true
+    val pBrowse = scmSearchPageZeroBased
+    val browseUrl = apiUrl("shipping-charge-map/mappings/page?page=$pBrowse&size=$scmItemsPerPage")
+    window.fetch(browseUrl)
         .then { resp: dynamic ->
             if (resp.ok) resp.json() else throw js("Error('Failed to load')")
         }
-        .then { result: dynamic ->
-            val data = js("result.data") ?: js("[]")
-            val arr = js("Array.isArray(data) ? data : []").unsafeCast<Array<dynamic>>()
+        .then { body: dynamic ->
+            val err = js("body.error")?.toString()?.trim()
+            if (!err.isNullOrEmpty()) throw js("Error(err)")
+            scmSearchTotalFlat =
+                when (val te = js("body.totalElements")) {
+                    is Number -> te.toLong()
+                    else -> te?.toString()?.toLongOrNull() ?: 0L
+                }
+            scmSearchTotalPages =
+                max(
+                    1,
+                    when (val tp = js("body.totalPages")) {
+                        is Number -> tp.toInt()
+                        else -> tp?.toString()?.toIntOrNull() ?: 1
+                    },
+                )
+            scmSearchPageZeroBased =
+                when (val num = js("body.page")) {
+                    is Number -> num.toInt()
+                    else -> num?.toString()?.toIntOrNull() ?: 0
+                }
+            scmCurrentPage = scmSearchPageZeroBased + 1
+
+            val content = js("body.content") ?: js("[]")
+            val arr = js("Array.isArray(content) ? content : []").unsafeCast<Array<dynamic>>()
             scmAllFlatRows = arr.toList().toMutableList()
             val grouped = groupShippingChargesForView(scmAllFlatRows)
             if (grouped.isEmpty()) {
@@ -580,13 +600,9 @@ fun loadShippingChargeMapTable() {
                     """.trimIndent()
                 return@then
             }
-            val totalPages = max(1, (grouped.size + scmItemsPerPage - 1) / scmItemsPerPage)
-            scmCurrentPage = scmCurrentPage.coerceIn(1, totalPages)
-            val start = (scmCurrentPage - 1) * scmItemsPerPage
-            val slice = grouped.drop(start).take(scmItemsPerPage)
-            val end = minOf(start + slice.size, grouped.size)
-            val footer = "Stock locations: ${grouped.size}. Showing ${start + 1}–$end."
-            renderGroupedTableUi(tableDiv, slice, scmCurrentPage, totalPages, footer)
+            val footer =
+                "DB rows: ${scmSearchTotalFlat}. Showing ${grouped.size} stock location group(s) on this page."
+            renderGroupedTableUi(tableDiv, grouped, scmCurrentPage, scmSearchTotalPages, footer)
         }
         .catch { e: dynamic ->
             Logger.error("Shipping charge map load failed: ${e.toString()}")
@@ -634,14 +650,17 @@ private fun populateNativeStockSelect(selectId: String, selectedValue: String) {
 }
 
 private fun fetchTiersForStock(stock: String, onDone: (carsJoined: String, pricesJoined: String) -> Unit) {
-    window.fetch(apiUrl("shipping-charge-map/mappings"))
+    val stockTrim = stock.trim()
+    val enc = js("encodeURIComponent")(stockTrim).unsafeCast<String>()
+    window.fetch(apiUrl("shipping-charge-map/mappings/by-stock-location?stockLocation=$enc"))
         .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('load')") }
         .then { result: dynamic ->
             val data = js("result.data") ?: js("[]")
             val arr = js("Array.isArray(data) ? data : []").unsafeCast<Array<dynamic>>()
+            // Server already filters by stock; equals check kept as safety.
             val filtered =
                 arr.toList().filter { row ->
-                    scmJsonObjStrProp(row, "stockLocation").equals(stock.trim(), ignoreCase = true)
+                    scmJsonObjStrProp(row, "stockLocation").equals(stockTrim, ignoreCase = true)
                 }
             val grouped = groupShippingChargesForView(filtered)
             val g = grouped.firstOrNull()

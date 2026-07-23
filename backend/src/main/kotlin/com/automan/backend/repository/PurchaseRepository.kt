@@ -271,6 +271,16 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     )
     fun findByChassisToken(@Param("token") token: String): List<Purchase>
 
+    /**
+     * Lightweight projection for Rixo buying-date dropdown (avoids loading full Purchase rows).
+     * Pending Rixo = workflow not yet RIXO_REQUESTED or later (see PurchaseWorkflowService.applyForRead).
+     */
+    @Query(
+        "SELECT p.date AS date, p.workflowStatus AS workflowStatus FROM Purchase p " +
+            "WHERE p.date IS NOT NULL AND TRIM(p.date) <> ''",
+    )
+    fun findDateAndWorkflowPairs(): List<PurchaseDateWorkflowProjection>
+
     @Query(
         "SELECT p FROM Purchase p WHERE p.workflowStatus IN (" +
             "com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED, " +
@@ -278,4 +288,10 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED)",
     )
     fun findPurchasesWhereRixoConfirmedPositive(): List<Purchase>
+}
+
+/** Closed projection: purchase date string + workflow (rixo_requested is @Transient). */
+interface PurchaseDateWorkflowProjection {
+    fun getDate(): String?
+    fun getWorkflowStatus(): com.automan.backend.model.WorkflowStatus?
 }

@@ -23,6 +23,21 @@ class ShippingChargeMapController(
         )
     }
 
+    /**
+     * Paginated browse for Shipping Charge Map (no search text). Prefer this over [listAll] for UI.
+     */
+    @GetMapping("/mappings/page")
+    fun listPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(shippingChargeMapService.listPage(page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
     @GetMapping("/mappings/page-search")
     fun pageSearch(
         @RequestParam q: String,
@@ -130,6 +145,12 @@ class ShippingChargeMapController(
         } catch (e: Exception) {
             ResponseEntity.badRequest().body(errorBody(e.message ?: "Failed to save"))
         }
+    }
+
+    @GetMapping("/mappings/by-stock-location")
+    fun listByStockLocation(@RequestParam stockLocation: String): ResponseEntity<Map<String, Any>> {
+        val data = shippingChargeMapService.findAsMapsByStockLocation(stockLocation)
+        return ResponseEntity.ok(mapOf("success" to true, "data" to data, "count" to data.size))
     }
 
     @DeleteMapping("/mappings/by-stock-location")

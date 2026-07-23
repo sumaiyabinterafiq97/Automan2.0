@@ -13,6 +13,15 @@ import com.automan.purchase.models.TransactionResponse
 /** Matches backend [AppConstants.CREDIT_LIMIT_NEAR_FRACTION] — warn at 90% of limit used. */
 private const val CLIENT_CREDIT_ALERT_FRACTION = 0.9
 
+private var clientListServerMode: Boolean = true
+private var clientListPageZeroBased: Int = 0
+private var clientListTotalPages: Int = 1
+private var clientListTotalElements: Long = 0L
+private var clientListItemsPerPage: Int = AppConstants.DEFAULT_ITEMS_PER_PAGE
+private var clientListActiveSearchQ: String = ""
+private var clientListSearchDebounceHandle: Int? = null
+private var clientListCachedRows: Array<dynamic> = emptyArray()
+
 private fun alertThresholdFromCreditLimit(creditLimit: Double): Double =
     creditLimit * CLIENT_CREDIT_ALERT_FRACTION
 
@@ -193,10 +202,12 @@ fun showClientAccountsPage() {
     
     
     document.getElementById("clientSearchInput")?.addEventListener("input", { _: Event ->
-        filterClients()
+        scheduleClientListSearchDebounced()
     })
     
     // Load clients
+    clientListPageZeroBased = 0
+    clientListActiveSearchQ = ""
     loadClients()
 
     if (!isEditor()) {
@@ -204,15 +215,79 @@ fun showClientAccountsPage() {
     }
 }
 
-fun loadClients() {
-    window.fetch(apiUrl("clients"))
+private fun scheduleClientListSearchDebounced() {
+    val prev = clientListSearchDebounceHandle
+    if (prev != null) window.clearTimeout(prev)
+    clientListSearchDebounceHandle = window.setTimeout({
+        clientListSearchDebounceHandle = null
+        clientListPageZeroBased = 0
+        loadClients(0)
+    }, 420)
+}
+
+fun loadClients(page0: Int = clientListPageZeroBased) {
+    val host = document.getElementById("clientListTable")
+    host?.innerHTML = """
+        <div style="text-align: center; color: #666; padding: 20px;">
+            Loading clients...
+        </div>
+    """
+    val q = (document.getElementById("clientSearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    clientListActiveSearchQ = q
+    clientListPageZeroBased = page0.coerceAtLeast(0)
+    val size = clientListItemsPerPage.coerceAtLeast(1)
+    val url = if (q.isNotEmpty()) {
+        val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
+        apiUrl("clients/page-search?q=$encQ&page=$clientListPageZeroBased&size=$size")
+    } else {
+        apiUrl("clients/page?page=$clientListPageZeroBased&size=$size")
+    }
+    window.fetch(url)
         .then { response ->
             if (response.ok) {
-                response.json().then { clients ->
-                    displayClients(clients)
+                response.json().then { body ->
+                    val err = js("body.error")?.toString()?.trim()
+                    if (!err.isNullOrEmpty()) {
+                        host?.innerHTML = """
+                            <div style="text-align: center; color: #e74c3c; padding: 20px;">
+                                ${escapeHtml(err)}
+                            </div>
+                        """
+                        return@then
+                    }
+                    clientListServerMode = true
+                    val totalEl = js("body.totalElements")
+                    clientListTotalElements = when (totalEl) {
+                        is Number -> totalEl.toLong()
+                        else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+                    }
+                    val tp = js("body.totalPages")
+                    clientListTotalPages = kotlin.math.max(
+                        1,
+                        when (tp) {
+                            is Number -> tp.toInt()
+                            else -> tp?.toString()?.toIntOrNull() ?: 1
+                        },
+                    )
+                    val num = js("body.page")
+                    clientListPageZeroBased = when (num) {
+                        is Number -> num.toInt()
+                        else -> num?.toString()?.toIntOrNull() ?: 0
+                    }
+                    val sz = js("body.size")
+                    clientListItemsPerPage = when (sz) {
+                        is Number -> sz.toInt()
+                        else -> sz?.toString()?.toIntOrNull() ?: AppConstants.DEFAULT_ITEMS_PER_PAGE
+                    }
+                    clientListCachedRows = try {
+                        js("Array.from((body && body.content) ? body.content : [])").unsafeCast<Array<dynamic>>()
+                    } catch (_: dynamic) {
+                        emptyArray()
+                    }
+                    displayClients(clientListCachedRows)
                 }
             } else {
-                document.getElementById("clientListTable")?.innerHTML = """
+                host?.innerHTML = """
                     <div style="text-align: center; color: #e74c3c; padding: 20px;">
                         Failed to load clients
                     </div>
@@ -220,7 +295,7 @@ fun loadClients() {
             }
         }
         .catch { error ->
-            document.getElementById("clientListTable")?.innerHTML = """
+            host?.innerHTML = """
                 <div style="text-align: center; color: #e74c3c; padding: 20px;">
                     Error loading clients: $error
                 </div>
@@ -305,9 +380,44 @@ fun displayClients(clients: dynamic) {
         </div>
         """
     }.joinToString("")
+
+    val pagerHtml = if (clientListServerMode) {
+        val totalPages = kotlin.math.max(1, clientListTotalPages)
+        val currentPage = clientListPageZeroBased + 1
+        if (totalPages > 1 || clientListTotalElements > clientListItemsPerPage) {
+            val prevDisabled = if (currentPage <= 1) "disabled" else ""
+            val nextDisabled = if (currentPage >= totalPages) "disabled" else ""
+            val prevStyle = if (currentPage <= 1) "#ccc" else "#007bff"
+            val nextStyle = if (currentPage >= totalPages) "#ccc" else "#007bff"
+            val prevCursor = if (currentPage <= 1) "not-allowed" else "pointer"
+            val nextCursor = if (currentPage >= totalPages) "not-allowed" else "pointer"
+            """
+            <div id="clientListPager" style="display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;">
+                <div style="color:#6b7280;font-size:14px;">Page $currentPage of $totalPages · $clientListTotalElements client(s)</div>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <button type="button" id="clientListPrevPage" $prevDisabled style="padding:8px 16px;background-color:$prevStyle;color:white;border:none;border-radius:4px;cursor:$prevCursor;">Previous</button>
+                    <span style="color:#374151;font-size:14px;">Page $currentPage of $totalPages</span>
+                    <button type="button" id="clientListNextPage" $nextDisabled style="padding:8px 16px;background-color:$nextStyle;color:white;border:none;border-radius:4px;cursor:$nextCursor;">Next</button>
+                </div>
+            </div>
+            """
+        } else {
+            ""
+        }
+    } else {
+        ""
+    }
     
-    clientListTable.innerHTML = clientsHtml
+    clientListTable.innerHTML = clientsHtml + pagerHtml
     wireClientListCreditLimitButtons()
+    document.getElementById("clientListPrevPage")?.addEventListener("click", { _: Event ->
+        if (clientListPageZeroBased > 0) loadClients(clientListPageZeroBased - 1)
+    })
+    document.getElementById("clientListNextPage")?.addEventListener("click", { _: Event ->
+        if (clientListPageZeroBased + 1 < clientListTotalPages) {
+            loadClients(clientListPageZeroBased + 1)
+        }
+    })
 }
 
 fun selectClient(clientId: Long) {
@@ -1404,15 +1514,9 @@ fun displayClientBalance(client: dynamic, balanceElementId: String, warningEleme
 }
 
 fun filterClients() {
-    val searchInput = document.getElementById("clientSearchInput") as HTMLInputElement?
-    val searchTerm = searchInput?.value?.uppercase() ?: ""
-    
-    val clientItems = document.querySelectorAll(".client-item")
-    for (i in 0 until clientItems.length) {
-        val item = clientItems.item(i) as HTMLElement
-        val text = item.textContent ?: ""
-        item.style.display = if (text.uppercase().contains(searchTerm)) "block" else "none"
-    }
+    // Server-side search via [loadClients]; kept for any legacy callers.
+    clientListPageZeroBased = 0
+    loadClients(0)
 }
 
 fun toggleClientAlerts() {

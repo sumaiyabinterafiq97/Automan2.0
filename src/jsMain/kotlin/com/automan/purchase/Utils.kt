@@ -644,7 +644,7 @@ fun getMaxColumnsForDevice(deviceType: String? = null): Int {
 fun getMaxCarBrandMapColumnsForDevice(deviceType: String? = null): Int = 6
 
 /** Consignee Map & Supplier Map: max 6 data columns (plus actions). */
-fun getMaxConsigneeSupplierMapColumnsForDevice(deviceType: String? = null): Int = 6
+fun getMaxConsigneeSupplierMapColumnsForDevice(deviceType: String? = null): Int = 8
 
 /** Purchase List table: max 8 data columns (plus actions). */
 fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int = 8

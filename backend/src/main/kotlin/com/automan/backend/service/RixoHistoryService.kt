@@ -1,9 +1,11 @@
 package com.automan.backend.service
 
+import com.automan.backend.dto.RixoHistoryPageResponse
 import com.automan.backend.dto.RixoHistoryRowDto
 import com.automan.backend.model.RixoHistory
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.RixoHistoryRepository
+import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -91,16 +93,59 @@ class RixoHistoryService(
 
     fun listAllRows(): List<RixoHistoryRowDto> {
         val sort = Sort.by(Sort.Direction.DESC, "id")
-        val rows = rixoHistoryRepository.findAll(sort)
+        return enrichRows(rixoHistoryRepository.findAll(sort))
+    }
+
+    fun listRowsPage(page: Int, rawSize: Int): RixoHistoryPageResponse {
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg = rixoHistoryRepository.findAll(pageable)
+        return RixoHistoryPageResponse(
+            content = enrichRows(pg.content),
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    fun searchRowsPage(rawQuery: String, page: Int, rawSize: Int): RixoHistoryPageResponse {
+        val q = sanitizeHistorySearchToken(rawQuery)
+        require(q.isNotEmpty()) { "Search text is required" }
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pg = rixoHistoryRepository.searchKeyFields(q, pageable)
+        return RixoHistoryPageResponse(
+            content = enrichRows(pg.content),
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    /**
+     * Builds purchase index from ONLY purchases matching chassis tokens on [rows]
+     * (via [PurchaseRepository.findByChassisToken] per unique token — not findAll).
+     */
+    private fun enrichRows(rows: List<RixoHistory>): List<RixoHistoryRowDto> {
         if (rows.isEmpty()) return emptyList()
 
-        // One purchases load + in-memory chassis index (same match rules as findByChassisToken).
-        val byNormalizedChassis = purchaseRepository.findAll()
-            .mapNotNull { p ->
-                val key = p.chassis?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.ROOT) ?: return@mapNotNull null
-                key to p
+        val tokens = linkedSetOf<String>()
+        for (row in rows) {
+            tokens.addAll(parseChassisTokens(row.chassis))
+        }
+
+        val byNormalizedChassis = mutableMapOf<String, MutableList<com.automan.backend.model.Purchase>>()
+        for (token in tokens) {
+            for (p in purchaseRepository.findByChassisToken(token)) {
+                val key = p.chassis?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.ROOT) ?: continue
+                val list = byNormalizedChassis.getOrPut(key) { mutableListOf() }
+                if (list.none { it.id == p.id }) list.add(p)
             }
-            .groupBy({ it.first }, { it.second })
+        }
 
         return rows.map { e ->
             val matched = matchedPurchasesForHistoryRow(e, byNormalizedChassis)
@@ -117,6 +162,9 @@ class RixoHistoryService(
             )
         }
     }
+
+    private fun sanitizeHistorySearchToken(raw: String): String =
+        raw.trim().replace("%", "").replace("_", "").take(120)
 
     /**
      * Purchases matched by chassis segments for a history row.

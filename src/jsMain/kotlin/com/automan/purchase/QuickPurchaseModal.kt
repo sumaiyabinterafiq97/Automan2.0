@@ -5,6 +5,7 @@ import kotlinx.browser.window
 import org.w3c.dom.HTMLButtonElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
+import org.w3c.dom.HTMLTextAreaElement
 import org.w3c.dom.events.Event
 import kotlin.js.JSON
 
@@ -51,6 +52,10 @@ fun openQuickPurchaseModal() {
                     ${createEditableCombobox("qpChassis", "Select Chassis", required = true)}
                 </div>
                 <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Chassis Number</label>
+                    ${createEditableCombobox("qpChassisNumber", "Suffix (optional)", showDropdownButton = false)}
+                </div>
+                <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Car Name</label>
                     ${createEditableCombobox("qpCarName", "Select Car Name")}
                 </div>
@@ -80,6 +85,15 @@ fun openQuickPurchaseModal() {
                     ${createEditableCombobox("qpRixoCompany", "Select Rixo Company")}
                 </div>
                 <div>
+                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Rixo Price</label>
+                    <div class="currency-input" style="display:flex;gap:8px;align-items:center;">
+                        <span style="font-weight:600;color:#374151;">¥</span>
+                        <input type="text" inputmode="decimal" id="qpRixoPrice" class="money-input" placeholder="0"
+                               autocomplete="off" onfocus="this.select();"
+                               style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;">
+                    </div>
+                </div>
+                <div>
                     <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Client Name</label>
                     ${createEditableCombobox("qpClientName", "Select Client Name")}
                 </div>
@@ -101,6 +115,11 @@ fun openQuickPurchaseModal() {
                         </label>
                     </div>
                 </div>
+            </div>
+            <div style="margin-top:16px;">
+                <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Note</label>
+                <textarea id="qpNotes" placeholder="Optional"
+                          style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;min-height:72px;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
             </div>
             <div style="margin-top:20px;">
                 <h3 style="color:#333;margin:0 0 10px 0;border-bottom:1px solid #eee;padding-bottom:5px;font-size:16px;">Car Pictures</h3>
@@ -136,6 +155,7 @@ fun openQuickPurchaseModal() {
 
     bindStrictDateTextMask("qpDate", null)
     bindStrictMonthYearTextMask("qpCarModelYear", "qpCarModelYearHint")
+    bindPurchaseChassisNumberInput("qpChassisNumber")
     setupQuickPurchaseModalListeners()
     preloadQuickPurchaseDropdowns()
 
@@ -152,13 +172,15 @@ fun closeQuickPurchaseModal() {
 
 private fun resetQuickPurchaseModalForm() {
     (document.getElementById("qpAuctionNo") as? HTMLInputElement)?.value = ""
-    listOf("qpChassis", "qpCarName", "qpAuctionName", "qpStockLocation", "qpRixoCompany", "qpClientName", "qpCountry").forEach { id ->
+    listOf("qpChassis", "qpChassisNumber", "qpCarName", "qpAuctionName", "qpStockLocation", "qpRixoCompany", "qpClientName", "qpCountry").forEach { id ->
         val sel = document.getElementById(id) as? HTMLSelectElement
         val inp = document.getElementById("${id}Input") as? HTMLInputElement
         sel?.value = ""
         inp?.value = ""
     }
     (document.getElementById("qpPrice") as? HTMLInputElement)?.value = ""
+    (document.getElementById("qpRixoPrice") as? HTMLInputElement)?.value = ""
+    (document.getElementById("qpNotes") as? HTMLTextAreaElement)?.value = ""
     (document.getElementById("qpNegotiate") as? HTMLInputElement)?.checked = false
     (document.getElementById("carPicturePreview") as? org.w3c.dom.HTMLElement)?.innerHTML = ""
     (document.getElementById("carPictures") as? HTMLInputElement)?.value = ""
@@ -301,6 +323,25 @@ fun applyQuickPurchaseSupplierSelection(selection: dynamic) {
                 window.__suppressRixoAutoSelect = prevSuppress;
             }
             window.__qpResolvedSupplier = sel;
+            if (typeof window.scheduleAutofillRixoPriceFromMapping === 'function') {
+                window.__rixoPriceUserOverride = false;
+                var auc = '';
+                if (typeof window.getComboboxValue === 'function') {
+                    auc = (window.getComboboxValue('qpAuctionName') || '').toString().trim();
+                }
+                window.scheduleAutofillRixoPriceFromMapping(false, {
+                    force: true,
+                    delay: 0,
+                    inputId: 'qpRixoPrice',
+                    auctionName: auc,
+                    stockLocation: sel.stockLocation || '',
+                    rixoCompany: sel.rixoCompany || '',
+                    venueId: sel.venueId || '',
+                    pol: sel.pol || '',
+                    supportedVehicleType: sel.supportedVehicleType || '',
+                    selection: sel
+                });
+            }
         })();
     """)
 }
@@ -338,15 +379,23 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
         return
     }
 
-    // Quick Purchase stores the chassis CODE only (drop any typed "-number" suffix). The chassis
-    // number belongs to the full Add/Edit form; QP is a minimal quick entry keyed by code.
+    // Quick Purchase: save full chassis CODE-NUMBER (same as Add Purchase).
     val chassisCodeOnly = chassis.substringBefore("-").trim()
+    val chassisNumber = (
+        (document.getElementById("qpChassisNumberInput") as? HTMLInputElement)?.value
+            ?: (document.getElementById("qpChassisNumber") as? HTMLInputElement)?.value
+            ?: ""
+        ).trim().ifBlank {
+            // If user typed CODE-NUMBER into Chassis, keep the suffix
+            if (chassis.contains("-")) chassis.substringAfter("-").trim() else ""
+        }
+    val chassisForSave = composePurchaseChassisForSave(chassisCodeOnly, chassisNumber)
 
     val purchaseData = js("{}")
     val dateIso = (document.getElementById("qpDate") as? HTMLInputElement)?.value ?: ""
     purchaseData.date = if (dateIso.isNotBlank()) formatWithWeekday(dateIso) else ""
     purchaseData.auctionNo = (document.getElementById("qpAuctionNo") as? HTMLInputElement)?.value?.trim() ?: ""
-    purchaseData.chassis = chassisCodeOnly
+    purchaseData.chassis = chassisForSave
     purchaseData.carName = getComboboxValueSafe("qpCarName")
     purchaseData.auctionHouse = getComboboxValueSafe("qpAuctionName")
     purchaseData.stockLocation = getComboboxValueSafe("qpStockLocation")
@@ -355,7 +404,11 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
     purchaseData.country = getComboboxValueSafe("qpCountry")
     val priceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpPrice') : ''").unsafeCast<String>().trim()
     purchaseData.price = if (priceValue.isNotBlank()) "¥$priceValue" else ""
+    val rixoPriceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpRixoPrice') : ''").unsafeCast<String>().trim()
+    purchaseData.rixoPrice = if (rixoPriceValue.isNotBlank()) "¥$rixoPriceValue" else ""
     purchaseData.negotiate = (document.getElementById("qpNegotiate") as? HTMLInputElement)?.checked ?: false
+    val notes = (document.getElementById("qpNotes") as? HTMLTextAreaElement)?.value?.trim().orEmpty()
+    if (notes.isNotBlank()) purchaseData.notes = notes
     val regDate = readCarModelYearInput("qpCarModelYear")
     if (regDate.isNotBlank()) purchaseData.carModelYear = regDate
 

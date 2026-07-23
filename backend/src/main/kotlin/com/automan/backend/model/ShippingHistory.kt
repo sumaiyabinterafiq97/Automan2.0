@@ -29,8 +29,11 @@ data class ShippingHistory(
     @Column(name = "consignee")
     val consignee: String? = null,
 
-    @Column(name = "notify_party")
+    @Column(name = "notify_party", columnDefinition = "TEXT")
     val notifyParty: String? = null,
+
+    @Column(name = "in_transit_clause", columnDefinition = "TEXT")
+    val inTransitClause: String? = null,
 
     @Column(name = "shipment_date")
     val shipmentDate: LocalDate? = null,

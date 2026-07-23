@@ -13,6 +13,8 @@ data class ShippingHistoryBatchRequest(
     val consignee: String? = null,
     /** Optional notify party from booking form. */
     val notifyParty: String? = null,
+    /** Optional in-transit clause (multi-line) from booking / Consignee Map. */
+    val inTransitClause: String? = null,
     /** ISO date yyyy-MM-dd from ETD */
     val shipmentDate: String? = null,
     /** ISO date yyyy-MM-dd from CY CUT */

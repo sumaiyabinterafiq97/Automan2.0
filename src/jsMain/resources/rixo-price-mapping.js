@@ -5246,9 +5246,10 @@ window.findRixoPriceFromSupplierSelection = function(sel, auctionName) {
     return null;
 };
 
-window.applyRixoPriceToInput = function(isEditForm, priceRaw) {
+window.applyRixoPriceToInput = function(isEditForm, priceRaw, inputIdOverride) {
     if (!priceRaw) return false;
-    var input = document.getElementById(isEditForm ? 'editRixoPriceInput' : 'rixoPriceInput');
+    var inputId = inputIdOverride || (isEditForm ? 'editRixoPriceInput' : 'rixoPriceInput');
+    var input = document.getElementById(inputId);
     if (!input) return false;
     var numericValue = (typeof window.parseRixoPrice === 'function') ? window.parseRixoPrice(priceRaw) : String(priceRaw);
     if (!numericValue) numericValue = String(priceRaw).replace(/[¥,\s]/g, '').replace(/[^0-9.]/g, '');
@@ -5273,10 +5274,17 @@ window.scheduleAutofillRixoPriceFromMapping = function(isEditForm, fields) {
 window.autofillRixoPriceFromMapping = function(isEditForm, options) {
     options = options || {};
     var fields = options.fields || {};
-    var auctionNameId = isEditForm ? 'editAuctionName' : 'auctionName';
-    var stockLocationId = isEditForm ? 'editStockLocation' : 'stockLocation';
-    var rixoCompanyId = isEditForm ? 'editRixoCompany' : 'rixoCompany';
-    var vehicleTypeId = isEditForm ? 'editShipmentSize' : 'shipmentSize';
+    var inputIdOverride = fields.inputId || null;
+    var auctionNameId = fields.auctionNameId || (isEditForm ? 'editAuctionName' : 'auctionName');
+    var stockLocationId = fields.stockLocationId || (isEditForm ? 'editStockLocation' : 'stockLocation');
+    var rixoCompanyId = fields.rixoCompanyId || (isEditForm ? 'editRixoCompany' : 'rixoCompany');
+    var vehicleTypeId = fields.vehicleTypeId || (isEditForm ? 'editShipmentSize' : 'shipmentSize');
+    // Quick Purchase uses qp* combobox ids when filling price into qpRixoPrice
+    if (inputIdOverride === 'qpRixoPrice') {
+        auctionNameId = 'qpAuctionName';
+        stockLocationId = 'qpStockLocation';
+        rixoCompanyId = 'qpRixoCompany';
+    }
 
     if (window.__editPurchaseHydrating === true && !options.force) return;
     if (window.__rixoPriceUserOverride === true && !options.force) return;
@@ -5300,7 +5308,7 @@ window.autofillRixoPriceFromMapping = function(isEditForm, options) {
     };
 
     var cached = window.findRixoPriceFromSupplierSelection(lookupSel, auctionName);
-    if (cached && window.applyRixoPriceToInput(isEditForm, cached)) return;
+    if (cached && window.applyRixoPriceToInput(isEditForm, cached, inputIdOverride)) return;
 
     function fetchLookup(vt) {
         var url = apiUrl('rixo-mapping/lookup?' +
@@ -5319,10 +5327,10 @@ window.autofillRixoPriceFromMapping = function(isEditForm, options) {
 
     var chain = vehicleType ? fetchLookup(vehicleType) : fetchLookup(null);
     chain.then(function(price) {
-        if (price && window.applyRixoPriceToInput(isEditForm, price)) return;
+        if (price && window.applyRixoPriceToInput(isEditForm, price, inputIdOverride)) return;
         if (!vehicleType) return;
         return fetchLookup(null).then(function(fallbackPrice) {
-            if (fallbackPrice) window.applyRixoPriceToInput(isEditForm, fallbackPrice);
+            if (fallbackPrice) window.applyRixoPriceToInput(isEditForm, fallbackPrice, inputIdOverride);
         });
     }).catch(function(err) {
         console.warn('autofillRixoPriceFromMapping error:', err);

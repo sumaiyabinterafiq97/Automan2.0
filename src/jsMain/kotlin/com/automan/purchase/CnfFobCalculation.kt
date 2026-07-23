@@ -1686,6 +1686,7 @@ fun saveShippingHistoryAndBooking() {
                 req.country = bd.consigneeCountry
                 req.consignee = bd.consigneeName
                 req.notifyParty = bd.notifyParty
+                req.inTransitClause = bd.inTransitClause
                 req.shipmentDate = bd.shippingDate
                 req.cyCutDate = bd.cyCutDate
                 req.eta = bd.eta

@@ -73,6 +73,32 @@ class RixoMappingService(
             )
         )
 
+    fun listForTreeByCompany(rixoCompany: String): List<RixoMapping> {
+        val c = rixoCompany.trim()
+        if (c.isEmpty()) return emptyList()
+        return rixoMappingRepository.findByRixoCompanyIgnoreCase(c).sortedWith(
+            compareBy(
+                { it.rixoCompany },
+                { it.auctionName ?: "" },
+                { it.stockLocation },
+                { it.id ?: 0L },
+            )
+        )
+    }
+
+    fun listForTreeByAuction(auctionName: String): List<RixoMapping> {
+        val a = auctionName.trim()
+        if (a.isEmpty()) return emptyList()
+        return rixoMappingRepository.findByAuctionNameIgnoreCase(a).sortedWith(
+            compareBy(
+                { it.rixoCompany },
+                { it.auctionName ?: "" },
+                { it.stockLocation },
+                { it.id ?: 0L },
+            )
+        )
+    }
+
     /** Distinct non-blank [RixoMapping.auctionName] values for supplier map dropdowns. */
     fun listDistinctAuctionNames(): List<String> =
         rixoMappingRepository.findDistinctAuctionNamesOrdered()

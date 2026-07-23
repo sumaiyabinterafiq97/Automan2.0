@@ -34,6 +34,21 @@ class BookingMappingController(
     private val masterMenuService: MasterMenuService
 ) {
     /**
+     * Paginated browse for Consignee Map (no search text). Prefer this over [getAll] for UI.
+     */
+    @GetMapping("/page")
+    fun listPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(bookingMappingService.listConsigneeMapPage(page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    /**
      * Paginated search for Consignee Map (consignee name / country / all).
      */
     @GetMapping("/page-search")

@@ -308,6 +308,93 @@ fun handleR2CarPictureUpload(input: HTMLInputElement, purchaseId: Long?) {
     }
 }
 
+/**
+ * Global entry used by `onchange="handleCarPictureUpload(this)"` on Quick Purchase, Add, and Edit.
+ * Registered at app init so Quick Purchase works without opening the Add form first
+ * (the Add form used to define this only inside its inline script).
+ */
+fun handleCarPictureUpload(input: HTMLInputElement) {
+    val files = input.files ?: return
+    if (files.length == 0) return
+
+    val editIdEl = document.getElementById("editId") as? HTMLInputElement
+    val purchaseId = editIdEl?.value?.trim()?.takeIf { it.isNotEmpty() }?.toLongOrNull()
+
+    ensureCarPictureMediaConfig { enabled ->
+        if (enabled) {
+            handleR2CarPictureUpload(input, purchaseId)
+        } else {
+            handleLegacyCarPictureUpload(input)
+        }
+        input.value = ""
+    }
+}
+
+/** Legacy base64 preview path when R2 media is disabled (same contract as the old inline JS). */
+private fun handleLegacyCarPictureUpload(input: HTMLInputElement) {
+    val files = input.files ?: return
+    if (files.length == 0) return
+
+    val previewDiv = document.getElementById("carPicturePreview") as? HTMLElement
+    if (previewDiv == null) {
+        console.warn("Car picture preview container not found: carPicturePreview")
+        return
+    }
+
+    val progressDiv = document.getElementById("uploadProgress") as? HTMLElement
+    val progressBar = document.getElementById("progressBar") as? HTMLElement
+    val progressText = document.getElementById("progressText") as? HTMLElement
+    progressDiv?.style?.display = "block"
+    progressBar?.style?.width = "0%"
+    progressText?.textContent = "Preparing upload..."
+
+    var uploadedCount = 0
+    var scheduledCount = 0
+    for (i in 0 until files.length) {
+        val file = files.item(i) as? File ?: continue
+        if ((file.type as? String)?.startsWith("image/") != true) continue
+        val fileSize = (file.asDynamic().size as? Number)?.toInt() ?: 0
+        if (fileSize > cachedMaxFileSizeBytes) {
+            showMessage("File ${file.name} exceeds maximum image size", "error")
+            continue
+        }
+        scheduledCount++
+        val index = i
+        val reader = js("new FileReader()")
+        reader.onload = { event: dynamic ->
+            val result = js("event && event.target && event.target.result")?.toString()
+            if (!result.isNullOrBlank()) {
+                val pictureId =
+                    "pic_${js("Date.now()")}_${js("Math.random().toString(36).substr(2, 9)")}"
+                appendCarPicturePreview(
+                    previewDiv,
+                    pictureId,
+                    result,
+                    r2Media = false,
+                    purchaseId = null,
+                )
+                window.setTimeout({
+                    uploadedCount++
+                    val total = if (scheduledCount > 0) scheduledCount else 1
+                    val progress = (uploadedCount.toDouble() / total.toDouble()) * 100.0
+                    progressBar?.style?.width = "${progress}%"
+                    progressText?.textContent = "Uploaded $uploadedCount/$total pictures"
+                    if (uploadedCount >= scheduledCount) {
+                        window.setTimeout({
+                            progressDiv?.style?.display = "none"
+                            progressText?.textContent = "All pictures uploaded successfully!"
+                        }, 1000)
+                    }
+                }, 1000 + (index * 500))
+            }
+        }
+        reader.readAsDataURL(file)
+    }
+    if (scheduledCount == 0) {
+        progressDiv?.style?.display = "none"
+    }
+}
+
 fun registerCarPictureMediaBridges() {
     window.asDynamic().handleR2CarPictureUpload = { input: dynamic, purchaseId: dynamic ->
         val htmlInput = input as? HTMLInputElement
@@ -319,6 +406,13 @@ fun registerCarPictureMediaBridges() {
             }
             handleR2CarPictureUpload(htmlInput, id)
             htmlInput.value = ""
+        }
+    }
+    // Must exist before any form mounts — Quick Purchase calls this via inline onchange.
+    window.asDynamic().handleCarPictureUpload = { input: dynamic ->
+        val htmlInput = input as? HTMLInputElement
+        if (htmlInput != null) {
+            handleCarPictureUpload(htmlInput)
         }
     }
     window.asDynamic().isR2CarPictureStorageEnabled = { isR2CarPictureStorageEnabled() }

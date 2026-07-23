@@ -766,8 +766,10 @@ fun storeBookingDetailsForPdf() {
     val etaValue = optionalBookingDateIso("etaDate", "etaDateText")
     val finalDestinationValue = (document.getElementById("finalDestination") as? HTMLInputElement)?.value?.trim().orEmpty()
         .ifEmpty { bookingDynString(carBookingFormState.finalDestination) }
-    val notifyPartyValue = getEditableComboboxValue("notifyParty")
+    val notifyPartyValue = (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value?.trim().orEmpty()
         .ifEmpty { bookingDynString(carBookingFormState.notifyParty) }
+    val inTransitClauseValue = (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value?.trim().orEmpty()
+        .ifEmpty { bookingDynString(carBookingFormState.inTransitClause) }
     
     Logger.debug("Reading form values - Booking No: $bookingNoValue, Vessel: $vesselNameValue, Carrier: $carrierValue, POL: $polValue, POD: $podValue, ETD: $shippingDateValue")
     
@@ -789,6 +791,7 @@ fun storeBookingDetailsForPdf() {
     bookingDetails.eta = etaValue
     bookingDetails.finalDestination = finalDestinationValue
     bookingDetails.notifyParty = notifyPartyValue
+    bookingDetails.inTransitClause = inTransitClauseValue
     bookingDetails.consigneeName = if (consigneeNameValue.isNotEmpty()) consigneeNameValue else "OVERSEAS TRANSIT AGENCY (PVT) LTD."
     bookingDetails.consigneeAddress = ""
     bookingDetails.consigneeCountry = consigneeCountryForPdf
@@ -3324,7 +3327,7 @@ fun setupEditableComboboxHandlers() {
             'editRixoCompany', 'editStockLocation', 'editClientName', 'editCountry', 'editPol',
             'editConsignee', 'editPod', 'editRepairCompany',
             // Add Quick Purchase modal
-            'qpChassis', 'qpCarName', 'qpAuctionName', 'qpRixoCompany', 'qpStockLocation', 'qpClientName', 'qpCountry',
+            'qpChassis', 'qpChassisNumber', 'qpCarName', 'qpAuctionName', 'qpRixoCompany', 'qpStockLocation', 'qpClientName', 'qpCountry',
             // Chassis Map (Car Brand) Add/Edit/Duplicate modals — chip multi-select comboboxes
             'carBrandBrand', 'carBrandFuel', 'carBrandWd', 'carBrandShift', 'carBrandColor', 'carBrandDriveType',
             // Client Map Add/Edit/Duplicate modals — chip multi-select comboboxes
@@ -9699,7 +9702,10 @@ fun setupRixoDropdowns() {
             }
         }
         
-        window.handleCarPictureUpload = handleCarPictureUpload;
+        // Prefer the app-init Kotlin bridge (required for Quick Purchase). Keep local fn as fallback only.
+        if (typeof window.handleCarPictureUpload !== 'function') {
+            window.handleCarPictureUpload = handleCarPictureUpload;
+        }
         
         // Set values for Edit form dropdowns
         function setEditFormValues(purchaseData) {
@@ -12693,7 +12699,7 @@ internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
         if (mfgYear.isNotBlank()) purchaseData.manufactureYear = mfgYear
         val feeDigits = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
         if (feeDigits.isNotBlank()) purchaseData.recycleFee = "¥$feeDigits"
-        // Quick Purchase saves the chassis code only; do not append the mapping chassis number.
+        // Quick Purchase may still append mapping chassis number via qpChassisNumber UI; cache kept for brand/fuel/etc.
     }
     return purchaseData
 }
@@ -15338,6 +15344,12 @@ fun fetchMappingByChassisOnly(
                     storeQuickPurchaseChassisMappingCache(
                         brand, selectedCarName, fuel, recycleFeeRaw, carModelYearRaw, manufactureYearRaw, chassisNumberRaw,
                     )
+                    applyPurchaseChassisNumberFromMapping(
+                        isEditForm = false,
+                        numberTokens = chassisNumberTokens,
+                        preserveExisting = false,
+                        fieldIdOverride = "qpChassisNumber",
+                    )
                     val regIso = isoMonthFromRecycleFeeMapping(recycleFeeRaw)
                         .ifBlank { normalizeCarModelYearForCompare(carModelYearRaw) }
                     if (regIso.isNotBlank() && readCarModelYearInput("qpCarModelYear").isBlank()) {
@@ -16956,10 +16968,12 @@ fun applyPurchaseChassisNumberFromMapping(
     isEditForm: Boolean,
     numberTokens: List<String>,
     preserveExisting: Boolean,
+    fieldIdOverride: String? = null,
 ) {
-    val fieldId = purchaseChassisNumberFieldId(isEditForm)
+    val fieldId = fieldIdOverride ?: purchaseChassisNumberFieldId(isEditForm)
     val select = document.getElementById(fieldId) as? HTMLSelectElement
-    val input = purchaseChassisNumberInputEl(isEditForm)
+    val input = (document.getElementById("${fieldId}Input") as? HTMLInputElement)
+        ?: (document.getElementById(fieldId) as? HTMLInputElement)
     if (select == null && input == null) return
 
     val tokens = numberTokens.map { it.trim() }.filter { it.isNotEmpty() }
@@ -17078,6 +17092,7 @@ fun bindPurchaseChassisNumberInput(fieldId: String) {
         ?: return
     val select = document.getElementById(fieldId) as? HTMLSelectElement
     val isEditForm = fieldId.startsWith("edit")
+    val isQuickPurchase = fieldId.startsWith("qp")
     val manufactureYearBaseId = if (isEditForm) "editManufactureYear" else "manufactureYear"
     fun sanitize() {
         val raw = input.value
@@ -17086,10 +17101,15 @@ fun bindPurchaseChassisNumberInput(fieldId: String) {
         if (alnum != raw) input.value = alnum
     }
     fun maybeLookupManufactureYear() {
+        if (isQuickPurchase) return
         val suffix = input.value.trim()
         if (suffix.isBlank()) return
         if (readManufactureYearInput(manufactureYearBaseId).isNotBlank()) return
-        val prefix = readPurchaseChassisCode(isEditForm)
+        val prefix = if (isQuickPurchase) {
+            getComboboxValueSafe("qpChassis").substringBefore("-").trim()
+        } else {
+            readPurchaseChassisCode(isEditForm)
+        }
         if (prefix.isNotBlank()) lookupManufactureYearForChassisSuffix(prefix, suffix, manufactureYearBaseId)
     }
     input.addEventListener("input", { _: Event -> sanitize() })
@@ -20452,13 +20472,17 @@ fun submitEditPurchase(id: Long, purchaseData: dynamic) {
             response.json().then { updatedPurchase: dynamic ->
                 refreshEditPurchaseAfterSuccessfulSave(id, updatedPurchase)
                 pendingEditAuditChangedFields = null
-                showSuccessModal("Saved", "Purchase updated successfully!")
+                showSuccessModal("Saved", "Purchase updated successfully!") {
+                    navigateToPurchaseList(forceClearFilters = false)
+                }
                 clearRixoAutoSelectSuppress()
             }.catch { err: dynamic ->
                 console.warn("Edit save OK but response parse failed:", err)
                 refreshEditPurchaseAfterSuccessfulSave(id, null)
                 pendingEditAuditChangedFields = null
-                showSuccessModal("Saved", "Purchase updated successfully!")
+                showSuccessModal("Saved", "Purchase updated successfully!") {
+                    navigateToPurchaseList(forceClearFilters = false)
+                }
                 clearRixoAutoSelectSuppress()
             }
         } else {
@@ -21162,6 +21186,7 @@ private fun persistCarBookingFormToSessionStorage() {
         s.asDynamic().podPort = carBookingFormState.podPort ?: ""
         s.asDynamic().finalDestination = carBookingFormState.finalDestination ?: ""
         s.asDynamic().notifyParty = carBookingFormState.notifyParty ?: ""
+        s.asDynamic().inTransitClause = carBookingFormState.inTransitClause ?: ""
         s.asDynamic().bookingNo = carBookingFormState.bookingNo ?: ""
         s.asDynamic().vesselSelect = carBookingFormState.vesselSelect ?: ""
         s.asDynamic().carrierSelect = carBookingFormState.carrierSelect ?: ""
@@ -21199,8 +21224,13 @@ private fun mergeCarBookingFormFromSessionStorageIfNeeded() {
     mergeKey("consigneeCountry")
     mergeKey("consigneeName")
     mergeKey("etdDate")
+    mergeKey("cyCutDate")
+    mergeKey("etaDate")
     mergeKey("polPort")
     mergeKey("podPort")
+    mergeKey("finalDestination")
+    mergeKey("notifyParty")
+    mergeKey("inTransitClause")
     mergeKey("bookingNo")
     mergeKey("vesselSelect")
     mergeKey("carrierSelect")
@@ -21310,7 +21340,8 @@ fun saveCarBookingState() {
         carBookingFormState.polPort = polVal
         carBookingFormState.podPort = podPortValue
         carBookingFormState.finalDestination = (document.getElementById("finalDestination") as? HTMLInputElement)?.value ?: ""
-        carBookingFormState.notifyParty = getEditableComboboxValue("notifyParty")
+        carBookingFormState.notifyParty = (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value ?: ""
+        carBookingFormState.inTransitClause = (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value ?: ""
         carBookingFormState.bookingNo = bookingNoEl?.value ?: ""
         carBookingFormState.vesselSelect = vesselInputEl?.value ?: ""
         carBookingFormState.carrierSelect = carrierSelectEl?.value ?: ""
@@ -21458,7 +21489,10 @@ fun restoreCarBookingState() {
     }
     (document.getElementById("finalDestination") as? HTMLInputElement)?.value =
         bookingDynString(carBookingFormState.finalDestination)
-    setEditableComboboxValue("notifyParty", bookingDynString(carBookingFormState.notifyParty))
+    (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value =
+        bookingDynString(carBookingFormState.notifyParty)
+    (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value =
+        bookingDynString(carBookingFormState.inTransitClause)
     // POL options come from purchases only after country is set — repopulate before restoring POL value
     val restoredCountry = syncCountry
     if (restoredCountry.isNotEmpty()) {
@@ -26865,20 +26899,25 @@ fun alreadySoldOkMessage(chassisValues: Collection<String>): String {
     return "These ${list.joinToString(", ")} are already sold."
 }
 
-/** Centered confirmation with OK (success accent). */
-fun showSuccessModal(title: String, message: String) {
-    showOkModal(title, message, accent = OkModalAccent.SUCCESS)
+/** Centered confirmation with OK (success accent). [onOk] runs only when the green OK button is clicked. */
+fun showSuccessModal(title: String, message: String, onOk: (() -> Unit)? = null) {
+    showOkModal(title, message, accent = OkModalAccent.SUCCESS, onOk = onOk)
 }
 
 /** Centered notice/error confirmation with OK (neutral/danger accent). */
-fun showNoticeModal(title: String, message: String) {
-    showOkModal(title, message, accent = OkModalAccent.NOTICE)
+fun showNoticeModal(title: String, message: String, onOk: (() -> Unit)? = null) {
+    showOkModal(title, message, accent = OkModalAccent.NOTICE, onOk = onOk)
 }
 
 enum class OkModalAccent { SUCCESS, NOTICE }
 
 /** Centered OK dialog used instead of toasts for important confirmations. */
-fun showOkModal(title: String, message: String, accent: OkModalAccent = OkModalAccent.SUCCESS) {
+fun showOkModal(
+    title: String,
+    message: String,
+    accent: OkModalAccent = OkModalAccent.SUCCESS,
+    onOk: (() -> Unit)? = null,
+) {
     document.getElementById("successModal")?.remove()
 
     val titleColor = when (accent) {
@@ -26923,7 +26962,10 @@ fun showOkModal(title: String, message: String, accent: OkModalAccent = OkModalA
     }
 
     document.getElementById("closeSuccessModal")?.addEventListener("click", { _: Event -> closeModal() })
-    document.getElementById("okSuccessModalBtn")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("okSuccessModalBtn")?.addEventListener("click", { _: Event ->
+        closeModal()
+        onOk?.invoke()
+    })
 
     modal.addEventListener("click", { event ->
         if (event.target == modal) {
@@ -27883,6 +27925,12 @@ fun generateShippingSchedulePdf() {
     pdfRequest.consigneeName = globalBookingDetails.consigneeName
     pdfRequest.consigneeAddress = ""
     pdfRequest.consigneeCountry = globalBookingDetails.consigneeCountry
+    pdfRequest.carrier = globalBookingDetails.carrier
+    pdfRequest.cyCutDate = globalBookingDetails.cyCutDate
+    pdfRequest.eta = globalBookingDetails.eta
+    pdfRequest.finalDestination = globalBookingDetails.finalDestination
+    pdfRequest.notifyParty = globalBookingDetails.notifyParty
+    pdfRequest.inTransitClause = globalBookingDetails.inTransitClause
     
     // Use stored selected cars, or try to get from table if on booking page
     val carsForPdf = if (isOnBookingPage && globalSelectedCarsForPdf.isEmpty()) {
@@ -27995,6 +28043,12 @@ fun generateShippingSchedulePdfPreview() {
     pdfRequest.consigneeName = globalBookingDetails.consigneeName
     pdfRequest.consigneeAddress = ""
     pdfRequest.consigneeCountry = globalBookingDetails.consigneeCountry
+    pdfRequest.carrier = globalBookingDetails.carrier
+    pdfRequest.cyCutDate = globalBookingDetails.cyCutDate
+    pdfRequest.eta = globalBookingDetails.eta
+    pdfRequest.finalDestination = globalBookingDetails.finalDestination
+    pdfRequest.notifyParty = globalBookingDetails.notifyParty
+    pdfRequest.inTransitClause = globalBookingDetails.inTransitClause
     
     // Use stored selected cars, or try to get from table if on booking page
     val carsForPdf = if (isOnBookingPage && globalSelectedCarsForPdf.isEmpty()) {

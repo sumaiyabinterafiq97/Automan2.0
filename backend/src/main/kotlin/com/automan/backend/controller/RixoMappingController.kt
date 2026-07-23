@@ -513,18 +513,7 @@ class RixoMappingController(
 
     @GetMapping("/all")
     fun listAll(): ResponseEntity<Map<String, Any?>> {
-        val items = rixoMappingService.listAllForTree().map { m ->
-            mapOf(
-                "id" to m.id,
-                "rixoCompany" to m.rixoCompany,
-                "auctionName" to m.auctionName,
-                "stockLocation" to m.stockLocation,
-                "venueId" to m.venueId,
-                "pol" to m.pol,
-                "supportedVehicleType" to m.supportedVehicleType,
-                "rixoPrice" to m.rixoPrice
-            )
-        }
+        val items = rixoMappingService.listAllForTree().map { m -> treeRowMap(m) }
         return ResponseEntity.ok(
             mapOf(
                 "success" to true,
@@ -532,6 +521,40 @@ class RixoMappingController(
             )
         )
     }
+
+    @GetMapping("/by-company")
+    fun listByCompany(@RequestParam rixoCompany: String): ResponseEntity<Map<String, Any?>> {
+        val items = rixoMappingService.listForTreeByCompany(rixoCompany).map { m -> treeRowMap(m) }
+        return ResponseEntity.ok(
+            mapOf(
+                "success" to true,
+                "data" to items
+            )
+        )
+    }
+
+    @GetMapping("/by-auction")
+    fun listByAuction(@RequestParam auctionName: String): ResponseEntity<Map<String, Any?>> {
+        val items = rixoMappingService.listForTreeByAuction(auctionName).map { m -> treeRowMap(m) }
+        return ResponseEntity.ok(
+            mapOf(
+                "success" to true,
+                "data" to items
+            )
+        )
+    }
+
+    private fun treeRowMap(m: RixoMapping): Map<String, Any?> =
+        mapOf(
+            "id" to m.id,
+            "rixoCompany" to m.rixoCompany,
+            "auctionName" to m.auctionName,
+            "stockLocation" to m.stockLocation,
+            "venueId" to m.venueId,
+            "pol" to m.pol,
+            "supportedVehicleType" to m.supportedVehicleType,
+            "rixoPrice" to m.rixoPrice
+        )
 
     @GetMapping("/lookup")
     fun lookupRixoPrice(

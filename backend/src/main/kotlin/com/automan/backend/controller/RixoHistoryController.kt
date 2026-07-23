@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
@@ -19,6 +20,31 @@ class RixoHistoryController(
 ) {
     @GetMapping
     fun list(): List<RixoHistoryRowDto> = rixoHistoryService.listAllRows()
+
+    @GetMapping("/page")
+    fun listPage(
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(rixoHistoryService.listRowsPage(page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    @GetMapping("/page-search")
+    fun searchPage(
+        @RequestParam q: String,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "20") size: Int,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(rixoHistoryService.searchRowsPage(q, page, size))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
 
     /** Mark all purchases under selected history rows as `rixo_confirmed = TRUE`. */
     @PostMapping("/confirm-selected")

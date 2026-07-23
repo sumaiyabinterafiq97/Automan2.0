@@ -19,6 +19,13 @@ private var rixoHistorySortField: String = "buyingDate"
 private var rixoHistorySortOrder: String = "desc"
 private val rixoHistorySelectedIds: MutableSet<String> = mutableSetOf()
 private var rixoHistoryResizeDebounceHandle: Int? = null
+private var rixoHistorySearchDebounceHandle: Int? = null
+private var rixoHistoryServerMode: Boolean = true
+private var rixoHistoryPageZeroBased: Int = 0
+private var rixoHistoryTotalPages: Int = 1
+private var rixoHistoryTotalElements: Long = 0L
+private var rixoHistoryItemsPerPage: Int = AppConstants.DEFAULT_ITEMS_PER_PAGE
+private var rixoHistoryActiveSearchQ: String = ""
 
 private const val RIXO_HISTORY_COMPACT_MAX_WIDTH_PX = 860
 
@@ -29,6 +36,12 @@ fun showRixoHistoryPage() {
     rixoHistorySortField = "buyingDate"
     rixoHistorySortOrder = "desc"
     rixoHistorySelectedIds.clear()
+    rixoHistoryServerMode = true
+    rixoHistoryPageZeroBased = 0
+    rixoHistoryTotalPages = 1
+    rixoHistoryTotalElements = 0L
+    rixoHistoryItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+    rixoHistoryActiveSearchQ = ""
 
     content.innerHTML = """
         <style>
@@ -118,11 +131,13 @@ fun showRixoHistoryPage() {
 
     val searchInput = document.getElementById("rixoHistorySearchInput") as? HTMLInputElement
     searchInput?.addEventListener("input", { _: Event ->
-        renderRixoHistoryTableFromCache()
+        scheduleRixoHistorySearchDebounced()
     })
     document.getElementById("rixoHistorySearchClearBtn")?.addEventListener("click", { _: Event ->
         searchInput?.value = ""
-        renderRixoHistoryTableFromCache()
+        rixoHistoryActiveSearchQ = ""
+        rixoHistoryPageZeroBased = 0
+        loadRixoHistory(0)
     })
 
     setupRixoHistoryResizeListener()
@@ -424,15 +439,20 @@ private fun downloadRixoHistoryPdf(row: dynamic, btn: HTMLButtonElement?) {
     }
     MainScope().launch {
         try {
-            val purchasesResult = ApiClient.get<Array<dynamic>>("purchases")
-            val allPurchases = when (purchasesResult) {
+            val encChassis = js("encodeURIComponent")(chassisRaw).unsafeCast<String>()
+            val encDate = js("encodeURIComponent")(buyingDate).unsafeCast<String>()
+            val encCompany = js("encodeURIComponent")(rixoCompany).unsafeCast<String>()
+            val forRixoUrl =
+                "purchases/for-rixo?chassis=$encChassis&dateIso=$encDate&rixoCompany=$encCompany&includeNonPending=true"
+            val purchasesResult = ApiClient.get<Array<dynamic>>(forRixoUrl)
+            val scopedPurchases = when (purchasesResult) {
                 is ApiResult.Success -> purchasesResult.data
                 is ApiResult.Error -> {
                     showMessage("Failed to load purchases: ${purchasesResult.message}", "error")
                     return@launch
                 }
             }
-            val selectedIds = resolveRixoHistoryPurchaseIds(row, allPurchases)
+            val selectedIds = resolveRixoHistoryPurchaseIds(row, scopedPurchases)
             if (selectedIds.isEmpty()) {
                 showMessage(
                     "No purchases matched this history row (chassis + buying date + Rixo company).",
@@ -521,14 +541,76 @@ private fun rixoHistoryConfirmedIndicatorHtml(confirmed: Boolean): String {
     }
 }
 
-private fun loadRixoHistory() {
+private fun scheduleRixoHistorySearchDebounced() {
+    val prev = rixoHistorySearchDebounceHandle
+    if (prev != null) window.clearTimeout(prev)
+    rixoHistorySearchDebounceHandle = window.setTimeout({
+        rixoHistorySearchDebounceHandle = null
+        rixoHistoryPageZeroBased = 0
+        loadRixoHistory(0)
+    }, 420)
+}
+
+private fun applyRixoHistoryPageBody(body: dynamic) {
+    rixoHistoryServerMode = true
+    val totalEl = js("body.totalElements")
+    rixoHistoryTotalElements = when (totalEl) {
+        is Number -> totalEl.toLong()
+        else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+    }
+    val tp = js("body.totalPages")
+    rixoHistoryTotalPages = kotlin.math.max(
+        1,
+        when (tp) {
+            is Number -> tp.toInt()
+            else -> tp?.toString()?.toIntOrNull() ?: 1
+        },
+    )
+    val num = js("body.page")
+    rixoHistoryPageZeroBased = when (num) {
+        is Number -> num.toInt()
+        else -> num?.toString()?.toIntOrNull() ?: 0
+    }
+    val sz = js("body.size")
+    rixoHistoryItemsPerPage = when (sz) {
+        is Number -> sz.toInt()
+        else -> sz?.toString()?.toIntOrNull() ?: AppConstants.DEFAULT_ITEMS_PER_PAGE
+    }
+    rixoHistoryCachedRows = try {
+        js("Array.from((body && body.content) ? body.content : [])").unsafeCast<Array<dynamic>>()
+    } catch (_: dynamic) {
+        emptyArray()
+    }
+}
+
+private fun loadRixoHistory(page0: Int = rixoHistoryPageZeroBased) {
     val tableHost = document.getElementById("rixoHistoryTable") ?: return
     tableHost.innerHTML = """<div class="rixo-history-empty"><strong>Loading</strong><div>Loading Rixo history…</div></div>"""
 
+    val q = (document.getElementById("rixoHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    rixoHistoryActiveSearchQ = q
+    rixoHistoryPageZeroBased = page0.coerceAtLeast(0)
+    val size = rixoHistoryItemsPerPage.coerceAtLeast(1)
+    val endpoint = if (q.isNotEmpty()) {
+        val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
+        "rixo-history/page-search?q=$encQ&page=$rixoHistoryPageZeroBased&size=$size"
+    } else {
+        "rixo-history/page?page=$rixoHistoryPageZeroBased&size=$size"
+    }
+
     MainScope().launch {
-        ApiClient.get<Array<dynamic>>("rixo-history").fold(
-            onSuccess = { rows ->
-                rixoHistoryCachedRows = rows
+        ApiClient.get<dynamic>(endpoint).fold(
+            onSuccess = { body ->
+                if (body == null) {
+                    ErrorHandler.showError("Empty Rixo history response")
+                    return@fold
+                }
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) {
+                    ErrorHandler.showError(err)
+                    return@fold
+                }
+                applyRixoHistoryPageBody(body)
                 renderRixoHistoryTableFromCache()
             },
             onError = { message, _ ->
@@ -679,19 +761,73 @@ private fun toggleRixoHistorySort(field: String) {
     renderRixoHistoryTableFromCache()
 }
 
+private fun appendRixoHistoryPager(html: StringBuilder) {
+    if (!rixoHistoryServerMode) return
+    val totalPages = kotlin.math.max(1, rixoHistoryTotalPages)
+    val currentPage = rixoHistoryPageZeroBased + 1
+    if (totalPages <= 1 && rixoHistoryTotalElements <= rixoHistoryItemsPerPage) return
+    val prevDisabled = if (currentPage <= 1) "disabled" else ""
+    val nextDisabled = if (currentPage >= totalPages) "disabled" else ""
+    val prevStyle = if (currentPage <= 1) "#ccc" else "#007bff"
+    val nextStyle = if (currentPage >= totalPages) "#ccc" else "#007bff"
+    val prevCursor = if (currentPage <= 1) "not-allowed" else "pointer"
+    val nextCursor = if (currentPage >= totalPages) "not-allowed" else "pointer"
+    html.append(
+        """
+        <div id="rixoHistoryPager" style="display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;">
+            <div style="color:#6b7280;font-size:14px;">Page $currentPage of $totalPages · $rixoHistoryTotalElements row(s)</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <button type="button" id="rixoHistoryPrevPage" $prevDisabled style="padding:8px 16px;background-color:$prevStyle;color:white;border:none;border-radius:4px;cursor:$prevCursor;">Previous</button>
+                <span style="color:#374151;font-size:14px;">Page $currentPage of $totalPages</span>
+                <button type="button" id="rixoHistoryNextPage" $nextDisabled style="padding:8px 16px;background-color:$nextStyle;color:white;border:none;border-radius:4px;cursor:$nextCursor;">Next</button>
+            </div>
+        </div>
+        """
+    )
+}
+
+private fun wireRixoHistoryPager() {
+    document.getElementById("rixoHistoryPrevPage")?.addEventListener("click", { _: Event ->
+        if (rixoHistoryPageZeroBased > 0) loadRixoHistory(rixoHistoryPageZeroBased - 1)
+    })
+    document.getElementById("rixoHistoryNextPage")?.addEventListener("click", { _: Event ->
+        if (rixoHistoryPageZeroBased + 1 < rixoHistoryTotalPages) {
+            loadRixoHistory(rixoHistoryPageZeroBased + 1)
+        }
+    })
+}
+
 private fun renderRixoHistoryTableFromCache() {
     val tableHost = document.getElementById("rixoHistoryTable") ?: return
-    val q = (document.getElementById("rixoHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    val q = if (rixoHistoryServerMode) {
+        rixoHistoryActiveSearchQ
+    } else {
+        (document.getElementById("rixoHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    }
 
     if (rixoHistoryCachedRows.isEmpty()) {
-        tableHost.innerHTML = """<div class="rixo-history-empty"><strong>No history yet</strong><div>No Rixo history records yet.</div></div>"""
+        val emptyHtml = if (q.isNotEmpty()) {
+            """<div class="rixo-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
+        } else {
+            """<div class="rixo-history-empty"><strong>No history yet</strong><div>No Rixo history records yet.</div></div>"""
+        }
+        val html = StringBuilder(emptyHtml)
+        appendRixoHistoryPager(html)
+        tableHost.innerHTML = html.toString()
+        wireRixoHistoryPager()
+        updateRixoHistorySelectionUi()
         return
     }
 
-    var rows = rixoHistoryCachedRows.filter { rixoHistoryRowMatchesQuery(it, q) }.toTypedArray()
+    var rows = if (rixoHistoryServerMode) {
+        rixoHistoryCachedRows
+    } else {
+        rixoHistoryCachedRows.filter { rixoHistoryRowMatchesQuery(it, q) }.toTypedArray()
+    }
 
     if (rows.isEmpty()) {
         tableHost.innerHTML = """<div class="rixo-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
+        updateRixoHistorySelectionUi()
         return
     }
 
@@ -824,6 +960,8 @@ private fun renderRixoHistoryTableFromCache() {
         html.append("</div>")
     }
 
+    appendRixoHistoryPager(html)
     tableHost.innerHTML = html.toString()
+    wireRixoHistoryPager()
     updateRixoHistorySelectionUi()
 }

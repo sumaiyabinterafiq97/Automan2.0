@@ -30,8 +30,11 @@ data class BookingMapping(
     @Column(name = "pod")
     val pod: String? = null,
 
-    @Column(name = "notify_party", length = 512)
+    @Column(name = "notify_party", columnDefinition = "TEXT")
     val notifyParty: String? = null,
+
+    @Column(name = "in_transit_clause", columnDefinition = "TEXT")
+    val inTransitClause: String? = null,
 
     @Column(name = "created_at")
     val createdAt: LocalDateTime = LocalDateTime.now(),

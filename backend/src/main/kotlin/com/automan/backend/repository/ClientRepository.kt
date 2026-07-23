@@ -2,6 +2,8 @@ package com.automan.backend.repository
 
 import com.automan.backend.model.Client
 import com.automan.backend.model.ClientStatus
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
@@ -14,6 +16,16 @@ interface ClientRepository : JpaRepository<Client, Long> {
            "LOWER(c.clientNumber) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
            "LOWER(c.clientName) LIKE LOWER(CONCAT('%', :searchTerm, '%'))")
     fun searchClients(@Param("searchTerm") searchTerm: String): List<Client>
+
+    @Query(
+        value = "SELECT c FROM Client c WHERE " +
+            "LOWER(COALESCE(c.clientNumber, '')) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+            "LOWER(COALESCE(c.clientName, '')) LIKE LOWER(CONCAT('%', :searchTerm, '%'))",
+        countQuery = "SELECT count(c) FROM Client c WHERE " +
+            "LOWER(COALESCE(c.clientNumber, '')) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +
+            "LOWER(COALESCE(c.clientName, '')) LIKE LOWER(CONCAT('%', :searchTerm, '%'))",
+    )
+    fun searchClientsPage(@Param("searchTerm") searchTerm: String, pageable: Pageable): Page<Client>
     
     fun findByClientNumberContainingIgnoreCase(clientNumber: String): List<Client>
     fun findByClientNameContainingIgnoreCase(clientName: String): List<Client>

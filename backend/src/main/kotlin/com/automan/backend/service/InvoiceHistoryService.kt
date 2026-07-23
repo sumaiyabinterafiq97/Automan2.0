@@ -6,6 +6,7 @@ import com.automan.backend.dto.CreditLimitStatus
 import com.automan.backend.dto.InvoiceBatchDeleteResult
 import com.automan.backend.dto.InvoiceConfirmAndDownloadRequest
 import com.automan.backend.dto.InvoiceConfirmResult
+import com.automan.backend.dto.InvoiceHistoryPageResponse
 import com.automan.backend.dto.InvoiceHistoryRowDto
 import com.automan.backend.dto.InvoiceItem
 import com.automan.backend.dto.InvoiceLedgerResult
@@ -17,6 +18,7 @@ import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.InvoiceHistoryLineRepository
 import com.automan.backend.repository.InvoiceHistoryRepository
 import com.automan.backend.util.Logger
+import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -40,29 +42,64 @@ class InvoiceHistoryService(
 
     fun listAllRows(): List<InvoiceHistoryRowDto> {
         val sort = Sort.by(Sort.Direction.DESC, "createdAt")
-        return invoiceHistoryRepository.findAll(sort).map { h ->
-            val lines = invoiceHistoryLineRepository.findByInvoiceHistoryIdOrderBySortOrderAsc(h.id!!)
-            val chassisJoined = lines.joinToString(";") { it.chassis.trim() }.trim()
-            val amountsJoined = lines.joinToString(";") {
-                it.lineAmount?.trim().orEmpty()
-            }
-            InvoiceHistoryRowDto(
-                invoiceNumber = h.invoiceNumber,
-                vessel = h.vessel,
-                clientName = h.clientName,
-                shippingDate = h.shippingDate?.toString(),
-                pol = h.pol,
-                pod = h.pod,
-                lcNo = h.lcNo,
-                priceType = h.priceType,
-                bank = h.bank,
-                messages = h.messages,
-                chassis = chassisJoined.ifEmpty { null },
-                totalAmount = amountsJoined.ifEmpty { null },
-                createdAt = h.createdAt.toString(),
-            )
-        }
+        return invoiceHistoryRepository.findAll(sort).map { toRowDto(it) }
     }
+
+    fun listRowsPage(page: Int, rawSize: Int): InvoiceHistoryPageResponse {
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        val pg = invoiceHistoryRepository.findAll(pageable)
+        return InvoiceHistoryPageResponse(
+            content = pg.content.map { toRowDto(it) },
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    fun searchRowsPage(rawQuery: String, page: Int, rawSize: Int): InvoiceHistoryPageResponse {
+        val q = sanitizeHistorySearchToken(rawQuery)
+        require(q.isNotEmpty()) { "Search text is required" }
+        val pageIdx = page.coerceAtLeast(0)
+        val size = rawSize.coerceIn(1, 100)
+        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        val pg = invoiceHistoryRepository.searchKeyFields(q, pageable)
+        return InvoiceHistoryPageResponse(
+            content = pg.content.map { toRowDto(it) },
+            totalElements = pg.totalElements,
+            totalPages = pg.totalPages,
+            page = pg.number,
+            size = pg.size,
+        )
+    }
+
+    private fun toRowDto(h: InvoiceHistory): InvoiceHistoryRowDto {
+        val lines = invoiceHistoryLineRepository.findByInvoiceHistoryIdOrderBySortOrderAsc(h.id!!)
+        val chassisJoined = lines.joinToString(";") { it.chassis.trim() }.trim()
+        val amountsJoined = lines.joinToString(";") {
+            it.lineAmount?.trim().orEmpty()
+        }
+        return InvoiceHistoryRowDto(
+            invoiceNumber = h.invoiceNumber,
+            vessel = h.vessel,
+            clientName = h.clientName,
+            shippingDate = h.shippingDate?.toString(),
+            pol = h.pol,
+            pod = h.pod,
+            lcNo = h.lcNo,
+            priceType = h.priceType,
+            bank = h.bank,
+            messages = h.messages,
+            chassis = chassisJoined.ifEmpty { null },
+            totalAmount = amountsJoined.ifEmpty { null },
+            createdAt = h.createdAt.toString(),
+        )
+    }
+
+    private fun sanitizeHistorySearchToken(raw: String): String =
+        raw.trim().replace("%", "").replace("_", "").take(120)
 
     @Transactional
     fun confirmAndDownload(request: InvoiceConfirmAndDownloadRequest): InvoiceConfirmResult {

@@ -82,6 +82,13 @@ private var shippingHistoryCachedRows: Array<dynamic> = emptyArray()
 private var shippingHistorySortField: String = "bookingId"
 private var shippingHistorySortOrder: String = "desc"
 private var shippingHistoryResizeDebounceHandle: Int? = null
+private var shippingHistorySearchDebounceHandle: Int? = null
+private var shippingHistoryServerMode: Boolean = true
+private var shippingHistoryPageZeroBased: Int = 0
+private var shippingHistoryTotalPages: Int = 1
+private var shippingHistoryTotalElements: Long = 0L
+private var shippingHistoryItemsPerPage: Int = AppConstants.DEFAULT_ITEMS_PER_PAGE
+private var shippingHistoryActiveSearchQ: String = ""
 
 private const val SHIPPING_HISTORY_COMPACT_MAX_WIDTH_PX = 860
 
@@ -784,7 +791,10 @@ private fun filterPurchasesByPurchaseDateRange(rows: Array<dynamic>, startIso: S
 
 private fun applyPurchaseDateFilterRange(startIso: String, endIso: String, resetPage: Boolean = true) {
     if (purchaseSearchServerMode) {
-        showMessage("Clear the search box to use purchase date filters on the full list.", "info")
+        showMessage(
+            "Purchase date filter across the full database isn’t available with paged lists yet. Use the search box for now.",
+            "info",
+        )
         return
     }
     if (isoToLocalDayRangeTimestamps(startIso) == null || isoToLocalDayRangeTimestamps(endIso) == null) return
@@ -1111,15 +1121,15 @@ private fun refreshPurchaseRowsFromBase(resetPage: Boolean = true) {
 }
 
 private fun togglePurchaseTableSort(field: String) {
-    if (purchaseSearchServerMode) {
-        showMessage("Clear the search box to sort the full purchase list.", "info")
-        return
-    }
     val current = purchaseTableSortOrderByField[field] ?: "desc"
     val next = if (current == "asc") "desc" else "asc"
     purchaseTableSortOrderByField[field] = next
     purchaseTableSortField = field
-    refreshPurchaseRowsFromBase(resetPage = true)
+    if (purchaseSearchServerMode) {
+        loadPurchasesListPage(purchaseSearchServerPageZeroBased.coerceAtLeast(0))
+    } else {
+        refreshPurchaseRowsFromBase(resetPage = true)
+    }
 }
 
 fun navigateToPurchaseList(forceClearFilters: Boolean = false, forceRefresh: Boolean = true) {
@@ -1458,6 +1468,12 @@ fun showShippingHistoryPage() {
     shippingHistoryCachedRows = emptyArray()
     shippingHistorySortField = "bookingId"
     shippingHistorySortOrder = "desc"
+    shippingHistoryServerMode = true
+    shippingHistoryPageZeroBased = 0
+    shippingHistoryTotalPages = 1
+    shippingHistoryTotalElements = 0L
+    shippingHistoryItemsPerPage = AppConstants.DEFAULT_ITEMS_PER_PAGE
+    shippingHistoryActiveSearchQ = ""
 
     content.innerHTML = """
         <style>
@@ -1518,6 +1534,12 @@ fun showShippingHistoryPage() {
                     <button type="button" id="shippingHistorySearchClearBtn" class="shipping-search-clear" title="Clear search" aria-label="Clear search">×</button>
                 </div>
                 <div class="shipping-history-actions">
+                    <button type="button" id="shippingHistoryColumnFilterBtn" title="Column filter" aria-label="Column filter"
+                            style="width:48px;height:48px;min-width:48px;min-height:48px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.06);">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
                     <button type="button" id="exportShippingHistoryExcelBtn" class="shipping-export-btn" title="Export shipping history to Excel">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
@@ -1540,14 +1562,19 @@ fun showShippingHistoryPage() {
 
     val searchInput = document.getElementById("shippingHistorySearchInput") as? HTMLInputElement
     searchInput?.addEventListener("input", { _: Event ->
-        renderShippingHistoryTableFromCache()
+        scheduleShippingHistorySearchDebounced()
     })
     document.getElementById("shippingHistorySearchClearBtn")?.addEventListener("click", { _: Event ->
         searchInput?.value = ""
-        renderShippingHistoryTableFromCache()
+        shippingHistoryActiveSearchQ = ""
+        shippingHistoryPageZeroBased = 0
+        loadShippingHistory(0)
     })
     document.getElementById("exportShippingHistoryExcelBtn")?.addEventListener("click", { _: Event ->
         exportShippingHistoryToExcel()
+    })
+    document.getElementById("shippingHistoryColumnFilterBtn")?.addEventListener("click", { _: Event ->
+        showShippingHistoryColumnFilterModal()
     })
 
     setupShippingHistoryResizeListener()
@@ -1744,6 +1771,12 @@ private fun buildShippingPdfRequestFromHistoryGroup(gRows: List<dynamic>): dynam
     pdfRequest.consigneeName = shippingHistoryFirstNonEmpty(gRows, "consignee")
     pdfRequest.consigneeAddress = ""
     pdfRequest.consigneeCountry = shippingHistoryFirstNonEmpty(gRows, "country")
+    pdfRequest.carrier = shippingHistoryFirstNonEmpty(gRows, "carrier")
+    pdfRequest.cyCutDate = shippingHistoryFirstNonEmpty(gRows, "cyCutDate")
+    pdfRequest.eta = shippingHistoryFirstNonEmpty(gRows, "eta")
+    pdfRequest.finalDestination = shippingHistoryFirstNonEmpty(gRows, "finalDestination")
+    pdfRequest.notifyParty = shippingHistoryFirstNonEmpty(gRows, "notifyParty")
+    pdfRequest.inTransitClause = shippingHistoryFirstNonEmpty(gRows, "inTransitClause")
     pdfRequest.calculationMode = if (isFob) "FOB" else "C&F"
     pdfRequest.chassisNumbers = chassisList.toTypedArray()
     val totals = js("{}")
@@ -1821,9 +1854,14 @@ private fun shippingHistoryRowsPayloadArray(gRows: List<dynamic>): dynamic {
         o.id = shippingHistoryRawField(r, "id")
         o.country = shippingHistoryCell(r, "country")
         o.consignee = shippingHistoryCell(r, "consignee")
+        o.notifyParty = shippingHistoryCell(r, "notifyParty")
+        o.inTransitClause = shippingHistoryCell(r, "inTransitClause")
         o.shipmentDate = shippingHistoryCell(r, "shipmentDate")
+        o.cyCutDate = shippingHistoryCell(r, "cyCutDate")
+        o.eta = shippingHistoryCell(r, "eta")
         o.pol = shippingHistoryCell(r, "pol")
         o.pod = shippingHistoryCell(r, "pod")
+        o.finalDestination = shippingHistoryCell(r, "finalDestination")
         o.bookingId = shippingHistoryCell(r, "bookingId")
         o.vessel = shippingHistoryCell(r, "vessel")
         o.carrier = shippingHistoryCell(r, "carrier")
@@ -2033,8 +2071,10 @@ private fun appendShippingHistoryGroupTableRow(html: StringBuilder, gRows: List<
     html.append(
         """<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceStatusCircleHtml(gRows)}</td>"""
     )
-    val bookingCell = escapeHtml(shippingHistoryRepresentativeBookingDisplay(gRows))
-    html.append("""<td style="padding: 12px; vertical-align: top; font-weight: 600;">$bookingCell</td>""")
+    if (shippingHistoryShowsBookingIdColumn()) {
+        val bookingCell = escapeHtml(shippingHistoryRepresentativeBookingDisplay(gRows))
+        html.append("""<td style="padding: 12px; vertical-align: top; font-weight: 600;">$bookingCell</td>""")
+    }
     for (key in shippingHistoryDisplayColumnKeys()) {
         html.append("""<td style="padding: 12px; vertical-align: top;">${shippingHistoryDisplayCellHtml(gRows, key)}</td>""")
     }
@@ -2059,11 +2099,13 @@ private fun appendShippingHistoryGroupCard(html: StringBuilder, gRows: List<dyna
     html.append(
         """<div class="shipping-kv"><div class="shipping-k">Invoice created</div><div class="shipping-v">${shippingHistoryInvoiceStatusCircleHtml(gRows)}</div></div>"""
     )
-    val booking = shippingHistoryRepresentativeBookingDisplay(gRows)
-    if (booking.isNotEmpty() && booking != "—") {
-        html.append(
-            """<div class="shipping-kv"><div class="shipping-k">Booking ID</div><div class="shipping-v">${formatHistoryListRectChipHtml(booking)}</div></div>"""
-        )
+    if (shippingHistoryShowsBookingIdColumn()) {
+        val booking = shippingHistoryRepresentativeBookingDisplay(gRows)
+        if (booking.isNotEmpty() && booking != "—") {
+            html.append(
+                """<div class="shipping-kv"><div class="shipping-k">Booking ID</div><div class="shipping-v">${formatHistoryListRectChipHtml(booking)}</div></div>"""
+            )
+        }
     }
     for (key in shippingHistoryDisplayColumnKeys()) {
         val cellHtml = shippingHistoryDisplayCellHtml(gRows, key)
@@ -2074,14 +2116,76 @@ private fun appendShippingHistoryGroupCard(html: StringBuilder, gRows: List<dyna
     html.append("""</div></div>""")
 }
 
-private fun loadShippingHistory() {
+private fun scheduleShippingHistorySearchDebounced() {
+    val prev = shippingHistorySearchDebounceHandle
+    if (prev != null) window.clearTimeout(prev)
+    shippingHistorySearchDebounceHandle = window.setTimeout({
+        shippingHistorySearchDebounceHandle = null
+        shippingHistoryPageZeroBased = 0
+        loadShippingHistory(0)
+    }, 420)
+}
+
+private fun applyShippingHistoryPageBody(body: dynamic) {
+    shippingHistoryServerMode = true
+    val totalEl = js("body.totalElements")
+    shippingHistoryTotalElements = when (totalEl) {
+        is Number -> totalEl.toLong()
+        else -> totalEl?.toString()?.toLongOrNull() ?: 0L
+    }
+    val tp = js("body.totalPages")
+    shippingHistoryTotalPages = kotlin.math.max(
+        1,
+        when (tp) {
+            is Number -> tp.toInt()
+            else -> tp?.toString()?.toIntOrNull() ?: 1
+        },
+    )
+    val num = js("body.page")
+    shippingHistoryPageZeroBased = when (num) {
+        is Number -> num.toInt()
+        else -> num?.toString()?.toIntOrNull() ?: 0
+    }
+    val sz = js("body.size")
+    shippingHistoryItemsPerPage = when (sz) {
+        is Number -> sz.toInt()
+        else -> sz?.toString()?.toIntOrNull() ?: AppConstants.DEFAULT_ITEMS_PER_PAGE
+    }
+    shippingHistoryCachedRows = try {
+        js("Array.from((body && body.content) ? body.content : [])").unsafeCast<Array<dynamic>>()
+    } catch (_: dynamic) {
+        emptyArray()
+    }
+}
+
+private fun loadShippingHistory(page0: Int = shippingHistoryPageZeroBased) {
     val tableHost = document.getElementById("shippingHistoryTable") ?: return
     tableHost.innerHTML = """<div class="shipping-history-empty"><strong>Loading</strong><div>Loading shipping history…</div></div>"""
 
+    val q = (document.getElementById("shippingHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    shippingHistoryActiveSearchQ = q
+    shippingHistoryPageZeroBased = page0.coerceAtLeast(0)
+    val size = shippingHistoryItemsPerPage.coerceAtLeast(1)
+    val endpoint = if (q.isNotEmpty()) {
+        val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
+        "shipping-history/page-search?q=$encQ&page=$shippingHistoryPageZeroBased&size=$size"
+    } else {
+        "shipping-history/page?page=$shippingHistoryPageZeroBased&size=$size"
+    }
+
     MainScope().launch {
-        ApiClient.get<Array<dynamic>>("shipping-history").fold(
-            onSuccess = { rows ->
-                shippingHistoryCachedRows = rows
+        ApiClient.get<dynamic>(endpoint).fold(
+            onSuccess = { body ->
+                if (body == null) {
+                    ErrorHandler.showError("Empty shipping history response")
+                    return@fold
+                }
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) {
+                    ErrorHandler.showError(err)
+                    return@fold
+                }
+                applyShippingHistoryPageBody(body)
                 renderShippingHistoryTableFromCache()
             },
             onError = { message, _ ->
@@ -2097,21 +2201,92 @@ private fun loadShippingHistory() {
     }
 }
 
-/** Data columns only; Booking ID is rendered in its own left column after Actions. */
-private fun shippingHistoryDisplayColumnKeys(): List<String> = listOf(
-    "country", "consignee", "shipmentDate", "pol", "pod",
-    "vessel", "carrier", "priceType", "chassis", "clientName", "amount",
+/** Data columns only; Booking ID is rendered in its own left column after Actions when selected. */
+private fun shippingHistoryAllSelectableColumnKeys(): List<String> = listOf(
+    "bookingId",
+    "country",
+    "consignee",
+    "notifyParty",
+    "inTransitClause",
+    "shipmentDate",
+    "cyCutDate",
+    "eta",
+    "pol",
+    "pod",
+    "finalDestination",
+    "vessel",
+    "carrier",
+    "priceType",
+    "chassis",
+    "clientName",
+    "amount",
 )
 
+private fun shippingHistoryLockedColumnKeys(): Set<String> = setOf("bookingId", "country", "chassis")
+
+private fun shippingHistoryDefaultColumnKeys(): List<String> = listOf(
+    "bookingId", "country", "consignee", "shipmentDate", "vessel", "chassis", "clientName", "amount",
+)
+
+private const val SHIPPING_HISTORY_MAX_DATA_COLUMNS = 8
+private const val SHIPPING_HISTORY_COLUMNS_STORAGE_KEY = "selectedShippingHistoryColumns"
+
+/** Selected data columns (max 8). Booking ID / Country / Chassis are always included. */
+private fun getSelectedShippingHistoryColumns(): List<String> {
+    val defaults = shippingHistoryDefaultColumnKeys()
+    val locked = shippingHistoryLockedColumnKeys()
+    val allowed = shippingHistoryAllSelectableColumnKeys().toSet()
+    val saved = safeLocalStorageGet(SHIPPING_HISTORY_COLUMNS_STORAGE_KEY)
+    val savedColumns = if (saved != null) {
+        try {
+            JSON.parse<Array<String>>(saved).toList().filter { it in allowed }
+        } catch (_: dynamic) {
+            null
+        }
+    } else {
+        null
+    }
+    val base = if (savedColumns.isNullOrEmpty()) defaults else savedColumns
+    val withLocked = (locked.toList() + base).distinct()
+    val ordered = shippingHistoryAllSelectableColumnKeys().filter { it in withLocked.toSet() }
+    return if (ordered.size > SHIPPING_HISTORY_MAX_DATA_COLUMNS) {
+        defaults
+    } else {
+        ordered
+    }
+}
+
+private fun saveSelectedShippingHistoryColumns(columns: List<String>) {
+    val locked = shippingHistoryLockedColumnKeys()
+    val allowed = shippingHistoryAllSelectableColumnKeys().toSet()
+    val merged = (locked.toList() + columns.filter { it in allowed }).distinct()
+    val ordered = shippingHistoryAllSelectableColumnKeys().filter { it in merged.toSet() }
+        .take(SHIPPING_HISTORY_MAX_DATA_COLUMNS)
+    val finalCols = if (ordered.size < locked.size) shippingHistoryDefaultColumnKeys() else ordered
+    safeLocalStorageSet(SHIPPING_HISTORY_COLUMNS_STORAGE_KEY, JSON.stringify(finalCols.toTypedArray()))
+}
+
+/** Non-bookingId columns shown in table body / cards. */
+private fun shippingHistoryDisplayColumnKeys(): List<String> =
+    getSelectedShippingHistoryColumns().filter { it != "bookingId" }
+
+private fun shippingHistoryShowsBookingIdColumn(): Boolean =
+    "bookingId" in getSelectedShippingHistoryColumns()
+
 private fun shippingHistorySearchColumnKeys(): List<String> =
-    listOf("id", "createdAt") + shippingHistoryDisplayColumnKeys()
+    listOf("id", "createdAt") + shippingHistoryAllSelectableColumnKeys()
 
 private fun shippingHistoryColumnLabel(key: String): String = when (key) {
     "country" -> "Country"
     "consignee" -> "Consignee"
+    "notifyParty" -> "Notify party"
+    "inTransitClause" -> "In-Transit Clause"
     "shipmentDate" -> "Shipment date"
+    "cyCutDate" -> "CY CUT"
+    "eta" -> "ETA"
     "pol" -> "POL"
     "pod" -> "POD"
+    "finalDestination" -> "Final Destination"
     "bookingId" -> "Booking ID"
     "vessel" -> "Vessel"
     "carrier" -> "Carrier"
@@ -2129,9 +2304,14 @@ private fun shippingHistoryRawField(row: dynamic, key: String): String {
         "id" -> d.id
         "country" -> d.country
         "consignee" -> d.consignee
+        "notifyParty" -> d.notifyParty
+        "inTransitClause" -> d.inTransitClause
         "shipmentDate" -> d.shipmentDate
+        "cyCutDate" -> d.cyCutDate
+        "eta" -> d.eta
         "pol" -> d.pol
         "pod" -> d.pod
+        "finalDestination" -> d.finalDestination
         "bookingId" -> d.bookingId
         "vessel" -> d.vessel
         "carrier" -> d.carrier
@@ -2154,9 +2334,14 @@ private fun shippingHistoryCell(row: dynamic, key: String): String {
         "id" -> d.id
         "country" -> d.country
         "consignee" -> d.consignee
+        "notifyParty" -> d.notifyParty
+        "inTransitClause" -> d.inTransitClause
         "shipmentDate" -> d.shipmentDate
+        "cyCutDate" -> d.cyCutDate
+        "eta" -> d.eta
         "pol" -> d.pol
         "pod" -> d.pod
+        "finalDestination" -> d.finalDestination
         "bookingId" -> d.bookingId
         "vessel" -> d.vessel
         "carrier" -> d.carrier
@@ -2289,16 +2474,68 @@ private fun toggleShippingHistorySort(field: String) {
     renderShippingHistoryTableFromCache()
 }
 
+private fun appendShippingHistoryPager(html: StringBuilder) {
+    if (!shippingHistoryServerMode) return
+    val totalPages = kotlin.math.max(1, shippingHistoryTotalPages)
+    val currentPage = shippingHistoryPageZeroBased + 1
+    if (totalPages <= 1 && shippingHistoryTotalElements <= shippingHistoryItemsPerPage) return
+    val prevDisabled = if (currentPage <= 1) "disabled" else ""
+    val nextDisabled = if (currentPage >= totalPages) "disabled" else ""
+    val prevStyle = if (currentPage <= 1) "#ccc" else "#007bff"
+    val nextStyle = if (currentPage >= totalPages) "#ccc" else "#007bff"
+    val prevCursor = if (currentPage <= 1) "not-allowed" else "pointer"
+    val nextCursor = if (currentPage >= totalPages) "not-allowed" else "pointer"
+    html.append(
+        """
+        <div id="shippingHistoryPager" style="display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;">
+            <div style="color:#6b7280;font-size:14px;">Page $currentPage of $totalPages · $shippingHistoryTotalElements row(s)</div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <button type="button" id="shippingHistoryPrevPage" $prevDisabled style="padding:8px 16px;background-color:$prevStyle;color:white;border:none;border-radius:4px;cursor:$prevCursor;">Previous</button>
+                <span style="color:#374151;font-size:14px;">Page $currentPage of $totalPages</span>
+                <button type="button" id="shippingHistoryNextPage" $nextDisabled style="padding:8px 16px;background-color:$nextStyle;color:white;border:none;border-radius:4px;cursor:$nextCursor;">Next</button>
+            </div>
+        </div>
+        """
+    )
+}
+
+private fun wireShippingHistoryPager() {
+    document.getElementById("shippingHistoryPrevPage")?.addEventListener("click", { _: Event ->
+        if (shippingHistoryPageZeroBased > 0) loadShippingHistory(shippingHistoryPageZeroBased - 1)
+    })
+    document.getElementById("shippingHistoryNextPage")?.addEventListener("click", { _: Event ->
+        if (shippingHistoryPageZeroBased + 1 < shippingHistoryTotalPages) {
+            loadShippingHistory(shippingHistoryPageZeroBased + 1)
+        }
+    })
+}
+
 private fun renderShippingHistoryTableFromCache() {
     val tableHost = document.getElementById("shippingHistoryTable") ?: return
-    val q = (document.getElementById("shippingHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    val q = if (shippingHistoryServerMode) {
+        shippingHistoryActiveSearchQ
+    } else {
+        (document.getElementById("shippingHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    }
 
     if (shippingHistoryCachedRows.isEmpty()) {
-        tableHost.innerHTML = """<div class="shipping-history-empty"><strong>No history yet</strong><div>No shipping history records yet.</div></div>"""
+        val emptyHtml = if (q.isNotEmpty()) {
+            """<div class="shipping-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
+        } else {
+            """<div class="shipping-history-empty"><strong>No history yet</strong><div>No shipping history records yet.</div></div>"""
+        }
+        val html = StringBuilder(emptyHtml)
+        appendShippingHistoryPager(html)
+        tableHost.innerHTML = html.toString()
+        wireShippingHistoryPager()
         return
     }
 
-    val rowList = shippingHistoryCachedRows.filter { shippingHistoryRowMatchesQuery(it, q) }.toList()
+    val rowList = if (shippingHistoryServerMode) {
+        shippingHistoryCachedRows.toList()
+    } else {
+        shippingHistoryCachedRows.filter { shippingHistoryRowMatchesQuery(it, q) }.toList()
+    }
 
     if (rowList.isEmpty()) {
         tableHost.innerHTML = """<div class="shipping-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
@@ -2318,7 +2555,8 @@ private fun renderShippingHistoryTableFromCache() {
     val html = StringBuilder()
 
     if (!compact) {
-        val colCountShip = 5 + shippingHistoryDisplayColumnKeys().size
+        val bookingCol = if (shippingHistoryShowsBookingIdColumn()) 1 else 0
+        val colCountShip = 4 + bookingCol + shippingHistoryDisplayColumnKeys().size
         html.append(
             """<div class="shipping-history-table-shell"><table class="purchase-list-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">""" +
                 htmlTableColgroupMultipleNarrowActionsEqualRest(colCountShip, 56, 56, 56, 64) +
@@ -2330,8 +2568,7 @@ private fun renderShippingHistoryTableFromCache() {
         html.append(
             """<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;" title="Invoice created status">Invoice Created</th>"""
         )
-        run {
-            val key = "bookingId"
+        fun appendSortableHeader(key: String) {
             val label = escapeHtml(shippingHistoryColumnLabel(key))
             val isActive = shippingHistorySortField == key
             val sortOrder = if (isActive) shippingHistorySortOrder else "desc"
@@ -2351,25 +2588,11 @@ private fun renderShippingHistoryTableFromCache() {
                 """
             )
         }
+        if (shippingHistoryShowsBookingIdColumn()) {
+            appendSortableHeader("bookingId")
+        }
         for (key in shippingHistoryDisplayColumnKeys()) {
-            val label = escapeHtml(shippingHistoryColumnLabel(key))
-            val isActive = shippingHistorySortField == key
-            val sortOrder = if (isActive) shippingHistorySortOrder else "desc"
-            val tooltipRaw = when {
-                !isActive -> "Sort by ${shippingHistoryColumnLabel(key)}"
-                sortOrder == "asc" -> "Sorted ascending (click for descending)"
-                else -> "Sorted descending (click for ascending)"
-            }
-            val tooltip = escapeHtml(tooltipRaw)
-            html.append(
-                """
-                <th style="padding:12px;text-align:left;border-bottom:1px solid #dee2e6;">
-                    <button type="button" data-shipping-sort="$key" title="$tooltip" style="background:none;border:none;cursor:pointer;font-weight:700;color:#0f172a;padding:0;display:inline-flex;align-items:center;gap:6px;">
-                        <span>$label</span><span style="font-size:14px;color:#64748b;">↕</span>
-                    </button>
-                </th>
-                """
-            )
+            appendSortableHeader(key)
         }
         html.append("</tr></thead><tbody id='shippingHistoryTableBody'>")
         for (gRows in groups) {
@@ -2384,7 +2607,9 @@ private fun renderShippingHistoryTableFromCache() {
         html.append("</div>")
     }
 
+    appendShippingHistoryPager(html)
     tableHost.innerHTML = html.toString()
+    wireShippingHistoryPager()
 }
 
 
@@ -2520,6 +2745,106 @@ fun exportPurchasesToExcel() {
     }
 }
 
+private fun showShippingHistoryColumnFilterModal() {
+    document.getElementById("shippingHistoryColumnFilterModal")?.remove()
+
+    val modal = document.createElement("div")
+    modal.id = "shippingHistoryColumnFilterModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); z-index: 10000;
+        display: flex; align-items: center; justify-content: center;
+    """
+
+    val selected = getSelectedShippingHistoryColumns().toSet()
+    val locked = shippingHistoryLockedColumnKeys()
+
+    modal.innerHTML = """
+        <div style="background: white; border-radius: 8px; padding: 24px; max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 style="margin: 0; color: #333;">Select Columns to Display</h3>
+                <button type="button" id="closeShippingHistoryColumnFilter" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">&times;</button>
+            </div>
+            <p style="margin: 0 0 8px 0; color: #64748b; font-size: 13px;">Max $SHIPPING_HISTORY_MAX_DATA_COLUMNS data columns. Booking ID, Country, and Chassis are always on. Action buttons are always visible.</p>
+            <p id="shippingHistoryColumnCount" style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: #0f172a;"></p>
+            <div id="shippingHistoryColumnCheckboxes" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;"></div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" id="resetShippingHistoryColumns" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Reset to Default</button>
+                <button type="button" id="applyShippingHistoryColumns" style="padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Apply Changes</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    fun updateCountAndLocks() {
+        val boxes = document.querySelectorAll("#shippingHistoryColumnCheckboxes input[type=checkbox]")
+        var count = 0
+        for (i in 0 until boxes.length) {
+            val el = boxes.item(i) as? HTMLInputElement ?: continue
+            if (el.checked) count++
+        }
+        document.getElementById("shippingHistoryColumnCount")?.textContent =
+            "Selected: $count / $SHIPPING_HISTORY_MAX_DATA_COLUMNS"
+        for (i in 0 until boxes.length) {
+            val el = boxes.item(i) as? HTMLInputElement ?: continue
+            val key = el.getAttribute("data-column") ?: continue
+            if (key in locked) {
+                el.checked = true
+                el.disabled = true
+                continue
+            }
+            el.disabled = !el.checked && count >= SHIPPING_HISTORY_MAX_DATA_COLUMNS
+        }
+    }
+
+    val checkboxesDiv = document.getElementById("shippingHistoryColumnCheckboxes")
+    for (key in shippingHistoryAllSelectableColumnKeys()) {
+        val row = document.createElement("div")
+        row.asDynamic().style.cssText = "display:flex;align-items:center;gap:8px;"
+        val input = document.createElement("input") as HTMLInputElement
+        input.type = "checkbox"
+        input.id = "shippingHistCol_$key"
+        input.setAttribute("data-column", key)
+        input.checked = key in selected || key in locked
+        if (key in locked) input.disabled = true
+        input.addEventListener("change", { _: Event -> updateCountAndLocks() })
+        val labelEl = document.createElement("label") as HTMLLabelElement
+        labelEl.htmlFor = "shippingHistCol_$key"
+        labelEl.textContent = shippingHistoryColumnLabel(key) + if (key in locked) " (always on)" else ""
+        labelEl.asDynamic().style.cssText = "cursor:pointer;margin:0;"
+        row.appendChild(input)
+        row.appendChild(labelEl)
+        checkboxesDiv?.appendChild(row)
+    }
+    updateCountAndLocks()
+
+    document.getElementById("closeShippingHistoryColumnFilter")?.addEventListener("click", { _: Event ->
+        modal.remove()
+    })
+    modal.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "shippingHistoryColumnFilterModal") modal.remove()
+    })
+    document.getElementById("resetShippingHistoryColumns")?.addEventListener("click", { _: Event ->
+        saveSelectedShippingHistoryColumns(shippingHistoryDefaultColumnKeys())
+        modal.remove()
+        renderShippingHistoryTableFromCache()
+    })
+    document.getElementById("applyShippingHistoryColumns")?.addEventListener("click", { _: Event ->
+        val boxes = document.querySelectorAll("#shippingHistoryColumnCheckboxes input[type=checkbox]")
+        val picked = mutableListOf<String>()
+        for (i in 0 until boxes.length) {
+            val el = boxes.item(i) as? HTMLInputElement ?: continue
+            if (el.checked) {
+                val key = el.getAttribute("data-column") ?: continue
+                picked.add(key)
+            }
+        }
+        saveSelectedShippingHistoryColumns(picked)
+        modal.remove()
+        renderShippingHistoryTableFromCache()
+    })
+}
+
 fun exportShippingHistoryToExcel() {
     val btn = document.getElementById("exportShippingHistoryExcelBtn") as? HTMLButtonElement
     val originalHtml = btn?.innerHTML
@@ -2569,24 +2894,61 @@ fun exportShippingHistoryToExcel() {
 
 fun loadPurchases() {
     if (!routeEquals("/purchase")) return
-    Logger.debug("loadPurchases function called")
-    val endpoint = "purchases"
+    Logger.debug("loadPurchases function called (server page)")
+    val returnPage = purchaseReturnPageFromEdit
+    val page0 = if (returnPage != null && returnPage > 0) (returnPage - 1).coerceAtLeast(0) else 0
+    loadPurchasesListPage(page0)
+}
+
+/**
+ * Unified loader: empty search → [GET /purchases/page], non-empty → [GET /purchases/page-search].
+ * Always server-paged (never downloads the full catalog for the list UI).
+ */
+fun loadPurchasesListPage(page0: Int) {
+    if (!routeEquals("/purchase")) return
+    val input = document.getElementById("purchaseSearchInput") as? HTMLInputElement
+    val qFromInput = input?.value?.trim().orEmpty()
+    val q = qFromInput.ifEmpty { purchaseSearchQuery.trim() }
+    if (q.isNotEmpty() && input != null && input.value.trim().isEmpty()) {
+        input.value = q
+    }
+    if (q.isNotEmpty()) {
+        loadPurchasesSearchPage(page0)
+        return
+    }
     val generation = purchaseListLoadGeneration
-    
+    val sortField = purchaseTableSortField
+    val order = purchaseTableSortOrderByField[sortField] ?: "desc"
+    val encSort = js("encodeURIComponent")(sortField).unsafeCast<String>()
+    val encOrder = js("encodeURIComponent")(order).unsafeCast<String>()
+    val endpoint = "purchases/page?page=$page0&size=$itemsPerPage&sort=$encSort&order=$encOrder"
     val scope = MainScope()
     scope.launch {
-        val result = ApiClient.get<Array<dynamic>>(endpoint)
+        val result = ApiClient.get<dynamic>(endpoint)
         result.fold(
-            onSuccess = { purchases ->
+            onSuccess = { body ->
                 if (generation != purchaseListLoadGeneration) return@fold
                 if (!routeEquals("/purchase")) return@fold
-                Logger.debug("Purchases data received: ${purchases.size} items")
-                displayPurchases(purchases)
+                if (body == null) {
+                    ErrorHandler.showError("Empty purchase page response")
+                    return@fold
+                }
+                val err = js("body.error")?.toString()?.trim()
+                if (!err.isNullOrEmpty()) {
+                    ErrorHandler.showError(err)
+                    return@fold
+                }
+                purchaseSearchQuery = ""
+                val restoring = restoringPurchaseListFromEdit
+                restoringPurchaseListFromEdit = false
+                displayPurchasesFromSearchPage(body)
+                if (restoring) restorePurchaseListFilterUi()
+                purchaseReturnPageFromEdit = null
             },
             onError = { message, status ->
                 if (generation != purchaseListLoadGeneration) return@fold
                 if (!routeEquals("/purchase")) return@fold
-                Logger.error("API call failed: $message (status: $status)")
+                Logger.error("Purchase page API failed: $message (status: $status)")
                 ErrorHandler.showError("Failed to load purchases: $message")
             }
         )
@@ -2993,12 +3355,20 @@ private fun showPurchaseAdvancedFilterModal() {
             val op = if (purchaseDateFields().contains(field)) "equals" else "contains"
             next.add(PurchaseAdvancedFilter(field = field, operator = op, value = v1))
         }
-        purchaseAdvancedFilters = next
         panel.style.display = "none"
         (document.getElementById("purchaseSearchFilterBtn") as? HTMLElement)?.setAttribute("aria-expanded", "false")
-        updatePurchaseFilterBadge()
-        refreshPurchaseRowsFromBase(resetPage = true)
-        showMessage("${purchaseAdvancedFilters.size} filter(s) applied", "success")
+        if (purchaseSearchServerMode) {
+            updatePurchaseFilterBadge()
+            showMessage(
+                "Advanced filters across the full database aren’t available with paged lists yet. Use the search box for now.",
+                "info",
+            )
+        } else {
+            purchaseAdvancedFilters = next
+            updatePurchaseFilterBadge()
+            refreshPurchaseRowsFromBase(resetPage = true)
+            showMessage("${purchaseAdvancedFilters.size} filter(s) applied", "success")
+        }
     })
     document.getElementById("purchaseAdvFilterClear")?.addEventListener("click", { _: Event ->
         purchaseAdvancedFilters.clear()
@@ -3008,7 +3378,11 @@ private fun showPurchaseAdvancedFilterModal() {
         updatePurchaseFilterBadge()
         renderFilterRows()
         updatePurchaseFilterResultCount()
-        refreshPurchaseRowsFromBase(resetPage = true)
+        if (purchaseSearchServerMode) {
+            loadPurchasesListPage(0)
+        } else {
+            refreshPurchaseRowsFromBase(resetPage = true)
+        }
         showMessage("All filters cleared", "info")
     })
     document.getElementById("purchaseAdvFilterClose")?.addEventListener("click", { _: Event ->
@@ -3050,6 +3424,8 @@ fun displayPurchasesFromSearchPage(body: dynamic) {
     } catch (_: dynamic) {
         emptyArray()
     }
+    // Current page only — used for edit lookup / view on this page.
+    purchaseBaseRows = allPurchases
     displayPurchasesWithPagination()
 }
 
@@ -3057,21 +3433,27 @@ fun loadPurchasesSearchPage(page0: Int) {
     val input = document.getElementById("purchaseSearchInput") as? HTMLInputElement
     val q = input?.value?.trim() ?: ""
     if (q.length == 0) {
-        purchaseSearchServerMode = false
-        purchaseSearchServerTotal = 0
-        purchaseSearchServerTotalPages = 0
-        loadPurchases()
+        loadPurchasesListPage(page0)
         return
     }
+    purchaseSearchQuery = q
+    val generation = purchaseListLoadGeneration
     val scope = MainScope()
     scope.launch {
         val field = purchaseSearchFieldChoice
         val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
         val encF = js("encodeURIComponent")(field).unsafeCast<String>()
-        val endpoint = "purchases/page-search?q=$encQ&field=$encF&page=$page0&size=$itemsPerPage"
+        val sortField = purchaseTableSortField
+        val order = purchaseTableSortOrderByField[sortField] ?: "desc"
+        val encSort = js("encodeURIComponent")(sortField).unsafeCast<String>()
+        val encOrder = js("encodeURIComponent")(order).unsafeCast<String>()
+        val endpoint =
+            "purchases/page-search?q=$encQ&field=$encF&page=$page0&size=$itemsPerPage&sort=$encSort&order=$encOrder"
         val result = ApiClient.get<dynamic>(endpoint)
         result.fold(
             onSuccess = { body ->
+                if (generation != purchaseListLoadGeneration) return@fold
+                if (!routeEquals("/purchase")) return@fold
                 if (body == null) {
                     ErrorHandler.showError("Empty search response")
                     return@fold
@@ -3081,9 +3463,14 @@ fun loadPurchasesSearchPage(page0: Int) {
                     ErrorHandler.showError(err)
                     return@fold
                 }
+                val restoring = restoringPurchaseListFromEdit
+                restoringPurchaseListFromEdit = false
                 displayPurchasesFromSearchPage(body)
+                if (restoring) restorePurchaseListFilterUi()
+                purchaseReturnPageFromEdit = null
             },
             onError = { message, status ->
+                if (generation != purchaseListLoadGeneration) return@fold
                 Logger.error("Search API failed: $message ($status)")
                 ErrorHandler.showError("Search failed: $message")
             }
@@ -3106,10 +3493,7 @@ private fun runPurchaseSearchFromInput() {
     val input = document.getElementById("purchaseSearchInput") as? HTMLInputElement
     val raw = input?.value?.trim() ?: ""
     purchaseSearchQuery = raw
-    purchaseSearchServerMode = false
-    purchaseSearchServerTotal = 0
-    purchaseSearchServerTotalPages = 0
-    refreshPurchaseRowsFromBase(resetPage = true)
+    loadPurchasesListPage(0)
 }
 
 fun setupPurchaseSearchBarListeners() {
@@ -3434,7 +3818,7 @@ fun displayPurchasesWithPagination() {
     """)
     
     // Add pagination controls
-    val suffix = if (purchaseSearchServerMode) " (search results)" else ""
+    val suffix = if (purchaseSearchServerMode && purchaseSearchQuery.isNotBlank()) " (search results)" else ""
     if (purchaseSearchServerMode || totalPages > 1) {
         tableHTML.append("""
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding: 10px;">
@@ -3474,7 +3858,7 @@ fun displayPurchasesWithPagination() {
     document.getElementById("prevPageBtn")?.addEventListener("click", { _: Event ->
         if (purchaseSearchServerMode) {
             if (purchaseSearchServerPageZeroBased > 0) {
-                loadPurchasesSearchPage(purchaseSearchServerPageZeroBased - 1)
+                loadPurchasesListPage(purchaseSearchServerPageZeroBased - 1)
             }
         } else if (currentPage > 1) {
             currentPage--
@@ -3486,7 +3870,7 @@ fun displayPurchasesWithPagination() {
         if (purchaseSearchServerMode) {
             val tp = kotlin.math.max(1, purchaseSearchServerTotalPages)
             if (purchaseSearchServerPageZeroBased < tp - 1) {
-                loadPurchasesSearchPage(purchaseSearchServerPageZeroBased + 1)
+                loadPurchasesListPage(purchaseSearchServerPageZeroBased + 1)
             }
         } else {
         val totalPages = kotlin.math.ceil(allPurchases.size.toDouble() / itemsPerPage).toInt()
@@ -3584,7 +3968,7 @@ fun displayPurchasesAsCards() {
     
     cardsHTML.append("</div>")
     
-    val suffixM = if (purchaseSearchServerMode) " (search)" else ""
+    val suffixM = if (purchaseSearchServerMode && purchaseSearchQuery.isNotBlank()) " (search)" else ""
     if (purchaseSearchServerMode || totalPages > 1) {
         cardsHTML.append("""
             <div class="pagination-controls">
@@ -3613,7 +3997,7 @@ fun displayPurchasesAsCards() {
     document.getElementById("prevPageBtn")?.addEventListener("click", { _: Event ->
         if (purchaseSearchServerMode) {
             if (purchaseSearchServerPageZeroBased > 0) {
-                loadPurchasesSearchPage(purchaseSearchServerPageZeroBased - 1)
+                loadPurchasesListPage(purchaseSearchServerPageZeroBased - 1)
             }
         } else if (currentPage > 1) {
             currentPage--
@@ -3625,7 +4009,7 @@ fun displayPurchasesAsCards() {
         if (purchaseSearchServerMode) {
             val tp = kotlin.math.max(1, purchaseSearchServerTotalPages)
             if (purchaseSearchServerPageZeroBased < tp - 1) {
-                loadPurchasesSearchPage(purchaseSearchServerPageZeroBased + 1)
+                loadPurchasesListPage(purchaseSearchServerPageZeroBased + 1)
             }
         } else {
         val totalPages = kotlin.math.ceil(allPurchases.size.toDouble() / itemsPerPage).toInt()
