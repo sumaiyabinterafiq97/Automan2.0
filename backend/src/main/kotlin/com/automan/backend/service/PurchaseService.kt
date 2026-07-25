@@ -238,8 +238,19 @@ class PurchaseService(
                     .distinctBy { it.id }
             }
             targetDate != null -> {
-                // Best-effort: date column often stores ISO or labeled strings containing yyyy-MM-dd.
-                purchaseRepository.findByDateContainingIgnoreCase(targetDate.toString())
+                // Match ISO or weekday labels (e.g. "June 29, 2026 (Monday)") via parse,
+                // same equality as getDistinctPurchaseDatesIso / Purchase List date filters.
+                // ISO LIKE alone misses labeled dates and empties Rixo company + cars.
+                val matchingIds = filterIdDatePairsByRange(
+                    purchaseRepository.findIdAndDateAll(),
+                    targetDate,
+                    targetDate,
+                )
+                if (matchingIds.isEmpty()) {
+                    emptyList()
+                } else {
+                    purchaseRepository.findAllById(matchingIds).toList()
+                }
             }
             else -> purchaseRepository.findAll()
         }

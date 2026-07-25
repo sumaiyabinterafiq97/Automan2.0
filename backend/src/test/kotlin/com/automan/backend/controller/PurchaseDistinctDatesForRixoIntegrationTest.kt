@@ -1,6 +1,7 @@
 package com.automan.backend.controller
 
 import com.automan.backend.model.Purchase
+import com.automan.backend.model.WorkflowStatus
 import com.automan.backend.repository.PurchaseRepository
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -40,39 +41,40 @@ class PurchaseDistinctDatesForRixoIntegrationTest {
 
     @Test
     fun `GET distinct-purchase-dates only returns dates with pending rixo requested`() {
+        // Pending = workflow_status null or PURCHASED (rixoRequested is @Transient).
         purchaseRepository.save(
             Purchase(
                 chassis = "PEND-001",
                 date = "July 10, 2026 (Friday)",
-                rixoRequested = "0",
+                workflowStatus = WorkflowStatus.PURCHASED,
             ),
         )
         purchaseRepository.save(
             Purchase(
                 chassis = "PEND-002",
                 date = "July 10, 2026 (Friday)",
-                rixoRequested = "",
+                workflowStatus = WorkflowStatus.PURCHASED,
             ),
         )
         purchaseRepository.save(
             Purchase(
                 chassis = "DONE-001",
                 date = "July 4, 2026 (Saturday)",
-                rixoRequested = "TRUE",
+                workflowStatus = WorkflowStatus.RIXO_REQUESTED,
             ),
         )
         purchaseRepository.save(
             Purchase(
                 chassis = "DONE-002",
                 date = "July 4, 2026 (Saturday)",
-                rixoRequested = "1",
+                workflowStatus = WorkflowStatus.RIXO_REQUESTED,
             ),
         )
         purchaseRepository.save(
             Purchase(
                 chassis = "PEND-003",
                 date = "June 27, 2026 (Saturday)",
-                rixoRequested = null,
+                workflowStatus = null,
             ),
         )
 
@@ -86,7 +88,7 @@ class PurchaseDistinctDatesForRixoIntegrationTest {
         )
 
         assertTrue(dates.contains("2026-07-10"), "pending date should be included: $dates")
-        assertTrue(dates.contains("2026-06-27"), "null rixo_requested date should be included: $dates")
+        assertTrue(dates.contains("2026-06-27"), "null workflow_status date should be included: $dates")
         assertFalse(dates.contains("2026-07-04"), "fully requested date must be excluded: $dates")
         assertEquals(listOf("2026-07-10", "2026-06-27"), dates)
     }
