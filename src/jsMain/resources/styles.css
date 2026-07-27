@@ -4403,18 +4403,23 @@ button.invoice-history-pdf-btn:disabled {
     gap: 30px;
     min-height: 600px;
     align-items: stretch;
+    min-width: 0;
 }
 
-/* Left Section: Booking Details */
+/* Left Section: Booking Details — capped so long Notify/In-transit cannot steal table space */
 .booking-details-section {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 50%;
     padding-right: 20px;
     border-right: 2px solid #e5e7eb;
+    overflow-x: hidden;
 }
 
 /* Right Section: Chassis List */
 .booking-list-section {
-    flex: 1;
+    flex: 1 1 0;
+    min-width: 0;
     padding-left: 20px;
     display: flex;
     flex-direction: column;
@@ -4610,6 +4615,38 @@ button.invoice-history-pdf-btn:disabled {
 }
 .booking-details-section .rixo-fab-trigger {
     background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    max-width: 100%;
+    align-items: flex-start;
+}
+
+/* Long Notify party / In-transit values wrap inside the Booking column only */
+.booking-details-section .rixo-fab-trigger-label {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.35;
+}
+
+.booking-details-section .rixo-fab-trigger-text-wrap {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.booking-details-section .rixo-fab-action-label {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.35;
+}
+
+.booking-details-section .booking-fab-field.rixo-company-fab-wrap,
+.booking-details-section .rixo-company-fab {
+    max-width: 100%;
+    min-width: 0;
 }
 
 .rixo-fab-trigger {
@@ -5156,6 +5193,9 @@ button.invoice-history-pdf-btn:disabled {
     
     /* Booking Details as its own card on mobile */
     .booking-details-section {
+        flex: 1 1 auto;
+        max-width: none;
+        min-width: 0;
         padding: 16px;
         border-right: none;
         border-bottom: none;
@@ -5163,10 +5203,14 @@ button.invoice-history-pdf-btn:disabled {
         border-radius: 12px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         border: 1px solid #e5e7eb;
+        overflow-x: hidden;
     }
     
     /* LIST as its own card on mobile */
     .booking-list-section {
+        flex: 1 1 auto;
+        max-width: none;
+        min-width: 0;
         padding: 16px;
         background: white;
         border-radius: 12px;
@@ -5374,11 +5418,15 @@ button.invoice-history-pdf-btn:disabled {
     }
     
     .booking-details-section {
+        flex: 1 1 auto;
+        max-width: none;
         padding-right: 0;
         border-right: none;
     }
     
     .booking-list-section {
+        flex: 1 1 auto;
+        max-width: none;
         padding-left: 0;
     }
     
@@ -9818,11 +9866,15 @@ input.client-form-readonly:read-only {
     }
 
     .booking-details-section {
+        flex: 1 1 auto;
+        max-width: none;
         padding-right: 0;
         border-right: none;
     }
 
     .booking-list-section {
+        flex: 1 1 auto;
+        max-width: none;
         padding-left: 0;
     }
 }
