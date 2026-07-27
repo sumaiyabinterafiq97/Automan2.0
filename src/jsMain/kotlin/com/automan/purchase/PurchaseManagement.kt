@@ -83,6 +83,9 @@ private var shippingHistorySortField: String = "bookingId"
 private var shippingHistorySortOrder: String = "desc"
 private var shippingHistoryResizeDebounceHandle: Int? = null
 private var shippingHistorySearchDebounceHandle: Int? = null
+private var shippingHistoryLastCompactLayout: Boolean? = null
+private var shippingHistoryColumnFilterKeyHandler: ((Event) -> Unit)? = null
+private var shippingHistoryInvoiceAlreadyCreatedKeyHandler: ((Event) -> Unit)? = null
 private var shippingHistoryServerMode: Boolean = true
 private var shippingHistoryPageZeroBased: Int = 0
 private var shippingHistoryTotalPages: Int = 1
@@ -91,6 +94,10 @@ private var shippingHistoryItemsPerPage: Int = AppConstants.DEFAULT_ITEMS_PER_PA
 private var shippingHistoryActiveSearchQ: String = ""
 
 private const val SHIPPING_HISTORY_COMPACT_MAX_WIDTH_PX = 860
+private const val PURCHASE_LIST_COMPACT_MAX_WIDTH_PX = 860
+private var purchaseListResizeDebounceHandle: Int? = null
+private var purchaseListLastCompactLayout: Boolean? = null
+internal var columnFilterModalKeyHandler: ((Event) -> Unit)? = null
 
 private val purchaseColumnCategories: Map<String, List<String>> = linkedMapOf(
     "📅 Date Fields" to listOf("date", "shipmentDate", "paymentDate", "carModelYear"),
@@ -875,9 +882,9 @@ private fun purchaseDateQuickFilterMenuPortalHtml(): String = """
 private fun purchaseDateQuickFilterHeaderCellHtml(label: String): String {
     val sortOrder = purchaseTableSortOrderByField["date"] ?: "desc"
     val sortTooltip = if (sortOrder == "asc") {
-        "Sorted A-Z (click to sort Z-A)"
+        "Sorted oldest to newest (click for newest first)"
     } else {
-        "Sorted Z-A (click to sort A-Z)"
+        "Sorted newest to oldest (click for oldest first)"
     }
     return """
     <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
@@ -1246,6 +1253,7 @@ private fun handlePurchaseViewButtonClick(btn: HTMLElement) {
 /** Read-only Vehicle Summary modal (Purchase List eye icon). */
 fun showVehicleSummaryModal(purchase: dynamic) {
     document.getElementById("vehicleSummaryModal")?.remove()
+    closeCarPictureLightbox()
 
     fun cell(label: String, value: String): String {
         val v = if (value.isBlank()) "—" else escapeHtml(value)
@@ -1290,26 +1298,41 @@ fun showVehicleSummaryModal(purchase: dynamic) {
             <div style="padding:20px 22px 24px;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px 16px;">
                 $gridHtml
             </div>
+            <div style="padding:0 22px 24px;">
+                <h3 style="margin:0 0 12px 0;font-size:13px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.04em;border-top:1px solid #e5e7eb;padding-top:16px;">Car Pictures</h3>
+                <div id="vehicleSummaryPictures"
+                     style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;"></div>
+            </div>
         </div>
     """.trimIndent()
 
     document.body?.appendChild(modal)
 
     val closeModal = {
+        closeCarPictureLightbox()
+        document.removeEventListener("keydown", ::handleVehicleSummaryEscape)
         document.getElementById("vehicleSummaryModal")?.remove()
     }
     document.getElementById("closeVehicleSummaryModal")?.addEventListener("click", { _: Event -> closeModal() })
     modal.addEventListener("click", { event ->
         if (event.target == modal) closeModal()
     })
-    fun handleEscape(event: Event) {
-        val keyEvent = event.asDynamic()
-        if (keyEvent.key == "Escape") {
-            closeModal()
-            document.removeEventListener("keydown", ::handleEscape)
-        }
+    document.addEventListener("keydown", ::handleVehicleSummaryEscape)
+
+    loadVehicleSummaryCarPictures(purchase, "vehicleSummaryPictures")
+}
+
+private fun handleVehicleSummaryEscape(event: Event) {
+    val keyEvent = event.asDynamic()
+    if (keyEvent.key != "Escape") return
+    // Lightbox sits above the summary; Escape should close it first.
+    if (document.getElementById("carPictureLightbox") != null) {
+        closeCarPictureLightbox()
+        return
     }
-    document.addEventListener("keydown", ::handleEscape)
+    closeCarPictureLightbox()
+    document.removeEventListener("keydown", ::handleVehicleSummaryEscape)
+    document.getElementById("vehicleSummaryModal")?.remove()
 }
 
 /** One-shot purchase id used if chassis lookup fails after navigating to /edit/{chassis}. */
@@ -1350,6 +1373,39 @@ private fun handlePurchaseEditButtonClick(btn: HTMLElement) {
     }
 }
 
+private fun purchaseListIsCompactLayout(): Boolean {
+    val w = window.innerWidth
+    return w > 0 && w <= PURCHASE_LIST_COMPACT_MAX_WIDTH_PX
+}
+
+private fun purchaseListEmptyHtml(title: String, detail: String): String =
+    """<div class="purchase-list-empty"><strong>${escapeHtml(title)}</strong><div>${escapeHtml(detail)}</div></div>"""
+
+private fun setupPurchaseListCompactResizeListener() {
+    if (document.getElementById("purchaseList") == null) return
+    purchaseListLastCompactLayout = purchaseListIsCompactLayout()
+
+    val existing = window.asDynamic().__purchaseListCompactResizeListener
+    if (existing != null) {
+        window.removeEventListener("resize", existing.unsafeCast<(Event) -> Unit>())
+    }
+
+    val resizeListener: (Event) -> Unit = { _: Event ->
+        val prev = purchaseListResizeDebounceHandle
+        if (prev != null) window.clearTimeout(prev)
+        purchaseListResizeDebounceHandle = window.setTimeout({
+            if (document.getElementById("purchaseList") == null) return@setTimeout
+            val compact = purchaseListIsCompactLayout()
+            if (purchaseListLastCompactLayout != compact) {
+                purchaseListLastCompactLayout = compact
+                displayPurchasesWithPagination()
+            }
+        }, 120)
+    }
+    window.asDynamic().__purchaseListCompactResizeListener = resizeListener
+    window.addEventListener("resize", resizeListener)
+}
+
 fun showPurchaseList(forceClearFilters: Boolean = false) {
     val preserveFilters = !forceClearFilters && preservePurchaseListFiltersOnNextShow
     preservePurchaseListFiltersOnNextShow = false
@@ -1361,63 +1417,101 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
     
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        
-        <div id="purchaseList" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; background: #fafbfc;">
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 20px;">
-                <h2 style="margin: 0;">Purchase List</h2>
-                <style>
-                    #purchaseList .purchase-search-filter-opt:hover { background: #f3f4f6 !important; }
-                    #purchaseList .purchase-search-filter-opt--active { background: #eef2ff !important; font-weight: 600; }
-                    #purchaseList .purchase-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-                    #purchaseList #purchaseSearchFilterBtn:hover { background: #e8eaed !important; box-shadow: 0 2px 8px rgba(0,0,0,0.08) !important; }
-                    #purchaseList #purchaseSearchFilterBtn:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
-                </style>
-                <div style="display: flex; flex-direction: column; align-items: stretch; gap: 10px; flex: 1; min-width: 0; max-width: 640px;">
-                    <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
-                        <div style="position: relative; flex: 1; display: flex; align-items: center; min-width: 0; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: all .3s ease;">
-                            <span style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; color: #9ca3af; display: flex;" aria-hidden="true">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                            </span>
-                            <input type="text" id="purchaseSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search by chassis, brand, supplier…" aria-label="Search purchases" style="width: 100%; box-sizing: border-box; padding: 12px 40px 12px 44px; border: none; font-size: 14px; background: transparent; border-radius: 999px; outline: none; transition: all .2s ease;" />
-                            <button type="button" id="purchaseSearchClearBtn" title="Clear search" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: #9ca3af; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; border-radius: 8px; transition: all .2s ease;">×</button>
-                        </div>
-                        <div style="position: relative; flex-shrink: 0;">
-                            <span id="purchaseSearchFieldLabel" class="purchase-sr-only" aria-live="polite">All fields</span>
-                            <button type="button" id="purchaseSearchFilterBtn" title="Filter columns" aria-haspopup="true" aria-expanded="false" aria-label="Open filter columns panel." style="width: 48px; height: 48px; border-radius: 50%; border: 1px solid #e5e7eb; background: #f3f4f6; box-shadow: 0 1px 3px rgba(0,0,0,0.06); cursor: pointer; display: flex; align-items: center; justify-content: center; color: #4b5563; padding: 0; flex-shrink: 0; position: relative; transition: all .2s ease;">
-                                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                    <line x1="3" y1="7" x2="21" y2="7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
-                                    <circle cx="8" cy="7" r="2.25" fill="currentColor"/>
-                                    <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
-                                    <circle cx="16" cy="12" r="2.25" fill="currentColor"/>
-                                    <line x1="3" y1="17" x2="21" y2="17" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
-                                    <circle cx="7" cy="17" r="2.25" fill="currentColor"/>
-                                </svg>
-                                <span id="purchaseFilterBadge" style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;width:20px;height:20px;display:none;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.1);">0</span>
-                            </button>
-                        </div>
+        <style>
+            #purchaseList{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:20px;}
+            .purchase-list-toolbar{
+                display:grid;
+                grid-template-columns:1fr;
+                grid-template-areas:"title" "search" "actions";
+                gap:12px;
+                margin-bottom:16px;
+                align-items:center;
+            }
+            .purchase-list-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;grid-area:title;text-align:center;}
+            .purchase-list-search-row{grid-area:search;display:flex;align-items:center;gap:10px;width:100%;min-width:0;}
+            .purchase-search{position:relative;flex:1;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
+            .purchase-search input{width:100%;box-sizing:border-box;padding:11px 36px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
+            .purchase-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;border-radius:8px;}
+            .purchase-search-clear:hover{background:#f3f4f6;color:#111827;}
+            .purchase-list-actions{grid-area:actions;display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;}
+            .purchase-export-btn{padding:8px 16px;background-color:#198754;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap;}
+            .purchase-export-btn:disabled{opacity:0.7;cursor:not-allowed;}
+            .purchase-column-filter-btn,.purchase-adv-filter-btn{
+                width:48px;height:48px;min-width:48px;min-height:48px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;
+                cursor:pointer;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.06);
+                color:#4b5563;padding:0;position:relative;flex-shrink:0;
+            }
+            .purchase-column-filter-btn:hover,.purchase-adv-filter-btn:hover{background:#e8eaed;box-shadow:0 2px 8px rgba(0,0,0,0.08);}
+            .purchase-column-filter-btn:focus-visible,.purchase-adv-filter-btn:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
+            .purchase-list-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
+            .purchase-list-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+            .purchase-list-empty strong{color:#0f172a;}
+            .purchase-list-pager{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-top:20px;padding:10px;}
+            .purchase-list-pager-btns{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+            .purchase-list-pager-btn{padding:8px 16px;background-color:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;min-height:40px;}
+            .purchase-list-pager-btn:disabled,.purchase-list-pager-btn.is-disabled{background-color:#ccc;cursor:not-allowed;}
+            #purchaseList .purchase-search-filter-opt:hover{background:#f3f4f6 !important;}
+            #purchaseList .purchase-search-filter-opt--active{background:#eef2ff !important;font-weight:600;}
+            #purchaseList .purchase-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+            @media (max-width:1024px){
+                #purchaseList{padding:14px;border-radius:14px;}
+                .purchase-list-toolbar{gap:14px;margin-bottom:14px;}
+                .purchase-list-title{font-size:17px;}
+                .purchase-search input{font-size:13px;padding:10px 34px 10px 38px;}
+                .purchase-list-actions{justify-self:end;}
+            }
+            @media (min-width:1025px){
+                .purchase-list-toolbar{
+                    grid-template-columns:auto 1fr minmax(220px,32%) auto;
+                    grid-template-areas:"title . search actions";
+                    column-gap:12px;
+                    row-gap:0;
+                }
+                .purchase-list-title{text-align:left;justify-self:start;}
+            }
+        </style>
+        <div id="purchaseList">
+            <div class="purchase-list-toolbar">
+                <h2 class="purchase-list-title">Purchase List</h2>
+                <div class="purchase-list-search-row">
+                    <div class="purchase-search">
+                        <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af;display:flex;" aria-hidden="true">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                        </span>
+                        <input type="text" id="purchaseSearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search by chassis, brand, supplier…" aria-label="Search purchases" />
+                        <button type="button" id="purchaseSearchClearBtn" class="purchase-search-clear" title="Clear search" aria-label="Clear search">×</button>
                     </div>
+                    <span id="purchaseSearchFieldLabel" class="purchase-sr-only" aria-live="polite">All fields</span>
+                    <button type="button" id="purchaseSearchFilterBtn" class="purchase-adv-filter-btn" title="Filter columns" aria-haspopup="true" aria-expanded="false" aria-label="Open filter columns panel.">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <line x1="3" y1="7" x2="21" y2="7" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                            <circle cx="8" cy="7" r="2.25" fill="currentColor"/>
+                            <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                            <circle cx="16" cy="12" r="2.25" fill="currentColor"/>
+                            <line x1="3" y1="17" x2="21" y2="17" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                            <circle cx="7" cy="17" r="2.25" fill="currentColor"/>
+                        </svg>
+                        <span id="purchaseFilterBadge" style="position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;border-radius:50%;width:20px;height:20px;display:none;align-items:center;justify-content:center;font-size:11px;font-weight:700;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,0.1);">0</span>
+                    </button>
                 </div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <button id="exportPurchasesExcelBtn" style="padding: 8px 16px; background-color: #198754; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
+                <div class="purchase-list-actions">
+                    <button type="button" id="columnFilterBtn" class="purchase-column-filter-btn" title="Column filter" aria-label="Column filter">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                    <button type="button" id="exportPurchasesExcelBtn" class="purchase-export-btn" title="Export purchases to Excel">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
                             <path d="M14 2v6h6M8 13h8M8 17h8M8 9h2" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
                         </svg>
                         Export Excel
                     </button>
-                    <button id="columnFilterBtn" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
-                        </svg>
-                        Column Filter
-                    </button>
                 </div>
             </div>
-            <div id="purchaseAdvancedFilterDropdown" style="display:none; margin-top: -6px; margin-bottom: 14px; border: none; border-radius: 12px; background:#fff; box-shadow: 0 10px 30px rgba(0,0,0,0.08);"></div>
-            <div id="purchaseTable" style="margin-top: 20px;">
-                <div style="text-align: center; color: #666; padding: 40px;">
-                    Loading purchases...
-                </div>
+            <div id="purchaseAdvancedFilterDropdown" style="display:none;margin-bottom:14px;border:none;border-radius:12px;background:#fff;box-shadow:0 10px 30px rgba(0,0,0,0.08);"></div>
+            <div id="purchaseTable">
+                ${purchaseListEmptyHtml("Loading", "Loading purchases…")}
             </div>
         </div>
     """
@@ -1434,6 +1528,7 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
     
     // Setup window resize listener for device change detection
     setupDeviceChangeListener()
+    setupPurchaseListCompactResizeListener()
     
     // Hamburger button listener is set up by ensureSidebarPresent()
     
@@ -1493,12 +1588,24 @@ fun showShippingHistoryPage() {
             .shipping-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;}
             .shipping-search-clear:hover{background:#f3f4f6;color:#111827;}
             .shipping-history-actions{grid-area:actions;display:flex;justify-content:flex-end;align-items:center;gap:10px;}
+            .shipping-column-filter-btn{
+                width:48px;height:48px;min-width:48px;min-height:48px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;
+                cursor:pointer;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.06);padding:0;color:#4b5563;
+            }
+            .shipping-column-filter-btn:hover{background:#e8eaed;box-shadow:0 2px 8px rgba(0,0,0,0.08);}
+            .shipping-column-filter-btn:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
             .shipping-export-btn{padding:8px 16px;background-color:#198754;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap;}
             .shipping-export-btn:disabled{opacity:0.7;cursor:not-allowed;}
             .shipping-history-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
-            table.purchase-list-table thead th{position:sticky;top:0;z-index:1;}
+            table.purchase-list-table thead th{position:sticky;top:0;z-index:10;}
             .shipping-history-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
             .shipping-history-empty strong{color:#0f172a;}
+            .shipping-history-pager{display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;}
+            .shipping-history-pager-meta{color:#6b7280;font-size:14px;}
+            .shipping-history-pager-btns{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+            .shipping-history-pager-btn{padding:8px 16px;background-color:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;min-height:40px;font-size:14px;}
+            .shipping-history-pager-btn:disabled,.shipping-history-pager-btn.is-disabled{background-color:#ccc;cursor:not-allowed;}
+            .shipping-history-pager-page{color:#374151;font-size:14px;padding:0 8px;}
             .shipping-cards{display:flex;flex-direction:column;gap:10px;}
             .shipping-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
             .shipping-card-top{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:10px;}
@@ -1535,8 +1642,7 @@ fun showShippingHistoryPage() {
                     <button type="button" id="shippingHistorySearchClearBtn" class="shipping-search-clear" title="Clear search" aria-label="Clear search">×</button>
                 </div>
                 <div class="shipping-history-actions">
-                    <button type="button" id="shippingHistoryColumnFilterBtn" title="Column filter" aria-label="Column filter"
-                            style="width:48px;height:48px;min-width:48px;min-height:48px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.06);">
+                    <button type="button" id="shippingHistoryColumnFilterBtn" class="shipping-column-filter-btn" title="Column filter" aria-label="Column filter">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
                         </svg>
@@ -1567,7 +1673,6 @@ fun showShippingHistoryPage() {
     })
     document.getElementById("shippingHistorySearchClearBtn")?.addEventListener("click", { _: Event ->
         searchInput?.value = ""
-        shippingHistoryActiveSearchQ = ""
         shippingHistoryPageZeroBased = 0
         loadShippingHistory(0)
     })
@@ -1691,27 +1796,50 @@ private fun shippingHistoryGroupIsFullyInvoiced(gRows: List<dynamic>): Boolean {
 private fun showShippingHistoryInvoiceAlreadyCreatedModal() {
     val modalId = "shippingInvoiceAlreadyCreatedModal"
     document.getElementById(modalId)?.remove()
+    shippingHistoryInvoiceAlreadyCreatedKeyHandler?.let { document.removeEventListener("keydown", it) }
+    shippingHistoryInvoiceAlreadyCreatedKeyHandler = null
+
+    val returnFocus = document.activeElement as? HTMLElement
     val overlay = document.createElement("div") as org.w3c.dom.HTMLDivElement
     overlay.id = modalId
     overlay.style.cssText =
-        "position:fixed;inset:0;background:rgba(0,0,0,0.50);z-index:99999;display:flex;align-items:center;justify-content:center;"
+        "position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:10020;display:flex;align-items:center;justify-content:center;padding:16px;"
     overlay.innerHTML = """
         <div role="dialog" aria-labelledby="shippingInvoiceAlreadyCreatedTitle" aria-modal="true"
-            style="background:#fff;border-radius:14px;padding:32px 40px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.18);max-width:400px;width:calc(100% - 32px);">
+            style="background:#fff;border-radius:14px;padding:32px 40px;text-align:center;box-shadow:0 20px 50px rgba(15,23,42,0.28);max-width:400px;width:calc(100% - 32px);">
             <div id="shippingInvoiceAlreadyCreatedTitle" style="font-size:22px;font-weight:700;color:#111827;margin-bottom:20px;">Invoice Already Created</div>
             <button type="button" id="shippingInvoiceAlreadyCreatedOkBtn"
-                style="padding:10px 28px;border:none;border-radius:8px;background:#0f766e;color:#fff;font-weight:600;font-size:15px;cursor:pointer;">OK</button>
+                style="padding:10px 28px;border:none;border-radius:8px;background:#0f766e;color:#fff;font-weight:600;font-size:15px;cursor:pointer;min-height:40px;">OK</button>
         </div>
     """.trimIndent()
+
+    fun closeModal() {
+        shippingHistoryInvoiceAlreadyCreatedKeyHandler?.let { document.removeEventListener("keydown", it) }
+        shippingHistoryInvoiceAlreadyCreatedKeyHandler = null
+        overlay.remove()
+        returnFocus?.focus()
+    }
+
     overlay.addEventListener("click", { e: Event ->
-        if (e.target === overlay) overlay.remove()
+        if (e.target === overlay) closeModal()
     })
     document.body?.appendChild(overlay)
     val card = overlay.firstElementChild
     card?.addEventListener("click", { e: Event -> e.stopPropagation() })
     document.getElementById("shippingInvoiceAlreadyCreatedOkBtn")?.addEventListener("click", { _: Event ->
-        overlay.remove()
+        closeModal()
     })
+
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    shippingHistoryInvoiceAlreadyCreatedKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    (document.getElementById("shippingInvoiceAlreadyCreatedOkBtn") as? HTMLElement)?.focus()
 }
 
 private fun shippingHistoryInvoiceButtonHtml(sortedIdsCsv: String): String {
@@ -2023,17 +2151,28 @@ private fun shippingHistoryIsCompactLayout(): Boolean {
 }
 
 private fun setupShippingHistoryResizeListener() {
-    val page = document.getElementById("shippingHistoryPage") ?: return
-    if (page.hasAttribute("data-shipping-history-resize")) return
-    page.setAttribute("data-shipping-history-resize", "true")
-    window.addEventListener("resize", { _: Event ->
+    if (document.getElementById("shippingHistoryPage") == null) return
+    shippingHistoryLastCompactLayout = shippingHistoryIsCompactLayout()
+
+    val existing = window.asDynamic().__shippingHistoryCompactResizeListener
+    if (existing != null) {
+        window.removeEventListener("resize", existing.unsafeCast<(Event) -> Unit>())
+    }
+
+    val resizeListener: (Event) -> Unit = { _: Event ->
         val prev = shippingHistoryResizeDebounceHandle
         if (prev != null) window.clearTimeout(prev)
         shippingHistoryResizeDebounceHandle = window.setTimeout({
             if (document.getElementById("shippingHistoryPage") == null) return@setTimeout
-            if (shippingHistoryCachedRows.isNotEmpty()) renderShippingHistoryTableFromCache()
+            val compact = shippingHistoryIsCompactLayout()
+            if (shippingHistoryLastCompactLayout != compact) {
+                shippingHistoryLastCompactLayout = compact
+                if (shippingHistoryCachedRows.isNotEmpty()) renderShippingHistoryTableFromCache()
+            }
         }, 120)
-    })
+    }
+    window.asDynamic().__shippingHistoryCompactResizeListener = resizeListener
+    window.addEventListener("resize", resizeListener)
 }
 
 private fun shippingHistoryInvoiceStatusCircleHtml(gRows: List<dynamic>): String {
@@ -2041,13 +2180,13 @@ private fun shippingHistoryInvoiceStatusCircleHtml(gRows: List<dynamic>): String
     val totalRows = gRows.size
     return when {
         totalRows == 0 ->
-            """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#f3f4f6;border:2px solid #d1d5db;" title="No rows"></span>"""
+            """<span role="img" aria-label="No rows" title="No rows" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#f3f4f6;border:2px solid #d1d5db;"></span>"""
         invoicedCount == totalRows ->
-            """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#d1fae5;border:2px solid #6ee7b7;" title="All chassis invoiced"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 13l4 4L19 7" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>"""
+            """<span role="img" aria-label="All chassis invoiced" title="All chassis invoiced" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#d1fae5;border:2px solid #6ee7b7;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M5 13l4 4L19 7" stroke="#059669" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>"""
         invoicedCount > 0 ->
-            """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#fef3c7;border:2px solid #fcd34d;" title="Partially invoiced ($invoicedCount/$totalRows)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 13l4 4L19 7" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>"""
+            """<span role="img" aria-label="Partially invoiced ($invoicedCount/$totalRows)" title="Partially invoiced ($invoicedCount/$totalRows)" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#fef3c7;border:2px solid #fcd34d;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M5 13l4 4L19 7" stroke="#d97706" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>"""
         else ->
-            """<span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#f9fafb;border:2px solid #e5e7eb;" title="Not invoiced"></span>"""
+            """<span role="img" aria-label="Not invoiced" title="Not invoiced" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#f9fafb;border:2px solid #e5e7eb;"></span>"""
     }
 }
 
@@ -2480,20 +2619,16 @@ private fun appendShippingHistoryPager(html: StringBuilder) {
     val totalPages = kotlin.math.max(1, shippingHistoryTotalPages)
     val currentPage = shippingHistoryPageZeroBased + 1
     if (totalPages <= 1 && shippingHistoryTotalElements <= shippingHistoryItemsPerPage) return
-    val prevDisabled = if (currentPage <= 1) "disabled" else ""
-    val nextDisabled = if (currentPage >= totalPages) "disabled" else ""
-    val prevStyle = if (currentPage <= 1) "#ccc" else "#007bff"
-    val nextStyle = if (currentPage >= totalPages) "#ccc" else "#007bff"
-    val prevCursor = if (currentPage <= 1) "not-allowed" else "pointer"
-    val nextCursor = if (currentPage >= totalPages) "not-allowed" else "pointer"
+    val prevDisabled = currentPage <= 1
+    val nextDisabled = currentPage >= totalPages
     html.append(
         """
-        <div id="shippingHistoryPager" style="display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;">
-            <div style="color:#6b7280;font-size:14px;">Page $currentPage of $totalPages · $shippingHistoryTotalElements row(s)</div>
-            <div style="display:flex;align-items:center;gap:8px;">
-                <button type="button" id="shippingHistoryPrevPage" $prevDisabled style="padding:8px 16px;background-color:$prevStyle;color:white;border:none;border-radius:4px;cursor:$prevCursor;">Previous</button>
-                <span style="color:#374151;font-size:14px;">Page $currentPage of $totalPages</span>
-                <button type="button" id="shippingHistoryNextPage" $nextDisabled style="padding:8px 16px;background-color:$nextStyle;color:white;border:none;border-radius:4px;cursor:$nextCursor;">Next</button>
+        <div id="shippingHistoryPager" class="shipping-history-pager">
+            <div class="shipping-history-pager-meta">Page $currentPage of $totalPages · $shippingHistoryTotalElements row(s)</div>
+            <div class="shipping-history-pager-btns">
+                <button type="button" id="shippingHistoryPrevPage" class="shipping-history-pager-btn${if (prevDisabled) " is-disabled" else ""}" ${if (prevDisabled) "disabled" else ""}>Previous</button>
+                <span class="shipping-history-pager-page">Page $currentPage of $totalPages</span>
+                <button type="button" id="shippingHistoryNextPage" class="shipping-history-pager-btn${if (nextDisabled) " is-disabled" else ""}" ${if (nextDisabled) "disabled" else ""}>Next</button>
             </div>
         </div>
         """
@@ -2553,6 +2688,7 @@ private fun renderShippingHistoryTableFromCache() {
         }
 
     val compact = shippingHistoryIsCompactLayout()
+    shippingHistoryLastCompactLayout = compact
     val html = StringBuilder()
 
     if (!compact) {
@@ -2748,34 +2884,45 @@ fun exportPurchasesToExcel() {
 
 private fun showShippingHistoryColumnFilterModal() {
     document.getElementById("shippingHistoryColumnFilterModal")?.remove()
+    shippingHistoryColumnFilterKeyHandler?.let { document.removeEventListener("keydown", it) }
+    shippingHistoryColumnFilterKeyHandler = null
 
+    val returnFocus = document.activeElement as? HTMLElement
     val modal = document.createElement("div")
     modal.id = "shippingHistoryColumnFilterModal"
     modal.asDynamic().style.cssText = """
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background-color: rgba(0,0,0,0.5); z-index: 10000;
-        display: flex; align-items: center; justify-content: center;
+        position: fixed; inset: 0;
+        background-color: rgba(15,23,42,0.45); z-index: 10000;
+        display: flex; align-items: center; justify-content: center; padding: 16px;
     """
 
     val selected = getSelectedShippingHistoryColumns().toSet()
     val locked = shippingHistoryLockedColumnKeys()
 
     modal.innerHTML = """
-        <div style="background: white; border-radius: 8px; padding: 24px; max-width: 520px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+        <div role="dialog" aria-modal="true" aria-labelledby="shippingHistoryColumnFilterTitle"
+             style="background: white; border-radius: 12px; padding: 24px; max-width: 520px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.2);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-                <h3 style="margin: 0; color: #333;">Select Columns to Display</h3>
-                <button type="button" id="closeShippingHistoryColumnFilter" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #666;">&times;</button>
+                <h3 id="shippingHistoryColumnFilterTitle" style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 700;">Select Columns to Display</h3>
+                <button type="button" id="closeShippingHistoryColumnFilter" aria-label="Close" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 4px 8px; line-height: 1; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center;">&times;</button>
             </div>
             <p style="margin: 0 0 8px 0; color: #64748b; font-size: 13px;">Max $SHIPPING_HISTORY_MAX_DATA_COLUMNS data columns. Booking ID, Country, and Chassis are always on. Action buttons are always visible.</p>
             <p id="shippingHistoryColumnCount" style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: #0f172a;"></p>
             <div id="shippingHistoryColumnCheckboxes" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;"></div>
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button type="button" id="resetShippingHistoryColumns" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Reset to Default</button>
-                <button type="button" id="applyShippingHistoryColumns" style="padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Apply Changes</button>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+                <button type="button" id="resetShippingHistoryColumns" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; min-height: 40px;">Reset to Default</button>
+                <button type="button" id="applyShippingHistoryColumns" style="padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; min-height: 40px;">Apply Changes</button>
             </div>
         </div>
     """
     document.body?.appendChild(modal)
+
+    fun closeModal() {
+        shippingHistoryColumnFilterKeyHandler?.let { document.removeEventListener("keydown", it) }
+        shippingHistoryColumnFilterKeyHandler = null
+        modal.remove()
+        returnFocus?.focus()
+    }
 
     fun updateCountAndLocks() {
         val boxes = document.querySelectorAll("#shippingHistoryColumnCheckboxes input[type=checkbox]")
@@ -2820,14 +2967,14 @@ private fun showShippingHistoryColumnFilterModal() {
     updateCountAndLocks()
 
     document.getElementById("closeShippingHistoryColumnFilter")?.addEventListener("click", { _: Event ->
-        modal.remove()
+        closeModal()
     })
     modal.addEventListener("click", { event: Event ->
-        if ((event.target as? HTMLElement)?.id == "shippingHistoryColumnFilterModal") modal.remove()
+        if ((event.target as? HTMLElement)?.id == "shippingHistoryColumnFilterModal") closeModal()
     })
     document.getElementById("resetShippingHistoryColumns")?.addEventListener("click", { _: Event ->
         saveSelectedShippingHistoryColumns(shippingHistoryDefaultColumnKeys())
-        modal.remove()
+        closeModal()
         renderShippingHistoryTableFromCache()
     })
     document.getElementById("applyShippingHistoryColumns")?.addEventListener("click", { _: Event ->
@@ -2841,9 +2988,20 @@ private fun showShippingHistoryColumnFilterModal() {
             }
         }
         saveSelectedShippingHistoryColumns(picked)
-        modal.remove()
+        closeModal()
         renderShippingHistoryTableFromCache()
     })
+
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    shippingHistoryColumnFilterKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    (document.getElementById("closeShippingHistoryColumnFilter") as? HTMLElement)?.focus()
 }
 
 fun exportShippingHistoryToExcel() {
@@ -3749,10 +3907,10 @@ private fun computePurchaseListViewSlice(): PurchaseListViewSlice {
 fun displayPurchasesWithPagination() {
     if (!routeEquals("/purchase")) return
     val table = document.getElementById("purchaseTable") ?: return
-    val deviceType = getDeviceType()
-    
-    // Use card layout for mobile, table for tablet/desktop
-    if (deviceType == "mobile") {
+    purchaseListLastCompactLayout = purchaseListIsCompactLayout()
+
+    // Cards on compact viewports (≤860); table on larger screens
+    if (purchaseListIsCompactLayout()) {
         displayPurchasesAsCards()
         return
     }
@@ -3765,7 +3923,7 @@ fun displayPurchasesWithPagination() {
     
     val tableHTML = StringBuilder()
         val emptyColCount = selectedColumns.size
-        tableHTML.append("""<div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);"><table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupEqualWidth(emptyColCount)}""")
+        tableHTML.append("""<div class="purchase-list-table-shell"><table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupEqualWidth(emptyColCount)}""")
         tableHTML.append("<thead><tr>")
         
         for (columnKey in selectedColumns) {
@@ -3795,12 +3953,13 @@ fun displayPurchasesWithPagination() {
         }
         
         tableHTML.append("</tr></thead>")
-        val emptyRowMsg = if (purchaseSearchServerMode) {
+        val emptyTitle = if (purchaseSearchServerMode) "No matches" else "No purchases yet"
+        val emptyDetail = if (purchaseSearchServerMode) {
             "No matching purchases for this search. Try another term or change the field filter (sliders button)."
         } else {
-            "No purchases found. Click the menu button (☰) in the top-left corner to add a purchase or import data."
+            "Click the menu button (☰) in the top-left corner to add a purchase or import data."
         }
-        tableHTML.append("<tbody><tr><td colspan=\"${selectedColumns.size + 2}\" style=\"text-align: center; padding: 40px; color: #666;\">$emptyRowMsg</td></tr></tbody>")
+        tableHTML.append("<tbody><tr><td colspan=\"${selectedColumns.size}\" style=\"padding:0;border:none;\">${purchaseListEmptyHtml(emptyTitle, emptyDetail)}</td></tr></tbody>")
         tableHTML.append("</table></div>")
         
         table.innerHTML = tableHTML.toString()
@@ -3829,7 +3988,7 @@ fun displayPurchasesWithPagination() {
     val tableHTML = StringBuilder()
     val purchaseColCount = 1 + selectedColumns.size
     tableHTML.append("""
-        <div style="overflow-x: auto; border-radius: 10px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+        <div class="purchase-list-table-shell">
         <table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupNarrowActionEqualRest(purchaseColCount, 88)}
             <thead>
                 <tr style="background-color: #f8f9fa;">
@@ -3915,19 +4074,21 @@ fun displayPurchasesWithPagination() {
     // Add pagination controls
     val suffix = if (purchaseSearchServerMode && purchaseSearchQuery.isNotBlank()) " (search results)" else ""
     if (purchaseSearchServerMode || totalPages > 1) {
+        val prevDisabled = currentPage == 1
+        val nextDisabled = currentPage == totalPages
         tableHTML.append("""
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px; padding: 10px;">
+            <div class="purchase-list-pager">
                 <div style="color: #666;">
                     Showing ${sl.displayFrom} to ${sl.displayTo} of ${sl.totalItems} purchases$suffix
                 </div>
-                <div style="display: flex; gap: 10px;">
-                    <button id="prevPageBtn" ${if (currentPage == 1) "disabled" else ""} style="padding: 8px 16px; background-color: ${if (currentPage == 1) "#ccc" else "#007bff"}; color: white; border: none; border-radius: 4px; cursor: ${if (currentPage == 1) "not-allowed" else "pointer"};">
+                <div class="purchase-list-pager-btns">
+                    <button type="button" id="prevPageBtn" class="purchase-list-pager-btn${if (prevDisabled) " is-disabled" else ""}" ${if (prevDisabled) "disabled" else ""}>
                         Previous
                     </button>
                     <span style="padding: 8px 16px; color: #666;">
                         Page $currentPage of $totalPages
                     </span>
-                    <button id="nextPageBtn" ${if (currentPage == totalPages) "disabled" else ""} style="padding: 8px 16px; background-color: ${if (currentPage == totalPages) "#ccc" else "#007bff"}; color: white; border: none; border-radius: 4px; cursor: ${if (currentPage == totalPages) "not-allowed" else "pointer"};">
+                    <button type="button" id="nextPageBtn" class="purchase-list-pager-btn${if (nextDisabled) " is-disabled" else ""}" ${if (nextDisabled) "disabled" else ""}>
                         Next
                     </button>
                 </div>
@@ -3984,16 +4145,13 @@ fun displayPurchasesAsCards() {
     val table = document.getElementById("purchaseTable")!!
     
     if (allPurchases.isEmpty()) {
-        val emptyMsg = if (purchaseSearchServerMode) {
+        val emptyTitle = if (purchaseSearchServerMode) "No matches" else "No purchases yet"
+        val emptyDetail = if (purchaseSearchServerMode) {
             "No matching purchases for this search. Try another term or change the field filter."
         } else {
-            "No purchases found. Click the menu button (☰) in the top-left corner to add a purchase or import data."
+            "Click the menu button (☰) in the top-left corner to add a purchase or import data."
         }
-        table.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                $emptyMsg
-            </div>
-        """
+        table.innerHTML = purchaseListEmptyHtml(emptyTitle, emptyDetail)
         return
     }
     
@@ -4194,14 +4352,16 @@ fun setupColumnSorting() {
 
 fun showColumnFilterModal() {
     // Remove existing modal if any
-    document.getElementById("columnFilterModal")?.remove()
+    closeColumnFilterModal()
+
+    val returnFocus = document.activeElement as? HTMLElement
     
     val modal = document.createElement("div")
     modal.id = "columnFilterModal"
     modal.asDynamic().style.cssText = """
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-        background-color: rgba(0,0,0,0.5); z-index: 10000; 
-        display: flex; align-items: center; justify-content: center;
+        position: fixed; inset: 0; 
+        background-color: rgba(15,23,42,0.45); z-index: 10000; 
+        display: flex; align-items: center; justify-content: center; padding: 16px;
     """
     
     // Get current device type and limits
@@ -4217,26 +4377,32 @@ fun showColumnFilterModal() {
     val selectedColumns = selectedColumnsList.toSet()
     
     modal.innerHTML = """
-        <div style="background: white; border-radius: 8px; padding: 24px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+        <div role="dialog" aria-modal="true" aria-labelledby="columnFilterTitle"
+             style="background: white; border-radius: 12px; padding: 24px; max-width: 500px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.2);">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; position: relative;">
-                <h3 style="margin: 0; color: #333; flex: 1;">Select Columns to Display</h3>
-                <button id="closeColumnFilter" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 4px 8px; line-height: 1; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">&times;</button>
+                <h3 id="columnFilterTitle" style="margin: 0; color: #0f172a; flex: 1; font-size: 18px; font-weight: 700;">Select Columns to Display</h3>
+                <button type="button" id="closeColumnFilter" aria-label="Close" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 4px 8px; line-height: 1; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">&times;</button>
             </div>
-            <div style="margin-bottom: 16px; padding: 12px; background-color: #f8f9fa; border-radius: 4px; border-left: 4px solid #007bff;">
-                <strong>$deviceDisplayName - Maximum $maxColumns columns allowed</strong><br>
+            <div style="margin-bottom: 16px; padding: 12px; background-color: #f8fafc; border-radius: 8px; border-left: 4px solid #007bff;">
+                <strong>$deviceDisplayName — Maximum $maxColumns columns allowed</strong><br>
                 <span style="color: #666; font-size: 14px;">Purchase Date and Chassis are always on. Selected total: <span id="selectedCount">0</span></span>
             </div>
             <div id="columnCheckboxes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
                 <!-- Column checkboxes will be populated here -->
             </div>
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button id="resetColumns" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">Reset to Default</button>
-                <button id="applyColumns" style="padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">Apply Changes</button>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+                <button type="button" id="resetColumns" class="btn-secondary" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; min-height: 40px;">Reset to Default</button>
+                <button type="button" id="applyColumns" class="btn-primary" style="padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; min-height: 40px;">Apply Changes</button>
             </div>
         </div>
     """
     
     document.body?.appendChild(modal)
+
+    fun closeModal() {
+        closeColumnFilterModal()
+        returnFocus?.focus()
+    }
     
     // Populate column checkboxes (using function from MinimalPurchaseApp.kt)
     populateColumnCheckboxes(selectedColumns)
@@ -4246,22 +4412,35 @@ fun showColumnFilterModal() {
     
     // Add event listeners
     document.getElementById("closeColumnFilter")?.addEventListener("click", { _: Event ->
-        closeColumnFilterModal()
+        closeModal()
     })
     document.getElementById("resetColumns")?.addEventListener("click", { _: Event ->
         resetToDefaultColumns()
     })
     document.getElementById("applyColumns")?.addEventListener("click", { _: Event ->
         applyColumnChanges()
+        returnFocus?.focus()
     })
     
     // Close modal when clicking outside
     modal.addEventListener("click", { event: Event ->
         val target = event.target as? HTMLElement
         if (target?.id == "columnFilterModal") {
-            closeColumnFilterModal()
+            closeModal()
         }
     })
+
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    columnFilterModalKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+
+    (document.getElementById("closeColumnFilter") as? HTMLElement)?.focus()
 }
 
 // External variables (defined in MinimalPurchaseApp.kt or shared state)

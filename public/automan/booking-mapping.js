@@ -105,35 +105,115 @@ function getUniqueConsignees(mappings) {
 }
 
 /**
- * Autofill Notify party + In-Transit Clause textareas from Consignee Map row(s) for [name].
+ * Split mapping field on `;` only (Notify / In-Transit). Commas and newlines stay inside one option.
+ */
+function getUniqueSemicolonTokens(mappings, fieldName) {
+  const values = [];
+  const seen = {};
+  (mappings || []).forEach(function(m) {
+    const raw = (m && m[fieldName] != null) ? String(m[fieldName]) : '';
+    raw.split(';').forEach(function(part) {
+      const s = (part || '').trim();
+      if (!s) return;
+      const key = s.toUpperCase();
+      if (!seen[key]) {
+        seen[key] = true;
+        values.push(s);
+      }
+    });
+  });
+  return values;
+}
+
+/**
+ * Ensure #fieldId is a <select>, fill options from tokens, optionally preserve current value, then FAB-wrap.
+ */
+function populateBookingSemicolonSelect(fieldId, tokens, preserveCurrent, ensureFabFn, defaultLabel, emptyMessage, hintText) {
+  var el = document.getElementById(fieldId);
+  if (!el) return;
+
+  var currentValue = (preserveCurrent !== false && el.value) ? String(el.value).trim() : '';
+
+  var select = el;
+  if (el.tagName !== 'SELECT') {
+    select = document.createElement('select');
+    select.id = fieldId;
+    select.name = el.name || fieldId;
+    select.className = el.className || '';
+    if (el.parentNode) {
+      el.parentNode.replaceChild(select, el);
+    }
+  }
+
+  select.innerHTML = '<option value="">' + (defaultLabel || 'Select') + '</option>';
+  (tokens || []).forEach(function(tok) {
+    var option = document.createElement('option');
+    option.value = tok;
+    option.textContent = tok;
+    select.appendChild(option);
+  });
+
+  if (currentValue) {
+    var exists = Array.from(select.options).some(function(opt) { return opt.value === currentValue; });
+    if (!exists) {
+      var custom = document.createElement('option');
+      custom.value = currentValue;
+      custom.textContent = currentValue;
+      select.appendChild(custom);
+    }
+    select.value = currentValue;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (tokens && tokens.length > 0 && !select.value) {
+    select.value = tokens[0];
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  if (typeof ensureFabFn === 'function') {
+    ensureFabFn();
+  }
+}
+
+/**
+ * Autofill Notify party + In-Transit Clause dropdowns from Consignee Map row(s) for [name].
+ * Options are `;`-split tokens; booking stores one selected string (like POD).
  * @param {string} consigneeName
- * @param {boolean} [onlyIfEmpty=false] — when true, do not overwrite non-empty fields (country load / recreate).
+ * @param {boolean} [onlyIfEmpty=false] — when true, preserve non-empty current selection.
  */
 function applyConsigneeMapNotifyAndInTransit(consigneeName, onlyIfEmpty) {
   var mappings = window.__carBookingMappingsByCountry || [];
   var name = (consigneeName || '').trim();
-  var notifyEl = document.getElementById('notifyParty');
-  var inTransitEl = document.getElementById('inTransitClause');
-  if (!notifyEl && !inTransitEl) return;
+  var preserve = onlyIfEmpty === true;
+
   if (!name) {
-    if (!onlyIfEmpty) {
-      if (notifyEl) notifyEl.value = '';
-      if (inTransitEl) inTransitEl.value = '';
+    if (!preserve) {
+      populateBookingSemicolonSelect(
+        'notifyParty', [], false,
+        window.ensureBookingFabNotify,
+        'Select Notify party', 'No notify party for this consignee', 'Tap to choose notify party'
+      );
+      populateBookingSemicolonSelect(
+        'inTransitClause', [], false,
+        window.ensureBookingFabInTransit,
+        'Select In-transit clause', 'No in-transit clause for this consignee', 'Tap to choose clause'
+      );
     }
     return;
   }
+
   var sub = filterMappingsByConsigneeName(mappings, name);
-  var row = (sub && sub.length) ? sub[0] : null;
-  if (notifyEl) {
-    if (!onlyIfEmpty || !String(notifyEl.value || '').trim()) {
-      notifyEl.value = row && row.notifyParty != null ? String(row.notifyParty) : '';
-    }
-  }
-  if (inTransitEl) {
-    if (!onlyIfEmpty || !String(inTransitEl.value || '').trim()) {
-      inTransitEl.value = row && row.inTransitClause != null ? String(row.inTransitClause) : '';
-    }
-  }
+  var notifyTokens = getUniqueSemicolonTokens(sub, 'notifyParty');
+  var inTransitTokens = getUniqueSemicolonTokens(sub, 'inTransitClause');
+
+  populateBookingSemicolonSelect(
+    'notifyParty', notifyTokens, preserve,
+    window.ensureBookingFabNotify,
+    'Select Notify party', 'No notify party for this consignee', 'Tap to choose notify party'
+  );
+  populateBookingSemicolonSelect(
+    'inTransitClause', inTransitTokens, preserve,
+    window.ensureBookingFabInTransit,
+    'Select In-transit clause', 'No in-transit clause for this consignee', 'Tap to choose clause'
+  );
 }
 
 /**
@@ -446,13 +526,17 @@ window.applyBookingMappingsByCountry = async function(country) {
       legacyDisplay.innerHTML = '';
       legacyDisplay.style.display = 'none';
     }
+    if (typeof applyConsigneeMapNotifyAndInTransit === 'function') {
+      applyConsigneeMapNotifyAndInTransit('');
+    }
     refreshBookingMappingFabLabels();
     return;
   }
   
   console.log('🌍 Fetching booking mappings for country:', country);
   
-  const mappings = await window.fetchBookingMappingsByCountry(country);
+  // Always refresh so Notify / In-Transit match latest Consignee Map values
+  const mappings = await window.fetchBookingMappingsByCountry(country, true);
   console.log('📋 Found mappings:', mappings);
   
   if (mappings.length === 0) {
@@ -776,6 +860,89 @@ if (window.MutationObserver) {
       labelId: 'bookingPodFabLabel',
       defaultLabel: 'Select POD',
       emptyMessage: 'No POD for this consignee'
+    });
+  };
+
+  function ensureBookingFabForSelect(cfg) {
+    var sel = document.getElementById(cfg.selectId);
+    if (!sel || sel.tagName !== 'SELECT') return;
+
+    if (document.getElementById(cfg.wrapId)) {
+      window.registerBookingFabSelect(cfg);
+      return;
+    }
+
+    var parent = sel.parentNode;
+    if (!parent) return;
+    var wrap = document.createElement('div');
+    wrap.className = 'rixo-company-fab-wrap booking-fab-field';
+    wrap.id = cfg.wrapId;
+    var col = document.createElement('div');
+    col.className = 'rixo-company-fab';
+    var trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'rixo-fab-trigger';
+    trigger.id = cfg.triggerId;
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-controls', cfg.actionsId);
+    var tw = document.createElement('span');
+    tw.className = 'rixo-fab-trigger-text-wrap';
+    var lab = document.createElement('span');
+    lab.className = 'rixo-fab-trigger-label';
+    lab.id = cfg.labelId;
+    lab.textContent = cfg.defaultLabel || 'Select';
+    var hint = document.createElement('span');
+    hint.className = 'rixo-fab-trigger-hint';
+    hint.textContent = cfg.hint || 'Tap to choose';
+    tw.appendChild(lab);
+    tw.appendChild(hint);
+    var chev = document.createElement('span');
+    chev.className = 'rixo-fab-trigger-chevron';
+    chev.setAttribute('aria-hidden', 'true');
+    chev.textContent = '▼';
+    trigger.appendChild(tw);
+    trigger.appendChild(chev);
+    var actions = document.createElement('div');
+    actions.id = cfg.actionsId;
+    actions.className = 'rixo-fab-actions';
+    actions.style.display = 'none';
+    actions.setAttribute('role', 'listbox');
+    col.appendChild(trigger);
+    col.appendChild(actions);
+    parent.insertBefore(wrap, sel);
+    sel.className = 'rixo-company-fab-native-select';
+    sel.setAttribute('tabindex', '-1');
+    sel.setAttribute('aria-hidden', 'true');
+    wrap.appendChild(sel);
+    wrap.appendChild(col);
+
+    window.registerBookingFabSelect(cfg);
+  }
+
+  window.ensureBookingFabNotify = function() {
+    ensureBookingFabForSelect({
+      selectId: 'notifyParty',
+      wrapId: 'bookingNotifyFabWrap',
+      triggerId: 'bookingNotifyFabTrigger',
+      actionsId: 'bookingNotifyFabActions',
+      labelId: 'bookingNotifyFabLabel',
+      defaultLabel: 'Select Notify party',
+      emptyMessage: 'No notify party for this consignee',
+      hint: 'Tap to choose notify party'
+    });
+  };
+
+  window.ensureBookingFabInTransit = function() {
+    ensureBookingFabForSelect({
+      selectId: 'inTransitClause',
+      wrapId: 'bookingInTransitFabWrap',
+      triggerId: 'bookingInTransitFabTrigger',
+      actionsId: 'bookingInTransitFabActions',
+      labelId: 'bookingInTransitFabLabel',
+      defaultLabel: 'Select In-transit clause',
+      emptyMessage: 'No in-transit clause for this consignee',
+      hint: 'Tap to choose clause'
     });
   };
 })();

@@ -88,20 +88,8 @@ private fun rpmSortedCompanies(list: List<RixoPriceMapTreeRowLite>): List<String
         return when (rpmCompanySortOrder) {
             "asc" -> filtered.sortedBy { it.lowercase() }
             "desc" -> filtered.sortedByDescending { it.lowercase() }
-            else -> {
-                // Newest without row ids (roots-only): fall back to A-Z.
-                val withIds = filtered.map { name ->
-                    name to (list.filter { rpmNormCompany(it.company) == name }
-                        .maxOfOrNull { it.id.toLongOrNull() ?: 0L } ?: 0L)
-                }
-                if (withIds.all { it.second == 0L }) {
-                    filtered.sortedBy { it.lowercase() }
-                } else {
-                    withIds.sortedWith(
-                        compareByDescending<Pair<String, Long>> { it.second }.thenBy { it.first.lowercase() },
-                    ).map { it.first }
-                }
-            }
+            // Stable A–Z: do not re-rank by partially loaded branch row ids (keeps expand in place).
+            else -> filtered.sortedBy { it.lowercase() }
         }
     }
     val grouped = list.groupBy { rpmNormCompany(it.company) }

@@ -1,6 +1,7 @@
 package com.automan.purchase
 
 import kotlin.js.asDynamic
+import kotlin.js.unsafeCast
 import kotlinx.browser.document
 import kotlinx.browser.window
 import org.w3c.dom.*
@@ -27,6 +28,406 @@ var carBookingShippingRecreateRowIds: MutableList<Long> = mutableListOf()
 
 /** Uppercase chassis token → shipping_history row id (for remove-chassis). */
 var carBookingShippingRecreateChassisToHistoryId: MutableMap<String, Long> = mutableMapOf()
+
+// --- Booking LIST Column Filter (Rixo-style; Booking-scoped state) ---
+/** Fixed UI columns (not in filter): SELECT + NO. Data columns max 4 including chassis. */
+private const val BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS: Int = 4
+private const val BOOKING_MAX_NON_CHASSIS_COLUMNS: Int = BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS - 1
+
+private val bookingDefaultDataColumns: List<String> = listOf(
+    "chassis", "carName", "carModelYear", "stockLocation",
+)
+
+private var bookingSelectedDataColumns: MutableList<String> = mutableListOf()
+
+private fun bookingColumnStorageKey(): String = "bookingSelectedColumns"
+
+private fun bookingAvailableDataColumns(): List<String> =
+    purchaseListColumnLabels().keys
+        .filter { it != "id" && it != "createdAt" && it != "updatedAt" && it != "vesselNo" && it != "shaken" }
+
+private fun bookingColumnLabel(key: String): String = when (key) {
+    "chassis" -> "CHASSIS"
+    "carName" -> "NAME"
+    "carModelYear" -> "YEAR"
+    "stockLocation" -> "STOCK"
+    else -> (purchaseListColumnLabels()[key] ?: key).uppercase()
+}
+
+private fun normalizeBookingSelectedDataColumns(cols: List<String>): MutableList<String> {
+    val available = bookingAvailableDataColumns().toSet()
+    val dedup = linkedSetOf<String>()
+    cols.forEach { c ->
+        val k = c.trim()
+        if (k.isNotEmpty() && available.contains(k)) dedup.add(k)
+    }
+    dedup.remove("chassis")
+    val picked = dedup.toList().toMutableList()
+    while (picked.size > BOOKING_MAX_NON_CHASSIS_COLUMNS) {
+        picked.removeAt(picked.size - 1)
+    }
+    val ordered = mutableListOf("chassis")
+    ordered.addAll(picked.take(BOOKING_MAX_NON_CHASSIS_COLUMNS))
+    return ordered
+}
+
+private fun bookingResolvedDataColumns(): List<String> {
+    if (bookingSelectedDataColumns.isEmpty()) {
+        loadBookingSelectedColumnsFromStorage()
+    }
+    return normalizeBookingSelectedDataColumns(bookingSelectedDataColumns).toList()
+}
+
+private fun loadBookingSelectedColumnsFromStorage() {
+    val raw = safeLocalStorageGet(bookingColumnStorageKey())
+    if (raw.isNullOrBlank()) {
+        bookingSelectedDataColumns = normalizeBookingSelectedDataColumns(bookingDefaultDataColumns)
+        return
+    }
+    try {
+        val parsed = JSON.parse<Array<String>>(raw).toList()
+        val available = bookingAvailableDataColumns().toSet()
+        val chosen = parsed.filter { available.contains(it) }
+        bookingSelectedDataColumns =
+            if (chosen.isNotEmpty()) normalizeBookingSelectedDataColumns(chosen)
+            else normalizeBookingSelectedDataColumns(bookingDefaultDataColumns)
+    } catch (_: dynamic) {
+        bookingSelectedDataColumns = normalizeBookingSelectedDataColumns(bookingDefaultDataColumns)
+    }
+}
+
+private fun saveBookingSelectedColumnsToStorage() {
+    bookingSelectedDataColumns = normalizeBookingSelectedDataColumns(bookingSelectedDataColumns)
+    safeLocalStorageSet(bookingColumnStorageKey(), JSON.stringify(bookingSelectedDataColumns.toTypedArray()))
+}
+
+private fun bookingListCellDisplayValue(purchase: dynamic, columnKey: String): String {
+    return when (columnKey) {
+        "carName" -> {
+            val n = purchase.carName?.toString()?.trim().orEmpty()
+            if (n.isEmpty()) "N/A" else n
+        }
+        "carModelYear" -> carModelYearToYearOnly(purchase.carModelYear?.toString())
+        "stockLocation" -> {
+            val stockRaw = (purchase.stockLocation ?: purchase.stock_location ?: "").toString()
+            firstSemicolonToken(stockRaw)
+        }
+        else -> purchaseTableCellValue(purchase, columnKey)
+    }
+}
+
+private fun bookingListSelectHeaderHtml(isRecreateMode: Boolean): String =
+    if (isRecreateMode) {
+        "<th class=\"booking-th-select\"></th>"
+    } else {
+        """<th class="booking-th-select">
+            <input type="checkbox" id="selectAllCars" class="booking-select-all-cb" aria-label="Select all"> SELECT
+        </th>"""
+    }
+
+private fun paintBookingListTableHeader(forceRecreateMode: Boolean? = null) {
+    val theadRow = document.querySelector("#carSelectionTableHeadRow") as? HTMLElement ?: return
+    val isRecreateMode = forceRecreateMode ?: isCarBookingRecreateSession()
+    val dataCols = bookingResolvedDataColumns()
+    val dataTh = dataCols.joinToString("") { key ->
+        val cls = if (key == "carModelYear") " class=\"booking-col-year\"" else ""
+        "<th$cls>${escapeHtml(bookingColumnLabel(key))}</th>"
+    }
+    theadRow.innerHTML = """
+        ${bookingListSelectHeaderHtml(isRecreateMode)}
+        <th>NO.</th>
+        $dataTh
+    """.trimIndent()
+    // Re-bind select-all after header rebuild (new DOM node)
+    if (!isRecreateMode) {
+        document.getElementById("selectAllCars")?.addEventListener("change", { event: Event ->
+            val target = event.target as? HTMLInputElement
+            val isChecked = target?.checked ?: false
+            val tableBody = document.getElementById("carSelectionTableBody")
+            if (tableBody != null) {
+                val checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
+                for (i in 0 until checkboxes.length) {
+                    (checkboxes.item(i) as? HTMLInputElement)?.checked = isChecked
+                }
+            }
+            target?.indeterminate = false
+            updateBookingCarsSelectedCount()
+        })
+    }
+}
+
+private fun bookingListCheckedChassisSet(): Set<String> {
+    val out = mutableSetOf<String>()
+    val tableBody = document.getElementById("carSelectionTableBody") ?: return out
+    val checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
+    for (i in 0 until checkboxes.length) {
+        val cb = checkboxes.item(i) as? HTMLInputElement ?: continue
+        if (cb.checked) {
+            val ch = cb.getAttribute("data-chassis")?.trim().orEmpty()
+            if (ch.isNotEmpty()) out.add(ch)
+        }
+    }
+    return out
+}
+
+/** Full rebuild of LIST from [carBookingDisplayedCars] (used after Column Filter Apply). */
+private fun rebuildBookingListTableFromDisplayedCars(restoreCheckedChassis: Set<String>? = null) {
+    val checked = restoreCheckedChassis ?: bookingListCheckedChassisSet()
+    paintBookingListTableHeader()
+    val tbody = document.getElementById("carSelectionTableBody") as? HTMLElement ?: return
+    tbody.innerHTML = ""
+    val cars = carBookingDisplayedCars
+    for (i in cars.indices) {
+        appendBookingListRow(cars[i], i + 1)
+    }
+    if (!isCarBookingRecreateSession()) {
+        val checkboxes = tbody.querySelectorAll("input[type='checkbox'].car-checkbox")
+        for (i in 0 until checkboxes.length) {
+            val cb = checkboxes.item(i) as? HTMLInputElement ?: continue
+            val ch = cb.getAttribute("data-chassis")?.trim().orEmpty()
+            if (ch.isNotEmpty() && checked.contains(ch)) cb.checked = true
+        }
+    }
+    updateBookingCarsSelectedCount()
+    updateBookingSelectAllCheckbox()
+}
+
+private fun appendBookingListRow(purchase: dynamic, rowNumber: Int) {
+    val tbody = document.getElementById("carSelectionTableBody") as? HTMLElement ?: return
+    val chassisNumber = purchase.chassis?.toString() ?: "N/A"
+    val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
+    val chStr = chassisNumber
+    val chAttr = chStr.replace("&", "&amp;").replace("\"", "&quot;")
+    val historyId = carBookingShippingRecreateChassisToHistoryId[chStr.uppercase()] ?: 0L
+    val isSold = purchaseDynIsSold(purchase)
+    val selectCellHtml = if (isCarBookingRecreateSession()) {
+        if (isSold) {
+            bookingListSoldLockedHtml()
+        } else {
+            bookingListRemoveButtonHtml(purchaseId, chAttr, historyId)
+        }
+    } else {
+        """<input type="checkbox" class="car-checkbox" data-purchase-id="$purchaseId" data-chassis="$chAttr" aria-label="Select row">"""
+    }
+    val noChip = formatPurchaseListCellChipHtml(rowNumber.toString())
+    val dataCols = bookingResolvedDataColumns()
+    val dataTds = dataCols.joinToString("") { key ->
+        val raw = bookingListCellDisplayValue(purchase, key)
+        val chip = if (raw.isNotBlank()) formatPurchaseListCellChipHtml(raw) else ""
+        val yearCls = if (key == "carModelYear") " booking-col-year" else ""
+        val label = escapeHtml(bookingColumnLabel(key))
+        """<td class="booking-td$yearCls" data-label="$label">$chip</td>"""
+    }
+    val row = document.createElement("tr")
+    row.setAttribute("data-purchase-id", purchaseId.toString())
+    row.setAttribute("data-chassis", chStr)
+    if (isSold) row.setAttribute("data-sold", "true")
+    row.innerHTML = """
+        <td class="booking-td booking-td-select" data-label="Select">
+            $selectCellHtml
+        </td>
+        <td class="booking-td" data-label="No.">$noChip</td>
+        $dataTds
+    """
+    tbody.appendChild(row)
+}
+
+private fun showBookingColumnFilterModal() {
+    document.getElementById("bookingColumnFilterModal")?.remove()
+
+    val available = bookingAvailableDataColumns()
+    val selected = bookingResolvedDataColumns().toSet()
+    val checks = available.sortedBy { bookingColumnLabel(it).lowercase() }.joinToString("") { key ->
+        val checked = if (selected.contains(key)) "checked" else ""
+        val disabled = if (key == "chassis") "disabled" else ""
+        """
+        <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;">
+            <input type="checkbox" class="booking-col-check" value="$key" $checked $disabled style="transform:scale(1.05);">
+            <span style="font-size:13px;color:#374151;">${escapeHtml(bookingColumnLabel(key))}</span>
+        </label>
+        """.trimIndent()
+    }
+
+    val modal = document.createElement("div")
+    modal.id = "bookingColumnFilterModal"
+    modal.asDynamic().style.cssText =
+        "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;"
+    modal.innerHTML = """
+        <div style="background:#fff;border-radius:10px;padding:18px;max-width:420px;width:100%;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 18px 36px rgba(0,0,0,0.22);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <h3 style="margin:0;font-size:18px;font-weight:700;color:#111827;">Select Columns to Display</h3>
+                <button id="bookingColFilterClose" type="button" style="border:none;background:transparent;font-size:22px;cursor:pointer;color:#6b7280;">&times;</button>
+            </div>
+            <div id="bookingColFilterCount" style="font-size:12px;color:#6b7280;margin-bottom:10px;">
+                Choose up to $BOOKING_MAX_NON_CHASSIS_COLUMNS optional columns plus Chassis (max $BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS data columns). Chassis is always shown.
+            </div>
+            <div id="bookingColChecksWrap" style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:2px;">
+                $checks
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+                <button id="bookingColFilterDefault" type="button" style="padding:8px 14px;border:1px solid #0ea5e9;background:#f0f9ff;color:#0369a1;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Default</button>
+                <button id="bookingColFilterCancel" type="button" style="padding:8px 14px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;">Cancel</button>
+                <button id="bookingColFilterApply" type="button" style="padding:8px 14px;border:none;background:#0ea5e9;color:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Apply</button>
+            </div>
+        </div>
+    """.trimIndent()
+    document.body?.appendChild(modal)
+
+    fun closeModal() {
+        document.getElementById("bookingColumnFilterModal")?.remove()
+    }
+
+    fun updateBookingColFilterChecks() {
+        val checksNode = document.querySelectorAll("#bookingColChecksWrap .booking-col-check")
+        var nonChassisChecked = 0
+        for (i in 0 until checksNode.length) {
+            val cb = checksNode.item(i) as? HTMLInputElement ?: continue
+            if (cb.checked && cb.value != "chassis") nonChassisChecked++
+        }
+        for (i in 0 until checksNode.length) {
+            val cb = checksNode.item(i) as? HTMLInputElement ?: continue
+            if (cb.value == "chassis") {
+                cb.disabled = true
+                cb.checked = true
+                continue
+            }
+            cb.disabled = !cb.checked && nonChassisChecked >= BOOKING_MAX_NON_CHASSIS_COLUMNS
+        }
+        val totalData = nonChassisChecked + 1
+        (document.getElementById("bookingColFilterCount") as? HTMLElement)?.textContent =
+            "Optional: $nonChassisChecked / $BOOKING_MAX_NON_CHASSIS_COLUMNS (+ Chassis = $totalData data columns; max $BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS)"
+    }
+
+    document.getElementById("bookingColFilterClose")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("bookingColFilterCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    modal.addEventListener("click", { e: Event ->
+        if ((e.target as? HTMLElement)?.id == "bookingColumnFilterModal") closeModal()
+    })
+    document.getElementById("bookingColFilterDefault")?.addEventListener("click", { _: Event ->
+        bookingSelectedDataColumns = normalizeBookingSelectedDataColumns(bookingDefaultDataColumns)
+        saveBookingSelectedColumnsToStorage()
+        rebuildBookingListTableFromDisplayedCars()
+        closeModal()
+    })
+
+    val checksNodeInit = document.querySelectorAll("#bookingColChecksWrap .booking-col-check")
+    for (i in 0 until checksNodeInit.length) {
+        val cb = checksNodeInit.item(i) as? HTMLInputElement ?: continue
+        cb.addEventListener("change", { _: Event ->
+            if (cb.value == "chassis") {
+                cb.checked = true
+                updateBookingColFilterChecks()
+                return@addEventListener
+            }
+            updateBookingColFilterChecks()
+            val all = document.querySelectorAll("#bookingColChecksWrap .booking-col-check")
+            var n = 0
+            for (j in 0 until all.length) {
+                val c2 = all.item(j) as? HTMLInputElement ?: continue
+                if (c2.checked && c2.value != "chassis") n++
+            }
+            if (n > BOOKING_MAX_NON_CHASSIS_COLUMNS) {
+                cb.checked = false
+                updateBookingColFilterChecks()
+                showMessage(
+                    "Maximum $BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS data columns (including Chassis).",
+                    "warning",
+                )
+            }
+        })
+    }
+    updateBookingColFilterChecks()
+
+    document.getElementById("bookingColFilterApply")?.addEventListener("click", { _: Event ->
+        val checksNode = document.querySelectorAll("#bookingColChecksWrap .booking-col-check")
+        val selectedCols = mutableListOf<String>()
+        for (i in 0 until checksNode.length) {
+            val cb = checksNode.item(i) as? HTMLInputElement ?: continue
+            if (cb.checked) selectedCols.add(cb.value)
+        }
+        bookingSelectedDataColumns = normalizeBookingSelectedDataColumns(selectedCols)
+        saveBookingSelectedColumnsToStorage()
+        rebuildBookingListTableFromDisplayedCars()
+        closeModal()
+    })
+}
+
+private var bookingConfirmModalKeyHandler: ((Event) -> Unit)? = null
+
+private fun bookingIconUserSvg(): String =
+    """<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M20 21a8 8 0 0 0-16 0" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.75"/></svg>"""
+
+private fun bookingIconSettingsSvg(): String =
+    """<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.75"/><path d="M12 2.5v2.2M12 19.3v2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>"""
+
+private fun bookingIconCalendarSvg(): String =
+    """<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.75"/><path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>"""
+
+private fun showBookingConfirmModal(
+    title: String,
+    message: String,
+    confirmLabel: String = "Confirm",
+    danger: Boolean = false,
+    onConfirm: () -> Unit,
+) {
+    document.getElementById("bookingConfirmModal")?.remove()
+    bookingConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+    bookingConfirmModalKeyHandler = null
+
+    val returnFocus = document.activeElement as? HTMLElement
+    val safeTitle = escapeHtml(title)
+    val safeMessage = escapeHtml(message)
+    val safeConfirm = escapeHtml(confirmLabel)
+    val confirmBg = if (danger) "#dc2626" else "linear-gradient(135deg,#14b8a6,#0f766e)"
+    val confirmShadow = if (danger) "0 2px 10px rgba(220,38,38,0.22)" else "0 2px 10px rgba(15,118,110,0.22)"
+
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = "bookingConfirmModal"
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10020;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    overlay.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="bookingConfirmTitle"
+             style="background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,0.28);
+             max-width:440px;width:100%;padding:22px 24px;box-sizing:border-box;">
+            <h3 id="bookingConfirmTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">$safeTitle</h3>
+            <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:20px;">$safeMessage</div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="bookingConfirmCancel"
+                    style="padding:9px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;min-height:40px;font-size:14px;color:#374151;">Cancel</button>
+                <button type="button" id="bookingConfirmOk"
+                    style="padding:9px 16px;border:none;border-radius:8px;background:$confirmBg;color:#fff;cursor:pointer;font-weight:700;min-height:40px;font-size:14px;box-shadow:$confirmShadow;">$safeConfirm</button>
+            </div>
+        </div>
+    """.trimIndent()
+
+    fun closeModal() {
+        bookingConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+        bookingConfirmModalKeyHandler = null
+        overlay.remove()
+        returnFocus?.focus()
+    }
+
+    document.body?.appendChild(overlay)
+    document.getElementById("bookingConfirmCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("bookingConfirmOk")?.addEventListener("click", { _: Event ->
+        closeModal()
+        onConfirm()
+    })
+    overlay.addEventListener("click", { ev: Event ->
+        if (ev.target === overlay) closeModal()
+    })
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    bookingConfirmModalKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    (document.getElementById(if (danger) "bookingConfirmCancel" else "bookingConfirmOk") as? HTMLElement)?.focus()
+}
 
 /** Uppercase chassis token → amount from history (for list Update without recalculation). */
 var carBookingShippingRecreateChassisAmounts: MutableMap<String, String> = mutableMapOf()
@@ -211,24 +612,14 @@ fun showCarBookingPage() {
         
         val content = document.getElementById("content") ?: return
     
-        // C&F/FOB price column removed from list table per user request
-        val listPriceHeader = ""
-
     val savedEtdEarly = (carBookingFormState.etdDate as? String)?.trim().orEmpty()
     val isRecreateMode = shippingHistoryEditPrefillRaw != null || isCarBookingRecreateSession()
-    val listSelectHeaderHtml = if (isRecreateMode) {
-        "<th class=\"booking-th-select\"></th>"
-    } else {
-        """<th class="booking-th-select">
-            <input type="checkbox" id="selectAllCars" class="booking-select-all-cb" aria-label="Select all"> SELECT
-        </th>"""
-    }
     val bookingActionButtonsHtml = ""
     val listFooterHtml = if (isRecreateMode) {
         """
-                        <div class="booking-list-footer" style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid #e5e7eb;">
-                            <button type="button" id="deleteShippingHistoryFromRecreate" style="padding:10px 20px;border:1px solid #b91c1c;border-radius:8px;background:#fff;color:#b91c1c;font-weight:600;font-size:14px;cursor:pointer;">Delete</button>
-                            <button type="button" id="updateShippingHistoryFromRecreate" style="padding:10px 20px;border:none;border-radius:8px;background:#2563eb;color:#fff;font-weight:600;font-size:14px;cursor:pointer;">Update</button>
+                        <div class="booking-list-footer">
+                            <button type="button" id="deleteShippingHistoryFromRecreate" class="booking-recreate-delete-btn">Delete</button>
+                            <button type="button" id="updateShippingHistoryFromRecreate" class="booking-recreate-update-btn">Update</button>
                         </div>
         """.trimIndent()
     } else {
@@ -254,21 +645,21 @@ fun showCarBookingPage() {
             <div class="booking-main-content">
                 <div class="booking-columns">
                     
-                    <!-- Left Section: BOOKING DETAILS -->
+                    <!-- Left Section: Booking details -->
                     <div class="booking-details-section booking-panel">
-                        <h2 class="booking-section-header">BOOKING DETAILS</h2>
+                        <h2 class="booking-section-header">Booking details</h2>
                         
-                        <!-- CONSIGNEE (country + name): FAB UI matches Rixo Company picker on Rixo Transport page -->
+                        <!-- Consignee (country + name): FAB UI matches Rixo Company picker on Rixo Transport page -->
                         <div class="booking-form-group">
-                            <label>CONSIGNEE:</label>
+                            <label for="consigneeName">Consignee</label>
                             <div class="booking-consignee-row">
-                                <span style="color: #6b7280; font-size: 16px; flex-shrink: 0;">👤</span>
+                                <span class="booking-field-icon" aria-hidden="true">${bookingIconUserSvg()}</span>
                                 <div class="booking-fab-field rixo-company-fab-wrap" id="bookingCountryFabWrap" style="flex: 1; min-width: 0;">
                                     <select id="consigneeCountry" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
                                         <option value="">Select Country</option>
                                     </select>
                                     <div class="rixo-company-fab">
-                                        <button type="button" id="bookingCountryFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingCountryFabActions">
+                                        <button type="button" id="bookingCountryFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingCountryFabActions" aria-label="Select country">
                                             <span class="rixo-fab-trigger-text-wrap">
                                                 <span class="rixo-fab-trigger-label" id="bookingCountryFabLabel">Select Country</span>
                                                 <span class="rixo-fab-trigger-hint">Tap to choose country</span>
@@ -278,22 +669,22 @@ fun showCarBookingPage() {
                                         <div id="bookingCountryFabActions" class="rixo-fab-actions" role="listbox" style="display: none;" aria-label="Countries"></div>
                                     </div>
                                 </div>
-                                <button id="manageBookingMappingsBtn" type="button" style="display: flex; flex-shrink: 0; align-items: center; justify-content: center; background: none; border: none; cursor: pointer; padding: 4px; font-size: 18px; color: #6b7280;" title="Open Consignee Map in new tab">
-                                    ⚙️
+                                <button id="manageBookingMappingsBtn" type="button" class="booking-map-btn" title="Open Consignee Map in new tab" aria-label="Open Consignee Map in new tab">
+                                    ${bookingIconSettingsSvg()}
                                 </button>
                             </div>
-                            <input type="text" id="consigneeName" placeholder="(CONSIGNEE NAME)">
+                            <input type="text" id="consigneeName" placeholder="Consignee name" aria-label="Consignee name">
                         </div>
                         
                         <!-- POL -->
                         <div class="booking-form-group">
-                            <label>POL:</label>
+                            <label id="bookingPolLabel">POL</label>
                             <div class="booking-fab-field rixo-company-fab-wrap" id="bookingPolFabWrap">
                                 <select id="polPort" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
                                     <option value="">Select Port of Loading</option>
                                 </select>
                                 <div class="rixo-company-fab">
-                                    <button type="button" id="bookingPolFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingPolFabActions">
+                                    <button type="button" id="bookingPolFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingPolFabActions" aria-labelledby="bookingPolLabel">
                                         <span class="rixo-fab-trigger-text-wrap">
                                             <span class="rixo-fab-trigger-label" id="bookingPolFabLabel">Select Port of Loading</span>
                                             <span class="rixo-fab-trigger-hint">Tap to choose POL</span>
@@ -307,97 +698,122 @@ fun showCarBookingPage() {
                         
                         <!-- ETD -->
                         <div class="booking-form-group">
-                            <label>ETD:</label>
-                            <div style="position:relative; width:100%;">
-                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                            <label for="etdDateText">ETD</label>
+                            <div class="booking-date-field">
+                                <div class="booking-date-field-row">
                                     <input type="text" id="etdDateText" maxlength="10" inputmode="numeric" autocomplete="off"
-                                           placeholder="MM/DD/YYYY"
-                                           style="flex:1; min-width:0; color:#000000; padding:8px; border:1px solid #ddd; border-radius:4px;">
-                                    <button type="button" id="etdDateCalendarBtn" title="Open calendar"
-                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                           placeholder="MM/DD/YYYY" class="booking-date-text-input">
+                                    <button type="button" id="etdDateCalendarBtn" class="booking-calendar-btn" title="Open calendar" aria-label="Open ETD calendar">
+                                        ${bookingIconCalendarSvg()}
+                                    </button>
                                 </div>
-                                <input type="date" id="etdDate" placeholder="ESTIMATED SHIPPING DATE" tabindex="-1" aria-hidden="true"
-                                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                                <input type="date" id="etdDate" tabindex="-1" aria-hidden="true" class="booking-date-native-input">
                             </div>
                         </div>
 
                         <!-- CY CUT Date -->
                         <div class="booking-form-group">
-                            <label>CY CUT Date:</label>
-                            <div style="position:relative; width:100%;">
-                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                            <label for="cyCutDateText">CY CUT date</label>
+                            <div class="booking-date-field">
+                                <div class="booking-date-field-row">
                                     <input type="text" id="cyCutDateText" maxlength="10" inputmode="numeric" autocomplete="off"
-                                           placeholder="MM/DD/YYYY"
-                                           style="flex:1; min-width:0; color:#000000; padding:8px; border:1px solid #ddd; border-radius:4px;">
-                                    <button type="button" id="cyCutDateCalendarBtn" title="Open calendar"
-                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                           placeholder="MM/DD/YYYY" class="booking-date-text-input">
+                                    <button type="button" id="cyCutDateCalendarBtn" class="booking-calendar-btn" title="Open calendar" aria-label="Open CY CUT calendar">
+                                        ${bookingIconCalendarSvg()}
+                                    </button>
                                 </div>
-                                <input type="date" id="cyCutDate" tabindex="-1" aria-hidden="true"
-                                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                                <input type="date" id="cyCutDate" tabindex="-1" aria-hidden="true" class="booking-date-native-input">
                             </div>
                         </div>
 
                         <!-- ETA -->
                         <div class="booking-form-group">
-                            <label>ETA:</label>
-                            <div style="position:relative; width:100%;">
-                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                            <label for="etaDateText">ETA</label>
+                            <div class="booking-date-field">
+                                <div class="booking-date-field-row">
                                     <input type="text" id="etaDateText" maxlength="10" inputmode="numeric" autocomplete="off"
-                                           placeholder="MM/DD/YYYY"
-                                           style="flex:1; min-width:0; color:#000000; padding:8px; border:1px solid #ddd; border-radius:4px;">
-                                    <button type="button" id="etaDateCalendarBtn" title="Open calendar"
-                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                           placeholder="MM/DD/YYYY" class="booking-date-text-input">
+                                    <button type="button" id="etaDateCalendarBtn" class="booking-calendar-btn" title="Open calendar" aria-label="Open ETA calendar">
+                                        ${bookingIconCalendarSvg()}
+                                    </button>
                                 </div>
-                                <input type="date" id="etaDate" tabindex="-1" aria-hidden="true"
-                                       style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                                <input type="date" id="etaDate" tabindex="-1" aria-hidden="true" class="booking-date-native-input">
                             </div>
                         </div>
                         
                         <!-- POD -->
                         <div class="booking-form-group">
-                            <label>POD:</label>
-                            <input type="text" id="podPort" placeholder="PORT OF DISCHARGE" style="color: #000000;">
+                            <label for="podPort">POD</label>
+                            <input type="text" id="podPort" placeholder="Port of discharge">
                         </div>
 
                         <!-- Final Destination (optional) -->
                         <div class="booking-form-group">
-                            <label>Final Destination:</label>
-                            <input type="text" id="finalDestination" placeholder="Optional" style="color: #000000;">
+                            <label for="finalDestination">Final destination</label>
+                            <input type="text" id="finalDestination" placeholder="Optional">
                         </div>
 
-                        <!-- Notify party (optional) — textarea; autofilled from Consignee Map -->
+                        <!-- Notify party (optional) — FAB select; options from Consignee Map (; tokens) -->
                         <div class="booking-form-group">
-                            <label>Notify party:</label>
-                            <textarea id="notifyParty" rows="4" placeholder="Optional" style="width:100%;color:#000000;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+                            <label id="bookingNotifyLabel">Notify party</label>
+                            <div class="booking-fab-field rixo-company-fab-wrap" id="bookingNotifyFabWrap">
+                                <select id="notifyParty" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
+                                    <option value="">Select Notify party</option>
+                                </select>
+                                <div class="rixo-company-fab">
+                                    <button type="button" id="bookingNotifyFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingNotifyFabActions" aria-labelledby="bookingNotifyLabel">
+                                        <span class="rixo-fab-trigger-text-wrap">
+                                            <span class="rixo-fab-trigger-label" id="bookingNotifyFabLabel">Select Notify party</span>
+                                            <span class="rixo-fab-trigger-hint">Tap to choose notify party</span>
+                                        </span>
+                                        <span class="rixo-fab-trigger-chevron" aria-hidden="true">▼</span>
+                                    </button>
+                                    <div id="bookingNotifyFabActions" class="rixo-fab-actions" role="listbox" style="display: none;" aria-label="Notify party"></div>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- In-Transit Clause (optional) — textarea; autofilled from Consignee Map -->
+                        <!-- In-Transit Clause (optional) — FAB select; options from Consignee Map (; tokens) -->
                         <div class="booking-form-group">
-                            <label>In-Transit Clause:</label>
-                            <textarea id="inTransitClause" rows="6" placeholder="Optional" style="width:100%;color:#000000;resize:vertical;font-family:inherit;box-sizing:border-box;"></textarea>
+                            <label id="bookingInTransitLabel">In-transit clause</label>
+                            <div class="booking-fab-field rixo-company-fab-wrap" id="bookingInTransitFabWrap">
+                                <select id="inTransitClause" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
+                                    <option value="">Select In-transit clause</option>
+                                </select>
+                                <div class="rixo-company-fab">
+                                    <button type="button" id="bookingInTransitFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingInTransitFabActions" aria-labelledby="bookingInTransitLabel">
+                                        <span class="rixo-fab-trigger-text-wrap">
+                                            <span class="rixo-fab-trigger-label" id="bookingInTransitFabLabel">Select In-transit clause</span>
+                                            <span class="rixo-fab-trigger-hint">Tap to choose clause</span>
+                                        </span>
+                                        <span class="rixo-fab-trigger-chevron" aria-hidden="true">▼</span>
+                                    </button>
+                                    <div id="bookingInTransitFabActions" class="rixo-fab-actions" role="listbox" style="display: none;" aria-label="In-transit clause"></div>
+                                </div>
+                            </div>
                         </div>
                         
-                        <!-- BOOKING NO -->
+                        <!-- Booking no -->
                         <div class="booking-form-group">
-                            <label>BOOKING NO:</label>
+                            <label for="bookingNo">Booking no</label>
                             <input type="text" id="bookingNo" placeholder="">
                         </div>
                         
-                        <!-- VESSEL -->
+                        <!-- Vessel -->
                         <div class="booking-form-group">
-                            <label>VESSEL:</label>
-                            <input type="text" id="vesselSelect" placeholder="Enter Vessel">
+                            <label for="vesselSelect">Vessel</label>
+                            <input type="text" id="vesselSelect" placeholder="Enter vessel">
                         </div>
 
-                        <!-- CARRIER (master_menu field: carrier) -->
+                        <!-- Carrier (master_menu field: carrier) -->
                         <div class="booking-form-group">
-                            <label>CARRIER:</label>
+                            <label id="bookingCarrierLabel">Carrier</label>
                             <div class="booking-fab-field rixo-company-fab-wrap" id="bookingCarrierFabWrap">
                                 <select id="carrierSelect" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
                                     <option value="">Select Carrier</option>
                                 </select>
                                 <div class="rixo-company-fab">
-                                    <button type="button" id="bookingCarrierFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingCarrierFabActions">
+                                    <button type="button" id="bookingCarrierFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingCarrierFabActions" aria-labelledby="bookingCarrierLabel">
                                         <span class="rixo-fab-trigger-text-wrap">
                                             <span class="rixo-fab-trigger-label" id="bookingCarrierFabLabel">Select Carrier</span>
                                             <span class="rixo-fab-trigger-hint">Tap to choose carrier</span>
@@ -411,32 +827,40 @@ fun showCarBookingPage() {
                         
                         <!-- Selection Options -->
                         <div class="booking-selection-options">
-                            <div class="booking-selection-mode" style="display: flex; align-items: center; gap: 16px; margin-bottom: 10px;">
-                                <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #374151; cursor: pointer;">
-                                    <input type="checkbox" id="cnfCheckbox" checked>
+                            <div class="booking-price-mode" role="radiogroup" aria-label="Price mode">
+                                <label class="booking-price-mode-option">
+                                    <input type="radio" name="bookingPriceMode" id="cnfCheckbox" value="CNF" checked>
                                     C&amp;F
                                 </label>
-                                <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #374151; cursor: pointer;">
-                                    <input type="checkbox" id="fobCheckbox">
+                                <label class="booking-price-mode-option">
+                                    <input type="radio" name="bookingPriceMode" id="fobCheckbox" value="FOB">
                                     FOB
                                 </label>
                             </div>
-                            <button id="calculateBtn" class="booking-calculate-btn">${if (isRecreateMode) "Recalculate" else "Calculate"}</button>
+                            <button type="button" id="calculateBtn" class="booking-calculate-btn">${if (isRecreateMode) "Recalculate" else "Calculate"}</button>
                         </div>
                         
                         $bookingActionButtonsHtml
                     </div>
                     
-                    <!-- Right Section: LIST -->
+                    <!-- Right Section: List -->
                     <div class="booking-list-section booking-panel">
                         <div class="booking-list-header-row">
-                            <h2 class="booking-section-header">LIST</h2>
-                            <span id="bookingCarsSelectedCount" class="booking-cars-selected-count is-empty" aria-live="polite">0 CARS SELECTED</span>
+                            <h2 class="booking-section-header">List</h2>
+                            <div class="booking-list-header-actions">
+                                <span id="bookingCarsSelectedCount" class="booking-cars-selected-count is-empty" aria-live="polite">0 cars selected</span>
+                                <button id="bookingColumnFilterBtn" type="button" class="rixo-generator-col-filter-btn booking-col-filter-btn">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
+                                    </svg>
+                                    Column Filter
+                                </button>
+                            </div>
                         </div>
                         
-                        <!-- SEARCH CHASSIS: plain input, suggestions from purchase table search (no dropdown button) -->
+                        <!-- Search chassis: plain input, suggestions from purchase table search (no dropdown button) -->
                         <div class="booking-form-group booking-chassis-search-wrap">
-                            <label>SEARCH CHASSIS:</label>
+                            <label for="chassisSearchInput">Search chassis</label>
                             <input type="text" id="chassisSearchInput" class="booking-chassis-search-input" placeholder="Type to search chassis from purchases…"
                                    autocomplete="off">
                             <div id="chassisSuggestions" class="booking-chassis-suggestions"></div>
@@ -446,14 +870,8 @@ fun showCarBookingPage() {
                         <div class="booking-table-card">
                             <table class="booking-chassis-table">
                                 <thead>
-                                    <tr>
-                                        $listSelectHeaderHtml
-                                        <th>NO.</th>
-                                        <th>CHASSIS</th>
-                                        <th>NAME</th>
-                                        <th>YEAR</th>
-                                        <th>STOCK</th>
-                                        $listPriceHeader
+                                    <tr id="carSelectionTableHeadRow">
+                                        <!-- painted by paintBookingListTableHeader() -->
                                     </tr>
                                 </thead>
                                 <tbody id="carSelectionTableBody">
@@ -479,6 +897,8 @@ fun showCarBookingPage() {
     
     // Setup event listeners
     setupCarBookingPageListeners()
+    loadBookingSelectedColumnsFromStorage()
+    paintBookingListTableHeader(isRecreateMode)
     if (isRecreateMode) {
         setupBookingRecreatePageListeners()
         lockBookingRecreateCountryAndPol()
@@ -514,6 +934,24 @@ fun showCarBookingPage() {
               labelId: 'bookingCarrierFabLabel',
               defaultLabel: 'Select Carrier',
               emptyMessage: 'No carriers available'
+            });
+            window.registerBookingFabSelect({
+              selectId: 'notifyParty',
+              wrapId: 'bookingNotifyFabWrap',
+              triggerId: 'bookingNotifyFabTrigger',
+              actionsId: 'bookingNotifyFabActions',
+              labelId: 'bookingNotifyFabLabel',
+              defaultLabel: 'Select Notify party',
+              emptyMessage: 'No notify party for this consignee'
+            });
+            window.registerBookingFabSelect({
+              selectId: 'inTransitClause',
+              wrapId: 'bookingInTransitFabWrap',
+              triggerId: 'bookingInTransitFabTrigger',
+              actionsId: 'bookingInTransitFabActions',
+              labelId: 'bookingInTransitFabLabel',
+              defaultLabel: 'Select In-transit clause',
+              emptyMessage: 'No in-transit clause for this consignee'
             });
           }
         }, 0);
@@ -739,6 +1177,10 @@ fun setupCarBookingPageListeners() {
         // restoreBookingSelectionState() - This function should be in MinimalPurchaseApp.kt
         js("if (window.restoreBookingSelectionState) window.restoreBookingSelectionState()")
     }, 200)
+
+    document.getElementById("bookingColumnFilterBtn")?.addEventListener("click", { _: Event ->
+        showBookingColumnFilterModal()
+    })
     
     // Select All checkbox for car selection table
     document.getElementById("selectAllCars")?.addEventListener("change", { event: Event ->
@@ -789,8 +1231,8 @@ fun setupCarBookingPageListeners() {
         }
         carBookingFormState.podPort = ""
         carBookingFormState.consigneeName = ""
-        (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.let { it.value = "" }
-        (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.let { it.value = "" }
+        setBookingSelectFieldValue("notifyParty", "")
+        setBookingSelectFieldValue("inTransitClause", "")
         carBookingFormState.notifyParty = ""
         carBookingFormState.inTransitClause = ""
 
@@ -872,7 +1314,60 @@ fun setupCarBookingPageListeners() {
         attachPodChangeListener(podPortElForListener)
     }
 
+    document.getElementById("notifyParty")?.addEventListener("change", { _: Event ->
+        carBookingFormState.notifyParty = bookingFormFieldValue("notifyParty")
+    })
+    document.getElementById("inTransitClause")?.addEventListener("change", { _: Event ->
+        carBookingFormState.inTransitClause = bookingFormFieldValue("inTransitClause")
+    })
+
     updateBookingCarsSelectedCount()
+}
+
+/** Read Booking form field that may be SELECT (Notify / In-Transit / POD) or legacy TEXTAREA/INPUT. */
+fun bookingFormFieldValue(elementId: String): String {
+    val el = document.getElementById(elementId) as? HTMLElement ?: return ""
+    return when (el.tagName) {
+        "SELECT" -> (el as HTMLSelectElement).value?.trim().orEmpty()
+        "TEXTAREA" -> (el as HTMLTextAreaElement).value?.trim().orEmpty()
+        else -> (el as? HTMLInputElement)?.value?.trim().orEmpty()
+    }
+}
+
+/** Set Booking Notify / In-Transit (or similar) SELECT value; adds option if missing so recreate strings survive. */
+fun setBookingSelectFieldValue(elementId: String, raw: String) {
+    val value = raw.trim()
+    val el = document.getElementById(elementId) as? HTMLElement ?: return
+    if (el.tagName == "SELECT") {
+        val sel = el as HTMLSelectElement
+        if (value.isNotEmpty()) {
+            val exists = (0 until sel.options.length).any { i ->
+                (sel.options.item(i) as? HTMLOptionElement)?.value == value
+            }
+            if (!exists) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = value
+                opt.textContent = value
+                sel.appendChild(opt)
+            }
+            sel.value = value
+        } else {
+            sel.value = ""
+        }
+        try {
+            val rebuild = window.asDynamic().rebuildBookingFabFromSelect
+            if (rebuild != null && jsTypeOf(rebuild) == "function") {
+                rebuild.unsafeCast<(String) -> Unit>().invoke(elementId)
+            }
+        } catch (_: dynamic) {
+        }
+        return
+    }
+    if (el.tagName == "TEXTAREA") {
+        (el as HTMLTextAreaElement).value = value
+    } else {
+        (el as? HTMLInputElement)?.value = value
+    }
 }
 
 // Helper function to attach POD change listener (can be called multiple times if element is replaced)
@@ -1025,31 +1520,18 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
         }
     })
 
-    // C&F/FOB mode checkboxes (single-select checkbox behavior)
+    // C&F/FOB price mode (radio group — exclusive)
     val cnfCheckbox = document.getElementById("cnfCheckbox") as? HTMLInputElement
     val fobCheckbox = document.getElementById("fobCheckbox") as? HTMLInputElement
 
-    cnfCheckbox?.addEventListener("change", { _: Event ->
-        if (cnfCheckbox.checked) {
-            fobCheckbox?.checked = false
-        } else if (fobCheckbox?.checked != true) {
-            cnfCheckbox.checked = true
-        }
-        carBookingFormState.cnfChecked = cnfCheckbox.checked
+    fun syncBookingPriceModeState() {
+        carBookingFormState.cnfChecked = cnfCheckbox?.checked == true
         carBookingFormState.fobChecked = fobCheckbox?.checked == true
         saveBookingSelectionState(if (fobCheckbox?.checked == true) "FOB" else "C&F")
-    })
+    }
 
-    fobCheckbox?.addEventListener("change", { _: Event ->
-        if (fobCheckbox.checked) {
-            cnfCheckbox?.checked = false
-        } else if (cnfCheckbox?.checked != true) {
-            fobCheckbox.checked = true
-        }
-        carBookingFormState.cnfChecked = cnfCheckbox?.checked == true
-        carBookingFormState.fobChecked = fobCheckbox.checked
-        saveBookingSelectionState(if (fobCheckbox.checked) "FOB" else "C&F")
-    })
+    cnfCheckbox?.addEventListener("change", { _: Event -> syncBookingPriceModeState() })
+    fobCheckbox?.addEventListener("change", { _: Event -> syncBookingPriceModeState() })
 }
 
 fun loadCountries(onCountriesLoaded: (() -> Unit)? = null) {
@@ -1444,7 +1926,7 @@ fun updateBookingCarsSelectedCount() {
         }
         checked
     }
-    countEl.textContent = if (selectedCount == 1) "1 CAR SELECTED" else "$selectedCount CARS SELECTED"
+    countEl.textContent = if (selectedCount == 1) "1 car selected" else "$selectedCount cars selected"
     if (selectedCount == 0) {
         countEl.classList.add("is-empty")
     } else {
@@ -1695,40 +2177,25 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
     
     console.log("💾 Accumulated displayed cars for state persistence:", carBookingDisplayedCars.size)
     
-    // Debug: Check if table body exists
     val tbody = document.getElementById("carSelectionTableBody")
-    console.log("Table body element found:", tbody)
-    console.log("Table body element type:", tbody?.tagName)
-    
     if (tbody == null) {
         console.error("Car table body not found!")
         return
     }
     
-    // Don't clear the table - append new cars instead
-    console.log("✅ TABLE NOT CLEARED - APPENDING MODE ACTIVE")
-    
     val purchasesArray = js("Array.isArray(purchases) ? purchases : [purchases]") as Array<dynamic>
-    console.log("🚀 NEW APPEND LOGIC: Processing", purchasesArray.size, "purchases to ADD to existing table")
-    
-    // Get current row count to continue numbering
-    val currentRowCount = tbody.children.length
-    console.log("Current table has", currentRowCount, "rows, adding", purchasesArray.size, "more")
     
     for (index in purchasesArray.indices) {
         val purchase = purchasesArray[index]
+        val chassisNumber = purchase.chassis?.toString() ?: "N/A"
         
-        // Check if this car is already in the table (avoid duplicates)
-        val chassisNumber = purchase.chassis ?: "N/A"
-        val existingRows = tbody.querySelectorAll("tr")
+        // Prefer data-chassis on the row (stable when Column Filter reorders data columns)
+        val existingRows = tbody.querySelectorAll("tr[data-chassis]")
         var carAlreadyExists = false
-        
         for (i in 0 until existingRows.length) {
-            val row = existingRows.item(i) as HTMLElement
-            val chassisCell = row.querySelector("td:nth-child(3)") // 3rd column is chassis (after checkbox column)
-            if (chassisCell?.textContent?.trim() == chassisNumber) {
+            val row = existingRows.item(i) as? HTMLElement ?: continue
+            if (row.getAttribute("data-chassis")?.trim() == chassisNumber) {
                 carAlreadyExists = true
-                console.log("Car with chassis", chassisNumber, "already exists in table, skipping")
                 break
             }
         }
@@ -1739,47 +2206,8 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
             continue
         }
         
-        val rowNumber = currentRowCount + index + 1
-        val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
-        val chStr = chassisNumber.toString()
-        val nameStr = (purchase.carName ?: "N/A").toString()
-        val yearStr = formatCarModelYear(purchase.carModelYear?.toString())
-        val stockRaw = (purchase.stockLocation ?: purchase.stock_location ?: "").toString()
-        val stockStr = firstSemicolonToken(stockRaw)
-        val noChip = formatPurchaseListCellChipHtml(rowNumber.toString())
-        val chChip = formatPurchaseListCellChipHtml(chStr)
-        val nmChip = formatPurchaseListCellChipHtml(nameStr)
-        val yrChip = if (yearStr.isNotBlank()) formatPurchaseListCellChipHtml(yearStr) else ""
-        val stockChip = if (stockStr.isNotBlank()) formatPurchaseListCellChipHtml(stockStr) else ""
-        
-        val chAttr = chStr.replace("&", "&amp;").replace("\"", "&quot;")
-        val historyId = carBookingShippingRecreateChassisToHistoryId[chStr.uppercase()] ?: 0L
-        val isSold = purchaseDynIsSold(purchase)
-        val selectCellHtml = if (isCarBookingRecreateSession()) {
-            if (isSold) {
-                bookingListSoldLockedHtml()
-            } else {
-                bookingListRemoveButtonHtml(purchaseId, chAttr, historyId)
-            }
-        } else {
-            """<input type="checkbox" class="car-checkbox" data-purchase-id="$purchaseId" data-chassis="$chAttr" aria-label="Select row">"""
-        }
-        val row = document.createElement("tr")
-        row.setAttribute("data-purchase-id", purchaseId.toString())
-        row.setAttribute("data-chassis", chStr)
-        if (isSold) row.setAttribute("data-sold", "true")
-        row.innerHTML = """
-            <td class="booking-td booking-td-select">
-                $selectCellHtml
-            </td>
-            <td class="booking-td">$noChip</td>
-            <td class="booking-td">$chChip</td>
-            <td class="booking-td">$nmChip</td>
-            <td class="booking-td">$yrChip</td>
-            <td class="booking-td">$stockChip</td>
-        """
-        tbody.appendChild(row)
-
+        val rowNumber = tbody.children.length + 1
+        appendBookingListRow(purchase, rowNumber)
     }
     
     console.log("✅ Added", purchasesArray.size, "new cars to table")
@@ -2528,10 +2956,10 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
         (document.getElementById("finalDestination") as? HTMLInputElement)?.value = finalDestination
         carBookingFormState.finalDestination = finalDestination
         val notifyParty = (first.notifyParty?.toString() ?: "").trim()
-        (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value = notifyParty
+        setBookingSelectFieldValue("notifyParty", notifyParty)
         carBookingFormState.notifyParty = notifyParty
         val inTransitClause = (first.inTransitClause?.toString() ?: "").trim()
-        (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value = inTransitClause
+        setBookingSelectFieldValue("inTransitClause", inTransitClause)
         carBookingFormState.inTransitClause = inTransitClause
         (document.getElementById("bookingNo") as? HTMLInputElement)?.value = bookingId
         carBookingFormState.bookingNo = bookingId
@@ -2717,8 +3145,23 @@ private fun handleRemoveChassisFromBookingRecreate(btn: HTMLButtonElement) {
         showNoticeModal("Notice", alreadySoldOkMessage(soldChassis.ifEmpty { listOf(chassis) }))
         return
     }
-    val ok = window.confirm("Are you sure you want to remove the car?")
-    if (!ok) return
+    showBookingConfirmModal(
+        title = "Remove car",
+        message = "Are you sure you want to remove this car from the booking?",
+        confirmLabel = "Remove",
+        danger = true,
+    ) {
+        performRemoveChassisFromBookingRecreate(btn)
+    }
+}
+
+private fun performRemoveChassisFromBookingRecreate(btn: HTMLButtonElement) {
+    val chassis = btn.getAttribute("data-chassis")?.trim().orEmpty()
+    if (chassis.isEmpty()) {
+        showMessage("Chassis is missing for this row.", "error")
+        return
+    }
+    val purchaseId = btn.getAttribute("data-purchase-id")?.toLongOrNull()
     val historyId = btn.getAttribute("data-history-id")?.trim()?.toLongOrNull()
     MainScope().launch {
         val body = js("{}")
@@ -2809,8 +3252,17 @@ private fun handleDeleteShippingHistoryFromRecreate() {
         showNoticeModal("Notice", alreadySoldOkMessage(chassisList))
         return
     }
-    val ok = window.confirm("Are you sure you want to remove the history?")
-    if (!ok) return
+    showBookingConfirmModal(
+        title = "Remove history",
+        message = "Are you sure you want to remove this shipping history?",
+        confirmLabel = "Delete",
+        danger = true,
+    ) {
+        performDeleteShippingHistoryFromRecreate()
+    }
+}
+
+private fun performDeleteShippingHistoryFromRecreate() {
     MainScope().launch {
         val ids = resolveShippingHistoryIdsForRecreateDelete()
         if (ids.isEmpty()) {
@@ -2941,8 +3393,8 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
                 val req: dynamic = js("{}")
                 req.country = selectedCountry
                 req.consignee = consigneeName
-                req.notifyParty = (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value?.trim().orEmpty()
-                req.inTransitClause = (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value?.trim().orEmpty()
+                req.notifyParty = bookingFormFieldValue("notifyParty")
+                req.inTransitClause = bookingFormFieldValue("inTransitClause")
                 req.shipmentDate = etd
                 req.cyCutDate = bookingFormCyCutIso()
                 req.eta = bookingFormEtaIso()
@@ -2984,24 +3436,46 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
 private fun showConsigneeMapRefreshNoticeModal() {
     val modalId = "consigneeMapRefreshNoticeModal"
     document.getElementById(modalId)?.remove()
+    val returnFocus = document.activeElement as? HTMLElement
     val overlay = document.createElement("div") as HTMLDivElement
     overlay.id = modalId
-    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10050;display:flex;align-items:center;justify-content:center;padding:16px;"
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:10050;display:flex;align-items:center;justify-content:center;padding:16px;"
     overlay.innerHTML = """
-        <div style="background:#fff;border-radius:12px;max-width:420px;width:100%;padding:28px 24px;box-shadow:0 10px 40px rgba(0,0,0,0.2);text-align:center;">
-            <p style="margin:0 0 20px 0;color:#374151;font-size:16px;line-height:1.5;">New data is available. Refresh the page to load the latest content.</p>
-            <button type="button" id="consigneeMapRefreshNoticeOk" style="padding:10px 22px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;">OK</button>
+        <div role="dialog" aria-modal="true" aria-labelledby="consigneeMapRefreshNoticeTitle"
+             style="background:#fff;border-radius:12px;max-width:420px;width:100%;padding:28px 24px;box-shadow:0 20px 50px rgba(15,23,42,0.28);text-align:center;">
+            <h3 id="consigneeMapRefreshNoticeTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">Refresh available</h3>
+            <p style="margin:0 0 20px 0;color:#374151;font-size:15px;line-height:1.5;">New data is available. Refresh the page to load the latest content.</p>
+            <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="consigneeMapRefreshNoticeCancel" style="padding:10px 18px;background:#fff;color:#374151;border:1px solid #cbd5e1;border-radius:8px;font-size:15px;cursor:pointer;min-height:40px;">Cancel</button>
+                <button type="button" id="consigneeMapRefreshNoticeOk" style="padding:10px 22px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer;min-height:40px;font-weight:600;">Refresh</button>
+            </div>
         </div>
     """.trimIndent()
     document.body?.appendChild(overlay)
+
     fun dismissOnly() {
         overlay.remove()
+        returnFocus?.focus()
     }
-    document.getElementById("consigneeMapRefreshNoticeOk")?.addEventListener("click", {
+
+    document.getElementById("consigneeMapRefreshNoticeCancel")?.addEventListener("click", { _: Event ->
+        dismissOnly()
+    })
+    document.getElementById("consigneeMapRefreshNoticeOk")?.addEventListener("click", { _: Event ->
         window.location.reload()
     })
     overlay.addEventListener("click", { e: Event ->
         if (js("e.target === overlay") as Boolean) dismissOnly()
     })
+    fun handleEscape(event: Event) {
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            event.preventDefault()
+            document.removeEventListener("keydown", ::handleEscape)
+            dismissOnly()
+        }
+    }
+    document.addEventListener("keydown", ::handleEscape)
+    (document.getElementById("consigneeMapRefreshNoticeOk") as? HTMLElement)?.focus()
 }
 

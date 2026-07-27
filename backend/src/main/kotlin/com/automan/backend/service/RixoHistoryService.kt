@@ -5,6 +5,7 @@ import com.automan.backend.dto.RixoHistoryRowDto
 import com.automan.backend.model.RixoHistory
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.RixoHistoryRepository
+import com.automan.backend.util.Logger
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
@@ -282,6 +283,7 @@ class RixoHistoryService(
      */
     @Transactional
     fun saveFromTransport(selectedIds: List<Long>, transportData: Map<String, String>) {
+        val t0 = System.nanoTime()
         val buyingDateStr = transportData["buyingDate"]?.trim().orEmpty()
         val buyingDate: LocalDate? = if (buyingDateStr.isNotEmpty()) {
             try {
@@ -299,6 +301,7 @@ class RixoHistoryService(
         val chassisJoined = selectedIds.mapNotNull { id ->
             purchaseRepository.findById(id).orElse(null)?.chassis?.trim()?.takeIf { it.isNotEmpty() }
         }.joinToString(";")
+        val tChassis = System.nanoTime()
 
         val newTokens = chassisJoined.split(';')
             .mapNotNull { it.trim().takeIf { t -> t.isNotEmpty() }?.uppercase(Locale.ROOT) }
@@ -306,6 +309,7 @@ class RixoHistoryService(
 
         val existing = findExistingRowForChassisOverlap(newTokens)
         val oldTokens = existing?.let { parseChassisTokens(it.chassis) }?.toSet() ?: emptySet()
+        val tOverlap = System.nanoTime()
 
         if (existing != null && existing.id != null) {
             val updated = existing.copy(
@@ -325,10 +329,33 @@ class RixoHistoryService(
             )
             rixoHistoryRepository.save(row)
         }
+        val tSave = System.nanoTime()
 
-        val clearedIds = syncRixoConfirmedWithAllHistory()
+        // Full-history sync is expensive. Only needed when chassis leave a history row
+        // (pure insert / add-only update cannot uncover a previously confirmed purchase).
+        val removedTokens = oldTokens - newTokens
+        val clearedIds = if (removedTokens.isEmpty()) {
+            emptySet()
+        } else {
+            syncRixoConfirmedWithAllHistory()
+        }
+        val tSync = System.nanoTime()
+
         val touchedIds = purchaseIdsForExpandedTokens(expandTokenSet(oldTokens + newTokens))
         purchaseWorkflowService.recomputeByPurchaseIds(touchedIds + clearedIds)
+        val tEnd = System.nanoTime()
+
+        fun ms(a: Long, b: Long) = (b - a) / 1_000_000.0
+        Logger.log(
+            "RixoHistory.saveFromTransport ids=${selectedIds.size} overlap=${existing != null} " +
+                "removedTokens=${removedTokens.size} syncRan=${removedTokens.isNotEmpty()} " +
+                "ms chassis=${"%.1f".format(ms(t0, tChassis))} " +
+                "overlap=${"%.1f".format(ms(tChassis, tOverlap))} " +
+                "save=${"%.1f".format(ms(tOverlap, tSave))} " +
+                "sync=${"%.1f".format(ms(tSave, tSync))} " +
+                "recompute=${"%.1f".format(ms(tSync, tEnd))} " +
+                "total=${"%.1f".format(ms(t0, tEnd))}",
+        )
     }
 
     /**

@@ -83,6 +83,29 @@ private var smSearchQuery: String = ""
 private var smSupplierSortOrder: String? = null // null = newest-first; "asc" | "desc"
 private var smSearchDebounceTimer: dynamic = null
 
+/** Client-side pagination of Supplier Name roots (filter/sort first, then page). */
+private const val SM_SUPPLIER_PAGE_SIZE = 20
+private var smSupplierCurrentPage: Int = 1
+
+private fun smClearSelectionChain() {
+    smSelectedSupplier = null
+    smSelectedVenue = null
+    smSelectedStock = null
+    smSelectedPol = null
+    smSelectedCompany = null
+    smSelectedMappingId = null
+    smLeafInlineEditMappingId = null
+    smLeafInlineEditLineType = ""
+}
+
+/** Clamp current page into [1, totalPages] for the given filtered supplier count. */
+private fun smClampSupplierPage(filteredCount: Int): Int {
+    val totalPages = kotlin.math.max(1, (filteredCount + SM_SUPPLIER_PAGE_SIZE - 1) / SM_SUPPLIER_PAGE_SIZE)
+    if (smSupplierCurrentPage > totalPages) smSupplierCurrentPage = totalPages
+    if (smSupplierCurrentPage < 1) smSupplierCurrentPage = 1
+    return totalPages
+}
+
 private fun smSortedSuppliers(list: List<SupplierMapTreeRowLite>): List<String> {
     if (smRootSuppliers.isNotEmpty()) {
         val names = smRootSuppliers.map { smNormSupplier(it) }.distinctBy { it.lowercase() }
@@ -91,20 +114,8 @@ private fun smSortedSuppliers(list: List<SupplierMapTreeRowLite>): List<String> 
         return when (smSupplierSortOrder) {
             "asc" -> filtered.sortedBy { it.lowercase() }
             "desc" -> filtered.sortedByDescending { it.lowercase() }
-            else -> {
-                // Newest without row ids (roots-only): fall back to A-Z.
-                val withIds = filtered.map { name ->
-                    name to (list.filter { smNormSupplier(it.supplier) == name }
-                        .maxOfOrNull { it.id.toLongOrNull() ?: 0L } ?: 0L)
-                }
-                if (withIds.all { it.second == 0L }) {
-                    filtered.sortedBy { it.lowercase() }
-                } else {
-                    withIds.sortedWith(
-                        compareByDescending<Pair<String, Long>> { it.second }.thenBy { it.first.lowercase() },
-                    ).map { it.first }
-                }
-            }
+            // Stable A–Z: do not re-rank by partially loaded branch row ids (keeps expand in place).
+            else -> filtered.sortedBy { it.lowercase() }
         }
     }
     val grouped = list.groupBy { smNormSupplier(it.supplier) }
@@ -134,6 +145,29 @@ private fun smSearchToolbarHtml(): String = """
         </div>
     </div>
 """.trimIndent()
+
+private fun smSupplierPaginationHtml(filteredCount: Int, totalPages: Int): String {
+    if (filteredCount <= 0) return ""
+    val start = (smSupplierCurrentPage - 1) * SM_SUPPLIER_PAGE_SIZE + 1
+    val end = kotlin.math.min(filteredCount, smSupplierCurrentPage * SM_SUPPLIER_PAGE_SIZE)
+    val pagerControls = if (totalPages > 1) {
+        """
+            <div class="car-brand-pagination-controls">
+                <button type="button" id="smSupplierPrevPage" class="car-brand-pagination-btn" ${if (smSupplierCurrentPage <= 1) "disabled" else ""}>Previous</button>
+                <span class="car-brand-pagination-page">Page $smSupplierCurrentPage of $totalPages</span>
+                <button type="button" id="smSupplierNextPage" class="car-brand-pagination-btn" ${if (smSupplierCurrentPage >= totalPages) "disabled" else ""}>Next</button>
+            </div>
+        """.trimIndent()
+    } else {
+        ""
+    }
+    return """
+        <div class="supplier-map-pagination" style="display:flex;justify-content:space-between;align-items:center;padding:16px 8px 8px;flex-wrap:wrap;gap:12px;">
+            <div style="color:#6b7280;font-size:14px;">Showing $start to $end of $filteredCount supplier${if (filteredCount == 1) "" else "s"}</div>
+            $pagerControls
+        </div>
+    """.trimIndent()
+}
 
 private fun smSupplierSortTooltip(): String = when (smSupplierSortOrder) {
     "asc" -> "Sorted A-Z (click to sort Z-A)"
@@ -668,12 +702,15 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
     }
 
     val suppliers = smSortedSuppliers(list)
-    if (smSelectedSupplier !in suppliers) {
-        smSelectedSupplier = null
-        smSelectedVenue = null
-        smSelectedStock = null
-        smSelectedPol = null
-        smSelectedCompany = null
+    val totalPages = smClampSupplierPage(suppliers.size)
+    val pageStart = (smSupplierCurrentPage - 1) * SM_SUPPLIER_PAGE_SIZE
+    val pageSuppliers = suppliers.drop(pageStart).take(SM_SUPPLIER_PAGE_SIZE)
+
+    if (smSelectedSupplier != null) {
+        val sel = smNormSupplier(smSelectedSupplier!!)
+        if (pageSuppliers.none { it == sel }) {
+            smClearSelectionChain()
+        }
     }
 
     val sb = StringBuilder()
@@ -689,7 +726,7 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
         return sb.toString()
     }
 
-    for (supplier in suppliers) {
+    for (supplier in pageSuppliers) {
         val supplierRows = list.filter { smNormSupplier(it.supplier) == supplier }
         val supplierOpen = supplier == smSelectedSupplier
         sb.append("""<div class="rixo-tree-node">""")
@@ -808,6 +845,7 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
         sb.append("""</div>""")
     }
     sb.append("""</div>""")
+    sb.append(smSupplierPaginationHtml(suppliers.size, totalPages))
     return sb.toString()
 }
 
@@ -1230,6 +1268,7 @@ private fun toggleSmSupplierSort() {
         "desc" -> "asc"
         else -> "asc"
     }
+    smSupplierCurrentPage = 1
 }
 
 private fun smApplySearchAndRerender() {
@@ -1238,6 +1277,7 @@ private fun smApplySearchAndRerender() {
     if (clearBtn != null) {
         clearBtn.style.visibility = if (smSearchQuery.isBlank()) "hidden" else "visible"
     }
+    smSupplierCurrentPage = 1
     smRerenderTree(root)
 }
 
@@ -1475,6 +1515,39 @@ private fun smRerenderTree(root: HTMLElement) {
     bindSupplierMapTreeClicks(root)
     if (smFullRowAddOpen) {
         window.setTimeout({ wireSmFullRowAddComboboxes() }, 0)
+    }
+}
+
+private fun bindSmSupplierPagination(root: HTMLElement) {
+    val prevBtn = document.getElementById("smSupplierPrevPage") as? HTMLElement
+    val nextBtn = document.getElementById("smSupplierNextPage") as? HTMLElement
+    if (prevBtn != null) {
+        val old = prevBtn.asDynamic().__smPagePrevHandler.unsafeCast<((Event) -> Unit)?>()
+        if (old != null) prevBtn.removeEventListener("click", old)
+        val handler: (Event) -> Unit = { ev ->
+            ev.preventDefault()
+            if (smSupplierCurrentPage > 1) {
+                smSupplierCurrentPage--
+                smRerenderTree(root)
+            }
+        }
+        prevBtn.asDynamic().__smPagePrevHandler = handler
+        prevBtn.addEventListener("click", handler)
+    }
+    if (nextBtn != null) {
+        val old = nextBtn.asDynamic().__smPageNextHandler.unsafeCast<((Event) -> Unit)?>()
+        if (old != null) nextBtn.removeEventListener("click", old)
+        val handler: (Event) -> Unit = { ev ->
+            ev.preventDefault()
+            val filteredCount = smSortedSuppliers(smTreeRowsCache).size
+            val totalPages = kotlin.math.max(1, (filteredCount + SM_SUPPLIER_PAGE_SIZE - 1) / SM_SUPPLIER_PAGE_SIZE)
+            if (smSupplierCurrentPage < totalPages) {
+                smSupplierCurrentPage++
+                smRerenderTree(root)
+            }
+        }
+        nextBtn.asDynamic().__smPageNextHandler = handler
+        nextBtn.addEventListener("click", handler)
     }
 }
 
@@ -1886,6 +1959,7 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
 
     root.asDynamic().__smTreeClickHandler = handler
     root.addEventListener("click", handler)
+    bindSmSupplierPagination(root)
 }
 
 fun showSupplierMapTreePage() {
@@ -1945,16 +2019,9 @@ fun loadSupplierMapTree() {
             smRootSuppliers = parseMasterListArray(raw).distinct()
             smTreeRowsCache = emptyList()
             smLoadedSupplierKeys.clear()
-            smSelectedSupplier = null
-            smSelectedVenue = null
-            smSelectedStock = null
-            smSelectedPol = null
-            smSelectedCompany = null
-            smSelectedMappingId = null
-            smLeafInlineEditMappingId = null
-            smLeafInlineEditLineType = ""
-            root.innerHTML = buildSupplierMapTreeHtmlFromCache()
-            bindSupplierMapTreeClicks(root)
+            smSupplierCurrentPage = 1
+            smClearSelectionChain()
+            smRerenderTree(root)
         }
         .catch { err: dynamic ->
             Logger.error("Supplier map tree load: ${err.toString()}")
@@ -1973,11 +2040,16 @@ fun refreshSupplierMapTreeData() {
             smLeafInlineEditMappingId = null
             smLeafInlineEditLineType = ""
             fun finishRender() {
-                root.innerHTML = buildSupplierMapTreeHtmlFromCache()
-                bindSupplierMapTreeClicks(root)
-                if (smFullRowAddOpen) {
-                    window.setTimeout({ wireSmFullRowAddComboboxes() }, 0)
+                val selectedNorm = smSelectedSupplier?.let { smNormSupplier(it) }
+                val allSuppliers = smSortedSuppliers(smTreeRowsCache)
+                if (selectedNorm != null) {
+                    val idx = allSuppliers.indexOfFirst { it.equals(selectedNorm, ignoreCase = true) || it == selectedNorm }
+                    if (idx >= 0) {
+                        smSupplierCurrentPage = idx / SM_SUPPLIER_PAGE_SIZE + 1
+                    }
                 }
+                smClampSupplierPage(allSuppliers.size)
+                smRerenderTree(root)
             }
             val selected = smSelectedSupplier
             if (selected != null) {

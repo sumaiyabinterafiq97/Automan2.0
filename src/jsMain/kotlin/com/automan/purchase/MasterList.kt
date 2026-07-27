@@ -65,6 +65,72 @@ private fun joinDistinctNonBlank(values: List<String>): String {
     return out.joinToString(";")
 }
 
+
+private var masterConfirmModalKeyHandler: ((Event) -> Unit)? = null
+
+/** In-app confirm for Master Sets / Maps destructive actions (replaces window.confirm). */
+private fun showMasterConfirmModal(
+    title: String,
+    message: String,
+    confirmLabel: String = "Delete",
+    onConfirm: () -> Unit,
+) {
+    document.getElementById("masterConfirmModal")?.remove()
+    masterConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+    masterConfirmModalKeyHandler = null
+    val returnFocus = document.activeElement as? HTMLElement
+    val safeTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    val safeMessage = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    val safeConfirm = confirmLabel.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = "masterConfirmModal"
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10030;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    overlay.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="masterConfirmTitle"
+             style="background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,0.28);
+             max-width:440px;width:100%;padding:22px 24px;box-sizing:border-box;">
+            <h3 id="masterConfirmTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">$safeTitle</h3>
+            <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:20px;">$safeMessage</div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="masterConfirmCancel"
+                    style="padding:9px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;min-height:40px;font-size:14px;color:#374151;">Cancel</button>
+                <button type="button" id="masterConfirmOk"
+                    style="padding:9px 16px;border:none;border-radius:8px;background:#b91c1c;color:#fff;cursor:pointer;font-weight:700;min-height:40px;font-size:14px;">$safeConfirm</button>
+            </div>
+        </div>
+    """.trimIndent()
+
+    fun closeModal() {
+        masterConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+        masterConfirmModalKeyHandler = null
+        overlay.remove()
+        returnFocus?.focus()
+    }
+
+    document.body?.appendChild(overlay)
+    document.getElementById("masterConfirmCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("masterConfirmOk")?.addEventListener("click", { _: Event ->
+        closeModal()
+        onConfirm()
+    })
+    overlay.addEventListener("click", { ev: Event ->
+        if (ev.target === overlay) closeModal()
+    })
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        if (event.asDynamic().key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    masterConfirmModalKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    (document.getElementById("masterConfirmCancel") as? HTMLElement)?.focus()
+}
+
+
 private fun escapeJsString(s: String): String {
     return s
         .replace("\\", "\\\\")
@@ -459,6 +525,18 @@ fun normalizeStoredListForChips(raw: String): String {
         .joinToString(";")
 }
 
+/**
+ * Notify party / In-Transit Clause: split on `;` only so legacy free text with commas/newlines
+ * stays one token until the user intentionally adds multiple chips.
+ */
+fun normalizeNotifyInTransitForChips(raw: String): String {
+    if (raw.isBlank()) return ""
+    return raw.split(';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .joinToString(";")
+}
+
 private fun splitConsigneeChipTokens(hiddenJoined: String): List<String> =
     hiddenJoined.split(';').map { it.trim() }.filter { it.isNotEmpty() }
 
@@ -501,7 +579,7 @@ fun createChipInput(id: String, placeholder: String, maxLength: Int? = null): St
     val maxAttr = maxLength?.let { """ maxlength="$it"""" } ?: ""
     return """
         <div style="position: relative; width: 100%;">
-            <div id="${id}Wrap" class="chip-input-inner-wrap" style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; width:100%; min-height:42px; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; box-sizing:border-box; background:white;">
+            <div id="${id}Wrap" class="chip-input-inner-wrap" data-supplier-chip-allow-any="true" style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; width:100%; min-height:42px; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; box-sizing:border-box; background:white;">
                 <div id="${id}Chips" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
                 <input type="text" id="${id}Input" placeholder="$placeholder"$maxAttr
                        style="flex:1; min-width:0; border:none; outline:none; font-size:14px; padding:6px 0; background:transparent;"
@@ -514,9 +592,31 @@ fun createChipInput(id: String, placeholder: String, maxLength: Int? = null): St
     """.trimIndent()
 }
 
+/**
+ * Chip multi-value field without dropdown — tall box like Consignee Address.
+ * Compose area is a textarea (Enter = newline; Ctrl/Cmd+Enter or blur commits a chip).
+ */
+fun createTallMultilineChipInput(id: String, placeholder: String, rows: Int = 4): String {
+    val minH = (rows * 22).coerceAtLeast(88)
+    return """
+        <div style="position: relative; width: 100%;">
+            <div id="${id}Wrap" class="chip-input-inner-wrap consignee-map-tall-chip-wrap" data-supplier-chip-allow-any="true" data-supplier-chip-multiline="true"
+                 style="display:flex; flex-direction:column; align-items:stretch; gap:8px; width:100%; min-height:${minH + 36}px; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; box-sizing:border-box; background:white;">
+                <div id="${id}Chips" style="display:flex; flex-wrap:wrap; gap:6px; width:100%;"></div>
+                <textarea id="${id}Input" rows="$rows" placeholder="$placeholder"
+                       style="width:100%; border:none; outline:none; font-size:14px; padding:0; background:transparent; resize:vertical; font-family:inherit; box-sizing:border-box; min-height:${minH}px; line-height:1.4;"
+                       onkeydown="return window.supplierChipHandleKey(event, '$id');"
+                       onblur="window.supplierChipAddFromInput('$id');"></textarea>
+                <input type="hidden" id="${id}Hidden" value="">
+            </div>
+        </div>
+    """.trimIndent()
+}
+
 fun ensureSupplierChipJs() {
     js("""
-        if (!window.__supplierChipJsReady) {
+        if (window.__supplierChipJsVersion !== 3) {
+          window.__supplierChipJsVersion = 3;
           window.__supplierChipJsReady = true;
 
           function _splitTokens(v) {
@@ -582,12 +682,15 @@ fun ensureSupplierChipJs() {
             for (var i = 0; i < tokens.length; i++) {
               (function(t) {
               var chip = document.createElement('span');
-              chip.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:#2563eb; color:white; border-radius:9999px; padding:6px 10px; font-size:12px; font-weight:600; line-height:1;';
+              var isMultiline = (t || '').indexOf('\n') >= 0;
+              chip.style.cssText = isMultiline
+                ? 'display:inline-flex; align-items:flex-start; gap:6px; background:#2563eb; color:white; border-radius:8px; padding:8px 10px; font-size:12px; font-weight:600; line-height:1.35; max-width:100%; box-sizing:border-box;'
+                : 'display:inline-flex; align-items:center; gap:6px; background:#2563eb; color:white; border-radius:9999px; padding:6px 10px; font-size:12px; font-weight:600; line-height:1;';
               var x = document.createElement('button');
               x.type = 'button';
               x.textContent = '×';
               x.setAttribute('aria-label', 'Remove');
-              x.style.cssText = 'border:none; background:rgba(255,255,255,0.20); color:white; width:18px; height:18px; border-radius:9999px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; padding:0; line-height:1;';
+              x.style.cssText = 'border:none; background:rgba(255,255,255,0.20); color:white; width:18px; height:18px; border-radius:9999px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; padding:0; line-height:1; flex-shrink:0;';
               x.addEventListener('click', function(ev) {
                 ev.preventDefault();
                 ev.stopPropagation();
@@ -600,6 +703,11 @@ fun ensureSupplierChipJs() {
                 labelText = window._moneyFormat(window._moneySanitize(t));
               }
               label.textContent = labelText;
+              if (isMultiline) {
+                label.style.whiteSpace = 'pre-wrap';
+                label.style.wordBreak = 'break-word';
+                label.style.overflowWrap = 'anywhere';
+              }
               chip.appendChild(x);
               chip.appendChild(label);
               chips.appendChild(chip);
@@ -765,6 +873,12 @@ fun ensureSupplierChipJs() {
             if (!e) return true;
             var key = e.key;
             if (key === 'Enter') {
+              var input = _getInput(id);
+              var isTextarea = input && input.tagName === 'TEXTAREA';
+              // Multiline compose: Shift+Enter = newline; Enter commits chip.
+              if (isTextarea && e.shiftKey) {
+                return true;
+              }
               e.preventDefault();
               window.supplierChipAddFromInput(id);
               return false;
@@ -1509,10 +1623,10 @@ fun showEditClientMasterModal(originalName: String) {
     })
 
     document.getElementById("clientMasterModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        if (!window.confirm("Are you sure you want to delete client '$originalName'?")) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete client '$originalName'?",
+        ) {
         val requestInit = js("{}")
         requestInit.method = "DELETE"
 
@@ -1533,6 +1647,7 @@ fun showEditClientMasterModal(originalName: String) {
                 Logger.error("Error deleting client: ${error.toString()}")
                 showMessage("Error deleting client: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -1878,10 +1993,10 @@ fun showEditConsigneeMasterModal(originalName: String) {
     })
 
     document.getElementById("consigneeMasterModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        if (!window.confirm("Are you sure you want to delete consignee '$originalName'?")) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete consignee '$originalName'?",
+        ) {
         val requestInit = js("{}")
         requestInit.method = "DELETE"
 
@@ -1902,6 +2017,7 @@ fun showEditConsigneeMasterModal(originalName: String) {
                 Logger.error("Error deleting consignee: ${error.toString()}")
                 showMessage("Error deleting consignee: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -2350,8 +2466,12 @@ private fun buildConsigneeTableUi(
             }
             val titleAttr = if (fullForTitle.length > 60) " title=\"${escapeHtml(fullForTitle)}\"" else ""
             val cellInner =
-                if (columnKey == "consigneeAddress" || columnKey == "notifyParty" || columnKey == "inTransitClause")
+                if (columnKey == "consigneeAddress")
                     formatConsigneeMapAddressChipHtml(value)
+                else if (columnKey == "notifyParty" || columnKey == "inTransitClause")
+                    formatSemicolonOnlyValueChipHtml(
+                        if (columnKey == "notifyParty") notifyParty else inTransitClause,
+                    )
                 else formatConsigneeMapValueChipHtml(value)
             html += """<td style="$cellStyle"$titleAttr>$cellInner</td>"""
                 }
@@ -2611,8 +2731,10 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
             
             if (value.isNotEmpty()) {
                 val displayValue =
-                    if (columnKey == "consigneeAddress" || columnKey == "notifyParty" || columnKey == "inTransitClause")
+                    if (columnKey == "consigneeAddress")
                         formatConsigneeMapAddressChipHtml(value)
+                    else if (columnKey == "notifyParty" || columnKey == "inTransitClause")
+                        formatSemicolonOnlyValueChipHtml(value)
                     else formatConsigneeMapValueChipHtml(value)
                 cardFields.append("""
                     <div class="consignee-map-field">
@@ -2917,11 +3039,11 @@ fun showConsigneeModal(mappingId: Long?, duplicateFromId: Long? = null) {
                         </div>
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Notify party</label>
-                            <textarea id="consigneeNotifyParty" rows="4" placeholder="Optional" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; resize: vertical; font-family: inherit;"></textarea>
+                            ${createTallMultilineChipInput("consigneeMapNotifyParty", "Type notify party name and address…", rows = 4)}
                         </div>
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">In-Transit Clause</label>
-                            <textarea id="consigneeInTransitClause" rows="6" placeholder="Optional" style="width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; resize: vertical; font-family: inherit;"></textarea>
+                            ${createTallMultilineChipInput("consigneeMapInTransitClause", "Type In-Transit Clause…", rows = 4)}
                         </div>
                         <div class="consignee-modal-actions">
                             <button type="button" id="cancelConsigneeBtn" class="consignee-modal-btn consignee-modal-btn-cancel">Cancel</button>
@@ -3006,8 +3128,8 @@ fun loadConsigneeDataForEdit(mappingId: Long, clearConsigneeNameAndAddressForDup
                     setChipFieldValue("consigneeMapPod", normalizeStoredListForChips(podRaw))
                     (document.getElementById("consigneeAddress") as? HTMLTextAreaElement)?.value =
                         if (clearConsigneeNameAndAddressForDuplicate) "" else addrRaw
-                    (document.getElementById("consigneeNotifyParty") as? HTMLTextAreaElement)?.value = notifyRaw
-                    (document.getElementById("consigneeInTransitClause") as? HTMLTextAreaElement)?.value = inTransitRaw
+                    setChipFieldValue("consigneeMapNotifyParty", normalizeNotifyInTransitForChips(notifyRaw))
+                    setChipFieldValue("consigneeMapInTransitClause", normalizeNotifyInTransitForChips(inTransitRaw))
                 }, 450)
             }
         }
@@ -3116,8 +3238,8 @@ fun performConsigneeSave(mappingId: Long?) {
     consigneeData.consigneeName = getEditableComboboxValue("consigneeMapConsigneeName").takeUnless { it.isBlank() }
     consigneeData.consigneeAddress = (document.getElementById("consigneeAddress") as? HTMLTextAreaElement)?.value?.trim() ?: null
     consigneeData.pod = getChipFieldValue("consigneeMapPod").takeUnless { it.isBlank() }
-    consigneeData.notifyParty = (document.getElementById("consigneeNotifyParty") as? HTMLTextAreaElement)?.value?.trim()?.takeUnless { it.isBlank() }
-    consigneeData.inTransitClause = (document.getElementById("consigneeInTransitClause") as? HTMLTextAreaElement)?.value?.trim()?.takeUnless { it.isBlank() }
+    consigneeData.notifyParty = getChipFieldValue("consigneeMapNotifyParty").takeUnless { it.isBlank() }
+    consigneeData.inTransitClause = getChipFieldValue("consigneeMapInTransitClause").takeUnless { it.isBlank() }
     consigneeData.stockLocation = null
     consigneeData.pols = null
     consigneeData.notes = consigneeModalNotesSnapshot?.takeUnless { it.isBlank() }
@@ -3542,10 +3664,10 @@ fun showEditCarBrandsMasterModal(originalName: String) {
     })
 
     document.getElementById("carBrandsMasterModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        if (!window.confirm("Are you sure you want to delete car brand '$originalName'?")) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete car brand '$originalName'?",
+        ) {
         val requestInit = js("{}")
         requestInit.method = "DELETE"
 
@@ -3566,6 +3688,7 @@ fun showEditCarBrandsMasterModal(originalName: String) {
                 Logger.error("Error deleting car brand: ${error.toString()}")
                 showMessage("Error deleting car brand: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -5962,10 +6085,10 @@ fun showEditCountryModal(originalName: String) {
     })
 
     document.getElementById("countryModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        if (!window.confirm("Are you sure you want to delete country '$originalName'?")) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete country '$originalName'?",
+        ) {
         val requestInit = js("{}")
         requestInit.method = "DELETE"
 
@@ -5986,6 +6109,7 @@ fun showEditCountryModal(originalName: String) {
                 Logger.error("Error deleting country: ${error.toString()}")
                 showMessage("Error deleting country: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -6317,10 +6441,10 @@ fun showEditSupplierMasterModal(originalName: String) {
     })
 
     document.getElementById("supplierMasterModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        if (!window.confirm("Are you sure you want to delete supplier '$originalName'?")) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete supplier '$originalName'?",
+        ) {
         val requestInit = js("{}")
         requestInit.method = "DELETE"
 
@@ -6341,6 +6465,7 @@ fun showEditSupplierMasterModal(originalName: String) {
                 Logger.error("Error deleting supplier: ${error.toString()}")
                 showMessage("Error deleting supplier: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -6656,11 +6781,10 @@ fun showEditRixoCompanyModal(originalName: String) {
     })
 
     document.getElementById("rixoCompanyModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        val confirmDelete = window.confirm("Are you sure you want to delete this Rixo company?")
-        if (!confirmDelete) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete this Rixo company?",
+        ) {
         val encoded = js("encodeURIComponent")(originalName) as String
         val url = apiUrl("master-menu/rixo_company?value=" + encoded)
         val requestInit = js("{}")
@@ -6680,6 +6804,7 @@ fun showEditRixoCompanyModal(originalName: String) {
                 Logger.error("Error deleting Rixo company: ${error.toString()}")
                 showMessage("Error deleting Rixo company: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -6994,10 +7119,10 @@ fun showEditStockLocationModal(originalName: String) {
     })
 
     document.getElementById("stockLocationModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        if (!window.confirm("Are you sure you want to delete stock location '$originalName'?")) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete stock location '$originalName'?",
+        ) {
         val requestInit = js("{}")
         requestInit.method = "DELETE"
 
@@ -7018,6 +7143,7 @@ fun showEditStockLocationModal(originalName: String) {
                 Logger.error("Error deleting stock location: ${error.toString()}")
                 showMessage("Error deleting stock location: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -7297,11 +7423,10 @@ fun showEditRepairCompanyModal(originalName: String) {
     })
 
     document.getElementById("repairCompanyModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        val confirmDelete = window.confirm("Are you sure you want to delete this repair company?")
-        if (!confirmDelete) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete this repair company?",
+        ) {
         val encoded = js("encodeURIComponent")(originalName) as String
         val url = apiUrl("master-menu/repair_company?value=" + encoded)
         val requestInit = js("{}")
@@ -7321,6 +7446,7 @@ fun showEditRepairCompanyModal(originalName: String) {
                 Logger.error("Error deleting repair company: ${error.toString()}")
                 showMessage("Error deleting repair company: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -7596,11 +7722,10 @@ fun showEditBankAccountModal(originalName: String) {
     })
 
     document.getElementById("bankAccountModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        val confirmDelete = window.confirm("Are you sure you want to delete this bank account?")
-        if (!confirmDelete) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete this bank account?",
+        ) {
         val encoded = js("encodeURIComponent")(originalName) as String
         val url = apiUrl("master-menu/bank_accounts?value=" + encoded)
         val requestInit = js("{}")
@@ -7619,6 +7744,7 @@ fun showEditBankAccountModal(originalName: String) {
                 Logger.error("Error deleting bank account: ${error.toString()}")
                 showMessage("Error deleting bank account: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -7898,11 +8024,10 @@ fun showEditVenueIdModal(originalValue: String) {
     })
 
     document.getElementById("venueIdModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        val confirmDelete = window.confirm("Are you sure you want to delete this venue ID?")
-        if (!confirmDelete) {
-            return@addEventListener
-        }
-
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Are you sure you want to delete this venue ID?",
+        ) {
         val encoded = js("encodeURIComponent")(originalValue) as String
         val url = apiUrl("master-menu/venue_id?value=" + encoded)
         val requestInit = js("{}")
@@ -7922,6 +8047,7 @@ fun showEditVenueIdModal(originalValue: String) {
                 Logger.error("Error deleting venue ID: ${error.toString()}")
                 showMessage("Error deleting venue ID: ${error.message}", "error")
             }
+        }
     })
 }
 
@@ -8093,13 +8219,17 @@ fun showEditPolModal(originalName: String) {
             .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
     })
     document.getElementById("polModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        if (!window.confirm("Delete this POL?")) return@addEventListener
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Delete this POL?",
+        ) {
         val encoded = js("encodeURIComponent")(originalName) as String
         val req = js("{}"); req.method = "DELETE"
         window.fetch(apiUrl("master-menu/pol?value=" + encoded), req)
             .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete')") }
             .then { _: dynamic -> showMessage("POL deleted successfully", "success"); modal.remove(); polCurrentPage = 1; loadMasterPol() }
             .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+        }
     })
 }
 
@@ -8233,13 +8363,17 @@ fun showEditPodModal(originalName: String) {
             .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
     })
     document.getElementById("podModalDeleteBtn")?.addEventListener("click", { _: Event ->
-        if (!window.confirm("Delete this POD?")) return@addEventListener
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Delete this POD?",
+        ) {
         val encoded = js("encodeURIComponent")(originalName) as String
         val req = js("{}"); req.method = "DELETE"
         window.fetch(apiUrl("master-menu/pod?value=" + encoded), req)
             .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete')") }
             .then { _: dynamic -> showMessage("POD deleted successfully", "success"); modal.remove(); podCurrentPage = 1; loadMasterPod() }
             .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+        }
     })
 }
 
@@ -8587,6 +8721,7 @@ private fun renderSimpleMasterPage(apiPath: String, title: String, listId: Strin
             .simple-master-pager{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:14px 4px 4px;color:#475569;font-size:14px;}
             .simple-master-pager-btn{padding:8px 14px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;cursor:pointer;min-height:36px;}
             .simple-master-pager-btn:disabled{opacity:0.5;cursor:not-allowed;}
+            .simple-master-pager-btn:focus-visible,.simple-master-add-btn:focus-visible,.simple-master-search-clear:focus-visible,.simple-master-sort-btn:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
             .simple-master-pager-meta{font-weight:500;color:#334155;}
             @media (max-width:1024px){#$pageId{padding:14px;border-radius:14px;max-width:100%;}.simple-master-toolbar{gap:14px;}.simple-master-title{font-size:17px;}.simple-master-search input{font-size:13px;padding:10px 34px 10px 38px;}}
             @media (min-width:1025px){.simple-master-toolbar{grid-template-columns:auto 1fr minmax(200px,25%) auto;grid-template-areas:"title . search add";column-gap:12px;row-gap:0;}.simple-master-title{text-align:left;justify-self:start;}}
@@ -8672,22 +8807,41 @@ private fun invalidateNumberCutPlaceCacheIfNeeded(apiPath: String) {
 
 private fun addSimpleMasterModal(apiPath: String, title: String, modalId: String, inputId: String, cancelBtnId: String, addBtnId: String, onSuccess: () -> Unit) {
     document.getElementById(modalId)?.remove()
-    val modal = document.createElement("div")
+    val modal = document.createElement("div") as HTMLElement
     modal.id = modalId
-    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    modal.style.cssText =
+        "position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    val titleId = "${modalId}Title"
     modal.innerHTML = """
-        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%;">
-            <h3 style="margin-top: 0;">Add $title</h3>
-            <label>$title</label>
-            <input type="text" id="$inputId" placeholder="Enter $title" style="width: 100%; padding: 10px 12px; margin: 8px 0; box-sizing: border-box;">
-            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top: 16px;">
-                <button id="$cancelBtnId" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
-                <button id="$addBtnId" style="padding: 8px 16px; border-radius: 6px; border: none; background: #10b981; color:white; cursor: pointer;">Add</button>
+        <div role="dialog" aria-modal="true" aria-labelledby="$titleId"
+             style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:100%;box-sizing:border-box;box-shadow:0 20px 50px rgba(15,23,42,0.28);">
+            <h3 id="$titleId" style="margin:0 0 16px;font-size:18px;font-weight:700;color:#0f172a;">Add $title</h3>
+            <label for="$inputId" style="display:block;margin-bottom:6px;font-weight:600;color:#374151;font-size:14px;">$title</label>
+            <input type="text" id="$inputId" placeholder="Enter $title"
+                   style="width:100%;padding:10px 12px;margin:0 0 16px;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:8px;min-height:44px;">
+            <div style="display:flex;justify-content:flex-end;gap:10px;">
+                <button type="button" id="$cancelBtnId" style="padding:9px 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;cursor:pointer;min-height:40px;color:#374151;">Cancel</button>
+                <button type="button" id="$addBtnId" style="padding:9px 16px;border-radius:8px;border:none;background:#059669;color:#fff;cursor:pointer;font-weight:600;min-height:40px;">Add</button>
             </div>
         </div>
     """
     document.body?.appendChild(modal)
-    document.getElementById(cancelBtnId)?.addEventListener("click", { _: Event -> modal.remove() })
+    var keyHandler: ((Event) -> Unit)? = null
+    fun close() {
+        keyHandler?.let { document.removeEventListener("keydown", it) }
+        modal.remove()
+    }
+    document.getElementById(cancelBtnId)?.addEventListener("click", { _: Event -> close() })
+    modal.addEventListener("click", { ev: Event -> if (ev.target === modal) close() })
+    keyHandler = { event: Event ->
+        if (event.asDynamic().key == "Escape") {
+            event.preventDefault()
+            close()
+        }
+    }
+    document.addEventListener("keydown", keyHandler!!)
+    (document.getElementById(inputId) as? HTMLElement)?.focus()
     document.getElementById(addBtnId)?.addEventListener("click", { _: Event ->
         val value = (document.getElementById(inputId) as? HTMLInputElement)?.value?.trim() ?: ""
         if (value.isEmpty()) { showMessage("$title is required", "error"); return@addEventListener }
@@ -8695,33 +8849,52 @@ private fun addSimpleMasterModal(apiPath: String, title: String, modalId: String
         val req = js("{}"); req.method = "POST"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
         window.fetch(apiUrl(apiPath), req)
             .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to add')") }
-            .then { _: dynamic -> showMessage("$title added successfully", "success"); modal.remove(); invalidateNumberCutPlaceCacheIfNeeded(apiPath); onSuccess() }
+            .then { _: dynamic -> showMessage("$title added successfully", "success"); close(); invalidateNumberCutPlaceCacheIfNeeded(apiPath); onSuccess() }
             .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
     })
 }
 
 private fun editSimpleMasterModal(apiPath: String, title: String, originalName: String, modalId: String, inputId: String, cancelBtnId: String, updateBtnId: String, deleteBtnId: String, onUpdateSuccess: () -> Unit, onDeleteSuccess: () -> Unit) {
     document.getElementById(modalId)?.remove()
-    val modal = document.createElement("div")
+    val modal = document.createElement("div") as HTMLElement
     modal.id = modalId
-    modal.asDynamic().style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;"
+    modal.style.cssText =
+        "position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    val titleId = "${modalId}Title"
     val safeOriginal = originalName.replace("\"", "&quot;")
     modal.innerHTML = """
-        <div style="background: white; border-radius: 10px; padding: 24px; max-width: 420px; width: 90%;">
-            <h3 style="margin-top: 0;">Edit $title</h3>
-            <label>$title</label>
-            <input type="text" id="$inputId" value="$safeOriginal" style="width: 100%; padding: 10px 12px; margin: 8px 0; box-sizing: border-box;">
-            <div style="display:flex; justify-content:space-between; gap:10px; margin-top: 16px;">
-                <button id="$deleteBtnId" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #ef4444; background: white; color:#ef4444; cursor: pointer;">Delete</button>
-                <div style="display:flex; gap:10px;">
-                    <button id="$cancelBtnId" style="padding: 8px 16px; border-radius: 6px; border: 1px solid #d1d5db; background: white; cursor: pointer;">Cancel</button>
-                    <button id="$updateBtnId" style="padding: 8px 16px; border-radius: 6px; border: none; background: #3b82f6; color:white; cursor: pointer;">Update</button>
+        <div role="dialog" aria-modal="true" aria-labelledby="$titleId"
+             style="background:#fff;border-radius:12px;padding:24px;max-width:420px;width:100%;box-sizing:border-box;box-shadow:0 20px 50px rgba(15,23,42,0.28);">
+            <h3 id="$titleId" style="margin:0 0 16px;font-size:18px;font-weight:700;color:#0f172a;">Edit $title</h3>
+            <label for="$inputId" style="display:block;margin-bottom:6px;font-weight:600;color:#374151;font-size:14px;">$title</label>
+            <input type="text" id="$inputId" value="$safeOriginal"
+                   style="width:100%;padding:10px 12px;margin:0 0 16px;box-sizing:border-box;border:1px solid #e5e7eb;border-radius:8px;min-height:44px;">
+            <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="$deleteBtnId" style="padding:9px 16px;border-radius:8px;border:1px solid #b91c1c;background:#fff;color:#b91c1c;cursor:pointer;font-weight:600;min-height:40px;">Delete</button>
+                <div style="display:flex;gap:10px;">
+                    <button type="button" id="$cancelBtnId" style="padding:9px 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;cursor:pointer;min-height:40px;color:#374151;">Cancel</button>
+                    <button type="button" id="$updateBtnId" style="padding:9px 16px;border-radius:8px;border:none;background:#2563eb;color:#fff;cursor:pointer;font-weight:600;min-height:40px;">Update</button>
                 </div>
             </div>
         </div>
     """
     document.body?.appendChild(modal)
-    document.getElementById(cancelBtnId)?.addEventListener("click", { _: Event -> modal.remove() })
+    var keyHandler: ((Event) -> Unit)? = null
+    fun close() {
+        keyHandler?.let { document.removeEventListener("keydown", it) }
+        modal.remove()
+    }
+    document.getElementById(cancelBtnId)?.addEventListener("click", { _: Event -> close() })
+    modal.addEventListener("click", { ev: Event -> if (ev.target === modal) close() })
+    keyHandler = { event: Event ->
+        if (event.asDynamic().key == "Escape") {
+            event.preventDefault()
+            close()
+        }
+    }
+    document.addEventListener("keydown", keyHandler!!)
+    (document.getElementById(inputId) as? HTMLElement)?.focus()
     document.getElementById(updateBtnId)?.addEventListener("click", { _: Event ->
         val newValue = (document.getElementById(inputId) as? HTMLInputElement)?.value?.trim() ?: ""
         if (newValue.isEmpty()) { showMessage("$title is required", "error"); return@addEventListener }
@@ -8729,17 +8902,21 @@ private fun editSimpleMasterModal(apiPath: String, title: String, originalName: 
         val req = js("{}"); req.method = "PUT"; req.headers = js("{\"Content-Type\": \"application/json\"}"); req.body = JSON.stringify(body)
         window.fetch(apiUrl(apiPath), req)
             .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to update')") }
-            .then { _: dynamic -> showMessage("$title updated successfully", "success"); modal.remove(); invalidateNumberCutPlaceCacheIfNeeded(apiPath); onUpdateSuccess() }
+            .then { _: dynamic -> showMessage("$title updated successfully", "success"); close(); invalidateNumberCutPlaceCacheIfNeeded(apiPath); onUpdateSuccess() }
             .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
     })
     document.getElementById(deleteBtnId)?.addEventListener("click", { _: Event ->
-        if (!window.confirm("Delete this $title?")) return@addEventListener
-        val encoded = js("encodeURIComponent")(originalName) as String
-        val req = js("{}"); req.method = "DELETE"
-        window.fetch(apiUrl(apiPath + "?value=" + encoded), req)
-            .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete')") }
-            .then { _: dynamic -> showMessage("$title deleted successfully", "success"); modal.remove(); invalidateNumberCutPlaceCacheIfNeeded(apiPath); onDeleteSuccess() }
-            .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+        showMasterConfirmModal(
+            title = "Confirm delete",
+            message = "Delete this $title?",
+        ) {
+            val encoded = js("encodeURIComponent")(originalName) as String
+            val req = js("{}"); req.method = "DELETE"
+            window.fetch(apiUrl(apiPath + "?value=" + encoded), req)
+                .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to delete')") }
+                .then { _: dynamic -> showMessage("$title deleted successfully", "success"); close(); invalidateNumberCutPlaceCacheIfNeeded(apiPath); onDeleteSuccess() }
+                .catch { e: dynamic -> showMessage("Error: ${e.message}", "error") }
+        }
     })
 }
 

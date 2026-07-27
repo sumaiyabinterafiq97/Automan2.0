@@ -67,16 +67,16 @@ fun showCreditLimitExceededModal(detailMessage: String) {
             .replace("&", "&amp;")
             .replace("<", "&lt;")
             .replace(">", "&gt;")
-        """<p style="margin: 0 0 16px; padding: 12px; background: #fef2f2; border-left: 4px solid #e74c3c; color: #7f1d1d; font-size: 14px; line-height: 1.5;">$safeMsg</p>"""
+        """<p id="creditLimitInvoiceDetail" style="margin: 0 0 16px; padding: 12px; background: #fef2f2; border-left: 4px solid #e74c3c; color: #7f1d1d; font-size: 14px; line-height: 1.5;">$safeMsg</p>"""
     } else {
         ""
     }
     val modalHTML = """
-        <div id="creditLimitInvoiceModal" class="client-modal">
-            <div class="client-modal-content" style="max-width: 520px;">
+        <div id="creditLimitInvoiceModal" class="client-modal" role="presentation">
+            <div class="client-modal-content" role="dialog" aria-modal="true" aria-labelledby="creditLimitInvoiceTitle" style="max-width: 520px;">
                 <div class="client-modal-header">
-                    <h2>Credit limit exceeded</h2>
-                    <button type="button" id="closeCreditLimitInvoiceModalBtn" class="client-modal-close">&times;</button>
+                    <h2 id="creditLimitInvoiceTitle">Credit limit exceeded</h2>
+                    <button type="button" id="closeCreditLimitInvoiceModalBtn" class="client-modal-close" aria-label="Close">&times;</button>
                 </div>
                 <p style="margin: 0 0 12px; color: #333; line-height: 1.5;">
                     This invoice cannot be saved because the client would exceed their credit limit.
@@ -92,7 +92,9 @@ fun showCreditLimitExceededModal(detailMessage: String) {
         </div>
     """
     document.body?.insertAdjacentHTML("beforeend", modalHTML)
+    var keyHandler: ((Event) -> Unit)? = null
     fun close() {
+        keyHandler?.let { document.removeEventListener("keydown", it) }
         document.getElementById("creditLimitInvoiceModal")?.remove()
     }
     document.getElementById("closeCreditLimitInvoiceModalBtn")?.addEventListener("click", { _: Event -> close() })
@@ -100,6 +102,79 @@ fun showCreditLimitExceededModal(detailMessage: String) {
     document.getElementById("creditLimitInvoiceModal")?.addEventListener("click", { event: Event ->
         if ((event.target as? HTMLElement)?.id == "creditLimitInvoiceModal") close()
     })
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        if (event.asDynamic().key == "Escape") {
+            event.preventDefault()
+            close()
+        }
+    }
+    keyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    (document.getElementById("okCreditLimitInvoiceModalBtn") as? HTMLElement)?.focus()
+}
+
+private var invoiceConfirmModalKeyHandler: ((Event) -> Unit)? = null
+
+/** In-app confirm (replaces window.confirm) for destructive invoice actions. */
+private fun showInvoiceConfirmModal(
+    title: String,
+    message: String,
+    confirmLabel: String = "Delete",
+    onConfirm: () -> Unit,
+) {
+    document.getElementById("invoiceConfirmModal")?.remove()
+    invoiceConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+    invoiceConfirmModalKeyHandler = null
+    val returnFocus = document.activeElement as? HTMLElement
+    val safeTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    val safeMessage = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    val safeConfirm = confirmLabel.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = "invoiceConfirmModal"
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10020;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    overlay.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="invoiceConfirmTitle"
+             style="background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,0.28);
+             max-width:440px;width:100%;padding:22px 24px;box-sizing:border-box;">
+            <h3 id="invoiceConfirmTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">$safeTitle</h3>
+            <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:20px;">$safeMessage</div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="invoiceConfirmCancel"
+                    style="padding:9px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;min-height:40px;font-size:14px;color:#374151;">Cancel</button>
+                <button type="button" id="invoiceConfirmOk"
+                    style="padding:9px 16px;border:none;border-radius:8px;background:#b91c1c;color:#fff;cursor:pointer;font-weight:700;min-height:40px;font-size:14px;">$safeConfirm</button>
+            </div>
+        </div>
+    """.trimIndent()
+
+    fun closeModal() {
+        invoiceConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+        invoiceConfirmModalKeyHandler = null
+        overlay.remove()
+        returnFocus?.focus()
+    }
+
+    document.body?.appendChild(overlay)
+    document.getElementById("invoiceConfirmCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("invoiceConfirmOk")?.addEventListener("click", { _: Event ->
+        closeModal()
+        onConfirm()
+    })
+    overlay.addEventListener("click", { ev: Event ->
+        if (ev.target === overlay) closeModal()
+    })
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        if (event.asDynamic().key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    invoiceConfirmModalKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    (document.getElementById("invoiceConfirmCancel") as? HTMLElement)?.focus()
 }
 
 private fun handleInvoiceSaveFailure(httpStatus: Int, errorText: String) {
@@ -167,15 +242,15 @@ fun showInvoicePage() {
     val isRecreateInvoice = routeStartsWith("/recreate-invoice")
     val invoicePageMainTitle =
         if (isRecreateInvoice) {
-            "AUTOMAN | RECREATE LOCAL CUSTOMER INVOICE"
+            "Recreate Local Customer Invoice"
         } else {
-            "AUTOMAN | CREATE LOCAL CUSTOMER INVOICE"
+            "Create Local Customer Invoice"
         }
     val invoiceSaveBtnLabel = if (isRecreateInvoice) "Update" else "Save"
     val invoiceListFooterHtml = if (isRecreateInvoice) {
         """
-                        <div class="invoice-list-footer" style="display:flex;justify-content:flex-end;margin-top:14px;padding-top:12px;">
-                            <button type="button" id="deleteInvoiceFromRecreate" class="invoice-btn" style="padding:10px 20px;border:1px solid #b91c1c;border-radius:8px;background:#fff;color:#b91c1c;font-weight:600;font-size:14px;cursor:pointer;">Delete</button>
+                        <div class="invoice-list-footer">
+                            <button type="button" id="deleteInvoiceFromRecreate" class="invoice-btn invoice-btn-danger-outline">Delete</button>
                         </div>
         """.trimIndent()
     } else {
@@ -213,14 +288,14 @@ fun showInvoicePage() {
                     <!-- Left Column: Form Fields -->
                     <div class="invoice-form-section">
                         <div class="invoice-field">
-                            <label for="invoiceClient">CLIENT:</label>
+                            <label for="invoiceClient">Client</label>
                             <select id="invoiceClient" class="invoice-select">
                                 <option value="">Select client</option>
                             </select>
                         </div>
                         
                         <div class="invoice-field">
-                            <label for="invoiceVessel">VESSEL:</label>
+                            <label for="invoiceVessel">Vessel</label>
                             <select id="invoiceVessel" class="invoice-select">
                                 <option value="">Select vessel</option>
                             </select>
@@ -228,14 +303,13 @@ fun showInvoicePage() {
                         </div>
                         
                         <div class="invoice-field">
-                            <label for="invoiceShippingDate">SHIPPING DATE:</label>
-                            <div style="position:relative; width:100%;">
-                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                            <label for="invoiceShippingDateText">Shipping Date</label>
+                            <div class="invoice-date-wrap">
+                                <div class="invoice-date-row">
                                     <input type="text" id="invoiceShippingDateText" maxlength="10" inputmode="numeric" autocomplete="off"
-                                           class="invoice-input" placeholder="MM/DD/YYYY"
-                                           style="flex:1; min-width:0;" />
-                                    <button type="button" id="invoiceShippingDateCalendarBtn" title="Open calendar"
-                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                           class="invoice-input" placeholder="MM/DD/YYYY" />
+                                    <button type="button" id="invoiceShippingDateCalendarBtn" class="invoice-calendar-btn"
+                                            title="Open calendar" aria-label="Open shipping date calendar">${purchaseFormCalendarIconSvg()}</button>
                                 </div>
                                 <input type="date" id="invoiceShippingDate" class="invoice-input" tabindex="-1" aria-hidden="true"
                                        style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
@@ -243,38 +317,38 @@ fun showInvoicePage() {
                         </div>
                         
                         <div class="invoice-field">
-                            <label>SHIPPING LOCATION:</label>
-                            <div class="invoice-shipping-grid">
+                            <span class="invoice-field-legend" id="invoiceShippingLocationLegend">Shipping Location</span>
+                            <div class="invoice-shipping-grid" role="group" aria-labelledby="invoiceShippingLocationLegend">
                                 <div>
-                                    <label>FROM:</label>
+                                    <label for="invoiceFrom">From</label>
                                     <input type="text" id="invoiceFrom" class="invoice-input" placeholder="Origin port" />
                                 </div>
                                 <div>
-                                    <label>TO:</label>
+                                    <label for="invoiceTo">To</label>
                                     <input type="text" id="invoiceTo" class="invoice-input" placeholder="Destination port" />
                                 </div>
                             </div>
                         </div>
                         
                         <div class="invoice-field">
-                            <label for="invoiceNumber">INVOICE NUMBER:</label>
+                            <label for="invoiceNumber">Invoice Number</label>
                             <div class="invoice-number-row">
                                 <input type="text" id="invoiceNumber" class="invoice-input" placeholder="Enter invoice number" />
-                                <button type="button" id="generateInvoiceNumberBtn" class="invoice-generate-btn">GENERATE INVOICE NUMBER</button>
+                                <button type="button" id="generateInvoiceNumberBtn" class="invoice-generate-btn">Generate Invoice Number</button>
                             </div>
                         </div>
                         
                         <div class="invoice-field">
-                            <label for="invoiceLcNo">LC NO.:</label>
+                            <label for="invoiceLcNo">LC No.</label>
                             <input type="text" id="invoiceLcNo" class="invoice-input" placeholder="Enter LC number" />
                         </div>
                         
                         <div class="invoice-field">
-                            <label>PRICE TYPE:</label>
-                            <div class="invoice-radio-group">
+                            <span class="invoice-field-legend" id="invoicePriceTypeLegend">Price Type</span>
+                            <div class="invoice-radio-group" role="radiogroup" aria-labelledby="invoicePriceTypeLegend">
                                 <div class="invoice-radio">
                                     <input type="radio" id="invoiceCnf" name="invoicePriceType" value="CNF" checked />
-                                    <label for="invoiceCnf">C&F</label>
+                                    <label for="invoiceCnf">C&amp;F</label>
                                 </div>
                                 <div class="invoice-radio">
                                     <input type="radio" id="invoiceFob" name="invoicePriceType" value="FOB" />
@@ -284,7 +358,7 @@ fun showInvoicePage() {
                         </div>
                         
                         <div class="invoice-field">
-                            <label for="invoiceBankAccount">SELECT BANK ACCOUNT:</label>
+                            <label for="invoiceBankAccount">Bank Account</label>
                             <select id="invoiceBankAccount" class="invoice-select">
                                 <option value="">Select bank account</option>
                                 <option value="BANK OF SMBC MITSUI SUMITOMO (Gyotoku) BRANCH
@@ -298,14 +372,14 @@ SWIFT CODE: SMBCJPJT</option>
                         </div>
                         
                         <div class="invoice-field">
-                            <label for="invoiceMessage">MESSAGE:</label>
+                            <label for="invoiceMessage">Message</label>
                             <textarea id="invoiceMessage" class="invoice-textarea" rows="4" placeholder="Enter message"></textarea>
                         </div>
                     </div>
                     
                     <!-- Right Column: LIST Table -->
                     <div class="invoice-list-section">
-                        <h2>LIST</h2>
+                        <h2>List</h2>
                         
                         <!-- Table/Cards Container (grows to fill space) -->
                         <div class="invoice-table-container">
@@ -313,11 +387,11 @@ SWIFT CODE: SMBCJPJT</option>
                             <table class="invoice-list-table" id="invoiceListTable">
                                 <thead>
                                     <tr>
-                                        <th>NO.</th>
-                                        <th>CHASSIS</th>
-                                        <th>NAME</th>
-                                        <th>YEAR</th>
-                                        <th>AMOUNT</th>
+                                        <th scope="col">No.</th>
+                                        <th scope="col">Chassis</th>
+                                        <th scope="col">Name</th>
+                                        <th scope="col">Year</th>
+                                        <th scope="col">Amount</th>
                                     </tr>
                                 </thead>
                                 <tbody id="invoiceListTableBody">
@@ -331,8 +405,8 @@ SWIFT CODE: SMBCJPJT</option>
                             </div>
                         </div>
                         
-                        <div class="invoice-total" id="invoiceTotalAmount">
-                            TOTAL AMOUNT: ¥000,000
+                        <div class="invoice-total" id="invoiceTotalAmount" aria-live="polite">
+                            Total Amount: ¥000,000
                         </div>
                         $invoiceListFooterHtml
                     </div>
@@ -363,7 +437,7 @@ SWIFT CODE: SMBCJPJT</option>
     }
     val totalElement = document.getElementById("invoiceTotalAmount")
     if (totalElement != null) {
-        totalElement.textContent = "TOTAL AMOUNT: ¥000,000"
+        totalElement.textContent = "Total Amount: ¥000,000"
     }
     
     // Handle pre-selected purchases from URL or localStorage
@@ -1073,7 +1147,7 @@ private fun clearInvoiceListAndTotals() {
     cardsContainer?.innerHTML = ""
     val totalElement = document.getElementById("invoiceTotalAmount")
     if (totalElement != null) {
-        totalElement.textContent = "TOTAL AMOUNT: ¥000,000"
+        totalElement.textContent = "Total Amount: ¥000,000"
     }
     js("window.currentInvoicePurchaseIds = []")
     js("window.currentInvoicePdfLines = []")
@@ -1091,7 +1165,7 @@ private fun showInvoiceListPlaceholder(message: String) {
         """<td colspan="5" style="text-align:center; padding: 16px; color:#495057; font-size: 14px; line-height: 1.4;">$esc</td>"""
     tableBody.appendChild(emptyRow)
     val totalElement = document.getElementById("invoiceTotalAmount")
-    totalElement?.textContent = "TOTAL AMOUNT: ¥000,000"
+    totalElement?.textContent = "Total Amount: ¥000,000"
     js("window.currentInvoicePurchaseIds = []")
     js("window.currentInvoicePdfLines = []")
     js("window.currentInvoiceChassisList = []")
@@ -1189,19 +1263,19 @@ fun populateInvoiceListTable(purchases: Array<dynamic>, historyLineAmounts: List
             card.className = "invoice-card-item"
             card.innerHTML = """
                 <div class="card-row">
-                    <span class="card-label">NO.</span>
+                    <span class="card-label">No.</span>
                     <span class="card-value">$rowNumber</span>
                 </div>
                 <div class="card-row">
-                    <span class="card-label">CHASSIS</span>
+                    <span class="card-label">Chassis</span>
                     <span class="card-value">$chassis</span>
                 </div>
                 <div class="card-row">
-                    <span class="card-label">NAME</span>
+                    <span class="card-label">Name</span>
                     <span class="card-value">$carName</span>
                 </div>
                 <div class="card-row">
-                    <span class="card-label">AMOUNT</span>
+                    <span class="card-label">Amount</span>
                     <span class="card-amount">$formattedAmount</span>
                 </div>
             """
@@ -1220,7 +1294,7 @@ fun populateInvoiceListTable(purchases: Array<dynamic>, historyLineAmounts: List
     val totalJoined = totalChunked.joinToString(",")
     val totalFinalReversed = totalJoined.reversed()
     val formattedTotal = "¥$totalFinalReversed"
-    totalElement?.textContent = "TOTAL AMOUNT: $formattedTotal"
+    totalElement?.textContent = "Total Amount: $formattedTotal"
     
     // Store purchase IDs in JavaScript variable
     val idsArray = js("[]")
@@ -1447,7 +1521,7 @@ fun populateInvoiceListFromShippingLines(lines: Array<dynamic>) {
         js("window.currentInvoicePdfLines = []")
         js("window.currentInvoiceChassisList = []")
         val totalElement = document.getElementById("invoiceTotalAmount")
-        totalElement?.textContent = "TOTAL AMOUNT: ¥000,000"
+        totalElement?.textContent = "Total Amount: ¥000,000"
         return
     }
 
@@ -1477,19 +1551,19 @@ fun populateInvoiceListFromShippingLines(lines: Array<dynamic>) {
             card.className = "invoice-card-item"
             card.innerHTML = """
                 <div class="card-row">
-                    <span class="card-label">NO.</span>
+                    <span class="card-label">No.</span>
                     <span class="card-value">$rowNumber</span>
                 </div>
                 <div class="card-row">
-                    <span class="card-label">CHASSIS</span>
+                    <span class="card-label">Chassis</span>
                     <span class="card-value">$chassis</span>
                 </div>
                 <div class="card-row">
-                    <span class="card-label">NAME</span>
+                    <span class="card-label">Name</span>
                     <span class="card-value">$carName</span>
                 </div>
                 <div class="card-row">
-                    <span class="card-label">AMOUNT</span>
+                    <span class="card-label">Amount</span>
                     <span class="card-amount">$formattedAmount</span>
                 </div>
             """
@@ -1499,7 +1573,7 @@ fun populateInvoiceListFromShippingLines(lines: Array<dynamic>) {
     }
 
     val totalElement = document.getElementById("invoiceTotalAmount")
-    totalElement?.textContent = "TOTAL AMOUNT: ${formatInvoiceYenInt(totalAmount)}"
+    totalElement?.textContent = "Total Amount: ${formatInvoiceYenInt(totalAmount)}"
 
     val idsArray = js("[]")
     purchaseIds.forEach { id -> js("idsArray.push(id)") }
@@ -1999,8 +2073,16 @@ private fun resolveInvoiceNumberForRecreateDelete(): String {
 }
 
 private fun handleDeleteInvoiceFromRecreate() {
-    val ok = window.confirm("Are you sure you want to Delete the invoice?")
-    if (!ok) return
+    showInvoiceConfirmModal(
+        title = "Delete invoice?",
+        message = "Are you sure you want to delete this invoice? This cannot be undone.",
+        confirmLabel = "Delete",
+    ) {
+        deleteInvoiceFromRecreateConfirmed()
+    }
+}
+
+private fun deleteInvoiceFromRecreateConfirmed() {
     MainScope().launch {
         val invoiceNumber = resolveInvoiceNumberForRecreateDelete()
         if (invoiceNumber.isEmpty()) {

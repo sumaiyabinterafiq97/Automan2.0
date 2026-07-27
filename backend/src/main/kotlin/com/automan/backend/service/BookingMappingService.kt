@@ -91,16 +91,24 @@ class BookingMappingService(
             incoming.consigneeAddress,
             TokenSplit.SEMICOLON_NEWLINE_ONLY,
         )
-        val incomingNotify = incoming.notifyParty?.trim()?.takeIf { it.isNotEmpty() }
-        val incomingInTransit = incoming.inTransitClause?.trim()?.takeIf { it.isNotEmpty() }
+        val mergedNotify = mergeTokenFields(
+            target.notifyParty,
+            incoming.notifyParty,
+            TokenSplit.SEMICOLON_ONLY,
+        )
+        val mergedInTransit = mergeTokenFields(
+            target.inTransitClause,
+            incoming.inTransitClause,
+            TokenSplit.SEMICOLON_ONLY,
+        )
         return repo.save(
             target.copy(
                 country = ensureCountryColumn(mergedCountry ?: target.country),
                 consigneeName = target.consigneeName,
                 consigneeAddress = mergedAddress ?: target.consigneeAddress,
                 pod = mergedPod ?: target.pod,
-                notifyParty = incomingNotify ?: target.notifyParty,
-                inTransitClause = incomingInTransit ?: target.inTransitClause,
+                notifyParty = mergedNotify ?: target.notifyParty,
+                inTransitClause = mergedInTransit ?: target.inTransitClause,
                 createdAt = target.createdAt,
             ),
         )
@@ -114,6 +122,8 @@ class BookingMappingService(
     private enum class TokenSplit {
         COMMA_SEMICOLON_NEWLINE,
         SEMICOLON_NEWLINE_ONLY,
+        /** Notify / In-Transit: preserve commas and newlines inside a single value. */
+        SEMICOLON_ONLY,
     }
 
     private fun mergeTokenFields(
@@ -142,6 +152,7 @@ class BookingMappingService(
         val regex = when (split) {
             TokenSplit.COMMA_SEMICOLON_NEWLINE -> Regex("""[,;\n]+""")
             TokenSplit.SEMICOLON_NEWLINE_ONLY -> Regex("""[;\n]+""")
+            TokenSplit.SEMICOLON_ONLY -> Regex(""";+""")
         }
         return regex.split(s).map { it.trim() }.filter { it.isNotEmpty() }
     }

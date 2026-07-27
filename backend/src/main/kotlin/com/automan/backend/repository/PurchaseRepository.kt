@@ -385,6 +385,17 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED)",
     )
     fun findPurchasesWhereRixoConfirmedPositive(): List<Purchase>
+
+    /**
+     * Lightweight rows for Home dashboard aggregations (avoids loading full Purchase entities).
+     */
+    @Query(
+        "SELECT p.id AS id, p.date AS date, p.chassis AS chassis, p.brand AS brand, " +
+            "p.carName AS carName, p.auctionHouse AS auctionHouse, p.clientName AS clientName, " +
+            "p.country AS country, p.totalPrice AS totalPrice, p.workflowStatus AS workflowStatus " +
+            "FROM Purchase p",
+    )
+    fun findDashboardRows(): List<DashboardPurchaseRowProjection>
 }
 
 /** Closed projection: purchase date string + workflow (rixo_requested is @Transient). */
@@ -397,4 +408,18 @@ interface PurchaseDateWorkflowProjection {
 interface PurchaseIdDateProjection {
     fun getId(): Long?
     fun getDate(): String?
+}
+
+/** Closed projection: fields needed for Home dashboard KPIs, charts, and tables. */
+interface DashboardPurchaseRowProjection {
+    fun getId(): Long?
+    fun getDate(): String?
+    fun getChassis(): String?
+    fun getBrand(): String?
+    fun getCarName(): String?
+    fun getAuctionHouse(): String?
+    fun getClientName(): String?
+    fun getCountry(): String?
+    fun getTotalPrice(): String?
+    fun getWorkflowStatus(): com.automan.backend.model.WorkflowStatus?
 }

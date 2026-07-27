@@ -21,6 +21,107 @@ private var clientListItemsPerPage: Int = AppConstants.DEFAULT_ITEMS_PER_PAGE
 private var clientListActiveSearchQ: String = ""
 private var clientListSearchDebounceHandle: Int? = null
 private var clientListCachedRows: Array<dynamic> = emptyArray()
+private var clientModalEscapeHandler: ((Event) -> Unit)? = null
+private var clientConfirmModalKeyHandler: ((Event) -> Unit)? = null
+
+private fun clearClientModalEscape() {
+    clientModalEscapeHandler?.let { document.removeEventListener("keydown", it) }
+    clientModalEscapeHandler = null
+}
+
+/** Dialog a11y + Escape for `.client-modal` overlays. Call from open; clear on close. */
+private fun wireClientModalA11y(modalId: String, titleId: String, close: () -> Unit, focusId: String? = null) {
+    clearClientModalEscape()
+    val modal = document.getElementById(modalId) as? HTMLElement ?: return
+    val content = modal.querySelector(".client-modal-content") as? HTMLElement
+    content?.setAttribute("role", "dialog")
+    content?.setAttribute("aria-modal", "true")
+    content?.setAttribute("aria-labelledby", titleId)
+    (modal.querySelector(".client-modal-close") as? HTMLElement)?.setAttribute("aria-label", "Close")
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        if (event.asDynamic().key == "Escape") {
+            event.preventDefault()
+            close()
+        }
+    }
+    clientModalEscapeHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    val focusEl = (
+        focusId?.let { document.getElementById(it) }
+            ?: content?.querySelector("button:not(.client-modal-close), input, select, textarea")
+        ) as? HTMLElement
+    window.setTimeout({ focusEl?.focus() }, 0)
+}
+
+/** In-app confirm for destructive ledger actions (replaces window.confirm). */
+private fun showClientConfirmModal(
+    title: String,
+    message: String,
+    confirmLabel: String = "Delete",
+    onConfirm: () -> Unit,
+) {
+    document.getElementById("clientConfirmModal")?.remove()
+    clientConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+    clientConfirmModalKeyHandler = null
+    val returnFocus = document.activeElement as? HTMLElement
+    val safeTitle = title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    val safeMessage = message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    val safeConfirm = confirmLabel.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = "clientConfirmModal"
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10020;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    overlay.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="clientConfirmTitle"
+             style="background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,0.28);
+             max-width:440px;width:100%;padding:22px 24px;box-sizing:border-box;">
+            <h3 id="clientConfirmTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">$safeTitle</h3>
+            <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:20px;">$safeMessage</div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="clientConfirmCancel"
+                    style="padding:9px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;min-height:40px;font-size:14px;color:#374151;">Cancel</button>
+                <button type="button" id="clientConfirmOk"
+                    style="padding:9px 16px;border:none;border-radius:8px;background:#b91c1c;color:#fff;cursor:pointer;font-weight:700;min-height:40px;font-size:14px;">$safeConfirm</button>
+            </div>
+        </div>
+    """.trimIndent()
+
+    fun closeModal() {
+        clientConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+        clientConfirmModalKeyHandler = null
+        overlay.remove()
+        returnFocus?.focus()
+    }
+
+    document.body?.appendChild(overlay)
+    document.getElementById("clientConfirmCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("clientConfirmOk")?.addEventListener("click", { _: Event ->
+        closeModal()
+        onConfirm()
+    })
+    overlay.addEventListener("click", { ev: Event ->
+        if (ev.target === overlay) closeModal()
+    })
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        if (event.asDynamic().key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    clientConfirmModalKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    (document.getElementById("clientConfirmCancel") as? HTMLElement)?.focus()
+}
+
+private fun clientStatusBlock(message: String, kind: String = "muted"): String {
+    val cls = when (kind) {
+        "error" -> "client-status-block client-status-block--error"
+        else -> "client-status-block"
+    }
+    return """<div class="$cls" role="status">${escapeHtml(message)}</div>"""
+}
 
 private fun alertThresholdFromCreditLimit(creditLimit: Double): Double =
     creditLimit * CLIENT_CREDIT_ALERT_FRACTION
@@ -114,16 +215,14 @@ fun showClientDetailsPage(clientId: Long) {
                 <div class="client-details-header client-page-toolbar">
                     <h2 class="client-page-title">Client Details</h2>
                     <div class="client-details-actions client-toolbar-actions">
-                        <button id="clientStatementPdfBtn" class="client-btn client-btn-info">Statement PDF</button>
-                        <button id="exportClientTxBtn" class="client-btn client-btn-info">Export CSV</button>
-                        <button id="backToClientsBtn" class="client-btn client-btn-secondary">Back to Client Transactions</button>
+                        <button type="button" id="clientStatementPdfBtn" class="client-btn client-btn-info">Statement PDF</button>
+                        <button type="button" id="exportClientTxBtn" class="client-btn client-btn-info">Export CSV</button>
+                        <button type="button" id="backToClientsBtn" class="client-btn client-btn-secondary">Back to Client Transactions</button>
                     </div>
                 </div>
                 <div id="clientDetailsContent"></div>
                 <div id="clientEventsTable" class="client-transactions-section">
-                    <div style="text-align: center; color: #666; padding: 20px;">
-                        Loading transactions...
-                    </div>
+                    ${clientStatusBlock("Loading transactions…")}
                 </div>
             </div>
         </div>
@@ -154,9 +253,9 @@ fun showClientAccountsPage() {
                 <div class="client-page-header client-page-toolbar">
                     <h2 class="client-page-title">$pageTitle</h2>
                     <div class="client-action-buttons client-toolbar-actions">
-                        <button id="addClientBtn" class="client-btn client-btn-primary">Add New Client</button>
-                        <button id="clientAlertsBtn" class="client-btn client-btn-warning">View Alerts</button>
-                        <button id="exportClientsBtn" class="client-btn client-btn-info">Export clients CSV</button>
+                        <button type="button" id="addClientBtn" class="client-btn client-btn-primary">Add New Client</button>
+                        <button type="button" id="clientAlertsBtn" class="client-btn client-btn-warning">View Alerts</button>
+                        <button type="button" id="exportClientsBtn" class="client-btn client-btn-info">Export clients CSV</button>
                     </div>
                 </div>
                 
@@ -164,9 +263,7 @@ fun showClientAccountsPage() {
                 <div id="clientAlertsSection" class="client-alerts-section">
                     <h3>Client Alerts</h3>
                     <div id="clientAlertsTable">
-                        <div style="text-align: center; color: #666; padding: 20px;">
-                            Loading client alerts...
-                        </div>
+                        ${clientStatusBlock("Loading client alerts…")}
                     </div>
                 </div>
                 
@@ -174,12 +271,12 @@ fun showClientAccountsPage() {
                 <div class="client-list-section">
                     <h3>Client List</h3>
                     <div class="client-search-container">
-                        <input id="clientSearchInput" type="text" placeholder="Search clients..." class="client-search-input">
+                        <label for="clientSearchInput" class="visually-hidden">Search clients</label>
+                        <input id="clientSearchInput" type="text" role="searchbox" autocomplete="off" inputmode="search"
+                               placeholder="Search clients…" class="client-search-input" aria-label="Search clients">
                     </div>
                     <div id="clientListTable" class="client-list-container">
-                        <div style="text-align: center; color: #666; padding: 20px;">
-                            Loading clients...
-                        </div>
+                        ${clientStatusBlock("Loading clients…")}
                     </div>
                 </div>
             </div>
@@ -227,11 +324,7 @@ private fun scheduleClientListSearchDebounced() {
 
 fun loadClients(page0: Int = clientListPageZeroBased) {
     val host = document.getElementById("clientListTable")
-    host?.innerHTML = """
-        <div style="text-align: center; color: #666; padding: 20px;">
-            Loading clients...
-        </div>
-    """
+    host?.innerHTML = clientStatusBlock("Loading clients…")
     val q = (document.getElementById("clientSearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
     clientListActiveSearchQ = q
     clientListPageZeroBased = page0.coerceAtLeast(0)
@@ -248,11 +341,7 @@ fun loadClients(page0: Int = clientListPageZeroBased) {
                 response.json().then { body ->
                     val err = js("body.error")?.toString()?.trim()
                     if (!err.isNullOrEmpty()) {
-                        host?.innerHTML = """
-                            <div style="text-align: center; color: #e74c3c; padding: 20px;">
-                                ${escapeHtml(err)}
-                            </div>
-                        """
+                        host?.innerHTML = clientStatusBlock(err, "error")
                         return@then
                     }
                     clientListServerMode = true
@@ -287,19 +376,11 @@ fun loadClients(page0: Int = clientListPageZeroBased) {
                     displayClients(clientListCachedRows)
                 }
             } else {
-                host?.innerHTML = """
-                    <div style="text-align: center; color: #e74c3c; padding: 20px;">
-                        Failed to load clients
-                    </div>
-                """
+                host?.innerHTML = clientStatusBlock("Failed to load clients", "error")
             }
         }
         .catch { error ->
-            host?.innerHTML = """
-                <div style="text-align: center; color: #e74c3c; padding: 20px;">
-                    Error loading clients: $error
-                </div>
-            """
+            host?.innerHTML = clientStatusBlock("Error loading clients: $error", "error")
         }
 }
 
@@ -308,11 +389,7 @@ fun displayClients(clients: dynamic) {
     if (clientListTable == null) return
     
     if (js("Array.isArray(clients)") as Boolean && (clients as Array<dynamic>).isEmpty()) {
-        clientListTable.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 20px;">
-                No clients found
-            </div>
-        """
+        clientListTable.innerHTML = clientStatusBlock("No clients found")
         return
     }
     
@@ -333,8 +410,16 @@ fun displayClients(clients: dynamic) {
         } else null
         val (alertIcon, alertStyle, overLimitBadge) = when {
             usedPct == null -> Triple("", "", "")
-            usedPct >= 100.0 -> Triple("⚠️", "border-left: 4px solid #e74c3c;", """<div class="client-limit-badge client-limit-over">OVER LIMIT (${usedPct.toInt()}%)</div>""")
-            usedPct >= 90.0 -> Triple("⚠️", "border-left: 4px solid #ffc107;", "")
+            usedPct >= 100.0 -> Triple(
+                """<span class="client-alert-icon" role="img" aria-label="Over credit limit">!</span>""",
+                "border-left: 4px solid #e74c3c;",
+                """<div class="client-limit-badge client-limit-over">Over limit (${usedPct.toInt()}%)</div>""",
+            )
+            usedPct >= 90.0 -> Triple(
+                """<span class="client-alert-icon client-alert-icon--warn" role="img" aria-label="Near credit limit">!</span>""",
+                "border-left: 4px solid #ffc107;",
+                "",
+            )
             else -> Triple("", "", "")
         }
         val limitSummary = when {
@@ -385,19 +470,15 @@ fun displayClients(clients: dynamic) {
         val totalPages = kotlin.math.max(1, clientListTotalPages)
         val currentPage = clientListPageZeroBased + 1
         if (totalPages > 1 || clientListTotalElements > clientListItemsPerPage) {
-            val prevDisabled = if (currentPage <= 1) "disabled" else ""
-            val nextDisabled = if (currentPage >= totalPages) "disabled" else ""
-            val prevStyle = if (currentPage <= 1) "#ccc" else "#007bff"
-            val nextStyle = if (currentPage >= totalPages) "#ccc" else "#007bff"
-            val prevCursor = if (currentPage <= 1) "not-allowed" else "pointer"
-            val nextCursor = if (currentPage >= totalPages) "not-allowed" else "pointer"
+            val prevDisabled = currentPage <= 1
+            val nextDisabled = currentPage >= totalPages
             """
-            <div id="clientListPager" style="display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;">
-                <div style="color:#6b7280;font-size:14px;">Page $currentPage of $totalPages · $clientListTotalElements client(s)</div>
-                <div style="display:flex;align-items:center;gap:8px;">
-                    <button type="button" id="clientListPrevPage" $prevDisabled style="padding:8px 16px;background-color:$prevStyle;color:white;border:none;border-radius:4px;cursor:$prevCursor;">Previous</button>
-                    <span style="color:#374151;font-size:14px;">Page $currentPage of $totalPages</span>
-                    <button type="button" id="clientListNextPage" $nextDisabled style="padding:8px 16px;background-color:$nextStyle;color:white;border:none;border-radius:4px;cursor:$nextCursor;">Next</button>
+            <div id="clientListPager" class="client-list-pager">
+                <div class="client-list-pager-meta">Page $currentPage of $totalPages · $clientListTotalElements client(s)</div>
+                <div class="client-list-pager-btns">
+                    <button type="button" id="clientListPrevPage" class="client-list-pager-btn${if (prevDisabled) " is-disabled" else ""}" ${if (prevDisabled) "disabled" else ""}>Previous</button>
+                    <span class="client-list-pager-page">Page $currentPage of $totalPages</span>
+                    <button type="button" id="clientListNextPage" class="client-list-pager-btn${if (nextDisabled) " is-disabled" else ""}" ${if (nextDisabled) "disabled" else ""}>Next</button>
                 </div>
             </div>
             """
@@ -436,19 +517,13 @@ fun loadClientDetails(clientId: Long) {
                     displayClientDetails(clientId, client)
                 }
             } else {
-                document.getElementById("clientDetailsContent")?.innerHTML = """
-                    <div style="text-align: center; color: #e74c3c; padding: 20px;">
-                        Failed to load client details
-                    </div>
-                """
+                document.getElementById("clientDetailsContent")?.innerHTML =
+                    clientStatusBlock("Failed to load client details", "error")
             }
         }
         .catch { error ->
-            document.getElementById("clientDetailsContent")?.innerHTML = """
-                <div style="text-align: center; color: #e74c3c; padding: 20px;">
-                    Error loading client details: $error
-                </div>
-            """
+            document.getElementById("clientDetailsContent")?.innerHTML =
+                clientStatusBlock("Error loading client details: $error", "error")
         }
 }
 
@@ -542,19 +617,13 @@ fun loadClientEvents(clientId: Long) {
                     displayClientEvents(clientId, events)
                 }
             } else {
-                document.getElementById("clientEventsTable")?.innerHTML = """
-                    <div style="text-align: center; color: #e74c3c; padding: 20px;">
-                        Failed to load transactions
-                    </div>
-                """
+                document.getElementById("clientEventsTable")?.innerHTML =
+                    clientStatusBlock("Failed to load transactions", "error")
             }
         }
         .catch { error ->
-            document.getElementById("clientEventsTable")?.innerHTML = """
-                <div style="text-align: center; color: #e74c3c; padding: 20px;">
-                    Error loading transactions: $error
-                </div>
-            """
+            document.getElementById("clientEventsTable")?.innerHTML =
+                clientStatusBlock("Error loading transactions: $error", "error")
         }
 }
 
@@ -565,16 +634,14 @@ fun displayClientEvents(clientId: Long, events: dynamic) {
     if (js("Array.isArray(events)") as Boolean && (events as Array<dynamic>).isEmpty()) {
         clientEventsTable.innerHTML = """
             <h3>Ledger</h3>
-            <div style="text-align: center; color: #666; padding: 20px;">
-                No ledger entries yet. Invoices post automatically when confirmed in Invoice.
-            </div>
+            ${clientStatusBlock("No ledger entries yet. Invoices post automatically when confirmed in Invoice.")}
         """
         return
     }
     
     val eventsArray = events as Array<dynamic>
     val showActions = isEditor()
-    val actionsHeader = if (showActions) """<th>ACTIONS</th>""" else ""
+    val actionsHeader = if (showActions) """<th scope="col">Actions</th>""" else ""
 
     val rowsHtml = eventsArray.map { event ->
         val eventType = event.eventType?.toString()
@@ -667,13 +734,13 @@ fun displayClientEvents(clientId: Long, events: dynamic) {
             <table class="transactions-table">
                 <thead>
                     <tr>
-                        <th>DATE</th>
-                        <th>TYPE</th>
-                        <th>DESCRIPTION</th>
-                        <th>REFERENCE</th>
-                        <th style="text-align: right;">DEBIT</th>
-                        <th style="text-align: right;">CREDIT</th>
-                        <th style="text-align: right;">BALANCE</th>
+                        <th scope="col">Date</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Description</th>
+                        <th scope="col">Reference</th>
+                        <th scope="col" style="text-align: right;">Debit</th>
+                        <th scope="col" style="text-align: right;">Credit</th>
+                        <th scope="col" style="text-align: right;">Balance</th>
                         $actionsHeader
                     </tr>
                 </thead>
@@ -724,8 +791,8 @@ fun showAddClientForm() {
         <div id="addClientModal" class="client-modal">
             <div class="client-modal-content">
                 <div class="client-modal-header">
-                    <h2>Add New Client</h2>
-                    <button id="closeAddClientModalBtn" class="client-modal-close">&times;</button>
+                    <h2 id="addClientModalTitle">Add New Client</h2>
+                    <button type="button" id="closeAddClientModalBtn" class="client-modal-close">&times;</button>
                 </div>
                 <form id="addClientForm" class="client-form">
                     <div class="client-form-row">
@@ -819,6 +886,10 @@ fun showAddClientForm() {
     document.getElementById("creditLimit")?.addEventListener("input", { _: Event ->
         syncAlertThresholdFromCreditLimit("creditLimit", "alertThreshold")
     })
+    document.getElementById("addClientModal")?.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "addClientModal") closeAddClientModal()
+    })
+    wireClientModalA11y("addClientModal", "addClientModalTitle", ::closeAddClientModal, "clientNumber")
 }
 
 fun handleAddClientSubmit() {
@@ -878,6 +949,7 @@ fun handleAddClientSubmit() {
 
 @JsName("closeAddClientModalFromClientManagement")
 fun closeAddClientModal() {
+    clearClientModalEscape()
     document.getElementById("addClientModal")?.remove()
 }
 
@@ -930,8 +1002,8 @@ fun openCreditLimitModal(
         <div id="creditLimitModal" class="client-modal">
             <div class="client-modal-content">
                 <div class="client-modal-header">
-                    <h2>$title</h2>
-                    <button id="closeCreditLimitModalBtn" class="client-modal-close">&times;</button>
+                    <h2 id="creditLimitModalTitle">$title</h2>
+                    <button type="button" id="closeCreditLimitModalBtn" class="client-modal-close">&times;</button>
                 </div>
                 <p class="client-ledger-hint" style="margin: 0 0 12px;">Client: <strong>${clientName}</strong></p>
                 <form id="creditLimitForm" class="client-form">
@@ -1000,6 +1072,7 @@ fun openCreditLimitModal(
         event.preventDefault()
         handleCreditLimitSubmit(clientName)
     })
+    wireClientModalA11y("creditLimitModal", "creditLimitModalTitle", ::closeCreditLimitModal, "clCreditLimit")
 }
 
 private fun handleCreditLimitSubmit(clientName: String) {
@@ -1066,6 +1139,7 @@ private fun handleCreditLimitSubmit(clientName: String) {
 
 @JsName("closeCreditLimitModal")
 fun closeCreditLimitModal() {
+    clearClientModalEscape()
     document.getElementById("creditLimitModal")?.remove()
 }
 
@@ -1176,27 +1250,27 @@ fun openAddTransactionModal(clientId: Long) {
         <div id="addTransactionModal" class="client-modal" data-client-id="$clientId">
             <div class="client-modal-content">
                 <div class="client-modal-header">
-                    <h2>Add Ledger Entry</h2>
-                    <button id="closeTxModalBtn" class="client-modal-close">&times;</button>
+                    <h2 id="addTransactionModalTitle">Add Ledger Entry</h2>
+                    <button type="button" id="closeTxModalBtn" class="client-modal-close">&times;</button>
                 </div>
                 <p class="client-ledger-hint" style="margin: 0 0 16px;">Invoices post automatically. Enter bank payments or adjustments here.</p>
                 <form id="addTransactionForm" class="client-form">
                     <input type="hidden" id="txClientId" value="$clientId">
                     <div class="client-form-row">
                         <div class="client-form-field">
-                            <label for="txDate" class="client-form-label">DATE *</label>
-                            <div style="position:relative; width:100%;">
-                                <div style="display:flex; gap:8px; align-items:center; width:100%;">
+                            <label for="txDateText" class="client-form-label">Date *</label>
+                            <div class="client-date-wrap">
+                                <div class="client-date-row">
                                     <input type="text" id="txDateText" maxlength="10" inputmode="numeric" autocomplete="off" required class="client-form-input" placeholder="MM/DD/YYYY">
-                                    <button type="button" id="txDateCalendarBtn" title="Open calendar"
-                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                    <button type="button" id="txDateCalendarBtn" class="client-calendar-btn"
+                                            title="Open calendar" aria-label="Open transaction date calendar">${purchaseFormCalendarIconSvg()}</button>
                                 </div>
                                 <input type="date" id="txDate" name="txDate" required class="client-form-input" tabindex="-1" aria-hidden="true"
                                        style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
                             </div>
                         </div>
                         <div class="client-form-field">
-                            <label for="txEventType" class="client-form-label">TYPE *</label>
+                            <label for="txEventType" class="client-form-label">Type *</label>
                             <select id="txEventType" name="txEventType" required class="client-form-select">
                                 <option value="">Select type</option>
                                 <option value="PAYMENT_RECEIVED">Payment received</option>
@@ -1207,17 +1281,17 @@ fun openAddTransactionModal(clientId: Long) {
                     </div>
                     <div class="client-form-row">
                         <div class="client-form-field">
-                            <label for="txBillNo" class="client-form-label">REFERENCE (TT slip, bank ref)</label>
+                            <label for="txBillNo" class="client-form-label">Reference (TT slip, bank ref)</label>
                             <input type="text" id="txBillNo" name="txBillNo" class="client-form-input" placeholder="Optional">
                         </div>
                         <div class="client-form-field">
-                            <label for="txDescription" class="client-form-label">DESCRIPTION / NOTE</label>
+                            <label for="txDescription" class="client-form-label">Description / note</label>
                             <input type="text" id="txDescription" name="txDescription" class="client-form-input" placeholder="Required for adjustments">
                         </div>
                     </div>
                     <div class="client-form-row">
                         <div class="client-form-field full-width">
-                            <label for="txAmount" class="client-form-label">AMOUNT (¥) *</label>
+                            <label for="txAmount" class="client-form-label">Amount (¥) *</label>
                             <input type="text" id="txAmount" name="txAmount" required
                                    placeholder="Payment: positive. Adjustment: use − for debit"
                                    class="client-form-input" inputmode="decimal">
@@ -1279,6 +1353,7 @@ fun openAddTransactionModal(clientId: Long) {
     document.getElementById("addTransactionModal")?.addEventListener("click", { event: Event ->
         if ((event.target as? HTMLElement)?.id == "addTransactionModal") closeAddTransactionModal()
     })
+    wireClientModalA11y("addTransactionModal", "addTransactionModalTitle", ::closeAddTransactionModal, "txDateText")
 
     val typeSelect = document.getElementById("txEventType") as? HTMLSelectElement
     typeSelect?.addEventListener("change", { _: Event ->
@@ -1378,6 +1453,7 @@ fun openAddTransactionModal(clientId: Long) {
 
 @JsName("closeAddTransactionModal")
 fun closeAddTransactionModal() {
+    clearClientModalEscape()
     document.getElementById("addTransactionModal")?.remove()
 }
 
@@ -1798,7 +1874,7 @@ fun openStatementPdfModal(clientId: Long) {
         <div id="statementPdfModal" class="client-modal">
             <div class="client-modal-content">
                 <div class="client-modal-header">
-                    <h2>Export statement PDF</h2>
+                    <h2 id="statementPdfModalTitle">Export statement PDF</h2>
                     <button type="button" id="closeStatementPdfModalBtn" class="client-modal-close">&times;</button>
                 </div>
                 <p class="client-ledger-hint">Leave dates empty to include all ledger entries.</p>
@@ -1821,6 +1897,7 @@ fun openStatementPdfModal(clientId: Long) {
     """
     document.body?.insertAdjacentHTML("beforeend", modalHTML)
     fun close() {
+        clearClientModalEscape()
         document.getElementById("statementPdfModal")?.remove()
     }
     document.getElementById("closeStatementPdfModalBtn")?.addEventListener("click", { _: Event -> close() })
@@ -1842,6 +1919,7 @@ fun openStatementPdfModal(clientId: Long) {
         )
         close()
     })
+    wireClientModalA11y("statementPdfModal", "statementPdfModalTitle", { close() }, "stmtStartDate")
 }
 
 fun openEditClientModal(
@@ -1860,7 +1938,7 @@ fun openEditClientModal(
         <div id="editClientProfileModal" class="client-modal">
             <div class="client-modal-content">
                 <div class="client-modal-header">
-                    <h2>Edit client</h2>
+                    <h2 id="editClientProfileModalTitle">Edit client</h2>
                     <button type="button" id="closeEditClientProfileBtn" class="client-modal-close">&times;</button>
                 </div>
                 <form id="editClientProfileForm" class="client-form">
@@ -1904,10 +1982,14 @@ fun openEditClientModal(
     """
     document.body?.insertAdjacentHTML("beforeend", modalHTML)
     fun close() {
+        clearClientModalEscape()
         document.getElementById("editClientProfileModal")?.remove()
     }
     document.getElementById("closeEditClientProfileBtn")?.addEventListener("click", { _: Event -> close() })
     document.getElementById("cancelEditClientProfileBtn")?.addEventListener("click", { _: Event -> close() })
+    document.getElementById("editClientProfileModal")?.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "editClientProfileModal") close()
+    })
     document.getElementById("editClientProfileForm")?.addEventListener("submit", { event: Event ->
         event.preventDefault()
         val payload = js("({})")
@@ -1928,6 +2010,7 @@ fun openEditClientModal(
             }
         }.catch { err -> showMessage("Update failed: $err", "error") }
     })
+    wireClientModalA11y("editClientProfileModal", "editClientProfileModalTitle", { close() }, "editProfileCurrency")
 }
 
 fun openEditLedgerModal(clientId: Long, event: dynamic) {
@@ -2022,7 +2105,16 @@ fun openEditLedgerModal(clientId: Long, event: dynamic) {
 
 fun deleteLedgerEntry(clientId: Long, eventId: Long) {
     if (!isEditor()) return
-    if (!js("confirm('Delete this ledger entry? Balances will be recalculated.')") as Boolean) return
+    showClientConfirmModal(
+        title = "Delete ledger entry?",
+        message = "Delete this ledger entry? Balances will be recalculated.",
+        confirmLabel = "Delete",
+    ) {
+        deleteLedgerEntryConfirmed(clientId, eventId)
+    }
+}
+
+private fun deleteLedgerEntryConfirmed(clientId: Long, eventId: Long) {
     val req = js("({})")
     req.method = "DELETE"
     window.fetch(apiUrl("events/$eventId"), req).then { response ->

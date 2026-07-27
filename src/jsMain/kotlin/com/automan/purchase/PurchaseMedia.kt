@@ -175,6 +175,7 @@ private fun appendCarPicturePreview(
     r2Media: Boolean,
     purchaseId: Long?,
     onRemove: (() -> Unit)? = null,
+    allowDelete: Boolean = true,
 ) {
     val pictureElement = document.createElement("div") as HTMLElement
     pictureElement.setAttribute(
@@ -194,31 +195,37 @@ private fun appendCarPicturePreview(
     img.setAttribute("src", imageSrc)
     wireCarPictureThumbnailClick(img, imageSrc)
 
-    val deleteBtn = document.createElement("button")
-    deleteBtn.textContent = "✕"
-    deleteBtn.setAttribute(
-        "style",
-        "position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px; z-index: 2;",
-    )
-    deleteBtn.addEventListener("click", { event: dynamic ->
-        event.stopPropagation()
-        if (r2Media && purchaseId != null) {
-            val mediaId = pictureId.toLongOrNull()
-            if (mediaId != null) {
-                window.fetch(apiUrl("purchases/$purchaseId/media/$mediaId"), js("({ method: 'DELETE' })"))
-                    .catch { e: dynamic -> console.error("Failed to delete R2 media:", e) }
-            }
-        }
-        pictureElement.remove()
-        onRemove?.invoke()
-    })
-
     pictureElement.appendChild(img)
-    pictureElement.appendChild(deleteBtn)
+    if (allowDelete) {
+        val deleteBtn = document.createElement("button")
+        deleteBtn.textContent = "✕"
+        deleteBtn.setAttribute(
+            "style",
+            "position: absolute; top: 5px; right: 5px; background: rgba(255,0,0,0.8); color: white; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-size: 12px; z-index: 2;",
+        )
+        deleteBtn.addEventListener("click", { event: dynamic ->
+            event.stopPropagation()
+            if (r2Media && purchaseId != null) {
+                val mediaId = pictureId.toLongOrNull()
+                if (mediaId != null) {
+                    window.fetch(apiUrl("purchases/$purchaseId/media/$mediaId"), js("({ method: 'DELETE' })"))
+                        .catch { e: dynamic -> console.error("Failed to delete R2 media:", e) }
+                }
+            }
+            pictureElement.remove()
+            onRemove?.invoke()
+        })
+        pictureElement.appendChild(deleteBtn)
+    }
     container.appendChild(pictureElement)
 }
 
-fun renderR2CarPictureItems(items: dynamic, containerId: String, purchaseId: Long) {
+fun renderR2CarPictureItems(
+    items: dynamic,
+    containerId: String,
+    purchaseId: Long,
+    readOnly: Boolean = false,
+) {
     val container = document.getElementById(containerId) as? HTMLElement ?: return
     container.innerHTML = ""
     if (!js("Array.isArray(items)").unsafeCast<Boolean>()) return
@@ -228,14 +235,24 @@ fun renderR2CarPictureItems(items: dynamic, containerId: String, purchaseId: Lon
         val id = js("String(item.id)").toString()
         val url = js("String(item.url || '')").toString()
         if (url.isEmpty()) continue
-        appendCarPicturePreview(container, id, url, r2Media = true, purchaseId = purchaseId)
+        appendCarPicturePreview(
+            container,
+            id,
+            url,
+            r2Media = true,
+            purchaseId = purchaseId,
+            allowDelete = !readOnly,
+        )
     }
-    notifyCarPicturesDomUpdated()
+    if (!readOnly) {
+        notifyCarPicturesDomUpdated()
+    }
 }
 
 fun loadCarPicturesWithR2Fallback(
     purchaseData: dynamic,
     containerId: String,
+    readOnly: Boolean = false,
     legacyLoader: () -> Unit,
 ) {
     val purchaseId = (purchaseData.id as? Number)?.toLong()
@@ -253,12 +270,124 @@ fun loadCarPicturesWithR2Fallback(
             .then { items: dynamic ->
                 val hasItems = js("Array.isArray(items) && items.length > 0").unsafeCast<Boolean>()
                 if (hasItems) {
-                    renderR2CarPictureItems(items, containerId, purchaseId)
+                    renderR2CarPictureItems(items, containerId, purchaseId, readOnly = readOnly)
                 } else {
                     legacyLoader()
                 }
             }
             .catch { _: dynamic -> legacyLoader() }
+    }
+}
+
+private fun vehicleSummaryPicturesEmptyHtml(): String =
+    """<div style="grid-column:1/-1;padding:12px 14px;border:1px dashed #d1d5db;border-radius:8px;background:#f9fafb;color:#6b7280;font-size:13px;">No car pictures saved for this vehicle.</div>"""
+
+private fun vehicleSummaryPicturesLoadingHtml(): String =
+    """<div style="grid-column:1/-1;padding:12px 14px;color:#6b7280;font-size:13px;">Loading pictures…</div>"""
+
+private fun carPicturesRawFromPurchase(p: dynamic): dynamic {
+    if (p == null || p == js("undefined")) return null
+    val camel = js("p.carPictures")
+    if (camel != null && camel != js("undefined")) {
+        val camelEmptyStr = js("typeof camel === 'string' && String(camel).trim() === ''").unsafeCast<Boolean>()
+        if (!camelEmptyStr) return camel
+    }
+    return js("p.car_pictures")
+}
+
+/** Parse legacy carPictures JSON into image sources; returns how many thumbnails were appended. */
+private fun renderLegacyCarPicturesReadOnly(purchaseData: dynamic, containerId: String): Int {
+    val container = document.getElementById(containerId) as? HTMLElement ?: return 0
+    val carPicturesRaw = carPicturesRawFromPurchase(purchaseData)
+    if (carPicturesRaw == null || carPicturesRaw == js("undefined")) return 0
+
+    val carPictures: dynamic = try {
+        when {
+            js("Array.isArray(carPicturesRaw)").unsafeCast<Boolean>() -> carPicturesRaw
+            carPicturesRaw is String -> {
+                val s = js("String(carPicturesRaw).trim()").toString()
+                if (s.isEmpty()) return 0
+                var parsed = JSON.parse<dynamic>(s)
+                if (js("typeof parsed === 'string'").unsafeCast<Boolean>()) {
+                    val inner = js("String(parsed).trim()").toString()
+                    if (inner.isNotEmpty()) parsed = JSON.parse<dynamic>(inner)
+                }
+                parsed
+            }
+            else -> return 0
+        }
+    } catch (_: Throwable) {
+        return 0
+    }
+
+    if (!js("Array.isArray(carPictures)").unsafeCast<Boolean>()) return 0
+    val count = js("carPictures.length").unsafeCast<Int>()
+    if (count <= 0) return 0
+
+    container.innerHTML = ""
+    var rendered = 0
+    for (i in 0 until count) {
+        val picture = js("carPictures[i]")
+        val pictureId = js("picture.id !== undefined && picture.id !== null ? String(picture.id) : ''").toString()
+        var pictureData = ""
+        if (js("typeof picture === 'string'").unsafeCast<Boolean>()) {
+            pictureData = picture.toString()
+        } else {
+            pictureData = js("picture.data != null ? String(picture.data) : ''").toString()
+            if (pictureData.isEmpty()) pictureData = js("picture.src != null ? String(picture.src) : ''").toString()
+            if (pictureData.isEmpty()) pictureData = js("picture.url != null ? String(picture.url) : ''").toString()
+            if (pictureData.isEmpty()) pictureData = js("picture.image != null ? String(picture.image) : ''").toString()
+        }
+        if (pictureData.isEmpty()) continue
+        appendCarPicturePreview(
+            container,
+            if (pictureId.isEmpty()) "legacy_$i" else pictureId,
+            pictureData,
+            r2Media = false,
+            purchaseId = null,
+            allowDelete = false,
+        )
+        rendered++
+    }
+    return rendered
+}
+
+/**
+ * Read-only Car Pictures for Vehicle Summary (Purchase List eye icon).
+ * Uses R2 media when enabled; falls back to legacy carPictures (fetching full purchase if needed).
+ */
+fun loadVehicleSummaryCarPictures(purchaseData: dynamic, containerId: String) {
+    val container = document.getElementById(containerId) as? HTMLElement ?: return
+    container.innerHTML = vehicleSummaryPicturesLoadingHtml()
+
+    val purchaseId = (purchaseData.id as? Number)?.toLong()
+    val finishEmpty = {
+        val el = document.getElementById(containerId) as? HTMLElement
+        if (el != null) el.innerHTML = vehicleSummaryPicturesEmptyHtml()
+    }
+    val tryLegacyFrom = { data: dynamic ->
+        val n = renderLegacyCarPicturesReadOnly(data, containerId)
+        if (n <= 0) finishEmpty()
+    }
+
+    loadCarPicturesWithR2Fallback(purchaseData, containerId, readOnly = true) {
+        val localCount = renderLegacyCarPicturesReadOnly(purchaseData, containerId)
+        if (localCount > 0) return@loadCarPicturesWithR2Fallback
+        if (purchaseId == null || purchaseId <= 0L) {
+            finishEmpty()
+            return@loadCarPicturesWithR2Fallback
+        }
+        // List-row cache often omits full carPictures JSON — fetch once for legacy fallback.
+        window.fetch(apiUrl("purchases/purchase/$purchaseId"))
+            .then { response: dynamic -> if (response.ok) response.json() else null }
+            .then { full: dynamic ->
+                if (full == null || full == js("undefined")) {
+                    finishEmpty()
+                } else {
+                    tryLegacyFrom(full)
+                }
+            }
+            .catch { _: dynamic -> finishEmpty() }
     }
 }
 

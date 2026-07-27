@@ -766,9 +766,9 @@ fun storeBookingDetailsForPdf() {
     val etaValue = optionalBookingDateIso("etaDate", "etaDateText")
     val finalDestinationValue = (document.getElementById("finalDestination") as? HTMLInputElement)?.value?.trim().orEmpty()
         .ifEmpty { bookingDynString(carBookingFormState.finalDestination) }
-    val notifyPartyValue = (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value?.trim().orEmpty()
+    val notifyPartyValue = bookingFormFieldValue("notifyParty")
         .ifEmpty { bookingDynString(carBookingFormState.notifyParty) }
-    val inTransitClauseValue = (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value?.trim().orEmpty()
+    val inTransitClauseValue = bookingFormFieldValue("inTransitClause")
         .ifEmpty { bookingDynString(carBookingFormState.inTransitClause) }
     
     Logger.debug("Reading form values - Booking No: $bookingNoValue, Vessel: $vesselNameValue, Carrier: $carrierValue, POL: $polValue, POD: $podValue, ETD: $shippingDateValue")
@@ -1835,6 +1835,8 @@ fun main() {
     // Must run once at startup (not only when #/add loads). Otherwise opening Edit before Add
     // skipped money listeners entirely, and edit-form code used to set flags that blocked install.
     setupMoneyInputFormattingOnce()
+    // Same for option chip clicks: Edit must work without visiting Add first.
+    ensurePurchaseOptionButtonsInfrastructure()
     
     val root = document.getElementById("root")
     if (root == null) {
@@ -5843,7 +5845,7 @@ fun createApp(root: Element) {
             </style>
             <!-- Hamburger Menu Button (size controlled by CSS for mobile) -->
             <div id="hamburgerBtnContainer" class="hamburger-container" style="position: fixed; top: 20px; left: 20px; z-index: 10000;">
-                <button id="hamburgerBtn" class="hamburger-btn" type="button" style="background-color: #2c3e50; color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#34495e'" onmouseout="this.style.backgroundColor='#2c3e50'" onclick="if(window.openSidebar) window.openSidebar();">
+                <button id="hamburgerBtn" class="hamburger-btn" type="button" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false" style="background-color: #2c3e50; color: white; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.2); transition: background-color 0.2s;" onmouseover="this.style.backgroundColor='#34495e'" onmouseout="this.style.backgroundColor='#2c3e50'" onclick="if(window.openSidebar) window.openSidebar();">
                     ☰
                 </button>
             </div>
@@ -5853,139 +5855,67 @@ fun createApp(root: Element) {
             </div>
             
             <!-- Sidebar -->
-            <div id="sidebar" class="app-sidebar" style="position: fixed; top: 0; left: -250px; width: 250px; height: 100vh; background-color: #2c3e50; transition: left 0.3s ease; z-index: 1000; box-shadow: 2px 0 5px rgba(0,0,0,0.1); overflow-y: auto; overflow-x: hidden;">
+            <nav id="sidebar" class="app-sidebar" aria-label="Main" style="position: fixed; top: 0; left: -250px; width: 250px; height: 100vh; background-color: #2c3e50; transition: left 0.3s ease; z-index: 1000; box-shadow: 2px 0 5px rgba(0,0,0,0.1); overflow-y: auto; overflow-x: hidden;">
                 <div class="sidebar-inner" style="padding: 20px;">
                     <div class="sidebar-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
                         <h3 style="color: white; margin: 0;">Menu</h3>
-                        <button id="closeSidebar" class="sidebar-close-btn" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">×</button>
+                        <button id="closeSidebar" class="sidebar-close-btn" type="button" aria-label="Close menu" style="background: none; border: none; color: white; font-size: 20px; cursor: pointer;">×</button>
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 15px;">
-                        <!-- Home Button at Top -->
-                        <button id="purchaseListBtn" style="padding: 12px 20px; background-color: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Home</button>
-                        <button id="quickPurchaseBtn" style="padding: 12px 20px; background-color: #0d9488; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Add Quick Purchase</button>
-                        
-                        <!-- Top Action Buttons -->
-                        <button id="newBtn" style="padding: 12px 20px; background-color: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">New+</button>
-                        <button id="importBtn" style="padding: 12px 20px; background-color: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Import CSV</button>
+                        <button id="homeNavBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #475569; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Home</button>
+                        <button id="purchaseListBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Purchase</button>
+                        <button id="quickPurchaseBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #0d9488; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Add Quick Purchase</button>
+                        <button id="newBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">New+</button>
+                        <button id="importBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Import CSV</button>
                         
                         <!-- Rixo Section -->
                         <div id="rixoSection" style="margin-top: 10px;">
-                            <div id="rixoHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #8e44ad 0%, #6c3483 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleRixoList()">
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="font-size: 16px;">📝</span>
-                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Rixo</h3>
-                                </div>
-                                <span id="rixoArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
+                            <div id="rixoHeader" role="button" tabindex="0" aria-expanded="false" aria-controls="rixoItems" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #0f766e 0%, #115e59 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleRixoList()">
+                                <h3 class="sidebar-section-title" style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Rixo</h3>
+                                <span id="rixoArrow" aria-hidden="true" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
                             </div>
                             <div id="rixoItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="rixoRequestBtn" class="rixo-list-item" style="padding: 10px 15px; background-color: rgba(142, 68, 173, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Request</button>
-                                <button id="rixoHistorySidebarBtn" class="rixo-list-item" style="padding: 10px 15px; background-color: rgba(142, 68, 173, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo History</button>
+                                <button id="rixoRequestBtn" class="rixo-list-item" type="button" style="padding: 10px 15px; background-color: rgba(15, 118, 110, 0.2); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Request</button>
+                                <button id="rixoHistorySidebarBtn" class="rixo-list-item" type="button" style="padding: 10px 15px; background-color: rgba(15, 118, 110, 0.2); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo History</button>
                             </div>
                         </div>
                         
                         <!-- Shipment Section -->
                         <div id="shipmentSection" style="margin-top: 10px;">
-                            <div id="shipmentHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleShipmentList()">
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="font-size: 16px;">🚢</span>
-                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Shipment</h3>
-                                </div>
-                                <span id="shipmentArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
+                            <div id="shipmentHeader" role="button" tabindex="0" aria-expanded="false" aria-controls="shipmentItems" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #3498db 0%, #2980b9 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleShipmentList()">
+                                <h3 class="sidebar-section-title" style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Shipment</h3>
+                                <span id="shipmentArrow" aria-hidden="true" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
                             </div>
                             <div id="shipmentItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="carBookingBtn" class="shipment-list-item" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Booking</button>
-                                <button id="shipmentStatusBtn" class="shipment-list-item" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping History</button>
+                                <button id="carBookingBtn" class="shipment-list-item" type="button" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Booking</button>
+                                <button id="shipmentStatusBtn" class="shipment-list-item" type="button" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping History</button>
                             </div>
                         </div>
                         
                         <!-- Invoice (nav) Section: customer invoice + history -->
                         <div id="invoiceNavSection" style="margin-top: 10px;">
-                            <div id="invoiceNavHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleInvoiceNavList()">
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="font-size: 16px;">🧾</span>
-                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Invoice</h3>
-                                </div>
-                                <span id="invoiceNavArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
+                            <div id="invoiceNavHeader" role="button" tabindex="0" aria-expanded="false" aria-controls="invoiceNavItems" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #27ae60 0%, #1e8449 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleInvoiceNavList()">
+                                <h3 class="sidebar-section-title" style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Invoice</h3>
+                                <span id="invoiceNavArrow" aria-hidden="true" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
                             </div>
                             <div id="invoiceNavItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="anInvoiceBtn" class="invoice-nav-list-item" style="padding: 10px 15px; background-color: rgba(39, 174, 96, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Invoice</button>
-                                <button id="invoiceHistorySidebarBtn" class="invoice-nav-list-item" style="padding: 10px 15px; background-color: rgba(39, 174, 96, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Invoice History</button>
+                                <button id="anInvoiceBtn" class="invoice-nav-list-item" type="button" style="padding: 10px 15px; background-color: rgba(39, 174, 96, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Invoice</button>
+                                <button id="invoiceHistorySidebarBtn" class="invoice-nav-list-item" type="button" style="padding: 10px 15px; background-color: rgba(39, 174, 96, 0.12); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Invoice History</button>
                             </div>
                         </div>
                         
-                        <button id="clientTransactionsSidebarBtn" style="padding: 12px 20px; background-color: #2980b9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Client Transactions</button>
-                        <button id="vehicleDetailsBtn" style="padding: 12px 20px; background-color: #f39c12; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Vehicle Details</button>
-                        
-                        <!-- Sales Section -->
-                        <div id="salesSection" style="margin-top: 10px;">
-                            <div id="salesHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #27ae60 0%, #229954 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleSalesList()">
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="font-size: 16px;">💰</span>
-                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Sales</h3>
-                                </div>
-                                <span id="salesArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
-                            </div>
-                            <div id="salesItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <!-- Export Subsection -->
-                                <div style="margin-bottom: 8px;">
-                                    <div id="exportHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: rgba(39, 174, 96, 0.2); border-radius: 4px; cursor: pointer; margin-bottom: 4px;" onclick="window.toggleExportList()">
-                                        <span style="color: #bdc3c7; font-size: 13px; font-weight: 500;">Export</span>
-                                        <span id="exportArrow" style="color: #bdc3c7; font-size: 12px; transition: transform 0.3s;">▼</span>
-                                    </div>
-                                    <div id="exportItems" style="display: none; flex-direction: column; gap: 4px; padding-left: 20px;">
-                                        <button id="invoiceBtn" class="sales-list-item" style="padding: 8px 12px; background-color: rgba(39, 174, 96, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; text-align: left; transition: all 0.2s;">Invoice</button>
-                                        <button id="otaInvoiceBtn" class="sales-list-item" style="padding: 8px 12px; background-color: rgba(39, 174, 96, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; text-align: left; transition: all 0.2s;">OTA Invoice</button>
-                                        <button id="proformaInvoiceBtn" class="sales-list-item" style="padding: 8px 12px; background-color: rgba(39, 174, 96, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; text-align: left; transition: all 0.2s;">Proforma Invoice</button>
-                                    </div>
-                                </div>
-                                <!-- Local Subsection -->
-                                <div>
-                                    <div id="localHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: rgba(39, 174, 96, 0.2); border-radius: 4px; cursor: pointer; margin-bottom: 4px;" onclick="window.toggleLocalList()">
-                                        <span style="color: #bdc3c7; font-size: 13px; font-weight: 500;">Local</span>
-                                        <span id="localArrow" style="color: #bdc3c7; font-size: 12px; transition: transform 0.3s;">▼</span>
-                                    </div>
-                                    <div id="localItems" style="display: none; flex-direction: column; gap: 4px; padding-left: 20px;">
-                                        <button id="contractBtn" class="sales-list-item" style="padding: 8px 12px; background-color: rgba(39, 174, 96, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; text-align: left; transition: all 0.2s;">Contract</button>
-                                        <button id="localInvoiceBtn" class="sales-list-item" style="padding: 8px 12px; background-color: rgba(39, 174, 96, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; text-align: left; transition: all 0.2s;">Invoice</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Reports Section -->
-                        <div id="reportsSection" style="margin-top: 10px;">
-                            <div id="reportsHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #e67e22 0%, #d35400 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleReportsList()">
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="font-size: 16px;">📊</span>
-                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Reports</h3>
-                                </div>
-                                <span id="reportsArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
-                            </div>
-                            <div id="reportsItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="salesReportBtn" class="reports-list-item" style="padding: 10px 15px; background-color: rgba(230, 126, 34, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Sales Report</button>
-                                <button id="stockReportBtn" class="reports-list-item" style="padding: 10px 15px; background-color: rgba(230, 126, 34, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Stock Report</button>
-                                <button id="purchaseReportBtn" class="reports-list-item" style="padding: 10px 15px; background-color: rgba(230, 126, 34, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Purchase Report</button>
-                            </div>
-                        </div>
-                        
-                        <!-- Accounts and Data Analysis -->
-                        <button id="accountsBtn" style="padding: 12px 20px; background-color: #16a085; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Accounts</button>
-                        <button id="dataAnalysisBtn" style="padding: 12px 20px; background-color: #9b59b6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Data Analysis</button>
-                        
-                        <button id="userManagementBtn" style="padding: 12px 20px; background-color: #9b59b6; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Manage Users</button>
+                        <button id="clientTransactionsSidebarBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #2980b9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Client Transactions</button>
+                        <button id="userManagementBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Manage Users</button>
                         
                         <!-- Master List Section (Master Set) -->
                         <div id="masterListSection" style="margin-top: 10px;">
-                            <div id="masterListHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleMasterList()">
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="font-size: 16px;">📋</span>
-                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Master Set</h3>
-                                </div>
-                                <span id="masterListArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▲</span>
+                            <div id="masterListHeader" role="button" tabindex="0" aria-expanded="false" aria-controls="masterListItems" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #334155 0%, #1e293b 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleMasterList()">
+                                <h3 class="sidebar-section-title" style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Master Set</h3>
+                                <span id="masterListArrow" aria-hidden="true" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
                             </div>
-                            <div id="masterListItems" style="display: flex; flex-direction: column; gap: 8px; padding-left: 10px;">
+                            <div id="masterListItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
                                 <div style="display: flex; flex-direction: column; gap: 6px;">
-                                <button id="addMasterSetBtn" style="padding: 10px 15px; background-color: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left;">+ Add Set</button>
+                                <button id="addMasterSetBtn" type="button" style="padding: 10px 15px; background-color: #16a34a; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left;">+ Add Set</button>
                                     <!-- DELETE SET: uncomment next line + Kotlin blocks marked "DELETE SET" to restore
                                 <button id="deleteMasterSetBtn" style="padding: 10px 15px; background-color: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left;">Delete Set</button>
                                     -->
@@ -5996,36 +5926,33 @@ fun createApp(root: Element) {
                         
                         <!-- Master Map Section -->
                         <div id="masterMapSection" style="margin-top: 10px;">
-                            <div id="masterMapHeader" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #4b6cb7 0%, #182848 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleMasterMapList()">
-                                <div style="display: flex; align-items: center; gap: 10px;">
-                                    <span style="font-size: 16px;">🗺️</span>
-                                    <h3 style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Master Map</h3>
-                                </div>
-                                <span id="masterMapArrow" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
+                            <div id="masterMapHeader" role="button" tabindex="0" aria-expanded="false" aria-controls="masterMapItems" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; background: linear-gradient(135deg, #4b6cb7 0%, #182848 100%); border-radius: 6px; cursor: pointer; margin-bottom: 8px;" onclick="window.toggleMasterMapList()">
+                                <h3 class="sidebar-section-title" style="color: white; margin: 0; font-size: 16px; font-weight: 600;">Master Map</h3>
+                                <span id="masterMapArrow" aria-hidden="true" style="color: white; font-size: 14px; transition: transform 0.3s;">▼</span>
                             </div>
                             <div id="masterMapItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
-                                <button id="masterCarBrandsMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Chassis Map</button>
-                                <button id="masterClientMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client Map</button>
-                                <button id="masterConsigneeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee Map</button>
-                                <button id="masterShippingChargeMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping Charge Map</button>
-                                <button id="masterSupplierMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
-                                <button id="masterRixoPriceMapBtn" class="master-list-item" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Price Map</button>
+                                <button id="masterCarBrandsMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Chassis Map</button>
+                                <button id="masterClientMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client Map</button>
+                                <button id="masterConsigneeMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee Map</button>
+                                <button id="masterShippingChargeMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping Charge Map</button>
+                                <button id="masterSupplierMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
+                                <button id="masterRixoPriceMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Price Map</button>
                             </div>
                         </div>
                         
-                        <button id="roleRequestBtn" style="padding: 12px 20px; background-color: #ffc107; color: black; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Request Role</button>
+                        <button id="roleRequestBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #ffc107; color: black; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Request Role</button>
                         <div style="border-top: 1px solid #34495e; margin: 10px 0; padding-top: 15px;">
                             <div id="userInfo" style="color: #bdc3c7; font-size: 12px; margin-bottom: 10px; text-align: center;">
                                 <!-- User info will be populated here -->
                             </div>
-                            <button id="logoutBtn" style="padding: 12px 20px; background-color: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; width: 100%;">Logout</button>
+                            <button id="logoutBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; width: 100%;">Logout</button>
                         </div>
                     </div>
                 </div>
-            </div>
+            </nav>
             
             <!-- Overlay -->
-            <div id="sidebarOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 999; display: none;"></div>
+            <div id="sidebarOverlay" aria-hidden="true" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 999; display: none;"></div>
             
             
             <div style="margin-bottom: 20px; margin-top: 60px; display: flex; gap: 10px;">
@@ -6049,12 +5976,12 @@ fun createApp(root: Element) {
                 }
                 /* Master List Item Hover Effects */
                 .master-list-item:hover {
-                    background-color: rgba(102, 126, 234, 0.3) !important;
+                    background-color: rgba(75, 108, 183, 0.35) !important;
                     color: white !important;
                     transform: translateX(5px);
                 }
                 .master-list-item:active {
-                    background-color: rgba(102, 126, 234, 0.5) !important;
+                    background-color: rgba(75, 108, 183, 0.5) !important;
                 }
                 /* Shipment List Item Hover Effects */
                 .shipment-list-item:hover {
@@ -6066,12 +5993,12 @@ fun createApp(root: Element) {
                     background-color: rgba(52, 152, 219, 0.5) !important;
                 }
                 .rixo-list-item:hover {
-                    background-color: rgba(142, 68, 173, 0.35) !important;
+                    background-color: rgba(15, 118, 110, 0.4) !important;
                     color: white !important;
                     transform: translateX(5px);
                 }
                 .rixo-list-item:active {
-                    background-color: rgba(142, 68, 173, 0.5) !important;
+                    background-color: rgba(15, 118, 110, 0.55) !important;
                 }
                 .invoice-nav-list-item:hover {
                     background-color: rgba(39, 174, 96, 0.35) !important;
@@ -6081,24 +6008,6 @@ fun createApp(root: Element) {
                 .invoice-nav-list-item:active {
                     background-color: rgba(39, 174, 96, 0.5) !important;
                 }
-                /* Sales List Item Hover Effects */
-                .sales-list-item:hover {
-                    background-color: rgba(39, 174, 96, 0.3) !important;
-                    color: white !important;
-                    transform: translateX(5px);
-                }
-                .sales-list-item:active {
-                    background-color: rgba(39, 174, 96, 0.5) !important;
-                }
-                /* Reports List Item Hover Effects */
-                .reports-list-item:hover {
-                    background-color: rgba(230, 126, 34, 0.3) !important;
-                    color: white !important;
-                    transform: translateX(5px);
-                }
-                .reports-list-item:active {
-                    background-color: rgba(230, 126, 34, 0.5) !important;
-                }
                 /* Sidebar Scrollbar Styling */
                 #sidebar::-webkit-scrollbar {
                     width: 8px;
@@ -6107,11 +6016,11 @@ fun createApp(root: Element) {
                     background: #34495e;
                 }
                 #sidebar::-webkit-scrollbar-thumb {
-                    background: #667eea;
+                    background: #4b6cb7;
                     border-radius: 4px;
                 }
                 #sidebar::-webkit-scrollbar-thumb:hover {
-                    background: #764ba2;
+                    background: #334155;
                 }
             </style>
             
@@ -6129,6 +6038,12 @@ fun createApp(root: Element) {
     """
     
     // Set up button event listeners
+    document.getElementById("homeNavBtn")?.addEventListener("click", { _: Event ->
+        clearCarBookingStates()
+        closeSidebar()
+        navigateToApp("/home")
+    })
+
     document.getElementById("purchaseListBtn")?.addEventListener("click", { _: Event ->
         // Clear car booking states when navigating to Purchase List
         clearCarBookingStates()
@@ -6213,15 +6128,18 @@ fun createApp(root: Element) {
         window.toggleMasterList = function() {
             var items = document.getElementById('masterListItems');
             var arrow = document.getElementById('masterListArrow');
+            var header = document.getElementById('masterListHeader');
             if (items && arrow) {
                 if (items.style.display === 'none') {
                     items.style.display = 'flex';
                     arrow.textContent = '▲';
                     arrow.style.transform = 'rotate(0deg)';
+                    if (header) header.setAttribute('aria-expanded', 'true');
                 } else {
                     items.style.display = 'none';
                     arrow.textContent = '▼';
                     arrow.style.transform = 'rotate(180deg)';
+                    if (header) header.setAttribute('aria-expanded', 'false');
                 }
             }
         };
@@ -6229,15 +6147,18 @@ fun createApp(root: Element) {
         window.toggleMasterMapList = function() {
             var items = document.getElementById('masterMapItems');
             var arrow = document.getElementById('masterMapArrow');
+            var header = document.getElementById('masterMapHeader');
             if (items && arrow) {
                 if (items.style.display === 'none') {
                     items.style.display = 'flex';
                     arrow.textContent = '▲';
                     arrow.style.transform = 'rotate(0deg)';
+                    if (header) header.setAttribute('aria-expanded', 'true');
                 } else {
                     items.style.display = 'none';
                     arrow.textContent = '▼';
                     arrow.style.transform = 'rotate(180deg)';
+                    if (header) header.setAttribute('aria-expanded', 'false');
                 }
             }
         };
@@ -6245,13 +6166,16 @@ fun createApp(root: Element) {
         window.toggleShipmentList = function() {
             var items = document.getElementById('shipmentItems');
             var arrow = document.getElementById('shipmentArrow');
+            var header = document.getElementById('shipmentHeader');
             if (items && arrow) {
                 if (items.style.display === 'none') {
                     items.style.display = 'flex';
                     arrow.textContent = '▲';
+                    if (header) header.setAttribute('aria-expanded', 'true');
                 } else {
                     items.style.display = 'none';
                     arrow.textContent = '▼';
+                    if (header) header.setAttribute('aria-expanded', 'false');
                 }
             }
         };
@@ -6259,13 +6183,16 @@ fun createApp(root: Element) {
         window.toggleRixoList = function() {
             var items = document.getElementById('rixoItems');
             var arrow = document.getElementById('rixoArrow');
+            var header = document.getElementById('rixoHeader');
             if (items && arrow) {
                 if (items.style.display === 'none') {
                     items.style.display = 'flex';
                     arrow.textContent = '▲';
+                    if (header) header.setAttribute('aria-expanded', 'true');
                 } else {
                     items.style.display = 'none';
                     arrow.textContent = '▼';
+                    if (header) header.setAttribute('aria-expanded', 'false');
                 }
             }
         };
@@ -6273,69 +6200,16 @@ fun createApp(root: Element) {
         window.toggleInvoiceNavList = function() {
             var items = document.getElementById('invoiceNavItems');
             var arrow = document.getElementById('invoiceNavArrow');
+            var header = document.getElementById('invoiceNavHeader');
             if (items && arrow) {
                 if (items.style.display === 'none') {
                     items.style.display = 'flex';
                     arrow.textContent = '▲';
+                    if (header) header.setAttribute('aria-expanded', 'true');
                 } else {
                     items.style.display = 'none';
                     arrow.textContent = '▼';
-                }
-            }
-        };
-        
-        window.toggleSalesList = function() {
-            var items = document.getElementById('salesItems');
-            var arrow = document.getElementById('salesArrow');
-            if (items && arrow) {
-                if (items.style.display === 'none') {
-                    items.style.display = 'flex';
-                    arrow.textContent = '▲';
-                } else {
-                    items.style.display = 'none';
-                    arrow.textContent = '▼';
-                }
-            }
-        };
-        
-        window.toggleExportList = function() {
-            var items = document.getElementById('exportItems');
-            var arrow = document.getElementById('exportArrow');
-            if (items && arrow) {
-                if (items.style.display === 'none') {
-                    items.style.display = 'flex';
-                    arrow.textContent = '▲';
-                } else {
-                    items.style.display = 'none';
-                    arrow.textContent = '▼';
-                }
-            }
-        };
-        
-        window.toggleLocalList = function() {
-            var items = document.getElementById('localItems');
-            var arrow = document.getElementById('localArrow');
-            if (items && arrow) {
-                if (items.style.display === 'none') {
-                    items.style.display = 'flex';
-                    arrow.textContent = '▲';
-                } else {
-                    items.style.display = 'none';
-                    arrow.textContent = '▼';
-                }
-            }
-        };
-        
-        window.toggleReportsList = function() {
-            var items = document.getElementById('reportsItems');
-            var arrow = document.getElementById('reportsArrow');
-            if (items && arrow) {
-                if (items.style.display === 'none') {
-                    items.style.display = 'flex';
-                    arrow.textContent = '▲';
-                } else {
-                    items.style.display = 'none';
-                    arrow.textContent = '▼';
+                    if (header) header.setAttribute('aria-expanded', 'false');
                 }
             }
         };
@@ -6359,72 +6233,63 @@ fun createApp(root: Element) {
             // Master List (Master Set)
             var masterItems = document.getElementById('masterListItems');
             var masterArrow = document.getElementById('masterListArrow');
+            var masterHeader = document.getElementById('masterListHeader');
             if (masterItems && masterArrow) {
                 masterItems.style.display = 'none';
                 masterArrow.textContent = '▼';
                 masterArrow.style.transform = 'rotate(180deg)';
+                if (masterHeader) masterHeader.setAttribute('aria-expanded', 'false');
             }
             // Master Map
             var masterMapItems = document.getElementById('masterMapItems');
             var masterMapArrow = document.getElementById('masterMapArrow');
+            var masterMapHeader = document.getElementById('masterMapHeader');
             if (masterMapItems && masterMapArrow) {
                 masterMapItems.style.display = 'none';
                 masterMapArrow.textContent = '▼';
                 masterMapArrow.style.transform = 'rotate(180deg)';
+                if (masterMapHeader) masterMapHeader.setAttribute('aria-expanded', 'false');
             }
             // Shipment
             var shipmentItems = document.getElementById('shipmentItems');
             var shipmentArrow = document.getElementById('shipmentArrow');
+            var shipmentHeader = document.getElementById('shipmentHeader');
             if (shipmentItems && shipmentArrow) {
                 shipmentItems.style.display = 'none';
                 shipmentArrow.textContent = '▼';
+                if (shipmentHeader) shipmentHeader.setAttribute('aria-expanded', 'false');
             }
             // Rixo
             var rixoItems = document.getElementById('rixoItems');
             var rixoArrow = document.getElementById('rixoArrow');
+            var rixoHeader = document.getElementById('rixoHeader');
             if (rixoItems && rixoArrow) {
                 rixoItems.style.display = 'none';
                 rixoArrow.textContent = '▼';
+                if (rixoHeader) rixoHeader.setAttribute('aria-expanded', 'false');
             }
             // Invoice (sidebar nav)
             var invoiceNavItems = document.getElementById('invoiceNavItems');
             var invoiceNavArrow = document.getElementById('invoiceNavArrow');
+            var invoiceNavHeader = document.getElementById('invoiceNavHeader');
             if (invoiceNavItems && invoiceNavArrow) {
                 invoiceNavItems.style.display = 'none';
                 invoiceNavArrow.textContent = '▼';
+                if (invoiceNavHeader) invoiceNavHeader.setAttribute('aria-expanded', 'false');
             }
-            // Sales
-            var salesItems = document.getElementById('salesItems');
-            var salesArrow = document.getElementById('salesArrow');
-            if (salesItems && salesArrow) {
-                salesItems.style.display = 'none';
-                salesArrow.textContent = '▼';
-            }
-            // Export
-            var exportItems = document.getElementById('exportItems');
-            var exportArrow = document.getElementById('exportArrow');
-            if (exportItems && exportArrow) {
-                exportItems.style.display = 'none';
-                exportArrow.textContent = '▼';
-            }
-            // Local
-            var localItems = document.getElementById('localItems');
-            var localArrow = document.getElementById('localArrow');
-            if (localItems && localArrow) {
-                localItems.style.display = 'none';
-                localArrow.textContent = '▼';
-            }
-            // Reports
-            var reportsItems = document.getElementById('reportsItems');
-            var reportsArrow = document.getElementById('reportsArrow');
-            if (reportsItems && reportsArrow) {
-                reportsItems.style.display = 'none';
-                reportsArrow.textContent = '▼';
+            // Form sections (Add/Edit Purchase) - collapse all by default
+            var formHeaders = document.querySelectorAll('.form-section-header');
+            for (var i = 0; i < formHeaders.length; i++) {
+                formHeaders[i].classList.add('collapsed');
+                var sectionName = formHeaders[i].getAttribute('data-section');
+                if (sectionName) {
+                    var contentDivs = document.querySelectorAll('.form-section-content[data-section="' + sectionName + '"]');
+                    for (var j = 0; j < contentDivs.length; j++) {
+                        contentDivs[j].style.display = 'none';
+                    }
+                }
             }
         }
-        // Run immediately
-        initCollapsibleSections();
-        // Also run on DOM ready (in case sidebar is created later)
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', initCollapsibleSections);
         } else {
@@ -6533,6 +6398,11 @@ fun createApp(root: Element) {
     }
 }
 
+/** Home operations dashboard (live KPIs, workflow, charts, tables). */
+fun showHomePlaceholderPage() {
+    showHomeDashboardPage()
+}
+
 fun updateContent(root: Element) {
     if (ensureAppPathOrRedirect()) return
 
@@ -6567,6 +6437,11 @@ fun updateContent(root: Element) {
             removeHamburgerMenu()
             showAuthPage(signInMode = false)
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        routeAtEquals(route, "/home") -> {
+            ensureSidebarPresent()
+            showHomePlaceholderPage()
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         routeAtEquals(route, "/purchase") -> {
@@ -7510,6 +7385,15 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
 fun setupSidebarListeners() {
     // Use event delegation on document to avoid duplicate listeners
     // This ensures listeners work even if buttons are recreated
+    val homeNavBtn = document.getElementById("homeNavBtn")
+    if (homeNavBtn != null && !homeNavBtn.hasAttribute("data-listener-attached")) {
+        homeNavBtn.setAttribute("data-listener-attached", "true")
+        homeNavBtn.addEventListener("click", { _: Event ->
+            closeSidebar()
+            navigateToApp("/home")
+        })
+    }
+
     val purchaseListBtn = document.getElementById("purchaseListBtn")
     if (purchaseListBtn != null && !purchaseListBtn.hasAttribute("data-listener-attached")) {
         purchaseListBtn.setAttribute("data-listener-attached", "true")
@@ -7688,16 +7572,6 @@ fun setupSidebarListeners() {
         }
     }
 
-    // Vehicle Details button
-    val vehicleDetailsBtn = document.getElementById("vehicleDetailsBtn")
-    if (vehicleDetailsBtn != null && !vehicleDetailsBtn.hasAttribute("data-listener-attached")) {
-        vehicleDetailsBtn.setAttribute("data-listener-attached", "true")
-        vehicleDetailsBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            showMessage("Vehicle Details page - coming soon", "info")
-        })
-    }
-    
     // Shipping History (shipment sub-item)
     val shipmentStatusBtn = document.getElementById("shipmentStatusBtn")
     if (shipmentStatusBtn != null && !shipmentStatusBtn.hasAttribute("data-listener-attached")) {
@@ -7727,106 +7601,6 @@ fun setupSidebarListeners() {
         })
     }
 
-    // Invoice button (moved to Sales -> Export)
-    val invoiceBtn = document.getElementById("invoiceBtn")
-    if (invoiceBtn != null && !invoiceBtn.hasAttribute("data-listener-attached")) {
-        invoiceBtn.setAttribute("data-listener-attached", "true")
-        invoiceBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            navigateToApp("/invoice")
-        })
-    }
-    
-    // OTA Invoice button
-    val otaInvoiceBtn = document.getElementById("otaInvoiceBtn")
-    if (otaInvoiceBtn != null && !otaInvoiceBtn.hasAttribute("data-listener-attached")) {
-        otaInvoiceBtn.setAttribute("data-listener-attached", "true")
-        otaInvoiceBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            showMessage("OTA Invoice page - coming soon", "info")
-        })
-    }
-    
-    // Proforma Invoice button
-    val proformaInvoiceBtn = document.getElementById("proformaInvoiceBtn")
-    if (proformaInvoiceBtn != null && !proformaInvoiceBtn.hasAttribute("data-listener-attached")) {
-        proformaInvoiceBtn.setAttribute("data-listener-attached", "true")
-        proformaInvoiceBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            showMessage("Proforma Invoice page - coming soon", "info")
-        })
-    }
-    
-    // Contract button
-    val contractBtn = document.getElementById("contractBtn")
-    if (contractBtn != null && !contractBtn.hasAttribute("data-listener-attached")) {
-        contractBtn.setAttribute("data-listener-attached", "true")
-        contractBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            showMessage("Contract page - coming soon", "info")
-        })
-    }
-    
-    // Local Invoice button
-    val localInvoiceBtn = document.getElementById("localInvoiceBtn")
-    if (localInvoiceBtn != null && !localInvoiceBtn.hasAttribute("data-listener-attached")) {
-        localInvoiceBtn.setAttribute("data-listener-attached", "true")
-        localInvoiceBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            navigateToApp("/invoice")
-        })
-    }
-    
-    // Sales Report button
-    val salesReportBtn = document.getElementById("salesReportBtn")
-    if (salesReportBtn != null && !salesReportBtn.hasAttribute("data-listener-attached")) {
-        salesReportBtn.setAttribute("data-listener-attached", "true")
-        salesReportBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            showMessage("Sales Report page - coming soon", "info")
-        })
-    }
-    
-    // Stock Report button
-    val stockReportBtn = document.getElementById("stockReportBtn")
-    if (stockReportBtn != null && !stockReportBtn.hasAttribute("data-listener-attached")) {
-        stockReportBtn.setAttribute("data-listener-attached", "true")
-        stockReportBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            showMessage("Stock Report page - coming soon", "info")
-        })
-    }
-    
-    // Purchase Report button
-    val purchaseReportBtn = document.getElementById("purchaseReportBtn")
-    if (purchaseReportBtn != null && !purchaseReportBtn.hasAttribute("data-listener-attached")) {
-        purchaseReportBtn.setAttribute("data-listener-attached", "true")
-        purchaseReportBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            showMessage("Purchase Report page - coming soon", "info")
-        })
-    }
-    
-    // Accounts button
-    val accountsBtn = document.getElementById("accountsBtn")
-    if (accountsBtn != null && !accountsBtn.hasAttribute("data-listener-attached")) {
-        accountsBtn.setAttribute("data-listener-attached", "true")
-        accountsBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            showMessage("Accounts page - coming soon", "info")
-        })
-    }
-    
-    // Data Analysis button
-    val dataAnalysisBtn = document.getElementById("dataAnalysisBtn")
-    if (dataAnalysisBtn != null && !dataAnalysisBtn.hasAttribute("data-listener-attached")) {
-        dataAnalysisBtn.setAttribute("data-listener-attached", "true")
-        dataAnalysisBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            showMessage("Data Analysis page - coming soon", "info")
-        })
-    }
-    
     val logoutBtn = document.getElementById("logoutBtn")
     if (logoutBtn != null && !logoutBtn.hasAttribute("data-listener-attached")) {
         logoutBtn.setAttribute("data-listener-attached", "true")
@@ -7894,15 +7668,14 @@ private fun displayUsers(users: dynamic) {
     
     if (js("users.length") == 0) {
         table.innerHTML = """
-            <div style="text-align: center; color: #666; padding: 40px;">
-                No users found.
-            </div>
+            <div class="user-status-block" role="status">No users found.</div>
         """
         return
     }
     
     val tableHTML = StringBuilder()
     val cardsHTML = StringBuilder()
+    val editIcon = """<svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="currentColor"/><path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="currentColor"/></svg>"""
     
     // Table for tablet/desktop
     tableHTML.append("""
@@ -7910,11 +7683,11 @@ private fun displayUsers(users: dynamic) {
             <table class="users-table">
             <thead>
                     <tr>
-                        <th style="width: 50px;"></th>
-                        <th>Email</th>
-                        <th>Name</th>
-                        <th>Role</th>
-                        <th>Created</th>
+                        <th scope="col" style="width: 50px;"><span class="visually-hidden">Edit</span></th>
+                        <th scope="col">Email</th>
+                        <th scope="col">Name</th>
+                        <th scope="col">Role</th>
+                        <th scope="col">Created</th>
                 </tr>
             </thead>
             <tbody>
@@ -7937,8 +7710,8 @@ private fun displayUsers(users: dynamic) {
         tableHTML.append("""
             <tr data-user-id="${user.id}">
                 <td style="text-align: center;">
-                    <button class="edit-user-btn" data-id="${user.id}" style="width: 36px; height: 36px; background-color: #007bff; color: white; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px;" title="Edit User">
-                        ✏️
+                    <button type="button" class="edit-user-btn" data-id="${user.id}" aria-label="Edit user ${user.name}" title="Edit User">
+                        $editIcon
                     </button>
                 </td>
                 <td>${user.email}</td>
@@ -7954,7 +7727,7 @@ private fun displayUsers(users: dynamic) {
         
         // Mobile card
         cardsHTML.append("""
-            <div class="user-card" data-user-id="${user.id}">
+            <div class="user-card" data-user-id="${user.id}" role="button" tabindex="0" aria-label="Edit user ${user.name}">
                 <div class="user-card-content">
                     <div class="user-card-avatar">$initial</div>
                     <div class="user-card-info">
@@ -7997,6 +7770,14 @@ private fun displayUsers(users: dynamic) {
             val cardEl = event.currentTarget as HTMLElement
             val id = cardEl.getAttribute("data-user-id")
             editUser(id?.toLongOrNull())
+        })
+        card.addEventListener("keydown", { event ->
+            val key = event.asDynamic().key as? String ?: return@addEventListener
+            if (key == "Enter" || key == " ") {
+                event.preventDefault()
+                val cardEl = event.currentTarget as HTMLElement
+                editUser(cardEl.getAttribute("data-user-id")?.toLongOrNull())
+            }
         })
     }
 }
@@ -8421,13 +8202,13 @@ private fun deleteUser(id: Long?) {
 }
 fun createAddFormHTML(): String {
     return """
-        <div style="border: 1px solid #ddd; border-radius: 4px; padding: 20px;">
+        <div class="purchase-form-page">
             <h2>Add New Purchase</h2>
             <form id="addForm" novalidate>
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('basic')"><h3 class="form-section-header" data-section="basic">Basic Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="basic">
                     <div>
-                        <label>Purchase Date</label>
+                        <label for="dateText">Purchase Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="dateText" maxlength="10" inputmode="numeric" autocomplete="off"
@@ -8435,7 +8216,7 @@ fun createAddFormHTML(): String {
                                        value="${isoToMmDdYyyy(todayIsoLocalDate())}"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="dateCalendarBtn" title="Open calendar"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open calendar">${purchaseFormCalendarIconSvg()}</button>
                                 <span id="dateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
                             </div>
                             <input type="date" id="date" value="${todayIsoLocalDate()}" tabindex="-1" aria-hidden="true"
@@ -8445,61 +8226,61 @@ fun createAddFormHTML(): String {
                     <div>
                     </div>
                     <div>
-                        <label>Chassis Code *</label>
+                        <label for="chassisCodeInput">Chassis Code *</label>
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <div style="flex: 1;">
                                 ${createEditableCombobox("chassisCode", "Select Chassis Code", required = true)}
                     </div>
-                            <button type="button" id="manageBrandMappings" class="manage-btn" title="Manage Car Brands">
-                                ⚙️
+                            <button type="button" id="manageBrandMappings" class="manage-btn" title="Manage Car Brands" aria-label="Manage Car Brands">
+                                ${purchaseFormSettingsIconSvg()}
                             </button>
                         </div>
                     </div>
                     <div>
-                        <label>Chassis Number</label>
+                        <label for="chassisNumberInput">Chassis Number</label>
                         ${createEditableCombobox("chassisNumber", "Suffix (optional)", showDropdownButton = false)}
                     </div>
                     <div>
-                        <label>Brand</label>
+                        <label for="brandInput">Brand</label>
                         ${createEditableCombobox("brand", "Add Brand")}
                     </div>
                     <div>
-                        <label>Car Name</label>
+                        <label for="carNameInput">Car Name</label>
                         ${createEditableCombobox("carName", "Select Car Name")}
                     </div>
                     <div>
-                        <label>Registration Date</label>
+                        <label for="carModelYearText">Registration Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="carModelYearText" maxlength="7" inputmode="numeric" autocomplete="off"
                                        placeholder="MM/YYYY"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="carModelYearCalendarBtn" title="Open month picker"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open month picker">${purchaseFormCalendarIconSvg()}</button>
                             </div>
                             <input type="hidden" id="carModelYear" value="">
                             <span id="carModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">MM/YYYY</span>
                         </div>
                 </div>
                     <div>
-                        <label>Manufacture Year</label>
+                        <label for="manufactureYearText">Manufacture Year</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="manufactureYearText" maxlength="4" inputmode="numeric" autocomplete="off"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="manufactureYearCalendarBtn" title="Open year picker"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open year picker">${purchaseFormCalendarIconSvg()}</button>
                             </div>
                             <input type="hidden" id="manufactureYear" value="">
                             <span id="manufactureYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">YYYY</span>
                         </div>
                     </div>
                     <div>
-                        <label>Grade</label>
+                        <label for="gradeInput">Grade</label>
                         ${createEditableCombobox("grade", "Select Grade", showDropdownButton = false)}
                     </div>
                     <div>
-                        <label>Auction No</label>
+                        <label for="auctionNo">Auction No</label>
                         <input type="text" id="auctionNo" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
@@ -8521,24 +8302,24 @@ fun createAddFormHTML(): String {
                     <div id="numberCutFieldsWrap" style="display: none;">
                     <div class="form-grid-4col">
                     <div>
-                        <label>Place Name (Japanese)</label>
+                        <label for="numberCutPlaceInput">Place Name (Japanese)</label>
                         ${createEditableComboboxWithOptions("numberCutPlace", "Select Place", emptyList(), "")}
                     </div>
                     <div>
-                        <label>Number (English)</label>
+                        <label for="numberCutNumber1">Number (English)</label>
                         <input type="number" id="numberCutNumber1" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Hiragana Character</label>
+                        <label for="numberCutHiraganaInput">Hiragana Character</label>
                         ${createEditableComboboxWithOptions("numberCutHiragana", "Select Character", getNumberCutHiraganaOptions(), "")}
                     </div>
                     <div>
-                        <label>Number (English)</label>
+                        <label for="numberCutNumber2">Number (English)</label>
                         <input type="number" id="numberCutNumber2" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
                 <div style="margin-bottom: 20px;">
-                    <label>Number Cut:</label>
+                    <label for="numberCutString">Number Cut:</label>
                     <input type="text" id="numberCutString" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
                     </div>
                     </div>
@@ -8548,35 +8329,35 @@ fun createAddFormHTML(): String {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('specifications')"><h3 class="form-section-header" data-section="specifications">Car Specifications</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
-                        <label>Rank</label>
+                        <label for="rankInput">Rank</label>
                         ${createEditableCombobox("rank", "Select Rank", showDropdownButton = false)}
                     </div>
                     <div>
-                        <label>Color</label>
+                        <label for="colorInput">Color</label>
                         ${createEditableCombobox("color", "Select Color")}
                     </div>
                     <div>
-                        <label>Fuel</label>
+                        <label for="fuelInput">Fuel</label>
                         ${createEditableCombobox("fuel", "Select Fuel Type")}
                     </div>
                     <div>
-                        <label>Seat</label>
+                        <label for="seatInput">Seat</label>
                         ${createEditableCombobox("seat", "Select Seat", showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
-                        <label>Door</label>
+                        <label for="doorInput">Door</label>
                         ${createEditableCombobox("door", "Select Door", showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
-                        <label>Mileage</label>
+                        <label for="distance">Mileage</label>
                         <input type="text" id="distance" class="comma-int-input km-suffix-input" placeholder="e.g., 50,000 km" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>CC</label>
+                        <label for="ccInput">CC</label>
                         ${createEditableCombobox("cc", "Select CC", showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
-                        <label>Shift</label>
+                        <label for="shiftInput">Shift</label>
                         ${createEditableCombobox("shift", "Select Shift")}
                 </div>
                     <div>
@@ -8610,11 +8391,11 @@ fun createAddFormHTML(): String {
                         </div>
                     </div>
                     <div>
-                        <label>Vehicle type</label>
+                        <label for="shipmentSizeInput">Vehicle type</label>
                         ${createEditableCombobox("shipmentSize", "Select Vehicle type")}
                     </div>
                     <div style="grid-column: 1 / -1; margin-bottom: 20px;">
-                        <label>Options</label>
+                        <label for="options">Options</label>
                         <div class="options-buttons-grid" id="optionsButtonsGrid"></div>
                         <input type="hidden" id="optionsPredefined" value="">
                         <div style="display: flex; gap: 10px; align-items: center;">
@@ -8627,18 +8408,18 @@ fun createAddFormHTML(): String {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('supplier')"><h3 class="form-section-header" data-section="supplier">Supplier Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="supplier">
                     <div>
-                        <label>Supplier Name *</label>
+                        <label for="auctionNameInput">Supplier Name *</label>
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <div style="flex: 1;">
                                 ${createEditableCombobox("auctionName", "Add Supplier Name", required = true)}
                             </div>
-                            <button type="button" id="manageAuctionMappings" class="manage-btn" title="Go to Supplier Map">
-                                ⚙️
+                            <button type="button" id="manageAuctionMappings" class="manage-btn" title="Go to Supplier Map" aria-label="Open Supplier Map">
+                                ${purchaseFormSettingsIconSvg()}
                             </button>
                         </div>
                     </div>
                     <div>
-                        <label>Venue ID</label>
+                        <label for="venueIdInput">Venue ID</label>
                         ${createEditableCombobox("venueId", "Select Venue ID", showDropdownButton = false)}
                     </div>
                 </div>
@@ -8646,15 +8427,15 @@ fun createAddFormHTML(): String {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('rixo')"><h3 class="form-section-header" data-section="rixo">Rixo Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="rixo">
                     <div>
-                        <label>Rixo Company</label>
+                        <label for="rixoCompanyInput">Rixo Company</label>
                         ${createEditableCombobox("rixoCompany", "Select Rixo Company", additionalAttrs = "onchange=\"handleRixoCompanyChange(window.getComboboxValue('rixoCompany'))\"")}
                     </div>
                     <div>
-                        <label>Stock Location</label>
+                        <label for="stockLocationInput">Stock Location</label>
                         ${createEditableCombobox("stockLocation", "Select Stock Location")}
                     </div>
                     <div>
-                        <label>Rixo Price</label>
+                        <label for="rixoPriceInput">Rixo Price</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="rixoPriceInput" class="money-input" placeholder="0"
@@ -8751,11 +8532,11 @@ fun createAddFormHTML(): String {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('client')"><h3 class="form-section-header" data-section="client">Client Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="client">
                     <div>
-                        <label>Client Name</label>
+                        <label for="clientNameInput">Client Name</label>
                         ${createEditableCombobox("clientName", "Select Client Name")}
                     </div>
                     <div>
-                        <label>Country</label>
+                        <label for="countryInput">Country</label>
                         ${createEditableCombobox("country", "Select Country")}
                     </div>
                 </div>
@@ -8763,18 +8544,18 @@ fun createAddFormHTML(): String {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="shipment">
                     <div>
-                        <label>POL</label>
+                        <label for="polInput">POL</label>
                         ${createEditableCombobox("pol", "Select POL")}
                     </div>
                     <div>
-                        <label>Shipment Date</label>
+                        <label for="shipmentDateText">Shipment Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="shipmentDateText" maxlength="10" inputmode="numeric" autocomplete="off"
                                        placeholder="MM/DD/YYYY"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="shipmentDateCalendarBtn" title="Open calendar"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open calendar">${purchaseFormCalendarIconSvg()}</button>
                                 <span id="shipmentDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
                             </div>
                             <input type="date" id="shipmentDate" value="" tabindex="-1" aria-hidden="true"
@@ -8782,30 +8563,30 @@ fun createAddFormHTML(): String {
                     </div>
                     </div>
                     <div>
-                        <label>B/L No.</label>
+                        <label for="blNo">B/L No.</label>
                         <input type="text" id="blNo" placeholder="Bill of Lading Number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Booking No</label>
+                        <label for="addPurchaseBookingId">Booking No</label>
                         <input type="text" id="addPurchaseBookingId" placeholder="Booking ID" inputmode="numeric" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Vessel</label>
+                        <label for="purchaseVessel">Vessel</label>
                         <input type="text" id="purchaseVessel" placeholder="Vessel name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Shipment Charges</label>
+                        <label for="shipmentCharges">Shipment Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="shipmentCharges" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Consignee</label>
+                        <label for="consigneeInput">Consignee</label>
                         ${createEditableCombobox("consignee", "Select Consignee")}
                     </div>
                     <div>
-                        <label>POD</label>
+                        <label for="podInput">POD</label>
                         ${createEditableCombobox("pod", "Select POD")}
                     </div>
                 </div>
@@ -8813,14 +8594,14 @@ fun createAddFormHTML(): String {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="pricing">
                     <div>
-                        <label>Car Price</label>
+                        <label for="price">Car Price</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="price" class="money-input" placeholder="0">
                 </div>
                     </div>
                     <div>
-                        <label>Auction Fees</label>
+                        <label for="auctionFee">Auction Fees</label>
                         <div style="display: flex; align-items: center; gap: 12px;">
                             <div class="currency-input" style="flex: 1; min-width: 0;">
                                 <span class="currency-symbol">¥</span>
@@ -8833,35 +8614,35 @@ fun createAddFormHTML(): String {
                         </div>
                     </div>
                     <div>
-                        <label>Recycle Fees</label>
+                        <label for="recycleFee">Recycle Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="recycleFee" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Road Tax</label>
+                        <label for="roadTax">Road Tax</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="roadTax" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Auction Penalty Fee</label>
+                        <label for="auctionPenaltyFee">Auction Penalty Fee</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="auctionPenaltyFee" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Payment Date</label>
+                        <label for="paymentDateText">Payment Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="paymentDateText" maxlength="10" inputmode="numeric" autocomplete="off"
                                        placeholder="MM/DD/YYYY"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="paymentDateCalendarBtn" title="Open calendar"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open calendar">${purchaseFormCalendarIconSvg()}</button>
                                 <span id="paymentDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
                             </div>
                             <input type="date" id="paymentDate" value="" tabindex="-1" aria-hidden="true"
@@ -8869,57 +8650,57 @@ fun createAddFormHTML(): String {
                     </div>
                 </div>
                     <div>
-                        <label>Freight</label>
+                        <label for="freight">Freight</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="freight" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Storage Fees</label>
+                        <label for="storageCharges">Storage Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="storageCharges" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Repair Company</label>
+                        <label for="repairCompanyInput">Repair Company</label>
                         ${createEditableCombobox("repairCompany", "Select Repair Company")}
                     </div>
                     <div>
-                        <label>Repair Charges</label>
+                        <label for="repairCharges">Repair Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="repairCharges" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Misc. Charges</label>
+                        <label for="miscCharges">Misc. Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="miscCharges" class="money-input" placeholder="0">
                     </div>
                     </div>
                     <div>
-                        <label>Inspection Fees</label>
+                        <label for="inspectionFee">Inspection Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="inspectionFee" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Commission</label>
+                        <label for="commission">Commission</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="commission" class="money-input" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Total Cost (Before Tax)</label>
+                        <label for="totalCostBeforeTax">Total Cost (Before Tax)</label>
                         <input type="text" id="totalCostBeforeTax" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
                     </div>
                     <div>
-                        <label>Tax Total</label>
+                        <label for="taxTotal">Tax Total</label>
                         <div style="display: flex; gap: 8px; align-items: stretch;">
                             <div class="currency-input" style="flex: 1;">
                                 <span class="currency-symbol">¥</span>
@@ -8929,13 +8710,13 @@ fun createAddFormHTML(): String {
                 </div>
                     </div>
                     <div>
-                        <label>Total Cost (After Tax 10%)</label>
+                        <label for="totalCostAfterTax">Total Cost (After Tax 10%)</label>
                         <input type="text" id="totalCostAfterTax" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
                     </div>
                 </div>
                 
                 <div style="margin-bottom: 20px;">
-                    <label>Notes</label>
+                    <label for="notes">Notes</label>
                     <textarea id="notes" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-height: 80px;"></textarea>
                 </div>
 
@@ -10218,101 +9999,8 @@ fun setupRixoDropdowns() {
                 }
                 
                 // Set Options: predefined go to hidden + button highlight; custom go to text box only
-                // API: GET /api/purchases/purchase/{id} returns Purchase as JSON; Jackson uses camelCase — canonical key is "options" (comma-separated string). Fallback keys are legacy/defensive.
-                function readPurchaseOptionsString(pd) {
-                    if (!pd) return '';
-                    var o = pd.options;
-                    if (o != null && String(o).trim() !== '') return String(o);
-                    o = pd.options_str || pd.carOptions;
-                    return (o != null && String(o).trim() !== '') ? String(o) : '';
-                }
-                var PREDEFINED_OPTIONS = [];
-                if (window.__purchasePredefinedOptions && window.__purchasePredefinedOptions.length) {
-                    PREDEFINED_OPTIONS = Array.prototype.slice.call(window.__purchasePredefinedOptions);
-                } else {
-                    var optionsGrid = document.getElementById('editOptionsButtonsGrid');
-                    if (optionsGrid) {
-                        optionsGrid.querySelectorAll('.option-btn[data-option]').forEach(function(btn) {
-                            var v = btn.getAttribute('data-option');
-                            if (v && PREDEFINED_OPTIONS.indexOf(v) === -1) PREDEFINED_OPTIONS.push(v);
-                        });
-                    }
-                }
-                var OPTIONS_NORMALIZE = { 'Navigation': 'Navigation/TV', 'TV': 'Navigation/TV' };
-                function optionLabelEqualsLocal(a, b) {
-                    if (typeof window.optionLabelEquals === 'function') return window.optionLabelEquals(a, b);
-                    return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
-                }
-                function normalizeOptionLabel(opt) {
-                    if (OPTIONS_NORMALIZE[opt]) return OPTIONS_NORMALIZE[opt];
-                    var lower = String(opt || '').trim().toLowerCase();
-                    for (var k in OPTIONS_NORMALIZE) {
-                        if (Object.prototype.hasOwnProperty.call(OPTIONS_NORMALIZE, k) &&
-                            String(k).toLowerCase() === lower) {
-                            return OPTIONS_NORMALIZE[k];
-                        }
-                    }
-                    return opt;
-                }
-                function matchPredefinedCanonical(opt) {
-                    var normalized = normalizeOptionLabel(opt);
-                    for (var i = 0; i < PREDEFINED_OPTIONS.length; i++) {
-                        if (optionLabelEqualsLocal(PREDEFINED_OPTIONS[i], normalized) ||
-                            optionLabelEqualsLocal(PREDEFINED_OPTIONS[i], opt)) {
-                            return PREDEFINED_OPTIONS[i];
-                        }
-                    }
-                    return null;
-                }
-                var editOptions = document.getElementById('editOptions');
-                var editOptionsPredefined = document.getElementById('editOptionsPredefined');
-                if (editOptions && editOptionsPredefined) {
-                    var optionsRaw = readPurchaseOptionsString(purchaseData);
-                    if (optionsRaw) {
-                        var optionsArray = String(optionsRaw).split(',').map(function(o) { return o.trim(); }).filter(Boolean);
-                        var predefined = [];
-                        var custom = [];
-                        optionsArray.forEach(function(opt) {
-                            var canonical = matchPredefinedCanonical(opt);
-                            if (canonical) {
-                                predefined.push(canonical);
-                            } else {
-                                custom.push(opt);
-                            }
-                        });
-                        editOptionsPredefined.value = predefined.join(', ');
-                        editOptions.value = custom.join(', ');
-                        var editForm = document.getElementById('editForm');
-                        var optionButtons = editForm ? editForm.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn');
-                        optionButtons.forEach(function(btn) {
-                            var optionValue = btn.getAttribute('data-option');
-                            if (optionValue === 'Basic') return;
-                            var isSelected = predefined.some(function(p) { return optionLabelEqualsLocal(p, optionValue); });
-                            if (isSelected) {
-                                btn.classList.add('selected');
-                            } else {
-                                btn.classList.remove('selected');
-                            }
-                        });
-                        // Keep Basic in sync with ABS/PW/PS/AC in Edit form after loading saved options
-                        if (editForm) {
-                            var basicBtn = editForm.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
-                            var required = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'AC'];
-                            var grid = editForm.querySelector('.options-buttons-grid');
-                            var allSelected = required.every(function(opt) {
-                                var b = (typeof window.findOptionBtnByLabel === 'function')
-                                    ? window.findOptionBtnByLabel(grid, opt)
-                                    : (grid ? grid.querySelector('.option-btn[data-option="' + opt + '"]') : null);
-                                return !!(b && b.classList.contains('selected'));
-                            });
-                            if (basicBtn) basicBtn.classList.toggle('selected', allSelected);
-                        }
-                    } else {
-                        editOptionsPredefined.value = '';
-                        editOptions.value = '';
-                        var ef = document.getElementById('editForm');
-                        (ef ? ef.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn')).forEach(function(btn) { btn.classList.remove('selected'); });
-                    }
+                if (typeof window.__applyEditPurchaseOptionsFromData === 'function') {
+                    window.__applyEditPurchaseOptionsFromData(purchaseData);
                 }
                 
                 // Set Rixo Requested radio button
@@ -10575,8 +10263,6 @@ fun setupRixoDropdowns() {
             } else {
                 // Fallback for edit page when global setupOptionButtons isn't available yet
                 var editForm = document.getElementById('editForm');
-                var optionButtons = editForm ? editForm.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn');
-                var editOptionsPredefined = document.getElementById('editOptionsPredefined');
                 var editOptionsInput = document.getElementById('editOptions');
                 var BASIC_OPTIONS = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'AC'];
                 function findBtnByLabel(grid, label) {
@@ -10590,18 +10276,6 @@ fun setupRixoDropdowns() {
                     }
                     return null;
                 }
-                function updatePredefined(option, add) {
-                    if (!editOptionsPredefined) return;
-                    var current = editOptionsPredefined.value.trim();
-                    var opts = current ? current.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
-                    var idx = -1;
-                    for (var i = 0; i < opts.length; i++) {
-                        if (String(opts[i]).trim().toLowerCase() === String(option).trim().toLowerCase()) { idx = i; break; }
-                    }
-                    if (add && idx === -1) opts.push(option);
-                    if (!add && idx > -1) opts.splice(idx, 1);
-                    editOptionsPredefined.value = opts.join(', ');
-                }
                 function syncBasicFromFour() {
                     if (!editForm) return;
                     var basicBtn = editForm.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
@@ -10613,33 +10287,11 @@ fun setupRixoDropdowns() {
                     });
                     basicBtn.classList.toggle('selected', allSelected);
                 }
-                optionButtons.forEach(function(btn) {
-                    btn.addEventListener('click', function() {
-                        var option = this.getAttribute('data-option');
-                        var grid = editForm ? editForm.querySelector('.options-buttons-grid') : null;
-                        if (option === 'Basic') {
-                            var willSelect = !this.classList.contains('selected');
-                            this.classList.toggle('selected', willSelect);
-                            BASIC_OPTIONS.forEach(function(opt) {
-                                var ob = findBtnByLabel(grid, opt);
-                                var actual = (ob && ob.getAttribute('data-option')) || opt;
-                                updatePredefined(actual, willSelect);
-                                if (ob) ob.classList.toggle('selected', willSelect);
-                            });
-                            return;
-                        }
-                        if (this.classList.contains('selected')) {
-                            this.classList.remove('selected');
-                            updatePredefined(option, false);
-                        } else {
-                            this.classList.add('selected');
-                            updatePredefined(option, true);
-                        }
-                        syncBasicFromFour();
-                    });
-                });
+                // Do not attach per-button click listeners here — global onOptionButtonClick handles Add+Edit.
+                // Duplicate listeners caused select-then-deselect after Basic.
                 syncBasicFromFour();
-                if (editOptionsInput) {
+                if (editOptionsInput && !editOptionsInput._optionsCustomBound) {
+                    editOptionsInput._optionsCustomBound = true;
                     editOptionsInput.addEventListener('keypress', function(e) {
                         if (e.key === 'Enter') {
                             e.preventDefault();
@@ -10667,6 +10319,220 @@ fun setupRixoDropdowns() {
             initRixoDropdowns();
         }
     """)
+}
+
+/** One-time: option chip click delegation + helpers for Add and Edit purchase forms. Call from [main]. */
+fun ensurePurchaseOptionButtonsInfrastructure() {
+    js("""
+        if (window.__purchaseOptionButtonsInfraInstalled) return;
+        window.__purchaseOptionButtonsInfraInstalled = true;
+
+        window.optionLabelEquals = function(a, b) {
+            return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+        };
+        window.findOptionBtnByLabel = function(grid, label) {
+            if (!grid || !label) return null;
+            var buttons = grid.querySelectorAll('.option-btn[data-option]');
+            for (var i = 0; i < buttons.length; i++) {
+                var v = buttons[i].getAttribute('data-option');
+                if (!v || v === 'Basic') continue;
+                if (window.optionLabelEquals(v, label)) return buttons[i];
+            }
+            return null;
+        };
+        function updatePredefinedInput(predefinedInput, option, add) {
+            if (!predefinedInput) return;
+            var current = predefinedInput.value.trim();
+            var opts = current ? current.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
+            var idx = -1;
+            for (var i = 0; i < opts.length; i++) {
+                if (window.optionLabelEquals(opts[i], option)) { idx = i; break; }
+            }
+            if (add && idx === -1) { opts.push(option); }
+            if (!add && idx > -1) { opts.splice(idx, 1); }
+            predefinedInput.value = opts.join(', ');
+        }
+        var BASIC_OPTIONS = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'AC'];
+        function syncBasicButtonState(form) {
+            if (!form) return;
+            var basicBtn = form.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
+            if (!basicBtn) return;
+            var grid = form.querySelector('.options-buttons-grid');
+            if (!grid) return;
+            var allSelected = BASIC_OPTIONS.every(function(opt) {
+                var b = window.findOptionBtnByLabel(grid, opt);
+                return !!(b && b.classList.contains('selected'));
+            });
+            basicBtn.classList.toggle('selected', allSelected);
+        }
+        function onOptionButtonClick(e) {
+            var t = e.target;
+            var btn = (t && t.closest) ? t.closest('.option-btn') : null;
+            if (!btn || !btn.classList || !btn.classList.contains('option-btn')) return;
+            var option = btn.getAttribute('data-option');
+            var form = btn.closest('form');
+            var grid = btn.closest('.options-buttons-grid') || (form ? form.querySelector('.options-buttons-grid') : null);
+            var predefinedInput = form ? form.querySelector('input[type="hidden"][id$="Predefined"]') : null;
+            if (!predefinedInput || predefinedInput.type !== 'hidden') return;
+            e.preventDefault();
+            if (option === 'Basic') {
+                var willSelect = !btn.classList.contains('selected');
+                btn.classList.toggle('selected', willSelect);
+                BASIC_OPTIONS.forEach(function(opt) {
+                    var otherBtn = grid ? window.findOptionBtnByLabel(grid, opt) : null;
+                    var actual = (otherBtn && otherBtn.getAttribute('data-option')) || opt;
+                    updatePredefinedInput(predefinedInput, actual, willSelect);
+                    if (otherBtn) otherBtn.classList.toggle('selected', willSelect);
+                });
+                return;
+            }
+            if (btn.classList.contains('selected')) {
+                btn.classList.remove('selected');
+                updatePredefinedInput(predefinedInput, option, false);
+            } else {
+                btn.classList.add('selected');
+                updatePredefinedInput(predefinedInput, option, true);
+            }
+            syncBasicButtonState(form);
+        }
+        if (!window.__optionButtonClickBound) {
+            window.__optionButtonClickBound = true;
+            document.addEventListener('click', onOptionButtonClick, true);
+        }
+        function setupOptionButtons() {
+            var optionsInput = document.getElementById('options');
+            var editOptionsInput = document.getElementById('editOptions');
+            if (optionsInput && !optionsInput._optionsCustomBound) {
+                optionsInput._optionsCustomBound = true;
+                optionsInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        var v = this.value.trim();
+                        var opts = v ? v.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
+                        this.value = opts.join(', ');
+                    }
+                });
+            }
+            if (editOptionsInput && !editOptionsInput._optionsCustomBound) {
+                editOptionsInput._optionsCustomBound = true;
+                editOptionsInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        var v = editOptionsInput.value.trim();
+                        var opts = v ? v.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
+                        editOptionsInput.value = opts.join(', ');
+                    }
+                });
+            }
+            syncBasicButtonState(document.getElementById('addForm'));
+            syncBasicButtonState(document.getElementById('editForm'));
+        }
+        window.setupOptionButtons = setupOptionButtons;
+        window.syncPurchaseBasicButtonState = syncBasicButtonState;
+
+        /** Apply saved purchase.options onto Edit form chips + custom text + Basic. */
+        window.__applyEditPurchaseOptionsFromData = function(pd) {
+            if (!pd) return;
+            function readPurchaseOptionsString(p) {
+                if (!p) return '';
+                var o = p.options;
+                if (o != null && String(o).trim() !== '') return String(o);
+                o = p.options_str || p.carOptions;
+                return (o != null && String(o).trim() !== '') ? String(o) : '';
+            }
+            var PREDEFINED_OPTIONS = [];
+            if (window.__purchasePredefinedOptions && window.__purchasePredefinedOptions.length) {
+                PREDEFINED_OPTIONS = Array.prototype.slice.call(window.__purchasePredefinedOptions);
+            } else {
+                var optionsGrid = document.getElementById('editOptionsButtonsGrid');
+                if (optionsGrid) {
+                    optionsGrid.querySelectorAll('.option-btn[data-option]').forEach(function(btn) {
+                        var v = btn.getAttribute('data-option');
+                        if (v && PREDEFINED_OPTIONS.indexOf(v) === -1) PREDEFINED_OPTIONS.push(v);
+                    });
+                }
+            }
+            var OPTIONS_NORMALIZE = { 'Navigation': 'Navigation/TV', 'TV': 'Navigation/TV' };
+            function optionLabelEqualsLocal(a, b) {
+                return window.optionLabelEquals(a, b);
+            }
+            function normalizeOptionLabel(opt) {
+                if (OPTIONS_NORMALIZE[opt]) return OPTIONS_NORMALIZE[opt];
+                var lower = String(opt || '').trim().toLowerCase();
+                for (var k in OPTIONS_NORMALIZE) {
+                    if (Object.prototype.hasOwnProperty.call(OPTIONS_NORMALIZE, k) &&
+                        String(k).toLowerCase() === lower) {
+                        return OPTIONS_NORMALIZE[k];
+                    }
+                }
+                return opt;
+            }
+            function matchPredefinedCanonical(opt) {
+                var normalized = normalizeOptionLabel(opt);
+                for (var i = 0; i < PREDEFINED_OPTIONS.length; i++) {
+                    if (optionLabelEqualsLocal(PREDEFINED_OPTIONS[i], normalized) ||
+                        optionLabelEqualsLocal(PREDEFINED_OPTIONS[i], opt)) {
+                        return PREDEFINED_OPTIONS[i];
+                    }
+                }
+                return null;
+            }
+            var editOptions = document.getElementById('editOptions');
+            var editOptionsPredefined = document.getElementById('editOptionsPredefined');
+            if (!editOptions || !editOptionsPredefined) return;
+            var optionsRaw = readPurchaseOptionsString(pd);
+            var editForm = document.getElementById('editForm');
+            if (optionsRaw) {
+                var optionsArray = String(optionsRaw).split(',').map(function(o) { return o.trim(); }).filter(Boolean);
+                var predefined = [];
+                var custom = [];
+                optionsArray.forEach(function(opt) {
+                    var canonical = matchPredefinedCanonical(opt);
+                    if (canonical) predefined.push(canonical);
+                    else custom.push(opt);
+                });
+                editOptionsPredefined.value = predefined.join(', ');
+                editOptions.value = custom.join(', ');
+                var optionButtons = editForm ? editForm.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn');
+                optionButtons.forEach(function(btn) {
+                    var optionValue = btn.getAttribute('data-option');
+                    if (optionValue === 'Basic') return;
+                    var isSelected = predefined.some(function(p) { return optionLabelEqualsLocal(p, optionValue); });
+                    if (isSelected) btn.classList.add('selected');
+                    else btn.classList.remove('selected');
+                });
+                syncBasicButtonState(editForm);
+            } else {
+                editOptionsPredefined.value = '';
+                editOptions.value = '';
+                (editForm ? editForm.querySelectorAll('.option-btn') : document.querySelectorAll('.option-btn')).forEach(function(btn) {
+                    btn.classList.remove('selected');
+                });
+            }
+        };
+    """)
+}
+
+/** Apply saved options onto Edit form; safe to call multiple times after chips render. */
+fun applyEditPurchaseOptionsFromData(purchaseData: dynamic) {
+    if (purchaseData == null || purchaseData == js("undefined")) return
+    ensurePurchaseOptionButtonsInfrastructure()
+    val pd = purchaseData
+    js("""
+        if (typeof window.__applyEditPurchaseOptionsFromData === 'function') {
+            window.__applyEditPurchaseOptionsFromData(pd);
+        }
+        if (typeof window.setupOptionButtons === 'function') {
+            window.setupOptionButtons();
+        }
+    """)
+}
+
+/** Immediate + delayed re-apply so late grid/async work cannot leave chips blank. */
+fun scheduleEditPurchaseOptionsApply(purchaseData: dynamic) {
+    applyEditPurchaseOptionsFromData(purchaseData)
+    window.setTimeout({ applyEditPurchaseOptionsFromData(purchaseData) }, 300)
+    window.setTimeout({ applyEditPurchaseOptionsFromData(purchaseData) }, 800)
 }
 
 /** One-time: comma formatting + numeric-only for `.money-input` (Add + Edit). Call from [main]. */
@@ -11513,120 +11379,10 @@ fun setupAddFormListeners() {
         hint?.textContent = isoToWeekdayLabel(v)
     })
     
-    // Option buttons: highlight selected only; text box is for custom options only (no predefined in text box)
-    // Use event delegation so Add and Edit forms both work (form can be rendered after initial load)
-    js("""
-        // Case-insensitive option matching so Basic works when master_menu uses AIR BAG vs Air Bag.
-        window.optionLabelEquals = function(a, b) {
-            return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
-        };
-        window.findOptionBtnByLabel = function(grid, label) {
-            if (!grid || !label) return null;
-            var buttons = grid.querySelectorAll('.option-btn[data-option]');
-            for (var i = 0; i < buttons.length; i++) {
-                var v = buttons[i].getAttribute('data-option');
-                if (!v || v === 'Basic') continue;
-                if (window.optionLabelEquals(v, label)) return buttons[i];
-            }
-            return null;
-        };
-        function updatePredefinedInput(predefinedInput, option, add) {
-            if (!predefinedInput) return;
-            var current = predefinedInput.value.trim();
-            var opts = current ? current.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
-            var idx = -1;
-            for (var i = 0; i < opts.length; i++) {
-                if (window.optionLabelEquals(opts[i], option)) { idx = i; break; }
-            }
-            if (add && idx === -1) { opts.push(option); }
-            if (!add && idx > -1) { opts.splice(idx, 1); }
-            predefinedInput.value = opts.join(', ');
-        }
-        var BASIC_OPTIONS = ['ABS', 'Air Bag', 'Power Window', 'Power Steering', 'AC'];
-        function syncBasicButtonState(form) {
-            if (!form) return;
-            var basicBtn = form.querySelector('.option-btn.option-btn-basic[data-option="Basic"]');
-            if (!basicBtn) return;
-            var grid = form.querySelector('.options-buttons-grid');
-            if (!grid) return;
-            var allSelected = BASIC_OPTIONS.every(function(opt) {
-                var b = window.findOptionBtnByLabel(grid, opt);
-                return !!(b && b.classList.contains('selected'));
-            });
-            basicBtn.classList.toggle('selected', allSelected);
-        }
-        function onOptionButtonClick(e) {
-            var btn = e.target;
-            if (!btn || !btn.classList || !btn.classList.contains('option-btn')) return;
-            var option = btn.getAttribute('data-option');
-            var form = btn.closest('form');
-            var grid = btn.closest('.options-buttons-grid') || (form ? form.querySelector('.options-buttons-grid') : null);
-            var predefinedInput = form ? form.querySelector('input[type="hidden"][id$="Predefined"]') : null;
-            if (!predefinedInput || predefinedInput.type !== 'hidden') return;
-            e.preventDefault();
-            if (option === 'Basic') {
-                var willSelect = !btn.classList.contains('selected');
-                btn.classList.toggle('selected', willSelect);
-                BASIC_OPTIONS.forEach(function(opt) {
-                    var otherBtn = grid ? window.findOptionBtnByLabel(grid, opt) : null;
-                    // Prefer the live chip's casing (e.g. AIR BAG) when writing the hidden field.
-                    var actual = (otherBtn && otherBtn.getAttribute('data-option')) || opt;
-                    updatePredefinedInput(predefinedInput, actual, willSelect);
-                    if (otherBtn) otherBtn.classList.toggle('selected', willSelect);
-                });
-                return;
-            }
-            if (btn.classList.contains('selected')) {
-                btn.classList.remove('selected');
-                updatePredefinedInput(predefinedInput, option, false);
-            } else {
-                btn.classList.add('selected');
-                updatePredefinedInput(predefinedInput, option, true);
-            }
-            syncBasicButtonState(form);
-        }
-        if (!window.__optionButtonClickBound) {
-            window.__optionButtonClickBound = true;
-        document.addEventListener('click', onOptionButtonClick, true);
-        }
-        function setupOptionButtons() {
-            var optionsInput = document.getElementById('options');
-            var editOptionsInput = document.getElementById('editOptions');
-            if (optionsInput && !optionsInput._optionsCustomBound) {
-                optionsInput._optionsCustomBound = true;
-                optionsInput.addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        var v = this.value.trim();
-                        var opts = v ? v.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
-                        this.value = opts.join(', ');
-                    }
-                });
-            }
-            if (editOptionsInput && !editOptionsInput._optionsCustomBound) {
-                editOptionsInput._optionsCustomBound = true;
-                editOptionsInput.addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        var v = editOptionsInput.value.trim();
-                        var opts = v ? v.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
-                        editOptionsInput.value = opts.join(', ');
-                    }
-                });
-            }
-            // Keep Basic button state in sync when forms load with preselected options.
-            var addForm = document.getElementById('addForm');
-            var editForm = document.getElementById('editForm');
-            syncBasicButtonState(addForm);
-            syncBasicButtonState(editForm);
-        }
-        window.setupOptionButtons = setupOptionButtons;
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', setupOptionButtons);
-        } else {
-            setupOptionButtons();
-        }
-    """)
+    // Option buttons: highlight selected only; text box is for custom options only (no predefined in text box).
+    // Click delegation is installed once at app start via ensurePurchaseOptionButtonsInfrastructure().
+    ensurePurchaseOptionButtonsInfrastructure()
+    js("if (typeof window.setupOptionButtons === 'function') window.setupOptionButtons();")
     (document.getElementById("paymentDate") as HTMLInputElement?)?.addEventListener("change", { ev: Event ->
         val v = (ev.target as HTMLInputElement).value
         val hint = document.getElementById("paymentDateDayHint") as HTMLElement?
@@ -17813,7 +17569,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
 
     val content = document.getElementById("content")!!
     content.innerHTML = """
-        <div class="edit-purchase-container" style="border: 1px solid #ddd; border-radius: 4px; padding: 20px; position: relative;">
+        <div class="edit-purchase-container purchase-form-page">
             <h2>Edit Purchase</h2>
             <form id="editForm">
                 <input type="hidden" id="editId" value="${purchaseData.id}">
@@ -17821,7 +17577,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('basic')"><h3 class="form-section-header" data-section="basic">Basic Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="basic">
                     <div>
-                        <label>Purchase Date</label>
+                        <label for="editDate">Purchase Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="editDate" maxlength="10" inputmode="numeric" autocomplete="off"
@@ -17829,7 +17585,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                        value="${editPurchaseDateMaskedInitial}"
                                        style="flex:1; min-width:0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing:border-box;" />
                                 <button type="button" id="editDateCalendarBtn" title="Open calendar"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open calendar">${purchaseFormCalendarIconSvg()}</button>
                                 <span id="editDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
                             </div>
                             <input type="date" id="editDatePicker" tabindex="-1" aria-hidden="true"
@@ -17840,26 +17596,26 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                     </div>
                     <div>
-                        <label>Chassis Code *</label>
+                        <label for="editChassisCodeInput">Chassis Code *</label>
                         <div class="chassis-input-row" style="display: flex; gap: 8px; align-items: center;">
                             <div class="chassis-input-wrap" style="flex: 1; position: relative; min-width: 0;">
                                 ${createEditableCombobox("editChassisCode", "Select Chassis Code", required = true, initialValue = editChassisCodeDisp)}
                     </div>
-                            <button type="button" id="manageEditBrandMappings" class="manage-btn" title="Manage Car Brands">
-                                ⚙️
+                            <button type="button" id="manageEditBrandMappings" class="manage-btn" title="Manage Car Brands" aria-label="Manage Car Brands">
+                                ${purchaseFormSettingsIconSvg()}
                             </button>
                     </div>
                     </div>
                     <div>
-                        <label>Chassis Number</label>
+                        <label for="editChassisNumberInput">Chassis Number</label>
                         ${createEditableCombobox("editChassisNumber", "Suffix (optional)", initialValue = editChassisNumberDisp, showDropdownButton = false)}
                     </div>
                     <div>
-                        <label>Brand</label>
+                        <label for="editBrandInput">Brand</label>
                         ${createEditableCombobox("editBrand", "Add Brand", initialValue = editBrandDisp)}
                     </div>
                     <div>
-                        <label>Car Name</label>
+                        <label for="editCarNameInput">Car Name</label>
                         <div style="position: relative; width: 100%;">
                             <input type="text" id="editCarNameInput" value="$editCarNameDisp" placeholder="Select Car Name" 
                                    style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
@@ -17878,11 +17634,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 </div>
                     </div>
                     <div>
-                        <label>Grade</label>
+                        <label for="editGradeInput">Grade</label>
                         ${createEditableCombobox("editGrade", "Select Grade", initialValue = editGradeDisp, showDropdownButton = false)}
                     </div>
                     <div>
-                        <label>Registration Date</label>
+                        <label for="editCarModelYearText">Registration Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="editCarModelYearText" maxlength="7" inputmode="numeric" autocomplete="off"
@@ -17890,28 +17646,28 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                        value="${escapeAttr(editCarModelYearTextInitial)}"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="editCarModelYearCalendarBtn" title="Open month picker"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open month picker">${purchaseFormCalendarIconSvg()}</button>
                             </div>
                             <input type="hidden" id="editCarModelYear" value="${escapeAttr(editCarModelYearIsoInitial)}">
                             <span id="editCarModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">MM/YYYY</span>
                         </div>
                     </div>
                     <div>
-                        <label>Manufacture Year</label>
+                        <label for="editManufactureYearText">Manufacture Year</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="editManufactureYearText" maxlength="4" inputmode="numeric" autocomplete="off"
                                        value="${escapeHtml(editManufactureYearInitial)}"
                                        style="flex:1; min-width:0; padding:8px; border:1px solid #ddd; border-radius:4px; box-sizing:border-box;" />
                                 <button type="button" id="editManufactureYearCalendarBtn" title="Open year picker"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open year picker">${purchaseFormCalendarIconSvg()}</button>
                             </div>
                             <input type="hidden" id="editManufactureYear" value="${escapeHtml(editManufactureYearInitial)}">
                             <span id="editManufactureYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none; display:${if (editManufactureYearInitial.isBlank()) "block" else "none"};">YYYY</span>
                         </div>
                     </div>
                     <div>
-                        <label>Auction No</label>
+                        <label for="editAuctionNo">Auction No</label>
                         <input type="text" id="editAuctionNo" value="${purchaseData.auctionNo ?: ""}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
@@ -17933,24 +17689,24 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div id="editNumberCutFieldsWrap" style="display: ${if (editShakenTruthy) "block" else "none"};${if (editShakenWithoutNumber) " opacity: 0.7;" else ""}">
                     <div class="form-grid-4col">
                     <div>
-                        <label>Place Name (Japanese)</label>
+                        <label for="editNumberCutPlaceInput">Place Name (Japanese)</label>
                         ${createEditableComboboxWithOptions("editNumberCutPlace", "Select Place", emptyList(), getInitialPlaceFromNumberCut(purchaseData.numberCut))}
                     </div>
                     <div>
-                        <label>Number (English)</label>
+                        <label for="editNumberCutNumber1">Number (English)</label>
                         <input type="number" id="editNumberCutNumber1" placeholder="Enter number" value="${escapeAttr(editNumberCutParts.num1)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Hiragana Character</label>
+                        <label for="editNumberCutHiraganaInput">Hiragana Character</label>
                         ${createEditableComboboxWithOptions("editNumberCutHiragana", "Select Character", getNumberCutHiraganaOptions(), getInitialHiraganaFromNumberCut(purchaseData.numberCut))}
                     </div>
                     <div>
-                        <label>Number (English)</label>
+                        <label for="editNumberCutNumber2">Number (English)</label>
                         <input type="number" id="editNumberCutNumber2" placeholder="Enter number" value="${escapeAttr(editNumberCutParts.num2)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
                 <div style="margin-bottom: 20px;">
-                    <label>Number Cut:</label>
+                    <label for="editNumberCutString">Number Cut:</label>
                     <input type="text" id="editNumberCutString" readonly value="${escapeAttr(editNumberCutRaw)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;" placeholder="Will be generated automatically">
                     </div>
                     </div>
@@ -17960,15 +17716,15 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('specifications')"><h3 class="form-section-header" data-section="specifications">Car Specifications</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
-                        <label>Rank</label>
+                        <label for="editRankInput">Rank</label>
                         ${createEditableCombobox("editRank", "Select Rank", initialValue = editRankDisp, showDropdownButton = false)}
                     </div>
                     <div>
-                        <label>Color</label>
+                        <label for="editColorInput">Color</label>
                         ${createEditableCombobox("editColor", "Select Color", initialValue = editColorDisp)}
                     </div>
                     <div>
-                        <label>Fuel</label>
+                        <label for="editFuelInput">Fuel</label>
                         <div style="position: relative; width: 100%;">
                             <input type="text" id="editFuelInput" value="$editFuelDisp" placeholder="Select Fuel Type" 
                                    style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
@@ -17988,23 +17744,23 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         </div>
                     </div>
                     <div>
-                        <label>Seat</label>
+                        <label for="editSeatInput">Seat</label>
                         ${createEditableCombobox("editSeat", "Select Seat", initialValue = editSeatDisp, showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
-                        <label>Door</label>
+                        <label for="editDoorInput">Door</label>
                         ${createEditableCombobox("editDoor", "Select Door", initialValue = editDoorDisp, showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
-                        <label>Mileage</label>
+                        <label for="editDistance">Mileage</label>
                         <input type="text" id="editDistance" class="comma-int-input km-suffix-input" value="${extractNumericFromSuffixedValue(purchaseData.distance)}" placeholder="e.g., 50,000 km" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>CC</label>
+                        <label for="editCcInput">CC</label>
                         ${createEditableCombobox("editCc", "Select CC", initialValue = editCcDisp, showDropdownButton = false, additionalAttrs = PURCHASE_SPEC_PLAIN_INT_ATTRS)}
                     </div>
                     <div>
-                        <label>Shift</label>
+                        <label for="editShiftInput">Shift</label>
                         <div style="position: relative; width: 100%;">
                             <input type="text" id="editShiftInput" value="$editShiftDisp" placeholder="Select Shift" 
                                    style="width: 100%; padding: 8px 40px 8px 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;"
@@ -18056,11 +17812,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         </div>
                     </div>
                     <div>
-                        <label>Vehicle type</label>
+                        <label for="editShipmentSizeInput">Vehicle type</label>
                         ${createEditableCombobox("editShipmentSize", "Select Vehicle type", initialValue = editShipDisp)}
                     </div>
                     <div style="grid-column: 1 / -1; margin-bottom: 20px;">
-                        <label>Options</label>
+                        <label for="editOptions">Options</label>
                         <div class="options-buttons-grid" id="editOptionsButtonsGrid"></div>
                         <input type="hidden" id="editOptionsPredefined" value="">
                         <div style="display: flex; gap: 10px; align-items: center;">
@@ -18073,18 +17829,18 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('supplier')"><h3 class="form-section-header" data-section="supplier">Supplier Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="supplier">
                     <div>
-                        <label>Supplier Name *</label>
+                        <label for="editAuctionNameInput">Supplier Name *</label>
                         <div style="display: flex; gap: 8px; align-items: center;">
                             <div style="flex: 1;">
                                 ${createEditableCombobox("editAuctionName", "Add Supplier Name", required = true, initialValue = purchaseData.auctionHouse ?: "")}
                             </div>
-                            <button type="button" id="manageEditAuctionMappings" class="manage-btn" title="Go to Supplier Map">
-                                ⚙️
+                            <button type="button" id="manageEditAuctionMappings" class="manage-btn" title="Go to Supplier Map" aria-label="Open Supplier Map">
+                                ${purchaseFormSettingsIconSvg()}
                             </button>
                         </div>
                     </div>
                     <div>
-                        <label>Venue ID</label>
+                        <label for="editVenueIdInput">Venue ID</label>
                         ${createEditableCombobox("editVenueId", "Select Venue ID", initialValue = editVenueDisp, showDropdownButton = false)}
                     </div>
                 </div>
@@ -18092,15 +17848,15 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('rixo')"><h3 class="form-section-header" data-section="rixo">Rixo Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="rixo">
                     <div>
-                        <label>Rixo Company</label>
+                        <label for="editRixoCompanyInput">Rixo Company</label>
                         ${createEditableCombobox("editRixoCompany", "Select Rixo Company", initialValue = (purchaseData.rixoCompany ?: ""))}
                     </div>
                     <div>
-                        <label>Stock Location</label>
+                        <label for="editStockLocationInput">Stock Location</label>
                         ${createEditableCombobox("editStockLocation", "Select Stock Location", initialValue = editStockDisp)}
                     </div>
                     <div>
-                        <label>Rixo Price</label>
+                        <label for="editRixoPriceInput">Rixo Price</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editRixoPriceInput" class="money-input" value="${extractNumericFromDbValue(purchaseData.rixoPrice)}" placeholder="0"
@@ -18197,11 +17953,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('client')"><h3 class="form-section-header" data-section="client">Client Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="client">
                     <div>
-                        <label>Client Name</label>
+                        <label for="editClientNameInput">Client Name</label>
                         ${createEditableCombobox("editClientName", "Select Client Name", initialValue = purchaseData.clientName?.toString() ?: "")}
                     </div>
                     <div>
-                        <label>Country</label>
+                        <label for="editCountryInput">Country</label>
                         ${createEditableCombobox("editCountry", "Select Country", initialValue = purchaseData.country?.toString() ?: "")}
                     </div>
                 </div>
@@ -18209,11 +17965,11 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="shipment">
                     <div>
-                        <label>POL</label>
+                        <label for="editPolInput">POL</label>
                         ${createEditableCombobox("editPol", "Select POL", initialValue = purchaseData.pol?.toString() ?: "")}
                     </div>
                     <div>
-                        <label>Shipment Date</label>
+                        <label for="editShipmentDate">Shipment Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="editShipmentDate" maxlength="10" inputmode="numeric" autocomplete="off"
@@ -18221,7 +17977,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                        value="${editShipmentMaskedInitial}"
                                        style="flex:1; min-width:0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing:border-box;" />
                                 <button type="button" id="editShipmentDateCalendarBtn" title="Open calendar"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open calendar">${purchaseFormCalendarIconSvg()}</button>
                                 <span id="editShipmentDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
                             </div>
                             <input type="date" id="editShipmentDatePicker" tabindex="-1" aria-hidden="true"
@@ -18230,30 +17986,30 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     </div>
                     <div>
-                        <label>B/L No.</label>
+                        <label for="editBlNo">B/L No.</label>
                         <input type="text" id="editBlNo" value="${purchaseData.blNo ?: ""}" placeholder="Bill of Lading Number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Booking No</label>
+                        <label for="editBookingId">Booking No</label>
                         <input type="text" id="editBookingId" value="${purchaseData.bookingId?.toString() ?: ""}" placeholder="Booking ID" inputmode="numeric" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Vessel</label>
+                        <label for="editVessel">Vessel</label>
                         <input type="text" id="editVessel" value="${(purchaseData.vessel ?: purchaseData.vesselNo)?.toString() ?: ""}" placeholder="Vessel name" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
-                        <label>Shipment Charges</label>
+                        <label for="editShipmentCharges">Shipment Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editShipmentCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.shipmentCharges)}" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Consignee</label>
+                        <label for="editConsigneeInput">Consignee</label>
                         ${createEditableCombobox("editConsignee", "Select Consignee", initialValue = editConsigneeDisp)}
                     </div>
                     <div>
-                        <label>POD</label>
+                        <label for="editPodInput">POD</label>
                         ${createEditableCombobox("editPod", "Select POD", initialValue = editPodDisp)}
                     </div>
                 </div>
@@ -18261,14 +18017,14 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('pricing')"><h3 class="form-section-header" data-section="pricing">Pricing Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="pricing">
                     <div>
-                        <label>Car Price</label>
+                        <label for="editPrice">Car Price</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editPrice" class="money-input" value="${extractNumericFromDbValue(purchaseData.price)}" placeholder="0">
                 </div>
                     </div>
                     <div>
-                        <label>Auction Fees</label>
+                        <label for="editAuctionFee">Auction Fees</label>
                         <div style="display: flex; align-items: center; gap: 12px;">
                             <div class="currency-input" style="flex: 1; min-width: 0;">
                                 <span class="currency-symbol">¥</span>
@@ -18281,28 +18037,28 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         </div>
                     </div>
                     <div>
-                        <label>Recycle Fees</label>
+                        <label for="editRecycleFee">Recycle Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editRecycleFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.recycleFee)}" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Road Tax</label>
+                        <label for="editRoadTax">Road Tax</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editRoadTax" class="money-input" value="${extractNumericFromDbValue(purchaseData.roadTax)}" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Auction Penalty Fee</label>
+                        <label for="editAuctionPenaltyFee">Auction Penalty Fee</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editAuctionPenaltyFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.auctionPenaltyFee)}" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Payment Date</label>
+                        <label for="editPaymentDate">Payment Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
                                 <input type="text" id="editPaymentDate" maxlength="10" inputmode="numeric" autocomplete="off"
@@ -18310,7 +18066,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                        value="${editPaymentMaskedInitial}"
                                        style="flex:1; min-width:0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing:border-box;" />
                                 <button type="button" id="editPaymentDateCalendarBtn" title="Open calendar"
-                                        style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                        class="purchase-form-calendar-btn" aria-label="Open calendar">${purchaseFormCalendarIconSvg()}</button>
                                 <span id="editPaymentDateDayHint" style="color:#6b7280; font-size:13px; white-space:nowrap;"></span>
                             </div>
                             <input type="date" id="editPaymentDatePicker" tabindex="-1" aria-hidden="true"
@@ -18319,57 +18075,57 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                 </div>
                     <div>
-                        <label>Freight</label>
+                        <label for="editFreight">Freight</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editFreight" class="money-input" value="${extractNumericFromDbValue(purchaseData.freight)}" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Storage Fees</label>
+                        <label for="editStorageCharges">Storage Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editStorageCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.storageCharges)}" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Repair Company</label>
+                        <label for="editRepairCompanyInput">Repair Company</label>
                         ${createEditableCombobox("editRepairCompany", "Select Repair Company", initialValue = purchaseData.repairCompany?.toString() ?: "")}
                     </div>
                     <div>
-                        <label>Repair Charges</label>
+                        <label for="editRepairCharges">Repair Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editRepairCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.repairCharges)}" placeholder="0">
                     </div>
                 </div>
                     <div>
-                        <label>Misc. Charges</label>
+                        <label for="editMiscCharges">Misc. Charges</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editMiscCharges" class="money-input" value="${extractNumericFromDbValue(purchaseData.miscCharges)}" placeholder="0">
                     </div>
                     </div>
                     <div>
-                        <label>Inspection Fees</label>
+                        <label for="editInspectionFee">Inspection Fees</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editInspectionFee" class="money-input" value="${extractNumericFromDbValue(purchaseData.inspectionFee)}" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Commission</label>
+                        <label for="editCommission">Commission</label>
                         <div class="currency-input">
                             <span class="currency-symbol">¥</span>
                             <input type="text" inputmode="decimal" id="editCommission" class="money-input" value="${extractNumericFromDbValue(purchaseData.commission)}" placeholder="0">
                         </div>
                     </div>
                     <div>
-                        <label>Total Cost (Before Tax)</label>
+                        <label for="editTotalCostBeforeTax">Total Cost (Before Tax)</label>
                         <input type="text" id="editTotalCostBeforeTax" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
                     </div>
                     <div>
-                        <label>Tax Total</label>
+                        <label for="editTaxTotal">Tax Total</label>
                         <div style="display: flex; gap: 8px; align-items: stretch;">
                             <div class="currency-input" style="flex: 1;">
                                 <span class="currency-symbol">¥</span>
@@ -18379,13 +18135,13 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 </div>
                     </div>
                     <div>
-                        <label>Total Cost (After Tax 10%)</label>
+                        <label for="editTotalCostAfterTax">Total Cost (After Tax 10%)</label>
                         <input type="text" id="editTotalCostAfterTax" value="${purchaseData.totalPrice ?: ""}" placeholder="¥0" readonly style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; background-color: #f9f9f9;">
                     </div>
                 </div>
                 
                 <div style="margin-bottom: 20px;">
-                    <label>Notes</label>
+                    <label for="editNotes">Notes</label>
                     <textarea id="editNotes" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; min-height: 80px;">${purchaseData.notes ?: ""}</textarea>
                 </div>
                 
@@ -18495,13 +18251,18 @@ fun showEditFormWithData(purchaseData: dynamic) {
     populateNumberCutPlaceComboboxesForPurchaseForm()
     preloadColorComboboxForPurchaseForm(isEditForm = true)
     setupRixoDropdowns()
+    ensurePurchaseOptionButtonsInfrastructure()
     fetchAndRenderPurchaseOptionButtons("editOptionsButtonsGrid") {
+        // Chips are in the DOM — apply saved options now, and again after form hydrate.
+        scheduleEditPurchaseOptionsApply(purchaseData)
         // Set edit form values after option buttons and other dropdowns are ready
         window.setTimeout({
         console.log("🔍 [KOTLIN] setTimeout callback started - setting up date fallbacks")
         // Load pictures before deep copy in setEditFormValuesFromKotlin (JSON.stringify may fail on huge base64).
         loadExistingCarPictures(purchaseData)
         setEditFormValuesFromKotlin(purchaseData)
+        scheduleEditPurchaseOptionsApply(purchaseData)
+        js("if (typeof window.setupOptionButtons === 'function') window.setupOptionButtons();")
         // Baseline for diff must match collectCarPictures() DOM (API snapshot can omit or alias carPictures)
         syncOriginalPurchaseCarPicturesBaselineFromDom()
         // Supplier mapping runs async after load; re-baseline whole form so Venue/Stock match what the user sees
@@ -21340,8 +21101,8 @@ fun saveCarBookingState() {
         carBookingFormState.polPort = polVal
         carBookingFormState.podPort = podPortValue
         carBookingFormState.finalDestination = (document.getElementById("finalDestination") as? HTMLInputElement)?.value ?: ""
-        carBookingFormState.notifyParty = (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value ?: ""
-        carBookingFormState.inTransitClause = (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value ?: ""
+        carBookingFormState.notifyParty = bookingFormFieldValue("notifyParty")
+        carBookingFormState.inTransitClause = bookingFormFieldValue("inTransitClause")
         carBookingFormState.bookingNo = bookingNoEl?.value ?: ""
         carBookingFormState.vesselSelect = vesselInputEl?.value ?: ""
         carBookingFormState.carrierSelect = carrierSelectEl?.value ?: ""
@@ -21489,10 +21250,8 @@ fun restoreCarBookingState() {
     }
     (document.getElementById("finalDestination") as? HTMLInputElement)?.value =
         bookingDynString(carBookingFormState.finalDestination)
-    (document.getElementById("notifyParty") as? HTMLTextAreaElement)?.value =
-        bookingDynString(carBookingFormState.notifyParty)
-    (document.getElementById("inTransitClause") as? HTMLTextAreaElement)?.value =
-        bookingDynString(carBookingFormState.inTransitClause)
+    setBookingSelectFieldValue("notifyParty", bookingDynString(carBookingFormState.notifyParty))
+    setBookingSelectFieldValue("inTransitClause", bookingDynString(carBookingFormState.inTransitClause))
     // POL options come from purchases only after country is set — repopulate before restoring POL value
     val restoredCountry = syncCountry
     if (restoredCountry.isNotEmpty()) {
@@ -22821,7 +22580,7 @@ fun showRixoTransportPage() {
                                 <div style="display:flex; gap:8px; align-items:center; width:100%;">
                                     <input class="input" type="text" id="transportDateText" maxlength="10" inputmode="numeric" autocomplete="off" placeholder="MM/DD/YYYY" aria-required="true" data-required="true" style="flex:1; min-width:0;" />
                                     <button type="button" id="transportDateCalendarBtn" title="Open calendar"
-                                            style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+                                            class="purchase-form-calendar-btn" aria-label="Open calendar">${purchaseFormCalendarIconSvg()}</button>
                                 </div>
                                 <input class="input" type="date" id="transportDate" aria-required="true" data-required="true" tabindex="-1" aria-hidden="true"
                                        style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
@@ -24095,6 +23854,38 @@ private fun setRixoRowsPreviewEmptyMessage(message: String) {
     document.getElementById("selectedCount")?.textContent = "Selected: 0 of 0"
 }
 
+/**
+ * After successful Save → OK: unselect Buying Date + Rixo Company FABs and show empty car list.
+ * Does not clear messages or edit-session state. Avoids buyingDate change → auto-pick company.
+ */
+private fun clearRixoGeneratorDateAndCompanySelection() {
+    val dateSelect = document.getElementById("buyingDate") as? HTMLSelectElement
+    val dateInput = document.getElementById("buyingDateInput") as? HTMLInputElement
+    if (dateSelect != null) {
+        dateSelect.value = ""
+    }
+    if (dateInput != null) {
+        dateInput.value = ""
+    }
+    js("if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput('buyingDate')")
+    js("if (typeof window.updateRixoBuyingDateFabTriggerLabel === 'function') window.updateRixoBuyingDateFabTriggerLabel()")
+
+    val companySelect = document.getElementById("rixoCompany") as? HTMLSelectElement
+    val companyInput = document.getElementById("rixoCompanyInput") as? HTMLInputElement
+    if (companySelect != null) {
+        companySelect.innerHTML = "<option value=\"\">▼</option>"
+        companySelect.value = ""
+    }
+    if (companyInput != null) {
+        companyInput.value = ""
+    }
+    js("if (typeof window.rebuildRixoCompanyFabFromSelect === 'function') window.rebuildRixoCompanyFabFromSelect()")
+    js("if (typeof window.updateRixoCompanyFabTriggerLabel === 'function') window.updateRixoCompanyFabTriggerLabel()")
+
+    rixoCurrentRows = emptyList()
+    setRixoRowsPreviewEmptyMessage("Please select a buying date and Rixo company to view available rows.")
+}
+
 // Load rows for the selected date and company
 fun loadRowsForDateAndCompany() {
     val buyingDate = getRixoBuyingDateValue()
@@ -25342,21 +25133,39 @@ fun generateRixoRequestPdf(
         showMessage(emptyMsg, "error")
         return
     }
-    
-    // Fetch selected purchase data
+
+    // History-only Save: backend uses selectedIds only — skip full GET /purchases (major latency).
+    if (persistHistory && !generatePdf) {
+        generateRixoRequestPdfViaBackend(
+            emptyList(),
+            buyingDate,
+            rixoCompany,
+            headMessage,
+            footerMessage,
+            extraMessage,
+            contactDetails,
+            selectedIds,
+            persistHistory = true,
+            generatePdf = false,
+            preview = false,
+        )
+        return
+    }
+
+    // Preview / PDF: still resolve selected rows client-side (legacy path; ViaBackend posts ids).
     window.fetch(apiUrl("purchases")).then { response ->
         if (response.ok) {
             response.json().then { allPurchases ->
                 val purchasesArray = allPurchases as Array<dynamic>
                 val selectedPurchases = mutableListOf<dynamic>()
-                
+
                 for (purchase in purchasesArray) {
                     val id = js("purchase.id").toString().toLongOrNull() ?: continue
                     if (selectedIds.contains(id)) {
                         selectedPurchases.add(purchase)
                     }
                 }
-                
+
                 generateRixoRequestPdfViaBackend(
                     selectedPurchases,
                     buyingDate,
@@ -25429,7 +25238,12 @@ fun generateRixoRequestPdfViaBackend(
             return@then Unit
         }
         if (!generatePdf) {
-            showSuccessModal("Saved", "Rixo history saved.")
+            showSuccessModal("Saved", "Rixo history saved.") {
+                // Normal generator only: reset date/company so car list empties. Keep edit-from-history selections.
+                if (!isRixoUpdaterEditSession()) {
+                    clearRixoGeneratorDateAndCompanySelection()
+                }
+            }
             return@then Unit
         }
         response.blob().then { blob ->
@@ -26986,6 +26800,7 @@ fun showOkModal(
 fun openSidebar() {
     val sidebar = document.getElementById("sidebar") as HTMLElement?
     val overlay = document.getElementById("sidebarOverlay") as HTMLElement?
+    val hamburger = document.getElementById("hamburgerBtn")
     val isMobile = window.innerWidth <= 767
     
     sidebar?.style?.setProperty("left", "0px")
@@ -26998,6 +26813,9 @@ fun openSidebar() {
         sidebar?.style?.setProperty("z-index", "")
     }
     overlay?.style?.setProperty("display", "block")
+    overlay?.setAttribute("aria-hidden", "false")
+    hamburger?.setAttribute("aria-expanded", "true")
+    hamburger?.setAttribute("aria-label", "Close menu")
 }
 
 // closeSidebar moved to AuthSetup.kt
@@ -27758,14 +27576,14 @@ fun applyColumnChanges() {
     saveSelectedColumns(ordered)
     closeColumnFilterModal()
     // Re-render current view in-place without any reload, preserving search/filter/sort state.
-    if (getDeviceType() == "mobile") {
-        displayPurchasesAsCards()
-    } else {
-        displayPurchasesWithPagination()
-    }
+    displayPurchasesWithPagination()
 }
 
 fun closeColumnFilterModal() {
+    columnFilterModalKeyHandler?.let { handler ->
+        document.removeEventListener("keydown", handler)
+    }
+    columnFilterModalKeyHandler = null
     document.getElementById("columnFilterModal")?.remove()
 }
 

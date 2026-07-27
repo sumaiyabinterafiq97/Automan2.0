@@ -45,6 +45,14 @@ fun escapeHtml(text: String?): String {
         .replace("/", "&#x2F;")
 }
 
+/** Shared SVG for Add/Edit Purchase (and similar) calendar trigger buttons. */
+fun purchaseFormCalendarIconSvg(): String =
+    """<svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.75"/><path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>"""
+
+/** Shared SVG for map/master gear buttons on purchase forms. */
+fun purchaseFormSettingsIconSvg(): String =
+    """<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.75"/><path d="M12 2.5v2.2M12 19.3v2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>"""
+
 /** Split on ';' with dedup by case-insensitive key (e.g. car brand chip fields joined with ';'). */
 fun splitSemicolonDistinctTokens(raw: String): List<String> {
     val out = mutableListOf<String>()
@@ -151,6 +159,23 @@ fun formatConsigneeMapAddressChipHtml(displayText: String): String {
 /** Consignee Map generic values: black text + subtle shadow for all chips, no multi-color variants. */
 fun formatConsigneeMapValueChipHtml(raw: String): String {
     val tokens = splitMultiValueDisplayTokens(raw)
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) return consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]))
+    val inner = tokens.joinToString("") { t ->
+        consigneeMapShadowChipSpanHtml(escapeHtml(t))
+    }
+    return """<span class="consignee-map-chip-wrap" style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;width:100%;max-width:100%;min-width:0;box-sizing:border-box;">$inner</span>"""
+}
+
+/**
+ * Like [formatConsigneeMapValueChipHtml] but splits on `;` only (Notify party / In-Transit Clause),
+ * so commas and newlines inside a single value stay one chip.
+ */
+fun formatSemicolonOnlyValueChipHtml(raw: String): String {
+    val tokens = raw.split(';')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinctBy { it.uppercase() }
     if (tokens.isEmpty()) return ""
     if (tokens.size == 1) return consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]))
     val inner = tokens.joinToString("") { t ->

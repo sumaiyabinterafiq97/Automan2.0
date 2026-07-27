@@ -41,4 +41,7 @@ interface InvoiceHistoryLineRepository : JpaRepository<InvoiceHistoryLine, Long>
     fun findDistinctInvoiceNumbersByNormalizedChassisIn(
         @Param("chassisKeys") chassisKeys: Collection<String>,
     ): List<String>
+
+    /** Batch load lines for dashboard sales-by-client aggregation. */
+    fun findByInvoiceHistoryIdIn(invoiceHistoryIds: Collection<Long>): List<InvoiceHistoryLine>
 }

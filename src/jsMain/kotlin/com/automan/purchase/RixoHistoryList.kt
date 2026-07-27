@@ -3,6 +3,7 @@ package com.automan.purchase
 import kotlinx.browser.document
 import kotlinx.browser.window
 import kotlin.js.JSON
+import kotlin.js.unsafeCast
 import org.w3c.dom.*
 import org.w3c.dom.events.Event
 import kotlinx.coroutines.MainScope
@@ -20,6 +21,8 @@ private var rixoHistorySortOrder: String = "desc"
 private val rixoHistorySelectedIds: MutableSet<String> = mutableSetOf()
 private var rixoHistoryResizeDebounceHandle: Int? = null
 private var rixoHistorySearchDebounceHandle: Int? = null
+private var rixoHistoryLastCompactLayout: Boolean? = null
+private var rixoHistoryConfirmModalKeyHandler: ((Event) -> Unit)? = null
 private var rixoHistoryServerMode: Boolean = true
 private var rixoHistoryPageZeroBased: Int = 0
 private var rixoHistoryTotalPages: Int = 1
@@ -67,9 +70,15 @@ fun showRixoHistoryPage() {
             .rixo-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;line-height:1;padding:6px 8px;border-radius:10px;min-height:36px;min-width:36px;}
             .rixo-search-clear:hover{background:#f3f4f6;color:#111827;}
             .rixo-history-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
-            table.purchase-list-table thead th{position:sticky;top:0;z-index:1;}
+            table.purchase-list-table thead th{position:sticky;top:0;z-index:10;}
             .rixo-history-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
             .rixo-history-empty strong{color:#0f172a;}
+            .rixo-history-pager{display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;}
+            .rixo-history-pager-meta{color:#6b7280;font-size:14px;}
+            .rixo-history-pager-btns{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+            .rixo-history-pager-btn{padding:8px 16px;background-color:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;min-height:40px;font-size:14px;}
+            .rixo-history-pager-btn:disabled,.rixo-history-pager-btn.is-disabled{background-color:#ccc;cursor:not-allowed;}
+            .rixo-history-pager-page{color:#374151;font-size:14px;padding:0 8px;}
 
             /* Card list (compact) */
             .rixo-cards{display:flex;flex-direction:column;gap:10px;}
@@ -135,7 +144,6 @@ fun showRixoHistoryPage() {
     })
     document.getElementById("rixoHistorySearchClearBtn")?.addEventListener("click", { _: Event ->
         searchInput?.value = ""
-        rixoHistoryActiveSearchQ = ""
         rixoHistoryPageZeroBased = 0
         loadRixoHistory(0)
     })
@@ -209,17 +217,28 @@ private fun rixoHistoryIsCompactLayout(): Boolean {
 }
 
 private fun setupRixoHistoryResizeListener() {
-    val page = document.getElementById("rixoHistoryPage") ?: return
-    if (page.hasAttribute("data-rixo-history-resize")) return
-    page.setAttribute("data-rixo-history-resize", "true")
-    window.addEventListener("resize", { _: Event ->
+    if (document.getElementById("rixoHistoryPage") == null) return
+    rixoHistoryLastCompactLayout = rixoHistoryIsCompactLayout()
+
+    val existing = window.asDynamic().__rixoHistoryCompactResizeListener
+    if (existing != null) {
+        window.removeEventListener("resize", existing.unsafeCast<(Event) -> Unit>())
+    }
+
+    val resizeListener: (Event) -> Unit = { _: Event ->
         val prev = rixoHistoryResizeDebounceHandle
         if (prev != null) window.clearTimeout(prev)
         rixoHistoryResizeDebounceHandle = window.setTimeout({
             if (document.getElementById("rixoHistoryPage") == null) return@setTimeout
-            if (rixoHistoryCachedRows.isNotEmpty()) renderRixoHistoryTableFromCache()
+            val compact = rixoHistoryIsCompactLayout()
+            if (rixoHistoryLastCompactLayout != compact) {
+                rixoHistoryLastCompactLayout = compact
+                if (rixoHistoryCachedRows.isNotEmpty()) renderRixoHistoryTableFromCache()
+            }
         }, 120)
-    })
+    }
+    window.asDynamic().__rixoHistoryCompactResizeListener = resizeListener
+    window.addEventListener("resize", resizeListener)
 }
 
 private fun updateRixoHistorySelectionUi() {
@@ -227,10 +246,73 @@ private fun updateRixoHistorySelectionUi() {
     if (confirmBtn != null) {
         val hasAny = rixoHistorySelectedIds.isNotEmpty()
         confirmBtn.disabled = !hasAny
-        confirmBtn.style.opacity = if (hasAny) "1" else "0.6"
-        confirmBtn.style.cursor = if (hasAny) "pointer" else "not-allowed"
         confirmBtn.textContent = if (hasAny) "Rixo Confirmed (${rixoHistorySelectedIds.size})" else "Rixo Confirmed"
     }
+}
+
+private fun showRixoHistoryConfirmModal(
+    title: String,
+    message: String,
+    confirmLabel: String = "Confirm",
+    onConfirm: () -> Unit,
+) {
+    document.getElementById("rixoHistoryConfirmModal")?.remove()
+    rixoHistoryConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+    rixoHistoryConfirmModalKeyHandler = null
+
+    val returnFocus = document.activeElement as? HTMLElement
+    val safeTitle = escapeHtml(title)
+    val safeMessage = escapeHtml(message)
+    val safeConfirm = escapeHtml(confirmLabel)
+
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = "rixoHistoryConfirmModal"
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10020;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    overlay.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="rixoHistoryConfirmTitle"
+             style="background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,0.28);
+             max-width:440px;width:100%;padding:22px 24px;box-sizing:border-box;">
+            <h3 id="rixoHistoryConfirmTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">$safeTitle</h3>
+            <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:20px;">$safeMessage</div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="rixoHistoryConfirmCancel"
+                    style="padding:9px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;min-height:40px;font-size:14px;color:#374151;">Cancel</button>
+                <button type="button" id="rixoHistoryConfirmOk"
+                    style="padding:9px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,#14b8a6,#0f766e);color:#fff;cursor:pointer;font-weight:700;min-height:40px;font-size:14px;box-shadow:0 2px 10px rgba(15,118,110,0.22);">$safeConfirm</button>
+            </div>
+        </div>
+    """.trimIndent()
+
+    fun closeModal() {
+        rixoHistoryConfirmModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+        rixoHistoryConfirmModalKeyHandler = null
+        overlay.remove()
+        returnFocus?.focus()
+    }
+
+    document.body?.appendChild(overlay)
+
+    document.getElementById("rixoHistoryConfirmCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("rixoHistoryConfirmOk")?.addEventListener("click", { _: Event ->
+        closeModal()
+        onConfirm()
+    })
+    overlay.addEventListener("click", { ev: Event ->
+        if (ev.target === overlay) closeModal()
+    })
+
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    rixoHistoryConfirmModalKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    (document.getElementById("rixoHistoryConfirmOk") as? HTMLElement)?.focus()
 }
 
 private fun confirmSelectedRixoHistoryRows() {
@@ -238,8 +320,21 @@ private fun confirmSelectedRixoHistoryRows() {
         showMessage("Select at least one history row.", "warning")
         return
     }
-    val ok = window.confirm("Mark all cars under ${rixoHistorySelectedIds.size} selected Rixo history row(s) as Rixo Confirmed?")
-    if (!ok) return
+    val count = rixoHistorySelectedIds.size
+    showRixoHistoryConfirmModal(
+        title = "Confirm Rixo",
+        message = "Mark all cars under $count selected Rixo history row(s) as Rixo Confirmed?",
+        confirmLabel = "Rixo Confirmed",
+    ) {
+        performConfirmSelectedRixoHistoryRows()
+    }
+}
+
+private fun performConfirmSelectedRixoHistoryRows() {
+    if (rixoHistorySelectedIds.isEmpty()) {
+        showMessage("Select at least one history row.", "warning")
+        return
+    }
 
     val btn = document.getElementById("rixoConfirmSelectedBtn") as? HTMLButtonElement
     btn?.disabled = true
@@ -588,6 +683,9 @@ private fun loadRixoHistory(page0: Int = rixoHistoryPageZeroBased) {
     tableHost.innerHTML = """<div class="rixo-history-empty"><strong>Loading</strong><div>Loading Rixo history…</div></div>"""
 
     val q = (document.getElementById("rixoHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
+    if (q != rixoHistoryActiveSearchQ) {
+        rixoHistorySelectedIds.clear()
+    }
     rixoHistoryActiveSearchQ = q
     rixoHistoryPageZeroBased = page0.coerceAtLeast(0)
     val size = rixoHistoryItemsPerPage.coerceAtLeast(1)
@@ -766,20 +864,16 @@ private fun appendRixoHistoryPager(html: StringBuilder) {
     val totalPages = kotlin.math.max(1, rixoHistoryTotalPages)
     val currentPage = rixoHistoryPageZeroBased + 1
     if (totalPages <= 1 && rixoHistoryTotalElements <= rixoHistoryItemsPerPage) return
-    val prevDisabled = if (currentPage <= 1) "disabled" else ""
-    val nextDisabled = if (currentPage >= totalPages) "disabled" else ""
-    val prevStyle = if (currentPage <= 1) "#ccc" else "#007bff"
-    val nextStyle = if (currentPage >= totalPages) "#ccc" else "#007bff"
-    val prevCursor = if (currentPage <= 1) "not-allowed" else "pointer"
-    val nextCursor = if (currentPage >= totalPages) "not-allowed" else "pointer"
+    val prevDisabled = currentPage <= 1
+    val nextDisabled = currentPage >= totalPages
     html.append(
         """
-        <div id="rixoHistoryPager" style="display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;">
-            <div style="color:#6b7280;font-size:14px;">Page $currentPage of $totalPages · $rixoHistoryTotalElements row(s)</div>
-            <div style="display:flex;align-items:center;gap:8px;">
-                <button type="button" id="rixoHistoryPrevPage" $prevDisabled style="padding:8px 16px;background-color:$prevStyle;color:white;border:none;border-radius:4px;cursor:$prevCursor;">Previous</button>
-                <span style="color:#374151;font-size:14px;">Page $currentPage of $totalPages</span>
-                <button type="button" id="rixoHistoryNextPage" $nextDisabled style="padding:8px 16px;background-color:$nextStyle;color:white;border:none;border-radius:4px;cursor:$nextCursor;">Next</button>
+        <div id="rixoHistoryPager" class="rixo-history-pager">
+            <div class="rixo-history-pager-meta">Page $currentPage of $totalPages · $rixoHistoryTotalElements row(s)</div>
+            <div class="rixo-history-pager-btns">
+                <button type="button" id="rixoHistoryPrevPage" class="rixo-history-pager-btn${if (prevDisabled) " is-disabled" else ""}" ${if (prevDisabled) "disabled" else ""}>Previous</button>
+                <span class="rixo-history-pager-page">Page $currentPage of $totalPages</span>
+                <button type="button" id="rixoHistoryNextPage" class="rixo-history-pager-btn${if (nextDisabled) " is-disabled" else ""}" ${if (nextDisabled) "disabled" else ""}>Next</button>
             </div>
         </div>
         """
@@ -835,9 +929,7 @@ private fun renderRixoHistoryTableFromCache() {
         compareRixoHistoryRows(a, b, rixoHistorySortField, rixoHistorySortOrder == "asc")
     }
     rows = rows.sortedWith(comparator).toTypedArray()
-    // Keep only selections that still exist in loaded rows.
-    val knownIds = rows.map { rixoHistoryRowIdString(it) }.filter { it.isNotEmpty() }.toSet()
-    rixoHistorySelectedIds.retainAll(knownIds)
+    rixoHistoryLastCompactLayout = rixoHistoryIsCompactLayout()
 
     val compact = rixoHistoryIsCompactLayout()
     val colCountRixo = 3 + rixoHistoryDisplayColumnKeys().size

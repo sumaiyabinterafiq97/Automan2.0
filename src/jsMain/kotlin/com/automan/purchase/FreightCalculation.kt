@@ -132,7 +132,7 @@ fun createFreightCalculationHTML(selectedCars: List<dynamic>): String {
                 
                 <!-- Header -->
                 <div class="freight-header">
-                    <h1>CALCULATE FREIGHT & SHIPPING CHARGE:</h1>
+                    <h1>Calculate Freight &amp; Shipping Charge</h1>
                 </div>
                 
                 <!-- Overall Container Price Calculation Section -->
@@ -814,7 +814,7 @@ private fun createShippingChargeCalculationHTML(): String {
             <!-- Shipping Charge Calculation Card -->
             <div class="freight-card">
                 <div class="freight-header">
-                    <h1>CALCULATE FREIGHT & SHIPPING CHARGE:</h1>
+                    <h1>Calculate Freight &amp; Shipping Charge</h1>
                 </div>
 
                 <div class="freight-price-section">

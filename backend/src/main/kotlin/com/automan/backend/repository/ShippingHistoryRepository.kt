@@ -66,4 +66,14 @@ interface ShippingHistoryRepository : JpaRepository<ShippingHistory, Long> {
         @Param("clientName") clientName: String,
         @Param("vessel") vessel: String,
     ): List<ShippingHistory>
+
+    /** Shipment dates for dashboard shipping-trend chart. */
+    @Query(
+        "SELECT sh.shipmentDate FROM ShippingHistory sh WHERE sh.shipmentDate IS NOT NULL " +
+            "AND sh.shipmentDate >= :from AND sh.shipmentDate <= :to",
+    )
+    fun findShipmentDatesBetween(
+        @Param("from") from: java.time.LocalDate,
+        @Param("to") to: java.time.LocalDate,
+    ): List<java.time.LocalDate>
 }

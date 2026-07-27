@@ -23,6 +23,17 @@ fun cnfRestoreMoneyDisplay(saved: String?): String {
     return if (parseCurrency(s) == 0.0) "" else s
 }
 
+/** Per-chassis Total Expense lock (default locked). In-memory only — not persisted. */
+private data class CnfExpenseLockState(
+    var locked: Boolean = true,
+    var target: Double? = null,
+)
+
+private val cnfExpenseLockByChassis = mutableMapOf<String, CnfExpenseLockState>()
+
+private fun cnfExpenseLockState(chassis: String): CnfExpenseLockState =
+    cnfExpenseLockByChassis.getOrPut(chassis) { CnfExpenseLockState() }
+
 fun showCnfCalculationPage(
     selectedChassis: String? = null,
     selectedCars: List<dynamic>? = null,
@@ -64,12 +75,21 @@ fun showCnfCalculationPage(
     }
 }
 
+private fun cnfQuickSaveIconSvg(): String =
+    """<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>"""
+
+/** Stable DOM id for expanded money fields (chassis may contain non-id-safe chars). */
+private fun cnfFieldDomId(chassis: String, field: String): String {
+    val safe = chassis.replace(Regex("[^A-Za-z0-9_-]"), "_")
+    return "cnf_${safe}_$field"
+}
+
 fun createCnfCalculationHTML(isFobMode: Boolean = false, isRecreateCalculation: Boolean = false): String {
-    val pageTitle = if (isFobMode) "FOB CALCULATION" else "C&F CALCULATION"
+    val pageTitle = if (isFobMode) "FOB Calculation" else "C&F Calculation"
     val saveButtonLabel = if (isRecreateCalculation) "Update" else "Save"
     val calculateFreightButton = if (isFobMode) """
         <div class="cnf-freight-action-wrap">
-            <button id="calculateShippingChargeBtn" type="button" class="cnf-btn cnf-btn-freight">CALCULATE SHIPPING CHARGE</button>
+            <button id="calculateShippingChargeBtn" type="button" class="cnf-btn cnf-btn-freight">Calculate Shipping Charge</button>
         </div>
     """ else """
         <div class="cnf-freight-action-wrap">
@@ -98,13 +118,13 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false, isRecreateCalculation: 
                     <table id="cnfCarsTable" class="cnf-cars-table">
                         <thead>
                             <tr>
-                                <th style="width: 30px; text-align: center;">▼</th>
-                                <th style="width: 36px; text-align: center;" title="Saved">●</th>
-                                <th style="width: 160px;">Chassis</th>
-                                <th style="width: 200px;">Car Name</th>
-                                <th style="width: 140px; text-align: right;">Car Price (¥)</th>
-                                <th id="totalPriceHeader" style="width: 160px; text-align: right;">Total C&F Price (¥)</th>
-                                <th style="width: 80px; text-align: center;">Save</th>
+                                <th class="cnf-th-icon" scope="col" style="width: 30px; text-align: center;"><span class="visually-hidden">Expand</span><span aria-hidden="true">▼</span></th>
+                                <th class="cnf-th-icon" scope="col" style="width: 36px; text-align: center;" title="Saved"><span class="visually-hidden">Saved</span><span aria-hidden="true">●</span></th>
+                                <th scope="col" style="width: 160px;">Chassis</th>
+                                <th scope="col" style="width: 200px;">Car Name</th>
+                                <th scope="col" style="width: 140px; text-align: right;">Car Price (¥)</th>
+                                <th id="totalPriceHeader" scope="col" style="width: 160px; text-align: right;">Total C&F Price (¥)</th>
+                                <th scope="col" style="width: 80px; text-align: center;">Save</th>
                             </tr>
                         </thead>
                         <tbody id="cnfCarsTableBody">
@@ -114,24 +134,24 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false, isRecreateCalculation: 
                 </div>
 
                 <!-- Batch PDF actions (unchanged backend payload: full selected batch) -->
-                <div class="cnf-action-buttons" style="margin-top: 24px; display: flex; gap: 10px; justify-content: center;">
-                    <button id="previewPdfBtn" class="cnf-btn cnf-btn-preview">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <div class="cnf-action-buttons">
+                    <button id="previewPdfBtn" type="button" class="cnf-btn cnf-btn-preview">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                             <circle cx="12" cy="12" r="3"></circle>
                         </svg>
                         Preview
                     </button>
-                    <button id="saveCnfBtn" class="cnf-btn cnf-btn-save" style="background-color: #059669; color: white;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <button id="saveCnfBtn" type="button" class="cnf-btn cnf-btn-save">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
                             <polyline points="17 21 17 13 7 13 7 21"></polyline>
                             <polyline points="7 3 7 8 15 8"></polyline>
                         </svg>
                         $saveButtonLabel
                     </button>
-                    <button id="downloadPdfBtn" class="cnf-btn cnf-btn-download">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <button id="downloadPdfBtn" type="button" class="cnf-btn cnf-btn-download">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                             <polyline points="14,2 14,8 20,8"></polyline>
                             <line x1="16" y1="13" x2="8" y2="13"></line>
@@ -148,17 +168,22 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false, isRecreateCalculation: 
 
 /** Inner HTML for expanded detail row: single &lt;td colspan="7"&gt; only (parent &lt;tr&gt; is created in JS). */
 fun createCnfCarExpandedRowInnerHTML(chassis: String, isFobMode: Boolean = false): String {
-    val freightFieldHTML = if (isFobMode) "" else """
-        <div class="cnf-cost-field">
-            <label>FREIGHT (¥):</label>
-            <div class="input-with-prefix">
-                <span>¥</span>
-                <input type="text" data-field="freight" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
-            </div>
-        </div>
-"""
-    
-    val totalLabel = if (isFobMode) "TOTAL FOB PRICE (¥):" else "TOTAL C&F PRICE (¥):"
+    fun field(field: String, label: String, extraClass: String = ""): String {
+        val id = cnfFieldDomId(chassis, field)
+        val cls = "cnf-expanded-input money-input money-empty-as-zero$extraClass".trim()
+        return """
+                            <div class="cnf-cost-field">
+                                <label for="$id">$label</label>
+                                <div class="input-with-prefix">
+                                    <span aria-hidden="true">¥</span>
+                                    <input type="text" id="$id" data-field="$field" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="$cls" aria-label="$label">
+                                </div>
+                            </div>
+        """.trimIndent()
+    }
+
+    val freightFieldHTML = if (isFobMode) "" else field("freight", "Freight (¥)")
+    val totalLabel = if (isFobMode) "Total FOB Price (¥)" else "Total C&F Price (¥)"
     
     return """
                 <td colspan="7">
@@ -167,82 +192,20 @@ fun createCnfCarExpandedRowInnerHTML(chassis: String, isFobMode: Boolean = false
                     <div class="cnf-expanded-grid">
                         <!-- Left Column -->
                         <div class="cnf-expanded-column">
-                            <div class="cnf-cost-field">
-                                <label>CAR PRICE (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="text" data-field="carPrice" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
-                                </div>
-                            </div>
-                            
-                            <div class="cnf-cost-field">
-                                <label>RIXO PRICE (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="text" data-field="rixoPrice" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
-                                </div>
-                            </div>
-                            
+                            ${field("carPrice", "Car Price (¥)")}
+                            ${field("rixoPrice", "Rixo Price (¥)")}
                             $freightFieldHTML
-                            
-                            <div class="cnf-cost-field">
-                                <label>REPAIR FEE (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="text" data-field="repairFee" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
-                                </div>
-                            </div>
-                            
-                            <div class="cnf-cost-field">
-                                <label>AUCTION PENALTY FEE (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="text" data-field="auctionPenaltyFee" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
-                                </div>
-                            </div>
+                            ${field("repairFee", "Repair Fee (¥)")}
+                            ${field("auctionPenaltyFee", "Auction Penalty Fee (¥)")}
                         </div>
                         
                         <!-- Right Column -->
                         <div class="cnf-expanded-column">
-                            <div class="cnf-cost-field">
-                                <label>AUCTION FEE (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="text" data-field="auctionFee" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
-                                </div>
-                            </div>
-                            
-                            <div class="cnf-cost-field">
-                                <label>SHIPPING CHARGE (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="text" data-field="shippingCharge" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
-                                </div>
-                            </div>
-                            
-                            <div class="cnf-cost-field">
-                                <label>INSPECTION FEE (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="text" data-field="inspectionFee" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
-                                </div>
-                            </div>
-                            
-                            <div class="cnf-cost-field">
-                                <label>MSC. CHARGES (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="text" data-field="mscCharges" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero">
-                                </div>
-                            </div>
-                            
-                            <div class="cnf-cost-field">
-                                <label>PROFIT (¥):</label>
-                                <div class="input-with-prefix">
-                                    <span>¥</span>
-                                    <input type="text" data-field="profit" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="cnf-expanded-input money-input money-empty-as-zero allow-negative">
-                                </div>
-                            </div>
+                            ${field("auctionFee", "Auction Fee (¥)")}
+                            ${field("shippingCharge", "Shipping Charge (¥)")}
+                            ${field("inspectionFee", "Inspection Fee (¥)")}
+                            ${field("mscCharges", "Misc. Charges (¥)")}
+                            ${field("profit", "Profit (¥)", " allow-negative")}
                         </div>
                     </div>
                     
@@ -250,12 +213,23 @@ fun createCnfCarExpandedRowInnerHTML(chassis: String, isFobMode: Boolean = false
                     <div class="cnf-expanded-totals">
                         <div class="cnf-totals-grid">
                             <div class="cnf-total-box">
-                                <label>$totalLabel</label>
-                                <div class="cnf-expanded-total-value green" data-chassis="$chassis" data-type="total">¥0</div>
+                                <div class="cnf-total-box-label">$totalLabel</div>
+                                <div class="cnf-expanded-total-value green" data-chassis="$chassis" data-type="total" aria-live="polite">¥0</div>
                             </div>
                             <div class="cnf-total-box">
-                                <label>TOTAL EXPENSE (¥):</label>
-                                <div class="cnf-expanded-total-value red" data-chassis="$chassis" data-type="expense">¥0</div>
+                                <div class="cnf-total-box-label-row">
+                                    <div class="cnf-total-box-label">Total Expense (¥)</div>
+                                    <button type="button"
+                                        class="cnf-expense-lock-btn cnf-expense-lock-btn--locked"
+                                        data-chassis="$chassis"
+                                        data-locked="true"
+                                        aria-pressed="true"
+                                        title="Locked: cost changes adjust profit to keep total expense fixed"
+                                        aria-label="Unlock total expense">
+                                        <span class="cnf-expense-lock-icon" aria-hidden="true">🔒</span>
+                                    </button>
+                                </div>
+                                <div class="cnf-expanded-total-value red" data-chassis="$chassis" data-type="expense" aria-live="polite">¥0</div>
                             </div>
                         </div>
                     </div>
@@ -284,7 +258,7 @@ fun setupCnfCalculationListeners(selectedChassis: String? = null, selectedCars: 
     // Update the table header based on FOB mode
     val headerEl = document.getElementById("totalPriceHeader")
     if (headerEl != null) {
-        headerEl.textContent = if (isFobMode) "Total Fob Price (¥)" else "Total C&F Price (¥)"
+        headerEl.textContent = if (isFobMode) "Total FOB Price (¥)" else "Total C&F Price (¥)"
     }
     
     // Populate table with cars
@@ -410,10 +384,10 @@ fun setCnfRowSavedIndicator(chassis: String, saved: Boolean) {
         ?: return
     if (saved) {
         indicator.classList.add("cnf-row-saved-indicator--on")
-        indicator.setAttribute("aria-checked", "true")
+        indicator.setAttribute("aria-label", "Saved")
     } else {
         indicator.classList.remove("cnf-row-saved-indicator--on")
-        indicator.setAttribute("aria-checked", "false")
+        indicator.setAttribute("aria-label", "Not saved")
     }
 }
 
@@ -422,7 +396,7 @@ fun markAllCnfRowSavedIndicators() {
     for (i in 0 until nodes.length) {
         val indicator = nodes.item(i) as? HTMLElement ?: continue
         indicator.classList.add("cnf-row-saved-indicator--on")
-        indicator.setAttribute("aria-checked", "true")
+        indicator.setAttribute("aria-label", "Saved")
     }
 }
 
@@ -463,16 +437,15 @@ fun renderCnfCarsTable(cars: List<dynamic>, isFobMode: Boolean = false) {
         val mainRow = document.createElement("tr") as HTMLTableRowElement
         mainRow.setAttribute("data-chassis", chassis)
         mainRow.className = "cnf-table-row"
-        (mainRow as HTMLElement).style.cssText = "background-color: #f8f9fa; border-bottom: 1px solid #e0e0e0;"
         
         mainRow.innerHTML = """
-            <td style="width: 30px; text-align: center; padding: 12px;"><button type="button" class="cnf-expand-btn" data-chassis="$chassis" style="background: none; border: none; cursor: pointer; font-size: 14px;">▼</button></td>
-            <td style="width: 36px; text-align: center; padding: 12px 4px; vertical-align: middle;"><span class="cnf-row-saved-indicator" data-chassis="$chassis" role="checkbox" aria-checked="false" title="Saved to purchases"></span></td>
-            <td style="width: 160px; padding: 12px;">$chassis</td>
-            <td style="width: 200px; padding: 12px;">$carName</td>
-            <td class="cnf-car-price-cell" style="width: 140px; text-align: right; padding: 12px;">¥${formatYenDisplay(carPrice)}</td>
-            <td style="width: 160px; text-align: right; padding: 12px;"><strong data-chassis="$chassis" class="cnf-total-display">¥0</strong></td>
-            <td style="width: 80px; text-align: center; padding: 12px;"><button type="button" class="cnf-quick-save-btn" data-chassis="$chassis" style="width: 32px; height: 32px; padding: 0; border: 2px solid #1e3a8a; border-radius: 50%; background: linear-gradient(135deg, #3b82f6 0%, #1e40af 100%); color: white; cursor: pointer; font-weight: 600; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(0,0,0,0.2); font-size: 16px; transition: all 0.2s ease;">💾</button></td>
+            <td class="cnf-td-expand"><button type="button" class="cnf-expand-btn" data-chassis="$chassis" aria-expanded="false" aria-label="Expand cost details for $chassis">▼</button></td>
+            <td class="cnf-td-saved"><span class="cnf-row-saved-indicator" data-chassis="$chassis" role="img" aria-label="Not saved" title="Saved to purchases"></span></td>
+            <td class="cnf-td-chassis">$chassis</td>
+            <td class="cnf-td-name">$carName</td>
+            <td class="cnf-car-price-cell cnf-td-price">¥${formatYenDisplay(carPrice)}</td>
+            <td class="cnf-td-total"><strong data-chassis="$chassis" class="cnf-total-display">¥0</strong></td>
+            <td class="cnf-td-save"><button type="button" class="cnf-quick-save-btn" data-chassis="$chassis" aria-label="Save costs for $chassis" title="Save costs">${cnfQuickSaveIconSvg()}</button></td>
         """
         
         tbody.appendChild(mainRow)
@@ -502,6 +475,19 @@ fun renderCnfCarsTable(cars: List<dynamic>, isFobMode: Boolean = false) {
     console.log("✅ Rendered ${cars.size} cars in table")
 }
 
+private fun setCnfExpandBtnState(btn: HTMLButtonElement?, expanded: Boolean, chassis: String? = null) {
+    if (btn == null) return
+    btn.textContent = if (expanded) "▲" else "▼"
+    btn.setAttribute("aria-expanded", if (expanded) "true" else "false")
+    val ch = chassis ?: btn.getAttribute("data-chassis").orEmpty()
+    if (ch.isNotEmpty()) {
+        btn.setAttribute(
+            "aria-label",
+            if (expanded) "Collapse cost details for $ch" else "Expand cost details for $ch",
+        )
+    }
+}
+
 fun toggleCnfRowExpanded(chassis: String, isFobMode: Boolean) {
     val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return
     val expandedRow = tbody.querySelector("tr.cnf-detail-row[data-chassis=\"$chassis\"]") as? HTMLTableRowElement
@@ -513,7 +499,7 @@ fun toggleCnfRowExpanded(chassis: String, isFobMode: Boolean) {
     if (isOpen) {
         rowEl.classList.remove("cnf-detail-row--open")
         val btn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$chassis\"]") as? HTMLButtonElement
-        btn?.textContent = "▼"
+        setCnfExpandBtnState(btn, expanded = false, chassis = chassis)
     } else {
         val allDetailRows = tbody.querySelectorAll("tr.cnf-detail-row")
         for (i in 0 until allDetailRows.length) {
@@ -522,13 +508,13 @@ fun toggleCnfRowExpanded(chassis: String, isFobMode: Boolean) {
                 row.classList.remove("cnf-detail-row--open")
                 val otherChassis = row.getAttribute("data-chassis")
                 val otherBtn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$otherChassis\"]") as? HTMLButtonElement
-                otherBtn?.textContent = "▼"
+                setCnfExpandBtnState(otherBtn, expanded = false, chassis = otherChassis)
             }
         }
         
         rowEl.classList.add("cnf-detail-row--open")
         val btn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$chassis\"]") as? HTMLButtonElement
-        btn?.textContent = "▲"
+        setCnfExpandBtnState(btn, expanded = true, chassis = chassis)
         populateCnfExpandedFields(chassis, isFobMode)
         setupCnfExpandedFieldListeners(chassis, isFobMode)
     }
@@ -540,7 +526,7 @@ fun collapseCnfExpandedRow(chassis: String) {
     val expandedRow = tbody.querySelector("tr.cnf-detail-row[data-chassis=\"$chassis\"]") as? HTMLElement ?: return
     expandedRow.classList.remove("cnf-detail-row--open")
     val btn = tbody.querySelector(".cnf-expand-btn[data-chassis=\"$chassis\"]") as? HTMLButtonElement
-    btn?.textContent = "▼"
+    setCnfExpandBtnState(btn, expanded = false, chassis = chassis)
 }
 
 fun populateCnfExpandedFields(chassis: String, isFobMode: Boolean) {
@@ -585,8 +571,9 @@ fun populateCnfExpandedFields(chassis: String, isFobMode: Boolean) {
         input?.value = cnfMoneyFieldDisplay(value)
     }
     
-    // Update totals
-    updateCnfExpandedTotals(chassis, isFobMode)
+    // Update totals; recapture lock target from freshly populated expense (default locked).
+    updateCnfExpandedTotals(chassis, isFobMode, changedField = null, recaptureLockTarget = true)
+    syncCnfExpenseLockButton(chassis)
 }
 
 fun setupCnfExpandedFieldListeners(chassis: String, isFobMode: Boolean) {
@@ -594,29 +581,80 @@ fun setupCnfExpandedFieldListeners(chassis: String, isFobMode: Boolean) {
     if (expandedRow.getAttribute("data-cnf-listeners") == "1") return
     expandedRow.setAttribute("data-cnf-listeners", "1")
     val inputs = expandedRow.querySelectorAll(".cnf-expanded-input")
-    
+
     for (i in 0 until inputs.length) {
         val input = inputs.item(i) as? HTMLInputElement ?: continue
         input.addEventListener("input", { _: Event ->
-            updateCnfExpandedTotals(chassis, isFobMode)
+            val field = input.getAttribute("data-field")
+            updateCnfExpandedTotals(chassis, isFobMode, changedField = field)
         })
+    }
+
+    val lockBtn = expandedRow.querySelector(".cnf-expense-lock-btn") as? HTMLButtonElement
+    lockBtn?.addEventListener("click", { ev: Event ->
+        ev.preventDefault()
+        ev.stopPropagation()
+        toggleCnfExpenseLock(chassis, isFobMode)
+    })
+    syncCnfExpenseLockButton(chassis)
+}
+
+private fun syncCnfExpenseLockButton(chassis: String) {
+    val expandedRow = cnfDetailRowForChassis(chassis) ?: return
+    val btn = expandedRow.querySelector(".cnf-expense-lock-btn") as? HTMLButtonElement ?: return
+    val state = cnfExpenseLockState(chassis)
+    val locked = state.locked
+    btn.setAttribute("data-locked", if (locked) "true" else "false")
+    btn.setAttribute("aria-pressed", if (locked) "true" else "false")
+    btn.classList.toggle("cnf-expense-lock-btn--locked", locked)
+    btn.classList.toggle("cnf-expense-lock-btn--unlocked", !locked)
+    btn.title = if (locked) {
+        "Locked: cost changes adjust profit to keep total expense fixed"
+    } else {
+        "Unlocked: total expense follows the sum of cost fields"
+    }
+    btn.setAttribute("aria-label", if (locked) "Unlock total expense" else "Lock total expense")
+    val icon = btn.querySelector(".cnf-expense-lock-icon")
+    if (icon != null) {
+        icon.textContent = if (locked) "🔒" else "🔓"
     }
 }
 
-fun updateCnfExpandedTotals(chassis: String, isFobMode: Boolean) {
+private fun toggleCnfExpenseLock(chassis: String, isFobMode: Boolean) {
+    val state = cnfExpenseLockState(chassis)
+    if (state.locked) {
+        state.locked = false
+        // Keep target for optional re-lock; will recapture on lock.
+    } else {
+        state.locked = true
+        updateCnfExpandedTotals(chassis, isFobMode, changedField = null, recaptureLockTarget = true)
+    }
+    syncCnfExpenseLockButton(chassis)
+}
+
+/**
+ * Refresh Total C&F/FOB + Total Expense for an expanded row.
+ * When expense is locked, non-car-price / non-profit field edits adjust [profit] only.
+ */
+fun updateCnfExpandedTotals(
+    chassis: String,
+    isFobMode: Boolean,
+    changedField: String? = null,
+    recaptureLockTarget: Boolean = false,
+) {
     val expandedRow = cnfDetailRowForChassis(chassis) ?: return
-    
-    // Get all field values
-    val fieldIds = listOf("carPrice", "auctionFee", "auctionPenaltyFee", "rixoPrice", "shippingCharge", "freight", "inspectionFee", "repairFee", "mscCharges", "profit")
+
+    val fieldIds = listOf(
+        "carPrice", "auctionFee", "auctionPenaltyFee", "rixoPrice", "shippingCharge",
+        "freight", "inspectionFee", "repairFee", "mscCharges", "profit",
+    )
     val values = mutableMapOf<String, Double>()
-    
+
     for (fieldId in fieldIds) {
         val input = expandedRow.querySelector("input[data-field=\"$fieldId\"]") as? HTMLInputElement
-        val value = input?.value?.let { parseCurrency(it) } ?: 0.0
-        values[fieldId] = value
+        values[fieldId] = input?.value?.let { parseCurrency(it) } ?: 0.0
     }
-    
-    // Calculate totals
+
     val carPrice = values["carPrice"] ?: 0.0
     val auctionFee = values["auctionFee"] ?: 0.0
     val auctionPenaltyFee = values["auctionPenaltyFee"] ?: 0.0
@@ -626,32 +664,56 @@ fun updateCnfExpandedTotals(chassis: String, isFobMode: Boolean) {
     val inspectionFee = values["inspectionFee"] ?: 0.0
     val repairFee = values["repairFee"] ?: 0.0
     val mscCharges = values["mscCharges"] ?: 0.0
-    val profit = values["profit"] ?: 0.0
-    
-    val totalPrice = if (isFobMode) {
-        carPrice + auctionFee + auctionPenaltyFee + rixoPrice + shippingCharge + inspectionFee + repairFee + mscCharges + profit
-    } else {
-        carPrice + auctionFee + auctionPenaltyFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+    var profit = values["profit"] ?: 0.0
+
+    fun nonProfitExpense(): Double =
+        auctionFee + auctionPenaltyFee + rixoPrice + shippingCharge + freight +
+            inspectionFee + repairFee + mscCharges
+
+    fun expenseWith(p: Double): Double = nonProfitExpense() + p
+
+    val lock = cnfExpenseLockState(chassis)
+
+    if (lock.locked) {
+        when {
+            recaptureLockTarget || lock.target == null -> {
+                lock.target = expenseWith(profit)
+            }
+            changedField == "profit" -> {
+                lock.target = expenseWith(profit)
+            }
+            changedField == "carPrice" -> {
+                // Car price does not affect total expense; keep profit + target.
+            }
+            else -> {
+                // Cost field edit, or programmatic refresh (changedField == null): hold target via profit.
+                val target = lock.target ?: expenseWith(profit)
+                lock.target = target
+                val adjusted = target - nonProfitExpense()
+                if (abs(adjusted - profit) > 1e-9) {
+                    profit = adjusted
+                    val profitInput = expandedRow.querySelector("input[data-field=\"profit\"]") as? HTMLInputElement
+                    profitInput?.value = cnfMoneyFieldDisplay(profit)
+                }
+            }
+        }
     }
-    
-    val totalExpense = if (isFobMode) {
-        auctionFee + auctionPenaltyFee + rixoPrice + shippingCharge + inspectionFee + repairFee + mscCharges + profit
+
+    val displayExpense = if (lock.locked) {
+        lock.target ?: expenseWith(profit)
     } else {
-        auctionFee + auctionPenaltyFee + rixoPrice + shippingCharge + freight + inspectionFee + repairFee + mscCharges + profit
+        expenseWith(profit)
     }
-    
-    // Update display
-    val totalDisplay = expandedRow.querySelector(".cnf-expanded-total-value[data-type=\"total\"]")
-    totalDisplay?.textContent = formatYenTotal(totalPrice)
-    
-    val expenseDisplay = expandedRow.querySelector(".cnf-expanded-total-value[data-type=\"expense\"]")
-    expenseDisplay?.textContent = formatYenTotal(totalExpense)
-    
-    // Update main table row total
+    val totalPrice = carPrice + displayExpense
+
+    expandedRow.querySelector(".cnf-expanded-total-value[data-type=\"total\"]")?.textContent =
+        formatYenTotal(totalPrice)
+    expandedRow.querySelector(".cnf-expanded-total-value[data-type=\"expense\"]")?.textContent =
+        formatYenTotal(displayExpense)
+
     val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement
     val mainRow = tbody?.querySelector("tr.cnf-table-row[data-chassis=\"$chassis\"]")
-    val mainTotal = mainRow?.querySelector(".cnf-total-display")
-    mainTotal?.textContent = formatYenTotal(totalPrice)
+    mainRow?.querySelector(".cnf-total-display")?.textContent = formatYenTotal(totalPrice)
 }
 
 fun saveCnfCarCosts(chassis: String, isFobMode: Boolean) {
@@ -1272,7 +1334,7 @@ fun saveCarCostDetails() {
     val selectedChassis = chassisSelect?.value ?: ""
     
     if (selectedChassis.isEmpty()) {
-        js("alert('Please select a car chassis first')")
+        showMessage("Please select a car chassis first", "warning")
         return
     }
     
@@ -1346,7 +1408,7 @@ fun saveTotalCnfPriceForSelectedPurchases() {
     
     if (finalPurchaseIds.isEmpty()) {
         console.error("❌ No purchase IDs found")
-        js("alert('No selected purchases found. Please select cars from Car Booking page.')")
+        showMessage("No selected purchases found. Please select cars from Car Booking page.", "warning")
         return
     }
     
@@ -1440,14 +1502,14 @@ fun saveTotalCnfPrice() {
     val selectedChassis = chassisSelect?.value ?: ""
     
     if (selectedChassis.isEmpty()) {
-        js("alert('Please select a car chassis first')")
+        showMessage("Please select a car chassis first", "warning")
         return
     }
     
     val purchaseId = cnfPageCurrentPurchaseId
     if (purchaseId == null) {
         console.error("❌ No purchase ID found for chassis: $selectedChassis")
-        js("alert('Error: Could not find purchase ID. Please select a chassis again.')")
+        showMessage("Could not find purchase ID. Please select a chassis again.", "error")
         return
     }
     

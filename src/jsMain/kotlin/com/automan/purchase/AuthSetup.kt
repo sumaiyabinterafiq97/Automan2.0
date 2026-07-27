@@ -157,8 +157,8 @@ fun showUserManagementPage() {
                 <div class="user-page-header">
                     <h2>User Management</h2>
                     <div class="user-action-buttons">
-                        <button id="addUserBtn" class="user-btn user-btn-primary">Add New User</button>
-                        <button id="pendingRequestBtn" class="user-btn user-btn-warning">Pending Request</button>
+                        <button type="button" id="addUserBtn" class="user-btn user-btn-primary">Add New User</button>
+                        <button type="button" id="pendingRequestBtn" class="user-btn user-btn-warning">Pending Request</button>
                     </div>
                 </div>
                 
@@ -166,9 +166,7 @@ fun showUserManagementPage() {
                 <div class="users-section">
                     <h3>All Users</h3>
                     <div id="usersTable">
-                        <div style="text-align: center; color: #666; padding: 40px;">
-                            Loading users...
-                        </div>
+                        <div class="user-status-block" role="status">Loading users…</div>
                     </div>
                 </div>
             </div>
@@ -195,14 +193,12 @@ fun showPendingSignupsPage() {
                 <div class="user-page-header">
                     <h2>Pending Signups</h2>
                     <div class="user-action-buttons">
-                        <button id="backToUsersBtn" class="user-btn user-btn-secondary">Back to Users</button>
+                        <button type="button" id="backToUsersBtn" class="user-btn user-btn-secondary">Back to Users</button>
                     </div>
                 </div>
                 
-                <div id="pendingSignupsTable" style="margin-top: 20px; padding: 16px;">
-                    <div style="text-align: center; color: #666; padding: 20px;">
-                        Loading pending signups...
-                    </div>
+                <div id="pendingSignupsTable" class="pending-signups-table-wrap">
+                    <div class="user-status-block" role="status">Loading pending signups…</div>
                 </div>
             </div>
         </div>
@@ -226,6 +222,7 @@ fun showPendingSignupsPage() {
 fun closeSidebar() {
     val sidebar = document.getElementById("sidebar") as HTMLElement?
     val overlay = document.getElementById("sidebarOverlay") as HTMLElement?
+    val hamburger = document.getElementById("hamburgerBtn")
     
     val isMobile = window.innerWidth <= 767
     if (isMobile) {
@@ -238,5 +235,8 @@ fun closeSidebar() {
     }
     sidebar?.classList?.remove("sidebar-open")
     overlay?.style?.setProperty("display", "none")
+    overlay?.setAttribute("aria-hidden", "true")
+    hamburger?.setAttribute("aria-expanded", "false")
+    hamburger?.setAttribute("aria-label", "Open menu")
 }
 

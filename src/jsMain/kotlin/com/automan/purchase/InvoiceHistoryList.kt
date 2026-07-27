@@ -2,6 +2,8 @@ package com.automan.purchase
 
 import kotlinx.browser.document
 import kotlinx.browser.window
+import kotlin.js.asDynamic
+import kotlin.js.unsafeCast
 import org.w3c.dom.*
 import org.w3c.dom.events.Event
 import kotlinx.coroutines.MainScope
@@ -18,6 +20,7 @@ private var invoiceHistorySortField: String = "invoiceNumber"
 private var invoiceHistorySortOrder: String = "desc"
 private var invoiceHistoryResizeDebounceHandle: Int? = null
 private var invoiceHistorySearchDebounceHandle: Int? = null
+private var invoiceHistoryLastCompactLayout: Boolean? = null
 private var invoiceHistoryServerMode: Boolean = true
 private var invoiceHistoryPageZeroBased: Int = 0
 private var invoiceHistoryTotalPages: Int = 1
@@ -57,9 +60,15 @@ fun showInvoiceHistoryPage() {
             .invoice-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;}
             .invoice-search-clear:hover{background:#f3f4f6;color:#111827;}
             .invoice-history-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
-            table.purchase-list-table thead th{position:sticky;top:0;z-index:1;}
+            table.purchase-list-table thead th{position:sticky;top:0;z-index:10;}
             .invoice-history-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
             .invoice-history-empty strong{color:#0f172a;}
+            .invoice-history-pager{display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;}
+            .invoice-history-pager-meta{color:#6b7280;font-size:14px;}
+            .invoice-history-pager-btns{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+            .invoice-history-pager-btn{padding:8px 16px;background-color:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;min-height:40px;font-size:14px;}
+            .invoice-history-pager-btn:disabled,.invoice-history-pager-btn.is-disabled{background-color:#ccc;cursor:not-allowed;}
+            .invoice-history-pager-page{color:#374151;font-size:14px;padding:0 8px;}
             .invoice-cards{display:flex;flex-direction:column;gap:10px;}
             .invoice-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
             .invoice-card-top{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:10px;}
@@ -112,7 +121,6 @@ fun showInvoiceHistoryPage() {
     })
     document.getElementById("invoiceHistorySearchClearBtn")?.addEventListener("click", { _: Event ->
         searchInput?.value = ""
-        invoiceHistoryActiveSearchQ = ""
         invoiceHistoryPageZeroBased = 0
         loadInvoiceHistory(0)
     })
@@ -244,17 +252,28 @@ private fun invoiceHistoryIsCompactLayout(): Boolean {
 }
 
 private fun setupInvoiceHistoryResizeListener() {
-    val page = document.getElementById("invoiceHistoryPage") ?: return
-    if (page.hasAttribute("data-invoice-history-resize")) return
-    page.setAttribute("data-invoice-history-resize", "true")
-    window.addEventListener("resize", { _: Event ->
+    if (document.getElementById("invoiceHistoryPage") == null) return
+    invoiceHistoryLastCompactLayout = invoiceHistoryIsCompactLayout()
+
+    val existing = window.asDynamic().__invoiceHistoryCompactResizeListener
+    if (existing != null) {
+        window.removeEventListener("resize", existing.unsafeCast<(Event) -> Unit>())
+    }
+
+    val resizeListener: (Event) -> Unit = { _: Event ->
         val prev = invoiceHistoryResizeDebounceHandle
         if (prev != null) window.clearTimeout(prev)
         invoiceHistoryResizeDebounceHandle = window.setTimeout({
             if (document.getElementById("invoiceHistoryPage") == null) return@setTimeout
-            if (invoiceHistoryCachedRows.isNotEmpty()) renderInvoiceHistoryTableFromCache()
+            val compact = invoiceHistoryIsCompactLayout()
+            if (invoiceHistoryLastCompactLayout != compact) {
+                invoiceHistoryLastCompactLayout = compact
+                if (invoiceHistoryCachedRows.isNotEmpty()) renderInvoiceHistoryTableFromCache()
+            }
         }, 120)
-    })
+    }
+    window.asDynamic().__invoiceHistoryCompactResizeListener = resizeListener
+    window.addEventListener("resize", resizeListener)
 }
 
 private fun invoiceHistoryDisplayCellHtml(row: dynamic, key: String): String {
@@ -496,20 +515,16 @@ private fun appendInvoiceHistoryPager(html: StringBuilder) {
     val totalPages = kotlin.math.max(1, invoiceHistoryTotalPages)
     val currentPage = invoiceHistoryPageZeroBased + 1
     if (totalPages <= 1 && invoiceHistoryTotalElements <= invoiceHistoryItemsPerPage) return
-    val prevDisabled = if (currentPage <= 1) "disabled" else ""
-    val nextDisabled = if (currentPage >= totalPages) "disabled" else ""
-    val prevStyle = if (currentPage <= 1) "#ccc" else "#007bff"
-    val nextStyle = if (currentPage >= totalPages) "#ccc" else "#007bff"
-    val prevCursor = if (currentPage <= 1) "not-allowed" else "pointer"
-    val nextCursor = if (currentPage >= totalPages) "not-allowed" else "pointer"
+    val prevDisabled = currentPage <= 1
+    val nextDisabled = currentPage >= totalPages
     html.append(
         """
-        <div id="invoiceHistoryPager" style="display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;">
-            <div style="color:#6b7280;font-size:14px;">Page $currentPage of $totalPages · $invoiceHistoryTotalElements row(s)</div>
-            <div style="display:flex;align-items:center;gap:8px;">
-                <button type="button" id="invoiceHistoryPrevPage" $prevDisabled style="padding:8px 16px;background-color:$prevStyle;color:white;border:none;border-radius:4px;cursor:$prevCursor;">Previous</button>
-                <span style="color:#374151;font-size:14px;">Page $currentPage of $totalPages</span>
-                <button type="button" id="invoiceHistoryNextPage" $nextDisabled style="padding:8px 16px;background-color:$nextStyle;color:white;border:none;border-radius:4px;cursor:$nextCursor;">Next</button>
+        <div id="invoiceHistoryPager" class="invoice-history-pager">
+            <div class="invoice-history-pager-meta">Page $currentPage of $totalPages · $invoiceHistoryTotalElements row(s)</div>
+            <div class="invoice-history-pager-btns">
+                <button type="button" id="invoiceHistoryPrevPage" class="invoice-history-pager-btn${if (prevDisabled) " is-disabled" else ""}" ${if (prevDisabled) "disabled" else ""}>Previous</button>
+                <span class="invoice-history-pager-page">Page $currentPage of $totalPages</span>
+                <button type="button" id="invoiceHistoryNextPage" class="invoice-history-pager-btn${if (nextDisabled) " is-disabled" else ""}" ${if (nextDisabled) "disabled" else ""}>Next</button>
             </div>
         </div>
         """
@@ -565,6 +580,7 @@ private fun renderInvoiceHistoryTableFromCache() {
     rows = rows.sortedWith(comparator).toTypedArray()
 
     val compact = invoiceHistoryIsCompactLayout()
+    invoiceHistoryLastCompactLayout = compact
     val html = StringBuilder()
 
     if (!compact) {

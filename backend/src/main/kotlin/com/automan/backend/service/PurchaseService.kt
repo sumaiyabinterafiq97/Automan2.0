@@ -1186,6 +1186,16 @@ class PurchaseService(
         val size = rawSize.coerceIn(1, 100)
         val from = parseIsoLocalDateOrThrow(dateFrom, "dateFrom")
         val to = parseIsoLocalDateOrThrow(dateTo, "dateTo")
+        // Purchase.date is a label string (e.g. "July 4, 2026(Saturday)"); never SQL-ORDER BY it.
+        if (isPurchaseDateSortField(sortField)) {
+            val pairs = if (from == null && to == null) {
+                purchaseRepository.findIdAndDateAll()
+            } else {
+                validateDateRangeBounds(from, to)
+                filterIdDatePairsAsPairs(purchaseRepository.findIdAndDateAll(), from, to)
+            }
+            return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
+        }
         if (from == null && to == null) {
             val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
             val pg = purchaseRepository.findAll(pageable)
@@ -1224,6 +1234,16 @@ class PurchaseService(
         val size = rawSize.coerceIn(1, 100)
         val from = parseIsoLocalDateOrThrow(dateFrom, "dateFrom")
         val to = parseIsoLocalDateOrThrow(dateTo, "dateTo")
+        // Chronological date sort must use parsed LocalDate, not SQL string ORDER BY date.
+        if (isPurchaseDateSortField(sortField)) {
+            val pairs = if (from == null && to == null) {
+                searchPurchasesIdDate(q, field)
+            } else {
+                validateDateRangeBounds(from, to)
+                filterIdDatePairsAsPairs(searchPurchasesIdDate(q, field), from, to)
+            }
+            return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
+        }
         if (from == null && to == null) {
             val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
             val pg: Page<Purchase> = searchPurchasesPageEntity(q, field, pageable)
@@ -1292,7 +1312,11 @@ class PurchaseService(
             return pagePurchasesInMemory(filtered, pageIdx, size, request.sort, request.order)
         }
 
-        // 5) DB-only path: page via findByIdIn + Sort
+        // 5) DB-only path: chronological date sort via id+date pairs; other sorts via findByIdIn + Sort
+        if (isPurchaseDateSortField(request.sort)) {
+            val datePairs = pairs.filter { it.getId() != null && it.getId() in candidateIds }
+            return pagePurchasesByIdDatePairs(datePairs, pageIdx, size, request.order)
+        }
         return pagePurchasesByIds(candidateIds.toList(), pageIdx, size, request.sort, request.order)
     }
 
@@ -1359,15 +1383,91 @@ class PurchaseService(
         pairs: List<PurchaseIdDateProjection>,
         from: LocalDate?,
         to: LocalDate?,
-    ): List<Long> {
-        return pairs.mapNotNull { pair ->
-            val id = pair.getId() ?: return@mapNotNull null
+    ): List<Long> = filterIdDatePairsAsPairs(pairs, from, to).mapNotNull { it.getId() }
+
+    private fun filterIdDatePairsAsPairs(
+        pairs: List<PurchaseIdDateProjection>,
+        from: LocalDate?,
+        to: LocalDate?,
+    ): List<PurchaseIdDateProjection> {
+        return pairs.filter { pair ->
+            if (pair.getId() == null) return@filter false
             val parsed = PurchaseDateParseUtils.parseToLocalDate(pair.getDate()?.trim().orEmpty())
-                ?: return@mapNotNull null
-            if (from != null && parsed.isBefore(from)) return@mapNotNull null
-            if (to != null && parsed.isAfter(to)) return@mapNotNull null
-            id
+                ?: return@filter false
+            if (from != null && parsed.isBefore(from)) return@filter false
+            if (to != null && parsed.isAfter(to)) return@filter false
+            true
         }
+    }
+
+    private fun isPurchaseDateSortField(sortField: String?): Boolean =
+        sortField?.trim()?.equals("date", ignoreCase = true) == true
+
+    /**
+     * Page purchases sorted by real calendar date (not lexicographic label text).
+     * Unparseable dates sort last (asc) / first after reverse (desc); ties break by id.
+     */
+    private fun pagePurchasesByIdDatePairs(
+        pairs: List<PurchaseIdDateProjection>,
+        pageIdx: Int,
+        size: Int,
+        sortOrder: String?,
+    ): PurchasePageResponse {
+        if (pairs.isEmpty()) return emptyPurchasePage(pageIdx, size)
+        val asc = sortOrder?.trim().equals("asc", ignoreCase = true) == true
+        val sortedPairs = pairs.sortedWith { a, b ->
+            val cmp = compareIdDatePairsChronological(a, b)
+            if (asc) cmp else -cmp
+        }
+        val orderedIds = sortedPairs.mapNotNull { it.getId() }
+        return pagePurchasesPreservingIdOrder(orderedIds, pageIdx, size)
+    }
+
+    private fun compareIdDatePairsChronological(
+        a: PurchaseIdDateProjection,
+        b: PurchaseIdDateProjection,
+    ): Int {
+        val aDate = PurchaseDateParseUtils.parseToLocalDate(a.getDate()?.trim().orEmpty())
+        val bDate = PurchaseDateParseUtils.parseToLocalDate(b.getDate()?.trim().orEmpty())
+        val dateCmp = when {
+            aDate == null && bDate == null -> 0
+            aDate == null -> 1
+            bDate == null -> -1
+            else -> aDate.compareTo(bDate)
+        }
+        if (dateCmp != 0) return dateCmp
+        return (a.getId() ?: 0L).compareTo(b.getId() ?: 0L)
+    }
+
+    /** Hydrate a page of purchases in the exact order of [orderedIds]. */
+    private fun pagePurchasesPreservingIdOrder(
+        orderedIds: List<Long>,
+        pageIdx: Int,
+        size: Int,
+    ): PurchasePageResponse {
+        val total = orderedIds.size.toLong()
+        val totalPages = if (total == 0L) 0 else ((total + size - 1) / size).toInt()
+        val fromIdx = (pageIdx * size).coerceAtMost(orderedIds.size)
+        val toIdx = (fromIdx + size).coerceAtMost(orderedIds.size)
+        val pageIds = if (fromIdx >= orderedIds.size) emptyList() else orderedIds.subList(fromIdx, toIdx)
+        if (pageIds.isEmpty()) {
+            return PurchasePageResponse(
+                content = emptyList(),
+                totalElements = total,
+                totalPages = totalPages,
+                page = pageIdx,
+                size = size,
+            )
+        }
+        val byId = purchaseRepository.findAllById(pageIds).associateBy { it.id }
+        val content = applyReadAdapters(pageIds.mapNotNull { byId[it] })
+        return PurchasePageResponse(
+            content = content,
+            totalElements = total,
+            totalPages = totalPages,
+            page = pageIdx,
+            size = size,
+        )
     }
 
     private fun pagePurchasesByIds(
@@ -1378,6 +1478,12 @@ class PurchaseService(
         sortOrder: String?,
     ): PurchasePageResponse {
         if (matchingIds.isEmpty()) return emptyPurchasePage(pageIdx, size)
+        // Safety net: if any caller still passes sort=date with bare ids, chronologically re-order.
+        if (isPurchaseDateSortField(sortField)) {
+            val idSet = matchingIds.toSet()
+            val pairs = purchaseRepository.findIdAndDateAll().filter { it.getId() in idSet }
+            return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
+        }
         val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
         val pg = purchaseRepository.findByIdIn(matchingIds, pageable)
         return PurchasePageResponse(
@@ -1420,7 +1526,11 @@ class PurchaseService(
             size = size,
         )
 
-    /** Whitelisted sort for purchase list page/search. Unknown fields fall back to id DESC. */
+    /**
+     * Whitelisted JPA sort for purchase list page/search.
+     * [date] is intentionally omitted — label strings must not be SQL-ordered; use
+     * [pagePurchasesByIdDatePairs] / [sortPurchasesForList] instead.
+     */
     private fun resolvePurchaseListSort(sortField: String?, sortOrder: String?): Sort {
         val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
             Sort.Direction.ASC
@@ -1428,9 +1538,8 @@ class PurchaseService(
             Sort.Direction.DESC
         }
         val prop = when (sortField?.trim()?.lowercase()) {
-            null, "", "id" -> "id"
+            null, "", "id", "date" -> "id"
             "chassis" -> "chassis"
-            "date" -> "date"
             "carname", "car_name" -> "carName"
             "brand" -> "brand"
             "clientname", "client_name", "client" -> "clientName"
@@ -1456,10 +1565,22 @@ class PurchaseService(
             val right = b?.trim().orEmpty()
             return left.compareTo(right, ignoreCase = true)
         }
+        fun cmpPurchaseDate(a: Purchase, b: Purchase): Int {
+            val aDate = PurchaseDateParseUtils.parseToLocalDate(a.date?.trim().orEmpty())
+            val bDate = PurchaseDateParseUtils.parseToLocalDate(b.date?.trim().orEmpty())
+            val dateCmp = when {
+                aDate == null && bDate == null -> cmp(a.date, b.date)
+                aDate == null -> 1
+                bDate == null -> -1
+                else -> aDate.compareTo(bDate)
+            }
+            if (dateCmp != 0) return dateCmp
+            return (a.id ?: 0L).compareTo(b.id ?: 0L)
+        }
         val sorted = when (key) {
             "", "id" -> purchases.sortedBy { it.id ?: 0L }
             "chassis" -> purchases.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.chassis })
-            "date" -> purchases.sortedWith { a, b -> cmp(a.date, b.date) }
+            "date" -> purchases.sortedWith { a, b -> cmpPurchaseDate(a, b) }
             "carname", "car_name" -> purchases.sortedWith { a, b -> cmp(a.carName, b.carName) }
             "brand" -> purchases.sortedWith { a, b -> cmp(a.brand, b.brand) }
             "clientname", "client_name", "client" -> purchases.sortedWith { a, b -> cmp(a.clientName, b.clientName) }
@@ -1713,8 +1834,23 @@ class PurchaseService(
     
     fun sortPurchases(field: String, order: String): List<Purchase> {
         val allPurchases = getAllPurchases()
+        fun cmpPurchaseDate(a: Purchase, b: Purchase): Int {
+            val aDate = PurchaseDateParseUtils.parseToLocalDate(a.date?.trim().orEmpty())
+            val bDate = PurchaseDateParseUtils.parseToLocalDate(b.date?.trim().orEmpty())
+            return when {
+                aDate == null && bDate == null ->
+                    (a.date ?: "").compareTo(b.date ?: "", ignoreCase = true)
+                aDate == null -> 1
+                bDate == null -> -1
+                else -> aDate.compareTo(bDate)
+            }
+        }
         return when (field) {
-            "date" -> if (order == "asc") allPurchases.sortedBy { it.date } else allPurchases.sortedByDescending { it.date }
+            "date" -> if (order == "asc") {
+                allPurchases.sortedWith { a, b -> cmpPurchaseDate(a, b) }
+            } else {
+                allPurchases.sortedWith { a, b -> cmpPurchaseDate(b, a) }
+            }
             "chassis" -> if (order == "asc") allPurchases.sortedBy { it.chassis } else allPurchases.sortedByDescending { it.chassis }
             "carName" -> if (order == "asc") allPurchases.sortedBy { it.carName } else allPurchases.sortedByDescending { it.carName }
             "auctionHouse" -> if (order == "asc") allPurchases.sortedBy { it.auctionHouse } else allPurchases.sortedByDescending { it.auctionHouse }
