@@ -53,7 +53,9 @@ class PurchaseService(
 
     /**
      * Phase 2–4 write sync + read adapters for API responses.
-     * @param snapshotSpecs edit/Update path only: freeze mapping-inherited vehicle specs onto the purchase.
+     * @param snapshotSpecs when true (create and edit/Update), non-empty spec values are stored as
+     * overrides even when they equal the car_brand_mapping baseline. This freezes form specs onto
+     * the purchase so Edit/Summary show saved values instead of only map defaults.
      */
     private fun finalizePurchaseWrite(purchase: Purchase, snapshotSpecs: Boolean = false): Purchase {
         val sanitized = localPurchaseSanitizer.apply(purchase)
@@ -122,8 +124,8 @@ class PurchaseService(
     }
     
     /**
-     * Validates Production Date (carModelYear): 4-digit year only, no range check.
-     * Format should be YYYY-MM (e.g., "2013-12"). Year must be exactly 4 digits.
+     * Validates Production Date (carModelYear): YYYY-MM with month 00–12; year in 1900–2100.
+     * Format should be YYYY-MM (e.g., "2013-12"). Year must be exactly 4 digits in project range.
      * Returns null if valid, or error message if invalid.
      */
     private fun validateCarModelYear(carModelYear: String?): String? {
@@ -143,6 +145,10 @@ class PurchaseService(
         if (!yearStr.all { it.isDigit() }) {
             return "Production year must be 4 digits only. Got: $yearStr"
         }
+        val year = yearStr.toIntOrNull()
+        if (year == null || year < 1900 || year > 2100) {
+            return "Production year must be between 1900 and 2100. Got: $yearStr"
+        }
         val month = monthStr.toIntOrNull()
         if (month == null || month !in 0..12) {
             return "Invalid Production Date month. Use 00–12 (00 = year only)."
@@ -157,7 +163,7 @@ class PurchaseService(
     }
 
     /**
-     * Validates Manufacture Year: optional; if set must be exactly 4 digits between 1000 and 9999.
+     * Validates Manufacture Year: optional; if set must be exactly 4 digits between 1900 and 2100.
      */
     private fun validateManufactureYear(manufactureYear: String?): String? {
         val t = manufactureYear?.trim().orEmpty()
@@ -166,8 +172,8 @@ class PurchaseService(
             return "Manufacture year must be exactly 4 digits (YYYY)."
         }
         val year = t.toIntOrNull()
-        if (year == null || year < 1000 || year > 9999) {
-            return "Manufacture year must be between 1000 and 9999."
+        if (year == null || year < 1900 || year > 2100) {
+            return "Manufacture year must be between 1900 and 2100."
         }
         return null
     }
@@ -425,9 +431,12 @@ class PurchaseService(
                     bookingId = persisted.bookingId,
                     updatedAt = persisted.updatedAt,
                 ),
+                // Create (Add + Quick Purchase): freeze non-empty form specs onto the purchase so
+                // Edit/Summary show saved values, not only Chassis Map defaults.
+                snapshotSpecs = true,
             )
         }
-        return finalizePurchaseWrite(purchaseToSave)
+        return finalizePurchaseWrite(purchaseToSave, snapshotSpecs = true)
     }
     
     @Transactional

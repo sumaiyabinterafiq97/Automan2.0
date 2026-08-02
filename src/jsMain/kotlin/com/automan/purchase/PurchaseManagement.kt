@@ -810,10 +810,14 @@ private fun applyPurchaseDateFilterRange(startIso: String, endIso: String, reset
 }
 
 private fun clearPurchaseDateFilter() {
-    if (!purchaseDateFilterActive && purchaseDateFilterStartIso.isEmpty() && purchaseDateFilterEndIso.isEmpty()) return
+    if (!purchaseDateFilterActive && purchaseDateFilterStartIso.isEmpty() && purchaseDateFilterEndIso.isEmpty()) {
+        clearPurchaseDateQuickFilterInputs()
+        return
+    }
     purchaseDateFilterActive = false
     purchaseDateFilterStartIso = ""
     purchaseDateFilterEndIso = ""
+    clearPurchaseDateQuickFilterInputs()
     if (purchaseSearchServerMode) {
         loadPurchasesListPage(0)
     } else {
@@ -850,12 +854,10 @@ private fun restorePurchaseListFilterUi() {
     }
     refreshPurchaseSearchScopeUi()
     updatePurchaseFilterBadge()
-    if (purchaseDateFilterStartIso.isNotEmpty()) {
-        syncPurchaseDateQuickFilterTextFromIso(purchaseDateFilterStartIso)
-    }
+    syncPurchaseDateQuickFilterRangeUiFromState()
 }
 
-private const val PURCHASE_DATE_QUICK_FILTER_MENU_WIDTH_PX = 260.0
+private const val PURCHASE_DATE_QUICK_FILTER_MENU_WIDTH_PX = 280.0
 
 private fun purchaseDateQuickFilterMenuPortalHtml(): String = """
     <div id="purchaseDateQuickFilterMenu" class="purchase-date-quick-filter-menu" style="display: none;" role="dialog" aria-label="Filter by purchase date">
@@ -867,12 +869,22 @@ private fun purchaseDateQuickFilterMenuPortalHtml(): String = """
             <button type="button" id="purchaseDateQuickFilterApplyBtn" class="is-primary">Apply</button>
         </div>
         <div class="purchase-date-quick-filter-menu__date-row">
-            <label for="purchaseDateQuickFilterInputText">Choose date</label>
+            <label for="purchaseDateQuickFilterFromText">From</label>
             <div class="purchase-date-quick-filter-menu__date-input-wrap">
-                <input type="text" id="purchaseDateQuickFilterInputText" maxlength="10" inputmode="numeric" autocomplete="off"
+                <input type="text" id="purchaseDateQuickFilterFromText" maxlength="10" inputmode="numeric" autocomplete="off"
                        placeholder="MM/DD/YYYY">
-                <button type="button" id="purchaseDateQuickFilterInputCalendarBtn" title="Open calendar" aria-label="Open calendar">📅</button>
-                <input type="date" id="purchaseDateQuickFilterInput" tabindex="-1" aria-hidden="true"
+                <button type="button" id="purchaseDateQuickFilterFromCalendarBtn" title="Open calendar" aria-label="Open From calendar">📅</button>
+                <input type="date" id="purchaseDateQuickFilterFrom" tabindex="-1" aria-hidden="true"
+                       class="purchase-date-quick-filter-menu__native-date">
+            </div>
+        </div>
+        <div class="purchase-date-quick-filter-menu__date-row purchase-date-quick-filter-menu__date-row--to">
+            <label for="purchaseDateQuickFilterToText">To</label>
+            <div class="purchase-date-quick-filter-menu__date-input-wrap">
+                <input type="text" id="purchaseDateQuickFilterToText" maxlength="10" inputmode="numeric" autocomplete="off"
+                       placeholder="MM/DD/YYYY">
+                <button type="button" id="purchaseDateQuickFilterToCalendarBtn" title="Open calendar" aria-label="Open To calendar">📅</button>
+                <input type="date" id="purchaseDateQuickFilterTo" tabindex="-1" aria-hidden="true"
                        class="purchase-date-quick-filter-menu__native-date">
             </div>
         </div>
@@ -936,6 +948,7 @@ private fun positionPurchaseDateQuickFilterMenu(anchor: HTMLElement) {
 }
 
 private fun openPurchaseDateQuickFilterMenu(anchor: HTMLElement) {
+    syncPurchaseDateQuickFilterRangeUiFromState()
     positionPurchaseDateQuickFilterMenu(anchor)
     window.asDynamic().__purchaseDateQuickFilterMenuOpen = true
     anchor.setAttribute("aria-expanded", "true")
@@ -950,19 +963,50 @@ private fun togglePurchaseDateQuickFilterMenu(anchor: HTMLElement) {
     }
 }
 
-private fun purchaseDateQuickFilterSelectedIso(): String {
-    val text = document.getElementById("purchaseDateQuickFilterInputText") as? HTMLInputElement
-    val hidden = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
+/** Read one From/To field (text mask preferred, then hidden native date). */
+private fun purchaseDateQuickFilterFieldIso(baseId: String): String {
+    val text = document.getElementById("${baseId}Text") as? HTMLInputElement
+    val hidden = document.getElementById(baseId) as? HTMLInputElement
     strictMmDdYyyySlashToIso(text?.value?.trim() ?: "")?.let { return it }
     val h = hidden?.value?.trim() ?: ""
     return if (h.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) h else ""
 }
 
-private fun syncPurchaseDateQuickFilterTextFromIso(iso: String) {
-    val hidden = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement ?: return
-    val text = document.getElementById("purchaseDateQuickFilterInputText") as? HTMLInputElement
+private fun syncPurchaseDateQuickFilterFieldFromIso(baseId: String, iso: String) {
+    val hidden = document.getElementById(baseId) as? HTMLInputElement ?: return
+    val text = document.getElementById("${baseId}Text") as? HTMLInputElement
+    if (iso.isBlank()) {
+        hidden.value = ""
+        text?.value = ""
+        return
+    }
     hidden.value = iso
     text?.value = isoToMmDdYyyy(iso)
+}
+
+private fun clearPurchaseDateQuickFilterInputs() {
+    syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", "")
+    syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", "")
+}
+
+private fun syncPurchaseDateQuickFilterRangeUiFromState() {
+    syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", purchaseDateFilterStartIso)
+    syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", purchaseDateFilterEndIso)
+}
+
+/**
+ * Resolve From/To for Apply: one filled → single day; both filled → range (swap if From > To).
+ */
+private fun purchaseDateQuickFilterResolvedRange(): Pair<String, String>? {
+    val from = purchaseDateQuickFilterFieldIso("purchaseDateQuickFilterFrom")
+    val to = purchaseDateQuickFilterFieldIso("purchaseDateQuickFilterTo")
+    return when {
+        from.isEmpty() && to.isEmpty() -> null
+        from.isNotEmpty() && to.isEmpty() -> from to from
+        from.isEmpty() && to.isNotEmpty() -> to to to
+        from > to -> to to from
+        else -> from to to
+    }
 }
 
 private fun setupPurchaseDateQuickFilterMenuPortal() {
@@ -970,53 +1014,56 @@ private fun setupPurchaseDateQuickFilterMenuPortal() {
         window.asDynamic().__purchaseDateQuickFilterMenuOpen = false
     }
 
+    // Always rebuild portal so From/To markup stays in sync (old single-date menu may linger on body).
     document.getElementById("purchaseList")?.querySelector("#purchaseDateQuickFilterMenu")?.remove()
+    document.getElementById("purchaseDateQuickFilterMenu")?.remove()
 
-    var menu = document.getElementById("purchaseDateQuickFilterMenu") as? HTMLElement
-    if (menu == null) {
-        val wrapper = document.createElement("div")
-        wrapper.innerHTML = purchaseDateQuickFilterMenuPortalHtml()
-        menu = wrapper.firstElementChild as? HTMLElement
-        if (menu != null) {
-            document.body?.appendChild(menu)
-        }
+    val wrapper = document.createElement("div")
+    wrapper.innerHTML = purchaseDateQuickFilterMenuPortalHtml()
+    val menu = wrapper.firstElementChild as? HTMLElement ?: return
+    document.body?.appendChild(menu)
+
+    listOf("purchaseDateQuickFilterFrom", "purchaseDateQuickFilterTo").forEach { baseId ->
+        (document.getElementById(baseId) as? HTMLInputElement)?.asDynamic()?.__strictDateBound = false
+        bindStrictDateTextMask(baseId)
     }
-
-    val hidden = document.getElementById("purchaseDateQuickFilterInput") as? HTMLInputElement
-    hidden?.asDynamic().__strictDateBound = false
-    bindStrictDateTextMask("purchaseDateQuickFilterInput")
-
-    if (window.asDynamic().__purchaseDateQuickFilterDelegationWired == true) return
-    window.asDynamic().__purchaseDateQuickFilterDelegationWired = true
+    syncPurchaseDateQuickFilterRangeUiFromState()
 
     val closeAfterAction = { closePurchaseDateQuickFilterMenu() }
 
-    menu?.addEventListener("click", { ev: Event ->
+    menu.addEventListener("click", { ev: Event ->
         val target = ev.target as? HTMLElement ?: return@addEventListener
         ev.stopPropagation()
         when {
             target.id == "purchaseDateQuickFilterApplyBtn" || target.closest("#purchaseDateQuickFilterApplyBtn") != null -> {
-                val selected = purchaseDateQuickFilterSelectedIso()
-                if (selected.isNotEmpty()) {
-                    applyPurchaseDateFilterRange(selected, selected)
+                val range = purchaseDateQuickFilterResolvedRange()
+                if (range != null) {
+                    syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", range.first)
+                    syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", range.second)
+                    applyPurchaseDateFilterRange(range.first, range.second)
                 }
                 closeAfterAction()
             }
             target.id == "purchaseDateQuickTodayBtn" || target.closest("#purchaseDateQuickTodayBtn") != null -> {
                 val today = isoLocalToday()
-                syncPurchaseDateQuickFilterTextFromIso(today)
+                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", today)
+                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", today)
                 applyPurchaseDateFilterRange(today, today)
                 closeAfterAction()
             }
             target.id == "purchaseDateQuickLast7Btn" || target.closest("#purchaseDateQuickLast7Btn") != null -> {
                 val end = isoLocalToday()
                 val start = isoLocalOffsetDays(-6)
+                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", start)
+                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", end)
                 applyPurchaseDateFilterRange(start, end)
                 closeAfterAction()
             }
             target.id == "purchaseDateQuickThisMonthBtn" || target.closest("#purchaseDateQuickThisMonthBtn") != null -> {
                 val start = isoLocalThisMonthStart()
                 val end = isoLocalThisMonthEnd()
+                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", start)
+                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", end)
                 applyPurchaseDateFilterRange(start, end)
                 closeAfterAction()
             }
@@ -1434,6 +1481,8 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
             .purchase-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;border-radius:8px;}
             .purchase-search-clear:hover{background:#f3f4f6;color:#111827;}
             .purchase-list-actions{grid-area:actions;display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;}
+            .purchase-quick-add-btn{padding:8px 16px;background-color:#0d9488;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap;}
+            .purchase-quick-add-btn:hover{background-color:#0f766e;}
             .purchase-export-btn{padding:8px 16px;background-color:#198754;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap;}
             .purchase-export-btn:disabled{opacity:0.7;cursor:not-allowed;}
             .purchase-column-filter-btn,.purchase-adv-filter-btn{
@@ -1500,6 +1549,12 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
                             <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
                         </svg>
                     </button>
+                    <button type="button" id="purchaseListQuickAddBtn" class="purchase-quick-add-btn" title="Add Quick Purchase" aria-label="Add Quick Purchase">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"/>
+                        </svg>
+                        ADD
+                    </button>
                     <button type="button" id="exportPurchasesExcelBtn" class="purchase-export-btn" title="Export purchases to Excel">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
@@ -1539,6 +1594,10 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
 
     document.getElementById("exportPurchasesExcelBtn")?.addEventListener("click", { _: Event ->
         exportPurchasesToExcel()
+    })
+
+    document.getElementById("purchaseListQuickAddBtn")?.addEventListener("click", { _: Event ->
+        openQuickPurchaseModal()
     })
     
     // Add quick access to client accounts
@@ -4058,8 +4117,13 @@ fun displayPurchasesWithPagination() {
         for (columnKey in selectedColumns) {
             val cellValue = purchaseListCellValue(purchase, columnKey)
             val raw = cellValue.toString().trim()
-            val cellHtml = if (raw.length == 0) "" else escapeHtml(raw)
-            tableHTML.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
+            val cellHtml = when {
+                raw.isEmpty() -> ""
+                columnKey == "date" -> purchaseListDateCellHtml(raw)
+                else -> escapeHtml(raw)
+            }
+            val tdClass = if (columnKey == "date") """ class="purchase-list-date-td"""" else ""
+            tableHTML.append("""<td$tdClass style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
         }
         
         tableHTML.append("""</tr>""")
@@ -4180,11 +4244,16 @@ fun displayPurchasesAsCards() {
             val isValueNotEmpty = valueStr.length > 0 && valueStr.trim().length > 0
             
             if (isValueNotEmpty) {
-                val cellDisplay = escapeHtml(valueStr.trim())
+                val cellDisplay = if (columnKey == "date") {
+                    purchaseListDateCellHtml(valueStr.trim())
+                } else {
+                    escapeHtml(valueStr.trim())
+                }
+                val valueClass = if (columnKey == "date") "card-value purchase-list-date-td" else "card-value"
                 cardFields.append("""
                     <div class="card-field">
                         <span class="card-label">$label:</span>
-                        <div class="card-value">$cellDisplay</div>
+                        <div class="$valueClass">$cellDisplay</div>
                     </div>
                 """)
             }

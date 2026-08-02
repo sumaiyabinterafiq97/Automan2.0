@@ -408,9 +408,9 @@ CREATE TABLE car_brand_mapping (
     cc VARCHAR(100),
     door VARCHAR(100),
     seat VARCHAR(100),
-    grade VARCHAR(50),
+    grade VARCHAR(255),
     vehicle_type VARCHAR(100) NULL,
-    `rank` VARCHAR(50) NULL,
+    `rank` VARCHAR(255) NULL,
     color VARCHAR(100) NULL,
     drive_type VARCHAR(20) NULL,
     recycle_fee VARCHAR(100) NULL,
@@ -428,6 +428,7 @@ CREATE TABLE booking_mappings (
     consignee_name VARCHAR(255),
     consignee_address TEXT,
     pod TEXT,
+    final_destination TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_country (country)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

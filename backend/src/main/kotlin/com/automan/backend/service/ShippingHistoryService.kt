@@ -1,6 +1,8 @@
 package com.automan.backend.service
 
 import com.automan.backend.dto.ShippingHistoryBatchRequest
+import com.automan.backend.dto.ClientBasedShipmentCarDto
+import com.automan.backend.dto.ClientBasedShipmentDetailsPdfData
 import com.automan.backend.dto.InvoicePdfRequest
 import com.automan.backend.dto.ShippingHistoryInvoiceHeaderDto
 import com.automan.backend.dto.ShippingHistoryInvoiceLineDto
@@ -8,8 +10,10 @@ import com.automan.backend.dto.ShippingHistoryInvoiceSliceDto
 import com.automan.backend.dto.ShippingHistoryPageResponse
 import com.automan.backend.dto.ShippingHistoryRowDto
 import com.automan.backend.model.ShippingHistory
+import com.automan.backend.repository.ClientMapRepository
 import com.automan.backend.repository.InvoiceHistoryLineRepository
 import com.automan.backend.repository.ShippingHistoryRepository
+import com.automan.backend.util.CarModelYearUtils
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
@@ -25,6 +29,7 @@ class ShippingHistoryService(
     private val shippingHistoryRepository: ShippingHistoryRepository,
     private val purchaseService: PurchaseService,
     private val invoiceHistoryLineRepository: InvoiceHistoryLineRepository,
+    private val clientMapRepository: ClientMapRepository,
 ) {
 
     fun listAllRows(): List<ShippingHistoryRowDto> {
@@ -257,9 +262,59 @@ class ShippingHistoryService(
                 carName = p?.carName,
                 carModelYear = p?.carModelYear,
                 purchaseId = p?.id,
+                brand = p?.brand,
             )
         }
         return ShippingHistoryInvoiceSliceDto(header, lines)
+    }
+
+    /**
+     * Builds PDF data for Client-Based Shipment Details.
+     * Uses [invoiceSlice] so only not-yet-invoiced chassis are included.
+     */
+    @Transactional(readOnly = true)
+    fun buildClientBasedShipmentDetailsPdfData(clientName: String, vessel: String): ClientBasedShipmentDetailsPdfData {
+        val cn = clientName.trim()
+        val v = vessel.trim()
+        require(cn.isNotEmpty()) { "clientName is required" }
+        require(v.isNotEmpty()) { "vessel is required" }
+
+        val slice = invoiceSlice(cn, v)
+        require(slice.lines.isNotEmpty()) {
+            "No open (not-yet-invoiced) chassis for this client and vessel"
+        }
+
+        val clientMap = clientMapRepository.findByClientNameIgnoreCase(cn)
+        val header = slice.header
+        val cars = slice.lines.mapIndexed { index, line ->
+            val p = purchaseService.getPurchaseByChassis(line.chassis)
+            val maker = p?.brand?.trim()?.takeIf { it.isNotEmpty() } ?: "-"
+            val model = (line.carName ?: p?.carName)?.trim()?.takeIf { it.isNotEmpty() } ?: "-"
+            val yearRaw = line.carModelYear ?: p?.carModelYear
+            val year = CarModelYearUtils.extractYearFromCarModelYear(yearRaw).ifEmpty { "-" }
+            ClientBasedShipmentCarDto(
+                no = index + 1,
+                maker = maker,
+                model = model,
+                chassis = line.chassis.trim().ifEmpty { "-" },
+                year = year,
+            )
+        }
+
+        return ClientBasedShipmentDetailsPdfData(
+            documentDate = null, // PDF uses generation date when null
+            clientName = cn,
+            clientAddress = clientMap?.address?.trim()?.takeIf { it.isNotEmpty() },
+            vessel = header.vessel?.trim()?.takeIf { it.isNotEmpty() } ?: v,
+            bookingNo = header.bookingId,
+            carrier = header.carrier,
+            etd = header.shipmentDate,
+            eta = header.eta,
+            pol = header.pol,
+            pod = header.pod,
+            finalDestination = header.finalDestination,
+            cars = cars,
+        )
     }
 
     /**

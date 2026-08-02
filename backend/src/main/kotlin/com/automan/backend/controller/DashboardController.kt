@@ -16,7 +16,7 @@ class DashboardController(
     /**
      * Home operations dashboard — single payload.
      *
-     * @param period today | this_week | this_month | last_month | this_year | custom
+     * @param period today | this_week | this_month | last_month | this_year | current_fy | custom
      * @param from ISO yyyy-MM-dd (required when period=custom)
      * @param to ISO yyyy-MM-dd (required when period=custom)
      */

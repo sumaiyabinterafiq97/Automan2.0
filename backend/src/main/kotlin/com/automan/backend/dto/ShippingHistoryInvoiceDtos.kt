@@ -22,6 +22,8 @@ data class ShippingHistoryInvoiceLineDto(
     val carName: String? = null,
     val carModelYear: String? = null,
     val purchaseId: Long? = null,
+    /** Purchase brand / maker (optional; used by Client-Based Shipment Details UI). */
+    val brand: String? = null,
 )
 
 data class ShippingHistoryInvoiceSliceDto(

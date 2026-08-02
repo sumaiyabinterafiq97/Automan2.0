@@ -157,6 +157,11 @@ fun isPotentialStrictPurchaseDateInput(value: String): Boolean {
 
     if (yyyy.length > 4) return false
     if (yyyy.any { !it.isDigit() }) return false
+    // Complete year must be within project window (blocks visible junk like …/9000)
+    if (yyyy.length == 4) {
+        val year = yyyy.toIntOrNull() ?: return false
+        if (year !in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) return false
+    }
     return true
 }
 
@@ -335,6 +340,11 @@ fun isPotentialStrictMonthYearInput(value: String): Boolean {
     }
     if (yyyy.length > 4) return false
     if (yyyy.any { !it.isDigit() }) return false
+    // Complete year must be within project window (blocks visible junk like 00/9000)
+    if (yyyy.length == 4) {
+        val year = yyyy.toIntOrNull() ?: return false
+        if (year !in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) return false
+    }
     return true
 }
 
@@ -429,6 +439,10 @@ fun bindStrictDateTextMask(baseId: String, hintId: String? = null) {
 
     positionHiddenPickerOverButton(hidden, btn)
 
+    // Constrain native calendar to project year window (all bindStrictDateTextMask callers inherit this)
+    hidden.min = "${AppConstants.MIN_YEAR}-01-01"
+    hidden.max = "${AppConstants.MAX_YEAR}-12-31"
+
     if (hidden.value.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) setFromIso(hidden.value)
     else if (text.value.isNotBlank()) {
         val iso = strictMmDdYyyySlashToIso(text.value.trim())
@@ -512,6 +526,10 @@ fun bindStrictMonthYearTextMask(baseId: String, hintId: String? = null) {
     val hint = if (hintId.isNullOrBlank()) null else document.getElementById(hintId) as? HTMLElement
     val picker = ensureCarModelYearMonthPicker(baseId, btn)
     val pickerBound = picker.asDynamic().__carModelYearPickerBound as? Boolean ?: false
+
+    // Constrain native month picker to project year window
+    picker.min = "${AppConstants.MIN_YEAR}-01"
+    picker.max = "${AppConstants.MAX_YEAR}-12"
 
     fun syncHint() {
         hint?.style?.display = if (text.value.isBlank()) "block" else "none"
@@ -614,7 +632,9 @@ private fun openStrictYearPickerPopover(anchorBtn: HTMLElement, currentYear: Str
     pop.style.left = "${rect.left}px"
     pop.style.minWidth = "${rect.width.coerceAtLeast(100.0)}px"
     val nowY = js("new Date().getFullYear()").unsafeCast<Int>()
-    for (y in (nowY + 1) downTo 1980) {
+    val endY = (nowY + 1).coerceAtMost(AppConstants.MAX_YEAR)
+    val startY = AppConstants.MIN_YEAR
+    for (y in endY downTo startY) {
         val yearStr = y.toString()
         val item = document.createElement("button") as HTMLButtonElement
         item.type = "button"
@@ -663,6 +683,15 @@ fun bindStrictYearTextMask(baseId: String, hintId: String? = null) {
 
     text.addEventListener("input", { _: Event ->
         val digits = text.value.filter { it.isDigit() }.take(4)
+        if (digits.length == 4) {
+            val year = digits.toIntOrNull()
+            if (year == null || year !in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) {
+                // Reject complete out-of-range year; keep previous accepted value
+                text.value = hidden.value.takeIf { it.length == 4 } ?: digits.dropLast(1)
+                syncHint()
+                return@addEventListener
+            }
+        }
         text.value = digits
         hidden.value = when {
             digits.isEmpty() -> ""
@@ -682,7 +711,19 @@ fun bindStrictYearTextMask(baseId: String, hintId: String? = null) {
     })
     text.addEventListener("blur", { _: Event ->
         val t = text.value.trim()
-        hidden.value = if (t.isEmpty()) "" else if (t.length == 4 && t.all { it.isDigit() }) t else hidden.value
+        if (t.isEmpty()) {
+            hidden.value = ""
+        } else if (t.length == 4 && t.all { it.isDigit() }) {
+            val year = t.toIntOrNull()
+            if (year != null && year in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) {
+                hidden.value = t
+            } else {
+                // Keep display but do not commit invalid year; clear hidden so save validation fails cleanly
+                hidden.value = ""
+            }
+        } else {
+            hidden.value = hidden.value
+        }
         syncHint()
     })
     btn.addEventListener("click", { ev ->
@@ -764,7 +805,7 @@ fun storeBookingDetailsForPdf() {
     }
     val cyCutValue = optionalBookingDateIso("cyCutDate", "cyCutDateText")
     val etaValue = optionalBookingDateIso("etaDate", "etaDateText")
-    val finalDestinationValue = (document.getElementById("finalDestination") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val finalDestinationValue = bookingFormFieldValue("finalDestination")
         .ifEmpty { bookingDynString(carBookingFormState.finalDestination) }
     val notifyPartyValue = bookingFormFieldValue("notifyParty")
         .ifEmpty { bookingDynString(carBookingFormState.notifyParty) }
@@ -1071,8 +1112,15 @@ fun initializeAppSetup() {
             styleEl.innerHTML = '@keyframes fieldFadeIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }';
             document.head.appendChild(styleEl);
         }
+        window.__chassisFieldSelectionResolve = null;
         window.__chassisFieldSelectionDismiss = function() {
+            var pendingResolve = window.__chassisFieldSelectionResolve;
+            window.__chassisFieldSelectionResolve = null;
             document.querySelectorAll('.chassis-field-selection-backdrop').forEach(function(el) { el.remove(); });
+            // Settle orphaned Promise (same as Cancel) so a newer fetch cannot leave waiters hanging
+            if (typeof pendingResolve === 'function') {
+                try { pendingResolve(null); } catch (e) {}
+            }
         };
 
         window.showFieldSelectionModal = function(contextLabel, fieldLabel, options) {
@@ -1080,6 +1128,17 @@ fun initializeAppSetup() {
                 if (typeof window.__chassisFieldSelectionDismiss === 'function') {
                     window.__chassisFieldSelectionDismiss();
                 }
+                var settled = false;
+                function settle(value) {
+                    if (settled) return;
+                    settled = true;
+                    if (window.__chassisFieldSelectionResolve === settle) {
+                        window.__chassisFieldSelectionResolve = null;
+                    }
+                    resolve(value);
+                }
+                window.__chassisFieldSelectionResolve = settle;
+
                 var ctx = contextLabel || '';
                 if (ctx && ctx.indexOf(':') === -1) {
                     ctx = 'Chassis: ' + ctx;
@@ -1139,7 +1198,7 @@ fun initializeAppSetup() {
                 closeBtn.onmouseleave = function() { closeBtn.style.color = '#9ca3af'; };
                 closeBtn.onclick = function() {
                     backdrop.remove();
-                    resolve(null);
+                    settle(null);
                 };
 
                 header.appendChild(title);
@@ -1193,7 +1252,7 @@ fun initializeAppSetup() {
                     };
                     btn.onclick = function() {
                         backdrop.remove();
-                        resolve(opt);
+                        settle(opt);
                     };
                     btn.textContent = opt;
                     optionsContainer.appendChild(btn);
@@ -1231,7 +1290,7 @@ fun initializeAppSetup() {
                 };
                 cancelBtn.onclick = function() {
                     backdrop.remove();
-                    resolve(null);
+                    settle(null);
                 };
 
                 footer.appendChild(cancelBtn);
@@ -1404,6 +1463,144 @@ fun initializeAppSetup() {
                         resolve(null);
                     } else {
                         console.error('Error during field resolution:', err);
+                        resolve(null);
+                    }
+                });
+            });
+        };
+
+        // Quick Purchase only: disambiguate Grade/Rank/Seat/Door/Color/Fuel/CC (not Brand/WD/Shift/Drive Type).
+        window.resolveQuickPurchaseChassisSpecFields = function(chassis, uniqueValues, firstRow, allRows, lockedCarName) {
+            return new Promise(function(resolve) {
+                var result = {};
+                if (lockedCarName) result.carName = lockedCarName;
+                var activeRows = (allRows && Array.isArray(allRows) && allRows.length > 0) ? allRows : null;
+
+                function cellMatchesValue(raw, selected) {
+                    if (!selected) return true;
+                    var s = String(selected).trim().toLowerCase();
+                    if (!s) return true;
+                    if (raw == null || raw === undefined) return false;
+                    var str = String(raw).trim();
+                    if (!str) return false;
+                    if (str.toLowerCase() === s) return true;
+                    var parts = str.split(';');
+                    for (var i = 0; i < parts.length; i++) {
+                        if (parts[i].trim().toLowerCase() === s) return true;
+                    }
+                    return false;
+                }
+
+                function rowMatchesSelections(row) {
+                    if (!activeRows) return true;
+                    if (result.carName && !cellMatchesValue(row.carName, result.carName)) return false;
+                    if (result.fuel && !cellMatchesValue(row.fuel, result.fuel)) return false;
+                    if (result.grade && !cellMatchesValue(row.grade, result.grade)) return false;
+                    if (result.cc && !cellMatchesValue(row.cc, result.cc)) return false;
+                    if (result.door && !cellMatchesValue(row.door, result.door)) return false;
+                    if (result.seat && !cellMatchesValue(row.seat, result.seat)) return false;
+                    if (result.rank && !cellMatchesValue(row.rank, result.rank)) return false;
+                    if (result.color && !cellMatchesValue(row.color, result.color)) return false;
+                    return true;
+                }
+
+                function rawFromRow(row, fieldKey) {
+                    switch (fieldKey) {
+                        case 'fuels': return row.fuel;
+                        case 'grades': return row.grade;
+                        case 'ccs': return row.cc;
+                        case 'doors': return row.door;
+                        case 'seats': return row.seat;
+                        case 'ranks': return row.rank;
+                        case 'colors': return row.color;
+                        default: return '';
+                    }
+                }
+
+                function getFieldRawList(fieldKey) {
+                    var fallback = (uniqueValues && uniqueValues[fieldKey]) ? uniqueValues[fieldKey] : [];
+                    if (!Array.isArray(fallback)) fallback = [];
+                    if (!activeRows || activeRows.length === 0) return fallback.slice();
+                    var out = [];
+                    activeRows.forEach(function(row) {
+                        if (!rowMatchesSelections(row)) return;
+                        var raw = rawFromRow(row, fieldKey);
+                        if (raw != null && raw !== undefined) {
+                            var s = String(raw).trim();
+                            if (s && s !== '0') out.push(s);
+                        }
+                    });
+                    return out.length > 0 ? out : fallback.slice();
+                }
+
+                function resolveField(label, fieldKey, defaultValue) {
+                    return new Promise(function(res, rej) {
+                        var uniqueList = getFieldRawList(fieldKey);
+                        if (!uniqueList || !Array.isArray(uniqueList)) {
+                            res(defaultValue || '');
+                            return;
+                        }
+                        var distinct = [];
+                        var seen = {};
+                        uniqueList.forEach(function(x) {
+                            if (x == null || x === undefined) return;
+                            var parts = String(x).split(';');
+                            parts.forEach(function(p) {
+                                var s = p.trim();
+                                if (s && s !== '0' && !seen[s.toLowerCase()]) {
+                                    seen[s.toLowerCase()] = true;
+                                    distinct.push(s);
+                                }
+                            });
+                        });
+                        if (distinct.length <= 1) {
+                            res(distinct.length ? distinct[0] : (defaultValue || ''));
+                            return;
+                        }
+                        window.showFieldSelectionModal('Chassis: ' + chassis, label, distinct).then(function(chosen) {
+                            if (chosen === null) {
+                                rej('CANCELLED');
+                            } else {
+                                res(chosen);
+                            }
+                        });
+                    });
+                }
+
+                resolveField('Fuel', 'fuels', firstRow && firstRow.fuel)
+                .then(function(fuel) {
+                    result.fuel = fuel;
+                    return resolveField('Grade', 'grades', firstRow && firstRow.grade);
+                })
+                .then(function(grade) {
+                    result.grade = grade;
+                    return resolveField('CC', 'ccs', firstRow && firstRow.cc);
+                })
+                .then(function(cc) {
+                    result.cc = cc;
+                    return resolveField('Door', 'doors', firstRow && firstRow.door);
+                })
+                .then(function(door) {
+                    result.door = door;
+                    return resolveField('Seat', 'seats', firstRow && firstRow.seat);
+                })
+                .then(function(seat) {
+                    result.seat = seat;
+                    return resolveField('Rank', 'ranks', firstRow && firstRow.rank);
+                })
+                .then(function(rank) {
+                    result.rank = rank;
+                    return resolveField('Color', 'colors', firstRow && firstRow.color);
+                })
+                .then(function(color) {
+                    result.color = color;
+                    resolve(result);
+                })
+                .catch(function(err) {
+                    if (err === 'CANCELLED') {
+                        resolve(null);
+                    } else {
+                        console.error('Error during QP field resolution:', err);
                         resolve(null);
                     }
                 });
@@ -2133,7 +2330,7 @@ fun ensureNumberCutPlaceOptionsLoaded(onReady: (() -> Unit)? = null) {
         }
 }
 
-private fun repopulateNumberCutPlaceCombobox(selectId: String, selectedJapanese: String = "") {
+internal fun repopulateNumberCutPlaceCombobox(selectId: String, selectedJapanese: String = "") {
     val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
     val current = selectedJapanese.trim().ifEmpty { getComboboxValueSafe(selectId).trim() }
     select.innerHTML = ""
@@ -2202,6 +2399,9 @@ fun populateNumberCutPlaceComboboxesForPurchaseForm() {
         val initial = getInitialPlaceFromNumberCut(nc)
         repopulateNumberCutPlaceCombobox("editNumberCutPlace", initial)
         prefillEditNumberCutDetailFields(nc)
+        if (document.getElementById("qpNumberCutPlace") != null) {
+            repopulateNumberCutPlaceCombobox("qpNumberCutPlace")
+        }
     }
 }
 
@@ -2784,7 +2984,7 @@ fun purchaseComboboxDisplayedValue(fieldId: String): String {
 }
 
 /** Distance UI may include commas and `km` suffix; DB expects digits only. */
-private fun sanitizeDistanceUiToDb(value: String): String =
+internal fun sanitizeDistanceUiToDb(value: String): String =
     value.trim().replace(Regex("[^0-9]"), "")
 
 fun applyPurchaseCountryFromClientName(clientSelectId: String, clearCountryWhenNameEmpty: Boolean = true) {
@@ -3330,6 +3530,7 @@ fun setupEditableComboboxHandlers() {
             'editConsignee', 'editPod', 'editRepairCompany',
             // Add Quick Purchase modal
             'qpChassis', 'qpChassisNumber', 'qpCarName', 'qpAuctionName', 'qpRixoCompany', 'qpStockLocation', 'qpClientName', 'qpCountry',
+            'qpGrade', 'qpRank', 'qpSeat', 'qpDoor', 'qpColor', 'qpFuel', 'qpCc', 'qpNumberCutPlace', 'qpNumberCutHiragana',
             // Chassis Map (Car Brand) Add/Edit/Duplicate modals — chip multi-select comboboxes
             'carBrandBrand', 'carBrandFuel', 'carBrandWd', 'carBrandShift', 'carBrandColor', 'carBrandDriveType',
             // Client Map Add/Edit/Duplicate modals — chip multi-select comboboxes
@@ -5888,6 +6089,7 @@ fun createApp(root: Element) {
                             </div>
                             <div id="shipmentItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
                                 <button id="carBookingBtn" class="shipment-list-item" type="button" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Booking</button>
+                                <button id="clientShipmentDetailsBtn" class="shipment-list-item" type="button" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client-Based Shipment Details</button>
                                 <button id="shipmentStatusBtn" class="shipment-list-item" type="button" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping History</button>
                             </div>
                         </div>
@@ -6502,6 +6704,12 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        routeAtStartsWith(route, "client-shipment-details") -> {
+            showClientShipmentDetailsPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
         routeAtStartsWith(route, "recreate-invoice") ||
             routeAtStartsWith(route, "invoice") -> {
             showInvoicePage()
@@ -6802,120 +7010,121 @@ fun showAuthPage(signInMode: Boolean = false) {
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div class="auth-container">
-            <!-- Background with automotive theme -->
             <div class="auth-background">
                 <div class="background-overlay"></div>
-                </div> 
-            
-            <!-- Auth Modal -->
-            <div class="auth-modal">
+            </div>
+
+            <div class="auth-modal" role="main" aria-labelledby="authModalTitle">
                 <div class="modal-header">
-                    <h1 class="modal-title" id="authModalTitle">Sign Up</h1>
-                    <button class="close-btn" id="closeAuth">×</button>
-                </div> 
-                
+                    <div class="auth-brand-block">
+                        <p class="auth-brand-name">Automan</p>
+                        <h1 class="modal-title" id="authModalTitle">Sign In</h1>
+                    </div>
+                </div>
+
                 <!-- Signup Panel -->
                 <div id="signupPanel" class="auth-panel" style="display:block;">
-                    <div class="panel-content">
+                    <form id="signupForm" class="panel-content" novalidate>
                         <div class="form-group">
-                            <label class="form-label">Email</label>
+                            <label class="form-label" for="su_email">Email</label>
                             <div class="input-container">
-                                <input id="su_email" type="email" placeholder="Enter your email" class="form-input"/>
-                                <span class="input-icon">✉️</span>
-                    </div> 
-                            <span id="su_email_error" class="auth-field-error" style="display:none;"></span>
-                    </div> 
+                                <input id="su_email" name="email" type="email" autocomplete="email" required
+                                       placeholder="Enter your email" class="form-input" aria-describedby="su_email_error"/>
+                                <span class="input-icon" aria-hidden="true">✉️</span>
+                            </div>
+                            <span id="su_email_error" class="auth-field-error" style="display:none;" role="alert"></span>
+                        </div>
                         <div class="form-group">
-                            <label class="form-label">Your Name</label>
+                            <label class="form-label" for="su_name">Your Name</label>
                             <div class="input-container">
-                                <input id="su_name" type="text" placeholder="Enter your name" class="form-input"/>
-                                <span class="input-icon">👤</span>
-                    </div> 
-                    </div> 
-                        
+                                <input id="su_name" name="name" type="text" autocomplete="name" required
+                                       placeholder="Enter your name" class="form-input"/>
+                                <span class="input-icon" aria-hidden="true">👤</span>
+                            </div>
+                        </div>
                         <div class="form-group">
-                            <label class="form-label">Password</label>
+                            <label class="form-label" for="su_pass">Password</label>
                             <div class="input-container">
-                                <input id="su_pass" type="password" placeholder="Enter your password" class="form-input"/>
-                                <span class="input-icon">🔒</span>
-                    </div> 
+                                <input id="su_pass" name="password" type="password" autocomplete="new-password" required
+                                       placeholder="Enter your password" class="form-input"
+                                       aria-describedby="su_pass_strength"/>
+                                <span class="input-icon" aria-hidden="true">🔒</span>
+                            </div>
                             <div id="su_pass_strength" class="auth-password-hints">
                                 <span id="su_pass_len" class="hint">At least 8 characters</span>
                                 <span id="su_pass_upper" class="hint">One uppercase letter</span>
                                 <span id="su_pass_lower" class="hint">One lowercase letter</span>
                                 <span id="su_pass_digit" class="hint">One number</span>
-                        </div>
+                            </div>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">Role</label>
+                            <label class="form-label" for="su_role">Role</label>
                             <div class="input-container">
-                                <select id="su_role" class="form-input">
-                                    <option value="VIEWER">Viewer</option>
-                                    <option value="EDITOR">Editor</option>
-                                    <option value="ADMIN">Admin</option>
+                                <select id="su_role" name="role" class="form-input" aria-describedby="su_role_hint">
+                                    <option value="VIEWER" selected>Viewer</option>
                                 </select>
-                                <span class="input-icon">👤</span>
-                            </div> 
+                                <span class="input-icon" aria-hidden="true">👤</span>
+                            </div>
+                            <p id="su_role_hint" class="auth-role-hint">New accounts start as Viewer. An admin can change your role after approval.</p>
                         </div>
-                        
+
                         <div class="form-options">
-                            <label class="checkbox-container">
-                                <input type="checkbox" id="rememberMe">
-                                <span class="checkmark"></span>
-                                Remember me
+                            <label class="checkbox-container" for="rememberMe">
+                                <input type="checkbox" id="rememberMe" name="rememberEmail">
+                                <span class="checkmark" aria-hidden="true"></span>
+                                Remember email
                             </label>
-                            <a href="#" class="forgot-link">Forget Password?</a>
                         </div>
-                        
-                        <div id="signupMessage" class="auth-message" style="display:none;"></div>
-                        <button id="btn_signup" class="auth-button">Sign Up</button>
+
+                        <div id="signupMessage" class="auth-message" style="display:none;" role="status"></div>
+                        <button type="submit" id="btn_signup" class="auth-button">Sign Up</button>
                         <div class="auth-switch">
                             <span>Already have an account? </span>
-                            <button id="toggleToSignin" class="switch-link">Sign In</button>
+                            <button type="button" id="toggleToSignin" class="switch-link">Sign In</button>
                         </div>
-                    </div>
+                    </form>
                 </div>
 
                 <!-- Signin Panel -->
                 <div id="signinPanel" class="auth-panel" style="display:none;">
-                    <div class="panel-content">
+                    <form id="signinForm" class="panel-content" novalidate>
                         <div class="form-group">
-                            <label class="form-label">Email</label>
+                            <label class="form-label" for="si_email">Email</label>
                             <div class="input-container">
-                                <input id="si_email" type="email" placeholder="Enter your email" class="form-input"/>
-                                <span class="input-icon">✉️</span>
-                    </div> 
-                    </div> 
-                        
+                                <input id="si_email" name="email" type="email" autocomplete="username" required
+                                       placeholder="Enter your email" class="form-input"/>
+                                <span class="input-icon" aria-hidden="true">✉️</span>
+                            </div>
+                        </div>
                         <div class="form-group">
-                            <label class="form-label">Password</label>
+                            <label class="form-label" for="si_pass">Password</label>
                             <div class="input-container">
-                                <input id="si_pass" type="password" placeholder="Enter your password" class="form-input"/>
-                                <span class="input-icon">🔒</span>
-                    </div> 
-                    </div> 
-                        
-                        
+                                <input id="si_pass" name="password" type="password" autocomplete="current-password" required
+                                       placeholder="Enter your password" class="form-input"/>
+                                <span class="input-icon" aria-hidden="true">🔒</span>
+                            </div>
+                        </div>
+
                         <div class="form-options">
-                            <label class="checkbox-container">
-                                <input type="checkbox" id="rememberMeSignin">
-                                <span class="checkmark"></span>
-                                Remember me
+                            <label class="checkbox-container" for="rememberMeSignin">
+                                <input type="checkbox" id="rememberMeSignin" name="rememberEmail">
+                                <span class="checkmark" aria-hidden="true"></span>
+                                Remember email
                             </label>
-                            <a href="#" class="forgot-link">Forget Password?</a>
-                </div> 
-                        
-                        <button id="btn_signin" class="auth-button">Sign In</button>
-                        
+                        </div>
+
+                        <div id="signinMessage" class="auth-message" style="display:none;" role="status"></div>
+                        <button type="submit" id="btn_signin" class="auth-button">Sign In</button>
+
                         <div class="auth-switch">
                             <span>Don't have an account? </span>
-                            <button id="toggleToSignup" class="switch-link">Sign Up</button>
-            </div> 
-                    </div>
+                            <button type="button" id="toggleToSignup" class="switch-link">Sign Up</button>
+                        </div>
+                    </form>
                 </div>
             </div>
         </div>
-        
+
             <style>
             .auth-container {
                 position: fixed;
@@ -6929,7 +7138,7 @@ fun showAuthPage(signInMode: Boolean = false) {
                 font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 overflow: hidden;
             }
-            
+
             .auth-background {
                 position: absolute;
                 top: 0;
@@ -6939,7 +7148,7 @@ fun showAuthPage(signInMode: Boolean = false) {
                 background: url('images/login-bg.png') center/cover no-repeat;
                 z-index: 1;
             }
-            
+
             .background-overlay {
                 position: absolute;
                 top: 0;
@@ -6949,8 +7158,7 @@ fun showAuthPage(signInMode: Boolean = false) {
                 background: rgba(0, 0, 0, 0.4);
                 z-index: 2;
             }
-            
-            
+
             .auth-modal {
                 position: relative;
                 background: rgba(0, 0, 0, 0.3);
@@ -6962,52 +7170,47 @@ fun showAuthPage(signInMode: Boolean = false) {
                 z-index: 10;
                 border: 1px solid rgba(255, 255, 255, 0.1);
             }
-            
+
             .modal-header {
                 display: flex;
                 justify-content: space-between;
-                align-items: center;
+                align-items: flex-start;
                 padding: 24px 24px 0 24px;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                border-bottom: 1px solid rgba(255, 255, 255, 0.12);
                 margin-bottom: 24px;
+                padding-bottom: 16px;
             }
-            
+
+            .auth-brand-block {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+
+            .auth-brand-name {
+                margin: 0;
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                color: rgba(255, 255, 255, 0.75);
+            }
+
             .modal-title {
                 font-size: 24px;
                 font-weight: 700;
                 color: white;
                 margin: 0;
             }
-            
-            .close-btn {
-                background: none;
-                border: none;
-                font-size: 24px;
-                color: white;
-                cursor: pointer;
-                padding: 4px;
-                border-radius: 50%;
-                width: 32px;
-                height: 32px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                transition: all 0.2s;
-            }
-            
-            .close-btn:hover {
-                background: rgba(255, 255, 255, 0.2);
-                color: white;
-            }
-            
+
             .auth-panel {
                 padding: 0 24px 24px 24px;
             }
-            
+
             .form-group {
                 margin-bottom: 20px;
             }
-            
+
             .form-label {
                 display: block;
                 font-size: 14px;
@@ -7015,11 +7218,11 @@ fun showAuthPage(signInMode: Boolean = false) {
                 color: white;
                 margin-bottom: 8px;
             }
-            
+
             .input-container {
                 position: relative;
             }
-            
+
             .form-input {
                 width: 100%;
                 padding: 12px 16px 12px 40px;
@@ -7030,18 +7233,19 @@ fun showAuthPage(signInMode: Boolean = false) {
                 background: rgba(255, 255, 255, 0.1);
                 outline: none;
                 color: white;
+                box-sizing: border-box;
             }
-            
+
             .form-input::placeholder {
                 color: rgba(255, 255, 255, 0.7);
             }
-            
+
             .form-input:focus {
                 border-color: rgba(255, 255, 255, 0.6);
-                box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+                box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
                 background: rgba(255, 255, 255, 0.2);
             }
-            
+
             .input-icon {
                 position: absolute;
                 left: 12px;
@@ -7049,9 +7253,9 @@ fun showAuthPage(signInMode: Boolean = false) {
                 transform: translateY(-50%);
                 font-size: 16px;
                 color: rgba(255, 255, 255, 0.7);
+                pointer-events: none;
             }
-            
-            /* Select dropdown styling */
+
             select.form-input {
                 appearance: none;
                 -webkit-appearance: none;
@@ -7063,21 +7267,27 @@ fun showAuthPage(signInMode: Boolean = false) {
                 padding-right: 40px;
                 cursor: pointer;
             }
-            
+
             select.form-input option {
                 background: #1a1a1a;
                 color: white;
                 padding: 8px;
             }
-            
-            
+
+            .auth-role-hint {
+                margin: 8px 0 0;
+                font-size: 12px;
+                line-height: 1.4;
+                color: rgba(255, 255, 255, 0.72);
+            }
+
             .form-options {
                 display: flex;
-                justify-content: space-between;
+                justify-content: flex-start;
                 align-items: center;
                 margin-bottom: 24px;
             }
-            
+
             .checkbox-container {
                 display: flex;
                 align-items: center;
@@ -7085,26 +7295,15 @@ fun showAuthPage(signInMode: Boolean = false) {
                 font-size: 14px;
                 color: white;
             }
-            
+
             .checkbox-container input {
                 margin-right: 8px;
             }
-            
-            .forgot-link {
-                color: rgba(255, 255, 255, 0.8);
-                text-decoration: none;
-                font-size: 14px;
-                font-weight: 500;
-            }
-            
-            .forgot-link:hover {
-                text-decoration: underline;
-            }
-            
+
             .auth-button {
                 width: 100%;
                 padding: 14px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
                 color: white;
                 border: none;
                 border-radius: 12px;
@@ -7114,47 +7313,46 @@ fun showAuthPage(signInMode: Boolean = false) {
                 transition: all 0.3s ease;
                 margin-bottom: 20px;
             }
-            
-            .auth-button:hover {
+
+            .auth-button:hover:not(:disabled) {
                 transform: translateY(-2px);
-                box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+                box-shadow: 0 8px 25px rgba(37, 99, 235, 0.4);
             }
-            
-            .auth-button:active {
+
+            .auth-button:disabled {
+                opacity: 0.65;
+                cursor: not-allowed;
+                transform: none;
+            }
+
+            .auth-button:active:not(:disabled) {
                 transform: translateY(0);
             }
-            
+
             .auth-switch {
                 text-align: center;
                 font-size: 14px;
                 color: white;
             }
-            
+
             .switch-link {
                 background: none;
                 border: none;
-                color: rgba(255, 255, 255, 0.8);
+                color: rgba(255, 255, 255, 0.9);
                 font-weight: 600;
                 cursor: pointer;
                 text-decoration: underline;
+                padding: 0;
             }
-            
+
             .switch-link:hover {
                 color: white;
             }
-            
+
             @media (max-width: 480px) {
                 .auth-modal {
                     width: 95%;
                     margin: 20px;
-                }
-                
-                .role-selection {
-                    flex-direction: column;
-                }
-                
-                .role-card {
-                    min-width: auto;
                 }
             }
             </style>
@@ -7204,39 +7402,76 @@ fun applyRoleBasedSignupRestrictions(currentUserRole: String) {
     document.querySelector(".si-role[data-role='VIEWER']")?.classList?.add("active")
 }
 private fun setupAuthHandlers(initialSignInMode: Boolean) {
-    var signupRole = "VIEWER"
-    var signinRole = "VIEWER"
+    val rememberEmailKey = "authRememberEmail"
     val signupPanel = document.getElementById("signupPanel") as HTMLElement
     val signinPanel = document.getElementById("signinPanel") as HTMLElement
     val titleEl = document.getElementById("authModalTitle") as HTMLElement
     val toSignin = document.getElementById("toggleToSignin") as HTMLButtonElement
     val toSignup = document.getElementById("toggleToSignup") as HTMLButtonElement
 
-    var isSigninMode = false
+    fun showAuthMessage(elementId: String, text: String, isError: Boolean) {
+        val el = document.getElementById(elementId) as? HTMLElement ?: return
+        el.style.display = "block"
+        el.textContent = text
+        el.setAttribute("data-auth-msg", if (isError) "error" else "success")
+        el.style.color = if (isError) "#fecaca" else "#bbf7d0"
+        el.style.backgroundColor = if (isError) "rgba(127, 29, 29, 0.55)" else "rgba(21, 128, 61, 0.45)"
+        el.style.border = if (isError) "1px solid rgba(252, 165, 165, 0.45)" else "1px solid rgba(134, 239, 172, 0.4)"
+    }
 
-    fun showSignupMessage(text: String, isError: Boolean) {
-        val el = document.getElementById("signupMessage") as? HTMLElement
-        if (el != null) {
-            el.style.display = "block"
-            el.textContent = text
-            el.style.color = if (isError) "#b91c1c" else "#166534"
-            el.style.backgroundColor = if (isError) "#fee2e2" else "#d1fae5"
+    fun showSignupMessage(text: String, isError: Boolean) =
+        showAuthMessage("signupMessage", text, isError)
+
+    fun showSigninMessage(text: String, isError: Boolean) =
+        showAuthMessage("signinMessage", text, isError)
+
+    fun clearSignupMessages() {
+        (document.getElementById("signupMessage") as? HTMLElement)?.let {
+            it.style.display = "none"
+            it.textContent = ""
+            it.removeAttribute("data-auth-msg")
+        }
+        (document.getElementById("su_email_error") as? HTMLElement)?.let {
+            it.style.display = "none"
+            it.textContent = ""
         }
     }
-    fun clearSignupMessages() {
-        (document.getElementById("signupMessage") as? HTMLElement)?.let { it.style.display = "none"; it.textContent = "" }
-        (document.getElementById("su_email_error") as? HTMLElement)?.let { it.style.display = "none"; it.textContent = "" }
+
+    fun clearSigninMessages() {
+        (document.getElementById("signinMessage") as? HTMLElement)?.let {
+            it.style.display = "none"
+            it.textContent = ""
+            it.removeAttribute("data-auth-msg")
+        }
     }
 
-    // Check if user is already logged in and get their role
-    val currentUserRole = window.localStorage.getItem("authUserRole")
-    
+    fun restoreRememberedEmail() {
+        val saved = window.localStorage.getItem(rememberEmailKey)?.trim().orEmpty()
+        if (saved.isBlank()) return
+        (document.getElementById("si_email") as? HTMLInputElement)?.let {
+            it.value = saved
+            (document.getElementById("rememberMeSignin") as? HTMLInputElement)?.checked = true
+        }
+        (document.getElementById("su_email") as? HTMLInputElement)?.let {
+            it.value = saved
+            (document.getElementById("rememberMe") as? HTMLInputElement)?.checked = true
+        }
+    }
+
+    fun persistRememberedEmail(email: String, remember: Boolean) {
+        if (remember && email.isNotBlank()) {
+            safeLocalStorageSet(rememberEmailKey, email.trim())
+        } else {
+            window.localStorage.removeItem(rememberEmailKey)
+        }
+    }
+
     fun setModeSignin(signin: Boolean) {
-        isSigninMode = signin
         if (signin) {
             signupPanel.style.display = "none"
             signinPanel.style.display = "block"
-            titleEl.textContent = "Login"
+            titleEl.textContent = "Sign In"
+            clearSigninMessages()
         } else {
             signupPanel.style.display = "block"
             signinPanel.style.display = "none"
@@ -7246,43 +7481,26 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
     }
     toSignin.addEventListener("click", { _: Event -> navigateToApp("/login") })
     toSignup.addEventListener("click", { _: Event -> navigateToApp("/signup") })
-    
-    setModeSignin(initialSignInMode)
-    
-    // Apply role-based restrictions to signup roles
-    // If no user is logged in (null), show all roles for initial signup
-    applyRoleBasedSignupRestrictions(currentUserRole ?: "GUEST")
 
-    // Role pickers
-    val sgRoles = document.getElementsByClassName("sg-role")
-    for (i in 0 until sgRoles.length) {
-        val el = sgRoles.item(i) as HTMLElement
-        el.addEventListener("click", { _: Event ->
-            signupRole = el.getAttribute("data-role") ?: "VIEWER"
-            for (j in 0 until sgRoles.length) (sgRoles.item(j) as HTMLElement).classList.remove("active")
-            el.classList.add("active")
-        })
-    }
-    val siRoles = document.getElementsByClassName("si-role")
-    for (i in 0 until siRoles.length) {
-        val el = siRoles.item(i) as HTMLElement
-        el.addEventListener("click", { _: Event ->
-            signinRole = el.getAttribute("data-role") ?: "VIEWER"
-            for (j in 0 until siRoles.length) (siRoles.item(j) as HTMLElement).classList.remove("active")
-            el.classList.add("active")
-        })
-    }
+    setModeSignin(initialSignInMode)
+    restoreRememberedEmail()
+
+    // Guest public signup is locked to VIEWER (select only offers that option).
+    applyRoleBasedSignupRestrictions("GUEST")
 
     fun doSignup() {
         clearSignupMessages()
         val email = (document.getElementById("su_email") as HTMLInputElement).value.trim()
         val name = (document.getElementById("su_name") as HTMLInputElement).value.trim()
         val pass = (document.getElementById("su_pass") as HTMLInputElement).value
-        val role = (document.getElementById("su_role") as HTMLSelectElement).value
-        if (email.isBlank() || name.isBlank() || pass.isBlank() || role.isBlank()) {
+        val role = "VIEWER"
+        (document.getElementById("su_role") as? HTMLSelectElement)?.value = role
+        if (email.isBlank() || name.isBlank() || pass.isBlank()) {
             showSignupMessage("Please fill in all fields", true)
             return
         }
+        val remember = (document.getElementById("rememberMe") as? HTMLInputElement)?.checked == true
+        persistRememberedEmail(email, remember)
         val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:email,name:name,password:pass,role:role})})")
         (document.getElementById("btn_signup") as? HTMLButtonElement)?.disabled = true
         window.fetch(apiUrl("auth/signup"), body)
@@ -7313,38 +7531,55 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
     }
 
     fun doSignin() {
-        val email = (document.getElementById("si_email") as HTMLInputElement).value
+        clearSigninMessages()
+        val email = (document.getElementById("si_email") as HTMLInputElement).value.trim()
         val pass = (document.getElementById("si_pass") as HTMLInputElement).value
         if (email.isBlank() || pass.isBlank()) {
-            js("alert('Please fill in all fields')")
+            showSigninMessage("Please fill in all fields", true)
             return
         }
+        val remember = (document.getElementById("rememberMeSignin") as? HTMLInputElement)?.checked == true
+        persistRememberedEmail(email, remember)
         val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:email,password:pass})})")
+        (document.getElementById("btn_signin") as? HTMLButtonElement)?.disabled = true
         window.fetch(apiUrl("auth/login"), body)
-            .then { it.json() }
-            .then { resp ->
-                val token = resp.asDynamic().token as String?
-                val role = resp.asDynamic().role as String?
-                val nameResp = resp.asDynamic().name as String?
-                val userId = resp.asDynamic().id as Number?
-                if (token != null) {
-                    safeLocalStorageSet("authToken", token)
-                    if (role != null) safeLocalStorageSet("authUserRole", role)
-                    if (nameResp != null) safeLocalStorageSet("authUserName", nameResp)
-                    if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
-                    navigateToPurchaseList(forceClearFilters = true)
-                    updateUserInfoInSidebar()
-                    applyRoleBasedRestrictions()
-                } else js("alert('Login failed')")
+            .then { response ->
+                response.json().then { resp ->
+                    (document.getElementById("btn_signin") as? HTMLButtonElement)?.disabled = false
+                    val token = resp.asDynamic().token as String?
+                    val role = resp.asDynamic().role as String?
+                    val nameResp = resp.asDynamic().name as String?
+                    val userId = resp.asDynamic().id as Number?
+                    val message = resp.asDynamic().message as String?
+                    if (response.ok && token != null) {
+                        safeLocalStorageSet("authToken", token)
+                        if (role != null) safeLocalStorageSet("authUserRole", role)
+                        if (nameResp != null) safeLocalStorageSet("authUserName", nameResp)
+                        if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
+                        navigateToPurchaseList(forceClearFilters = true)
+                        updateUserInfoInSidebar()
+                        applyRoleBasedRestrictions()
+                    } else {
+                        showSigninMessage(message ?: "Login failed. Check your email and password.", true)
+                    }
+                }
             }
             .catch { error ->
+                (document.getElementById("btn_signin") as? HTMLButtonElement)?.disabled = false
                 Logger.error("Network error during login: ${error.toString()}")
-                js("alert('Network error during login')")
+                showSigninMessage("Network error during login", true)
             }
     }
-    document.getElementById("btn_signup")?.addEventListener("click", { _: Event -> doSignup() })
-    document.getElementById("btn_signin")?.addEventListener("click", { _: Event -> doSignin() })
-    
+
+    (document.getElementById("signupForm") as? HTMLFormElement)?.addEventListener("submit", { e: Event ->
+        e.preventDefault()
+        doSignup()
+    })
+    (document.getElementById("signinForm") as? HTMLFormElement)?.addEventListener("submit", { e: Event ->
+        e.preventDefault()
+        doSignin()
+    })
+
     // Password strength (real-time)
     document.getElementById("su_pass")?.addEventListener("input", { _: Event ->
         val pass = (document.getElementById("su_pass") as? HTMLInputElement)?.value ?: ""
@@ -7372,11 +7607,6 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
                 }
             }
             .catch { _ -> Unit }
-    })
-    
-    // Close button handler
-    document.getElementById("closeAuth")?.addEventListener("click", { _: Event ->
-        window.location.href = "/"
     })
 }
 
@@ -7579,6 +7809,14 @@ fun setupSidebarListeners() {
         shipmentStatusBtn.addEventListener("click", { _: Event ->
             closeSidebar()
             navigateToApp("/shipping-history")
+        })
+    }
+    val clientShipmentDetailsBtn = document.getElementById("clientShipmentDetailsBtn")
+    if (clientShipmentDetailsBtn != null && !clientShipmentDetailsBtn.hasAttribute("data-listener-attached")) {
+        clientShipmentDetailsBtn.setAttribute("data-listener-attached", "true")
+        clientShipmentDetailsBtn.addEventListener("click", { _: Event ->
+            closeSidebar()
+            navigateToApp("/client-shipment-details")
         })
     }
     
@@ -8420,7 +8658,7 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label for="venueIdInput">Venue ID</label>
-                        ${createEditableCombobox("venueId", "Select Venue ID", showDropdownButton = false)}
+                        ${createEditableCombobox("venueId", "Select Venue ID")}
                     </div>
                 </div>
                 
@@ -12408,11 +12646,23 @@ private fun storeQuickPurchaseChassisMappingCache(
     carModelYearRaw: String,
     manufactureYearRaw: String,
     chassisNumberRaw: String,
+    grade: String = "",
+    rank: String = "",
+    color: String = "",
+    seat: String = "",
+    door: String = "",
+    cc: String = "",
 ) {
     val cache = js("{}").unsafeCast<dynamic>()
     cache.brand = brand
     cache.carName = carName
     cache.fuel = fuel
+    cache.grade = grade
+    cache.rank = rank
+    cache.color = color
+    cache.seat = seat
+    cache.door = door
+    cache.cc = cc
     cache.recycleFeeRaw = recycleFeeRaw
     cache.carModelYearRaw = carModelYearRaw
     cache.manufactureYearRaw = manufactureYearRaw
@@ -12438,8 +12688,35 @@ internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
     if (cache != null && cache != js("undefined")) {
         val brand = (cache.brand?.toString() ?: "").trim()
         if (brand.isNotBlank()) purchaseData.brand = brand
+        // UI Fuel (and other specs) win; cache only fills blanks.
+        val existingFuel = (purchaseData.fuel?.toString() ?: "").trim()
         val fuel = (cache.fuel?.toString() ?: "").trim()
-        if (fuel.isNotBlank()) purchaseData.fuel = fuel
+        if (existingFuel.isBlank() && fuel.isNotBlank()) purchaseData.fuel = fuel
+        val existingGrade = (purchaseData.grade?.toString() ?: "").trim()
+        val grade = (cache.grade?.toString() ?: "").trim()
+        if (existingGrade.isBlank() && grade.isNotBlank()) purchaseData.grade = grade
+        val existingRank = (purchaseData.rank?.toString() ?: "").trim()
+        val rank = (cache.rank?.toString() ?: "").trim()
+        if (existingRank.isBlank() && rank.isNotBlank()) purchaseData.rank = rank
+        val existingColor = (purchaseData.color?.toString() ?: "").trim()
+        val color = (cache.color?.toString() ?: "").trim()
+        if (existingColor.isBlank() && color.isNotBlank()) purchaseData.color = color
+        val existingSeat = (purchaseData.seat?.toString() ?: "").trim()
+        val seat = (cache.seat?.toString() ?: "").trim()
+        if (existingSeat.isBlank() && seat.isNotBlank()) purchaseData.seat = seat
+        val existingDoor = (purchaseData.door?.toString() ?: "").trim()
+        val door = (cache.door?.toString() ?: "").trim()
+        if (existingDoor.isBlank() && door.isNotBlank()) purchaseData.door = door
+        val existingCc = when {
+            purchaseData.cc == null || purchaseData.cc == js("undefined") -> ""
+            js("typeof purchaseData.cc === 'number'").unsafeCast<Boolean>() ->
+                js("String(purchaseData.cc)").toString().trim()
+            else -> (purchaseData.cc?.toString() ?: "").trim()
+        }
+        val cc = (cache.cc?.toString() ?: "").trim().replace(Regex("[^0-9]"), "")
+        if (existingCc.isBlank() && cc.isNotBlank()) {
+            purchaseData.cc = cc.toIntOrNull()
+        }
         val carModelYearRaw = (cache.carModelYearRaw?.toString() ?: "").trim()
         val recycleFeeRaw = (cache.recycleFeeRaw?.toString() ?: "").trim()
         val manufactureYearRaw = (cache.manufactureYearRaw?.toString() ?: "").trim()
@@ -15064,12 +15341,68 @@ fun fetchMappingByChassisOnly(
             if (quickPurchaseOnly) {
                 resetChassisMasterComboIds()
                 val carNameTokensList = flattenSemicolonChoices(uniqueCarNames.toList())
+                val gradeOptions = flattenSemicolonChoices(uniqueGrades.toList())
+                val rankOptions = flattenSemicolonChoices(uniqueRanks.toList())
+                val colorOptions = flattenSemicolonChoices(uniqueColors.toList())
+                val seatOptions = flattenSemicolonChoices(uniqueSeats.toList())
 
-                fun finishQuickPurchaseChassisAutofill(selectedCarName: String) {
+                fun applyQpComboboxValue(selectId: String, value: String) {
+                    val v = firstSemicolonToken(value)
+                    if (v.isBlank()) return
+                    window.asDynamic().__qpSetComboId = selectId
+                    window.asDynamic().__qpSetComboVal = v
+                    js("""
+                        (function() {
+                            var id = window.__qpSetComboId;
+                            var val = window.__qpSetComboVal;
+                            if (!id || !val) return;
+                            if (typeof ensureComboboxOptionExists === 'function') ensureComboboxOptionExists(id, val);
+                            if (typeof window.setFieldValue === 'function') {
+                                window.setFieldValue(id, id, val);
+                            } else {
+                                var sel = document.getElementById(id);
+                                var inp = document.getElementById(id + 'Input');
+                                if (sel) sel.value = val;
+                                if (inp) inp.value = val;
+                            }
+                        })();
+                    """)
+                }
+
+                fun populateQpSpecDropdowns(preferFuel: String, preferGrade: String, preferRank: String, preferColor: String, preferSeat: String, preferDoor: String, preferCc: String) {
+                    populateChassisMappingWithMasterListAsync(
+                        "qpFuel", "Select Fuel", fuelsForDropdown, preferFuel, "master-menu/fuel",
+                    )
+                    populateComboboxTokensWithSeeMore(
+                        "qpGrade", "Select Grade", gradeOptions, preferGrade, false,
+                    )
+                    populateComboboxTokensWithSeeMore(
+                        "qpRank", "Select Rank", rankOptions, preferRank, false,
+                    )
+                    populateChassisMappingWithMasterListAsync(
+                        "qpColor", "Select Color", colorOptions, preferColor, "master-menu/color",
+                    )
+                    populateComboboxTokensWithSeeMore(
+                        "qpCc", "Select CC", ccsForDropdown, preferCc, false,
+                    )
+                    populateComboboxTokensWithSeeMore(
+                        "qpDoor", "Select Door", doorsForDropdown, preferDoor, false,
+                    )
+                    populateComboboxTokensWithSeeMore(
+                        "qpSeat", "Select Seat", seatOptions, preferSeat, false,
+                    )
+                    updateConditionalComboboxButtonVisibility("qpGrade", gradeOptions, preferGrade)
+                    updateConditionalComboboxButtonVisibility("qpRank", rankOptions, preferRank)
+                    updateConditionalComboboxButtonVisibility("qpSeat", seatOptions, preferSeat)
+                    updateConditionalComboboxButtonVisibility("qpDoor", doorsForDropdown, preferDoor)
+                    updateConditionalComboboxButtonVisibility("qpCc", ccsForDropdown, preferCc)
+                }
+
+                fun finishQuickPurchaseChassisAutofill(selectedCarName: String): dynamic {
                     val seqNow = (js("window.__chassisMappingSeq") as? Int) ?: 0
                     if (seqNow != requestId) {
                         console.log("⏭️ Stale QP chassis mapping after car name selection ignored")
-                        return
+                        return js("Promise.resolve()")
                     }
                     populateChassisMappingWithMasterListAsync(
                         "qpCarName",
@@ -15097,26 +15430,100 @@ fun fetchMappingByChassisOnly(
                             })();
                         """)
                     }
-                    storeQuickPurchaseChassisMappingCache(
-                        brand, selectedCarName, fuel, recycleFeeRaw, carModelYearRaw, manufactureYearRaw, chassisNumberRaw,
-                    )
-                    applyPurchaseChassisNumberFromMapping(
-                        isEditForm = false,
-                        numberTokens = chassisNumberTokens,
-                        preserveExisting = false,
-                        fieldIdOverride = "qpChassisNumber",
-                    )
-                    val regIso = isoMonthFromRecycleFeeMapping(recycleFeeRaw)
-                        .ifBlank { normalizeCarModelYearForCompare(carModelYearRaw) }
-                    if (regIso.isNotBlank() && readCarModelYearInput("qpCarModelYear").isBlank()) {
-                        writeCarModelYearInput("qpCarModelYear", regIso)
+
+                    // Seed dropdowns with mapping tokens (like Add Purchase) before optional disambiguation.
+                    populateQpSpecDropdowns(fuel, grade, rank, color, seat, door, cc)
+
+                    val needsQpSpecDisambiguation = listOf(
+                        fuelsForDropdown, gradeOptions, ccsForDropdown, doorsForDropdown,
+                        seatOptions, rankOptions, colorOptions,
+                    ).any { it.size > 1 }
+
+                    val selectionPromise: dynamic = if (needsQpSpecDisambiguation) {
+                        window.asDynamic().__qpSpecChassis = chassis
+                        window.asDynamic().__qpSpecUnique = uniqueValuesObj
+                        window.asDynamic().__qpSpecFirstRow = data.firstRow
+                        window.asDynamic().__qpSpecAllRows = allRows
+                        window.asDynamic().__qpSpecCarName = selectedCarName
+                        js("""
+                            (function() {
+                                if (typeof window.resolveQuickPurchaseChassisSpecFields !== 'function') {
+                                    return Promise.resolve(null);
+                                }
+                                return window.resolveQuickPurchaseChassisSpecFields(
+                                    window.__qpSpecChassis,
+                                    window.__qpSpecUnique,
+                                    window.__qpSpecFirstRow,
+                                    window.__qpSpecAllRows,
+                                    window.__qpSpecCarName || ''
+                                );
+                            })()
+                        """)
+                    } else {
+                        js("Promise.resolve(null)")
                     }
-                    endChassisChangePreserve()
+
+                    return selectionPromise.then { selected: dynamic ->
+                        val seqAfter = (js("window.__chassisMappingSeq") as? Int) ?: 0
+                        if (seqAfter != requestId) {
+                            console.log("⏭️ Stale QP chassis spec selection ignored")
+                            return@then js("undefined")
+                        }
+                        var fuelSel = fuel
+                        var gradeSel = grade
+                        var rankSel = rank
+                        var colorSel = color
+                        var seatSel = seat
+                        var doorSel = door
+                        var ccSel = cc
+                        if (selected != null && selected != js("undefined") && !js("selected === null").unsafeCast<Boolean>()) {
+                            val f = (selected.fuel?.toString() ?: "").trim()
+                            val g = (selected.grade?.toString() ?: "").trim()
+                            val r = (selected.rank?.toString() ?: "").trim()
+                            val c = (selected.color?.toString() ?: "").trim()
+                            val s = (selected.seat?.toString() ?: "").trim()
+                            val d = (selected.door?.toString() ?: "").trim()
+                            val ccV = (selected.cc?.toString() ?: "").trim()
+                            if (f.isNotBlank()) fuelSel = firstSemicolonToken(f)
+                            if (g.isNotBlank()) gradeSel = firstSemicolonToken(g)
+                            if (r.isNotBlank()) rankSel = firstSemicolonToken(r)
+                            if (c.isNotBlank()) colorSel = firstSemicolonToken(c)
+                            if (s.isNotBlank() && s != "0") seatSel = firstSemicolonToken(s)
+                            if (d.isNotBlank() && d != "0") doorSel = firstSemicolonToken(d)
+                            if (ccV.isNotBlank() && ccV != "0") ccSel = firstSemicolonToken(ccV)
+                            // Refresh option lists then apply chosen values (Cancel → keep seeded prefers).
+                            populateQpSpecDropdowns(fuelSel, gradeSel, rankSel, colorSel, seatSel, doorSel, ccSel)
+                        }
+                        applyQpComboboxValue("qpFuel", fuelSel)
+                        applyQpComboboxValue("qpGrade", gradeSel)
+                        applyQpComboboxValue("qpRank", rankSel)
+                        applyQpComboboxValue("qpColor", colorSel)
+                        applyQpComboboxValue("qpSeat", seatSel)
+                        applyQpComboboxValue("qpDoor", doorSel)
+                        applyQpComboboxValue("qpCc", ccSel)
+
+                        storeQuickPurchaseChassisMappingCache(
+                            brand, selectedCarName, fuelSel, recycleFeeRaw, carModelYearRaw, manufactureYearRaw, chassisNumberRaw,
+                            grade = gradeSel, rank = rankSel, color = colorSel, seat = seatSel, door = doorSel, cc = ccSel,
+                        )
+                        applyPurchaseChassisNumberFromMapping(
+                            isEditForm = false,
+                            numberTokens = chassisNumberTokens,
+                            preserveExisting = false,
+                            fieldIdOverride = "qpChassisNumber",
+                        )
+                        val regIso = isoMonthFromRecycleFeeMapping(recycleFeeRaw)
+                            .ifBlank { normalizeCarModelYearForCompare(carModelYearRaw) }
+                        if (regIso.isNotBlank() && readCarModelYearInput("qpCarModelYear").isBlank()) {
+                            writeCarModelYearInput("qpCarModelYear", regIso)
+                        }
+                        endChassisChangePreserve()
+                        js("undefined")
+                    }
                 }
 
                 if (carNameTokensList.size <= 1) {
-                    finishQuickPurchaseChassisAutofill(carNameTokensList.firstOrNull().orEmpty().ifBlank { carName })
-                    return@then js("Promise.resolve()")
+                    return@then finishQuickPurchaseChassisAutofill(carNameTokensList.firstOrNull().orEmpty().ifBlank { carName })
                 }
 
                 // Multiple car names: populate options, then ask user to pick (same modal as Add Purchase).
@@ -15159,7 +15566,6 @@ fun fetchMappingByChassisOnly(
                         else -> chosen.toString().trim()
                     }
                     finishQuickPurchaseChassisAutofill(chosenStr)
-                    js("undefined")
                 }
             }
             
@@ -16934,6 +17340,13 @@ fun validateProductionDateYear(value: String): Pair<Boolean, String> {
     if (yearStr.length != 4 || !yearStr.all { it.isDigit() }) {
         return Pair(false, "Production year must be exactly 4 digits. Got: $yearStr")
     }
+    val year = yearStr.toIntOrNull()
+    if (year == null || year !in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) {
+        return Pair(
+            false,
+            "Production year must be between ${AppConstants.MIN_YEAR} and ${AppConstants.MAX_YEAR}.",
+        )
+    }
     if (monthStr.length != 2 || !monthStr.all { it.isDigit() }) {
         return Pair(false, "Invalid Registration Date month. Use 00–12.")
     }
@@ -16951,8 +17364,11 @@ fun validateManufactureYear(value: String): Pair<Boolean, String> {
         return Pair(false, "Manufacture year must be exactly 4 digits (YYYY).")
     }
     val year = t.toIntOrNull()
-    if (year == null || year < 1000 || year > 9999) {
-        return Pair(false, "Manufacture year must be between 1000 and 9999.")
+    if (year == null || year !in AppConstants.MIN_YEAR..AppConstants.MAX_YEAR) {
+        return Pair(
+            false,
+            "Manufacture year must be between ${AppConstants.MIN_YEAR} and ${AppConstants.MAX_YEAR}.",
+        )
     }
     return Pair(true, "")
 }
@@ -17841,7 +18257,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label for="editVenueIdInput">Venue ID</label>
-                        ${createEditableCombobox("editVenueId", "Select Venue ID", initialValue = editVenueDisp, showDropdownButton = false)}
+                        ${createEditableCombobox("editVenueId", "Select Venue ID", initialValue = editVenueDisp)}
                     </div>
                 </div>
                 
@@ -20412,132 +20828,150 @@ private fun loadLegacyCarPicturesFromPurchaseData(purchaseData: dynamic, existin
 
 fun showImportModal() {
     closeImportModal()
+    closeSidebar()
 
-    // Create modal overlay
-    val modal = document.createElement("div")
+    val modal = document.createElement("div") as HTMLElement
     modal.id = "importModal"
-    modal.setAttribute("style", "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 10000; pointer-events: auto;")
-    
+    modal.className = "import-modal-overlay"
+    modal.setAttribute("role", "presentation")
+
     modal.innerHTML = """
-        <div id="importModalContent" style="background-color: white; padding: 30px; border-radius: 8px; min-width: 400px; max-width: 600px; position: relative; pointer-events: auto; z-index: 10001;">
-            <h2>Import CSV File</h2>
-            <p>Select a CSV file to import purchase data:</p>
-            <input type="file" id="csvFile" accept=".csv" style="margin: 20px 0; pointer-events: auto;" onchange="window.handleFileSelect(event)">
-            <div id="fileInfo" style="margin: 20px 0;"></div>
-            <div style="display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end;">
-                <button id="cancelImportBtn" type="button" style="padding: 10px 20px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; pointer-events: auto; z-index: 10002; position: relative;">Cancel</button>
-                <button id="modalImportBtn" type="button" style="padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; pointer-events: auto; z-index: 10002; position: relative;">Import</button>
+        <div id="importModalContent" class="import-modal" role="dialog" aria-modal="true" aria-labelledby="importModalTitle">
+            <div class="import-modal-header">
+                <h2 id="importModalTitle" class="import-modal-title">Import CSV</h2>
+                <button type="button" id="closeImportBtn" class="import-modal-close" aria-label="Close import dialog">&times;</button>
+            </div>
+            <div class="import-modal-body">
+                <p class="import-modal-lead">Upload a CSV file to import purchase records.</p>
+                <p class="import-modal-hint">Use a .csv export matching Automan purchase columns. Duplicate chassis rows are skipped.</p>
+                <div class="import-dropzone" id="importDropzone">
+                    <label for="csvFile" class="import-dropzone-label">Choose CSV file</label>
+                    <input type="file" id="csvFile" class="import-file-input" accept=".csv,text/csv" aria-describedby="fileInfo importStatus">
+                    <p class="import-dropzone-sub">or drop a file here</p>
+                </div>
+                <div id="fileInfo" class="import-file-info" aria-live="polite"></div>
+                <div id="importStatus" class="import-status" role="status" aria-live="polite"></div>
+            </div>
+            <div class="import-modal-actions">
+                <button id="cancelImportBtn" type="button" class="import-btn import-btn-secondary">Cancel</button>
+                <button id="modalImportBtn" type="button" class="import-btn import-btn-primary" disabled>Import</button>
             </div>
         </div>
-    """
-    
-    val closeModal = {
-        closeImportModal()
-    }
+    """.trimIndent()
 
     document.body?.appendChild(modal)
-    
-    // Create global file select handler - this will be called by the inline onchange
-    js("""
-        window.handleFileSelect = function(event) {
-            console.log('📁 [IMPORT MODAL] File input change event fired (inline onchange)');
-            var target = event.target;
-            var files = target.files;
-            
-            console.log('📁 [IMPORT MODAL] files:', files);
-            console.log('📁 [IMPORT MODAL] files.length:', files ? files.length : 'null');
-            
-            if (files && files.length > 0) {
-                var file = files[0];
-                console.log('✅ [IMPORT MODAL] File selected:', file.name, 'Size:', file.size);
-                
-                // Update file info display
-                var fileInfo = document.getElementById('fileInfo');
-                if (fileInfo) {
-                    fileInfo.innerHTML = 'Selected file: ' + file.name;
-                }
-                
-                // Button is already green, just ensure it stays green
-                var importBtn = document.getElementById('modalImportBtn');
-                if (importBtn) {
-                    importBtn.style.backgroundColor = '#28a745';
-                    importBtn.style.color = 'white';
-                    importBtn.style.cursor = 'pointer';
-                    console.log('✅ [IMPORT MODAL] Import button ready (green)');
-                }
-                
-                // Store file for import
-                window.selectedFile = file;
-                console.log('✅ [IMPORT MODAL] File stored in window.selectedFile:', file.name);
-            } else {
-                console.log('❌ [IMPORT MODAL] No file in files array');
-                // Keep button green but show warning
-                var importBtn = document.getElementById('modalImportBtn');
-                if (importBtn) {
-                    // Keep green color to match sidebar button
-                    importBtn.style.backgroundColor = '#28a745';
-                    importBtn.style.color = 'white';
-                    importBtn.style.cursor = 'pointer';
-                }
-                var fileInfo = document.getElementById('fileInfo');
-                if (fileInfo) {
-                    fileInfo.innerHTML = '';
-                }
-                window.selectedFile = null;
+
+    fun setImportStatus(text: String, kind: String?) {
+        val el = document.getElementById("importStatus") as? HTMLElement ?: return
+        if (text.isBlank() || kind == null) {
+            el.textContent = ""
+            el.removeAttribute("data-kind")
+            el.style.display = "none"
+        } else {
+            el.textContent = text
+            el.setAttribute("data-kind", kind)
+            el.style.display = "block"
+        }
+    }
+
+    fun updateFileSelection(file: dynamic?) {
+        val fileInfo = document.getElementById("fileInfo") as? HTMLElement
+        val importBtn = document.getElementById("modalImportBtn") as? HTMLButtonElement
+        val hasFile = file != null && (file.name as? String)?.isNotBlank() == true
+        if (hasFile) {
+            val name = file.name as String
+            val size = (file.size as? Number)?.toLong() ?: 0L
+            val sizeLabel = when {
+                size >= 1_048_576L -> "${size / 1_048_576L} MB"
+                size >= 1024L -> "${size / 1024L} KB"
+                else -> "$size B"
             }
-        };
-        console.log('✅ [IMPORT MODAL] Global handleFileSelect function created');
-    """)
-    
-    // Cancel button — single click handler
-    val cancelBtn = document.getElementById("cancelImportBtn") as? HTMLButtonElement
-    cancelBtn?.addEventListener("click", { event: Event ->
-        event.preventDefault()
-        event.stopPropagation()
-        closeModal()
+            fileInfo?.textContent = "Selected: $name ($sizeLabel)"
+            importBtn?.disabled = false
+            js("window.selectedFile = file")
+            setImportStatus("", null)
+        } else {
+            fileInfo?.textContent = ""
+            importBtn?.disabled = true
+            js("window.selectedFile = null")
+        }
+    }
+
+    val fileInput = document.getElementById("csvFile") as? HTMLInputElement
+    fileInput?.addEventListener("change", { _: Event ->
+        val files = fileInput.files
+        val file = if (files != null && files.length > 0) files.item(0) else null
+        updateFileSelection(file)
     })
 
-    // Import button — single click handler (avoid mousedown + click double-fire)
-    val importBtn = document.getElementById("modalImportBtn") as? HTMLButtonElement
-    importBtn?.addEventListener("click", { event: Event ->
-        event.preventDefault()
-        event.stopPropagation()
+    val dropzone = document.getElementById("importDropzone") as? HTMLElement
+    dropzone?.addEventListener("dragover", { e: Event ->
+        e.preventDefault()
+        dropzone.classList.add("import-dropzone-active")
+    })
+    dropzone?.addEventListener("dragleave", { _: Event ->
+        dropzone.classList.remove("import-dropzone-active")
+    })
+    dropzone?.addEventListener("drop", { e: Event ->
+        e.preventDefault()
+        dropzone.classList.remove("import-dropzone-active")
+        val dt = e.asDynamic().dataTransfer
+        val files = dt?.files
+        if (files != null && files.length > 0) {
+            val file = files.item(0)
+            val name = (file?.name as? String).orEmpty().lowercase()
+            if (!name.endsWith(".csv")) {
+                setImportStatus("Please choose a .csv file.", "error")
+                updateFileSelection(null)
+                return@addEventListener
+            }
+            // Assign via DataTransfer so the input reflects the dropped file
+            try {
+                js(
+                    """
+                    (function(input, file) {
+                        if (!input || !file) return;
+                        try {
+                            var transfer = new DataTransfer();
+                            transfer.items.add(file);
+                            input.files = transfer.files;
+                        } catch (e) {}
+                    })(document.getElementById('csvFile'), file);
+                    """
+                )
+            } catch (_: dynamic) {
+                // Fallback: store on window only
+            }
+            updateFileSelection(file)
+        }
+    })
+
+    document.getElementById("closeImportBtn")?.addEventListener("click", { _: Event -> closeImportModal() })
+    document.getElementById("cancelImportBtn")?.addEventListener("click", { e: Event ->
+        e.preventDefault()
+        closeImportModal()
+    })
+    document.getElementById("modalImportBtn")?.addEventListener("click", { e: Event ->
+        e.preventDefault()
         handleImport()
     })
-    
-    // Prevent modal content clicks from closing the modal
-    val modalContent = document.getElementById("importModalContent")
-    if (modalContent != null) {
-        modalContent.addEventListener("click", { event: Event ->
-            event.stopPropagation()
-        })
-    }
-    
-    // Close modal when clicking outside (on overlay only)
-    // Use setTimeout to ensure this runs AFTER the global click handler
-    window.setTimeout({
-        modal.addEventListener("click", { event: Event ->
-            val target = event.target as? HTMLElement
-            // Only close if clicking directly on the overlay, not on the content or buttons
-            val isCancelBtn = target?.id == "cancelImportBtn" || 
-                             (target?.closest("#cancelImportBtn") != null)
-            val isImportBtn = target?.id == "modalImportBtn" || 
-                             (target?.closest("#modalImportBtn") != null)
-            
-            if ((target == modal || target?.id == "importModal") && 
-                !isCancelBtn && !isImportBtn) {
-                closeModal()
-            }
-        })
-    }, 0)
-    
-    // Close modal on Escape key
+
+    modal.addEventListener("click", { event: Event ->
+        if (event.target === modal) closeImportModal()
+    })
+
     js("""
+        if (window.importModalEscapeHandler) {
+            document.removeEventListener('keydown', window.importModalEscapeHandler);
+        }
         window.importModalEscapeHandler = function(event) {
             if (event.key === 'Escape' || event.keyCode === 27) {
-                var modal = document.getElementById('importModal');
-                if (modal && modal.parentNode) {
-                    modal.parentNode.removeChild(modal);
+                if (window.importInProgress) return;
+                if (typeof window.closeImportModal === 'function') {
+                    window.closeImportModal();
+                } else {
+                    var m = document.getElementById('importModal');
+                    if (m && m.parentNode) m.parentNode.removeChild(m);
                     document.removeEventListener('keydown', window.importModalEscapeHandler);
                     window.importModalEscapeHandler = null;
                 }
@@ -20545,93 +20979,92 @@ fun showImportModal() {
         };
         document.addEventListener('keydown', window.importModalEscapeHandler);
     """)
+
+    window.setTimeout({
+        (document.getElementById("cancelImportBtn") as? HTMLElement)?.focus()
+    }, 30)
 }
+
 fun handleImport() {
     val importInProgress = js("window.importInProgress") as? Boolean ?: false
-    if (importInProgress) {
-        console.log("⚠️ [IMPORT] Import already in progress, ignoring duplicate call")
-        return
-    }
+    if (importInProgress) return
 
     fun clearImportInProgress() {
         js("window.importInProgress = false")
     }
 
-    // Get file directly from input - this is the most reliable way
+    fun setBusy(busy: Boolean) {
+        val importBtn = document.getElementById("modalImportBtn") as? HTMLButtonElement
+        val cancelBtn = document.getElementById("cancelImportBtn") as? HTMLButtonElement
+        val closeBtn = document.getElementById("closeImportBtn") as? HTMLButtonElement
+        val fileInput = document.getElementById("csvFile") as? HTMLInputElement
+        if (busy) {
+            importBtn?.disabled = true
+            importBtn?.textContent = "Importing…"
+            cancelBtn?.disabled = true
+            closeBtn?.disabled = true
+            fileInput?.disabled = true
+        } else {
+            importBtn?.textContent = "Import"
+            cancelBtn?.disabled = false
+            closeBtn?.disabled = false
+            fileInput?.disabled = false
+            val hasFile = (fileInput?.files?.length ?: 0) > 0 || js("window.selectedFile") != null
+            importBtn?.disabled = !hasFile
+        }
+    }
+
+    fun setStatus(text: String, kind: String) {
+        val el = document.getElementById("importStatus") as? HTMLElement ?: return
+        el.textContent = text
+        el.setAttribute("data-kind", kind)
+        el.style.display = "block"
+    }
+
     val fileInput = document.getElementById("csvFile") as? HTMLInputElement
     var file: File? = null
-    
-    console.log("🔍 [IMPORT] handleImport called")
-    console.log("🔍 [IMPORT] fileInput:", fileInput)
-    
+
     if (fileInput != null) {
         val files = fileInput.files
-        console.log("🔍 [IMPORT] fileInput.value:", fileInput.value)
-        console.log("🔍 [IMPORT] fileInput.files:", files)
-        console.log("🔍 [IMPORT] files?.length:", files?.length)
-        
-        // Try to get file from input
         if (files != null && files.length > 0) {
             file = files.item(0)
-            console.log("✅ [IMPORT] File found in input: ${file?.name}, Size: ${file?.size}")
         } else {
-            console.log("⚠️ [IMPORT] fileInput.files is empty, checking window.selectedFile")
-            // Fallback to window.selectedFile
             file = js("window.selectedFile") as? File
-            if (file != null) {
-                console.log("✅ [IMPORT] File found in window.selectedFile: ${file.name}")
-            }
         }
     } else {
-        console.log("⚠️ [IMPORT] fileInput not found, checking window.selectedFile")
         file = js("window.selectedFile") as? File
-        if (file != null) {
-            console.log("✅ [IMPORT] File found in window.selectedFile: ${file.name}")
-        }
     }
-    
+
     if (file == null) {
-        console.error("❌ [IMPORT] No file found in input or window.selectedFile")
+        setStatus("Please select a CSV file first.", "error")
         showMessage("Please select a CSV file first", "error")
-        closeImportModal()
         return
     }
-    
-    console.log("📥 [IMPORT] Starting import for file: ${file.name}, size: ${file.size} bytes")
 
     js("window.importInProgress = true")
-
-    // Close modal immediately to show we're processing
-    closeImportModal()
-    
-    // Show loading message
+    setBusy(true)
+    setStatus("Importing CSV… Please wait.", "info")
     showMessage("Importing CSV file... Please wait.", "info")
-    
+
     val formData = js("new FormData()")
     formData.append("file", file)
-    
+
     val requestInit = js("{}")
     requestInit.method = "POST"
-    // Don't set Content-Type for FormData - browser sets it automatically with boundary
     requestInit.body = formData
-    
-    console.log("📤 [IMPORT] Sending POST request to: /api/purchases/import")
-    console.log("📤 [IMPORT] File details - Name: ${file.name}, Type: ${file.type}, Size: ${file.size}")
-    
+
     window.fetch(apiUrl("purchases/import"), requestInit).then { response ->
-        console.log("📥 [IMPORT] Response received - Status: ${response.status}, OK: ${response.ok}")
-        
         if (response.ok) {
             response.json().then { result ->
-                console.log("✅ [IMPORT] Import result:", result)
                 val importedCount = js("result.importedCount") as? Int ?: 0
                 val duplicateCount = js("result.duplicateCount") as? Int ?: 0
                 val errorCount = js("result.errorCount") as? Int ?: 0
-                val totalProcessed = js("result.totalProcessed") as? Int ?: 0
                 val message = js("result.message") as? String ?: "Import completed"
-                
-                console.log("📊 [IMPORT] Summary - Imported: $importedCount, Duplicates: $duplicateCount, Errors: $errorCount, Total: $totalProcessed")
-                
+
+                js("window.selectedFile = null")
+                clearImportInProgress()
+                closeImportModal()
+
                 if (duplicateCount > 0 || errorCount > 0) {
                     showMessage("$message (Imported: $importedCount, Duplicates: $duplicateCount, Errors: $errorCount)", "warning")
                 } else if (importedCount > 0) {
@@ -20639,50 +21072,52 @@ fun handleImport() {
                 } else {
                     showMessage("No purchases were imported. Please check your CSV file.", "warning")
                 }
-                
-                // Clear selected file
-                js("window.selectedFile = null")
-                
-                // Reload purchase list to show imported purchases
-                console.log("🔄 [IMPORT] Reloading purchase list...")
+
                 loadPurchases()
+            }.catch { _ ->
                 clearImportInProgress()
-            }.catch { error ->
-                console.error("❌ [IMPORT] Error parsing JSON response:", error)
+                setBusy(false)
+                setStatus("Import failed: Could not parse server response.", "error")
                 showMessage("Import failed: Could not parse server response", "error")
-                clearImportInProgress()
             }
         } else {
             response.text().then { errorText ->
-                console.error("❌ [IMPORT] Error response (${response.status}):", errorText)
-                showMessage("Import failed (${response.status}): $errorText", "error")
                 clearImportInProgress()
-            }.catch { error ->
-                console.error("❌ [IMPORT] Error reading error response:", error)
-                showMessage("Import failed: ${response.status} ${response.statusText}", "error")
+                setBusy(false)
+                val msg = "Import failed (${response.status}): $errorText"
+                setStatus(msg, "error")
+                showMessage(msg, "error")
+            }.catch { _ ->
                 clearImportInProgress()
+                setBusy(false)
+                val msg = "Import failed: ${response.status} ${response.statusText}"
+                setStatus(msg, "error")
+                showMessage(msg, "error")
             }
         }
     }.catch { error ->
-        console.error("❌ [IMPORT] Fetch error:", error)
-        showMessage("Import failed: ${error.message}", "error")
         clearImportInProgress()
+        setBusy(false)
+        val msg = "Import failed: ${error.message}"
+        setStatus(msg, "error")
+        showMessage(msg, "error")
     }
 }
 
 fun closeImportModal() {
+    val inProgress = js("window.importInProgress === true") as? Boolean ?: false
+    if (inProgress) return
+
     val existingModal = document.getElementById("importModal")
     if (existingModal != null) {
-        document.body?.removeChild(existingModal)
-        // Clean up escape key listener
+        existingModal.remove()
         js("""
             if (window.importModalEscapeHandler) {
                 document.removeEventListener('keydown', window.importModalEscapeHandler);
                 window.importModalEscapeHandler = null;
             }
-            window.importInProgress = false;
+            window.selectedFile = null;
         """)
-        console.log("🔴 [IMPORT] Modal closed")
     }
 }
 
@@ -21100,7 +21535,7 @@ fun saveCarBookingState() {
         carBookingFormState.etaDate = (document.getElementById("etaDate") as? HTMLInputElement)?.value ?: ""
         carBookingFormState.polPort = polVal
         carBookingFormState.podPort = podPortValue
-        carBookingFormState.finalDestination = (document.getElementById("finalDestination") as? HTMLInputElement)?.value ?: ""
+        carBookingFormState.finalDestination = bookingFormFieldValue("finalDestination")
         carBookingFormState.notifyParty = bookingFormFieldValue("notifyParty")
         carBookingFormState.inTransitClause = bookingFormFieldValue("inTransitClause")
         carBookingFormState.bookingNo = bookingNoEl?.value ?: ""
@@ -21248,8 +21683,7 @@ fun restoreCarBookingState() {
         (document.getElementById("etaDate") as? HTMLInputElement)?.value = restoredEta
         (document.getElementById("etaDateText") as? HTMLInputElement)?.value = isoToMmDdYyyy(restoredEta)
     }
-    (document.getElementById("finalDestination") as? HTMLInputElement)?.value =
-        bookingDynString(carBookingFormState.finalDestination)
+    setBookingSelectFieldValue("finalDestination", bookingDynString(carBookingFormState.finalDestination))
     setBookingSelectFieldValue("notifyParty", bookingDynString(carBookingFormState.notifyParty))
     setBookingSelectFieldValue("inTransitClause", bookingDynString(carBookingFormState.inTransitClause))
     // POL options come from purchases only after country is set — repopulate before restoring POL value

@@ -3,146 +3,210 @@ package com.automan.purchase
 import kotlinx.browser.document
 import kotlinx.browser.window
 import org.w3c.dom.HTMLButtonElement
+import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
 import org.w3c.dom.HTMLTextAreaElement
 import org.w3c.dom.events.Event
+import org.w3c.dom.events.KeyboardEvent
 import kotlin.js.JSON
 
 private const val QP_MODAL_ID = "quickPurchaseModal"
+private var qpEscapeHandler: ((Event) -> Unit)? = null
+private var qpSupplierChangeDebounceHandle: Int? = null
+private var qpLastSupplierFetchName: String = ""
+private var qpLastSupplierFetchAtMs: Double = 0.0
 
 fun openQuickPurchaseModal() {
     closeQuickPurchaseModal()
     closeSidebar()
 
-    val modal = document.createElement("div")
+    val modal = document.createElement("div") as HTMLElement
     modal.id = QP_MODAL_ID
-    modal.setAttribute(
-        "style",
-        "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10000;"
-    )
+    modal.className = "qp-modal-overlay"
+    modal.setAttribute("role", "presentation")
 
     modal.innerHTML = """
-        <div id="quickPurchaseModalContent" style="background:#fff;padding:24px 28px;border-radius:10px;width:min(720px,94vw);max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-                <h2 style="margin:0;font-size:20px;color:#1f2937;">Add Quick Purchase</h2>
-                <button type="button" id="qpCloseBtn" style="background:none;border:none;font-size:26px;cursor:pointer;color:#6b7280;line-height:1;">&times;</button>
+        <div id="quickPurchaseModalContent" class="qp-modal" role="dialog" aria-modal="true" aria-labelledby="qpModalTitle">
+            <div class="qp-modal-header">
+                <h2 id="qpModalTitle" class="qp-modal-title">Add Quick Purchase</h2>
+                <button type="button" id="qpCloseBtn" class="qp-modal-close" aria-label="Close quick purchase">&times;</button>
             </div>
-            <div class="form-grid-2col" style="display:grid;grid-template-columns:1fr 1fr;gap:16px 20px;">
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Purchase Date</label>
-                    <div style="position:relative;width:100%;">
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <input type="text" id="qpDateText" placeholder="DD/MM/YYYY" autocomplete="off"
-                                   style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;">
-                            <button type="button" id="qpDateCalendarBtn" title="Open calendar"
-                                    style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
+            <div class="qp-modal-body">
+                <div class="form-grid-2col qp-form-grid">
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpDateText">Purchase Date</label>
+                        <div class="qp-date-wrap">
+                            <div class="qp-date-row">
+                                <input type="text" id="qpDateText" placeholder="DD/MM/YYYY" autocomplete="off" class="qp-input">
+                                <button type="button" id="qpDateCalendarBtn" class="qp-calendar-btn" title="Open calendar" aria-label="Open purchase date calendar">📅</button>
+                            </div>
+                            <input type="date" id="qpDate" value="${todayIsoLocalDate()}" tabindex="-1" aria-hidden="true" class="qp-date-hidden">
                         </div>
-                        <input type="date" id="qpDate" value="${todayIsoLocalDate()}" tabindex="-1" aria-hidden="true"
-                               style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpAuctionNo">Auction No</label>
+                        <input type="text" id="qpAuctionNo" placeholder="Auction No" class="qp-input" autocomplete="off">
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpChassisInput">Chassis *</label>
+                        ${createEditableCombobox("qpChassis", "Select Chassis", required = true)}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpChassisNumberInput">Chassis Number</label>
+                        ${createEditableCombobox("qpChassisNumber", "Suffix (optional)", showDropdownButton = false)}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpCarNameInput">Car Name</label>
+                        ${createEditableCombobox("qpCarName", "Select Car Name")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpCarModelYearText">Registration Date</label>
+                        <div class="qp-date-wrap">
+                            <div class="qp-date-row">
+                                <input type="text" id="qpCarModelYearText" autocomplete="off" class="qp-input">
+                                <button type="button" id="qpCarModelYearCalendarBtn" class="qp-calendar-btn" title="Open month picker" aria-label="Open registration month picker">📅</button>
+                            </div>
+                            <input type="hidden" id="qpCarModelYear" value="" tabindex="-1" aria-hidden="true">
+                            <span id="qpCarModelYearHint" class="qp-month-hint">MM/YYYY</span>
+                        </div>
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpGradeInput">Grade</label>
+                        ${createEditableCombobox("qpGrade", "Select Grade", showDropdownButton = false)}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpRankInput">Rank</label>
+                        ${createEditableCombobox("qpRank", "Select Rank", showDropdownButton = false)}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpSeatInput">Seat</label>
+                        ${createEditableCombobox("qpSeat", "Select Seat", showDropdownButton = false, additionalAttrs = """inputmode="numeric" class="plain-int-input"""")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpDoorInput">Door</label>
+                        ${createEditableCombobox("qpDoor", "Select Door", showDropdownButton = false, additionalAttrs = """inputmode="numeric" class="plain-int-input"""")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpColorInput">Color</label>
+                        ${createEditableCombobox("qpColor", "Select Color")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpDistance">Mileage</label>
+                        <input type="text" id="qpDistance" class="comma-int-input km-suffix-input qp-input" placeholder="e.g., 50,000 km" autocomplete="off">
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpFuelInput">Fuel</label>
+                        ${createEditableCombobox("qpFuel", "Select Fuel Type")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpCcInput">CC</label>
+                        ${createEditableCombobox("qpCc", "Select CC", showDropdownButton = false, additionalAttrs = """inputmode="numeric" class="plain-int-input"""")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpAuctionNameInput">Supplier Name</label>
+                        ${createEditableCombobox("qpAuctionName", "Add Supplier Name")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpStockLocationInput">Stock Location</label>
+                        ${createEditableCombobox("qpStockLocation", "Select Stock Location")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpRixoCompanyInput">Rixo Company</label>
+                        ${createEditableCombobox("qpRixoCompany", "Select Rixo Company")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpRixoPrice">Rixo Price</label>
+                        <div class="currency-input qp-currency">
+                            <span class="qp-currency-symbol" aria-hidden="true">¥</span>
+                            <input type="text" inputmode="decimal" id="qpRixoPrice" class="money-input qp-input" placeholder="0"
+                                   autocomplete="off" onfocus="this.select();">
+                        </div>
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpClientNameInput">Client Name</label>
+                        ${createEditableCombobox("qpClientName", "Select Client Name")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpCountryInput">Country</label>
+                        ${createEditableCombobox("qpCountry", "Select Country")}
+                    </div>
+                    <div class="qp-field qp-field-span">
+                        <label class="qp-label" for="qpPrice">Car Price</label>
+                        <div class="qp-price-row">
+                            <div class="currency-input qp-currency">
+                                <span class="qp-currency-symbol" aria-hidden="true">¥</span>
+                                <input type="text" inputmode="decimal" id="qpPrice" class="money-input qp-input" placeholder="0" autocomplete="off">
+                            </div>
+                            <label class="qp-negotiate" for="qpNegotiate">
+                                <input type="checkbox" id="qpNegotiate">
+                                NEGOTIATE
+                            </label>
+                        </div>
                     </div>
                 </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Auction No</label>
-                    <input type="text" id="qpAuctionNo" placeholder="Auction No"
-                           style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;">
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Chassis *</label>
-                    ${createEditableCombobox("qpChassis", "Select Chassis", required = true)}
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Chassis Number</label>
-                    ${createEditableCombobox("qpChassisNumber", "Suffix (optional)", showDropdownButton = false)}
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Car Name</label>
-                    ${createEditableCombobox("qpCarName", "Select Car Name")}
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Registration Date</label>
-                    <div style="position:relative;width:100%;">
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <input type="text" id="qpCarModelYearText" autocomplete="off"
-                                   style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;">
-                            <button type="button" id="qpCarModelYearCalendarBtn" title="Open month picker"
-                                    style="flex-shrink:0;padding:8px 10px;border:1px solid #ddd;background:#f9fafb;border-radius:4px;cursor:pointer;">📅</button>
-                        </div>
-                        <input type="hidden" id="qpCarModelYear" value="" tabindex="-1" aria-hidden="true">
-                        <span id="qpCarModelYearHint" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#9ca3af;pointer-events:none;">MM/YYYY</span>
-                    </div>
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Supplier Name</label>
-                    ${createEditableCombobox("qpAuctionName", "Add Supplier Name")}
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Stock Location</label>
-                    ${createEditableCombobox("qpStockLocation", "Select Stock Location")}
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Rixo Company</label>
-                    ${createEditableCombobox("qpRixoCompany", "Select Rixo Company")}
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Rixo Price</label>
-                    <div class="currency-input" style="display:flex;gap:8px;align-items:center;">
-                        <span style="font-weight:600;color:#374151;">¥</span>
-                        <input type="text" inputmode="decimal" id="qpRixoPrice" class="money-input" placeholder="0"
-                               autocomplete="off" onfocus="this.select();"
-                               style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;">
-                    </div>
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Client Name</label>
-                    ${createEditableCombobox("qpClientName", "Select Client Name")}
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Country</label>
-                    ${createEditableCombobox("qpCountry", "Select Country")}
-                </div>
-                <div>
-                    <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Car Price</label>
-                    <div style="display:flex;align-items:center;gap:12px;">
-                        <div class="currency-input" style="display:flex;gap:8px;align-items:center;flex:1;min-width:0;">
-                            <span style="font-weight:600;color:#374151;">¥</span>
-                            <input type="text" inputmode="decimal" id="qpPrice" class="money-input" placeholder="0"
-                                   style="flex:1;padding:8px;border:1px solid #ddd;border-radius:4px;box-sizing:border-box;">
-                        </div>
-                        <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#374151;cursor:pointer;white-space:nowrap;margin:0;">
-                            <input type="checkbox" id="qpNegotiate" style="width:18px;height:18px;accent-color:#007bff;">
-                            NEGOTIATE
+                <div id="qpNumberCutSection" class="qp-number-cut">
+                    <h3 class="qp-section-title">Number Cut Information</h3>
+                    <div class="qp-shaken-row">
+                        <label class="qp-shaken-check" for="qpShakenCheckbox">
+                            <input type="checkbox" id="qpShakenCheckbox">
+                            SHAKEN
+                        </label>
+                        <label class="qp-shaken-check" for="qpShakenWithoutNumberCheckbox">
+                            <input type="checkbox" id="qpShakenWithoutNumberCheckbox">
+                            Shaken without Number
                         </label>
                     </div>
-                </div>
-            </div>
-            <div style="margin-top:16px;">
-                <label style="display:block;margin-bottom:6px;font-weight:600;color:#374151;">Note</label>
-                <textarea id="qpNotes" placeholder="Optional"
-                          style="width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;min-height:72px;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
-            </div>
-            <div style="margin-top:20px;">
-                <h3 style="color:#333;margin:0 0 10px 0;border-bottom:1px solid #eee;padding-bottom:5px;font-size:16px;">Car Pictures</h3>
-                <div style="padding:20px;border:2px dashed #ddd;border-radius:8px;background-color:#f9f9f9;">
-                    <div style="text-align:center;">
-                        <label for="carPictures" style="display:inline-block;padding:12px 24px;background-color:#007bff;color:white;border-radius:6px;cursor:pointer;font-weight:600;transition:background-color 0.3s;">
-                            📷 Upload Car Pictures
-                        </label>
-                        <input type="file" id="carPictures" multiple accept="image/*" style="display:none;" onchange="handleCarPictureUpload(this)">
-                    </div>
-                    <div id="carPicturePreview" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:15px;margin-top:20px;"></div>
-                    <div id="uploadProgress" style="display:none;margin-top:15px;">
-                        <div style="background-color:#e9ecef;border-radius:4px;height:20px;overflow:hidden;">
-                            <div id="progressBar" style="background-color:#007bff;height:100%;width:0%;transition:width 0.3s;"></div>
+                    <div id="qpNumberCutFieldsWrap" class="qp-number-cut-fields" style="display: none;">
+                        <div class="form-grid-2col qp-form-grid">
+                            <div class="qp-field">
+                                <label class="qp-label" for="qpNumberCutPlaceInput">Place Name (Japanese)</label>
+                                ${createEditableComboboxWithOptions("qpNumberCutPlace", "Select Place", emptyList(), "")}
+                            </div>
+                            <div class="qp-field">
+                                <label class="qp-label" for="qpNumberCutNumber1">Number (English)</label>
+                                <input type="number" id="qpNumberCutNumber1" class="qp-input" placeholder="Enter number" autocomplete="off">
+                            </div>
+                            <div class="qp-field">
+                                <label class="qp-label" for="qpNumberCutHiraganaInput">Hiragana Character</label>
+                                ${createEditableComboboxWithOptions("qpNumberCutHiragana", "Select Character", getNumberCutHiraganaOptions(), "")}
+                            </div>
+                            <div class="qp-field">
+                                <label class="qp-label" for="qpNumberCutNumber2">Number (English)</label>
+                                <input type="number" id="qpNumberCutNumber2" class="qp-input" placeholder="Enter number" autocomplete="off">
+                            </div>
                         </div>
-                        <div id="progressText" style="text-align:center;margin-top:5px;font-size:14px;color:#666;"></div>
+                        <div class="qp-field">
+                            <label class="qp-label" for="qpNumberCutString">Number Cut</label>
+                            <input type="text" id="qpNumberCutString" class="qp-input qp-number-cut-readonly" readonly placeholder="Will be generated automatically">
+                        </div>
+                    </div>
+                </div>
+                <div class="qp-field">
+                    <label class="qp-label" for="qpNotes">Note</label>
+                    <textarea id="qpNotes" placeholder="Optional" class="qp-textarea" rows="3"></textarea>
+                </div>
+                <div class="qp-pictures">
+                    <h3 class="qp-section-title">Car Pictures</h3>
+                    <div class="qp-pictures-box">
+                        <div class="qp-pictures-actions">
+                            <label for="carPictures" class="qp-upload-btn">Upload Car Pictures</label>
+                            <input type="file" id="carPictures" multiple accept="image/*" class="qp-file-input" onchange="handleCarPictureUpload(this)">
+                        </div>
+                        <div id="carPicturePreview" class="qp-picture-preview"></div>
+                        <div id="uploadProgress" class="qp-upload-progress" style="display:none;">
+                            <div class="qp-progress-track">
+                                <div id="progressBar" class="qp-progress-bar"></div>
+                            </div>
+                            <div id="progressText" class="qp-progress-text"></div>
+                        </div>
                     </div>
                 </div>
             </div>
-            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:24px;flex-wrap:wrap;">
-                <button type="button" id="qpCancelBtn" style="padding:10px 18px;background:#6c757d;color:#fff;border:none;border-radius:6px;cursor:pointer;">Cancel</button>
-                <button type="button" id="qpSaveAndMoreBtn" style="padding:10px 18px;background:#17a2b8;color:#fff;border:none;border-radius:6px;cursor:pointer;">Save and Add More</button>
-                <button type="button" id="qpSaveBtn" style="padding:10px 18px;background:#007bff;color:#fff;border:none;border-radius:6px;cursor:pointer;">Save</button>
+            <div class="qp-modal-actions">
+                <button type="button" id="qpCancelBtn" class="qp-btn qp-btn-secondary">Cancel</button>
+                <button type="button" id="qpSaveAndMoreBtn" class="qp-btn qp-btn-teal">Save and Add More</button>
+                <button type="button" id="qpSaveBtn" class="qp-btn qp-btn-primary">Save</button>
             </div>
         </div>
     """.trimIndent()
@@ -157,6 +221,7 @@ fun openQuickPurchaseModal() {
     bindStrictMonthYearTextMask("qpCarModelYear", "qpCarModelYearHint")
     bindPurchaseChassisNumberInput("qpChassisNumber")
     setupQuickPurchaseModalListeners()
+    setupQuickPurchaseNumberCutListeners()
     preloadQuickPurchaseDropdowns()
 
     window.setTimeout({
@@ -165,6 +230,12 @@ fun openQuickPurchaseModal() {
 }
 
 fun closeQuickPurchaseModal() {
+    qpSupplierChangeDebounceHandle?.let { window.clearTimeout(it) }
+    qpSupplierChangeDebounceHandle = null
+    qpLastSupplierFetchName = ""
+    qpLastSupplierFetchAtMs = 0.0
+    qpEscapeHandler?.let { document.removeEventListener("keydown", it) }
+    qpEscapeHandler = null
     document.getElementById(QP_MODAL_ID)?.remove()
     // Drop any staged-but-unsaved car pictures so they don't leak into a later Add/Quick Purchase.
     resetPendingCarPictureUploads()
@@ -172,7 +243,11 @@ fun closeQuickPurchaseModal() {
 
 private fun resetQuickPurchaseModalForm() {
     (document.getElementById("qpAuctionNo") as? HTMLInputElement)?.value = ""
-    listOf("qpChassis", "qpChassisNumber", "qpCarName", "qpAuctionName", "qpStockLocation", "qpRixoCompany", "qpClientName", "qpCountry").forEach { id ->
+    listOf(
+        "qpChassis", "qpChassisNumber", "qpCarName", "qpAuctionName", "qpStockLocation", "qpRixoCompany",
+        "qpClientName", "qpCountry", "qpGrade", "qpRank", "qpSeat", "qpDoor", "qpColor", "qpFuel", "qpCc",
+        "qpNumberCutPlace", "qpNumberCutHiragana",
+    ).forEach { id ->
         val sel = document.getElementById(id) as? HTMLSelectElement
         val inp = document.getElementById("${id}Input") as? HTMLInputElement
         sel?.value = ""
@@ -180,9 +255,16 @@ private fun resetQuickPurchaseModalForm() {
     }
     (document.getElementById("qpPrice") as? HTMLInputElement)?.value = ""
     (document.getElementById("qpRixoPrice") as? HTMLInputElement)?.value = ""
+    (document.getElementById("qpDistance") as? HTMLInputElement)?.value = ""
     (document.getElementById("qpNotes") as? HTMLTextAreaElement)?.value = ""
     (document.getElementById("qpNegotiate") as? HTMLInputElement)?.checked = false
-    (document.getElementById("carPicturePreview") as? org.w3c.dom.HTMLElement)?.innerHTML = ""
+    (document.getElementById("qpShakenCheckbox") as? HTMLInputElement)?.checked = false
+    (document.getElementById("qpShakenWithoutNumberCheckbox") as? HTMLInputElement)?.checked = false
+    (document.getElementById("qpNumberCutNumber1") as? HTMLInputElement)?.value = ""
+    (document.getElementById("qpNumberCutNumber2") as? HTMLInputElement)?.value = ""
+    (document.getElementById("qpNumberCutString") as? HTMLInputElement)?.value = ""
+    (document.getElementById("qpNumberCutFieldsWrap") as? HTMLElement)?.style?.display = "none"
+    (document.getElementById("carPicturePreview") as? HTMLElement)?.innerHTML = ""
     (document.getElementById("carPictures") as? HTMLInputElement)?.value = ""
     resetPendingCarPictureUploads()
     writeCarModelYearInput("qpCarModelYear", "")
@@ -206,7 +288,12 @@ private fun preloadQuickPurchaseDropdowns() {
     loadAllChassisDropdown(isEditForm = false, preserveForm = false, fieldIdOverride = "qpChassis")
     populateComboboxFromApiForField("qpAuctionName", "rixo/dropdowns/auction-names", "▼")
     populateComboboxFromApiForField("qpClientName", "client-map/dropdowns/client-names", "")
+    populateComboboxFromApiForField("qpColor", "master-menu/color", "Select Color")
+    populateComboboxFromApiForField("qpFuel", "master-menu/fuel", "Select Fuel")
     refreshPurchaseClientNameToCountryMap()
+    ensureNumberCutPlaceOptionsLoaded {
+        repopulateNumberCutPlaceCombobox("qpNumberCutPlace")
+    }
     window.fetch(apiUrl("master-menu/country"))
         .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('country')") }
         .then { raw: dynamic ->
@@ -256,6 +343,20 @@ private fun setupQuickPurchaseModalListeners() {
         if ((e.target as? org.w3c.dom.Element)?.id == QP_MODAL_ID) closeQuickPurchaseModal()
     })
 
+    qpEscapeHandler?.let { document.removeEventListener("keydown", it) }
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val ke = event as? KeyboardEvent
+        if (ke?.key == "Escape") {
+            // Field-selection overlays (Stock Location / chassis specs) own Escape first.
+            if (document.querySelector(".chassis-field-selection-backdrop") == null) {
+                event.preventDefault()
+                closeQuickPurchaseModal()
+            }
+        }
+    }
+    qpEscapeHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+
     document.getElementById("qpSaveBtn")?.addEventListener("click", { _: Event ->
         saveQuickPurchase(saveAndMore = false)
     })
@@ -266,10 +367,33 @@ private fun setupQuickPurchaseModalListeners() {
     fun onSupplierChange() {
         val name = getComboboxValueSafe("qpAuctionName").trim()
         if (name.isBlank()) return
-        fetchSupplierMapByAuctionName(name, isEditForm = false, purchaseForMerge = null, supplierTarget = "quickPurchase")
+        val now = js("Date.now()").unsafeCast<Double>()
+        // Collapse select+input double-change and ignore identical re-fires within a short window
+        if (name.equals(qpLastSupplierFetchName, ignoreCase = true) && (now - qpLastSupplierFetchAtMs) < 400.0) {
+            return
+        }
+        qpSupplierChangeDebounceHandle?.let { window.clearTimeout(it) }
+        qpSupplierChangeDebounceHandle = window.setTimeout({
+            qpSupplierChangeDebounceHandle = null
+            val latest = getComboboxValueSafe("qpAuctionName").trim()
+            if (latest.isBlank()) return@setTimeout
+            val t = js("Date.now()").unsafeCast<Double>()
+            if (latest.equals(qpLastSupplierFetchName, ignoreCase = true) && (t - qpLastSupplierFetchAtMs) < 400.0) {
+                return@setTimeout
+            }
+            qpLastSupplierFetchName = latest
+            qpLastSupplierFetchAtMs = t
+            fetchSupplierMapByAuctionName(
+                latest,
+                isEditForm = false,
+                purchaseForMerge = null,
+                supplierTarget = "quickPurchase",
+            )
+        }, 50)
     }
 
-    document.getElementById("qpAuctionName")?.addEventListener("change", { _: Event -> onSupplierChange() })
+    // Listen on the text input only: select onchange → syncComboboxInput already dispatches input change.
+    // Listening on both caused duplicate supplier fetches and Stock Location modal reopen/flash.
     document.getElementById("qpAuctionNameInput")?.addEventListener("change", { _: Event -> onSupplierChange() })
 
     fun onClientChange() {
@@ -280,6 +404,141 @@ private fun setupQuickPurchaseModalListeners() {
 
     // Arrow-key nav for Quick Purchase comboboxes (attach once even before first dropdown open)
     js("if (typeof window.wireAddPurchaseComboboxKeyboardNav === 'function') window.wireAddPurchaseComboboxKeyboardNav();")
+}
+
+/** Number Cut + SHAKEN wiring for Quick Purchase (qp* IDs only — does not touch Add/Edit). */
+private fun setupQuickPurchaseNumberCutListeners() {
+    fun generateQpNumberCutString() {
+        val place = getComboboxValueSafe("qpNumberCutPlace").trim()
+        val number1 = (document.getElementById("qpNumberCutNumber1") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val hiragana = getComboboxValueSafe("qpNumberCutHiragana").trim()
+        val number2 = (document.getElementById("qpNumberCutNumber2") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val numberCutString = if (place.isNotEmpty() && number1.isNotEmpty() && hiragana.isNotEmpty() && number2.isNotEmpty()) {
+            "$place$number1$hiragana$number2"
+        } else {
+            ""
+        }
+        (document.getElementById("qpNumberCutString") as? HTMLInputElement)?.value = numberCutString
+    }
+
+    fun clearQpNumberCutFields() {
+        listOf("qpNumberCutPlace", "qpNumberCutHiragana").forEach { id ->
+            (document.getElementById(id) as? HTMLSelectElement)?.value = ""
+            (document.getElementById("${id}Input") as? HTMLInputElement)?.value = ""
+        }
+        (document.getElementById("qpNumberCutNumber1") as? HTMLInputElement)?.value = ""
+        (document.getElementById("qpNumberCutNumber2") as? HTMLInputElement)?.value = ""
+        (document.getElementById("qpNumberCutString") as? HTMLInputElement)?.value = ""
+    }
+
+    fun setQpNumberCutFieldsDisabled(disabled: Boolean) {
+        val fieldIds = listOf(
+            "qpNumberCutPlaceInput", "qpNumberCutPlace",
+            "qpNumberCutHiraganaInput", "qpNumberCutHiragana",
+            "qpNumberCutNumber1", "qpNumberCutNumber2", "qpNumberCutString",
+        )
+        for (fieldId in fieldIds) {
+            val el = document.getElementById(fieldId) as? HTMLElement ?: continue
+            when (el) {
+                is HTMLInputElement -> el.disabled = disabled
+                is HTMLSelectElement -> el.disabled = disabled
+            }
+            if (disabled) {
+                el.style.setProperty("pointer-events", "none")
+                el.style.setProperty("opacity", "0.6")
+                el.style.setProperty("background-color", "#f3f4f6")
+            } else {
+                el.style.removeProperty("pointer-events")
+                el.style.removeProperty("opacity")
+                if (fieldId == "qpNumberCutString") {
+                    el.style.setProperty("background-color", "#f9f9f9")
+                } else {
+                    el.style.removeProperty("background-color")
+                }
+            }
+        }
+        for (buttonId in listOf("qpNumberCutPlaceButton", "qpNumberCutHiraganaButton")) {
+            val btn = document.getElementById(buttonId) as? HTMLElement ?: continue
+            if (disabled) {
+                btn.style.setProperty("pointer-events", "none")
+                btn.style.setProperty("opacity", "0.5")
+                btn.style.setProperty("cursor", "not-allowed")
+            } else {
+                btn.style.removeProperty("pointer-events")
+                btn.style.removeProperty("opacity")
+                btn.style.setProperty("cursor", "pointer")
+            }
+        }
+    }
+
+    fun syncQpShakenNumberCutUi() {
+        val wrap = document.getElementById("qpNumberCutFieldsWrap") as? HTMLElement
+        val withNumber = (document.getElementById("qpShakenCheckbox") as? HTMLInputElement)?.checked == true
+        val withoutNumber = (document.getElementById("qpShakenWithoutNumberCheckbox") as? HTMLInputElement)?.checked == true
+        val anyShaken = withNumber || withoutNumber
+        wrap?.style?.setProperty("display", if (anyShaken) "block" else "none")
+        setQpNumberCutFieldsDisabled(withoutNumber)
+        if (withoutNumber) clearQpNumberCutFields()
+    }
+
+    document.getElementById("qpShakenCheckbox")?.addEventListener("change", { event: Event ->
+        val target = event.target as HTMLInputElement
+        if (target.checked) {
+            (document.getElementById("qpShakenWithoutNumberCheckbox") as? HTMLInputElement)?.checked = false
+        }
+        syncQpShakenNumberCutUi()
+    })
+    document.getElementById("qpShakenWithoutNumberCheckbox")?.addEventListener("change", { event: Event ->
+        val target = event.target as HTMLInputElement
+        if (target.checked) {
+            (document.getElementById("qpShakenCheckbox") as? HTMLInputElement)?.checked = false
+            clearQpNumberCutFields()
+        }
+        syncQpShakenNumberCutUi()
+    })
+
+    document.getElementById("qpNumberCutPlace")?.addEventListener("change", { _: Event -> generateQpNumberCutString() })
+    document.getElementById("qpNumberCutPlaceInput")?.addEventListener("change", { _: Event -> generateQpNumberCutString() })
+    document.getElementById("qpNumberCutNumber1")?.addEventListener("input", { _: Event -> generateQpNumberCutString() })
+    document.getElementById("qpNumberCutHiragana")?.addEventListener("change", { _: Event -> generateQpNumberCutString() })
+    document.getElementById("qpNumberCutHiraganaInput")?.addEventListener("change", { _: Event -> generateQpNumberCutString() })
+    document.getElementById("qpNumberCutNumber2")?.addEventListener("input", { _: Event -> generateQpNumberCutString() })
+
+    syncQpShakenNumberCutUi()
+}
+
+private fun readQuickPurchaseShakenAndNumberCut(): Pair<Boolean, String> {
+    val shakenWithNumber = (document.getElementById("qpShakenCheckbox") as? HTMLInputElement)?.checked == true
+    val shakenWithoutNumber = (document.getElementById("qpShakenWithoutNumberCheckbox") as? HTMLInputElement)?.checked == true
+    val shaken = shakenWithNumber || shakenWithoutNumber
+    val numberCut = when {
+        shakenWithoutNumber -> ""
+        shakenWithNumber -> (document.getElementById("qpNumberCutString") as? HTMLInputElement)?.value?.trim().orEmpty()
+        else -> ""
+    }
+    return shaken to numberCut
+}
+
+private fun validateQuickPurchaseNumberCutWhenShaken(): Boolean {
+    val shakenWithNumber = (document.getElementById("qpShakenCheckbox") as? HTMLInputElement)?.checked == true
+    val shakenWithoutNumber = (document.getElementById("qpShakenWithoutNumberCheckbox") as? HTMLInputElement)?.checked == true
+    if (shakenWithoutNumber || !shakenWithNumber) return true
+    val missing = mutableListOf<String>()
+    if (getComboboxValueSafe("qpNumberCutPlace").trim().isEmpty()) missing.add("Place Name (Japanese)")
+    if ((document.getElementById("qpNumberCutNumber1") as? HTMLInputElement)?.value?.trim().isNullOrEmpty()) {
+        missing.add("Number (English) — first field")
+    }
+    if (getComboboxValueSafe("qpNumberCutHiragana").trim().isEmpty()) missing.add("Hiragana Character")
+    if ((document.getElementById("qpNumberCutNumber2") as? HTMLInputElement)?.value?.trim().isNullOrEmpty()) {
+        missing.add("Number (English) — second field")
+    }
+    if (missing.isEmpty()) return true
+    (document.getElementById("qpNumberCutFieldsWrap") as? HTMLElement)?.style?.display = "block"
+    showErrorModal(
+        "Number Cut Required",
+        "SHAKEN is selected. Please complete all Number Cut detail fields.",
+    )
+    return false
 }
 
 fun populateQuickSupplierDropdownsFromAuction(auctionName: String) {
@@ -378,6 +637,13 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
         showErrorModal("Invalid Chassis", "Please select chassis from dropdown. The first part cannot be edited manually.")
         return
     }
+    if (!validateQuickPurchaseNumberCutWhenShaken()) {
+        saveBtn?.disabled = false
+        saveMoreBtn?.disabled = false
+        saveBtn?.textContent = originalSave
+        saveMoreBtn?.textContent = originalMore
+        return
+    }
 
     // Quick Purchase: save full chassis CODE-NUMBER (same as Add Purchase).
     val chassisCodeOnly = chassis.substringBefore("-").trim()
@@ -402,6 +668,22 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
     purchaseData.rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("qpRixoCompany"))
     purchaseData.clientName = getComboboxValueSafe("qpClientName")
     purchaseData.country = getComboboxValueSafe("qpCountry")
+    purchaseData.grade = getComboboxValueSafe("qpGrade")
+    purchaseData.rank = getComboboxValueSafe("qpRank")
+    purchaseData.seat = getComboboxValueSafe("qpSeat")
+    purchaseData.door = getComboboxValueSafe("qpDoor")
+    purchaseData.color = getComboboxValueSafe("qpColor")
+    purchaseData.fuel = getComboboxValueSafe("qpFuel")
+    val qpCcValue = getComboboxValueSafe("qpCc")
+    // Backend expects Int? for cc (same as Add/Edit Purchase).
+    purchaseData.cc = if (qpCcValue.isNotEmpty()) {
+        val numValue = qpCcValue.replace(Regex("[^0-9]"), "")
+        numValue.toIntOrNull()
+    } else null
+    purchaseData.distance = sanitizeDistanceUiToDb((document.getElementById("qpDistance") as? HTMLInputElement)?.value ?: "")
+    val (shaken, numberCut) = readQuickPurchaseShakenAndNumberCut()
+    purchaseData.shaken = shaken
+    purchaseData.numberCut = numberCut
     val priceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpPrice') : ''").unsafeCast<String>().trim()
     purchaseData.price = if (priceValue.isNotBlank()) "¥$priceValue" else ""
     val rixoPriceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpRixoPrice') : ''").unsafeCast<String>().trim()

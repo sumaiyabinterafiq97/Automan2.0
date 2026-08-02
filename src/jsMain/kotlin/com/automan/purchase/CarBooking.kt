@@ -190,6 +190,7 @@ private fun rebuildBookingListTableFromDisplayedCars(restoreCheckedChassis: Set<
     }
     updateBookingCarsSelectedCount()
     updateBookingSelectAllCheckbox()
+    updateBookingListEmptyState()
 }
 
 private fun appendBookingListRow(purchase: dynamic, rowNumber: Int) {
@@ -230,6 +231,7 @@ private fun appendBookingListRow(purchase: dynamic, rowNumber: Int) {
         $dataTds
     """
     tbody.appendChild(row)
+    updateBookingListEmptyState()
 }
 
 private fun showBookingColumnFilterModal() {
@@ -747,13 +749,27 @@ fun showCarBookingPage() {
                             <input type="text" id="podPort" placeholder="Port of discharge">
                         </div>
 
-                        <!-- Final Destination (optional) -->
+                        <!-- Final Destination (optional) — FAB select; options from Consignee Map -->
                         <div class="booking-form-group">
-                            <label for="finalDestination">Final destination</label>
-                            <input type="text" id="finalDestination" placeholder="Optional">
+                            <label id="bookingFinalDestLabel">Final destination</label>
+                            <div class="booking-fab-field rixo-company-fab-wrap" id="bookingFinalDestFabWrap">
+                                <select id="finalDestination" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
+                                    <option value="">Select Final destination</option>
+                                </select>
+                                <div class="rixo-company-fab">
+                                    <button type="button" id="bookingFinalDestFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingFinalDestFabActions" aria-labelledby="bookingFinalDestLabel">
+                                        <span class="rixo-fab-trigger-text-wrap">
+                                            <span class="rixo-fab-trigger-label" id="bookingFinalDestFabLabel">Select Final destination</span>
+                                            <span class="rixo-fab-trigger-hint">Tap to choose destination</span>
+                                        </span>
+                                        <span class="rixo-fab-trigger-chevron" aria-hidden="true">▼</span>
+                                    </button>
+                                    <div id="bookingFinalDestFabActions" class="rixo-fab-actions" role="listbox" style="display: none;" aria-label="Final destination"></div>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Notify party (optional) — FAB select; options from Consignee Map (; tokens) -->
+                        <!-- Notify party (optional) — FAB select; options from Consignee Map -->
                         <div class="booking-form-group">
                             <label id="bookingNotifyLabel">Notify party</label>
                             <div class="booking-fab-field rixo-company-fab-wrap" id="bookingNotifyFabWrap">
@@ -773,7 +789,7 @@ fun showCarBookingPage() {
                             </div>
                         </div>
 
-                        <!-- In-Transit Clause (optional) — FAB select; options from Consignee Map (; tokens) -->
+                        <!-- In-Transit Clause (optional) — FAB select; options from Consignee Map -->
                         <div class="booking-form-group">
                             <label id="bookingInTransitLabel">In-transit clause</label>
                             <div class="booking-fab-field rixo-company-fab-wrap" id="bookingInTransitFabWrap">
@@ -849,7 +865,7 @@ fun showCarBookingPage() {
                             <h2 class="booking-section-header">List</h2>
                             <div class="booking-list-header-actions">
                                 <span id="bookingCarsSelectedCount" class="booking-cars-selected-count is-empty" aria-live="polite">0 cars selected</span>
-                                <button id="bookingColumnFilterBtn" type="button" class="rixo-generator-col-filter-btn booking-col-filter-btn">
+                                <button id="bookingColumnFilterBtn" type="button" class="rixo-generator-col-filter-btn booking-col-filter-btn" aria-label="Column filter" title="Column filter">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                                         <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
                                     </svg>
@@ -867,7 +883,11 @@ fun showCarBookingPage() {
                         </div>
                         
                         <!-- Car Selection Table -->
-                        <div class="booking-table-card">
+                        <div class="booking-table-card is-empty">
+                            <div id="bookingListEmpty" class="booking-list-empty" role="status">
+                                <p class="booking-list-empty-title">No cars in the list yet</p>
+                                <p class="booking-list-empty-hint">Choose Country and POL, then search a chassis — or wait for the filtered purchase list to load.</p>
+                            </div>
                             <table class="booking-chassis-table">
                                 <thead>
                                     <tr id="carSelectionTableHeadRow">
@@ -899,6 +919,7 @@ fun showCarBookingPage() {
     setupCarBookingPageListeners()
     loadBookingSelectedColumnsFromStorage()
     paintBookingListTableHeader(isRecreateMode)
+    updateBookingListEmptyState()
     if (isRecreateMode) {
         setupBookingRecreatePageListeners()
         lockBookingRecreateCountryAndPol()
@@ -934,6 +955,15 @@ fun showCarBookingPage() {
               labelId: 'bookingCarrierFabLabel',
               defaultLabel: 'Select Carrier',
               emptyMessage: 'No carriers available'
+            });
+            window.registerBookingFabSelect({
+              selectId: 'finalDestination',
+              wrapId: 'bookingFinalDestFabWrap',
+              triggerId: 'bookingFinalDestFabTrigger',
+              actionsId: 'bookingFinalDestFabActions',
+              labelId: 'bookingFinalDestFabLabel',
+              defaultLabel: 'Select Final destination',
+              emptyMessage: 'No final destination for this consignee'
             });
             window.registerBookingFabSelect({
               selectId: 'notifyParty',
@@ -1231,8 +1261,10 @@ fun setupCarBookingPageListeners() {
         }
         carBookingFormState.podPort = ""
         carBookingFormState.consigneeName = ""
+        setBookingSelectFieldValue("finalDestination", "")
         setBookingSelectFieldValue("notifyParty", "")
         setBookingSelectFieldValue("inTransitClause", "")
+        carBookingFormState.finalDestination = ""
         carBookingFormState.notifyParty = ""
         carBookingFormState.inTransitClause = ""
 
@@ -1314,6 +1346,9 @@ fun setupCarBookingPageListeners() {
         attachPodChangeListener(podPortElForListener)
     }
 
+    document.getElementById("finalDestination")?.addEventListener("change", { _: Event ->
+        carBookingFormState.finalDestination = bookingFormFieldValue("finalDestination")
+    })
     document.getElementById("notifyParty")?.addEventListener("change", { _: Event ->
         carBookingFormState.notifyParty = bookingFormFieldValue("notifyParty")
     })
@@ -1905,6 +1940,16 @@ fun clearBookingListTable() {
     Logger.debug("Cleared booking list table")
     updateBookingCarsSelectedCount()
     updateBookingSelectAllCheckbox()
+    updateBookingListEmptyState()
+}
+
+private fun updateBookingListEmptyState() {
+    val emptyEl = document.getElementById("bookingListEmpty") as? HTMLElement ?: return
+    val hasCars = carBookingDisplayedCars.isNotEmpty()
+    emptyEl.hidden = hasCars
+    emptyEl.setAttribute("aria-hidden", if (hasCars) "true" else "false")
+    val tableCard = document.querySelector(".booking-table-card") as? HTMLElement
+    tableCard?.classList?.toggle("is-empty", !hasCars)
 }
 
 fun updateBookingCarsSelectedCount() {
@@ -2213,6 +2258,7 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
     console.log("✅ Added", purchasesArray.size, "new cars to table")
     updateBookingCarsSelectedCount()
     updateBookingSelectAllCheckbox()
+    updateBookingListEmptyState()
 }
 
 fun searchCarsFallback(searchTerm: String) {
@@ -2263,7 +2309,7 @@ fun showCalculateFreightPage() {
         console.log("📋 Selected cars details:", selectedCars)
         
         if (selectedCars.isEmpty()) {
-            js("alert('Please select cars first before calculating freight!')")
+            showMessage("Please select cars first before calculating freight.", "error")
             return
         }
 
@@ -2292,163 +2338,104 @@ fun showCalculateFreightPage() {
         
     } catch (e: dynamic) {
         console.error("❌ Error opening freight calculation page:", e)
-        js("alert('Error opening freight calculation page: ' + e.message)")
+        showMessage("Error opening freight calculation page: ${e.message}", "error")
     }
 }
 
 fun getSelectedCarsFromTable(): List<dynamic> {
     val selectedCars = mutableListOf<dynamic>()
-    val tableBody = document.getElementById("carSelectionTableBody")
+    val tableBody = document.getElementById("carSelectionTableBody") ?: return selectedCars
     val recreateAllRows = isCarBookingRecreateSession()
-    
-    console.log("🔍 Looking for car selection table...")
-    console.log("🔍 Table body element:", tableBody)
-    
-    if (tableBody != null) {
-        val rows = tableBody.querySelectorAll("tr")
-        console.log("🔍 Found ${rows.length} rows in table")
-        
-        for (i in 0 until rows.length) {
-            val row = rows[i] as HTMLTableRowElement
-            val checkbox = row.querySelector("input[type='checkbox']") as HTMLInputElement?
-            val includeRow = recreateAllRows || (checkbox != null && checkbox.checked)
-            
-            console.log("🔍 Row $i: checkbox found = ${checkbox != null}, checked = ${checkbox?.checked}")
-            
-            if (includeRow) {
-                val chassisCell = row.cells[2] // Chassis is in the third column (index 2)
-                val nameCell = row.cells[3]    // Name is in the fourth column (index 3)
-                val yearCell = row.cells[4]    // Year is in the fifth column (index 4)
-                
-                val purchaseId = row.getAttribute("data-purchase-id")?.toLongOrNull()
-                    ?: checkbox?.getAttribute("data-purchase-id")?.toLongOrNull()
-                
-                console.log("🔍 Selected car: chassis=${chassisCell?.textContent}, name=${nameCell?.textContent}, year=${yearCell?.textContent}, purchaseId=$purchaseId")
-                
-                if (chassisCell != null && nameCell != null && yearCell != null) {
-                    val carObject = js("{}")
-                    val chassisStr = chassisCell.textContent?.trim().orEmpty()
-                    carObject.chassis = chassisCell.textContent
-                    carObject.name = nameCell.textContent
-                    carObject.year = yearCell.textContent
-                    carObject.price = 0 // Will be populated from API
-                    if (purchaseId != null) {
-                        carObject.id = purchaseId
-                        carObject.purchaseId = purchaseId
-                    }
-                    if (chassisStr.isNotEmpty()) {
-                        val fromDisplayed = carBookingDisplayedCars.firstOrNull {
-                            it.chassis?.toString()?.trim().equals(chassisStr, ignoreCase = true)
-                        }
-                        val sl = fromDisplayed?.stockLocation ?: fromDisplayed?.stock_location
-                        val sls = sl?.toString()?.trim().orEmpty()
-                        if (sls.isNotEmpty()) {
-                            carObject.stockLocation = sls
-                        }
-                    }
-                    selectedCars.add(carObject)
+    val rows = tableBody.querySelectorAll("tr[data-chassis], tr[data-purchase-id]")
+
+    for (i in 0 until rows.length) {
+        val row = rows.item(i) as? HTMLElement ?: continue
+        if (row.classList.contains("booking-empty-row")) continue
+        val checkbox = row.querySelector("input[type='checkbox'].car-checkbox") as? HTMLInputElement
+        val includeRow = recreateAllRows || (checkbox != null && checkbox.checked)
+        if (!includeRow) continue
+
+        val chassisStr = row.getAttribute("data-chassis")?.trim().orEmpty()
+            .ifBlank { checkbox?.getAttribute("data-chassis")?.trim().orEmpty() }
+        val purchaseId = row.getAttribute("data-purchase-id")?.toLongOrNull()
+            ?: checkbox?.getAttribute("data-purchase-id")?.toLongOrNull()
+
+        val fromDisplayed = when {
+            purchaseId != null && purchaseId > 0L ->
+                carBookingDisplayedCars.firstOrNull { (it.id as? Number)?.toLong() == purchaseId }
+            chassisStr.isNotEmpty() ->
+                carBookingDisplayedCars.firstOrNull {
+                    it.chassis?.toString()?.trim().equals(chassisStr, ignoreCase = true)
                 }
+            else -> null
+        }
+
+        val carObject = js("{}")
+        if (fromDisplayed != null) {
+            carObject.chassis = fromDisplayed.chassis?.toString() ?: chassisStr
+            carObject.name = fromDisplayed.carName?.toString() ?: ""
+            carObject.year = carModelYearToYearOnly(fromDisplayed.carModelYear?.toString())
+            carObject.price = fromDisplayed.price ?: 0
+            val id = (fromDisplayed.id as? Number)?.toLong() ?: purchaseId
+            if (id != null) {
+                carObject.id = id
+                carObject.purchaseId = id
+            }
+            val sl = (fromDisplayed.stockLocation ?: fromDisplayed.stock_location)?.toString()?.trim().orEmpty()
+            if (sl.isNotEmpty()) carObject.stockLocation = sl
+        } else {
+            if (chassisStr.isEmpty()) continue
+            carObject.chassis = chassisStr
+            carObject.name = ""
+            carObject.year = ""
+            carObject.price = 0
+            if (purchaseId != null) {
+                carObject.id = purchaseId
+                carObject.purchaseId = purchaseId
             }
         }
-    } else {
-        console.error("❌ Car selection table body not found!")
+        selectedCars.add(carObject)
     }
-    
-    console.log("🔍 Total selected cars: ${selectedCars.size}")
     return selectedCars
 }
 
 fun getSelectedPurchaseIds(): List<Long> {
     val selectedIds = mutableListOf<Long>()
-    val tableBody = document.getElementById("carSelectionTableBody")
-    
-    console.log("🔍 getSelectedPurchaseIds() called")
-    console.log("🔍 Table body element:", tableBody)
-    
-    if (tableBody != null) {
-        if (isCarBookingRecreateSession()) {
-            val rows = tableBody.querySelectorAll("tr")
-            for (i in 0 until rows.length) {
-                val row = rows.item(i) as? HTMLElement ?: continue
-                row.getAttribute("data-purchase-id")?.toLongOrNull()?.let { selectedIds.add(it) }
-            }
-            console.log("🔍 Recreate mode purchase IDs from rows: $selectedIds")
-            return selectedIds
-        }
-        // Try to find checkboxes with class 'car-checkbox' first
-        var checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
-        console.log("🔍 Found ${checkboxes.length} checkboxes with class 'car-checkbox'")
-        
-        // If none found, try finding all checkboxes in the table
-        if (checkboxes.length == 0) {
-            checkboxes = tableBody.querySelectorAll("input[type='checkbox']")
-            console.log("🔍 No 'car-checkbox' class found, trying all checkboxes: ${checkboxes.length} found")
-        }
-        
-        for (i in 0 until checkboxes.length) {
-            val checkbox = checkboxes.item(i) as HTMLInputElement
-            console.log("🔍 Checkbox $i: checked=${checkbox.checked}, data-purchase-id=${checkbox.getAttribute("data-purchase-id")}")
-            
-            if (checkbox.checked) {
-                // Try to get purchase ID from data attribute
-                var purchaseId = checkbox.getAttribute("data-purchase-id")?.toLongOrNull()
-                
-                // If not found, try to get it from the row's data attribute or from the purchase object
-                if (purchaseId == null) {
-                    val row = checkbox.closest("tr") as? HTMLTableRowElement
-                    if (row != null) {
-                        purchaseId = row.getAttribute("data-purchase-id")?.toLongOrNull()
-                        console.log("🔍 Trying row data-purchase-id: $purchaseId")
-                    }
-                }
-                
-                // If still not found, try to find the purchase ID from the displayed cars data
-                if (purchaseId == null) {
-                    val chassisCell = (checkbox.closest("tr") as? HTMLTableRowElement)?.cells?.get(2)
-                    val chassis = chassisCell?.textContent?.trim()
-                    if (chassis != null) {
-                        // Find the purchase in carBookingDisplayedCars
-                        for (car in carBookingDisplayedCars) {
-                            if (car.chassis == chassis) {
-                                purchaseId = (car.id as? Number)?.toLong()
-                                console.log("🔍 Found purchase ID from displayed cars: $purchaseId for chassis $chassis")
-                                break
-                            }
-                        }
-                    }
-                }
-                
-                if (purchaseId != null) {
-                    selectedIds.add(purchaseId)
-                    console.log("✅ Added purchase ID: $purchaseId")
-                } else {
-                    console.warn("⚠️ Could not find purchase ID for checked checkbox")
-                }
-            }
-        }
-    } else {
-        console.error("❌ Car selection table body not found!")
-    }
-    
-    console.log("🔍 Selected purchase IDs: $selectedIds")
+    val tableBody = document.getElementById("carSelectionTableBody") ?: return selectedIds
 
-    if (selectedIds.isEmpty()) {
-        console.warn("⚠️ No checkboxes selected. Falling back to all displayed cars.")
-        val fallbackIds = mutableListOf<Long>()
-        for (car in carBookingDisplayedCars) {
-            val id = (car.id as? Number)?.toLong()
-            if (id != null) {
-                fallbackIds.add(id)
-            }
+    if (isCarBookingRecreateSession()) {
+        val rows = tableBody.querySelectorAll("tr[data-purchase-id]")
+        for (i in 0 until rows.length) {
+            val row = rows.item(i) as? HTMLElement ?: continue
+            if (row.classList.contains("booking-empty-row")) continue
+            row.getAttribute("data-purchase-id")?.toLongOrNull()?.let { if (it > 0L) selectedIds.add(it) }
         }
-        if (fallbackIds.isNotEmpty()) {
-            selectedIds.addAll(fallbackIds)
-            console.log("✅ Defaulted to all displayed cars: $selectedIds")
-        } else {
-            console.warn("⚠️ No displayed cars available for fallback.")
-        }
+        return selectedIds
     }
 
+    val checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
+    for (i in 0 until checkboxes.length) {
+        val checkbox = checkboxes.item(i) as? HTMLInputElement ?: continue
+        if (!checkbox.checked) continue
+        var purchaseId = checkbox.getAttribute("data-purchase-id")?.toLongOrNull()
+        if (purchaseId == null || purchaseId == 0L) {
+            val row = checkbox.closest("tr") as? HTMLElement
+            purchaseId = row?.getAttribute("data-purchase-id")?.toLongOrNull()
+        }
+        if (purchaseId == null || purchaseId == 0L) {
+            val chassis = checkbox.getAttribute("data-chassis")?.trim()
+                ?: (checkbox.closest("tr") as? HTMLElement)?.getAttribute("data-chassis")?.trim()
+            if (!chassis.isNullOrEmpty()) {
+                for (car in carBookingDisplayedCars) {
+                    if (car.chassis?.toString()?.trim().equals(chassis, ignoreCase = true)) {
+                        purchaseId = (car.id as? Number)?.toLong()
+                        break
+                    }
+                }
+            }
+        }
+        if (purchaseId != null && purchaseId > 0L) selectedIds.add(purchaseId)
+    }
     return selectedIds
 }
 
@@ -2953,7 +2940,7 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
             carBookingFormState.etaDate = toIsoFromLabel(etaRaw).ifBlank { etaRaw.take(10) }
         }
         val finalDestination = (first.finalDestination?.toString() ?: "").trim()
-        (document.getElementById("finalDestination") as? HTMLInputElement)?.value = finalDestination
+        setBookingSelectFieldValue("finalDestination", finalDestination)
         carBookingFormState.finalDestination = finalDestination
         val notifyParty = (first.notifyParty?.toString() ?: "").trim()
         setBookingSelectFieldValue("notifyParty", notifyParty)
@@ -3087,12 +3074,12 @@ private fun purchaseDynIsSold(p: dynamic): Boolean {
 }
 
 private fun bookingListSoldLockedHtml(): String {
-    return """<span class="booking-row-sold-locked" title="Cannot remove: Sold is true" aria-label="Sold — cannot remove" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#f3f4f6;color:#6b7280;font-size:11px;font-weight:700;user-select:none;">Sold</span>"""
+    return """<span class="booking-row-sold-locked" title="Cannot remove: Sold is true" aria-label="Sold — cannot remove">Sold</span>"""
 }
 
 private fun bookingListRemoveButtonHtml(purchaseId: Long, chassisAttr: String, historyId: Long): String {
     val hid = if (historyId > 0L) historyId.toString() else ""
-    return """<button type="button" class="booking-row-remove-btn" data-purchase-id="$purchaseId" data-chassis="$chassisAttr" data-history-id="$hid" title="Remove car" aria-label="Remove car" style="width:28px;height:28px;border:none;border-radius:6px;background:#fee2e2;color:#b91c1c;cursor:pointer;line-height:1;font-size:18px;font-weight:700;padding:0;display:inline-flex;align-items:center;justify-content:center;">×</button>"""
+    return """<button type="button" class="booking-row-remove-btn" data-purchase-id="$purchaseId" data-chassis="$chassisAttr" data-history-id="$hid" title="Remove car" aria-label="Remove car">×</button>"""
 }
 
 private fun lockBookingRecreateCountryAndPol() {
@@ -3217,11 +3204,10 @@ private fun performRemoveChassisFromBookingRecreate(btn: HTMLButtonElement) {
 
 private fun removeBookingTableRowForChassis(chassis: String, purchaseId: Long?) {
     val tbody = document.getElementById("carSelectionTableBody") ?: return
-    val rows = tbody.querySelectorAll("tr")
+    val rows = tbody.querySelectorAll("tr[data-chassis], tr[data-purchase-id]")
     for (i in 0 until rows.length) {
         val row = rows.item(i) as? HTMLElement ?: continue
         val rowChassis = row.getAttribute("data-chassis")?.trim()
-            ?: row.querySelector("td:nth-child(3)")?.textContent?.trim()
         val rowPid = row.getAttribute("data-purchase-id")?.toLongOrNull()
         val matchChassis = rowChassis != null && rowChassis.equals(chassis, ignoreCase = true)
         val matchId = purchaseId != null && rowPid == purchaseId
@@ -3230,19 +3216,22 @@ private fun removeBookingTableRowForChassis(chassis: String, purchaseId: Long?) 
             break
         }
     }
+    updateBookingListEmptyState()
 }
 
 private fun renumberBookingListTable() {
     val tbody = document.getElementById("carSelectionTableBody") ?: return
-    val rows = tbody.querySelectorAll("tr")
+    val rows = tbody.querySelectorAll("tr[data-chassis], tr[data-purchase-id]")
     for (i in 0 until rows.length) {
         val row = rows.item(i) as? HTMLElement ?: continue
-        val noCell = row.querySelector("td:nth-child(2)")
+        val noCell = row.querySelector("td[data-label='No.']")
+            ?: row.querySelector("td:nth-child(2)")
         if (noCell != null) {
             noCell.innerHTML = formatPurchaseListCellChipHtml((i + 1).toString())
         }
     }
     updateBookingCarsSelectedCount()
+    updateBookingListEmptyState()
 }
 
 private fun handleDeleteShippingHistoryFromRecreate() {
@@ -3400,7 +3389,7 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
                 req.eta = bookingFormEtaIso()
                 req.pol = pol
                 req.pod = pod
-                req.finalDestination = (document.getElementById("finalDestination") as? HTMLInputElement)?.value?.trim().orEmpty()
+                req.finalDestination = bookingFormFieldValue("finalDestination")
                 req.bookingId = bookingNo
                 req.vessel = vessel
                 req.carrier = carrier

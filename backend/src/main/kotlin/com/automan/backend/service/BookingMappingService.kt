@@ -46,6 +46,7 @@ class BookingMappingService(
             id = 0,
             country = ensureCountryColumn(payload.country),
             consigneeName = name,
+            finalDestination = payload.finalDestination?.trim()?.takeIf { it.isNotEmpty() },
             notifyParty = payload.notifyParty?.trim()?.takeIf { it.isNotEmpty() },
             inTransitClause = payload.inTransitClause?.trim()?.takeIf { it.isNotEmpty() },
         )
@@ -71,6 +72,7 @@ class BookingMappingService(
                 id = id,
                 country = ensureCountryColumn(payload.country),
                 consigneeName = name,
+                finalDestination = payload.finalDestination?.trim()?.takeIf { it.isNotEmpty() },
                 notifyParty = payload.notifyParty?.trim()?.takeIf { it.isNotEmpty() },
                 inTransitClause = payload.inTransitClause?.trim()?.takeIf { it.isNotEmpty() },
                 createdAt = current.createdAt,
@@ -91,15 +93,20 @@ class BookingMappingService(
             incoming.consigneeAddress,
             TokenSplit.SEMICOLON_NEWLINE_ONLY,
         )
+        val mergedFinalDest = mergeTokenFields(
+            target.finalDestination,
+            incoming.finalDestination,
+            TokenSplit.RECORD_SEPARATOR,
+        )
         val mergedNotify = mergeTokenFields(
             target.notifyParty,
             incoming.notifyParty,
-            TokenSplit.SEMICOLON_ONLY,
+            TokenSplit.RECORD_SEPARATOR,
         )
         val mergedInTransit = mergeTokenFields(
             target.inTransitClause,
             incoming.inTransitClause,
-            TokenSplit.SEMICOLON_ONLY,
+            TokenSplit.RECORD_SEPARATOR,
         )
         return repo.save(
             target.copy(
@@ -107,6 +114,7 @@ class BookingMappingService(
                 consigneeName = target.consigneeName,
                 consigneeAddress = mergedAddress ?: target.consigneeAddress,
                 pod = mergedPod ?: target.pod,
+                finalDestination = mergedFinalDest ?: target.finalDestination,
                 notifyParty = mergedNotify ?: target.notifyParty,
                 inTransitClause = mergedInTransit ?: target.inTransitClause,
                 createdAt = target.createdAt,
@@ -122,8 +130,16 @@ class BookingMappingService(
     private enum class TokenSplit {
         COMMA_SEMICOLON_NEWLINE,
         SEMICOLON_NEWLINE_ONLY,
-        /** Notify / In-Transit: preserve commas and newlines inside a single value. */
-        SEMICOLON_ONLY,
+        /**
+         * Notify / In-Transit / Final Destination: chips joined with U+001E.
+         * Legacy rows without RS are one token (`;` is literal text).
+         */
+        RECORD_SEPARATOR,
+    }
+
+    private fun joinDelimiter(split: TokenSplit): String = when (split) {
+        TokenSplit.RECORD_SEPARATOR -> "\u001E"
+        else -> ";"
     }
 
     private fun mergeTokenFields(
@@ -144,17 +160,24 @@ class BookingMappingService(
             }
         }
         if (ordered.isEmpty()) return null
-        return ordered.joinToString(";")
+        return ordered.joinToString(joinDelimiter(split))
     }
 
     private fun tokenize(s: String?, split: TokenSplit): List<String> {
         if (s.isNullOrBlank()) return emptyList()
-        val regex = when (split) {
-            TokenSplit.COMMA_SEMICOLON_NEWLINE -> Regex("""[,;\n]+""")
-            TokenSplit.SEMICOLON_NEWLINE_ONLY -> Regex("""[;\n]+""")
-            TokenSplit.SEMICOLON_ONLY -> Regex(""";+""")
+        return when (split) {
+            TokenSplit.COMMA_SEMICOLON_NEWLINE ->
+                Regex("""[,;\n]+""").split(s).map { it.trim() }.filter { it.isNotEmpty() }
+            TokenSplit.SEMICOLON_NEWLINE_ONLY ->
+                Regex("""[;\n]+""").split(s).map { it.trim() }.filter { it.isNotEmpty() }
+            TokenSplit.RECORD_SEPARATOR -> {
+                if (!s.contains('\u001E')) {
+                    listOf(s.trim()).filter { it.isNotEmpty() }
+                } else {
+                    s.split('\u001E').map { it.trim() }.filter { it.isNotEmpty() }
+                }
+            }
         }
-        return regex.split(s).map { it.trim() }.filter { it.isNotEmpty() }
     }
 
     /**

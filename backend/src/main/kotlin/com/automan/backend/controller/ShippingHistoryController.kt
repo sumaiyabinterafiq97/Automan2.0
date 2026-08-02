@@ -1,8 +1,10 @@
 package com.automan.backend.controller
 
 import com.automan.backend.dto.ShippingHistoryBatchRequest
+import com.automan.backend.dto.ClientBasedShipmentDetailsPdfRequest
 import com.automan.backend.dto.ShippingHistoryDeleteBatchRequest
 import com.automan.backend.dto.ShippingHistoryRowDto
+import com.automan.backend.service.PdfService
 import com.automan.backend.service.ShippingHistoryExportService
 import com.automan.backend.service.ShippingHistoryService
 import com.automan.backend.util.Logger
@@ -26,6 +28,7 @@ import java.time.format.DateTimeFormatter
 class ShippingHistoryController(
     private val shippingHistoryService: ShippingHistoryService,
     private val shippingHistoryExportService: ShippingHistoryExportService,
+    private val pdfService: PdfService,
 ) {
 
     @GetMapping
@@ -114,6 +117,34 @@ class ShippingHistoryController(
                 "lines" to slice.lines,
             ),
         )
+    }
+
+    /** Client-Based Shipment Details PDF (not-yet-invoiced chassis only). */
+    @PostMapping("/client-shipment-details/pdf")
+    fun clientShipmentDetailsPdf(
+        @RequestBody request: ClientBasedShipmentDetailsPdfRequest,
+    ): ResponseEntity<Any> {
+        return try {
+            val data = shippingHistoryService.buildClientBasedShipmentDetailsPdfData(
+                request.clientName,
+                request.vessel,
+            )
+            val pdfBytes = pdfService.generateClientBasedShipmentDetailsPdf(data)
+            val safeClient = request.clientName.trim().replace(Regex("[^A-Za-z0-9_-]+"), "_").take(40)
+            val headers = org.springframework.http.HttpHeaders()
+            headers.contentType = MediaType.APPLICATION_PDF
+            headers.set(
+                org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                "attachment; filename=\"client_shipment_details_${safeClient}.pdf\"",
+            )
+            headers.contentLength = pdfBytes.size.toLong()
+            ResponseEntity.ok().headers(headers).body(pdfBytes)
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        } catch (e: Exception) {
+            Logger.error("[ShippingHistory] client-shipment-details pdf failed: ${e.message}", e)
+            ResponseEntity.status(500).body(mapOf("error" to (e.message ?: "Internal error")))
+        }
     }
 
     @PostMapping("/batch")

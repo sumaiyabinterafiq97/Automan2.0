@@ -94,9 +94,9 @@ class PurchaseVehicleOverrideService(
     }
 
     /**
-     * @param snapshotSpecs when true (edit/Update path), non-empty spec values are stored as
+     * @param snapshotSpecs when true (create and edit/Update), non-empty spec values are stored as
      * overrides even when they equal the car_brand_mapping baseline. This "freezes" the specs
-     * shown on the edit form onto the purchase so they persist independently of the mapping.
+     * from the form onto the purchase so they persist independently of the mapping.
      */
     @Transactional
     fun syncFromPurchase(purchase: Purchase, snapshotSpecs: Boolean = false) {

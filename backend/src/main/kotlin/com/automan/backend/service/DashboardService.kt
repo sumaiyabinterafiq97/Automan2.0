@@ -46,6 +46,7 @@ class DashboardService(
         private val DAY_LABEL: DateTimeFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH)
         private const val TABLE_LIMIT = 12
         private const val TOP_N = 8
+        private const val TOP_MODELS = 4
         private const val TOP_CLIENTS = 5
 
         private val WORKFLOW_ORDER = listOf(
@@ -90,6 +91,37 @@ class DashboardService(
                 .replace(Regex("[^0-9.-]"), "")
             return cleaned.toDoubleOrNull() ?: 0.0
         }
+
+        /**
+         * Automan fiscal year: 1 May → 30 Apr.
+         * May 2025–Apr 2026 = 32nd term ⇒ term = startYear - 1993.
+         */
+        fun fiscalYearStartYear(today: LocalDate): Int =
+            if (today.monthValue >= 5) today.year else today.year - 1
+
+        fun currentFiscalYearBounds(today: LocalDate): Pair<LocalDate, LocalDate> {
+            val startYear = fiscalYearStartYear(today)
+            return LocalDate.of(startYear, 5, 1) to LocalDate.of(startYear + 1, 4, 30)
+        }
+
+        fun fiscalYearTermNumber(startYear: Int): Int = startYear - 1993
+
+        fun ordinalSuffix(n: Int): String {
+            val mod100 = n % 100
+            if (mod100 in 11..13) return "th"
+            return when (n % 10) {
+                1 -> "st"
+                2 -> "nd"
+                3 -> "rd"
+                else -> "th"
+            }
+        }
+
+        fun currentFiscalYearLabel(today: LocalDate): String {
+            val startYear = fiscalYearStartYear(today)
+            val term = fiscalYearTermNumber(startYear)
+            return "FY$startYear (${term}${ordinalSuffix(term)} · May $startYear - Apr ${startYear + 1})"
+        }
     }
 
     @Transactional(readOnly = true)
@@ -119,9 +151,10 @@ class DashboardService(
                 to = period.to.format(ISO_DATE),
                 previousFrom = period.previousFrom.format(ISO_DATE),
                 previousTo = period.previousTo.format(ISO_DATE),
+                label = if (period.key == "current_fy") currentFiscalYearLabel(today) else null,
             ),
             generatedAt = LocalDateTime.now().toString(),
-            kpis = buildKpis(current, previous, pipeline),
+            kpis = buildKpis(current, previous, pipeline, period),
             workflow = buildWorkflow(pipeline),
             charts = buildCharts(current, pipeline, today, period),
             tables = buildTables(current, pipeline),
@@ -214,6 +247,11 @@ class DashboardService(
                 val prevTo = LocalDate.of(today.year - 1, 12, 31)
                 PeriodWindow(key, from, to, prevFrom, prevTo)
             }
+            "current_fy" -> {
+                val (from, to) = currentFiscalYearBounds(today)
+                val (prevFrom, prevTo) = currentFiscalYearBounds(from.minusDays(1))
+                PeriodWindow("current_fy", from, to, prevFrom, prevTo)
+            }
             "custom" -> {
                 val from = parseIso(fromRaw) ?: today.withDayOfMonth(1)
                 val to = parseIso(toRaw) ?: today
@@ -250,42 +288,116 @@ class DashboardService(
         current: List<ParsedRow>,
         previous: List<ParsedRow>,
         pipeline: List<ParsedRow>,
+        period: PeriodWindow,
     ): List<DashboardKpiDto> {
-        val purchaseCount = current.size.toDouble()
-        val prevPurchaseCount = previous.size.toDouble()
-        val purchaseValue = current.sumOf { it.totalPrice }
-        val prevPurchaseValue = previous.sumOf { it.totalPrice }
-        val unshipped = pipeline.count {
+        val carsBought = current.size.toDouble()
+        val prevCarsBought = previous.size.toDouble()
+
+        val totalClients = current.mapNotNull { it.clientName?.trim()?.takeIf { n -> n.isNotEmpty() } }.toSet().size.toDouble()
+        val prevTotalClients = previous.mapNotNull { it.clientName?.trim()?.takeIf { n -> n.isNotEmpty() } }.toSet().size.toDouble()
+
+        val carsShipped = countShipmentsBetween(period.from, period.to).toDouble()
+        val prevCarsShipped = countShipmentsBetween(period.previousFrom, period.previousTo).toDouble()
+
+        val carsSold = current.count { it.status == WorkflowStatus.INVOICE_CONFIRMED }.toDouble()
+        val prevCarsSold = previous.count { it.status == WorkflowStatus.INVOICE_CONFIRMED }.toDouble()
+
+        val inventory = pipeline.count {
             it.status == WorkflowStatus.PURCHASED ||
                 it.status == WorkflowStatus.RIXO_REQUESTED ||
                 it.status == WorkflowStatus.RIXO_CONFIRMED
         }.toDouble()
-        val prevUnshipped = previous.count {
+        val prevInventory = previous.count {
             it.status == WorkflowStatus.PURCHASED ||
                 it.status == WorkflowStatus.RIXO_REQUESTED ||
                 it.status == WorkflowStatus.RIXO_CONFIRMED
         }.toDouble()
-        val sold = current.count { it.status == WorkflowStatus.INVOICE_CONFIRMED }.toDouble()
-        val prevSold = previous.count { it.status == WorkflowStatus.INVOICE_CONFIRMED }.toDouble()
+
+        val avgMonthlyRevenue = averageMonthlyInvoiceRevenue(period)
+        val prevAvgMonthlyRevenue = averageMonthlyInvoiceRevenue(
+            PeriodWindow(
+                key = "previous",
+                from = period.previousFrom,
+                to = period.previousTo,
+                previousFrom = period.previousFrom,
+                previousTo = period.previousTo,
+            ),
+        )
+
         val rixoPending = pipeline.count { it.status == WorkflowStatus.RIXO_REQUESTED }.toDouble()
-        val prevRixoPending = previous.count { it.status == WorkflowStatus.RIXO_REQUESTED }.toDouble()
         val bookingPending = pipeline.count { it.status == WorkflowStatus.RIXO_CONFIRMED }.toDouble()
-        val prevBookingPending = previous.count { it.status == WorkflowStatus.RIXO_CONFIRMED }.toDouble()
-        val activeClients = current.mapNotNull { it.clientName?.trim()?.takeIf { n -> n.isNotEmpty() } }.toSet().size.toDouble()
-        val prevActiveClients = previous.mapNotNull { it.clientName?.trim()?.takeIf { n -> n.isNotEmpty() } }.toSet().size.toDouble()
-        val avgPrice = if (purchaseCount > 0) purchaseValue / purchaseCount else 0.0
-        val prevAvg = if (prevPurchaseCount > 0) prevPurchaseValue / prevPurchaseCount else 0.0
 
         return listOf(
-            kpi("purchases", "Purchases", purchaseCount, prevPurchaseCount, "/purchase", "number"),
-            kpi("purchase_value", "Purchase value", purchaseValue, prevPurchaseValue, "/purchase", "currency"),
-            kpi("unshipped", "Unshipped cars", unshipped, prevUnshipped, "/booking", "number"),
-            kpi("sold", "Sold cars", sold, prevSold, "/invoice-history", "number"),
-            kpi("rixo_pending", "Rixo pending", rixoPending, prevRixoPending, "/rixo-generator", "number"),
-            kpi("booking_pending", "Booking pending", bookingPending, prevBookingPending, "/booking", "number"),
-            kpi("active_clients", "Active clients", activeClients, prevActiveClients, "/master/client-transactions", "number"),
-            kpi("avg_price", "Avg purchase price", avgPrice, prevAvg, "/purchase", "currency"),
+            kpi("cars_bought", "Cars Bought This Month", carsBought, prevCarsBought, "", "number"),
+            kpi("total_clients", "Total Clients", totalClients, prevTotalClients, "", "number"),
+            kpi("cars_shipped", "Cars Shipped This Month", carsShipped, prevCarsShipped, "", "number"),
+            kpi("cars_sold", "Cars Sold This Month", carsSold, prevCarsSold, "", "number"),
+            kpi("current_inventory", "Current Inventory", inventory, prevInventory, "", "number"),
+            kpi("avg_monthly_revenue", "Average Monthly Revenue", avgMonthlyRevenue, prevAvgMonthlyRevenue, "", "currency"),
+            kpi(
+                id = "rixo_pending",
+                label = "Rixo Pending",
+                value = rixoPending,
+                previous = 0.0,
+                href = "/rixo-history",
+                format = "number",
+                actionLabel = "Finish Rixo For Pending Ones →",
+                includeDelta = false,
+            ),
+            kpi(
+                id = "bookings_pending",
+                label = "Bookings Pending",
+                value = bookingPending,
+                previous = 0.0,
+                href = "/booking",
+                format = "number",
+                actionLabel = "Book Unshipped Cars →",
+                includeDelta = false,
+            ),
         )
+    }
+
+    private fun countShipmentsBetween(from: LocalDate, to: LocalDate): Int =
+        try {
+            shippingHistoryRepository.findShipmentDatesBetween(from, to).size
+        } catch (_: Exception) {
+            0
+        }
+
+    /** Invoice line totals in period ÷ number of calendar months spanned by the period. */
+    private fun averageMonthlyInvoiceRevenue(period: PeriodWindow): Double {
+        val total = invoiceLineTotalForPeriod(period)
+        val months = monthsSpanned(period.from, period.to).coerceAtLeast(1)
+        return total / months
+    }
+
+    private fun monthsSpanned(from: LocalDate, to: LocalDate): Int =
+        (ChronoUnit.MONTHS.between(YearMonth.from(from), YearMonth.from(to)).toInt() + 1).coerceAtLeast(1)
+
+    private fun invoiceLineTotalForPeriod(period: PeriodWindow): Double {
+        val headers = try {
+            invoiceHistoryRepository.findAll()
+        } catch (_: Exception) {
+            return 0.0
+        }
+        val ids = headers.mapNotNull { h ->
+            val id = h.id ?: return@mapNotNull null
+            if (!invoiceInPeriod(h.shippingDate, h.createdAt?.toLocalDate(), period)) return@mapNotNull null
+            id
+        }
+        if (ids.isEmpty()) return 0.0
+        val lines = try {
+            invoiceHistoryLineRepository.findByInvoiceHistoryIdIn(ids)
+        } catch (_: Exception) {
+            return 0.0
+        }
+        return lines.sumOf { parseMoney(it.lineAmount) }
+    }
+
+    private fun invoiceInPeriod(shipping: LocalDate?, created: LocalDate?, period: PeriodWindow): Boolean {
+        val shippingIn = shipping != null && !shipping.isBefore(period.from) && !shipping.isAfter(period.to)
+        val createdIn = created != null && !created.isBefore(period.from) && !created.isAfter(period.to)
+        return shippingIn || createdIn
     }
 
     private fun kpi(
@@ -295,8 +407,11 @@ class DashboardService(
         previous: Double,
         href: String,
         format: String,
+        actionLabel: String? = null,
+        includeDelta: Boolean = true,
     ): DashboardKpiDto {
         val delta = when {
+            !includeDelta -> null
             previous == 0.0 && value == 0.0 -> null
             previous == 0.0 -> null
             else -> ((value - previous) / previous) * 100.0
@@ -310,6 +425,7 @@ class DashboardService(
             deltaPct = delta?.let { (it * 10.0).roundToLong() / 10.0 },
             href = href,
             format = format,
+            actionLabel = actionLabel,
         )
     }
 
@@ -358,13 +474,20 @@ class DashboardService(
             DashboardNamedValueDto(WORKFLOW_LABELS[status] ?: status.name, n.toDouble())
         }
 
-        val topModels = current
-            .groupingBy { it.modelLabel }
-            .eachCount()
-            .entries
-            .sortedByDescending { it.value }
-            .take(TOP_N)
-            .map { DashboardNamedValueDto(it.key, it.value.toDouble()) }
+        val topModels = run {
+            val counts = current.groupingBy { it.modelLabel }.eachCount()
+            val total = current.size.toDouble().coerceAtLeast(1.0)
+            counts.entries
+                .sortedByDescending { it.value }
+                .take(TOP_MODELS)
+                .map {
+                    DashboardNamedValueDto(
+                        name = it.key,
+                        value = it.value.toDouble(),
+                        pct = ((it.value / total) * 1000.0).roundToLong() / 10.0,
+                    )
+                }
+        }
 
         val countryDistribution = current
             .mapNotNull { it.country?.trim()?.takeIf { c -> c.isNotEmpty() } ?: "Unknown" }
@@ -414,11 +537,7 @@ class DashboardService(
         }
         val inPeriod = headers.mapNotNull { h ->
             val id = h.id ?: return@mapNotNull null
-            val shipping = h.shippingDate
-            val created = h.createdAt?.toLocalDate()
-            val shippingIn = shipping != null && !shipping.isBefore(period.from) && !shipping.isAfter(period.to)
-            val createdIn = created != null && !created.isBefore(period.from) && !created.isAfter(period.to)
-            if (!shippingIn && !createdIn) return@mapNotNull null
+            if (!invoiceInPeriod(h.shippingDate, h.createdAt?.toLocalDate(), period)) return@mapNotNull null
             id to (h.clientName?.trim()?.takeIf { it.isNotEmpty() } ?: "Unknown")
         }
         if (inPeriod.isEmpty()) return emptyList()

@@ -30,6 +30,9 @@ data class BookingMapping(
     @Column(name = "pod")
     val pod: String? = null,
 
+    @Column(name = "final_destination", columnDefinition = "TEXT")
+    val finalDestination: String? = null,
+
     @Column(name = "notify_party", columnDefinition = "TEXT")
     val notifyParty: String? = null,
 

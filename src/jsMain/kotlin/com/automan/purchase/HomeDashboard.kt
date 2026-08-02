@@ -16,6 +16,7 @@ private var homeDashboardCustomTo: String = ""
 /** Replaces the Home placeholder with the live operations dashboard. */
 fun showHomeDashboardPage() {
     val content = document.getElementById("content") as? HTMLElement ?: return
+    val fyLabel = currentFiscalYearOptionLabel()
     content.innerHTML = """
         <div id="homeDashboardPage" class="fade-in home-dash">
             <div class="home-dash-header">
@@ -31,12 +32,15 @@ fun showHomeDashboardPage() {
                         <option value="this_month" selected>This month</option>
                         <option value="last_month">Last month</option>
                         <option value="this_year">This year</option>
+                        <option value="current_fy">${escapeHtml(fyLabel)}</option>
                         <option value="custom">Custom range</option>
                     </select>
                     <div id="homeDashCustomRange" class="home-dash-custom-range" hidden>
-                        <input type="date" id="homeDashFrom" class="home-dash-date" aria-label="From date" />
+                        <input type="date" id="homeDashFrom" class="home-dash-date" aria-label="From date"
+                               min="${AppConstants.MIN_YEAR}-01-01" max="${AppConstants.MAX_YEAR}-12-31" />
                         <span class="home-dash-range-sep">–</span>
-                        <input type="date" id="homeDashTo" class="home-dash-date" aria-label="To date" />
+                        <input type="date" id="homeDashTo" class="home-dash-date" aria-label="To date"
+                               min="${AppConstants.MIN_YEAR}-01-01" max="${AppConstants.MAX_YEAR}-12-31" />
                     </div>
                     <button type="button" id="homeDashRefreshBtn" class="home-dash-btn home-dash-btn-secondary">Refresh</button>
                 </div>
@@ -84,6 +88,26 @@ fun showHomeDashboardPage() {
     })
 
     loadHomeDashboard()
+}
+
+/**
+ * Automan FY = 1 May → 30 Apr. May 2025–Apr 2026 = 32nd term ⇒ term = startYear - 1993.
+ * Label example: FY2026 (33rd · May 2026 - Apr 2027)
+ */
+private fun currentFiscalYearOptionLabel(): String {
+    val d = js("new Date()").unsafeCast<dynamic>()
+    val year = (d.getFullYear() as Number).toInt()
+    val month = (d.getMonth() as Number).toInt() + 1 // 0-based in JS
+    val startYear = if (month >= 5) year else year - 1
+    val term = startYear - 1993
+    val suffix = when {
+        term % 100 in 11..13 -> "th"
+        term % 10 == 1 -> "st"
+        term % 10 == 2 -> "nd"
+        term % 10 == 3 -> "rd"
+        else -> "th"
+    }
+    return "FY$startYear ($term$suffix · May $startYear - Apr ${startYear + 1})"
 }
 
 private fun toggleHomeCustomRange(show: Boolean) {
@@ -151,7 +175,10 @@ private fun renderHomeDashboard(data: dynamic) {
 
     body.innerHTML = """
         <div class="home-dash-meta">
-            <span>${escapeHtml(period?.from as? String)} → ${escapeHtml(period?.to as? String)}</span>
+            <span>${escapeHtml((period?.label as? String)?.takeIf { it.isNotBlank() } ?: "${period?.from as? String} → ${period?.to as? String}")}</span>
+            ${(period?.label as? String)?.takeIf { it.isNotBlank() }?.let {
+                """<span class="home-dash-meta-sep">·</span><span>${escapeHtml(period?.from as? String)} → ${escapeHtml(period?.to as? String)}</span>"""
+            } ?: ""}
             <span class="home-dash-meta-sep">·</span>
             <span>Updated ${escapeHtml(formatGeneratedAt(generatedAt))}</span>
         </div>
@@ -185,11 +212,19 @@ private fun renderHomeDashboard(data: dynamic) {
             </div>
         </section>
 
-        <section class="home-dash-section home-dash-charts" aria-label="Primary charts">
+        <section class="home-dash-section home-dash-charts home-dash-charts-primary" aria-label="Sales overview">
+            ${renderChartCard("Monthly Sales", renderBarChart(dynamicList(charts?.monthlyRevenue), "#059669"))}
+            ${renderChartCard("Top Purchased Models This Month", renderHBarChart(dynamicList(charts?.topModels), "#4b6cb7", showPct = true))}
+        </section>
+
+        <section class="home-dash-section home-dash-charts" aria-label="Shipping and purchases">
             ${renderChartCard("Shipping trend (30 days)", renderLineChart(dynamicList(charts?.shippingTrend), "#7c3aed"))}
             ${renderChartCard("Monthly purchases", renderBarChart(dynamicList(charts?.monthlyPurchases), "#2563eb"))}
+        </section>
+
+        <section class="home-dash-section home-dash-charts" aria-label="Workflow and sales">
             ${renderChartCard("Workflow distribution", renderDonutChart(dynamicList(charts?.workflowDistribution)))}
-            ${renderChartCard("Top purchased models", renderHBarChart(dynamicList(charts?.topModels), "#4b6cb7"))}
+            ${renderChartCard("Sales by Client", renderDonutChart(dynamicList(charts?.salesByClient), currencyLegend = true, emptyMessage = "No invoice sales in this period"))}
         </section>
 
         <section class="home-dash-section" aria-label="Analytics">
@@ -197,9 +232,7 @@ private fun renderHomeDashboard(data: dynamic) {
                 <h2 class="home-dash-analytics-title">Analytics</h2>
                 <div class="home-dash-charts home-dash-analytics-grid">
                     ${renderChartCard("Purchase value trend", renderAreaChart(dynamicList(charts?.purchaseValueTrend), "#0f766e"))}
-                    ${renderChartCard("Monthly revenue (sold)", renderBarChart(dynamicList(charts?.monthlyRevenue), "#059669"))}
                     ${renderChartCard("Country distribution", renderDonutChart(dynamicList(charts?.countryDistribution)))}
-                    ${renderChartCard("Sales by Client", renderDonutChart(dynamicList(charts?.salesByClient), currencyLegend = true, emptyMessage = "No invoice sales in this period"))}
                 </div>
             </div>
         </section>
@@ -228,15 +261,21 @@ private fun renderMetricCard(kpi: dynamic): String {
     val id = (kpi.id as? String).orEmpty()
     val label = (kpi.label as? String).orEmpty()
     val display = (kpi.displayValue as? String).orEmpty()
+    val href = (kpi.href as? String).orEmpty()
+    val actionLabel = (kpi.actionLabel as? String).orEmpty()
     val delta = kpi.deltaPct
-    val deltaHtml = when {
-        delta == null || delta == js("undefined") -> """<span class="home-dash-delta home-dash-delta-flat">vs prior period</span>"""
-        (delta as Number).toDouble() > 0 -> """<span class="home-dash-delta home-dash-delta-up">↑ ${escapeHtml(formatDelta(delta))}%</span>"""
+    val footerHtml = when {
+        actionLabel.isNotBlank() && href.isNotBlank() ->
+            """<button type="button" class="home-dash-kpi-cta" data-href="${escapeHtml(href)}">${escapeHtml(actionLabel)}</button>"""
+        delta == null || delta == js("undefined") ->
+            """<span class="home-dash-delta home-dash-delta-flat">vs prior period</span>"""
+        (delta as Number).toDouble() > 0 ->
+            """<span class="home-dash-delta home-dash-delta-up">↑ ${escapeHtml(formatDelta(delta))}% from last period</span>"""
         (delta as Number).toDouble() < 0 -> {
             val abs = kotlin.math.abs((delta as Number).toDouble())
-            """<span class="home-dash-delta home-dash-delta-down">↓ ${escapeHtml(formatDelta(abs))}%</span>"""
+            """<span class="home-dash-delta home-dash-delta-down">↓ ${escapeHtml(formatDelta(abs))}% from last period</span>"""
         }
-        else -> """<span class="home-dash-delta home-dash-delta-flat">0%</span>"""
+        else -> """<span class="home-dash-delta home-dash-delta-flat">0% from last period</span>"""
     }
     val icon = kpiIcon(id)
     return """
@@ -244,7 +283,7 @@ private fun renderMetricCard(kpi: dynamic): String {
             <span class="home-dash-kpi-icon" aria-hidden="true">$icon</span>
             <span class="home-dash-kpi-label">${escapeHtml(label)}</span>
             <span class="home-dash-kpi-value">${escapeHtml(display)}</span>
-            $deltaHtml
+            $footerHtml
         </div>
     """.trimIndent()
 }
@@ -255,14 +294,14 @@ private fun formatDelta(v: dynamic): String {
 }
 
 private fun kpiIcon(id: String): String = when (id) {
-    "purchases" -> "▣"
-    "purchase_value" -> "¥"
-    "unshipped" -> "◎"
-    "sold" -> "✓"
+    "cars_bought", "purchases" -> "▣"
+    "total_clients", "active_clients" -> "♟"
+    "cars_shipped" -> "▤"
+    "cars_sold", "sold" -> "✓"
+    "current_inventory", "unshipped" -> "◎"
+    "avg_monthly_revenue", "purchase_value", "avg_price" -> "¥"
     "rixo_pending" -> "◇"
-    "booking_pending" -> "▦"
-    "active_clients" -> "♟"
-    "avg_price" -> "≈"
+    "bookings_pending", "booking_pending" -> "▦"
     else -> "•"
 }
 
@@ -326,20 +365,28 @@ private fun renderBarChart(items: List<dynamic>, color: String): String {
     return """<svg viewBox="0 0 $w $h" class="home-dash-svg" role="img" aria-label="Bar chart">$bars</svg>"""
 }
 
-private fun renderHBarChart(items: List<dynamic>, color: String): String {
+private fun renderHBarChart(items: List<dynamic>, color: String, showPct: Boolean = false): String {
     val points = chartPoints(items)
     if (points.isEmpty()) return """<p class="home-dash-empty">No data</p>"""
     val max = points.maxOf { it.second }.coerceAtLeast(1.0)
-    val rows = points.joinToString("") { (name, value) ->
-        val pct = ((value / max) * 100.0).toInt().coerceIn(0, 100)
+    val rows = items.mapNotNull { item ->
+        val name = (item.name as? String).orEmpty()
+        val value = (item.value as? Number)?.toDouble() ?: return@mapNotNull null
+        val pctAttr = item.pct
+        val pctText = when {
+            !showPct -> ""
+            pctAttr == null || pctAttr == js("undefined") -> ""
+            else -> " (${formatDelta(pctAttr)}%)"
+        }
+        val barPct = ((value / max) * 100.0).toInt().coerceIn(0, 100)
         """
         <div class="home-dash-hbar-row">
             <span class="home-dash-hbar-label" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
-            <div class="home-dash-hbar-track"><div class="home-dash-hbar-fill" style="width:${pct}%;background:$color"></div></div>
-            <span class="home-dash-hbar-value">${escapeHtml(value.toLong().toString())}</span>
+            <div class="home-dash-hbar-track"><div class="home-dash-hbar-fill" style="width:${barPct}%;background:$color"></div></div>
+            <span class="home-dash-hbar-value">${escapeHtml(value.toLong().toString())}${escapeHtml(pctText)}</span>
         </div>
         """.trimIndent()
-    }
+    }.joinToString("")
     return """<div class="home-dash-hbar">$rows</div>"""
 }
 

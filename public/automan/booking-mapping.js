@@ -95,6 +95,7 @@ function getUniqueConsignees(mappings) {
       consignees.push({
         name: m.consigneeName || '',
         address: m.consigneeAddress || '',
+        finalDestination: m.finalDestination || '',
         notifyParty: m.notifyParty || '',
         inTransitClause: m.inTransitClause || ''
       });
@@ -105,14 +106,23 @@ function getUniqueConsignees(mappings) {
 }
 
 /**
- * Split mapping field on `;` only (Notify / In-Transit). Commas and newlines stay inside one option.
+ * Split Consignee Map free-text chip fields (Notify / In-Transit / Final Destination).
+ * New delimiter: U+001E. Legacy rows without RS are one option ('; is literal).
  */
-function getUniqueSemicolonTokens(mappings, fieldName) {
+function getUniqueConsigneeFreeTextTokens(mappings, fieldName) {
+  const RS = '\u001E';
   const values = [];
   const seen = {};
   (mappings || []).forEach(function(m) {
     const raw = (m && m[fieldName] != null) ? String(m[fieldName]) : '';
-    raw.split(';').forEach(function(part) {
+    if (!raw.trim()) return;
+    var parts;
+    if (raw.indexOf(RS) < 0) {
+      parts = [raw];
+    } else {
+      parts = raw.split(RS);
+    }
+    parts.forEach(function(part) {
       const s = (part || '').trim();
       if (!s) return;
       const key = s.toUpperCase();
@@ -123,6 +133,11 @@ function getUniqueSemicolonTokens(mappings, fieldName) {
     });
   });
   return values;
+}
+
+/** @deprecated alias — prefer getUniqueConsigneeFreeTextTokens */
+function getUniqueSemicolonTokens(mappings, fieldName) {
+  return getUniqueConsigneeFreeTextTokens(mappings, fieldName);
 }
 
 /**
@@ -174,8 +189,8 @@ function populateBookingSemicolonSelect(fieldId, tokens, preserveCurrent, ensure
 }
 
 /**
- * Autofill Notify party + In-Transit Clause dropdowns from Consignee Map row(s) for [name].
- * Options are `;`-split tokens; booking stores one selected string (like POD).
+ * Autofill Final Destination + Notify party + In-Transit from Consignee Map for [name].
+ * Options use U+001E chip delimiter (legacy: whole field = one option).
  * @param {string} consigneeName
  * @param {boolean} [onlyIfEmpty=false] — when true, preserve non-empty current selection.
  */
@@ -186,6 +201,11 @@ function applyConsigneeMapNotifyAndInTransit(consigneeName, onlyIfEmpty) {
 
   if (!name) {
     if (!preserve) {
+      populateBookingSemicolonSelect(
+        'finalDestination', [], false,
+        window.ensureBookingFabFinalDestination,
+        'Select Final destination', 'No final destination for this consignee', 'Tap to choose destination'
+      );
       populateBookingSemicolonSelect(
         'notifyParty', [], false,
         window.ensureBookingFabNotify,
@@ -201,9 +221,15 @@ function applyConsigneeMapNotifyAndInTransit(consigneeName, onlyIfEmpty) {
   }
 
   var sub = filterMappingsByConsigneeName(mappings, name);
-  var notifyTokens = getUniqueSemicolonTokens(sub, 'notifyParty');
-  var inTransitTokens = getUniqueSemicolonTokens(sub, 'inTransitClause');
+  var finalDestTokens = getUniqueConsigneeFreeTextTokens(sub, 'finalDestination');
+  var notifyTokens = getUniqueConsigneeFreeTextTokens(sub, 'notifyParty');
+  var inTransitTokens = getUniqueConsigneeFreeTextTokens(sub, 'inTransitClause');
 
+  populateBookingSemicolonSelect(
+    'finalDestination', finalDestTokens, preserve,
+    window.ensureBookingFabFinalDestination,
+    'Select Final destination', 'No final destination for this consignee', 'Tap to choose destination'
+  );
   populateBookingSemicolonSelect(
     'notifyParty', notifyTokens, preserve,
     window.ensureBookingFabNotify,
@@ -943,6 +969,19 @@ if (window.MutationObserver) {
       defaultLabel: 'Select In-transit clause',
       emptyMessage: 'No in-transit clause for this consignee',
       hint: 'Tap to choose clause'
+    });
+  };
+
+  window.ensureBookingFabFinalDestination = function() {
+    ensureBookingFabForSelect({
+      selectId: 'finalDestination',
+      wrapId: 'bookingFinalDestFabWrap',
+      triggerId: 'bookingFinalDestFabTrigger',
+      actionsId: 'bookingFinalDestFabActions',
+      labelId: 'bookingFinalDestFabLabel',
+      defaultLabel: 'Select Final destination',
+      emptyMessage: 'No final destination for this consignee',
+      hint: 'Tap to choose destination'
     });
   };
 })();

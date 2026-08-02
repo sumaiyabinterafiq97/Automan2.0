@@ -525,17 +525,8 @@ fun normalizeStoredListForChips(raw: String): String {
         .joinToString(";")
 }
 
-/**
- * Notify party / In-Transit Clause: split on `;` only so legacy free text with commas/newlines
- * stays one token until the user intentionally adds multiple chips.
- */
-fun normalizeNotifyInTransitForChips(raw: String): String {
-    if (raw.isBlank()) return ""
-    return raw.split(';')
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-        .joinToString(";")
-}
+/** @deprecated Prefer [normalizeConsigneeFreeTextChipsForLoad] — kept for any external call sites. */
+fun normalizeNotifyInTransitForChips(raw: String): String = normalizeConsigneeFreeTextChipsForLoad(raw)
 
 private fun splitConsigneeChipTokens(hiddenJoined: String): List<String> =
     hiddenJoined.split(';').map { it.trim() }.filter { it.isNotEmpty() }
@@ -598,9 +589,10 @@ fun createChipInput(id: String, placeholder: String, maxLength: Int? = null): St
  */
 fun createTallMultilineChipInput(id: String, placeholder: String, rows: Int = 4): String {
     val minH = (rows * 22).coerceAtLeast(88)
+    // data-supplier-chip-rs-sep: Enter commits one chip; ';' is literal; chips joined with U+001E
     return """
         <div style="position: relative; width: 100%;">
-            <div id="${id}Wrap" class="chip-input-inner-wrap consignee-map-tall-chip-wrap" data-supplier-chip-allow-any="true" data-supplier-chip-multiline="true"
+            <div id="${id}Wrap" class="chip-input-inner-wrap consignee-map-tall-chip-wrap" data-supplier-chip-allow-any="true" data-supplier-chip-multiline="true" data-supplier-chip-rs-sep="true"
                  style="display:flex; flex-direction:column; align-items:stretch; gap:8px; width:100%; min-height:${minH + 36}px; padding:10px 12px; border:1px solid #d1d5db; border-radius:6px; box-sizing:border-box; background:white;">
                 <div id="${id}Chips" style="display:flex; flex-wrap:wrap; gap:6px; width:100%;"></div>
                 <textarea id="${id}Input" rows="$rows" placeholder="$placeholder"
@@ -615,10 +607,16 @@ fun createTallMultilineChipInput(id: String, placeholder: String, rows: Int = 4)
 
 fun ensureSupplierChipJs() {
     js("""
-        if (window.__supplierChipJsVersion !== 3) {
-          window.__supplierChipJsVersion = 3;
+        if (window.__supplierChipJsVersion !== 4) {
+          window.__supplierChipJsVersion = 4;
           window.__supplierChipJsReady = true;
 
+          // Notify / In-Transit / Final Destination: chips joined with RS so ';' stays literal text.
+          var _RS_SEP = '\u001E';
+          function _usesRsSep(id) {
+            var wrap = document.getElementById(id + 'Wrap');
+            return !!(wrap && wrap.getAttribute && wrap.getAttribute('data-supplier-chip-rs-sep') === 'true');
+          }
           function _splitTokens(v) {
             if (!v) return [];
             var parts = v.split(';');
@@ -628,6 +626,24 @@ fun ensureSupplierChipJs() {
               if (s) out.push(s);
             }
             return out;
+          }
+          function _splitTokensFor(id, v) {
+            if (!v) return [];
+            if (_usesRsSep(id)) {
+              var raw = (v || '').toString();
+              if (raw.indexOf(_RS_SEP) < 0) {
+                var one = raw.trim();
+                return one ? [one] : [];
+              }
+              var parts = raw.split(_RS_SEP);
+              var out = [];
+              for (var i = 0; i < parts.length; i++) {
+                var s = (parts[i] || '').trim();
+                if (s) out.push(s);
+              }
+              return out;
+            }
+            return _splitTokens(v);
           }
           function _joinTokens(tokens) {
             // distinct, keep order
@@ -640,6 +656,17 @@ fun ensureSupplierChipJs() {
               if (!seen[key]) { seen[key] = true; out.push(t); }
             }
             return out.join(';');
+          }
+          function _joinTokensFor(id, tokens) {
+            var seen = {};
+            var out = [];
+            for (var i = 0; i < tokens.length; i++) {
+              var t = tokens[i];
+              var key = (t || '').toUpperCase();
+              if (!key) continue;
+              if (!seen[key]) { seen[key] = true; out.push(t); }
+            }
+            return out.join(_usesRsSep(id) ? _RS_SEP : ';');
           }
           function _getHidden(id) { return document.getElementById(id + 'Hidden'); }
           function _getChips(id) { return document.getElementById(id + 'Chips'); }
@@ -677,7 +704,7 @@ fun ensureSupplierChipJs() {
             var hidden = _getHidden(id);
             var chips = _getChips(id);
             if (!hidden || !chips) return;
-            var tokens = _splitTokens(hidden.value);
+            var tokens = _splitTokensFor(id, hidden.value);
             chips.innerHTML = '';
             for (var i = 0; i < tokens.length; i++) {
               (function(t) {
@@ -780,7 +807,7 @@ fun ensureSupplierChipJs() {
           window.supplierChipSetValue = function(id, value) {
             var hidden = _getHidden(id);
             if (!hidden) return;
-            var tokens = _splitTokens(value || '');
+            var tokens = _splitTokensFor(id, value || '');
             var select = document.getElementById(id);
             if (select) {
               for (var i = 0; i < tokens.length; i++) {
@@ -794,7 +821,7 @@ fun ensureSupplierChipJs() {
                 }
               }
             }
-            hidden.value = _joinTokens(tokens);
+            hidden.value = _joinTokensFor(id, tokens);
             _render(id);
           };
           window.supplierChipGetValue = function(id) {
@@ -820,9 +847,9 @@ fun ensureSupplierChipJs() {
             }
             var hidden = _getHidden(id);
             if (!hidden) return;
-            var tokens = _splitTokens(hidden.value);
+            var tokens = _splitTokensFor(id, hidden.value);
             tokens.push(v);
-            var joined = _joinTokens(tokens);
+            var joined = _joinTokensFor(id, tokens);
             if (id === 'carBrandCarName' && joined.length > ${CAR_BRAND_CAR_NAME_MAX_LEN}) {
               var invalidInput2 = _getInput(id);
               if (invalidInput2) invalidInput2.value = '';
@@ -839,12 +866,12 @@ fun ensureSupplierChipJs() {
             var v = (value || '').toString().trim();
             var hidden = _getHidden(id);
             if (!hidden) return;
-            var existing = _splitTokens(hidden.value);
+            var existing = _splitTokensFor(id, hidden.value);
             var tokens = [];
             for (var i = 0; i < existing.length; i++) {
               if (existing[i].toUpperCase() !== v.toUpperCase()) tokens.push(existing[i]);
             }
-            hidden.value = _joinTokens(tokens);
+            hidden.value = _joinTokensFor(id, tokens);
             _render(id);
           };
           window.supplierChipAddFromSelect = function(id) {
@@ -859,12 +886,17 @@ fun ensureSupplierChipJs() {
             if (!input) return;
             var v = (input.value || '').toString().trim();
             if (!v) return;
-            // Support typing multiple at once separated by ';'
-            var tokens = _splitTokens(v);
-            if (tokens.length > 1) {
-              for (var i = 0; i < tokens.length; i++) window.supplierChipAdd(id, tokens[i]);
-            } else {
+            // RS free-text fields: never split on ';'; Enter/blur commits one chip.
+            if (_usesRsSep(id)) {
               window.supplierChipAdd(id, v);
+            } else {
+              // Support typing multiple at once separated by ';'
+              var tokens = _splitTokens(v);
+              if (tokens.length > 1) {
+                for (var i = 0; i < tokens.length; i++) window.supplierChipAdd(id, tokens[i]);
+              } else {
+                window.supplierChipAdd(id, v);
+              }
             }
             // If anything typed was invalid, keep the field clean.
             if (input) input.value = '';
@@ -1119,10 +1151,10 @@ fun getDefaultConsigneeColumnsForDevice(deviceType: String? = null): List<String
     val device = deviceType ?: getDeviceType()
     // Display order: Consignee Name → Consignee Address → Country → POD → Notify party
     return when (device) {
-        "mobile" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
-        "tablet" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
-        "desktop" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
-        else -> listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
+        "mobile" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "finalDestination", "notifyParty", "inTransitClause")
+        "tablet" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "finalDestination", "notifyParty", "inTransitClause")
+        "desktop" -> listOf("consigneeName", "consigneeAddress", "country", "pod", "finalDestination", "notifyParty", "inTransitClause")
+        else -> listOf("consigneeName", "consigneeAddress", "country", "pod", "finalDestination", "notifyParty", "inTransitClause")
     }
 }
 
@@ -1257,7 +1289,7 @@ fun getSelectedConsigneeColumns(): List<String> {
     if (filteredColumns.isEmpty()) {
         return defaultColumns
     }
-    val preferredConsigneeColumnOrder = listOf("consigneeName", "consigneeAddress", "country", "pod", "notifyParty", "inTransitClause")
+    val preferredConsigneeColumnOrder = listOf("consigneeName", "consigneeAddress", "country", "pod", "finalDestination", "notifyParty", "inTransitClause")
     val sortedColumns = filteredColumns.sortedBy { col ->
         val idx = preferredConsigneeColumnOrder.indexOf(col)
         if (idx >= 0) idx else 999
@@ -2380,6 +2412,7 @@ private fun buildConsigneeTableUi(
                 "consigneeName" to "Consignee Name",
                 "consigneeAddress" to "Consignee Address",
                 "pod" to "POD",
+                "finalDestination" to "Final Destination",
                 "notifyParty" to "Notify party",
                 "inTransitClause" to "In-Transit Clause",
             )
@@ -2417,6 +2450,8 @@ private fun buildConsigneeTableUi(
                 val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
                 val consigneeAddressShort = if (consigneeAddress.length > 60) consigneeAddress.take(60) + "..." else consigneeAddress
                 val pod = (mapping.pod ?: "").toString()
+                val finalDestination = (mapping.finalDestination ?: "").toString()
+                val finalDestinationShort = if (finalDestination.length > 60) finalDestination.take(60) + "..." else finalDestination
                 val notifyParty = (mapping.notifyParty ?: "").toString()
                 val notifyPartyShort = if (notifyParty.length > 60) notifyParty.take(60) + "..." else notifyParty
                 val inTransitClause = (mapping.inTransitClause ?: "").toString()
@@ -2449,17 +2484,19 @@ private fun buildConsigneeTableUi(
                         "consigneeName" -> consigneeName
                         "consigneeAddress" -> consigneeAddressShort
                         "pod" -> pod
+                        "finalDestination" -> finalDestinationShort
                         "notifyParty" -> notifyPartyShort
                         "inTransitClause" -> inTransitClauseShort
                         else -> ""
                     }
                     val cellStyle = when (columnKey) {
                 "country", "consigneeName" -> "padding: 12px 16px; color: #111827; font-size: 14px; font-weight: 500; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
-                "consigneeAddress", "notifyParty", "inTransitClause" -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
+                "consigneeAddress", "finalDestination", "notifyParty", "inTransitClause" -> "padding: 12px 16px; color: #374151; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
                 else -> "padding: 12px 16px; color: #111827; font-size: 14px; vertical-align: top; border: 1px solid #e5e7eb; background-color: #ffffff;"
             }
             val fullForTitle = when (columnKey) {
                 "consigneeAddress" -> consigneeAddress
+                "finalDestination" -> finalDestination
                 "notifyParty" -> notifyParty
                 "inTransitClause" -> inTransitClause
                 else -> ""
@@ -2468,9 +2505,13 @@ private fun buildConsigneeTableUi(
             val cellInner =
                 if (columnKey == "consigneeAddress")
                     formatConsigneeMapAddressChipHtml(value)
-                else if (columnKey == "notifyParty" || columnKey == "inTransitClause")
-                    formatSemicolonOnlyValueChipHtml(
-                        if (columnKey == "notifyParty") notifyParty else inTransitClause,
+                else if (columnKey == "finalDestination" || columnKey == "notifyParty" || columnKey == "inTransitClause")
+                    formatConsigneeFreeTextChipHtml(
+                        when (columnKey) {
+                            "finalDestination" -> finalDestination
+                            "notifyParty" -> notifyParty
+                            else -> inTransitClause
+                        },
                     )
                 else formatConsigneeMapValueChipHtml(value)
             html += """<td style="$cellStyle"$titleAttr>$cellInner</td>"""
@@ -2699,6 +2740,7 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
         "consigneeName" to "Consignee Name",
         "consigneeAddress" to "Consignee Address",
         "pod" to "POD",
+        "finalDestination" to "Final Destination",
         "notifyParty" to "Notify party",
         "inTransitClause" to "In-Transit Clause",
     )
@@ -2712,6 +2754,7 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
         val consigneeName = (mapping.consigneeName ?: "").toString()
         val consigneeAddress = (mapping.consigneeAddress ?: "").toString()
         val pod = (mapping.pod ?: "").toString()
+        val finalDestination = (mapping.finalDestination ?: "").toString()
         val notifyParty = (mapping.notifyParty ?: "").toString()
         val inTransitClause = (mapping.inTransitClause ?: "").toString()
         
@@ -2724,6 +2767,7 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
                 "consigneeName" -> consigneeName
                 "consigneeAddress" -> consigneeAddress
                 "pod" -> pod
+                "finalDestination" -> finalDestination
                 "notifyParty" -> notifyParty
                 "inTransitClause" -> inTransitClause
                 else -> ""
@@ -2733,8 +2777,8 @@ fun displayConsigneesAsCards(filteredMappings: List<dynamic>, filterLabel: Strin
                 val displayValue =
                     if (columnKey == "consigneeAddress")
                         formatConsigneeMapAddressChipHtml(value)
-                    else if (columnKey == "notifyParty" || columnKey == "inTransitClause")
-                        formatSemicolonOnlyValueChipHtml(value)
+                    else if (columnKey == "finalDestination" || columnKey == "notifyParty" || columnKey == "inTransitClause")
+                        formatConsigneeFreeTextChipHtml(value)
                     else formatConsigneeMapValueChipHtml(value)
                 cardFields.append("""
                     <div class="consignee-map-field">
@@ -2878,12 +2922,13 @@ fun showConsigneeColumnFilterModal() {
     
     document.body?.appendChild(modal)
     
-    // Populate column checkboxes (order matches table default: Name → Address → Country → POD → Notify → In-Transit)
+    // Populate column checkboxes (order: Name → Address → Country → POD → Final Dest → Notify → In-Transit)
     val columnLabels = listOf(
         "consigneeName" to "Consignee Name",
         "consigneeAddress" to "Consignee Address",
         "country" to "Country",
         "pod" to "POD",
+        "finalDestination" to "Final Destination",
         "notifyParty" to "Notify party",
         "inTransitClause" to "In-Transit Clause",
     )
@@ -3038,6 +3083,10 @@ fun showConsigneeModal(mappingId: Long?, duplicateFromId: Long? = null) {
                             ${createChipMultiSelectCombobox("consigneeMapPod", "Select POD")}
                         </div>
                         <div style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Final Destination</label>
+                            ${createTallMultilineChipInput("consigneeMapFinalDestination", "Type Final Destination…", rows = 3)}
+                        </div>
+                        <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Notify party</label>
                             ${createTallMultilineChipInput("consigneeMapNotifyParty", "Type notify party name and address…", rows = 4)}
                         </div>
@@ -3122,14 +3171,16 @@ fun loadConsigneeDataForEdit(mappingId: Long, clearConsigneeNameAndAddressForDup
                 val addrRaw = (mapping.consigneeAddress ?: "").toString()
                 val notifyRaw = (mapping.notifyParty ?: "").toString()
                 val inTransitRaw = (mapping.inTransitClause ?: "").toString()
+                val finalDestRaw = (mapping.finalDestination ?: "").toString()
                 window.setTimeout({
                     setChipFieldValue("consigneeMapCountry", normalizeStoredListForChips(countryRaw))
                     setEditableComboboxValue("consigneeMapConsigneeName", if (clearConsigneeNameAndAddressForDuplicate) "" else nameRaw.trim())
                     setChipFieldValue("consigneeMapPod", normalizeStoredListForChips(podRaw))
                     (document.getElementById("consigneeAddress") as? HTMLTextAreaElement)?.value =
                         if (clearConsigneeNameAndAddressForDuplicate) "" else addrRaw
-                    setChipFieldValue("consigneeMapNotifyParty", normalizeNotifyInTransitForChips(notifyRaw))
-                    setChipFieldValue("consigneeMapInTransitClause", normalizeNotifyInTransitForChips(inTransitRaw))
+                    setChipFieldValue("consigneeMapFinalDestination", normalizeConsigneeFreeTextChipsForLoad(finalDestRaw))
+                    setChipFieldValue("consigneeMapNotifyParty", normalizeConsigneeFreeTextChipsForLoad(notifyRaw))
+                    setChipFieldValue("consigneeMapInTransitClause", normalizeConsigneeFreeTextChipsForLoad(inTransitRaw))
                 }, 450)
             }
         }
@@ -3238,6 +3289,7 @@ fun performConsigneeSave(mappingId: Long?) {
     consigneeData.consigneeName = getEditableComboboxValue("consigneeMapConsigneeName").takeUnless { it.isBlank() }
     consigneeData.consigneeAddress = (document.getElementById("consigneeAddress") as? HTMLTextAreaElement)?.value?.trim() ?: null
     consigneeData.pod = getChipFieldValue("consigneeMapPod").takeUnless { it.isBlank() }
+    consigneeData.finalDestination = getChipFieldValue("consigneeMapFinalDestination").takeUnless { it.isBlank() }
     consigneeData.notifyParty = getChipFieldValue("consigneeMapNotifyParty").takeUnless { it.isBlank() }
     consigneeData.inTransitClause = getChipFieldValue("consigneeMapInTransitClause").takeUnless { it.isBlank() }
     consigneeData.stockLocation = null

@@ -76,11 +76,69 @@ class PurchaseVehicleOverrideIntegrationTest {
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.fuel").value("HYBRID"))
+            .andExpect(jsonPath("$.grade").value("G"))
+            .andExpect(jsonPath("$.fuelExplicit").value("HYBRID"))
+            .andExpect(jsonPath("$.gradeExplicit").value("G"))
 
         val saved = purchaseRepository.findByChassis("P3MAP-001").first()
         val override = purchaseVehicleOverrideRepository.findByPurchaseId(saved.id!!)
         assert(override != null)
         assert(override!!.overridesJson.contains("HYBRID"))
+        // Create snapshots map-matching specs too (Quick Purchase / Add ownership).
+        assert(override.overridesJson.contains("\"grade\""))
+    }
+
+    @Test
+    fun `POST purchase snapshots map-matching specs onto overrides`() {
+        carBrandMappingRepository.save(
+            CarBrandMapping(
+                carBrand = "TOYOTA",
+                chassis = "P3SNAP",
+                fuel = "GASOLINE",
+                grade = "G",
+                seat = "5",
+                door = "4",
+                cc = "2000",
+            ),
+        )
+
+        mockMvc.perform(
+            post("/purchases")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """{
+                      "chassis":"P3SNAP-1",
+                      "brand":"TOYOTA",
+                      "carName":"SnapTest",
+                      "fuel":"GASOLINE",
+                      "grade":"G",
+                      "rank":"R",
+                      "color":"WHITE",
+                      "seat":"5",
+                      "door":"4",
+                      "cc":2000,
+                      "distance":"50000",
+                      "country":"Japan",
+                      "price":"1000",
+                      "totalPrice":"1000"
+                    }""".trimIndent(),
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.fuelExplicit").value("GASOLINE"))
+            .andExpect(jsonPath("$.gradeExplicit").value("G"))
+            .andExpect(jsonPath("$.colorExplicit").value("WHITE"))
+            .andExpect(jsonPath("$.distance").value("50000"))
+
+        val saved = purchaseRepository.findByChassis("P3SNAP-1").first()
+        val override = purchaseVehicleOverrideRepository.findByPurchaseId(saved.id!!)
+        assert(override != null)
+        val json = override!!.overridesJson
+        assert(json.contains("GASOLINE"))
+        assert(json.contains("\"grade\""))
+        assert(json.contains("WHITE"))
+        assert(json.contains("50000"))
+        assert(json.contains("\"rank\""))
     }
 
     @Test

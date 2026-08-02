@@ -21,6 +21,8 @@ data class DashboardPeriodDto(
     val to: String,
     val previousFrom: String,
     val previousTo: String,
+    /** Human label for the active period (e.g. current FY). */
+    val label: String? = null,
 )
 
 data class DashboardKpiDto(
@@ -30,8 +32,10 @@ data class DashboardKpiDto(
     val displayValue: String,
     val previousValue: Double,
     val deltaPct: Double?,
-    val href: String,
+    val href: String = "",
     val format: String = "number", // number | currency | percent
+    /** When set, UI shows this CTA instead of a trend % (e.g. Rixo / Booking pending). */
+    val actionLabel: String? = null,
 )
 
 data class DashboardWorkflowStageDto(
@@ -57,6 +61,8 @@ data class DashboardChartsDto(
 data class DashboardNamedValueDto(
     val name: String,
     val value: Double,
+    /** Optional share of total (0–100), e.g. top purchased models. */
+    val pct: Double? = null,
 )
 
 data class DashboardTablesDto(

@@ -1881,11 +1881,13 @@ fun openStatementPdfModal(clientId: Long) {
                 <div class="client-form-row">
                     <div class="client-form-field">
                         <label for="stmtStartDate" class="client-form-label">From (optional)</label>
-                        <input type="date" id="stmtStartDate" class="client-form-input">
+                        <input type="date" id="stmtStartDate" class="client-form-input"
+                               min="${AppConstants.MIN_YEAR}-01-01" max="${AppConstants.MAX_YEAR}-12-31">
                     </div>
                     <div class="client-form-field">
                         <label for="stmtEndDate" class="client-form-label">To (optional)</label>
-                        <input type="date" id="stmtEndDate" class="client-form-input">
+                        <input type="date" id="stmtEndDate" class="client-form-input"
+                               min="${AppConstants.MIN_YEAR}-01-01" max="${AppConstants.MAX_YEAR}-12-31">
                     </div>
                 </div>
                 <div class="client-modal-actions">
@@ -2039,7 +2041,8 @@ fun openEditLedgerModal(clientId: Long, event: dynamic) {
                         </div>
                         <div class="client-form-field">
                             <label for="editLedgerDate" class="client-form-label">Date *</label>
-                            <input type="date" id="editLedgerDate" class="client-form-input" required value="$dateStr">
+                            <input type="date" id="editLedgerDate" class="client-form-input" required value="$dateStr"
+                                   min="${AppConstants.MIN_YEAR}-01-01" max="${AppConstants.MAX_YEAR}-12-31">
                         </div>
                     </div>
                     <div class="client-form-row">

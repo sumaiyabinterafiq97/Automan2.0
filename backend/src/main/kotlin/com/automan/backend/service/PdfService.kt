@@ -357,7 +357,7 @@ class PdfService {
                     .add(formatInvoiceShortDate(data.cyCutDate))
                     .add(" | ")
                     .add(Text("ETD: ").setFont(fontBold).setBold())
-                    .add(formatInvoiceShortDate(data.shippingDate))
+                    .add(formatInvoiceEtdDate(data.shippingDate))
                     .add(" | ")
                     .add(Text("ETA: ").setFont(fontBold).setBold())
                     .add(formatInvoiceEtaDate(data.eta))
@@ -413,7 +413,7 @@ class PdfService {
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginTop(2f)
 
-        listOf("", "MAKER |", "MODEL |", "CHASIS NO. |", "YEAR |", "AMOUNT JPY").forEachIndexed { index, label ->
+        listOf("", "MAKER", "MODEL", "CHASIS NO.", "YEAR", "AMOUNT JPY").forEachIndexed { index, label ->
             val align = when (index) {
                 0 -> TextAlignment.CENTER
                 5 -> TextAlignment.RIGHT
@@ -430,8 +430,10 @@ class PdfService {
                 ?: "-"
             val chassis = car.chassisNumber.trim().ifEmpty { "-" }
             val year = car.year.trim().ifEmpty { "-" }
-            val amount = car.cnfPrice.trim().ifEmpty { "¥0" }
-            grandTotal += parseYenAmountToLong(amount)
+            val amountRaw = car.cnfPrice.trim().ifEmpty { "¥0" }
+            val amountYen = parseYenAmountToLong(amountRaw)
+            grandTotal += amountYen
+            val amount = formatInvoiceYenAmount(amountYen)
 
             table.addCell(itemCell(car.no.toString(), TextAlignment.CENTER))
             table.addCell(itemCell(maker))
@@ -490,9 +492,240 @@ class PdfService {
         return outputStream.toByteArray()
     }
 
+    /**
+     * Client-facing SHIPMENT DETAILS PDF (no amounts).
+     * ETD formatted as JUL, 24. Does not modify Booking Invoice layout.
+     */
+    fun generateClientBasedShipmentDetailsPdf(data: com.automan.backend.dto.ClientBasedShipmentDetailsPdfData): ByteArray {
+        val outputStream = ByteArrayOutputStream()
+        val pdfWriter = PdfWriter(outputStream)
+        val pdfDocument = PdfDocument(pdfWriter)
+        val document = Document(pdfDocument)
+        document.setMargins(40f, 40f, 40f, 40f)
+
+        val font = getVerdanaFont(false)
+        val fontBold = getVerdanaFont(true)
+        document.setFont(font)
+
+        val dash = { v: String? -> v?.trim()?.takeIf { it.isNotEmpty() } ?: "-" }
+        val noBorder = com.itextpdf.layout.borders.Border.NO_BORDER
+        val thinBorder = com.itextpdf.layout.borders.SolidBorder(ColorConstants.BLACK, 0.6f)
+
+        fun rule(marginTop: Float = 2f, marginBottom: Float = 2f): LineSeparator {
+            val line = SolidLine(0.6f)
+            line.color = ColorConstants.BLACK
+            return LineSeparator(line).setMarginTop(marginTop).setMarginBottom(marginBottom)
+        }
+
+        fun openCell(paragraph: Paragraph): Cell =
+            Cell()
+                .add(paragraph)
+                .setBorder(noBorder)
+                .setPadding(1f)
+                .setPaddingTop(2f)
+                .setPaddingBottom(2f)
+
+        fun itemCell(
+            text: String,
+            align: TextAlignment = TextAlignment.LEFT,
+            bold: Boolean = false,
+            top: Boolean = false,
+            bottom: Boolean = false,
+        ): Cell {
+            val p = Paragraph(text)
+                .setFont(if (bold) fontBold else font)
+                .setFontSize(9f)
+                .setTextAlignment(align)
+                .setFixedLeading(11f)
+            if (bold) p.setBold()
+            return Cell()
+                .add(p)
+                .setBorder(noBorder)
+                .setBorderTop(if (top) thinBorder else noBorder)
+                .setBorderBottom(if (bottom) thinBorder else noBorder)
+                .setPadding(4f)
+                .setPaddingTop(5f)
+                .setPaddingBottom(5f)
+        }
+
+        val dateRaw = data.documentDate?.trim()?.takeIf { it.isNotEmpty() }
+            ?: LocalDate.now(ZoneId.of("Asia/Tokyo")).toString()
+        val topTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginBottom(6f)
+        topTable.addCell(
+            Cell()
+                .add(Paragraph("MEMON CO., LTD").setFont(fontBold).setFontSize(12f).setBold())
+                .add(
+                    Paragraph(
+                        "#112 taiyo mansion, 3-6-1 gyotoku ekimae, Ichikawa-Shi,\n" +
+                            "Chiba-Ken. 272-0133\n" +
+                            "Tel: +81-47-701-3770  Fax: +81-47-701-3771\n" +
+                            "E-Mail: INFO@MEMON.CO.JP",
+                    ).setFont(font).setFontSize(8f).setFixedLeading(10f),
+                )
+                .setBorder(noBorder)
+                .setPadding(0f),
+        )
+        topTable.addCell(
+            Cell()
+                .add(
+                    Paragraph()
+                        .add(Text("DATE ").setFont(fontBold).setBold())
+                        .add(formatInvoiceDisplayDate(dateRaw))
+                        .setFont(font)
+                        .setFontSize(10f)
+                        .setTextAlignment(TextAlignment.RIGHT),
+                )
+                .setBorder(noBorder)
+                .setPadding(0f),
+        )
+        document.add(topTable)
+
+        document.add(
+            Paragraph("SHIPMENT DETAILS")
+                .setFont(fontBold)
+                .setFontSize(18f)
+                .setBold()
+                .setTextAlignment(TextAlignment.CENTER)
+                .setUnderline()
+                .setMarginBottom(10f),
+        )
+
+        val metaTable = Table(UnitValue.createPercentArray(floatArrayOf(48f, 52f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginBottom(6f)
+
+        val clientName = data.clientName.trim().takeIf { it.isNotEmpty() } ?: "-"
+        val clientAddress = data.clientAddress?.trim()?.takeIf { it.isNotEmpty() }
+        val leftClient = Cell()
+            .add(Paragraph().add(Text("CLIENT:").setFont(fontBold).setBold()).setFontSize(9f).setMarginBottom(2f))
+            .add(Paragraph(clientName).setFont(fontBold).setBold().setFontSize(9f).setFixedLeading(11f).setMarginBottom(2f))
+        if (clientAddress != null) {
+            leftClient.add(
+                Paragraph(clientAddress).setFont(font).setFontSize(8f).setFixedLeading(10f).setMarginBottom(8f),
+            )
+        } else {
+            leftClient.add(Paragraph("").setMarginBottom(8f))
+        }
+        leftClient.setBorder(noBorder).setPadding(0f).setPaddingRight(10f)
+        metaTable.addCell(leftClient)
+
+        val shipBox = Table(UnitValue.createPercentArray(floatArrayOf(100f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+        shipBox.addCell(
+            openCell(
+                Paragraph()
+                    .add(Text("VESSEL: ").setFont(fontBold).setBold())
+                    .add(dash(data.vessel))
+                    .setFont(font)
+                    .setFontSize(8f)
+                    .setFixedLeading(11f),
+            ),
+        )
+        shipBox.addCell(
+            openCell(
+                Paragraph()
+                    .add(Text("BOOKING NO. ").setFont(fontBold).setBold())
+                    .add(dash(data.bookingNo))
+                    .add("     ")
+                    .add(Text("CARRIER: ").setFont(fontBold).setBold())
+                    .add(dash(data.carrier))
+                    .setFont(font)
+                    .setFontSize(8f)
+                    .setFixedLeading(11f),
+            ),
+        )
+        shipBox.addCell(Cell().add(rule(4f, 4f)).setBorder(noBorder).setPadding(0f))
+        shipBox.addCell(
+            openCell(
+                Paragraph()
+                    .add(Text("ETD: ").setFont(fontBold).setBold())
+                    .add(formatInvoiceEtdDate(data.etd))
+                    .add(" | ")
+                    .add(Text("ETA: ").setFont(fontBold).setBold())
+                    .add(formatInvoiceEtaDate(data.eta))
+                    .setFont(font)
+                    .setFontSize(8f)
+                    .setFixedLeading(11f),
+            ),
+        )
+        shipBox.addCell(Cell().add(rule(4f, 4f)).setBorder(noBorder).setPadding(0f))
+        shipBox.addCell(
+            openCell(
+                Paragraph()
+                    .add(Text("POL: ").setFont(fontBold).setBold())
+                    .add(dash(data.pol))
+                    .add("     ")
+                    .add(Text("POD: ").setFont(fontBold).setBold())
+                    .add(dash(data.pod))
+                    .setFont(font)
+                    .setFontSize(8f)
+                    .setFixedLeading(11f),
+            ),
+        )
+        shipBox.addCell(
+            openCell(
+                Paragraph()
+                    .add(Text("FINAL DESTINATION: ").setFont(fontBold).setBold())
+                    .add(dash(data.finalDestination))
+                    .setFont(font)
+                    .setFontSize(8f)
+                    .setFixedLeading(11f),
+            ),
+        )
+        metaTable.addCell(Cell().add(shipBox).setBorder(noBorder).setPadding(0f))
+        document.add(metaTable)
+        document.add(rule(8f, 6f))
+
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(8f, 18f, 28f, 30f, 16f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginTop(2f)
+
+        listOf("", "MAKER", "MODEL", "CHASIS NO.", "YEAR").forEachIndexed { index, label ->
+            val align = when (index) {
+                0, 4 -> TextAlignment.CENTER
+                else -> TextAlignment.LEFT
+            }
+            table.addHeaderCell(itemCell(label, align, bold = true, top = true, bottom = true))
+        }
+
+        data.cars.forEach { car ->
+            table.addCell(itemCell(car.no.toString(), TextAlignment.CENTER))
+            table.addCell(itemCell(car.maker))
+            table.addCell(itemCell(car.model))
+            table.addCell(itemCell(car.chassis))
+            table.addCell(itemCell(car.year, TextAlignment.CENTER))
+        }
+        document.add(table)
+
+        val units = data.cars.size
+        val unitsLabel = if (units == 1) "1 UNIT" else "$units UNITS"
+        document.add(rule(4f, 4f))
+        document.add(
+            Paragraph(unitsLabel)
+                .setFont(fontBold)
+                .setBold()
+                .setFontSize(11f)
+                .setTextAlignment(TextAlignment.RIGHT),
+        )
+        document.add(rule(4f, 10f))
+
+        document.close()
+        return outputStream.toByteArray()
+    }
+
     private fun parseYenAmountToLong(raw: String): Long {
         val digits = raw.replace(Regex("[^0-9-]"), "")
         return digits.toLongOrNull() ?: 0L
+    }
+
+    /** Booking invoice row amount: ¥807,000 */
+    private fun formatInvoiceYenAmount(amountYen: Long): String {
+        val neg = amountYen < 0L
+        val abs = kotlin.math.abs(amountYen)
+        val grouped = "%,d".format(abs)
+        return "¥${if (neg) "-" else ""}$grouped"
     }
 
     private fun formatInvoiceDisplayDate(raw: String?): String {
@@ -548,6 +781,55 @@ class PdfService {
             "${d.monthValue}/${d.dayOfMonth}"
         } catch (_: Exception) {
             s
+        }
+    }
+
+    /** Booking invoice ETD only: JUL, 24 (month first, no year). */
+    private fun formatInvoiceEtdDate(raw: String?): String {
+        val s = raw?.trim().orEmpty()
+        if (s.isEmpty()) return "-"
+        parseInvoiceLocalDate(s)?.let { d ->
+            return d.format(DateTimeFormatter.ofPattern("MMM, d", java.util.Locale.ENGLISH)).uppercase()
+        }
+        return s
+    }
+
+    private fun parseInvoiceLocalDate(raw: String): LocalDate? {
+        val s = raw.trim()
+        if (s.isEmpty()) return null
+        // Dotted display form: 24.JUL.2026
+        if (s.contains(".")) {
+            return try {
+                val parts = s.split(".")
+                if (parts.size < 3) return null
+                val day = parts[0].toInt()
+                val month = java.time.Month.valueOf(
+                    when (parts[1].uppercase()) {
+                        "JAN" -> "JANUARY"
+                        "FEB" -> "FEBRUARY"
+                        "MAR" -> "MARCH"
+                        "APR" -> "APRIL"
+                        "MAY" -> "MAY"
+                        "JUN" -> "JUNE"
+                        "JUL" -> "JULY"
+                        "AUG" -> "AUGUST"
+                        "SEP" -> "SEPTEMBER"
+                        "OCT" -> "OCTOBER"
+                        "NOV" -> "NOVEMBER"
+                        "DEC" -> "DECEMBER"
+                        else -> return null
+                    },
+                )
+                val year = parts[2].toInt()
+                LocalDate.of(year, month, day)
+            } catch (_: Exception) {
+                null
+            }
+        }
+        return try {
+            LocalDate.parse(s.take(10))
+        } catch (_: Exception) {
+            null
         }
     }
 

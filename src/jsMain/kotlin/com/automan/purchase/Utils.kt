@@ -168,7 +168,7 @@ fun formatConsigneeMapValueChipHtml(raw: String): String {
 }
 
 /**
- * Like [formatConsigneeMapValueChipHtml] but splits on `;` only (Notify party / In-Transit Clause),
+ * Like [formatConsigneeMapValueChipHtml] but splits on `;` only (legacy Notify / In-Transit),
  * so commas and newlines inside a single value stay one chip.
  */
 fun formatSemicolonOnlyValueChipHtml(raw: String): String {
@@ -176,6 +176,42 @@ fun formatSemicolonOnlyValueChipHtml(raw: String): String {
         .map { it.trim() }
         .filter { it.isNotEmpty() }
         .distinctBy { it.uppercase() }
+    if (tokens.isEmpty()) return ""
+    if (tokens.size == 1) return consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]))
+    val inner = tokens.joinToString("") { t ->
+        consigneeMapShadowChipSpanHtml(escapeHtml(t))
+    }
+    return """<span class="consignee-map-chip-wrap" style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;width:100%;max-width:100%;min-width:0;box-sizing:border-box;">$inner</span>"""
+}
+
+/**
+ * Consignee Map free-text multi-chip fields (Notify / In-Transit / Final Destination).
+ * Inter-chip delimiter is [CONSIGNEE_FREE_TEXT_CHIP_SEP]; `;` is literal text inside a chip.
+ * Legacy rows without the separator are shown as a single chip.
+ */
+const val CONSIGNEE_FREE_TEXT_CHIP_SEP = "\u001E"
+
+fun splitConsigneeFreeTextChipTokens(raw: String): List<String> {
+    if (raw.isBlank()) return emptyList()
+    if (!raw.contains(CONSIGNEE_FREE_TEXT_CHIP_SEP)) {
+        val one = raw.trim()
+        return if (one.isEmpty()) emptyList() else listOf(one)
+    }
+    return raw.split(CONSIGNEE_FREE_TEXT_CHIP_SEP)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .distinctBy { it.uppercase() }
+}
+
+/** Normalize DB/legacy value for tall free-text chip fields (load into chip UI). */
+fun normalizeConsigneeFreeTextChipsForLoad(raw: String): String {
+    val tokens = splitConsigneeFreeTextChipTokens(raw)
+    if (tokens.isEmpty()) return ""
+    return tokens.joinToString(CONSIGNEE_FREE_TEXT_CHIP_SEP)
+}
+
+fun formatConsigneeFreeTextChipHtml(raw: String): String {
+    val tokens = splitConsigneeFreeTextChipTokens(raw)
     if (tokens.isEmpty()) return ""
     if (tokens.size == 1) return consigneeMapShadowChipSpanHtml(escapeHtml(tokens[0]))
     val inner = tokens.joinToString("") { t ->
@@ -671,22 +707,33 @@ fun getMaxCarBrandMapColumnsForDevice(deviceType: String? = null): Int = 6
 /** Consignee Map & Supplier Map: max 6 data columns (plus actions). */
 fun getMaxConsigneeSupplierMapColumnsForDevice(deviceType: String? = null): Int = 8
 
-/** Purchase List table: max 8 data columns (plus actions). */
-fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int = 8
+/** Purchase List table: max 11 data columns (plus actions). */
+fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int = 11
 
 /**
  * Get default columns for a specific device type
  * @param deviceType Device type ("mobile", "tablet", or "desktop")
  * @return List of default column keys for the device
+ *
+ * Default (11): Purchase Date, Chassis (pinned), Auction No, Manufacture Year, Car Name,
+ * Supplier Name, Stock Location, Rixo Company, Client Name, Target Country, Notes.
  */
 fun getDefaultColumnsForDevice(deviceType: String? = null): List<String> {
-    val device = deviceType ?: getDeviceType()
-    return when (device) {
-        "mobile" -> listOf("date", "chassis", "carName", "price")
-        "tablet" -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "price")
-        "desktop" -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "price")
-        else -> listOf("date", "chassis", "carName", "auctionHouse", "stockLocation", "price")
-    }
+    // Same defaults for all devices; Purchase Date + Chassis are always pinned first by
+    // [ensurePurchaseListPinnedColumns] / [prioritizePurchaseListDateAndChassis].
+    return listOf(
+        "date",
+        "chassis",
+        "auctionNo",
+        "manufactureYear",
+        "carName",
+        "auctionHouse",
+        "stockLocation",
+        "rixoCompany",
+        "clientName",
+        "country",
+        "notes",
+    )
 }
 
 /**
@@ -709,16 +756,18 @@ fun autoAdjustColumnsForDevice(savedColumns: List<String>, deviceType: String? =
 }
 
 /**
- * Purchase list: when "date" and/or "chassis" are selected, keep them as the leftmost data columns
- * (after the row action column). If both are selected: Purchase Date first, then Chassis; other
- * columns keep their relative order.
+ * Purchase list: when "date" and/or "chassis" are selected, keep them near the left
+ * (after the row action column). Preferred order: Purchase Date → Auction No (if selected)
+ * → Chassis → other columns in their relative order.
  */
 fun prioritizePurchaseListDateAndChassis(columns: List<String>): List<String> {
     val hasDate = columns.contains("date")
     val hasChassis = columns.contains("chassis")
-    val rest = columns.filter { it != "date" && it != "chassis" }
+    val hasAuctionNo = columns.contains("auctionNo")
+    val rest = columns.filter { it != "date" && it != "chassis" && it != "auctionNo" }
     return buildList {
         if (hasDate) add("date")
+        if (hasAuctionNo) add("auctionNo")
         if (hasChassis) add("chassis")
         addAll(rest)
     }
@@ -728,14 +777,16 @@ fun prioritizePurchaseListDateAndChassis(columns: List<String>): List<String> {
 fun purchaseListMandatoryColumnKeys(): Set<String> = setOf("date", "chassis")
 
 /**
- * Forces Purchase Date and Chassis to be present, in that order, then other columns in [columns] order
- * (excluding duplicate pins). Result length is capped at [maxColumns] (minimum 2 so pins always fit).
+ * Forces Purchase Date and Chassis to be present. When Auction No is selected, it sits between
+ * them. Other columns keep [columns] order (excluding pins). Result length capped at [maxColumns].
  */
 fun ensurePurchaseListPinnedColumns(columns: List<String>, maxColumns: Int): List<String> {
     val max = maxColumns.coerceAtLeast(2)
-    val rest = columns.filter { it != "date" && it != "chassis" }
+    val hasAuctionNo = columns.contains("auctionNo")
+    val rest = columns.filter { it != "date" && it != "chassis" && it != "auctionNo" }
     val merged = buildList {
         add("date")
+        if (hasAuctionNo) add("auctionNo")
         add("chassis")
         addAll(rest)
     }
@@ -993,7 +1044,8 @@ fun purchaseTableCellValue(purchase: dynamic, columnKey: String): String {
         "price" -> {
             val priceStr = (p.price as? String) ?: field("price")
             val priceValue = parseCurrency(priceStr)
-            if (priceValue > 0.0) formatCurrency(priceValue) else ""
+            // Match Rixo Price: always show ¥ when a value is displayed
+            if (priceValue > 0.0) "¥${formatCurrency(priceValue)}" else ""
         }
         "carModelYear" -> field("carModelYear")
         "brand" -> field("brand")
@@ -1289,10 +1341,27 @@ fun formatWithWeekday(isoDate: String?): String {
         val dayOfMonth = js("date.getDate()") as Int
         val year = js("date.getFullYear()") as Int
         val weekday = days[js("date.getDay()") as Int]
-        return month + dayOfMonth.toString() + ", " + year.toString() + "(" + weekday + ")"
+        return "$month $dayOfMonth, $year($weekday)"
     } catch (e: dynamic) {
         return isoDate
     }
+}
+
+/**
+ * Purchase List date cell HTML: date/year on the first line when possible; weekday
+ * `(Saturday)` wraps as a unit underneath when the column is too narrow — never overflows the cell.
+ */
+fun purchaseListDateCellHtml(dateDisplay: String): String {
+    val raw = dateDisplay.trim()
+    if (raw.isEmpty()) return ""
+    val open = raw.lastIndexOf('(')
+    val close = raw.lastIndexOf(')')
+    if (open > 0 && close > open) {
+        val main = raw.substring(0, open).trim()
+        val day = raw.substring(open, close + 1).trim()
+        return """<span class="purchase-list-date"><span class="purchase-list-date-main">${escapeHtml(main)}</span> <span class="purchase-list-date-day">${escapeHtml(day)}</span></span>"""
+    }
+    return """<span class="purchase-list-date">${escapeHtml(raw)}</span>"""
 }
 
 fun formatDateForDatabase(isoDate: String?): String {

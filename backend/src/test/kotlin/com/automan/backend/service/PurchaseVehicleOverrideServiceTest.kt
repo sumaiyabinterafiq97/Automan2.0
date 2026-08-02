@@ -49,6 +49,33 @@ class PurchaseVehicleOverrideServiceTest {
     }
 
     @Test
+    fun syncFromPurchase_snapshotSpecs_stores_values_equal_to_map_baseline() {
+        val mapping = CarBrandMapping(
+            id = 1L,
+            carBrand = "TOYOTA",
+            chassis = "SNAP01",
+            fuel = "GASOLINE",
+            grade = "G",
+        )
+        `when`(mappingRepository.findByChassis("SNAP01-1")).thenReturn(emptyList())
+        `when`(mappingRepository.findBestPrefixMatchForChassis("SNAP01-1")).thenReturn(listOf(mapping))
+        `when`(overrideRepository.findByPurchaseId(50L)).thenReturn(null)
+
+        val purchase = Purchase(
+            id = 50L,
+            chassis = "SNAP01-1",
+            brand = "TOYOTA",
+            fuel = "GASOLINE",
+            grade = "G",
+            color = "WHITE",
+            distance = "12000",
+        )
+        service.syncFromPurchase(purchase, snapshotSpecs = true)
+
+        verify(overrideRepository).save(any(PurchaseVehicleOverride::class.java))
+    }
+
+    @Test
     fun syncFromPurchase_deletes_row_when_all_specs_match_map() {
         val mapping = CarBrandMapping(
             id = 1L,

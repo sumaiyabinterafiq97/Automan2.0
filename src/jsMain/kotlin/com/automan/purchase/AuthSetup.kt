@@ -114,6 +114,7 @@ fun applyRoleBasedRestrictions() {
     val roleRequestBtn = document.getElementById("roleRequestBtn") as HTMLElement?
     val rixoTransportBtn = document.getElementById("rixoTransportBtn") as HTMLElement?
     val clientAccountsQuickBtn = document.getElementById("clientAccountsQuickBtn") as HTMLElement?
+    val purchaseListQuickAddBtn = document.getElementById("purchaseListQuickAddBtn") as HTMLElement?
     
     newBtn?.style?.display = if (isEditor()) "block" else "none"
     importBtn?.style?.display = if (isEditor()) "block" else "none"
@@ -121,6 +122,8 @@ fun applyRoleBasedRestrictions() {
     roleRequestBtn?.style?.display = if (!isAdmin()) "block" else "none" // Show for non-admin users
     rixoTransportBtn?.style?.display = "none"
     clientAccountsQuickBtn?.style?.display = if (isAdmin()) "block" else "none"
+    // inline-flex matches .purchase-quick-add-btn; hide for VIEWER (same create gate as New Purchase)
+    purchaseListQuickAddBtn?.style?.display = if (isEditor()) "inline-flex" else "none"
     
     // Update sidebar button visibility
     updateSidebarForRole()
