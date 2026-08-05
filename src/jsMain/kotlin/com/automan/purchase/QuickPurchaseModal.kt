@@ -53,8 +53,8 @@ fun openQuickPurchaseModal() {
                         ${createEditableCombobox("qpChassis", "Select Chassis", required = true)}
                     </div>
                     <div class="qp-field">
-                        <label class="qp-label" for="qpChassisNumberInput">Chassis Number</label>
-                        ${createEditableCombobox("qpChassisNumber", "Suffix (optional)", showDropdownButton = false)}
+                        <label class="qp-label" for="qpChassisNumberInput">Chassis Number *</label>
+                        ${createPlainTextInput("qpChassisNumber", "Suffix", required = true)}
                     </div>
                     <div class="qp-field">
                         <label class="qp-label" for="qpCarNameInput">Car Name</label>
@@ -655,6 +655,23 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
             // If user typed CODE-NUMBER into Chassis, keep the suffix
             if (chassis.contains("-")) chassis.substringAfter("-").trim() else ""
         }
+    if (chassisNumber.isBlank()) {
+        saveBtn?.disabled = false
+        saveMoreBtn?.disabled = false
+        saveBtn?.textContent = originalSave
+        saveMoreBtn?.textContent = originalMore
+        showErrorModal("Validation Error", "Chassis Number (suffix) is required.")
+        return
+    }
+    val (validNumber, numberError) = validateChassisNumber(chassisNumber)
+    if (!validNumber) {
+        saveBtn?.disabled = false
+        saveMoreBtn?.disabled = false
+        saveBtn?.textContent = originalSave
+        saveMoreBtn?.textContent = originalMore
+        showErrorModal("Validation Error", numberError)
+        return
+    }
     val chassisForSave = composePurchaseChassisForSave(chassisCodeOnly, chassisNumber)
 
     val purchaseData = js("{}")

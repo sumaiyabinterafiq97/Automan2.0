@@ -648,7 +648,11 @@ private fun smBuildCardHtml(
                 <button type="button" class="rixo-tree-card-menu-btn" aria-label="More actions" aria-haspopup="true">&#8942;</button>
                 <div class="rixo-tree-card-menu-panel" role="menu">
                     <button type="button" class="rixo-tree-card-menu-item" data-menu-action="edit" role="menuitem">Edit</button>
-                    <button type="button" class="rixo-tree-card-menu-item rixo-tree-card-menu-item--danger" data-menu-action="delete" role="menuitem">Delete branch</button>
+                    ${if (level != "venue") {
+                        """<button type="button" class="rixo-tree-card-menu-item rixo-tree-card-menu-item--danger" data-menu-action="delete" role="menuitem">Delete branch</button>"""
+                    } else {
+                        ""
+                    }}
                 </div>
             </div>
         </div>
@@ -1625,6 +1629,8 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                     }
                 }
                 "delete" -> {
+                    // Venue ID is 1:1 with supplier — delete would wipe the whole map; Edit only.
+                    if (level == "venue") return@click
                     // Ensure branch rows (ids) are loaded before cascade delete.
                     ensureSmSupplierBranchLoaded(supplier) {
                         val rowsToDelete = smTreeRowsCache.filter { row ->

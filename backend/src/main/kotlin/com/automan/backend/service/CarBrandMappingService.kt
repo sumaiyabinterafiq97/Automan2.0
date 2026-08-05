@@ -3,6 +3,7 @@ package com.automan.backend.service
 import com.automan.backend.dto.CarBrandMappingPageResponse
 import com.automan.backend.model.CarBrandMapping
 import com.automan.backend.repository.CarBrandMappingRepository
+import com.automan.backend.util.ChassisNumberManufactureYearMatcher
 import com.automan.backend.util.Logger
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -584,10 +585,11 @@ class CarBrandMappingService(
      * Looks up the manufacture year for a chassis suffix from the chassis map.
      *
      * The [chassisPrefix] is the code portion (e.g. "ACR50" from "ACR50-67h").
-     * The [chassisNumber] is the suffix after the hyphen (e.g. "67h").
+     * The [chassisNumber] is the suffix after the hyphen (e.g. "67h" or "230000").
      *
-     * The chassis_number column stores semicolon-delimited "number:year" pairs,
-     * e.g. "67H:2019;t6yg:2020".
+     * The chassis_number column stores semicolon-delimited pairs:
+     * - Exact: "67H:2019;t6yg:2020"
+     * - Inclusive numeric range: "187892~189709:2023"
      */
     fun getManufactureYearForChassisNumber(chassisPrefix: String, chassisNumber: String): String? {
         if (chassisPrefix.isBlank() || chassisNumber.isBlank()) return null
@@ -598,35 +600,18 @@ class CarBrandMappingService(
         if (mappings.isEmpty()) return null
 
         for (mapping in mappings) {
-            val pairsRaw = mapping.chassisNumber ?: continue
-            if (pairsRaw.isBlank()) continue
-
-            val pairs = pairsRaw.split(";").map { it.trim() }.filter { it.isNotBlank() }
-            for (pair in pairs) {
-                val colonIdx = pair.lastIndexOf(':')
-                if (colonIdx <= 0) continue
-                val numberToken = pair.substring(0, colonIdx).trim()
-                val yearToken = pair.substring(colonIdx + 1).trim()
-                if (numberToken.equals(normalizedNumber, ignoreCase = true) && yearToken.matches(Regex("""\d{4}"""))) {
-                    return yearToken
-                }
-            }
+            val year = ChassisNumberManufactureYearMatcher.matchYear(mapping.chassisNumber, normalizedNumber)
+            if (year != null) return year
         }
         return null
     }
 
-    /** Parses `number:year;number:year` chassis_number cells into suffix tokens only. */
-    private fun extractChassisNumberTokens(pairsRaw: String?): List<String> {
-        if (pairsRaw.isNullOrBlank()) return emptyList()
-        return pairsRaw.split(";")
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .mapNotNull { pair ->
-                val colonIdx = pair.lastIndexOf(':')
-                if (colonIdx <= 0) pair else pair.substring(0, colonIdx).trim()
-            }
-            .filter { it.isNotBlank() }
-    }
+    /**
+     * Parses `number:year;from~to:year` chassis_number cells into **exact** suffix tokens only.
+     * Range tokens (`from~to`) are omitted so purchase Chassis Number dropdowns are not flooded.
+     */
+    private fun extractChassisNumberTokens(pairsRaw: String?): List<String> =
+        ChassisNumberManufactureYearMatcher.extractExactTokens(pairsRaw)
 
     /** Parses semicolon-delimited `YYYY-MM` registration dates from car_model_year cells. */
     private fun extractCarModelYearTokens(yearsRaw: String?): List<String> {

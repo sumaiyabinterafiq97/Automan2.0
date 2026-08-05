@@ -16,7 +16,7 @@ data class ClientBasedShipmentCarDto(
 
 /**
  * PDF payload for client-facing SHIPMENT DETAILS (no amounts).
- * Lines are not-yet-invoiced chassis only (same rule as invoice slice).
+ * Lines are all shipping_history chassis for client+vessel (invoiced included).
  */
 data class ClientBasedShipmentDetailsPdfData(
     val documentDate: String?,

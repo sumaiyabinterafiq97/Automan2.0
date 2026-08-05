@@ -33,6 +33,10 @@ data class User(
     @Column(nullable = false, length = 16)
     val role: UserRole = UserRole.VIEWER,
 
+    /** JSON blob for UI prefs (e.g. Purchase List sort + columns). Nullable = defaults. */
+    @Column(name = "views", columnDefinition = "JSON")
+    val views: String? = null,
+
     @Column(nullable = false)
     val createdAt: LocalDateTime = LocalDateTime.now()
 ) {

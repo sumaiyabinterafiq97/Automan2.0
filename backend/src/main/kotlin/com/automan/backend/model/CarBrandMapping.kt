@@ -37,13 +37,13 @@ data class CarBrandMapping(
     @Column(name = "seat", length = 100)
     val seat: String? = null,
 
-    @Column(name = "grade", length = 255)
+    @Column(name = "grade", columnDefinition = "TEXT")
     val grade: String? = null,
 
     @Column(name = "vehicle_type", length = 100)
     val vehicleType: String? = null,
 
-    @Column(name = "`rank`", length = 255)
+    @Column(name = "`rank`", columnDefinition = "TEXT")
     val rank: String? = null,
 
     @Column(name = "color", length = 100)

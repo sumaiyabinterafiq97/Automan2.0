@@ -3,6 +3,8 @@ package com.automan.backend.controller
 import com.automan.backend.model.User
 import com.automan.backend.model.UserRole
 import com.automan.backend.repository.UserRepository
+import com.automan.backend.service.UserViewsDto
+import com.automan.backend.service.UserViewsService
 import org.springframework.http.ResponseEntity
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.web.bind.annotation.*
@@ -11,7 +13,8 @@ import org.springframework.web.bind.annotation.*
 @RequestMapping("/users")
 @CrossOrigin(origins = ["http://localhost:8080", "http://localhost:8081", "http://localhost:9090"], allowCredentials = "true")
 class UserController(
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val userViewsService: UserViewsService,
 ) {
     private val passwordEncoder = BCryptPasswordEncoder()
 
@@ -37,7 +40,7 @@ class UserController(
     fun getUserById(@PathVariable id: Long): ResponseEntity<UserResponseDto> {
         val user = userRepository.findById(id).orElse(null)
             ?: return ResponseEntity.notFound().build()
-        
+
         val userDto = UserResponseDto(
             id = user.id!!,
             email = user.email,
@@ -48,12 +51,34 @@ class UserController(
         return ResponseEntity.ok(userDto)
     }
 
+    /** Current user's UI prefs (Purchase List sort + columns). */
+    @GetMapping("/{id}/views")
+    fun getUserViews(@PathVariable id: Long): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(userViewsService.getViews(id))
+        } catch (_: NoSuchElementException) {
+            ResponseEntity.notFound().build()
+        }
+    }
+
+    /** Merge Purchase List (and future) prefs into users.views JSON. */
+    @PutMapping("/{id}/views")
+    fun putUserViews(@PathVariable id: Long, @RequestBody body: UserViewsDto): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(userViewsService.mergeViews(id, body))
+        } catch (_: NoSuchElementException) {
+            ResponseEntity.notFound().build()
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Invalid views")))
+        }
+    }
+
     @PostMapping
     fun createUser(@RequestBody body: CreateUserDto): ResponseEntity<UserResponseDto> {
         if (userRepository.existsByEmail(body.email)) {
             return ResponseEntity.badRequest().build()
         }
-        
+
         val user = User(
             email = body.email.trim().lowercase(),
             name = body.name.trim(),
@@ -61,7 +86,7 @@ class UserController(
             role = UserRole.valueOf(body.role.uppercase())
         )
         val saved = userRepository.save(user)
-        
+
         val userDto = UserResponseDto(
             id = saved.id!!,
             email = saved.email,
@@ -76,14 +101,15 @@ class UserController(
     fun updateUser(@PathVariable id: Long, @RequestBody body: UpdateUserDto): ResponseEntity<UserResponseDto> {
         val user = userRepository.findById(id).orElse(null)
             ?: return ResponseEntity.notFound().build()
-        
+
         val updatedUser = user.copy(
             email = body.email?.trim()?.lowercase() ?: user.email,
             name = body.name?.trim() ?: user.name,
             role = body.role?.let { UserRole.valueOf(it.uppercase()) } ?: user.role
+            // views intentionally preserved
         )
         val saved = userRepository.save(updatedUser)
-        
+
         val userDto = UserResponseDto(
             id = saved.id!!,
             email = saved.email,

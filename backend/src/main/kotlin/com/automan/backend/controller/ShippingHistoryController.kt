@@ -119,7 +119,47 @@ class ShippingHistoryController(
         )
     }
 
-    /** Client-Based Shipment Details PDF (not-yet-invoiced chassis only). */
+    /** All clients that have shipping history (includes fully invoiced). */
+    @GetMapping("/for-shipment-details/client-names")
+    fun clientNamesForShipmentDetails(): ResponseEntity<Map<String, Any>> {
+        val names = shippingHistoryService.distinctClientNamesForShipmentDetails()
+        return ResponseEntity.ok(
+            mapOf(
+                "success" to true,
+                "data" to names,
+            ),
+        )
+    }
+
+    /** All vessels for client with shipping history (invoiced included). */
+    @GetMapping("/for-shipment-details/vessels")
+    fun vesselsForShipmentDetails(@RequestParam clientName: String): ResponseEntity<Map<String, Any>> {
+        val vessels = shippingHistoryService.distinctVesselsForShipmentDetailsClient(clientName)
+        return ResponseEntity.ok(
+            mapOf(
+                "success" to true,
+                "data" to vessels,
+            ),
+        )
+    }
+
+    /** All chassis for client+vessel (invoiced included). */
+    @GetMapping("/for-shipment-details/lines")
+    fun linesForShipmentDetails(
+        @RequestParam clientName: String,
+        @RequestParam vessel: String,
+    ): ResponseEntity<Map<String, Any>> {
+        val slice = shippingHistoryService.shipmentDetailsSlice(clientName, vessel)
+        return ResponseEntity.ok(
+            mapOf(
+                "success" to true,
+                "header" to slice.header,
+                "lines" to slice.lines,
+            ),
+        )
+    }
+
+    /** Client-Based Shipment Details PDF (all chassis for client+vessel). */
     @PostMapping("/client-shipment-details/pdf")
     fun clientShipmentDetailsPdf(
         @RequestBody request: ClientBasedShipmentDetailsPdfRequest,

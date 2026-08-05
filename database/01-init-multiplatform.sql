@@ -13,6 +13,7 @@ CREATE TABLE users (
     name VARCHAR(80) NOT NULL,
     password_hash VARCHAR(120) NOT NULL,
     role VARCHAR(16) NOT NULL DEFAULT 'VIEWER',
+    views JSON NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_users_email (email),
     INDEX idx_users_role (role)

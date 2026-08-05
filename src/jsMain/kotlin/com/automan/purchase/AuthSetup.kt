@@ -76,6 +76,7 @@ fun logout() {
     safeLocalStorageRemove("authUserRole")
     safeLocalStorageRemove("authUserName")
     safeLocalStorageRemove("authUserId")
+    clearPurchaseListViewsSessionCache()
     
     // Close sidebar
     closeSidebar()

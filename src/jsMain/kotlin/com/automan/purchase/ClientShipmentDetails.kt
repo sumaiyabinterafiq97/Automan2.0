@@ -8,6 +8,9 @@ import org.w3c.dom.HTMLSelectElement
 import org.w3c.dom.HTMLTableSectionElement
 import org.w3c.dom.events.Event
 
+/** sessionStorage: client+vessel when opening from Shipping History next to INVOICE. */
+const val CLIENT_SHIPMENT_DETAILS_PREFILL_SESSION_KEY = "clientShipmentDetailsPrefillPayload"
+
 private var clientShipmentCurrentClient: String = ""
 private var clientShipmentCurrentVessel: String = ""
 private var clientShipmentLineCount: Int = 0
@@ -18,14 +21,28 @@ fun showClientShipmentDetailsPage() {
     clientShipmentCurrentVessel = ""
     clientShipmentLineCount = 0
 
+    val prefillRaw = window.sessionStorage.getItem(CLIENT_SHIPMENT_DETAILS_PREFILL_SESSION_KEY)
+    if (prefillRaw != null) {
+        window.sessionStorage.removeItem(CLIENT_SHIPMENT_DETAILS_PREFILL_SESSION_KEY)
+    }
+    var prefillClient = ""
+    var prefillVessel = ""
+    if (!prefillRaw.isNullOrBlank()) {
+        try {
+            val o = JSON.parse<dynamic>(prefillRaw)
+            prefillClient = o.clientName?.toString()?.trim().orEmpty()
+            prefillVessel = o.vessel?.toString()?.trim().orEmpty()
+        } catch (_: dynamic) {
+            prefillClient = ""
+            prefillVessel = ""
+        }
+    }
+
     content.innerHTML = """
         <div class="invoice-page-container">
             <div class="invoice-card">
                 <div class="invoice-page-header">
                     <h1>Client-Based Shipment Details</h1>
-                    <p style="margin:8px 0 0;color:#64748b;font-size:14px;">
-                        Open (not-yet-invoiced) chassis for a client and vessel. Generates a SHIPMENT DETAILS PDF without prices.
-                    </p>
                 </div>
 
                 <div class="invoice-layout">
@@ -42,7 +59,7 @@ fun showClientShipmentDetailsPage() {
                                 <option value="">Select vessel</option>
                             </select>
                             <p id="clientShipmentVesselEmptyHint" class="invoice-vessel-empty-hint" style="display:none;margin:6px 0 0;font-size:13px;color:#6c757d;">
-                                No open vessels for this client
+                                No vessels for this client
                             </p>
                         </div>
                         <div class="invoice-actions" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;">
@@ -79,7 +96,7 @@ fun showClientShipmentDetailsPage() {
     """.trimIndent()
 
     setupClientShipmentDetailsListeners()
-    loadClientShipmentClientOptions()
+    loadClientShipmentClientOptions(preferredClient = prefillClient, preferredVessel = prefillVessel)
 }
 
 private fun setupClientShipmentDetailsListeners() {
@@ -127,8 +144,8 @@ private fun clearClientShipmentTable(message: String) {
     document.getElementById("clientShipmentCount")?.textContent = "0 units"
 }
 
-private fun loadClientShipmentClientOptions() {
-    window.fetch(apiUrl("shipping-history/for-invoice/client-names"))
+private fun loadClientShipmentClientOptions(preferredClient: String = "", preferredVessel: String = "") {
+    window.fetch(apiUrl("shipping-history/for-shipment-details/client-names"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load client names')")
         }
@@ -139,11 +156,31 @@ private fun loadClientShipmentClientOptions() {
             while (clientSelect.options.length > 1) {
                 clientSelect.remove(1)
             }
+            val nameList = mutableListOf<String>()
             for (name in clientNames) {
+                val n = name.toString().trim()
+                if (n.isEmpty()) continue
+                nameList.add(n)
                 val option = document.createElement("option") as HTMLOptionElement
-                option.value = name.toString()
-                option.textContent = name.toString()
+                option.value = n
+                option.textContent = n
                 clientSelect.appendChild(option)
+            }
+
+            val preferred = preferredClient.trim()
+            if (preferred.isNotEmpty() && nameList.any { it == preferred }) {
+                clientSelect.value = preferred
+                clientShipmentCurrentClient = preferred
+                loadClientShipmentVesselOptions(preferred, preferredVessel = preferredVessel)
+            } else if (preferred.isNotEmpty()) {
+                // Prefill client not in open-invoice list — still try vessels for that name.
+                val option = document.createElement("option") as HTMLOptionElement
+                option.value = preferred
+                option.textContent = preferred
+                clientSelect.appendChild(option)
+                clientSelect.value = preferred
+                clientShipmentCurrentClient = preferred
+                loadClientShipmentVesselOptions(preferred, preferredVessel = preferredVessel)
             }
         }
         .catch { error: dynamic ->
@@ -151,25 +188,25 @@ private fun loadClientShipmentClientOptions() {
         }
 }
 
-private fun loadClientShipmentVesselOptions(client: String) {
+private fun loadClientShipmentVesselOptions(client: String, preferredVessel: String = "") {
     val vesselSelect = document.getElementById("clientShipmentVessel") as? HTMLSelectElement ?: return
     vesselSelect.innerHTML = "<option value=\"\">Select vessel</option>"
     (document.getElementById("clientShipmentVesselEmptyHint") as? HTMLElement)?.style?.display = "none"
     if (client.isBlank()) return
 
     val encodedClient = js("encodeURIComponent")(client) as String
-    window.fetch(apiUrl("shipping-history/for-invoice/vessels?clientName=$encodedClient"))
+    window.fetch(apiUrl("shipping-history/for-shipment-details/vessels?clientName=$encodedClient"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load vessels')")
         }
         .then { payload: dynamic ->
             val namesRaw = js("payload && payload.success ? payload.data : []")
             val vessels = js("Array.isArray(namesRaw) ? namesRaw : []") as Array<dynamic>
-            var count = 0
+            val vesselStrings = mutableListOf<String>()
             for (v in vessels) {
                 val vesselName = v.toString().trim()
                 if (vesselName.isEmpty()) continue
-                count += 1
+                vesselStrings.add(vesselName)
                 val option = document.createElement("option") as HTMLOptionElement
                 option.value = vesselName
                 option.textContent = vesselName
@@ -177,15 +214,35 @@ private fun loadClientShipmentVesselOptions(client: String) {
             }
             val emptyHint = document.getElementById("clientShipmentVesselEmptyHint") as? HTMLElement
             if (emptyHint != null) {
-                emptyHint.style.display = if (count == 0) "block" else "none"
+                emptyHint.style.display = if (vesselStrings.isEmpty()) "block" else "none"
             }
-            if (count == 1) {
-                vesselSelect.selectedIndex = 1
-                val only = vesselSelect.value
-                clientShipmentCurrentVessel = only
-                loadClientShipmentLines(client, only)
-            } else if (count == 0) {
-                clearClientShipmentTable("No open (not-yet-invoiced) vessels for this client")
+
+            val preferred = preferredVessel.trim()
+            var selected = ""
+            when {
+                preferred.isNotEmpty() && vesselStrings.any { it == preferred } -> {
+                    vesselSelect.value = preferred
+                    selected = preferred
+                }
+                preferred.isNotEmpty() -> {
+                    val option = document.createElement("option") as HTMLOptionElement
+                    option.value = preferred
+                    option.textContent = preferred
+                    vesselSelect.appendChild(option)
+                    vesselSelect.value = preferred
+                    selected = preferred
+                }
+                vesselStrings.size == 1 -> {
+                    vesselSelect.selectedIndex = 1
+                    selected = vesselSelect.value
+                }
+            }
+
+            if (selected.isNotEmpty()) {
+                clientShipmentCurrentVessel = selected
+                loadClientShipmentLines(client, selected)
+            } else if (vesselStrings.isEmpty()) {
+                clearClientShipmentTable("No vessels for this client")
             } else {
                 clearClientShipmentTable("Choose a vessel to load cars")
             }
@@ -198,7 +255,7 @@ private fun loadClientShipmentVesselOptions(client: String) {
 private fun loadClientShipmentLines(client: String, vessel: String) {
     val encodedClient = js("encodeURIComponent")(client) as String
     val encodedVessel = js("encodeURIComponent")(vessel) as String
-    window.fetch(apiUrl("shipping-history/for-invoice/lines?clientName=$encodedClient&vessel=$encodedVessel"))
+    window.fetch(apiUrl("shipping-history/for-shipment-details/lines?clientName=$encodedClient&vessel=$encodedVessel"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load lines')")
         }
@@ -209,7 +266,7 @@ private fun loadClientShipmentLines(client: String, vessel: String) {
             if (lines.isEmpty()) {
                 clientShipmentLineCount = 0
                 setClientShipmentPdfButtonsEnabled(false)
-                clearClientShipmentTable("No open chassis for this client and vessel")
+                clearClientShipmentTable("No chassis for this client and vessel")
                 return@then
             }
             val html = StringBuilder()
@@ -259,7 +316,7 @@ private fun fetchClientShipmentPdf(preview: Boolean) {
         return
     }
     if (clientShipmentLineCount <= 0) {
-        showMessage("No open chassis to include in the PDF", "warning")
+        showMessage("No chassis to include in the PDF", "warning")
         return
     }
 

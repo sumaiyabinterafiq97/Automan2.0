@@ -229,6 +229,7 @@ private fun groupCarBrandMappingsForView(mappings: List<dynamic>): List<dynamic>
         groupedObj.rank = joinDistinctNonBlank(list.map { (it.rank ?: "").toString() })
         groupedObj.color = joinDistinctNonBlank(list.map { (it.color ?: "").toString() })
         groupedObj.driveType = joinDistinctNonBlank(list.map { (it.driveType ?: "").toString() })
+        groupedObj.vehicleType = joinDistinctNonBlank(list.map { (it.vehicleType ?: "").toString() })
         groupedObj.recycleFee = joinDistinctNonBlank(list.map { (it.recycleFee ?: "").toString() })
         groupedObj.carModelYear = joinDistinctNonBlank(list.map { (it.carModelYear ?: "").toString() })
         groupedObj.chassisNumber = joinDistinctNonBlank(list.map { (it.chassisNumber ?: "").toString() })
@@ -246,6 +247,7 @@ private fun populateCarBrandModalComboboxes() {
     populateEditableComboboxFromMasterMenu("carBrandShift", "shift")
     populateEditableComboboxFromMasterMenu("carBrandColor", "color")
     populateEditableComboboxFromMasterMenu("carBrandGrade", "car_grade")
+    populateEditableComboboxFromMasterMenu("carBrandVehicleType", "type_of_vehicle")
 
     val wdSelect = document.getElementById("carBrandWd") as? HTMLSelectElement
     if (wdSelect != null) {
@@ -294,6 +296,7 @@ private fun tryPrefillCarBrandModalFromGroupedRow() {
     val rankVal = (row.rank ?: "").toString()
     val colorVal = (row.color ?: "").toString()
     val driveType = (row.driveType ?: "").toString()
+    val vehicleTypeVal = (row.vehicleType ?: "").toString()
     val recycleFeeVal = (row.recycleFee ?: "").toString()
     val chassisNumberVal = (row.chassisNumber ?: "").toString()
 
@@ -310,6 +313,7 @@ private fun tryPrefillCarBrandModalFromGroupedRow() {
     setChipFieldValue("carBrandRank", rankVal)
     setChipFieldValue("carBrandColor", colorVal)
     setChipFieldValue("carBrandDriveType", driveType)
+    setChipFieldValue("carBrandVehicleType", vehicleTypeVal)
     // Populate dynamic recycle fee rows from stored delimited string
     window.asDynamic().__prefillRecycleFee = recycleFeeVal
     window.asDynamic().__prefillChassisNumber = chassisNumberVal
@@ -1210,7 +1214,7 @@ fun getSelectedCarBrandColumns(): List<String> {
     }
     
     // Filter out "id" column (removed from UI) and auto-adjust if saved columns exceed device limit
-    val filteredColumns = savedColumns.filter { it.isNotBlank() && it != "id" && it != "vehicleType" }
+    val filteredColumns = savedColumns.filter { it.isNotBlank() && it != "id" }
     val ordered = normalizeCarBrandColumnOrder(filteredColumns)
     return if (ordered.size > maxColumns) {
         defaultColumns
@@ -4233,6 +4237,7 @@ private fun buildCarBrandTableUi(
                 "rank" to "Rank",
                 "color" to "Color",
                 "driveType" to "Drive Type",
+                "vehicleType" to "Vehicle Type",
                 "recycleFee" to "Recycle Fees",
                 "carModelYear" to "Registration Date",
                 "chassisNumber" to "Chassis Numbers",
@@ -4283,6 +4288,7 @@ private fun buildCarBrandTableUi(
                 val rankVal = (mapping.rank ?: "").toString()
                 val colorVal = (mapping.color ?: "").toString()
                 val driveTypeVal = (mapping.driveType ?: "").toString()
+                val vehicleTypeVal = (mapping.vehicleType ?: "").toString()
                 val recycleFeeVal = (mapping.recycleFee ?: "").toString()
                 val carModelYearVal = (mapping.carModelYear ?: "").toString()
                 val chassisNumberVal = (mapping.chassisNumber ?: "").toString()
@@ -4293,7 +4299,7 @@ private fun buildCarBrandTableUi(
                 }.filter { it.isNotEmpty() }.joinToString(";")
 
                 val rowDataJs =
-                    "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}',chassisNumber:'${escapeJsString(chassisNumberVal)}',manufactureYear:'${escapeJsString(manufactureYearVal)}'};"
+                    "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',vehicleType:'${escapeJsString(vehicleTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}',chassisNumber:'${escapeJsString(chassisNumberVal)}',manufactureYear:'${escapeJsString(manufactureYearVal)}'};"
                 
                 html += """
                     <tr>
@@ -4332,6 +4338,7 @@ private fun buildCarBrandTableUi(
                         "rank" -> rankVal
                         "color" -> colorVal
                         "driveType" -> driveTypeVal
+                        "vehicleType" -> vehicleTypeVal
                         "recycleFee" -> recycleFeeVal
                         "carModelYear" -> carModelYearDisplay
                         "chassisNumber" -> chassisNumberVal
@@ -4626,6 +4633,7 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         "rank" to "Rank",
         "color" to "Color",
         "driveType" to "Drive Type",
+        "vehicleType" to "Vehicle Type",
         "recycleFee" to "Recycle Fees",
         "carModelYear" to "Registration Date",
         "chassisNumber" to "Chassis Numbers",
@@ -4650,6 +4658,7 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         val rankVal = (mapping.rank ?: "").toString()
         val colorVal = (mapping.color ?: "").toString()
         val driveTypeVal = (mapping.driveType ?: "").toString()
+        val vehicleTypeVal = (mapping.vehicleType ?: "").toString()
         val recycleFeeVal = (mapping.recycleFee ?: "").toString()
         val carModelYearVal = (mapping.carModelYear ?: "").toString()
         val chassisNumberVal = (mapping.chassisNumber ?: "").toString()
@@ -4660,7 +4669,7 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         }.filter { it.isNotEmpty() }.joinToString(";")
 
         val rowDataJs =
-            "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}',chassisNumber:'${escapeJsString(chassisNumberVal)}',manufactureYear:'${escapeJsString(manufactureYearVal)}'};"
+            "window.__carBrandRowData={chassis:'${escapeJsString(chassis)}',carBrand:'${escapeJsString(carBrand)}',carName:'${escapeJsString(carName)}',fuel:'${escapeJsString(fuel)}',wd:'${escapeJsString(wd)}',shift:'${escapeJsString(shift)}',grade:'${escapeJsString(grade)}',cc:'${escapeJsString(cc)}',seat:'${escapeJsString(seat)}',door:'${escapeJsString(door)}',rank:'${escapeJsString(rankVal)}',color:'${escapeJsString(colorVal)}',driveType:'${escapeJsString(driveTypeVal)}',vehicleType:'${escapeJsString(vehicleTypeVal)}',recycleFee:'${escapeJsString(recycleFeeVal)}',carModelYear:'${escapeJsString(carModelYearVal)}',chassisNumber:'${escapeJsString(chassisNumberVal)}',manufactureYear:'${escapeJsString(manufactureYearVal)}'};"
         
         // Build card content based on selected columns
         val cardFields = StringBuilder()
@@ -4680,6 +4689,7 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
                 "rank" -> rankVal
                 "color" -> colorVal
                 "driveType" -> driveTypeVal
+                "vehicleType" -> vehicleTypeVal
                 "recycleFee" -> recycleFeeVal
                 "carModelYear" -> carModelYearDisplay
                 "chassisNumber" -> chassisNumberVal
@@ -4848,6 +4858,7 @@ fun showCarBrandColumnFilterModal() {
         "rank" to "Rank",
         "color" to "Color",
         "driveType" to "Drive Type",
+        "vehicleType" to "Vehicle Type",
         "recycleFee" to "Recycle Fees",
         "carModelYear" to "Registration Date",
         "chassisNumber" to "Chassis Numbers",
@@ -5051,7 +5062,10 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Drive Type (LHD/RHD)</label>
                                 ${createChipMultiSelectCombobox("carBrandDriveType", "Select Drive Type")}
                             </div>
-                            <div style="visibility:hidden;"></div>
+                            <div>
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Vehicle Type</label>
+                                ${createChipMultiSelectCombobox("carBrandVehicleType", "Select Vehicle Type")}
+                            </div>
                         </div>
                         <div style="margin-bottom: 20px;">
                             <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Recycle Fees <span style="color: #6b7280; font-weight: 400; font-size: 12px;">(by Registration Date)</span></label>
@@ -5493,6 +5507,7 @@ fun loadCarBrandDataForEdit(mappingId: Long, clearChassisForDuplicate: Boolean =
                 setChipFieldValue("carBrandRank", (data.rank ?: "").toString())
                 setChipFieldValue("carBrandColor", (data.color ?: "").toString())
                 setChipFieldValue("carBrandDriveType", (data.driveType ?: "").toString())
+                setChipFieldValue("carBrandVehicleType", (data.vehicleType ?: "").toString())
                 // Populate dynamic recycle fee rows from stored delimited string
                 val recycleStr = (data.recycleFee ?: "").toString()
                 window.asDynamic().__prefillRecycleFee = recycleStr
@@ -5609,6 +5624,7 @@ fun performCarBrandSave(mappingId: Long?, replaceExistingValues: Boolean = false
     carBrandData.rank = getChipFieldValue("carBrandRank").takeIf { it.isNotEmpty() } ?: null
     carBrandData.color = getChipFieldValue("carBrandColor").takeIf { it.isNotEmpty() } ?: null
     carBrandData.driveType = getChipFieldValue("carBrandDriveType").takeIf { it.isNotEmpty() } ?: null
+    carBrandData.vehicleType = getChipFieldValue("carBrandVehicleType").takeIf { it.isNotEmpty() } ?: null
     val recFeeStr = js("window.getRecycleFeeRowsValue ? window.getRecycleFeeRowsValue() : ''").unsafeCast<String>().trim()
     carBrandData.recycleFee = recFeeStr.takeIf { it.isNotEmpty() } ?: null
     val derivedModelYears = if (recFeeStr.isNotEmpty()) {

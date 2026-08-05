@@ -63,6 +63,139 @@ private val purchaseSuggestionStaticCache: MutableMap<String, List<String>> = mu
 var purchaseTableSortOrderByField: MutableMap<String, String> = mutableMapOf()
 var purchaseTableSortField: String = "date"
 
+/** Debounce timer for PUT users/{id}/views after sort/column changes. */
+private var purchaseListViewsSaveTimer: dynamic = null
+private var purchaseListViewsLoadedForUserId: String? = null
+
+fun clearPurchaseListViewsSessionCache() {
+    purchaseListViewsLoadedForUserId = null
+    if (purchaseListViewsSaveTimer != null) {
+        window.clearTimeout(purchaseListViewsSaveTimer)
+        purchaseListViewsSaveTimer = null
+    }
+}
+
+private fun currentAuthUserId(): Long? =
+    safeLocalStorageGet("authUserId")?.trim()?.toLongOrNull()
+
+/**
+ * Load Purchase List sort + columns from users.views.
+ * Server wins when present; if server has no columns but localStorage does, migrate once.
+ */
+private suspend fun loadPurchaseListViewsFromServer() {
+    val userId = currentAuthUserId() ?: return
+    val result = ApiClient.get<dynamic>("users/$userId/views")
+    when (result) {
+        is ApiResult.Error -> {
+            Logger.warn("Purchase list views load failed: ${result.message}")
+            return
+        }
+        is ApiResult.Success -> {
+            val body = result.data ?: return
+            val pl = body.purchaseList
+            applyPurchaseListViewsFromServer(pl)
+            purchaseListViewsLoadedForUserId = userId.toString()
+            // One-time migrate: local columns exist, server has none
+            val serverCols = try {
+                val arr = pl?.columns
+                if (arr == null || arr == js("undefined")) emptyList()
+                else {
+                    val asArr = js("Array.isArray(arr) ? arr : []") as Array<dynamic>
+                    asArr.map { it.toString() }.filter { it.isNotBlank() }
+                }
+            } catch (_: dynamic) {
+                emptyList()
+            }
+            if (serverCols.isEmpty()) {
+                val local = safeLocalStorageGet("selectedColumns")
+                if (!local.isNullOrBlank()) {
+                    persistPurchaseListViewsToServer(immediate = true)
+                }
+            }
+        }
+    }
+}
+
+private fun applyPurchaseListViewsFromServer(pl: dynamic?) {
+    if (pl == null || pl == js("undefined")) return
+    val sortField = (pl.sortField as? String)?.trim().orEmpty()
+    if (sortField.isNotEmpty()) {
+        purchaseTableSortField = sortField
+    }
+    val sortOrder = (pl.sortOrder as? String)?.trim()?.lowercase().orEmpty()
+    if (sortOrder == "asc" || sortOrder == "desc") {
+        purchaseTableSortOrderByField[purchaseTableSortField] = sortOrder
+    }
+    try {
+        val mapDyn = pl.sortOrderByField
+        if (mapDyn != null && mapDyn != js("undefined")) {
+            val keys = js("Object.keys(mapDyn)") as Array<String>
+            for (k in keys) {
+                val v = (mapDyn[k] as? String)?.trim()?.lowercase().orEmpty()
+                if (v == "asc" || v == "desc") {
+                    purchaseTableSortOrderByField[k] = v
+                }
+            }
+        }
+    } catch (_: dynamic) {
+    }
+    try {
+        val arr = pl.columns
+        if (arr != null && arr != js("undefined") && js("Array.isArray(arr)").unsafeCast<Boolean>()) {
+            val list = (arr as Array<dynamic>).map { it.toString().trim() }.filter { it.isNotEmpty() }
+            if (list.isNotEmpty()) {
+                val deviceType = getDeviceType()
+                val max = getMaxPurchaseListColumnsForDevice(deviceType)
+                val ordered = ensurePurchaseListPinnedColumns(
+                    prioritizePurchaseListDateAndChassis(sanitizePurchaseListSelectedColumns(list)),
+                    max,
+                )
+                saveSelectedColumns(ordered)
+            }
+        }
+    } catch (e: dynamic) {
+        Logger.warn("Purchase list views columns apply failed: ${e.toString()}")
+    }
+}
+
+private fun buildPurchaseListViewsPayload(): dynamic {
+    val pl = js("{}")
+    pl.sortField = purchaseTableSortField
+    pl.sortOrder = purchaseTableSortOrderByField[purchaseTableSortField] ?: "desc"
+    val orderMap = js("{}")
+    for ((k, v) in purchaseTableSortOrderByField) {
+        orderMap[k] = v
+    }
+    pl.sortOrderByField = orderMap
+    pl.columns = getSelectedColumns().toTypedArray()
+    val body = js("{}")
+    body.purchaseList = pl
+    return body
+}
+
+fun persistPurchaseListViewsToServer(immediate: Boolean = false) {
+    val userId = currentAuthUserId() ?: return
+    val runSave = {
+        MainScope().launch {
+            val body = buildPurchaseListViewsPayload()
+            when (val r = ApiClient.put<dynamic>("users/$userId/views", body)) {
+                is ApiResult.Success -> Logger.debug("Purchase list views saved")
+                is ApiResult.Error -> Logger.warn("Purchase list views save failed: ${r.message}")
+            }
+        }
+    }
+    if (immediate) {
+        if (purchaseListViewsSaveTimer != null) {
+            window.clearTimeout(purchaseListViewsSaveTimer)
+            purchaseListViewsSaveTimer = null
+        }
+        runSave()
+        return
+    }
+    if (purchaseListViewsSaveTimer != null) window.clearTimeout(purchaseListViewsSaveTimer)
+    purchaseListViewsSaveTimer = window.setTimeout({ runSave() }, 400)
+}
+
 // Purchase date filter state (used only for Purchase List table view)
 private var purchaseDateFilterActive: Boolean = false
 private var purchaseBaseRows: Array<dynamic> = emptyArray()
@@ -1180,6 +1313,7 @@ private fun togglePurchaseTableSort(field: String) {
     val next = if (current == "asc") "desc" else "asc"
     purchaseTableSortOrderByField[field] = next
     purchaseTableSortField = field
+    persistPurchaseListViewsToServer()
     if (purchaseSearchServerMode) {
         loadPurchasesListPage(purchaseSearchServerPageZeroBased.coerceAtLeast(0))
     } else {
@@ -1614,7 +1748,11 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
     setupPurchaseSearchBarListeners()
     setupPurchaseDateQuickFilterMenuPortal()
     setupPurchaseEditDelegationOnTable()
-    loadPurchases()
+    MainScope().launch {
+        loadPurchaseListViewsFromServer()
+        if (!routeEquals("/purchase")) return@launch
+        loadPurchases()
+    }
 }
 
 fun showShippingHistoryPage() {
@@ -1644,8 +1782,9 @@ fun showShippingHistoryPage() {
             .shipping-history-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;grid-area:title;text-align:center;}
             .shipping-search{grid-area:search;width:100%;position:relative;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
             .shipping-search input{width:100%;box-sizing:border-box;padding:11px 36px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
-            .shipping-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;}
+            .shipping-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;border-radius:8px;}
             .shipping-search-clear:hover{background:#f3f4f6;color:#111827;}
+            .shipping-search-clear.is-hidden{display:none;}
             .shipping-history-actions{grid-area:actions;display:flex;justify-content:flex-end;align-items:center;gap:10px;}
             .shipping-column-filter-btn{
                 width:48px;height:48px;min-width:48px;min-height:48px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;
@@ -1653,26 +1792,48 @@ fun showShippingHistoryPage() {
             }
             .shipping-column-filter-btn:hover{background:#e8eaed;box-shadow:0 2px 8px rgba(0,0,0,0.08);}
             .shipping-column-filter-btn:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
-            .shipping-export-btn{padding:8px 16px;background-color:#198754;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap;}
+            .shipping-export-btn{padding:8px 16px;background-color:#198754;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap;font-weight:600;}
+            .shipping-export-btn:hover{background-color:#157347;}
+            .shipping-export-btn:focus-visible{outline:2px solid #157347;outline-offset:2px;}
             .shipping-export-btn:disabled{opacity:0.7;cursor:not-allowed;}
+            .shipping-history-edit-btn{
+                display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;
+                background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 4px rgba(76,201,255,0.30);padding:0;
+            }
+            .shipping-history-edit-btn:hover{filter:brightness(1.05);}
+            .shipping-history-edit-btn:focus-visible{outline:2px solid #0284c7;outline-offset:2px;}
             .shipping-history-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
             table.purchase-list-table thead th{position:sticky;top:0;z-index:10;}
-            .shipping-history-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+            .shipping-history-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
             .shipping-history-empty strong{color:#0f172a;}
+            .shipping-history-empty--error{color:#b91c1c;}
+            .shipping-history-empty--error strong{color:#991b1b;}
+            .shipping-history-empty-cta{margin-top:8px;padding:8px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#0f172a;font-size:13px;font-weight:600;cursor:pointer;min-height:40px;}
+            .shipping-history-empty-cta:hover{background:#f8fafc;}
+            .shipping-history-empty-cta:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
             .shipping-history-pager{display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;}
             .shipping-history-pager-meta{color:#6b7280;font-size:14px;}
             .shipping-history-pager-btns{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-            .shipping-history-pager-btn{padding:8px 16px;background-color:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;min-height:40px;font-size:14px;}
+            .shipping-history-pager-btn{padding:8px 16px;background-color:#007bff;color:#fff;border:none;border-radius:8px;cursor:pointer;min-height:40px;font-size:14px;font-weight:600;}
+            .shipping-history-pager-btn:hover:not(:disabled):not(.is-disabled){background-color:#0069d9;}
+            .shipping-history-pager-btn:focus-visible{outline:2px solid #0069d9;outline-offset:2px;}
             .shipping-history-pager-btn:disabled,.shipping-history-pager-btn.is-disabled{background-color:#ccc;cursor:not-allowed;}
-            .shipping-history-pager-page{color:#374151;font-size:14px;padding:0 8px;}
+            .shipping-history-sort-btn{background:none;border:none;cursor:pointer;font-weight:700;color:#0f172a;padding:0;display:inline-flex;align-items:center;gap:6px;min-height:36px;}
+            .shipping-history-sort-btn:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;border-radius:4px;}
+            .shipping-history-sort-btn.is-active .shipping-history-sort-icon{color:#0f766e;font-weight:800;}
+            .shipping-history-sort-icon{font-size:14px;color:#64748b;}
             .shipping-cards{display:flex;flex-direction:column;gap:10px;}
             .shipping-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
-            .shipping-card-top{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:10px;}
+            .shipping-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap;}
             .shipping-card-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+            .shipping-card-status{display:inline-flex;align-items:center;gap:8px;margin-left:auto;}
             .shipping-card-grid{display:grid;gap:8px;}
             .shipping-kv{display:flex;gap:10px;align-items:flex-start;}
             .shipping-k{min-width:120px;font-size:12px;color:#64748b;line-height:1.4;}
             .shipping-v{flex:1;min-width:0;}
+            button.shipping-history-invoice-btn:focus-visible{outline:2px solid #15803d;outline-offset:2px;}
+            button.shipping-history-shipment-details-btn:focus-visible{outline:2px solid #475569;outline-offset:2px;}
+            button.invoice-history-pdf-btn:focus-visible{outline:2px solid #b91c1c;outline-offset:2px;border-radius:50%;}
             @media (max-width: 1024px){
                 #shippingHistoryPage{padding:14px;border-radius:14px;}
                 .shipping-history-toolbar{gap:14px;margin-bottom:14px;}
@@ -1698,15 +1859,15 @@ fun showShippingHistoryPage() {
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                     </span>
                     <input type="text" id="shippingHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search country, consignee, chassis, client…" aria-label="Search shipping history" />
-                    <button type="button" id="shippingHistorySearchClearBtn" class="shipping-search-clear" title="Clear search" aria-label="Clear search">×</button>
+                    <button type="button" id="shippingHistorySearchClearBtn" class="shipping-search-clear is-hidden" title="Clear search" aria-label="Clear search">×</button>
                 </div>
                 <div class="shipping-history-actions">
-                    <button type="button" id="shippingHistoryColumnFilterBtn" class="shipping-column-filter-btn" title="Column filter" aria-label="Column filter">
+                    <button type="button" id="shippingHistoryColumnFilterBtn" class="shipping-column-filter-btn" title="Select columns to display" aria-label="Select columns to display">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
                         </svg>
                     </button>
-                    <button type="button" id="exportShippingHistoryExcelBtn" class="shipping-export-btn" title="Export shipping history to Excel">
+                    <button type="button" id="exportShippingHistoryExcelBtn" class="shipping-export-btn" title="Export all shipping history to Excel" aria-label="Export all shipping history to Excel">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/>
                             <path d="M14 2v6h6M8 13h8M8 17h8M8 9h2" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
@@ -1727,14 +1888,22 @@ fun showShippingHistoryPage() {
     ensureSidebarPresent()
 
     val searchInput = document.getElementById("shippingHistorySearchInput") as? HTMLInputElement
+    fun syncShippingHistorySearchClearVisibility() {
+        val clearBtn = document.getElementById("shippingHistorySearchClearBtn") as? HTMLElement ?: return
+        val hasQuery = (searchInput?.value?.trim().orEmpty()).isNotEmpty()
+        if (hasQuery) clearBtn.classList.remove("is-hidden") else clearBtn.classList.add("is-hidden")
+    }
     searchInput?.addEventListener("input", { _: Event ->
+        syncShippingHistorySearchClearVisibility()
         scheduleShippingHistorySearchDebounced()
     })
     document.getElementById("shippingHistorySearchClearBtn")?.addEventListener("click", { _: Event ->
         searchInput?.value = ""
+        syncShippingHistorySearchClearVisibility()
         shippingHistoryPageZeroBased = 0
         loadShippingHistory(0)
     })
+    syncShippingHistorySearchClearVisibility()
     document.getElementById("exportShippingHistoryExcelBtn")?.addEventListener("click", { _: Event ->
         exportShippingHistoryToExcel()
     })
@@ -1745,6 +1914,21 @@ fun showShippingHistoryPage() {
     setupShippingHistoryResizeListener()
 
     val wrap = document.getElementById("shippingHistoryTableWrap")
+    if (wrap != null && !wrap.hasAttribute("data-shipping-empty-cta-delegation")) {
+        wrap.setAttribute("data-shipping-empty-cta-delegation", "true")
+        wrap.addEventListener("click", { e: Event ->
+            val target = e.target as? Element ?: return@addEventListener
+            val btn = target.closest("#shippingHistoryClearSearchCta") ?: return@addEventListener
+            e.preventDefault()
+            val input = document.getElementById("shippingHistorySearchInput") as? HTMLInputElement
+            input?.value = ""
+            val clearBtn = document.getElementById("shippingHistorySearchClearBtn") as? HTMLElement
+            clearBtn?.classList?.add("is-hidden")
+            shippingHistoryPageZeroBased = 0
+            loadShippingHistory(0)
+            input?.focus()
+        })
+    }
     if (wrap != null && !wrap.hasAttribute("data-shipping-sort-delegation")) {
         wrap.setAttribute("data-shipping-sort-delegation", "true")
         wrap.addEventListener("click", { e: Event ->
@@ -1796,6 +1980,24 @@ fun showShippingHistoryPage() {
             autoCreateInvoicesFromShippingHistory(gRows)
         })
     }
+    if (wrap != null && !wrap.hasAttribute("data-shipping-history-shipment-details-delegation")) {
+        wrap.setAttribute("data-shipping-history-shipment-details-delegation", "true")
+        wrap.addEventListener("click", { e: Event ->
+            val target = e.target as? Element ?: return@addEventListener
+            val btn = target.closest("button[data-shipping-history-shipment-details]") ?: return@addEventListener
+            e.preventDefault()
+            e.stopPropagation()
+            val idsCsv = btn.getAttribute("data-shipping-group-ids")?.trim() ?: return@addEventListener
+            val idSet = idsCsv.split(",").mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toSet()
+            if (idSet.isEmpty()) return@addEventListener
+            val gRows = shippingHistoryCachedRows.filter { r ->
+                val id = shippingHistoryCell(r, "id").trim()
+                id.isNotEmpty() && id in idSet
+            }.toList()
+            if (gRows.isEmpty()) return@addEventListener
+            storeAndNavigateClientShipmentDetails(gRows)
+        })
+    }
     if (wrap != null && !wrap.hasAttribute("data-shipping-history-pdf-delegation")) {
         wrap.setAttribute("data-shipping-history-pdf-delegation", "true")
         wrap.addEventListener("click", { e: Event ->
@@ -1821,9 +2023,8 @@ fun showShippingHistoryPage() {
 private fun shippingHistoryEditButtonHtml(sortedIdsCsv: String): String {
     if (sortedIdsCsv.isEmpty()) return ""
     val safe = escapeHtml(sortedIdsCsv)
-    return """<button type="button" data-shipping-history-edit data-shipping-group-ids="$safe" aria-label="Edit" title="Edit to Create Shipping Schedule"
-        style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 4px rgba(76,201,255,0.30);padding:0;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    return """<button type="button" class="shipping-history-edit-btn" data-shipping-history-edit data-shipping-group-ids="$safe" aria-label="Edit shipping schedule" title="Edit to Create Shipping Schedule">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
             <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
         </svg>
@@ -1906,6 +2107,40 @@ private fun shippingHistoryInvoiceButtonHtml(sortedIdsCsv: String): String {
     val safe = escapeHtml(sortedIdsCsv)
     return """<button type="button" class="shipping-history-invoice-btn" data-shipping-history-invoice data-shipping-group-ids="$safe"
         aria-label="Create Invoice" title="Create Invoice"><span class="shipping-history-invoice-btn__text">INVOICE</span></button>"""
+}
+
+/** Opens Client-Based Shipment Details (client+vessel) — sits next to INVOICE. */
+private fun shippingHistoryShipmentDetailsButtonHtml(sortedIdsCsv: String): String {
+    if (sortedIdsCsv.isEmpty()) return ""
+    val safe = escapeHtml(sortedIdsCsv)
+    return """<button type="button" class="shipping-history-shipment-details-btn" data-shipping-history-shipment-details data-shipping-group-ids="$safe"
+        aria-label="Client-Based Shipment Details" title="Client-Based Shipment Details">
+        <span class="shipping-history-shipment-details-btn__icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 6.5h11.5a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7.5a1 1 0 0 1 1-1z" stroke="white" stroke-width="1.7"/>
+                <path d="M7 10h6M7 13h6M7 16h4" stroke="white" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M15.5 8.5H19a1 1 0 0 1 .9 1.45l-1.7 3.4a1 1 0 0 1-.9.55H15.5" stroke="white" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </span>
+    </button>"""
+}
+
+private fun storeAndNavigateClientShipmentDetails(gRows: List<dynamic>) {
+    val clientName = shippingHistoryFirstNonEmpty(gRows, "clientName").trim()
+    val vessel = shippingHistoryFirstNonEmpty(gRows, "vessel").trim()
+    if (clientName.isEmpty()) {
+        showMessage("Client name is required to open Shipment Details.", "warning")
+        return
+    }
+    if (vessel.isEmpty()) {
+        showMessage("Vessel is required to open Shipment Details.", "warning")
+        return
+    }
+    val payload = js("{}")
+    payload.clientName = clientName
+    payload.vessel = vessel
+    window.sessionStorage.setItem(CLIENT_SHIPMENT_DETAILS_PREFILL_SESSION_KEY, JSON.stringify(payload))
+    navigateToApp("/client-shipment-details")
 }
 
 private fun parseShippingHistoryYenAmount(raw: String): Double? {
@@ -2267,6 +2502,7 @@ private fun appendShippingHistoryGroupTableRow(html: StringBuilder, gRows: List<
     html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryEditButtonHtml(groupIds)}</td>""")
     html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryPdfButtonHtml(groupIds)}</td>""")
     html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceButtonHtml(groupIds)}</td>""")
+    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryShipmentDetailsButtonHtml(groupIds)}</td>""")
     html.append(
         """<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceStatusCircleHtml(gRows)}</td>"""
     )
@@ -2290,14 +2526,15 @@ private fun appendShippingHistoryGroupCard(html: StringBuilder, gRows: List<dyna
                 ${shippingHistoryEditButtonHtml(groupIds)}
                 ${shippingHistoryPdfButtonHtml(groupIds)}
                 ${shippingHistoryInvoiceButtonHtml(groupIds)}
+                ${shippingHistoryShipmentDetailsButtonHtml(groupIds)}
+            </div>
+            <div class="shipping-card-status" title="Invoice created status">
+                ${shippingHistoryInvoiceStatusCircleHtml(gRows)}
             </div>
         </div>
         """
     )
     html.append("""<div class="shipping-card-grid">""")
-    html.append(
-        """<div class="shipping-kv"><div class="shipping-k">Invoice created</div><div class="shipping-v">${shippingHistoryInvoiceStatusCircleHtml(gRows)}</div></div>"""
-    )
     if (shippingHistoryShowsBookingIdColumn()) {
         val booking = shippingHistoryRepresentativeBookingDisplay(gRows)
         if (booking.isNotEmpty() && booking != "—") {
@@ -2390,7 +2627,7 @@ private fun loadShippingHistory(page0: Int = shippingHistoryPageZeroBased) {
             onError = { message, _ ->
                 ErrorHandler.showError("Failed to load shipping history: $message")
                 tableHost.innerHTML = """
-                    <div class="shipping-history-empty" style="color:#b91c1c;">
+                    <div class="shipping-history-empty shipping-history-empty--error">
                         <strong>Could not load</strong>
                         <div>Unable to load shipping history. Please reload and try again.</div>
                     </div>
@@ -2424,13 +2661,13 @@ private fun shippingHistoryAllSelectableColumnKeys(): List<String> = listOf(
 private fun shippingHistoryLockedColumnKeys(): Set<String> = setOf("bookingId", "country", "chassis")
 
 private fun shippingHistoryDefaultColumnKeys(): List<String> = listOf(
-    "bookingId", "country", "consignee", "shipmentDate", "vessel", "chassis", "clientName", "amount",
+    "bookingId", "country", "consignee", "shipmentDate", "chassis", "clientName",
 )
 
-private const val SHIPPING_HISTORY_MAX_DATA_COLUMNS = 8
+private const val SHIPPING_HISTORY_MAX_DATA_COLUMNS = 6
 private const val SHIPPING_HISTORY_COLUMNS_STORAGE_KEY = "selectedShippingHistoryColumns"
 
-/** Selected data columns (max 8). Booking ID / Country / Chassis are always included. */
+/** Selected data columns (max 6). Booking ID / Country / Chassis are always included. */
 private fun getSelectedShippingHistoryColumns(): List<String> {
     val defaults = shippingHistoryDefaultColumnKeys()
     val locked = shippingHistoryLockedColumnKeys()
@@ -2683,11 +2920,10 @@ private fun appendShippingHistoryPager(html: StringBuilder) {
     html.append(
         """
         <div id="shippingHistoryPager" class="shipping-history-pager">
-            <div class="shipping-history-pager-meta">Page $currentPage of $totalPages · $shippingHistoryTotalElements row(s)</div>
+            <div class="shipping-history-pager-meta">Showing page $currentPage of $totalPages · $shippingHistoryTotalElements group row(s)</div>
             <div class="shipping-history-pager-btns">
-                <button type="button" id="shippingHistoryPrevPage" class="shipping-history-pager-btn${if (prevDisabled) " is-disabled" else ""}" ${if (prevDisabled) "disabled" else ""}>Previous</button>
-                <span class="shipping-history-pager-page">Page $currentPage of $totalPages</span>
-                <button type="button" id="shippingHistoryNextPage" class="shipping-history-pager-btn${if (nextDisabled) " is-disabled" else ""}" ${if (nextDisabled) "disabled" else ""}>Next</button>
+                <button type="button" id="shippingHistoryPrevPage" class="shipping-history-pager-btn${if (prevDisabled) " is-disabled" else ""}" ${if (prevDisabled) "disabled" else ""} aria-label="Previous page">Previous</button>
+                <button type="button" id="shippingHistoryNextPage" class="shipping-history-pager-btn${if (nextDisabled) " is-disabled" else ""}" ${if (nextDisabled) "disabled" else ""} aria-label="Next page">Next</button>
             </div>
         </div>
         """
@@ -2715,7 +2951,13 @@ private fun renderShippingHistoryTableFromCache() {
 
     if (shippingHistoryCachedRows.isEmpty()) {
         val emptyHtml = if (q.isNotEmpty()) {
-            """<div class="shipping-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
+            """
+            <div class="shipping-history-empty">
+                <strong>No matches</strong>
+                <div>No rows match your search.</div>
+                <button type="button" id="shippingHistoryClearSearchCta" class="shipping-history-empty-cta">Clear search</button>
+            </div>
+            """.trimIndent()
         } else {
             """<div class="shipping-history-empty"><strong>No history yet</strong><div>No shipping history records yet.</div></div>"""
         }
@@ -2733,7 +2975,13 @@ private fun renderShippingHistoryTableFromCache() {
     }
 
     if (rowList.isEmpty()) {
-        tableHost.innerHTML = """<div class="shipping-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
+        tableHost.innerHTML = """
+            <div class="shipping-history-empty">
+                <strong>No matches</strong>
+                <div>No rows match your search.</div>
+                <button type="button" id="shippingHistoryClearSearchCta" class="shipping-history-empty-cta">Clear search</button>
+            </div>
+        """.trimIndent()
         return
     }
 
@@ -2752,22 +3000,32 @@ private fun renderShippingHistoryTableFromCache() {
 
     if (!compact) {
         val bookingCol = if (shippingHistoryShowsBookingIdColumn()) 1 else 0
-        val colCountShip = 4 + bookingCol + shippingHistoryDisplayColumnKeys().size
+        val colCountShip = 5 + bookingCol + shippingHistoryDisplayColumnKeys().size
+        // Wider action cols so Invoice / Ship Details / Invoice Created headers do not overlap
         html.append(
             """<div class="shipping-history-table-shell"><table class="purchase-list-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">""" +
-                htmlTableColgroupMultipleNarrowActionsEqualRest(colCountShip, 56, 56, 56, 64) +
+                htmlTableColgroupMultipleNarrowActionsEqualRest(colCountShip, 56, 56, 88, 112, 128) +
                 """<thead><tr style="background-color:#f8f9fa;">""",
         )
-        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;">Edit</th>""")
-        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;">PDF</th>""")
-        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;">Invoice</th>""")
+        html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">Edit</th>""")
+        html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">PDF</th>""")
+        html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">Invoice</th>""")
         html.append(
-            """<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;" title="Invoice created status">Invoice Created</th>"""
+            """<th style="padding:10px 6px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;font-size:13px;" title="Client-Based Shipment Details">Ship Details</th>""",
+        )
+        html.append(
+            """<th style="padding:10px 6px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;font-size:13px;" title="Invoice created status">Invoice Created</th>"""
         )
         fun appendSortableHeader(key: String) {
             val label = escapeHtml(shippingHistoryColumnLabel(key))
             val isActive = shippingHistorySortField == key
             val sortOrder = if (isActive) shippingHistorySortOrder else "desc"
+            val sortIcon = when {
+                !isActive -> "↕"
+                sortOrder == "asc" -> "↑"
+                else -> "↓"
+            }
+            val activeClass = if (isActive) " is-active" else ""
             val tooltipRaw = when {
                 !isActive -> "Sort by ${shippingHistoryColumnLabel(key)}"
                 sortOrder == "asc" -> "Sorted ascending (click for descending)"
@@ -2777,8 +3035,8 @@ private fun renderShippingHistoryTableFromCache() {
             html.append(
                 """
                 <th style="padding:12px;text-align:left;border-bottom:1px solid #dee2e6;">
-                    <button type="button" data-shipping-sort="$key" title="$tooltip" style="background:none;border:none;cursor:pointer;font-weight:700;color:#0f172a;padding:0;display:inline-flex;align-items:center;gap:6px;">
-                        <span>$label</span><span style="font-size:14px;color:#64748b;">↕</span>
+                    <button type="button" class="shipping-history-sort-btn$activeClass" data-shipping-sort="$key" title="$tooltip" aria-label="$tooltip">
+                        <span>$label</span><span class="shipping-history-sort-icon" aria-hidden="true">$sortIcon</span>
                     </button>
                 </th>
                 """

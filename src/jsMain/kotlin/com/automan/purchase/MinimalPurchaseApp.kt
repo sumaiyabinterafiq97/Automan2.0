@@ -3529,7 +3529,7 @@ fun setupEditableComboboxHandlers() {
             'editRixoCompany', 'editStockLocation', 'editClientName', 'editCountry', 'editPol',
             'editConsignee', 'editPod', 'editRepairCompany',
             // Add Quick Purchase modal
-            'qpChassis', 'qpChassisNumber', 'qpCarName', 'qpAuctionName', 'qpRixoCompany', 'qpStockLocation', 'qpClientName', 'qpCountry',
+            'qpChassis', 'qpCarName', 'qpAuctionName', 'qpRixoCompany', 'qpStockLocation', 'qpClientName', 'qpCountry',
             'qpGrade', 'qpRank', 'qpSeat', 'qpDoor', 'qpColor', 'qpFuel', 'qpCc', 'qpNumberCutPlace', 'qpNumberCutHiragana',
             // Chassis Map (Car Brand) Add/Edit/Duplicate modals — chip multi-select comboboxes
             'carBrandBrand', 'carBrandFuel', 'carBrandWd', 'carBrandShift', 'carBrandColor', 'carBrandDriveType',
@@ -6089,7 +6089,6 @@ fun createApp(root: Element) {
                             </div>
                             <div id="shipmentItems" style="display: none; flex-direction: column; gap: 8px; padding-left: 10px;">
                                 <button id="carBookingBtn" class="shipment-list-item" type="button" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Booking</button>
-                                <button id="clientShipmentDetailsBtn" class="shipment-list-item" type="button" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client-Based Shipment Details</button>
                                 <button id="shipmentStatusBtn" class="shipment-list-item" type="button" style="padding: 10px 15px; background-color: rgba(52, 152, 219, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping History</button>
                             </div>
                         </div>
@@ -7811,14 +7810,6 @@ fun setupSidebarListeners() {
             navigateToApp("/shipping-history")
         })
     }
-    val clientShipmentDetailsBtn = document.getElementById("clientShipmentDetailsBtn")
-    if (clientShipmentDetailsBtn != null && !clientShipmentDetailsBtn.hasAttribute("data-listener-attached")) {
-        clientShipmentDetailsBtn.setAttribute("data-listener-attached", "true")
-        clientShipmentDetailsBtn.addEventListener("click", { _: Event ->
-            closeSidebar()
-            navigateToApp("/client-shipment-details")
-        })
-    }
     
     // Invoice History (main nav, below Invoice)
     val invoiceHistorySidebarBtn = document.getElementById("invoiceHistorySidebarBtn")
@@ -8476,7 +8467,7 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label for="chassisNumberInput">Chassis Number</label>
-                        ${createEditableCombobox("chassisNumber", "Suffix (optional)", showDropdownButton = false)}
+                        ${createPlainTextInput("chassisNumber", "Suffix (optional)")}
                     </div>
                     <div>
                         <label for="brandInput">Brand</label>
@@ -12528,14 +12519,6 @@ private fun isoMonthFromRecycleFeeMapping(raw: String?): String {
     return normalizeCarModelYearForCompare(datePart)
 }
 
-/** First manufacture year from `chassisNumber:year` pairs stored in chassis map. */
-private fun firstManufactureYearFromChassisNumberPairs(chassisNumberRaw: String?): String {
-    val token = firstSemicolonToken(chassisNumberRaw?.trim() ?: "")
-    if (token.isBlank()) return ""
-    if (token.contains(":")) return firstSemicolonToken(token.substringAfter(":"))
-    return ""
-}
-
 private fun purchaseFieldBlank(purchaseForMerge: dynamic?, vararg keys: String): Boolean {
     if (purchaseForMerge == null || js("purchaseForMerge === void 0").unsafeCast<Boolean>()) return true
     val pd = purchaseForMerge.unsafeCast<dynamic>()
@@ -12590,8 +12573,8 @@ private fun applyChassisDerivedPricingFieldsIfEmpty(
     chassisPrefix: String,
     recycleFeeRaw: String,
     carModelYearRaw: String,
-    manufactureYearRaw: String,
-    chassisNumberRaw: String,
+    @Suppress("UNUSED_PARAMETER") manufactureYearRaw: String,
+    @Suppress("UNUSED_PARAMETER") chassisNumberRaw: String,
 ) {
     val carModelBase = if (isEditForm) "editCarModelYear" else "carModelYear"
     val recycleId = if (isEditForm) "editRecycleFee" else "recycleFee"
@@ -12603,10 +12586,10 @@ private fun applyChassisDerivedPricingFieldsIfEmpty(
         if (iso.isNotBlank()) writeCarModelYearInput(carModelBase, iso)
     }
 
-    if (purchaseFieldBlank(purchaseForMerge, "manufactureYear", "manufacture_year")) {
-        var year = firstSemicolonToken(manufactureYearRaw)
-        if (year.isBlank()) year = firstManufactureYearFromChassisNumberPairs(chassisNumberRaw)
-        if (year.isNotBlank()) writeManufactureYearInput(mfgBase, year)
+    // Manufacture Year: never use first map token — resolve from typed Chassis Number via range API.
+    val suffix = purchaseChassisNumberInputEl(isEditForm)?.value?.trim().orEmpty()
+    if (chassisPrefix.isNotBlank() && suffix.isNotBlank()) {
+        lookupManufactureYearForChassisSuffix(chassisPrefix, suffix, mfgBase)
     }
 
     if (purchaseFieldBlank(purchaseForMerge, "recycleFee")) {
@@ -12719,17 +12702,13 @@ internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
         }
         val carModelYearRaw = (cache.carModelYearRaw?.toString() ?: "").trim()
         val recycleFeeRaw = (cache.recycleFeeRaw?.toString() ?: "").trim()
-        val manufactureYearRaw = (cache.manufactureYearRaw?.toString() ?: "").trim()
-        val chassisNumberRaw = (cache.chassisNumberRaw?.toString() ?: "").trim()
         val carModelIso = isoMonthFromRecycleFeeMapping(recycleFeeRaw)
             .ifBlank { normalizeCarModelYearForCompare(carModelYearRaw) }
         val existingRegDate = (purchaseData.carModelYear?.toString() ?: "").trim()
         if (existingRegDate.isBlank() && carModelIso.isNotBlank()) {
             purchaseData.carModelYear = carModelIso
         }
-        var mfgYear = firstSemicolonToken(manufactureYearRaw)
-        if (mfgYear.isBlank()) mfgYear = firstManufactureYearFromChassisNumberPairs(chassisNumberRaw)
-        if (mfgYear.isNotBlank()) purchaseData.manufactureYear = mfgYear
+        // Manufacture Year is resolved in finalizeQuickPurchasePayload via range API + typed suffix.
         val feeDigits = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
         if (feeDigits.isNotBlank()) purchaseData.recycleFee = "¥$feeDigits"
         // Quick Purchase may still append mapping chassis number via qpChassisNumber UI; cache kept for brand/fuel/etc.
@@ -12740,28 +12719,58 @@ internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
 internal fun finalizeQuickPurchasePayload(purchaseData: dynamic): dynamic {
     enrichQuickPurchasePayload(purchaseData)
     val chassisFull = purchaseData.chassis?.toString()?.trim() ?: ""
-    val chassisPrefix = chassisFull.substringBefore("-").trim()
-    val carModelIso = purchaseData.carModelYear?.toString()?.trim() ?: ""
-    val recycleStr = purchaseData.recycleFee?.toString()?.trim() ?: ""
-    if (chassisPrefix.isBlank() || carModelIso.isBlank() || recycleStr.isNotBlank()) {
-        return js("Promise.resolve(purchaseData)")
-    }
-    val mmYyyy = isoMonthToMmYyyy(carModelIso)
-    if (mmYyyy.isBlank()) return js("Promise.resolve(purchaseData)")
-    val encodedChassis = js("encodeURIComponent")(chassisPrefix).unsafeCast<String>()
-    val encodedDate = js("encodeURIComponent")(mmYyyy).unsafeCast<String>()
-    val url = apiUrl("car-brand-mapping/chassis/$encodedChassis/recycle-fee?productionDate=$encodedDate")
-    return window.fetch(url)
-        .then { resp -> resp.json() }
-        .then { data: dynamic ->
-            val found = (data.found as? Boolean) ?: false
-            if (found) {
-                val fee = (data.fee ?: "").toString().trim()
-                if (fee.isNotBlank()) purchaseData.recycleFee = "¥$fee"
-            }
-            purchaseData
+    val (chassisPrefix, chassisSuffix) = splitPurchaseChassisForForm(chassisFull)
+
+    fun applyRecycleFeeIfNeeded(pd: dynamic): dynamic {
+        val prefix = (pd.chassis?.toString() ?: "").substringBefore("-").trim()
+        val carModelIso = pd.carModelYear?.toString()?.trim() ?: ""
+        val recycleStr = pd.recycleFee?.toString()?.trim() ?: ""
+        if (prefix.isBlank() || carModelIso.isBlank() || recycleStr.isNotBlank()) {
+            return js("Promise.resolve(pd)")
         }
-        .catch { _: dynamic -> purchaseData }
+        val mmYyyy = isoMonthToMmYyyy(carModelIso)
+        if (mmYyyy.isBlank()) return js("Promise.resolve(pd)")
+        val encodedChassis = js("encodeURIComponent")(prefix).unsafeCast<String>()
+        val encodedDate = js("encodeURIComponent")(mmYyyy).unsafeCast<String>()
+        val url = apiUrl("car-brand-mapping/chassis/$encodedChassis/recycle-fee?productionDate=$encodedDate")
+        return window.fetch(url)
+            .then { resp -> resp.json() }
+            .then { data: dynamic ->
+                val found = (data.found as? Boolean) ?: false
+                if (found) {
+                    val fee = (data.fee ?: "").toString().trim()
+                    if (fee.isNotBlank()) pd.recycleFee = "¥$fee"
+                }
+                pd
+            }
+            .catch { _: dynamic -> pd }
+    }
+
+    fun applyManufactureYearFromSuffix(pd: dynamic): dynamic {
+        val (prefix, suffix) = splitPurchaseChassisForForm(pd.chassis?.toString()?.trim() ?: "")
+        if (prefix.isBlank() || suffix.isBlank()) return js("Promise.resolve(pd)")
+        val encodedChassis = js("encodeURIComponent")(prefix).unsafeCast<String>()
+        val encodedNumber = js("encodeURIComponent")(suffix).unsafeCast<String>()
+        val url = apiUrl("car-brand-mapping/chassis/$encodedChassis/manufacture-year?chassisNumber=$encodedNumber")
+        return window.fetch(url)
+            .then { resp -> resp.json() }
+            .then { data: dynamic ->
+                val found = (data.found as? Boolean) ?: false
+                if (found) {
+                    val year = (data.manufactureYear ?: "").toString().trim()
+                    if (year.isNotBlank()) pd.manufactureYear = year
+                }
+                pd
+            }
+            .catch { _: dynamic -> pd }
+    }
+
+    // Prefer range match from typed suffix; then recycle fee if still blank.
+    return if (chassisPrefix.isNotBlank() && chassisSuffix.isNotBlank()) {
+        applyManufactureYearFromSuffix(purchaseData).then { pd: dynamic -> applyRecycleFeeIfNeeded(pd) }
+    } else {
+        applyRecycleFeeIfNeeded(purchaseData)
+    }
 }
 
 /** First token for edit-form HTML defaults (`Any?` from purchase row / DB multi-value cells). */
@@ -16093,6 +16102,19 @@ fun fetchMappingByChassisOnly(
                             numberTokens = chassisNumberTokens,
                             preserveExisting = true,
                         )
+                        // Correct Manufacture Year from Chassis Number ranges (overrides wrong first-map year from QP/save)
+                        val editPrefix = readPurchaseChassisCode(true)
+                        val editSuffix = readPurchaseChassisNumber(true)
+                        if (editPrefix.isNotBlank() && editSuffix.isNotBlank()) {
+                            lookupManufactureYearForChassisSuffix(editPrefix, editSuffix, "editManufactureYear")
+                            // Re-apply after snapshot reapply timeouts so a wrong saved year cannot stick
+                            window.setTimeout({
+                                lookupManufactureYearForChassisSuffix(editPrefix, editSuffix, "editManufactureYear")
+                            }, 450)
+                            window.setTimeout({
+                                lookupManufactureYearForChassisSuffix(editPrefix, editSuffix, "editManufactureYear")
+                            }, 950)
+                        }
                         js("setTimeout(function() { window.__editPurchaseHydrating = false; }, 1200);")
                     }
 
@@ -17114,10 +17136,11 @@ fun parseChassisNumberTokensFromDynamicList(raw: dynamic): List<String> {
 }
 
 /**
- * Apply chassis-map number options to Add/Edit Chassis Number field.
- * 0 → empty, hide dropdown; 1 → autofill, hide dropdown; 2+ → autofill first (unless preserved), show dropdown.
+ * Chassis Number is a plain text suffix field (no dropdown/options).
+ * Preserve existing typed/saved value when requested; otherwise clear when mapping has no tokens.
+ * Never autofill map tokens (ranges like 3323~3329 must not be dumped into the suffix).
  */
-/** Clear Chassis Number text + options and hide the conditional ▼ (when chassis code cleared / no mapping). */
+/** Clear Chassis Number text (when chassis code cleared / no mapping). */
 fun clearPurchaseChassisNumberFromMapping(isEditForm: Boolean) {
     applyPurchaseChassisNumberFromMapping(
         isEditForm = isEditForm,
@@ -17133,63 +17156,18 @@ fun applyPurchaseChassisNumberFromMapping(
     fieldIdOverride: String? = null,
 ) {
     val fieldId = fieldIdOverride ?: purchaseChassisNumberFieldId(isEditForm)
-    val select = document.getElementById(fieldId) as? HTMLSelectElement
     val input = (document.getElementById("${fieldId}Input") as? HTMLInputElement)
         ?: (document.getElementById(fieldId) as? HTMLInputElement)
-    if (select == null && input == null) return
+        ?: return
 
     val tokens = numberTokens.map { it.trim() }.filter { it.isNotEmpty() }
         .distinctBy { it.lowercase() }
-    val existing = input?.value?.trim().orEmpty()
-    val prefer = if (preserveExisting && existing.isNotEmpty()) existing else ""
-
-    if (select != null) {
-        select.innerHTML = ""
-        val def = document.createElement("option") as HTMLOptionElement
-        def.value = ""
-        def.textContent = "▼"
-        select.appendChild(def)
-        for (t in tokens) {
-            val opt = document.createElement("option") as HTMLOptionElement
-            opt.value = t
-            opt.textContent = t
-            select.appendChild(opt)
-        }
-        if (prefer.isNotEmpty() && tokens.none { it.equals(prefer, ignoreCase = true) }) {
-            val opt = document.createElement("option") as HTMLOptionElement
-            opt.value = prefer
-            opt.textContent = prefer
-            select.appendChild(opt)
-        }
-        // Always refresh ▼ visibility from token count (preserve only affects the selected value)
-        updateConditionalComboboxButtonVisibility(fieldId, tokens, prefer)
-        if (prefer.isNotEmpty()) {
-            val match = tokens.firstOrNull { it.equals(prefer, ignoreCase = true) } ?: prefer
-            select.value = match
-            input?.value = match
-        } else if (tokens.isEmpty()) {
-            select.value = ""
-            input?.value = ""
-        } else if (tokens.size == 1) {
-            input?.value = tokens.first()
-            select.value = tokens.first()
-        } else {
-            input?.value = tokens.first()
-            select.value = tokens.first()
-        }
-        console.log(
-            "Chassis Number options: ${tokens.size} → button=${if (tokens.size >= 2) "show" else "hide"}" +
-                " (field=$fieldId, prefer='$prefer')",
-        )
-    } else if (input != null) {
-        if (prefer.isNotEmpty()) {
-            // keep
-        } else if (tokens.isEmpty()) {
-            input.value = ""
-        } else {
-            input.value = tokens.first()
-        }
+    val existing = input.value.trim()
+    if (preserveExisting && existing.isNotEmpty()) return
+    if (tokens.isEmpty()) {
+        input.value = ""
     }
+    // Non-empty tokens: leave field empty for the user to type an alphanumeric suffix.
 }
 
 fun splitPurchaseChassisForForm(full: String): Pair<String, String> {
@@ -17266,12 +17244,7 @@ fun bindPurchaseChassisNumberInput(fieldId: String) {
         if (isQuickPurchase) return
         val suffix = input.value.trim()
         if (suffix.isBlank()) return
-        if (readManufactureYearInput(manufactureYearBaseId).isNotBlank()) return
-        val prefix = if (isQuickPurchase) {
-            getComboboxValueSafe("qpChassis").substringBefore("-").trim()
-        } else {
-            readPurchaseChassisCode(isEditForm)
-        }
+        val prefix = readPurchaseChassisCode(isEditForm)
         if (prefix.isNotBlank()) lookupManufactureYearForChassisSuffix(prefix, suffix, manufactureYearBaseId)
     }
     input.addEventListener("input", { _: Event -> sanitize() })
@@ -18024,7 +17997,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label for="editChassisNumberInput">Chassis Number</label>
-                        ${createEditableCombobox("editChassisNumber", "Suffix (optional)", initialValue = editChassisNumberDisp, showDropdownButton = false)}
+                        ${createPlainTextInput("editChassisNumber", "Suffix (optional)", initialValue = editChassisNumberDisp)}
                     </div>
                     <div>
                         <label for="editBrandInput">Brand</label>
@@ -18997,6 +18970,12 @@ fun setupEditFormListeners() {
     loadAllChassisDropdown(isEditForm = true)
     bindPurchaseChassisCodeInputNoDash("editChassisCodeInput")
     bindPurchaseChassisNumberInput("editChassisNumber")
+    // Resolve Manufacture Year from Chassis Number ranges when Edit opens with CODE-SUFFIX already filled
+    val initialPrefix = readPurchaseChassisCode(true)
+    val initialSuffix = readPurchaseChassisNumber(true)
+    if (initialPrefix.isNotBlank() && initialSuffix.isNotBlank()) {
+        lookupManufactureYearForChassisSuffix(initialPrefix, initialSuffix, "editManufactureYear")
+    }
     
     // Setup auto-refresh for chassis dropdown when tab regains focus
     setupChassisAutoRefresh(isEditForm = true)

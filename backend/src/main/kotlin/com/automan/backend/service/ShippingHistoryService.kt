@@ -269,8 +269,62 @@ class ShippingHistoryService(
     }
 
     /**
-     * Builds PDF data for Client-Based Shipment Details.
-     * Uses [invoiceSlice] so only not-yet-invoiced chassis are included.
+     * Client-Based Shipment Details lines for client + vessel.
+     * Includes **all** chassis (invoiced and not-yet-invoiced). Does not change [invoiceSlice].
+     */
+    fun shipmentDetailsSlice(clientName: String, vessel: String): ShippingHistoryInvoiceSliceDto {
+        val cn = clientName.trim()
+        val v = vessel.trim()
+        val rows = shippingHistoryRepository.findInvoiceRowsOrderByIdAsc(cn, v)
+        if (rows.isEmpty()) {
+            return ShippingHistoryInvoiceSliceDto(
+                header = ShippingHistoryInvoiceHeaderDto(),
+                lines = emptyList(),
+            )
+        }
+        val included = rows.map { row ->
+            row to purchaseService.getPurchaseByChassis(row.chassis)
+        }
+        val first = included.first().first
+        val header = ShippingHistoryInvoiceHeaderDto(
+            shipmentDate = first.shipmentDate?.toString(),
+            cyCutDate = first.cyCutDate?.toString(),
+            eta = first.eta?.toString(),
+            pol = first.pol,
+            pod = first.pod,
+            finalDestination = first.finalDestination,
+            priceType = first.priceType,
+            consignee = first.consignee,
+            notifyParty = first.notifyParty,
+            bookingId = first.bookingId,
+            vessel = first.vessel,
+            carrier = first.carrier,
+        )
+        val lines = included.map { (row, p) ->
+            ShippingHistoryInvoiceLineDto(
+                shippingHistoryId = row.id ?: 0L,
+                chassis = row.chassis,
+                amount = row.amount.setScale(2, RoundingMode.HALF_UP).toPlainString(),
+                carName = p?.carName,
+                carModelYear = p?.carModelYear,
+                purchaseId = p?.id,
+                brand = p?.brand,
+            )
+        }
+        return ShippingHistoryInvoiceSliceDto(header, lines)
+    }
+
+    fun distinctClientNamesForShipmentDetails(): List<String> =
+        shippingHistoryRepository.findDistinctClientNamesForInvoice()
+
+    fun distinctVesselsForShipmentDetailsClient(clientName: String): List<String> {
+        val key = clientName.trim()
+        if (key.isEmpty()) return emptyList()
+        return shippingHistoryRepository.findDistinctVesselsForInvoiceClient(key)
+    }
+
+    /**
+     * Builds PDF data for Client-Based Shipment Details (all chassis for client+vessel).
      */
     @Transactional(readOnly = true)
     fun buildClientBasedShipmentDetailsPdfData(clientName: String, vessel: String): ClientBasedShipmentDetailsPdfData {
@@ -279,9 +333,9 @@ class ShippingHistoryService(
         require(cn.isNotEmpty()) { "clientName is required" }
         require(v.isNotEmpty()) { "vessel is required" }
 
-        val slice = invoiceSlice(cn, v)
+        val slice = shipmentDetailsSlice(cn, v)
         require(slice.lines.isNotEmpty()) {
-            "No open (not-yet-invoiced) chassis for this client and vessel"
+            "No shipping history chassis for this client and vessel"
         }
 
         val clientMap = clientMapRepository.findByClientNameIgnoreCase(cn)

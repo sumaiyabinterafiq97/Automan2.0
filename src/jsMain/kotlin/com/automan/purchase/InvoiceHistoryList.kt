@@ -100,7 +100,7 @@ fun showInvoiceHistoryPage() {
                     <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);pointer-events:none;color:#9ca3af;display:flex;" aria-hidden="true">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                     </span>
-                    <input type="text" id="invoiceHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search invoice number, vessel, client, POL, POD, LC, price type, chassis, amount, bank…" aria-label="Search invoice history" />
+                    <input type="text" id="invoiceHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search invoice number, vessel, client, POL, POD, LC, price type, chassis, amount…" aria-label="Search invoice history" />
                     <button type="button" id="invoiceHistorySearchClearBtn" class="invoice-search-clear" title="Clear search" aria-label="Clear search">×</button>
                 </div>
             </div>
@@ -284,13 +284,6 @@ private fun invoiceHistoryDisplayCellHtml(row: dynamic, key: String): String {
             val tokens = raw.split(';').map { it.trim() }.filter { it.isNotEmpty() }
             formatHistoryListCollapsibleChipsHtml(tokens)
         }
-        "bank" -> {
-            val tokens = raw.split(';').map { it.trim() }.filter { it.isNotEmpty() }
-            if (tokens.isEmpty()) return ""
-            if (tokens.size == 1) return formatHistoryListRectChipHtml(tokens[0])
-            val inner = tokens.joinToString("") { formatHistoryListRectChipHtml(it) }
-            """<span style="display:inline-flex;flex-direction:column;gap:4px;align-items:flex-start;">$inner</span>"""
-        }
         else -> formatHistoryListRectChipHtml(raw)
     }
 }
@@ -414,8 +407,9 @@ private fun loadInvoiceHistory(page0: Int = invoiceHistoryPageZeroBased) {
     }
 }
 
+/** Columns shown in the history table/cards. Bank/messages stay in API + edit payload, not displayed. */
 private fun invoiceHistoryDisplayColumnKeys(): List<String> = listOf(
-    "invoiceNumber", "vessel", "clientName", "shippingDate", "pol", "pod", "lcNo", "priceType", "bank", "messages", "chassis", "totalAmount",
+    "invoiceNumber", "vessel", "clientName", "shippingDate", "pol", "pod", "lcNo", "priceType", "chassis", "totalAmount",
 )
 
 private fun invoiceHistorySearchColumnKeys(): List<String> = invoiceHistoryDisplayColumnKeys()
@@ -596,8 +590,6 @@ private fun renderInvoiceHistoryTableFromCache() {
             104, // POD
             72, // LC
             96, // Price type
-            220, // Bank
-            128, // Messages
             152, // Chassis
             116, // Amount
         )
