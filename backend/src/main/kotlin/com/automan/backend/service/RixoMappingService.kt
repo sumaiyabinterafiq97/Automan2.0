@@ -110,7 +110,7 @@ class RixoMappingService(
     fun listDistinctRixoCompanies(): List<String> =
         rixoMappingRepository.findDistinctRixoCompaniesOrdered()
             .map { it.trim() }
-            .filter { it.isNotEmpty() }
+            .filter { it.isNotEmpty() && it != "-" && !it.equals("(no company)", ignoreCase = true) }
             .distinctBy { it.lowercase() }
             .sortedBy { it.lowercase() }
 

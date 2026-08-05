@@ -26,6 +26,7 @@ interface RixoMappingRepository : JpaRepository<RixoMapping, Long> {
         FROM RixoMapping r
         WHERE r.rixoCompany IS NOT NULL
           AND TRIM(r.rixoCompany) <> ''
+          AND TRIM(r.rixoCompany) <> '-'
         ORDER BY r.rixoCompany ASC
         """
     )

@@ -82,7 +82,7 @@ private var rpmSearchDebounceTimer: dynamic = null
 
 private fun rpmSortedCompanies(list: List<RixoPriceMapTreeRowLite>): List<String> {
     if (rpmRootCompanies.isNotEmpty()) {
-        val names = rpmRootCompanies.map { rpmNormCompany(it) }.distinctBy { it.lowercase() }
+        val names = rpmFilterRealCompanies(rpmRootCompanies.map { rpmNormCompany(it) })
         val q = rpmSearchQuery.trim().lowercase()
         val filtered = if (q.isEmpty()) names else names.filter { it.lowercase().contains(q) }
         return when (rpmCompanySortOrder) {
@@ -93,6 +93,7 @@ private fun rpmSortedCompanies(list: List<RixoPriceMapTreeRowLite>): List<String
         }
     }
     val grouped = list.groupBy { rpmNormCompany(it.company) }
+        .filterKeys { !rpmIsBlankCompany(it) }
         .map { (name, rows) -> name to rows.maxOf { it.id.toLongOrNull() ?: 0L } }
     val q = rpmSearchQuery.trim().lowercase()
     val filtered = if (q.isEmpty()) grouped else grouped.filter { (name, _) -> name.lowercase().contains(q) }
@@ -149,6 +150,10 @@ private fun rpmIsBlankCompany(s: String): Boolean {
     val t = s.trim()
     return t.isEmpty() || t == "-" || t.equals("(no company)", ignoreCase = true)
 }
+
+/** Distinct company labels for roots/combobox — hide Supplier Map placeholders. */
+private fun rpmFilterRealCompanies(names: List<String>): List<String> =
+    names.map { it.trim() }.filter { !rpmIsBlankCompany(it) }.distinctBy { it.lowercase() }
 
 private fun rpmIsBlankSupplier(s: String?): Boolean {
     val t = s?.trim().orEmpty()
@@ -403,13 +408,17 @@ private fun rpmTreeAddButtonHtml(
 private fun buildRpmCardInlineAddHtml(level: String): String {
     val comboboxId = rpmCardInlineAddId(level)
     val placeholder = when (level) {
-        "rixo_company" -> "Select Rixo Company"
+        "rixo_company" -> "Enter Rixo Company"
         "supplier" -> "Select Supplier Name"
         "stock" -> "Select Stock Location"
         "pol" -> "Select POL"
         else -> ""
     }
-    val fieldPrimary = """<div class="rixo-tree-inline-add-field-primary rixo-tree-card-combobox-wrap">${createEditableCombobox(comboboxId, placeholder, required = true)}</div>"""
+    val fieldPrimary = if (level == "rixo_company") {
+        """<div class="rixo-tree-inline-add-field-primary rixo-tree-inline-add-plain">${createPlainTextInput(comboboxId, placeholder, required = true)}</div>"""
+    } else {
+        """<div class="rixo-tree-inline-add-field-primary rixo-tree-card-combobox-wrap">${createEditableCombobox(comboboxId, placeholder, required = true)}</div>"""
+    }
     return """
         <div class="rixo-tree-inline-add-outer rixo-tree-card--inline-editing" data-level="$level" data-rpm-inline-add="1">
             <div class="rixo-tree-inline-add-box">
@@ -460,7 +469,7 @@ private fun buildRpmFullRowAddHtml(): String = """
     <div class="rpm-tree-full-row-add" data-rpm-full-row-add="1">
         <div class="rpm-tree-full-row-add-grid">
             <div class="rpm-tree-full-row-col rpm-tree-full-row-col--company">
-                ${createEditableCombobox("rpmFullRowCompany", "Select Rixo Company", required = true)}
+                ${createPlainTextInput("rpmFullRowCompany", "Enter Rixo Company", required = true)}
             </div>
             <div class="rpm-tree-full-row-col rpm-tree-full-row-col--supplier">
                 ${createEditableCombobox("rpmFullRowSupplier", "Select Supplier Name", required = true)}
@@ -523,13 +532,17 @@ private fun rpmBuildCardHtml(
     if (useCardInline) {
         val comboboxId = rpmCardInlineEditId(level)
         val placeholder = when (level) {
-            "rixo_company" -> "Select Rixo Company"
+            "rixo_company" -> "Enter Rixo Company"
             "supplier" -> "Select Supplier Name"
             "stock" -> "Select Stock Location"
             "pol" -> "Select POL"
             else -> "Select value"
         }
-        val comboboxHtml = createEditableCombobox(comboboxId, placeholder, required = true)
+        val comboboxHtml = if (level == "rixo_company") {
+            createPlainTextInput(comboboxId, placeholder, required = true, initialValue = rpmCardInlineEditCurrentLabel)
+        } else {
+            createEditableCombobox(comboboxId, placeholder, required = true)
+        }
         return """
             <div class="rixo-tree-card-wrapper $wrapperClass" data-card-level="$level"
                  data-path-company="${escapeHtml(pathCompany)}"
@@ -807,7 +820,7 @@ private fun rpmEnsureMasterOptions(callback: (Boolean) -> Unit) {
             js("Promise.all")(parsePromises)
         }
         .then { results: dynamic ->
-            rpmMasterCompanies = parseMasterListArray(results[0]).distinct().sortedBy { it.lowercase() }
+            rpmMasterCompanies = rpmFilterRealCompanies(parseMasterListArray(results[0])).sortedBy { it.lowercase() }
             rpmMasterSuppliers = parseMasterListArray(results[1]).distinct().sortedBy { it.lowercase() }
             rpmMasterStocks = parseMasterListArray(results[2]).distinct().sortedBy { it.lowercase() }
             rpmMasterPols = parseMasterListArray(results[3]).distinct().sortedBy { it.lowercase() }
@@ -1032,7 +1045,7 @@ private fun postRpmMappingBulkOneRow(
 
 private fun wireRpmInlineAddComboboxes() {
     when (rpmCardInlineAddLevel) {
-        "rixo_company" -> rpmPopulateCombobox("rpmCardInlineAddCompany", rpmMasterCompanies, "")
+        "rixo_company" -> Unit // plain text — no dropdown options
         "supplier" -> rpmPopulateCombobox("rpmCardInlineAddSupplier", rpmMasterSuppliers, "")
         "stock" -> rpmPopulateCombobox("rpmCardInlineAddStock", rpmMasterStocks, "")
         "pol" -> rpmPopulateCombobox("rpmCardInlineAddPol", rpmMasterPols, "")
@@ -1048,7 +1061,7 @@ private fun wireRpmCardInlineCombobox() {
     val level = rpmCardInlineEditLevel ?: return
     val id = rpmCardInlineEditId(level)
     when (level) {
-        "rixo_company" -> rpmPopulateCombobox(id, rpmMasterCompanies, rpmCardInlineEditCurrentLabel)
+        "rixo_company" -> Unit // plain text — value set via createPlainTextInput initialValue
         "supplier" -> rpmPopulateCombobox(id, rpmMasterSuppliers, rpmCardInlineEditCurrentLabel)
         "stock" -> rpmPopulateCombobox(id, rpmMasterStocks, rpmCardInlineEditCurrentLabel)
         "pol" -> rpmPopulateCombobox(id, rpmMasterPols, rpmCardInlineEditCurrentLabel)
@@ -1057,7 +1070,7 @@ private fun wireRpmCardInlineCombobox() {
 }
 
 private fun wireRpmFullRowAddComboboxes() {
-    rpmPopulateCombobox("rpmFullRowCompany", rpmMasterCompanies, "")
+    // Rixo Company is plain text (no dropdown).
     rpmPopulateCombobox("rpmFullRowSupplier", rpmMasterSuppliers, "")
     rpmPopulateCombobox("rpmFullRowStock", rpmMasterStocks, "")
     rpmPopulateCombobox("rpmFullRowPol", rpmMasterPols, "")
@@ -1089,8 +1102,11 @@ private fun executeRpmFullRowAddSave() {
     val pol = getEditableComboboxValue("rpmFullRowPol").trim()
     val vtype = getEditableComboboxValue("rpmFullRowVehicleType").trim()
     val price = (document.getElementById("rpmFullRowPrice") as? HTMLInputElement)?.value?.trim().orEmpty()
-    if (company.isEmpty() || !rpmListContains(rpmMasterCompanies, company)) {
-        showMessage("Please select a Rixo company from the list", "error"); return
+    if (company.isEmpty()) {
+        showMessage("Rixo company is required", "error"); return
+    }
+    if (rpmIsBlankCompany(company)) {
+        showMessage("Rixo company cannot be blank or '-'", "error"); return
     }
     if (supplier.isEmpty()) {
         showMessage("Supplier name is required", "error"); return
@@ -1110,6 +1126,7 @@ private fun executeRpmFullRowAddSave() {
         rpmSelectedSupplier = rpmNormSupplier(supplier)
         rpmSelectedStock = rpmNormStock(stock)
         rpmSelectedPol = pol.takeIf { it.isNotEmpty() }?.let { rpmNormPol(it) }
+        rpmMasterOptionsReady = false
         refreshRixoPriceMapTreeData()
     }
 }
@@ -1249,12 +1266,17 @@ private fun executeRpmCardInlineAddSave() {
     when (rpmCardInlineAddLevel) {
         "rixo_company" -> {
             val company = getEditableComboboxValue("rpmCardInlineAddCompany").trim()
-            if (company.isEmpty() || !rpmListContains(rpmMasterCompanies, company)) {
-                showMessage("Please select a Rixo company from the list", "error"); return
+            if (company.isEmpty()) {
+                showMessage("Rixo company is required", "error"); return
             }
+            if (rpmIsBlankCompany(company)) {
+                showMessage("Rixo company cannot be blank or '-'", "error"); return
+            }
+            if (rpmRejectIfSemicolon(company)) return
             postRpmMappingBulkOneRow("RPM_COMPANY", company, "", "", "", "", "") {
                 clearRpmCardInlineAdd()
                 rpmSelectedCompany = rpmNormCompany(company)
+                rpmMasterOptionsReady = false
                 refreshRixoPriceMapTreeData()
             }
         }
@@ -1337,12 +1359,14 @@ private fun executeRpmCardInlineSave(root: HTMLElement) {
         return
     }
     val listOk = when (level) {
-        "pol", "supplier" -> true
-        "rixo_company" -> rpmListContains(rpmMasterCompanies, newVal)
+        "pol", "supplier", "rixo_company" -> true
         "stock" -> rpmListContains(rpmMasterStocks, newVal)
         else -> false
     }
     if (!listOk) { showMessage("Please select a value from the list", "error"); return }
+    if (level == "rixo_company" && rpmIsBlankCompany(newVal)) {
+        showMessage("Rixo company cannot be blank or '-'", "error"); return
+    }
     val branchKey = when (level) {
         "rixo_company" -> currentLabel
         "supplier" -> pathSupplier
@@ -1849,7 +1873,7 @@ fun loadRixoPriceMapTree() {
             if (response.ok) response.json() else throw js("Error('Failed to load Rixo companies')")
         }
         .then { raw: dynamic ->
-            rpmRootCompanies = parseMasterListArray(raw).distinct()
+            rpmRootCompanies = rpmFilterRealCompanies(parseMasterListArray(raw))
             rpmTreeRowsCache = emptyList()
             rpmLoadedCompanyKeys.clear()
             rpmSelectedCompany = null
@@ -1875,7 +1899,8 @@ fun refreshRixoPriceMapTreeData() {
             if (response.ok) response.json() else throw js("Error('Failed to load Rixo companies')")
         }
         .then { raw: dynamic ->
-            rpmRootCompanies = parseMasterListArray(raw).distinct()
+            rpmRootCompanies = rpmFilterRealCompanies(parseMasterListArray(raw))
+            rpmMasterCompanies = rpmFilterRealCompanies(rpmRootCompanies).sortedBy { it.lowercase() }
             rpmLeafInlineEditMappingId = null
             rpmLeafInlineEditLineType = ""
             fun finishRender() {
