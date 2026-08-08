@@ -77,7 +77,7 @@ fun openQuickPurchaseModal() {
                     </div>
                     <div class="qp-field">
                         <label class="qp-label" for="qpRankInput">Rank</label>
-                        ${createEditableCombobox("qpRank", "Select Rank", showDropdownButton = false)}
+                        ${createEditableCombobox("qpRank", "Select Rank")}
                     </div>
                     <div class="qp-field">
                         <label class="qp-label" for="qpSeatInput">Seat</label>
@@ -290,6 +290,7 @@ private fun preloadQuickPurchaseDropdowns() {
     populateComboboxFromApiForField("qpClientName", "client-map/dropdowns/client-names", "")
     populateComboboxFromApiForField("qpColor", "master-menu/color", "Select Color")
     populateComboboxFromApiForField("qpFuel", "master-menu/fuel", "Select Fuel")
+    populateComboboxFromApiForField("qpRank", "master-menu/rank", "Select Rank")
     refreshPurchaseClientNameToCountryMap()
     ensureNumberCutPlaceOptionsLoaded {
         repopulateNumberCutPlaceCombobox("qpNumberCutPlace")

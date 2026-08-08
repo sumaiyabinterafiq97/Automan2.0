@@ -15,6 +15,7 @@ import com.automan.backend.service.PurchaseChangeHistoryService
 import com.automan.backend.service.ClientService
 import com.automan.backend.service.TransactionService
 import com.automan.backend.util.Logger
+import com.automan.backend.util.PdfFilenameUtils
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
@@ -538,7 +539,9 @@ class PurchaseController(
             headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
             headers.set(
                 org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
-                "attachment; filename=\"invoice_${request.pdf.invoiceNumber}.pdf\"",
+                PdfFilenameUtils.contentDisposition(
+                    PdfFilenameUtils.build("Final_Invoice", request.pdf.clientName),
+                ),
             )
             headers.contentLength = result.pdfBytes.size.toLong()
             applyLedgerHeaders(headers, result.ledger)
@@ -730,7 +733,12 @@ class PurchaseController(
             
             val headers = org.springframework.http.HttpHeaders()
             headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
-            headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"invoice_${request.invoiceNumber}.pdf\"")
+            headers.set(
+                org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                PdfFilenameUtils.contentDisposition(
+                    PdfFilenameUtils.build("Final_Invoice", request.clientName),
+                ),
+            )
             headers.contentLength = pdfBytes.size.toLong()
             
             Logger.debug("[Controller] Invoice PDF generated successfully")
@@ -830,7 +838,12 @@ class PurchaseController(
             
             return ResponseEntity.ok()
                 .header("Content-Type", "application/pdf")
-                .header("Content-Disposition", "attachment; filename=\"rixo-purchases.pdf\"")
+                .header(
+                    "Content-Disposition",
+                    PdfFilenameUtils.contentDisposition(
+                        PdfFilenameUtils.build("RixoRequest", PdfFilenameUtils.todayYmd()),
+                    ),
+                )
                 .body(pdfBytes)
         } catch (e: Exception) {
             Logger.error("Controller: Error generating Rixo PDF: ${e.message}", e)
@@ -912,10 +925,17 @@ class PurchaseController(
             }
 
             val pdfBytes = purchaseService.generateRixoTransportPdf(selectedIds, transportData, purchaseData)
+            val company = transportData["rixoCompany"]
+            val dateRaw = transportData["buyingDate"].orEmpty().ifEmpty { transportData["transportDate"].orEmpty() }
+            val filename = PdfFilenameUtils.build(
+                "RixoTransport",
+                company,
+                PdfFilenameUtils.dateToken(dateRaw),
+            )
 
             return ResponseEntity.ok()
                 .header("Content-Type", "application/pdf")
-                .header("Content-Disposition", "attachment; filename=\"rixo-transport.pdf\"")
+                .header("Content-Disposition", PdfFilenameUtils.contentDisposition(filename))
                 .body(pdfBytes)
         } catch (e: Exception) {
             Logger.error("Controller: Error generating Rixo Transport PDF: ${e.message}", e)
@@ -1035,7 +1055,16 @@ class PurchaseController(
             val pdfBytes = pdfService.generateShippingScheduleInvoicePdf(pdfData)
             val headers = org.springframework.http.HttpHeaders()
             headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
-            headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"shipping_schedule_${request.bookingNo}.pdf\"")
+            headers.set(
+                org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                PdfFilenameUtils.contentDisposition(
+                    PdfFilenameUtils.build(
+                        "ShippingSchedule",
+                        request.bookingNo.ifBlank { "unknown" },
+                        request.vesselName,
+                    ),
+                ),
+            )
             headers.contentLength = pdfBytes.size.toLong()
             Logger.debug("PDF generated successfully for booking: ${request.bookingNo}")
             return ResponseEntity.ok()
@@ -1055,7 +1084,16 @@ class PurchaseController(
             val pdfBytes = pdfService.generateShippingScheduleInvoicePdf(pdfData)
             val headers = org.springframework.http.HttpHeaders()
             headers.contentType = org.springframework.http.MediaType.APPLICATION_PDF
-            headers.set(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"fob_shipping_schedule_${request.bookingNo}.pdf\"")
+            headers.set(
+                org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                PdfFilenameUtils.contentDisposition(
+                    PdfFilenameUtils.build(
+                        "FOB_ShippingSchedule",
+                        request.bookingNo.ifBlank { "unknown" },
+                        request.vesselName,
+                    ),
+                ),
+            )
             headers.contentLength = pdfBytes.size.toLong()
             Logger.debug("FOB PDF generated successfully for booking: ${request.bookingNo}")
             return ResponseEntity.ok()

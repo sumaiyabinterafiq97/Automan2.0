@@ -101,95 +101,353 @@ class PdfService {
         }
     }
 
-    /** Classic Create Invoice PDF (Invoice No / Description / Amount). */
+    /**
+     * Create Invoice PDF — MEMON commercial invoice layout (CUSTOMER DETAIL + vessel meta +
+     * #/DESCRIPTION/AMOUNT + GRAND TOTAL + banking + signature). Used by Preview, PDF download,
+     * confirm-and-download, and Invoice History re-download.
+     */
     fun generateInvoicePdf(request: InvoicePdfRequest): ByteArray {
         val outputStream = ByteArrayOutputStream()
         val pdfWriter = PdfWriter(outputStream)
         val pdfDocument = PdfDocument(pdfWriter)
         val document = Document(pdfDocument)
+        document.setMargins(40f, 40f, 40f, 40f)
 
         val font = getJapaneseFont()
+        val fontBold = try {
+            getVerdanaFont(true)
+        } catch (_: Exception) {
+            font
+        }
+        val fontLatin = try {
+            getVerdanaFont(false)
+        } catch (_: Exception) {
+            font
+        }
         document.setFont(font)
 
         val dash = { v: String? -> v?.trim()?.takeIf { it.isNotEmpty() } ?: "-" }
+        val noBorder = com.itextpdf.layout.borders.Border.NO_BORDER
+        val thinBorder = com.itextpdf.layout.borders.SolidBorder(ColorConstants.BLACK, 0.75f)
+        val headerBg = com.itextpdf.kernel.colors.DeviceRgb(220, 220, 220)
 
-        document.add(
-            Paragraph("INVOICE")
-                .setFontSize(20f)
-                .setBold()
-                .setTextAlignment(TextAlignment.CENTER)
-                .setMarginBottom(16f),
-        )
+        fun rule(marginTop: Float = 2f, marginBottom: Float = 2f): LineSeparator {
+            val line = SolidLine(0.6f)
+            line.color = ColorConstants.BLACK
+            return LineSeparator(line).setMarginTop(marginTop).setMarginBottom(marginBottom)
+        }
 
-        val meta = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f)))
+        fun metaLine(label: String, value: String, align: TextAlignment = TextAlignment.LEFT): Paragraph =
+            Paragraph()
+                .add(Text("$label ").setFont(fontBold).setBold())
+                .add(Text(value).setFont(fontLatin))
+                .setFontSize(9f)
+                .setFixedLeading(12f)
+                .setMarginBottom(1f)
+                .setTextAlignment(align)
+
+        // --- Header: MEMON left + DATE / INVOICE NO right (above separator) ---
+        val topTable = Table(UnitValue.createPercentArray(floatArrayOf(65f, 35f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginBottom(14f)
+            .setMarginBottom(4f)
+        topTable.addCell(
+            Cell()
+                .add(
+                    Paragraph("INVOICE")
+                        .setFont(fontBold)
+                        .setFontSize(22f)
+                        .setBold()
+                        .setTextAlignment(TextAlignment.LEFT)
+                        .setMarginBottom(4f),
+                )
+                .add(
+                    Paragraph("MEMON CO., LTD")
+                        .setFont(fontBold)
+                        .setFontSize(11f)
+                        .setBold()
+                        .setMarginBottom(2f),
+                )
+                .add(
+                    Paragraph(
+                        "〒272-0133 CHIBA KEN, ICHIKAWA-SHI,\n" +
+                            "GYOTOKUEKIMA 3-6-1, TAIYO MANSION 112\n" +
+                            "TEL: +81-47-303-3098\n" +
+                            "FAX: +81-47-711-0409\n" +
+                            "EMAIL: info@memon.co.jp",
+                    )
+                        .setFont(fontLatin)
+                        .setFontSize(7.5f)
+                        .setFixedLeading(9.5f),
+                )
+                .setBorder(noBorder)
+                .setPadding(0f)
+                .setPaddingRight(8f),
+        )
+        topTable.addCell(
+            Cell()
+                .add(metaLine("DATE:", formatInvoiceDisplayDate(request.invoiceDate), TextAlignment.RIGHT))
+                .add(metaLine("INVOICE NO.:", dash(request.invoiceNumber), TextAlignment.RIGHT))
+                .setBorder(noBorder)
+                .setPadding(0f)
+                .setPaddingTop(4f),
+        )
+        document.add(topTable)
+        document.add(rule(2f, 8f))
 
-        val left = Cell()
-            .add(Paragraph("Invoice No: ${dash(request.invoiceNumber)}").setFontSize(10f).setFixedLeading(14f))
-            .add(Paragraph("Invoice Date: ${dash(request.invoiceDate)}").setFontSize(10f).setFixedLeading(14f))
-            .add(Paragraph("LC No: ${dash(request.lcNumber)}").setFontSize(10f).setFixedLeading(14f))
-            .add(Paragraph("Client: ${dash(request.clientName)}").setFontSize(10f).setFixedLeading(14f))
-            .add(Paragraph("Client Address: ${dash(request.clientAddress)}").setFontSize(10f).setFixedLeading(14f))
-            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+        // --- Customer (left) + shipment meta (right) ---
+        val metaTable = Table(UnitValue.createPercentArray(floatArrayOf(52f, 48f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginBottom(12f)
+
+        val leftCustomer = Cell()
+            .add(
+                Paragraph("CUSTOMER DETAIL")
+                    .setFont(fontBold)
+                    .setBold()
+                    .setFontSize(10f)
+                    .setUnderline()
+                    .setMarginBottom(4f),
+            )
+            .add(
+                Paragraph(dash(request.clientName))
+                    .setFont(font)
+                    .setFontSize(10f)
+                    .setFixedLeading(12f)
+                    .setMarginBottom(2f),
+            )
+        val consigneeName = request.consignee?.trim()?.takeIf { it.isNotEmpty() }
+        if (consigneeName != null) {
+            leftCustomer.add(
+                Paragraph(consigneeName)
+                    .setFont(fontBold)
+                    .setBold()
+                    .setFontSize(10f)
+                    .setFixedLeading(12f)
+                    .setMarginBottom(2f),
+            )
+        }
+        val consigneeAddr = request.consigneeAddress?.trim()?.takeIf { it.isNotEmpty() }
+        if (consigneeAddr != null) {
+            leftCustomer.add(
+                Paragraph(consigneeAddr)
+                    .setFont(font)
+                    .setFontSize(8f)
+                    .setFixedLeading(10f)
+                    .setMarginBottom(4f),
+            )
+        }
+        leftCustomer
+            .setBorder(noBorder)
             .setPadding(0f)
-            .setPaddingRight(8f)
-        meta.addCell(left)
+            .setPaddingRight(12f)
+        metaTable.addCell(leftCustomer)
 
-        val right = Cell()
-            .add(Paragraph("Vessel: ${dash(request.vessel)}").setFontSize(10f).setFixedLeading(14f))
-            .add(Paragraph("Shipping Date: ${dash(request.shippingDate)}").setFontSize(10f).setFixedLeading(14f))
-            .add(Paragraph("From: ${dash(request.from)}").setFontSize(10f).setFixedLeading(14f))
-            .add(Paragraph("To: ${dash(request.to)}").setFontSize(10f).setFixedLeading(14f))
-            .add(Paragraph("Price Type: ${dash(request.priceType)}").setFontSize(10f).setFixedLeading(14f))
-            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+        val rightMeta = Cell()
+        request.lcNumber?.trim()?.takeIf { it.isNotEmpty() }?.let {
+            rightMeta.add(metaLine("LC NO.:", it))
+        }
+        rightMeta
+            .add(metaLine("VESSEL:", dash(request.vessel)))
+            .add(metaLine("ETD:", formatInvoiceDisplayDate(request.shippingDate)))
+            .add(metaLine("POL:", dash(request.from)))
+            .add(metaLine("POD:", dash(request.to)))
+            .add(metaLine("FINAL DESTINATION:", dash(request.finalDestination)))
+            .add(metaLine("TRADE TERMS:", dash(request.priceType)))
+            .add(metaLine("CURRENCY:", "JPY"))
+            .setBorder(noBorder)
             .setPadding(0f)
-        meta.addCell(right)
-        document.add(meta)
+            .setTextAlignment(TextAlignment.LEFT)
+        metaTable.addCell(rightMeta)
+        document.add(metaTable)
 
-        val table = Table(UnitValue.createPercentArray(floatArrayOf(10f, 65f, 25f)))
+        // --- Line items: # | DESCRIPTION | AMOUNT ---
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(8f, 67f, 25f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginTop(4f)
 
-        listOf("No.", "Description", "Amount").forEach {
-            table.addHeaderCell(
-                Cell()
-                    .add(Paragraph(it).setBold().setFontSize(10f).setTextAlignment(TextAlignment.CENTER))
-                    .setBackgroundColor(ColorConstants.LIGHT_GRAY)
-                    .setPadding(6f)
-                    .setBorder(com.itextpdf.layout.borders.SolidBorder(ColorConstants.BLACK, 1f)),
-            )
+        fun headerCell(text: String, align: TextAlignment = TextAlignment.CENTER): Cell =
+            Cell()
+                .add(
+                    Paragraph(text)
+                        .setFont(fontBold)
+                        .setBold()
+                        .setFontSize(9f)
+                        .setTextAlignment(align),
+                )
+                .setBackgroundColor(headerBg)
+                .setPadding(5f)
+                .setBorder(thinBorder)
+
+        table.addHeaderCell(headerCell("#"))
+        table.addHeaderCell(headerCell("DESCRIPTION", TextAlignment.LEFT))
+        table.addHeaderCell(headerCell("AMOUNT", TextAlignment.RIGHT))
+
+        fun descriptionParagraph(item: com.automan.backend.dto.InvoiceItem): Paragraph {
+            val desc = item.description ?: ""
+            val chassis = item.chassisNo?.trim()?.takeIf { it.isNotEmpty() }
+                ?: desc.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { it.isNotEmpty() }
+            if (chassis == null || desc.isEmpty()) {
+                return Paragraph(desc)
+                    .setFont(font)
+                    .setFontSize(8f)
+                    .setTextAlignment(TextAlignment.LEFT)
+                    .setFixedLeading(11f)
+            }
+            val idx = desc.indexOf(chassis, ignoreCase = true)
+            if (idx < 0) {
+                return Paragraph()
+                    .add(Text(chassis).setFont(fontBold).setBold())
+                    .add(Text(" " + desc.removePrefix(chassis).trimStart()).setFont(font))
+                    .setFontSize(8f)
+                    .setTextAlignment(TextAlignment.LEFT)
+                    .setFixedLeading(11f)
+            }
+            val before = desc.substring(0, idx)
+            val matched = desc.substring(idx, idx + chassis.length)
+            val after = desc.substring(idx + chassis.length)
+            return Paragraph()
+                .add(Text(before).setFont(font))
+                .add(Text(matched).setFont(fontBold).setBold())
+                .add(Text(after).setFont(font))
+                .setFontSize(8f)
+                .setTextAlignment(TextAlignment.LEFT)
+                .setFixedLeading(11f)
         }
 
         request.items.forEach { item ->
             table.addCell(
-                createCell(item.unit.toString(), font)
-                    .setFontSize(9f)
-                    .setTextAlignment(TextAlignment.CENTER),
+                Cell()
+                    .add(
+                        Paragraph(item.unit.toString())
+                            .setFont(fontLatin)
+                            .setFontSize(8f)
+                            .setTextAlignment(TextAlignment.CENTER)
+                            .setFixedLeading(11f),
+                    )
+                    .setPadding(4f)
+                    .setBorder(thinBorder),
             )
-            table.addCell(createCell(item.description, font).setFontSize(9f))
             table.addCell(
-                createCell(item.amount, font)
-                    .setFontSize(9f)
-                    .setTextAlignment(TextAlignment.RIGHT),
+                Cell()
+                    .add(descriptionParagraph(item))
+                    .setPadding(4f)
+                    .setBorder(thinBorder),
+            )
+            table.addCell(
+                Cell()
+                    .add(
+                        Paragraph(item.amount)
+                            .setFont(fontBold)
+                            .setBold()
+                            .setFontSize(8f)
+                            .setTextAlignment(TextAlignment.RIGHT)
+                            .setFixedLeading(11f),
+                    )
+                    .setPadding(4f)
+                    .setBorder(thinBorder),
             )
         }
         document.add(table)
 
+        // Grand total row-style line
+        val totalTable = Table(UnitValue.createPercentArray(floatArrayOf(75f, 25f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginTop(0f)
+        totalTable.addCell(
+            Cell()
+                .add(
+                    Paragraph("GRAND TOTAL:")
+                        .setFont(fontBold)
+                        .setBold()
+                        .setFontSize(10f)
+                        .setTextAlignment(TextAlignment.RIGHT),
+                )
+                .setPadding(6f)
+                .setBorder(thinBorder)
+                .setBackgroundColor(headerBg),
+        )
+        totalTable.addCell(
+            Cell()
+                .add(
+                    Paragraph(dash(request.totalAmount))
+                        .setFont(fontBold)
+                        .setBold()
+                        .setFontSize(10f)
+                        .setTextAlignment(TextAlignment.RIGHT),
+                )
+                .setPadding(6f)
+                .setBorder(thinBorder)
+                .setBackgroundColor(headerBg),
+        )
+        document.add(totalTable)
+
+        // Banking
+        request.bankAccount?.trim()?.takeIf { it.isNotEmpty() }?.let { bank ->
+            document.add(
+                Paragraph("BANKING DETAILS")
+                    .setFont(fontBold)
+                    .setBold()
+                    .setFontSize(10f)
+                    .setUnderline()
+                    .setMarginTop(14f)
+                    .setMarginBottom(4f),
+            )
+            document.add(
+                Paragraph(bank)
+                    .setFont(fontLatin)
+                    .setFontSize(8f)
+                    .setFixedLeading(11f)
+                    .setMarginBottom(6f),
+            )
+        }
+
+        // Optional form message
+        request.message?.trim()?.takeIf { it.isNotEmpty() }?.let { msg ->
+            document.add(
+                Paragraph(msg)
+                    .setFont(font)
+                    .setFontSize(8f)
+                    .setFixedLeading(10f)
+                    .setMarginTop(6f)
+                    .setMarginBottom(6f),
+            )
+        }
+
+        // Confirmation + signature
         document.add(
-            Paragraph("Total Amount: ${request.totalAmount}")
-                .setBold()
-                .setFontSize(12f)
-                .setTextAlignment(TextAlignment.RIGHT)
-                .setMarginTop(12f),
+            Paragraph("We, Memon Co., Ltd, hereby confirm your purchasing of goods.")
+                .setFont(fontLatin)
+                .setFontSize(9f)
+                .setFixedLeading(12f)
+                .setMarginTop(14f)
+                .setMarginBottom(28f),
         )
 
-        request.bankAccount?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            document.add(Paragraph("Bank Account: $it").setFontSize(9f).setMarginTop(12f))
-        }
-        request.message?.trim()?.takeIf { it.isNotEmpty() }?.let {
-            document.add(Paragraph(it).setFontSize(9f).setMarginTop(8f))
-        }
+        val sigTable = Table(UnitValue.createPercentArray(floatArrayOf(55f, 45f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+        sigTable.addCell(Cell().setBorder(noBorder).setPadding(0f))
+        sigTable.addCell(
+            Cell()
+                .add(rule(0f, 4f))
+                .add(
+                    Paragraph("M. Asif Memon")
+                        .setFont(fontBold)
+                        .setBold()
+                        .setFontSize(9f)
+                        .setTextAlignment(TextAlignment.CENTER)
+                        .setMarginBottom(1f),
+                )
+                .add(
+                    Paragraph("Memon Co., Ltd")
+                        .setFont(fontLatin)
+                        .setFontSize(8f)
+                        .setTextAlignment(TextAlignment.CENTER),
+                )
+                .setBorder(noBorder)
+                .setPadding(0f)
+                .setPaddingLeft(20f),
+        )
+        document.add(sigTable)
 
         document.close()
         return outputStream.toByteArray()

@@ -1989,7 +1989,7 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
                                             Logger.warn("Popup blocked, falling back to download")
                                             val a = document.createElement("a") as HTMLAnchorElement
                                             a.href = url
-                                            a.download = "invoice_" + invoiceNumber + ".pdf"
+                                            a.download = buildPdfFilename("Final_Invoice", clientName)
                                             document.body?.appendChild(a)
                                             a.click()
                                             document.body?.removeChild(a)
@@ -2016,7 +2016,7 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
                                     try {
                                         val a = document.createElement("a") as HTMLAnchorElement
                                         a.href = url
-                                        a.download = "invoice_" + invoiceNumber + ".pdf"
+                                        a.download = buildPdfFilename("Final_Invoice", clientName)
                                         document.body?.appendChild(a)
                                         a.click()
                                         document.body?.removeChild(a)

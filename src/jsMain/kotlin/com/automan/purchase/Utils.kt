@@ -1384,6 +1384,53 @@ fun formatDateForDatabase(isoDate: String?): String {
     }
 }
 
+/** Sanitize one segment of a PDF download filename (ASCII-safe, max 40 chars). */
+fun sanitizePdfFilenameToken(raw: String?, emptyFallback: String = "unknown"): String {
+    val cleaned = (raw ?: "")
+        .trim()
+        .replace(Regex("[^A-Za-z0-9._-]+"), "_")
+        .replace(Regex("_+"), "_")
+        .trim('_')
+    if (cleaned.isEmpty()) return emptyFallback
+    return if (cleaned.length <= 40) cleaned else cleaned.take(40).trimEnd('_')
+}
+
+/** Local calendar day as YYYYMMDD for PDF filenames. */
+fun pdfFilenameTodayYmd(): String {
+    return try {
+        val d = Date()
+        val y = d.getFullYear()
+        val mNum = d.getMonth() + 1
+        val dayNum = d.getDate()
+        val m = if (mNum < 10) "0$mNum" else mNum.toString()
+        val day = if (dayNum < 10) "0$dayNum" else dayNum.toString()
+        "$y$m$day"
+    } catch (_: dynamic) {
+        "unknown"
+    }
+}
+
+/**
+ * Build a recognizable PDF download name: `{DocType}_{Key1}_{Key2}_….pdf`.
+ * Empty parts are skipped (no trailing underscores).
+ */
+fun buildPdfFilename(docType: String, vararg parts: String?): String {
+    val tokens = mutableListOf(sanitizePdfFilenameToken(docType, "Document"))
+    for (p in parts) {
+        val t = (p ?: "").trim()
+        if (t.isEmpty()) continue
+        tokens.add(sanitizePdfFilenameToken(t, "unknown"))
+    }
+    return tokens.joinToString("_") + ".pdf"
+}
+
+/** Prefer ISO/date label → YYYYMMDD; else today. */
+fun pdfFilenameDateToken(raw: String?): String {
+    val iso = toIsoFromLabel(raw ?: "")
+    if (iso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) return iso.replace("-", "")
+    return pdfFilenameTodayYmd()
+}
+
 // Formats carModelYear from YYYY-MM or MM/YYYY to "Month YYYY" format
 // Examples: "2025-07" -> "July 2025", "07/2025" -> "July 2025", "7/2025" -> "July 2025"
 fun formatCarModelYear(yearStr: String?): String {

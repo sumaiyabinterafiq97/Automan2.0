@@ -77,6 +77,7 @@ fun showInvoiceHistoryPage() {
             .invoice-kv{display:flex;gap:10px;align-items:flex-start;}
             .invoice-k{min-width:120px;font-size:12px;color:#64748b;line-height:1.4;}
             .invoice-v{flex:1;min-width:0;}
+            button.invoice-history-shipment-details-btn:focus-visible{outline:2px solid #475569;outline-offset:2px;}
             @media (max-width: 1024px){
                 #invoiceHistoryPage{padding:14px;border-radius:14px;}
                 .invoice-history-toolbar{gap:14px;margin-bottom:14px;}
@@ -164,6 +165,20 @@ fun showInvoiceHistoryPage() {
             downloadInvoiceHistoryPdf(invKey, btn as? HTMLButtonElement)
         })
     }
+    if (wrap != null && !wrap.hasAttribute("data-invoice-history-shipment-details-delegation")) {
+        wrap.setAttribute("data-invoice-history-shipment-details-delegation", "true")
+        wrap.addEventListener("click", { e: Event ->
+            val target = e.target as? Element ?: return@addEventListener
+            val btn = target.closest("button[data-invoice-history-shipment-details]") ?: return@addEventListener
+            e.preventDefault()
+            e.stopPropagation()
+            val invKey = btn.getAttribute("data-invoice-number")?.trim() ?: return@addEventListener
+            val row = invoiceHistoryCachedRows.firstOrNull { r ->
+                invoiceHistoryCell(r, "invoiceNumber") == invKey
+            } ?: return@addEventListener
+            storeAndNavigateInvoiceHistoryShipmentDetails(row)
+        })
+    }
 
     loadInvoiceHistory()
 }
@@ -207,12 +222,50 @@ private fun invoiceHistoryPdfButtonHtml(invoiceNumber: String): String {
     </button>"""
 }
 
+/** Opens Client-Based Shipment Details with this invoice row's client + vessel prefilled. */
+private fun invoiceHistoryShipmentDetailsButtonHtml(invoiceNumber: String): String {
+    if (invoiceNumber.isEmpty()) return ""
+    val safeInv = escapeHtml(invoiceNumber)
+    return """<button type="button" class="shipping-history-shipment-details-btn invoice-history-shipment-details-btn" data-invoice-history-shipment-details data-invoice-number="$safeInv"
+        aria-label="Client-Based Shipment Details" title="Client-Based Shipment Details">
+        <span class="shipping-history-shipment-details-btn__icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M4 6.5h11.5a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7.5a1 1 0 0 1 1-1z" stroke="white" stroke-width="1.7"/>
+                <path d="M7 10h6M7 13h6M7 16h4" stroke="white" stroke-width="1.7" stroke-linecap="round"/>
+                <path d="M15.5 8.5H19a1 1 0 0 1 .9 1.45l-1.7 3.4a1 1 0 0 1-.9.55H15.5" stroke="white" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+        </span>
+    </button>"""
+}
+
+private fun storeAndNavigateInvoiceHistoryShipmentDetails(row: dynamic) {
+    val clientName = invoiceHistoryCell(row, "clientName").trim()
+    val vessel = invoiceHistoryCell(row, "vessel").trim()
+    if (clientName.isEmpty()) {
+        showMessage("Client name is required to open Shipment Details.", "warning")
+        return
+    }
+    if (vessel.isEmpty()) {
+        showMessage("Vessel is required to open Shipment Details.", "warning")
+        return
+    }
+    val payload = js("{}")
+    payload.clientName = clientName
+    payload.vessel = vessel
+    window.sessionStorage.setItem(CLIENT_SHIPMENT_DETAILS_PREFILL_SESSION_KEY, JSON.stringify(payload))
+    navigateToApp("/client-shipment-details")
+}
+
 
 private fun downloadInvoiceHistoryPdf(invoiceNumber: String, btn: HTMLButtonElement?) {
     if (btn != null) {
         btn.disabled = true
         btn.style.opacity = "0.6"
     }
+    val row = invoiceHistoryCachedRows.firstOrNull { r ->
+        invoiceHistoryCell(r, "invoiceNumber") == invoiceNumber
+    }
+    val clientName = if (row != null) invoiceHistoryCell(row, "clientName") else ""
     MainScope().launch {
         try {
             val encoded = (js("encodeURIComponent") as (String) -> String)(invoiceNumber)
@@ -227,7 +280,7 @@ private fun downloadInvoiceHistoryPdf(invoiceNumber: String, btn: HTMLButtonElem
             try {
                 val a = document.createElement("a") as HTMLAnchorElement
                 a.href = url
-                a.download = "invoice_${invoiceNumber.replace(Regex("[^a-zA-Z0-9._-]"), "_")}.pdf"
+                a.download = buildPdfFilename("Final_Invoice", clientName)
                 document.body?.appendChild(a)
                 a.click()
                 document.body?.removeChild(a)
@@ -293,6 +346,7 @@ private fun appendInvoiceHistoryTableRow(html: StringBuilder, row: dynamic) {
     val invNum = invoiceHistoryCell(row, "invoiceNumber")
     html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryEditButtonHtml(invNum)}</td>""")
     html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryPdfButtonHtml(invNum)}</td>""")
+    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryShipmentDetailsButtonHtml(invNum)}</td>""")
     for (key in invoiceHistoryDisplayColumnKeys()) {
         html.append("""<td style="padding: 12px; vertical-align: top;">${invoiceHistoryDisplayCellHtml(row, key)}</td>""")
     }
@@ -308,6 +362,7 @@ private fun appendInvoiceHistoryCard(html: StringBuilder, row: dynamic) {
             <div class="invoice-card-actions">
                 ${invoiceHistoryEditButtonHtml(invNum)}
                 ${invoiceHistoryPdfButtonHtml(invNum)}
+                ${invoiceHistoryShipmentDetailsButtonHtml(invNum)}
             </div>
         </div>
         """
@@ -578,10 +633,11 @@ private fun renderInvoiceHistoryTableFromCache() {
     val html = StringBuilder()
 
     if (!compact) {
-        val colCountInv = 2 + invoiceHistoryDisplayColumnKeys().size
+        val colCountInv = 3 + invoiceHistoryDisplayColumnKeys().size
         val invoiceHistoryColWidthsPx = listOf(
             56, // Edit
             56, // PDF
+            56, // Shipment Details
             132, // Invoice number
             96, // Vessel
             132, // Client name
@@ -600,6 +656,7 @@ private fun renderInvoiceHistoryTableFromCache() {
         )
         html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:56px;">Edit</th>""")
         html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:56px;">PDF</th>""")
+        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:56px;" title="Client-Based Shipment Details">Ship</th>""")
         for (key in invoiceHistoryDisplayColumnKeys()) {
             val label = escapeHtml(invoiceHistoryColumnLabel(key))
             val isActive = invoiceHistorySortField == key

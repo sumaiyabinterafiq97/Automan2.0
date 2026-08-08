@@ -1868,8 +1868,11 @@ private fun downloadPdfFromUrl(url: String, filename: String, successMessage: St
         }
 }
 
-fun openStatementPdfModal(clientId: Long) {
+fun openStatementPdfModal(clientId: Long, clientName: String = "") {
     document.getElementById("statementPdfModal")?.remove()
+    val resolvedName = clientName.trim().ifEmpty {
+        document.querySelector("#clientDetailsContent .client-info-name")?.textContent?.trim().orEmpty()
+    }
     val modalHTML = """
         <div id="statementPdfModal" class="client-modal">
             <div class="client-modal-content">
@@ -1916,7 +1919,7 @@ fun openStatementPdfModal(clientId: Long) {
         if (end.isNotEmpty()) params.add("endDate=$end")
         downloadPdfFromUrl(
             apiUrl("clients/$clientId/statement-pdf?${params.joinToString("&")}"),
-            "client-statement-$clientId.pdf",
+            buildPdfFilename("ClientStatement", resolvedName.ifEmpty { "unknown" }),
             "Statement PDF downloaded.",
         )
         close()

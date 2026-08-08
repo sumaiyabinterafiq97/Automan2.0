@@ -117,6 +117,50 @@ class RixoMappingService(
     fun findById(id: Long): RixoMapping? =
         rixoMappingRepository.findById(id).orElse(null)
 
+    /** Distinct non-blank venue_id values for a supplier (case-insensitive distinct). */
+    fun distinctVenuesForAuction(auctionName: String): List<String> {
+        val a = auctionName.trim()
+        if (a.isEmpty()) return emptyList()
+        return RixoMappingVenueRules.distinctVenues(
+            rixoMappingRepository.findByAuctionNameIgnoreCase(a).map { it.venueId },
+        )
+    }
+
+    /** Venue only when the supplier has exactly one distinct non-blank venue_id. */
+    fun resolveUniqueVenueForAuction(auctionName: String): String? {
+        val a = auctionName.trim()
+        if (a.isEmpty()) return null
+        return RixoMappingVenueRules.resolveUnique(
+            rixoMappingRepository.findByAuctionNameIgnoreCase(a).map { it.venueId },
+        )
+    }
+
+    /**
+     * If [venueId] is blank and [auctionName] has exactly one known venue, return that venue;
+     * otherwise return the trimmed non-blank [venueId] (or null).
+     */
+    fun coalesceVenueWithUniqueForAuction(auctionName: String?, venueId: String?): String? {
+        val explicit = RixoMappingVenueRules.normalizeVenue(venueId)
+        if (explicit != null) return explicit
+        val auction = auctionName?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return resolveUniqueVenueForAuction(auction)
+    }
+
+    /** Reject a new distinct venue when the supplier already has a different one. */
+    fun rejectSecondVenueForAuction(auctionName: String?, requestedVenue: String?): String? {
+        val auction = auctionName?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return RixoMappingVenueRules.rejectSecondVenue(
+            rixoMappingRepository.findByAuctionNameIgnoreCase(auction).map { it.venueId },
+            requestedVenue,
+        )
+    }
+
+    /** Suppliers with more than one distinct non-blank venue_id (read-only diagnostic). */
+    fun listVenueConflicts(): List<RixoMappingVenueRules.VenueConflict> {
+        val all = rixoMappingRepository.findAll()
+        return RixoMappingVenueRules.conflictSuppliers(all.map { it.auctionName to it.venueId })
+    }
+
     /**
      * Fills the next level on an existing partial row (same DB row as user expands company → auction → stock → leaf).
      */
@@ -132,6 +176,12 @@ class RixoMappingService(
         rixoPrice: String? = null,
     ): RixoMapping {
         val created = existing.createdAt
+        fun healVenue(auction: String?, requested: String?): String? {
+            val kept = RixoMappingVenueRules.normalizeVenue(requested)
+                ?: RixoMappingVenueRules.normalizeVenue(existing.venueId)
+            if (kept != null) return kept
+            return coalesceVenueWithUniqueForAuction(auction ?: existing.auctionName, null)
+        }
         return when (insertMode.uppercase()) {
             "AUCTION" -> existing.copy(
                 auctionName = auctionName!!.trim().takeIf { it.isNotEmpty() },
@@ -139,36 +189,43 @@ class RixoMappingService(
             )
             "STOCK" -> existing.copy(
                 stockLocation = stockLocation!!.trim(),
-                venueId = venueId?.trim()?.takeIf { it.isNotEmpty() } ?: existing.venueId,
+                venueId = healVenue(auctionName ?: existing.auctionName, venueId),
                 pol = pol?.trim()?.takeIf { it.isNotEmpty() } ?: existing.pol,
                 createdAt = created,
             )
             "RPM_STOCK" -> existing.copy(
                 stockLocation = stockLocation!!.trim(),
-                venueId = venueId?.trim()?.takeIf { it.isNotEmpty() } ?: existing.venueId,
+                venueId = healVenue(auctionName ?: existing.auctionName, venueId),
                 pol = pol?.trim()?.takeIf { it.isNotEmpty() } ?: existing.pol,
                 createdAt = created,
             )
-            "RPM_SUPPLIER" -> existing.copy(
-                auctionName = auctionName!!.trim().takeIf { it.isNotEmpty() },
-                createdAt = created,
-            )
+            "RPM_SUPPLIER" -> {
+                val nextAuction = auctionName!!.trim().takeIf { it.isNotEmpty() }
+                existing.copy(
+                    auctionName = nextAuction,
+                    venueId = healVenue(nextAuction, venueId),
+                    createdAt = created,
+                )
+            }
             "VENUE" -> existing.copy(
                 venueId = venueId!!.trim().takeIf { it.isNotEmpty() },
                 createdAt = created,
             )
             "POL", "RPM_POL" -> existing.copy(
                 pol = pol!!.trim().takeIf { it.isNotEmpty() },
+                venueId = healVenue(auctionName ?: existing.auctionName, venueId),
                 createdAt = created,
             )
             "RIXO_COMPANY" -> existing.copy(
                 rixoCompany = rixoCompany!!.trim(),
+                venueId = healVenue(auctionName ?: existing.auctionName, venueId),
                 createdAt = created,
             )
             "FULL", "RPM_FULL" -> existing.copy(
                 // Vehicle type is optional (nullable DB column); blank clears / leaves null.
                 supportedVehicleType = supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
                 rixoPrice = rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
+                venueId = healVenue(auctionName ?: existing.auctionName, venueId),
                 createdAt = created,
             )
             else -> throw IllegalArgumentException("Unsupported merge mode: $insertMode")
@@ -180,11 +237,12 @@ class RixoMappingService(
 
     fun addBulk(rows: List<UpsertInput>): List<RixoMapping> {
         val entities = rows.map { row ->
+            val venue = coalesceVenueWithUniqueForAuction(row.auctionName, row.venueId)
             RixoMapping(
                 rixoCompany = row.rixoCompany.trim(),
                 auctionName = row.auctionName?.trim()?.takeIf { it.isNotEmpty() },
                 stockLocation = row.stockLocation.trim(),
-                venueId = row.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                venueId = venue,
                 pol = row.pol?.trim()?.takeIf { it.isNotEmpty() },
                 supportedVehicleType = row.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
                 rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
@@ -195,11 +253,15 @@ class RixoMappingService(
 
     fun update(id: Long, row: UpsertInput): RixoMapping? {
         val existing = rixoMappingRepository.findById(id).orElse(null) ?: return null
+        // Never clear an existing venue when the request omits/blanks it; heal blank rows when unique.
+        val venue = RixoMappingVenueRules.normalizeVenue(row.venueId)
+            ?: RixoMappingVenueRules.normalizeVenue(existing.venueId)
+            ?: coalesceVenueWithUniqueForAuction(row.auctionName ?: existing.auctionName, null)
         val updated = existing.copy(
             rixoCompany = row.rixoCompany.trim(),
             auctionName = row.auctionName?.trim()?.takeIf { it.isNotEmpty() },
             stockLocation = row.stockLocation.trim(),
-            venueId = row.venueId?.trim()?.takeIf { it.isNotEmpty() },
+            venueId = venue,
             pol = row.pol?.trim()?.takeIf { it.isNotEmpty() },
             supportedVehicleType = row.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
             rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },

@@ -862,8 +862,12 @@ fun showPdfDownloadModal(pdfBlob: dynamic) {
     Logger.debug("globalBookingDetails value before modal JS setup")
     Logger.debug("globalBookingDetails.bookingNo: ${globalBookingDetails.bookingNo}")
     
-    // Extract booking number to avoid scope issues
+    // Extract booking number / vessel for recognizable download filename
     val bookingNumber = globalBookingDetails.bookingNo ?: "unknown"
+    val vesselName = globalBookingDetails.vesselName ?: ""
+    val shippingDocType =
+        if (lastCalculationMode.equals("FOB", ignoreCase = true)) "FOB_ShippingSchedule" else "ShippingSchedule"
+    val shippingPdfDownloadName = buildPdfFilename(shippingDocType, bookingNumber, vesselName)
     Logger.debug("Extracted booking number: $bookingNumber")
     
     val modalHTML = """
@@ -890,49 +894,41 @@ fun showPdfDownloadModal(pdfBlob: dynamic) {
     document.body?.insertAdjacentHTML("beforeend", modalHTML)
     
     // Attach event listeners with a small delay to ensure DOM is ready
-    js("""
-        setTimeout(function() {
-            console.log('🔍 DEBUG: Setting up modal event listeners...');
-            
-            var downloadBtn = document.getElementById('downloadPdfBtn');
-            Logger.debug('downloadPdfBtn element found');
-            if (downloadBtn) {
-                downloadBtn.addEventListener('click', function() {
-                    Logger.debug('Downloading PDF...');
-                    try {
-                        // Create download link directly with the blob
-                        var url = URL.createObjectURL(arguments[0]);
-                        var link = document.createElement('a');
-                        link.setAttribute('href', url);
-                        link.setAttribute('download', 'shipping_schedule_' + (arguments[1] || 'unknown') + '.pdf');
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
-                        console.log('✅ PDF download initiated');
-                    } catch (e) {
-                        console.error('❌ Error downloading PDF:', e);
-                        alert('Error downloading PDF: ' + e.message);
-                    }
-                }.bind(null, pdfBlob, bookingNumber));
+    val safeDownloadName = shippingPdfDownloadName.replace("\"", "").replace("\\", "")
+    window.setTimeout({
+        val downloadBtn = document.getElementById("downloadPdfBtn")
+        if (downloadBtn != null) {
+            downloadBtn.addEventListener("click", {
+                try {
+                    val url = js("URL.createObjectURL(pdfBlob)") as String
+                    val link = document.createElement("a") as HTMLAnchorElement
+                    link.href = url
+                    link.setAttribute("download", safeDownloadName)
+                    document.body?.appendChild(link)
+                    link.click()
+                    document.body?.removeChild(link)
+                    window.setTimeout({
+                        try {
+                            js("URL.revokeObjectURL(url)")
+                        } catch (_: dynamic) {
+                        }
+                    }, 1000)
+                } catch (e: dynamic) {
+                    console.error("Error downloading PDF:", e)
+                    js("alert('Error downloading PDF: ' + e.message)")
+                }
+            })
+        }
+        document.getElementById("closePdfModal")?.addEventListener("click", {
+            document.getElementById("pdfDownloadModal")?.remove()
+        })
+        val modal = document.getElementById("pdfDownloadModal")
+        modal?.addEventListener("click", { event ->
+            if (event.target == modal) {
+                modal.remove()
             }
-            var closeBtn = document.getElementById('closePdfModal');
-            if (closeBtn) {
-                closeBtn.addEventListener('click', function() {
-                    var modal = document.getElementById('pdfDownloadModal');
-                    if (modal) modal.remove();
-                });
-            }
-            var modal = document.getElementById('pdfDownloadModal');
-            if (modal) {
-                modal.addEventListener('click', function(event) {
-                    if (event.target === modal) {
-                        modal.remove();
-                    }
-                });
-            }
-        }, 100);
-    """)
+        })
+    }, 100)
     
     Logger.debug("PDF download modal displayed")
 }
@@ -3257,6 +3253,7 @@ fun populateMasterMenuComboboxesForPurchaseForm() {
     populatePurchaseClientNameComboboxesFromClientMap()
     val fieldToSelectIds = listOf(
         "car_grade" to listOf("grade", "editGrade"),
+        "rank" to listOf("rank", "editRank"),
         "fuel" to listOf("fuel", "editFuel"),
         "shift" to listOf("shift", "editShift"),
         "repair_company" to listOf("repairCompany", "editRepairCompany"),
@@ -6608,6 +6605,7 @@ fun updateContent(root: Element) {
     if (ensureAppPathOrRedirect()) return
 
     val route = currentRoute()
+    applyDocumentTitleForRoute(route)
     if (!routeAtEquals(route, "/purchase")) {
         invalidatePurchaseListLoads()
     }
@@ -8559,7 +8557,7 @@ fun createAddFormHTML(): String {
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label for="rankInput">Rank</label>
-                        ${createEditableCombobox("rank", "Select Rank", showDropdownButton = false)}
+                        ${createEditableCombobox("rank", "Select Rank")}
                     </div>
                     <div>
                         <label for="colorInput">Color</label>
@@ -13034,6 +13032,8 @@ private fun applySupplierSelectionToForm(selection: dynamic, isEditForm: Boolean
                 window.scheduleAutofillRixoPriceFromMapping(isEdit, {
                     force: true,
                     delay: userSupplierChange ? 0 : 180,
+                    // Only overwrite empty/0 on Edit when the user changed supplier (not hydrate/open).
+                    allowOverwriteBlankOrZero: userSupplierChange === true,
                     auctionName: auc,
                     stockLocation: sel.stockLocation || '',
                     rixoCompany: sel.rixoCompany || '',
@@ -13475,6 +13475,7 @@ private fun getMasterFieldApiPath(selectId: String): String? = when (selectId) {
     "venueId", "editVenueId" -> "master-menu/venue_id"
     "shipmentSize", "editShipmentSize", "typeOfVehicle", "editTypeOfVehicle" -> "master-menu/type_of_vehicle"
     "fuel", "editFuel" -> "master-menu/fuel"
+    "rank", "editRank" -> "master-menu/rank"
     "shift", "editShift" -> "master-menu/shift"
     "rixoCompany", "editRixoCompany" -> "rixo-mapping/distinct-rixo-companies"
     "stockLocation", "editStockLocation" -> "master-menu/stock_location"
@@ -15385,8 +15386,8 @@ fun fetchMappingByChassisOnly(
                     populateComboboxTokensWithSeeMore(
                         "qpGrade", "Select Grade", gradeOptions, preferGrade, false,
                     )
-                    populateComboboxTokensWithSeeMore(
-                        "qpRank", "Select Rank", rankOptions, preferRank, false,
+                    populateChassisMappingWithMasterListAsync(
+                        "qpRank", "Select Rank", rankOptions, preferRank, "master-menu/rank",
                     )
                     populateChassisMappingWithMasterListAsync(
                         "qpColor", "Select Color", colorOptions, preferColor, "master-menu/color",
@@ -15401,7 +15402,6 @@ fun fetchMappingByChassisOnly(
                         "qpSeat", "Select Seat", seatOptions, preferSeat, false,
                     )
                     updateConditionalComboboxButtonVisibility("qpGrade", gradeOptions, preferGrade)
-                    updateConditionalComboboxButtonVisibility("qpRank", rankOptions, preferRank)
                     updateConditionalComboboxButtonVisibility("qpSeat", seatOptions, preferSeat)
                     updateConditionalComboboxButtonVisibility("qpDoor", doorsForDropdown, preferDoor)
                     updateConditionalComboboxButtonVisibility("qpCc", ccsForDropdown, preferCc)
@@ -15614,8 +15614,8 @@ fun fetchMappingByChassisOnly(
             
             val rankOptions = ranks.sorted().toList()
             val rankId = if (isEditForm) "editRank" else "rank"
-            populateComboboxTokensWithSeeMore(
-                rankId, "Select Rank", rankOptions, rank, false,
+            populateChassisMappingWithMasterListAsync(
+                rankId, "Select Rank", rankOptions, rank, "master-menu/rank",
                 specPreserveOrEmpty(preserveSnap, "rank"),
             )
             
@@ -15650,8 +15650,8 @@ fun fetchMappingByChassisOnly(
             )
 
             // Chassis-dependent fields: show dropdown only when mapping yields 2+ options.
+            // Rank stays Fuel/Color-style (always visible; list = chassis → separator → master).
             updateConditionalComboboxButtonVisibility(gradeId, gradeOptions, grade)
-            updateConditionalComboboxButtonVisibility(rankId, rankOptions, rank)
             updateConditionalComboboxButtonVisibility(seatId, seatOptions, seat)
             updateConditionalComboboxButtonVisibility(doorId, doorsForDropdown, door)
             updateConditionalComboboxButtonVisibility(ccId, ccsForDropdown, cc)
@@ -18106,7 +18106,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label for="editRankInput">Rank</label>
-                        ${createEditableCombobox("editRank", "Select Rank", initialValue = editRankDisp, showDropdownButton = false)}
+                        ${createEditableCombobox("editRank", "Select Rank", initialValue = editRankDisp)}
                     </div>
                     <div>
                         <label for="editColorInput">Color</label>
@@ -25683,7 +25683,10 @@ fun generateRixoRequestPdfViaBackend(
             } else {
                 val a = document.createElement("a") as HTMLAnchorElement
                 a.href = url
-                a.setAttribute("download", "rixo-transport-${js("Date.now()")}.pdf")
+                a.setAttribute(
+                    "download",
+                    buildPdfFilename("RixoTransport", rixoCompany, pdfFilenameDateToken(buyingDate)),
+                )
                 document.body?.appendChild(a)
                 a.click()
                 document.body?.removeChild(a)
@@ -26428,8 +26431,9 @@ fun generateRixoTransportPdf(selectedIds: List<Long>) {
                 // Store the blob for later use
                 js("window.generatedRixoTransportPdfBlob = blob")
                 
-                // Show PDF generation success modal
-                showRixoTransportPdfGenerationSuccessModal(blob)
+                val transportDate =
+                    (document.getElementById("transportDate") as? HTMLInputElement)?.value?.trim().orEmpty()
+                showRixoTransportPdfGenerationSuccessModal(blob, buyingDate = transportDate)
                 
                 showMessage("Rixo Transport PDF generated successfully!", "success")
             }
@@ -26443,7 +26447,11 @@ fun generateRixoTransportPdf(selectedIds: List<Long>) {
     }
 }
 
-fun showRixoTransportPdfGenerationSuccessModal(blob: dynamic) {
+fun showRixoTransportPdfGenerationSuccessModal(
+    blob: dynamic,
+    rixoCompany: String = "",
+    buyingDate: String = "",
+) {
     val modal = document.createElement("div")
     modal.id = "rixoTransportPdfSuccessModal"
     modal.setAttribute("style", "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;")
@@ -26481,7 +26489,7 @@ fun showRixoTransportPdfGenerationSuccessModal(blob: dynamic) {
     
     // Event listeners
     document.getElementById("downloadRixoTransportPdfBtn")?.addEventListener("click", { _: Event ->
-        downloadRixoTransportPdf(blob)
+        downloadRixoTransportPdf(blob, rixoCompany, buyingDate)
         document.body?.removeChild(modal)
     })
     
@@ -26502,11 +26510,14 @@ fun showRixoTransportPdfGenerationSuccessModal(blob: dynamic) {
     })
 }
 
-fun downloadRixoTransportPdf(blob: dynamic) {
+fun downloadRixoTransportPdf(blob: dynamic, rixoCompany: String = "", buyingDate: String = "") {
     val url = js("window.URL.createObjectURL(blob)") as String
     val a = document.createElement("a") as HTMLAnchorElement
     a.setAttribute("href", url)
-    a.setAttribute("download", "rixo-transport-${js("Date.now()")}.pdf")
+    a.setAttribute(
+        "download",
+        buildPdfFilename("RixoTransport", rixoCompany, pdfFilenameDateToken(buyingDate)),
+    )
     document.body?.appendChild(a)
     a.click()
     document.body?.removeChild(a)
@@ -26794,7 +26805,11 @@ fun generateRixoPdfWithInvoiceData(selectedIds: List<Long>, invoiceData: dynamic
         showMessage("Failed to generate PDF: ${error.message}", "error")
     }
 }
-fun showPdfGenerationSuccessModal(blob: dynamic) {
+fun showPdfGenerationSuccessModal(
+    blob: dynamic,
+    rixoCompany: String = "",
+    buyingDate: String = "",
+) {
     val modal = document.createElement("div")
     modal.id = "pdfSuccessModal"
     modal.setAttribute("style", "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;")
@@ -26832,7 +26847,7 @@ fun showPdfGenerationSuccessModal(blob: dynamic) {
     
     // Event listeners
     document.getElementById("downloadPdfBtn")?.addEventListener("click", { _: Event ->
-        downloadPdf(blob)
+        downloadPdf(blob, rixoCompany, buyingDate)
         document.body?.removeChild(modal)
     })
     
@@ -26853,12 +26868,15 @@ fun showPdfGenerationSuccessModal(blob: dynamic) {
     })
 }
 
-fun downloadPdf(blob: dynamic) {
+fun downloadPdf(blob: dynamic, rixoCompany: String = "", buyingDate: String = "") {
     // Create download link
     val url = js("window.URL.createObjectURL(blob)") as String
     val a = document.createElement("a") as HTMLAnchorElement
     a.setAttribute("href", url)
-    a.setAttribute("download", "invoice.pdf")
+    a.setAttribute(
+        "download",
+        buildPdfFilename("RixoRequest", rixoCompany, pdfFilenameDateToken(buyingDate)),
+    )
     document.body?.appendChild(a)
     a.click()
     document.body?.removeChild(a)
@@ -27952,6 +27970,7 @@ fun resetToDefaultColumns() {
     val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
     val ordered = ensurePurchaseListPinnedColumns(prioritizePurchaseListDateAndChassis(getDefaultColumnsForDevice()), maxColumns)
     saveSelectedColumns(ordered)
+    persistPurchaseListViewsToServer()
     populateColumnCheckboxes(ordered.toSet())
     updateColumnSelection()
 }
@@ -27987,6 +28006,7 @@ fun applyColumnChanges() {
     
     // Save selected columns (date & chassis pinned left in stored order)
     saveSelectedColumns(ordered)
+    persistPurchaseListViewsToServer()
     closeColumnFilterModal()
     // Re-render current view in-place without any reload, preserving search/filter/sort state.
     displayPurchasesWithPagination()
@@ -28215,7 +28235,14 @@ fun generateShippingSchedulePdf() {
             val url = js("URL.createObjectURL(pdfBlob)") as String
             val link = js("document.createElement('a')")
             link.setAttribute("href", url)
-            link.setAttribute("download", "shipping_schedule_${globalBookingDetails.bookingNo ?: "unknown"}.pdf")
+            link.setAttribute(
+                "download",
+                buildPdfFilename(
+                    if (lastCalculationMode.equals("FOB", ignoreCase = true)) "FOB_ShippingSchedule" else "ShippingSchedule",
+                    globalBookingDetails.bookingNo ?: "unknown",
+                    globalBookingDetails.vesselName,
+                ),
+            )
             js("document.body.appendChild(link)")
             js("link.click()")
             js("document.body.removeChild(link)")
@@ -28340,7 +28367,14 @@ fun generateShippingSchedulePdfPreview() {
                     // Fallback to download if popup is blocked
                     val link = js("document.createElement('a')")
                     link.setAttribute("href", url)
-                    link.setAttribute("download", "shipping_schedule_${globalBookingDetails.bookingNo ?: "unknown"}.pdf")
+                    link.setAttribute(
+                "download",
+                buildPdfFilename(
+                    if (lastCalculationMode.equals("FOB", ignoreCase = true)) "FOB_ShippingSchedule" else "ShippingSchedule",
+                    globalBookingDetails.bookingNo ?: "unknown",
+                    globalBookingDetails.vesselName,
+                ),
+            )
                     js("document.body.appendChild(link)")
                     js("link.click()")
                     js("document.body.removeChild(link)")

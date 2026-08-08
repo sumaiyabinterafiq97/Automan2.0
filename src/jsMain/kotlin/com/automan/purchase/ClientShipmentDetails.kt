@@ -361,9 +361,17 @@ private fun fetchClientShipmentPdf(preview: Boolean) {
                         showMessage("Shipment details preview opened.", "success")
                     }
                 } else {
+                    val disposition = try {
+                        response.headers.get("Content-Disposition")?.toString().orEmpty()
+                    } catch (_: dynamic) {
+                        ""
+                    }
+                    val fromHeader = Regex("filename=\"?([^\";]+)\"?").find(disposition)?.groupValues?.get(1)
+                    val downloadName = fromHeader?.takeIf { it.isNotBlank() }
+                        ?: buildPdfFilename("ClientBased_ShipmentDetails", client, vessel)
                     val a = document.createElement("a") as org.w3c.dom.HTMLAnchorElement
                     a.href = url
-                    a.setAttribute("download", "client_shipment_details_${js("Date.now()")}.pdf")
+                    a.setAttribute("download", downloadName)
                     document.body?.appendChild(a)
                     a.click()
                     document.body?.removeChild(a)

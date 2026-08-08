@@ -5262,12 +5262,30 @@ window.applyRixoPriceToInput = function(isEditForm, priceRaw, inputIdOverride) {
     return true;
 };
 
+/** True when the Rixo Price input is missing, blank, or parses to numeric 0. */
+window.isRixoPriceInputBlankOrZero = function(isEditForm, inputIdOverride) {
+    var inputId = inputIdOverride || (isEditForm ? 'editRixoPriceInput' : 'rixoPriceInput');
+    var input = document.getElementById(inputId);
+    if (!input) return true;
+    var raw = (input.value != null ? String(input.value) : '').trim();
+    if (!raw) return true;
+    var numericValue = (typeof window.parseRixoPrice === 'function') ? window.parseRixoPrice(raw) : raw;
+    if (!numericValue) numericValue = raw.replace(/[¥,\s]/g, '').replace(/[^0-9.]/g, '');
+    if (!numericValue) return true;
+    var n = parseFloat(numericValue);
+    return isNaN(n) || n === 0;
+};
+
 window.scheduleAutofillRixoPriceFromMapping = function(isEditForm, fields) {
     fields = fields || {};
     if (window.__rixoPriceAutofillTimer) clearTimeout(window.__rixoPriceAutofillTimer);
     window.__rixoPriceAutofillTimer = setTimeout(function() {
         window.__rixoPriceAutofillTimer = null;
-        window.autofillRixoPriceFromMapping(isEditForm, { fields: fields, force: fields.force === true });
+        window.autofillRixoPriceFromMapping(isEditForm, {
+            fields: fields,
+            force: fields.force === true,
+            allowOverwriteBlankOrZero: fields.allowOverwriteBlankOrZero === true
+        });
     }, fields.delay != null ? fields.delay : 180);
 };
 
@@ -5288,6 +5306,14 @@ window.autofillRixoPriceFromMapping = function(isEditForm, options) {
 
     if (window.__editPurchaseHydrating === true && !options.force) return;
     if (window.__rixoPriceUserOverride === true && !options.force) return;
+
+    // Edit only: do not map-fill over empty/0 unless caller opted in (user supplier-field change).
+    var allowOverwriteBlankOrZero = options.allowOverwriteBlankOrZero === true ||
+        fields.allowOverwriteBlankOrZero === true;
+    if (isEditForm && !allowOverwriteBlankOrZero &&
+        window.isRixoPriceInputBlankOrZero(isEditForm, inputIdOverride)) {
+        return;
+    }
 
     var auctionName = (fields.auctionName || (window.getComboboxValue ? window.getComboboxValue(auctionNameId) : '') || '').toString().trim();
     var stockLocation = (fields.stockLocation || (window.getComboboxValue ? window.getComboboxValue(stockLocationId) : '') || '').toString().trim();
@@ -5364,6 +5390,8 @@ window.onSupplierMapFieldChanged = function(fieldId) {
     var priceFields = typeof window.buildSupplierMapAutofillFields === 'function'
         ? window.buildSupplierMapAutofillFields(isEdit)
         : { delay: 120 };
+    // User changed a supplier/map field — allow filling over empty/0 on Edit.
+    priceFields.allowOverwriteBlankOrZero = true;
     var snap = typeof __snapshotSupplierFormForPreserve === 'function' ? __snapshotSupplierFormForPreserve() : null;
     var shipmentOnly = fieldId === 'shipmentSize' || fieldId === 'editShipmentSize';
     if (shipmentOnly && typeof window.scheduleAutofillRixoPriceFromMapping === 'function') {

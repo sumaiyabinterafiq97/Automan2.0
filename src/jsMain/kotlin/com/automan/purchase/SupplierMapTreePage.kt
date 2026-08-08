@@ -250,6 +250,29 @@ private fun smVisibleVenues(rows: List<SupplierMapTreeRowLite>): List<String> {
     return if (hasNull) listOf(SM_PLACEHOLDER_VENUE) + venues else venues
 }
 
+/** Distinct non-blank venue ids for a supplier (excludes placeholder). */
+private fun smRealVenuesForSupplier(supplier: String): List<String> {
+    val key = smNormSupplier(supplier)
+    return smTreeRowsCache
+        .filter { smNormSupplier(it.supplier) == key }
+        .mapNotNull { it.venueId?.trim()?.takeIf { v -> v.isNotEmpty() } }
+        .distinctBy { it.lowercase() }
+}
+
+/** Block adding a second distinct venue under the same supplier. */
+private fun smRejectSecondVenue(supplier: String, requestedVenue: String): Boolean {
+    val requested = requestedVenue.trim()
+    if (requested.isEmpty() || requested == SM_PLACEHOLDER_VENUE) return false
+    val existing = smRealVenuesForSupplier(supplier)
+    if (existing.isEmpty()) return false
+    if (existing.any { it.equals(requested, ignoreCase = true) }) return false
+    showMessage(
+        "This supplier already has venue ${existing.joinToString(", ")}. Only one venue per supplier is allowed.",
+        "error",
+    )
+    return true
+}
+
 private fun smVisiblePols(rows: List<SupplierMapTreeRowLite>): List<String> {
     val hasNull = rows.any { it.pol.isNullOrBlank() }
     val pols = rows.map { smNormPol(it.pol) }
@@ -738,12 +761,15 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
 
         if (supplierOpen) {
             val venues = smVisibleVenues(supplierRows)
+            val allowAddVenue = venues.none { it != SM_PLACEHOLDER_VENUE }
             sb.append("""<div class="rixo-tree-children">""")
             if (venues.isEmpty()) {
                 if (smCardInlineAddMatchesVenueBranch(supplier)) {
                     sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("venue")}</div>""")
                 }
-                sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("venue", supplier, null, null, null, null)}</div>""")
+                if (allowAddVenue) {
+                    sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("venue", supplier, null, null, null, null)}</div>""")
+                }
             } else {
                 for (venue in venues) {
                     val venueRows = supplierRows.filter { smRowVenueKey(it) == venue }
@@ -839,10 +865,12 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
                     }
                     sb.append("""</div>""")
                 }
-                if (smCardInlineAddMatchesVenueBranch(supplier)) {
-                    sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("venue")}</div>""")
+                if (allowAddVenue) {
+                    if (smCardInlineAddMatchesVenueBranch(supplier)) {
+                        sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("venue")}</div>""")
+                    }
+                    sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("venue", supplier, null, null, null, null)}</div>""")
                 }
-                sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("venue", supplier, null, null, null, null)}</div>""")
             }
             sb.append("""</div>""")
         }
@@ -1069,6 +1097,7 @@ private fun postSmMappingBulkOneRow(
         }
         "VENUE" -> {
             if (supplier.isBlank() || venue.isBlank()) { showMessage("Supplier and venue are required", "error"); return }
+            if (smRejectSecondVenue(supplier, venue)) return
             obj.insertMode = "VENUE"
             obj.auctionName = supplier.trim()
             obj.venueId = venue.trim()
@@ -1109,6 +1138,7 @@ private fun postSmMappingBulkOneRow(
             if (supplier.isBlank() || stock.isBlank() || company.isBlank()) {
                 showMessage("Complete the path (supplier, stock location, and Rixo company)", "error"); return
             }
+            if (smRejectSecondVenue(supplier, venue)) return
             if (vtype.isNotBlank() && !smListContains(smMasterVehicleTypes, vtype)) {
                 showMessage("Please select a vehicle type from the list", "error"); return
             }
@@ -1334,6 +1364,13 @@ private fun startSmInlineAdd(
     when (level) {
         "venue" -> {
             if (pathSupplier.isEmpty()) { showMessage("Select a supplier first", "error"); return }
+            if (smRealVenuesForSupplier(pathSupplier).isNotEmpty()) {
+                showMessage(
+                    "This supplier already has venue ${smRealVenuesForSupplier(pathSupplier).joinToString(", ")}. Only one venue per supplier is allowed.",
+                    "error",
+                )
+                return
+            }
             smSelectedSupplier = smNormSupplier(pathSupplier)
         }
         "stock" -> {
@@ -2017,6 +2054,7 @@ private fun ensureSmSupplierBranchLoaded(supplier: String, onDone: () -> Unit) {
 
 fun loadSupplierMapTree() {
     val root = document.getElementById("supplierMapTreeRoot") as? HTMLElement ?: return
+    smReportVenueConflictsOnce()
     window.fetch(apiUrl("rixo-mapping/distinct-auction-names"))
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load suppliers')")
@@ -2033,6 +2071,35 @@ fun loadSupplierMapTree() {
             Logger.error("Supplier map tree load: ${err.toString()}")
             root.innerHTML = """<div style="text-align:center;color:#b91c1c;padding:32px;">Failed to load supplier map. ${escapeHtml(err.message?.toString() ?: "")}</div>"""
         }
+}
+
+private var smVenueConflictsReported = false
+
+/** Phase 0 diagnostic: toast once if any supplier has multiple venue ids. */
+private fun smReportVenueConflictsOnce() {
+    if (smVenueConflictsReported) return
+    smVenueConflictsReported = true
+    window.fetch(apiUrl("rixo-mapping/venue-conflicts"))
+        .then { response: dynamic ->
+            if (response.ok) response.json() else null
+        }
+        .then { result: dynamic ->
+            if (result == null) return@then
+            val count = (result.count as? Number)?.toInt() ?: 0
+            if (count <= 0) return@then
+            val data = result.data as? Array<dynamic> ?: emptyArray()
+            val sample = data.take(3).joinToString("; ") { row ->
+                val name = row.auctionName?.toString() ?: "?"
+                val venues = (row.venues as? Array<*>)?.joinToString(",") ?: "?"
+                "$name → $venues"
+            }
+            val more = if (count > 3) " (+${count - 3} more)" else ""
+            showMessage(
+                "Venue conflicts: $count supplier(s) have more than one venue. Examples: $sample$more",
+                "warning",
+            )
+        }
+        .catch { /* ignore diagnostic failures */ }
 }
 
 fun refreshSupplierMapTreeData() {

@@ -116,6 +116,7 @@ fun replaceAppRouteSilently(path: String) {
     val current = window.location.pathname + window.location.search
     if (current == target) return
     window.history.replaceState(null, "", target)
+    applyDocumentTitleForRoute(currentRoute())
 }
 
 fun navigateToApp(path: String, replace: Boolean = false, forceRefresh: Boolean = false) {

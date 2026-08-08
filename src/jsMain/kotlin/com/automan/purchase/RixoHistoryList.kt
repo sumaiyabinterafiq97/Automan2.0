@@ -586,11 +586,13 @@ private fun downloadRixoHistoryPdf(row: dynamic, btn: HTMLButtonElement?) {
             val blob = response.blob().await()
             val url = js("URL.createObjectURL(blob)") as String
             try {
-                val companySlug = rixoCompany.replace(Regex("[^a-zA-Z0-9._-]"), "_").ifEmpty { "rixo" }
-                val hid = rixoHistoryRowIdString(row).ifEmpty { "row" }
                 val a = document.createElement("a") as HTMLAnchorElement
                 a.href = url
-                a.download = "rixo-transport-${companySlug}-${hid}.pdf"
+                a.download = buildPdfFilename(
+                    "RixoTransport",
+                    rixoCompany,
+                    pdfFilenameDateToken(buyingDate),
+                )
                 document.body?.appendChild(a)
                 a.click()
                 document.body?.removeChild(a)

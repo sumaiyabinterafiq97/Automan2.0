@@ -14,6 +14,7 @@ import com.automan.backend.dto.InvoicePdfRequest
 import com.automan.backend.model.InvoiceHistory
 import com.automan.backend.model.InvoiceHistoryLine
 import com.automan.backend.model.Purchase
+import com.automan.backend.repository.ClientMapRepository
 import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.InvoiceHistoryLineRepository
 import com.automan.backend.repository.InvoiceHistoryRepository
@@ -38,6 +39,7 @@ class InvoiceHistoryService(
     private val eventService: EventService,
     private val shippingHistoryService: ShippingHistoryService,
     private val bookingMappingService: BookingMappingService,
+    private val clientMapRepository: ClientMapRepository,
 ) {
 
     fun listAllRows(): List<InvoiceHistoryRowDto> {
@@ -142,21 +144,51 @@ class InvoiceHistoryService(
     }
 
     /**
-     * Fills shipping_history extras + Consignee Map address onto an [InvoicePdfRequest]
-     * before save or PDF generation.
+     * Fills shipping_history extras, Client Map consignee, and Consignee Map address onto an
+     * [InvoicePdfRequest] before save or PDF generation.
      */
     fun finalizeInvoicePdfRequest(
         pdf: InvoicePdfRequest,
         chassisTokens: Collection<String> = emptyList(),
     ): InvoicePdfRequest {
         val (fromShipping, country) = shippingHistoryService.enrichInvoicePdfFromShippingHistory(pdf, chassisTokens)
-        val address = fromShipping.consigneeAddress?.trim()?.takeIf { it.isNotEmpty() }
-            ?: bookingMappingService.resolveConsigneeAddress(
-                fromShipping.consignee,
-                country,
-                fromShipping.to.takeIf { it.isNotBlank() && it != "-" },
-            ).takeIf { it.isNotEmpty() }
-        return if (address != null) fromShipping.copy(consigneeAddress = address) else fromShipping
+        val clientMapConsignee = firstClientMapConsigneeToken(fromShipping.clientName)
+        val consigneeForPdf = clientMapConsignee
+            ?: fromShipping.consignee?.trim()?.takeIf { it.isNotEmpty() }
+        val consigneeChanged = clientMapConsignee != null &&
+            !clientMapConsignee.equals(fromShipping.consignee?.trim().orEmpty(), ignoreCase = true)
+        val address = when {
+            consigneeForPdf.isNullOrBlank() -> null
+            // Prefer address matching Client Map consignee when that name was applied.
+            consigneeChanged || fromShipping.consigneeAddress.isNullOrBlank() ->
+                bookingMappingService.resolveConsigneeAddress(
+                    consigneeForPdf,
+                    country,
+                    fromShipping.to.takeIf { it.isNotBlank() && it != "-" },
+                ).takeIf { it.isNotEmpty() }
+                    ?: fromShipping.consigneeAddress?.trim()?.takeIf { it.isNotEmpty() }
+            else -> fromShipping.consigneeAddress?.trim()?.takeIf { it.isNotEmpty() }
+                ?: bookingMappingService.resolveConsigneeAddress(
+                    consigneeForPdf,
+                    country,
+                    fromShipping.to.takeIf { it.isNotBlank() && it != "-" },
+                ).takeIf { it.isNotEmpty() }
+        }
+        return fromShipping.copy(
+            consignee = consigneeForPdf,
+            consigneeAddress = address,
+        )
+    }
+
+    /** First non-empty Client Map consignee token (comma / semicolon / newline lists). */
+    private fun firstClientMapConsigneeToken(clientName: String?): String? {
+        val name = clientName?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val row = clientMapRepository.findByClientNameIgnoreCase(name) ?: return null
+        val raw = row.consignee?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return Regex("""[,;\n]+""")
+            .split(raw)
+            .map { it.trim() }
+            .firstOrNull { it.isNotEmpty() }
     }
 
     private fun computePersistedLineTotal(invoiceNumber: String): Double? {
@@ -540,6 +572,11 @@ class InvoiceHistoryService(
         }
         if (invoiceNumbersToDelete.isEmpty()) return 0
         return deleteByInvoiceNumbers(invoiceNumbersToDelete).deleted
+    }
+
+    fun clientNameForInvoiceNumber(invoiceNumber: String): String? {
+        val header = invoiceHistoryRepository.findByInvoiceNumber(invoiceNumber.trim()).orElse(null) ?: return null
+        return header.clientName?.trim()?.takeIf { it.isNotEmpty() }
     }
 
     /**

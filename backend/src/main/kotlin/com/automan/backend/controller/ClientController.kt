@@ -9,6 +9,7 @@ import com.automan.backend.service.InvoiceHistoryService
 import com.automan.backend.service.PdfService
 import com.automan.backend.service.TransactionService
 import com.automan.backend.util.Logger
+import com.automan.backend.util.PdfFilenameUtils
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -201,12 +202,12 @@ class ClientController(
         return try {
             val statement = clientTransactionsReportService.buildClientStatement(id, startDate, endDate)
             val pdf = pdfService.generateClientStatementPdf(statement)
-            val safeName = statement.clientNumber.replace(Regex("[^a-zA-Z0-9._-]"), "_")
+            val filename = PdfFilenameUtils.build("ClientStatement", statement.clientName)
             ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(
                     HttpHeaders.CONTENT_DISPOSITION,
-                    "attachment; filename=\"client-statement-$safeName.pdf\"",
+                    PdfFilenameUtils.contentDisposition(filename),
                 )
                 .body(pdf)
         } catch (e: IllegalArgumentException) {

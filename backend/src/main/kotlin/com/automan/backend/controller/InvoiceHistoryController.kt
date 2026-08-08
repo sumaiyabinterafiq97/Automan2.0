@@ -2,6 +2,7 @@ package com.automan.backend.controller
 
 import com.automan.backend.dto.InvoiceHistoryRowDto
 import com.automan.backend.service.InvoiceHistoryService
+import com.automan.backend.util.PdfFilenameUtils
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -51,10 +52,11 @@ class InvoiceHistoryController(
     @GetMapping("/{invoiceNumber}/pdf")
     fun downloadPdf(@PathVariable invoiceNumber: String): ResponseEntity<ByteArray> {
         val pdfBytes = invoiceHistoryService.generatePdfForInvoiceNumber(invoiceNumber)
-        val safeName = invoiceNumber.trim().replace(Regex("[^a-zA-Z0-9._-]"), "_")
+        val clientName = invoiceHistoryService.clientNameForInvoiceNumber(invoiceNumber)
+        val filename = PdfFilenameUtils.build("Final_Invoice", clientName)
         val headers = HttpHeaders()
         headers.contentType = MediaType.APPLICATION_PDF
-        headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"invoice_${safeName}.pdf\"")
+        headers.set(HttpHeaders.CONTENT_DISPOSITION, PdfFilenameUtils.contentDisposition(filename))
         return ResponseEntity.ok().headers(headers).body(pdfBytes)
     }
 

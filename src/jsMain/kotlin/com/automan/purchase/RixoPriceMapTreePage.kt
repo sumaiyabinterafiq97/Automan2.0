@@ -222,6 +222,33 @@ private fun rpmVisibleStocks(rows: List<RixoPriceMapTreeRowLite>): List<String> 
 private fun rpmRowSupplierKey(row: RixoPriceMapTreeRowLite) = rpmNormSupplier(row.auctionName)
 private fun rpmRowPolKey(row: RixoPriceMapTreeRowLite) = rpmNormPol(row.pol)
 
+/**
+ * Resolve venue for a supplier from loaded RPM cache.
+ * Exactly one distinct non-blank → that venue; zero → null; two+ → null + warn.
+ */
+private fun rpmResolveUniqueVenueForSupplier(supplier: String, warnOnConflict: Boolean = true): String? {
+    val key = supplier.trim()
+    if (key.isEmpty() || key == RPM_PLACEHOLDER_SUPPLIER || key == "-") return null
+    val venues = rpmTreeRowsCache
+        .filter { rpmNormSupplier(it.auctionName).equals(rpmNormSupplier(key), ignoreCase = true) }
+        .mapNotNull { it.venueId?.trim()?.takeIf { v -> v.isNotEmpty() } }
+        .distinctBy { it.lowercase() }
+    if (venues.size == 1) return venues[0]
+    if (venues.size > 1 && warnOnConflict) {
+        showMessage(
+            "Supplier “${rpmNormSupplier(key)}” has multiple venue IDs (${venues.joinToString(", ")}). " +
+                "Venue was left blank — fix conflicts in Supplier Map.",
+            "warning",
+        )
+    }
+    return null
+}
+
+private fun rpmApplyVenueToBulkPayload(obj: dynamic, supplier: String) {
+    val venue = rpmResolveUniqueVenueForSupplier(supplier)
+    if (venue != null) obj.venueId = venue
+}
+
 private fun rpmBuildLeafRows(polRows: List<RixoPriceMapTreeRowLite>): List<RpmLeafRow> {
     val out = mutableListOf<RpmLeafRow>()
     for (r in polRows) {
@@ -893,6 +920,7 @@ private fun rpmPutPayloadFromRow(
     val auction = newSupplier ?: row.auctionName
     p.auctionName = auction?.trim()?.takeIf { it.isNotEmpty() }
     p.venueId = row.venueId?.trim()?.takeIf { it.isNotEmpty() }
+        ?: row.auctionName?.let { rpmResolveUniqueVenueForSupplier(it, warnOnConflict = false) }
     if (!pathEditOnly) {
         p.supportedVehicleType = row.vType?.trim()?.takeIf { it.isNotEmpty() }
         p.rixoPrice = row.price?.trim()?.takeIf { it.isNotEmpty() }
@@ -969,6 +997,7 @@ private fun postRpmMappingBulkOneRow(
             obj.rixoCompany = company.trim()
             obj.auctionName = supplier.trim()
             obj.stockLocation = "-"
+            rpmApplyVenueToBulkPayload(obj, supplier)
         }
         "RPM_STOCK" -> {
             if (company.isBlank() || supplier.isBlank() || stock.isBlank()) {
@@ -978,6 +1007,7 @@ private fun postRpmMappingBulkOneRow(
             obj.rixoCompany = company.trim()
             obj.auctionName = supplier.trim()
             obj.stockLocation = stock.trim()
+            rpmApplyVenueToBulkPayload(obj, supplier)
         }
         "RPM_POL" -> {
             if (company.isBlank() || supplier.isBlank() || stock.isBlank() || pol.isBlank() || pol == RPM_PLACEHOLDER_POL) {
@@ -988,6 +1018,7 @@ private fun postRpmMappingBulkOneRow(
             obj.auctionName = supplier.trim()
             obj.stockLocation = stock.trim()
             obj.pol = pol.trim()
+            rpmApplyVenueToBulkPayload(obj, supplier)
         }
         else -> {
             if (company.isBlank() || supplier.isBlank() || stock.isBlank()) {
@@ -1006,6 +1037,7 @@ private fun postRpmMappingBulkOneRow(
             obj.pol = pol.trim().takeIf { it.isNotEmpty() && it != RPM_PLACEHOLDER_POL }
             obj.supportedVehicleType = vtype.trim().takeIf { it.isNotEmpty() }
             obj.rixoPrice = if (price.isBlank()) price else rpmNormalizePriceForDb(price)
+            rpmApplyVenueToBulkPayload(obj, supplier)
         }
     }
     val mergeId = when (mode) {
@@ -1717,7 +1749,8 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
             payload.rixoCompany = baseRow.company
             payload.auctionName = baseRow.auctionName
             payload.stockLocation = baseRow.stock
-            payload.venueId = baseRow.venueId
+            payload.venueId = baseRow.venueId?.trim()?.takeIf { it.isNotEmpty() }
+                ?: baseRow.auctionName?.let { rpmResolveUniqueVenueForSupplier(it, warnOnConflict = false) }
             payload.pol = baseRow.pol
             // Always send string (incl. "") so PUT can clear vehicle type; omit/null would coalesce to old value.
             payload.supportedVehicleType = vtype

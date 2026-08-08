@@ -8,6 +8,7 @@ import com.automan.backend.service.PdfService
 import com.automan.backend.service.ShippingHistoryExportService
 import com.automan.backend.service.ShippingHistoryService
 import com.automan.backend.util.Logger
+import com.automan.backend.util.PdfFilenameUtils
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -170,12 +171,16 @@ class ShippingHistoryController(
                 request.vessel,
             )
             val pdfBytes = pdfService.generateClientBasedShipmentDetailsPdf(data)
-            val safeClient = request.clientName.trim().replace(Regex("[^A-Za-z0-9_-]+"), "_").take(40)
+            val filename = PdfFilenameUtils.build(
+                "ClientBased_ShipmentDetails",
+                request.clientName,
+                request.vessel,
+            )
             val headers = org.springframework.http.HttpHeaders()
             headers.contentType = MediaType.APPLICATION_PDF
             headers.set(
                 org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
-                "attachment; filename=\"client_shipment_details_${safeClient}.pdf\"",
+                PdfFilenameUtils.contentDisposition(filename),
             )
             headers.contentLength = pdfBytes.size.toLong()
             ResponseEntity.ok().headers(headers).body(pdfBytes)

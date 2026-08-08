@@ -1,5 +1,6 @@
 package com.automan.purchase
 
+import kotlin.js.Date
 import kotlin.js.asDynamic
 import kotlin.js.unsafeCast
 import kotlinx.browser.document
@@ -1383,6 +1384,13 @@ private fun findPurchaseInListById(id: Long): dynamic? {
 
 private fun purchaseSummaryField(p: dynamic, key: String): String {
     val raw = when (key) {
+        "date" -> {
+            val dateStr = p.date?.toString()?.trim().orEmpty()
+            if (dateStr.isEmpty()) "" else {
+                val iso = toIsoFromLabel(dateStr)
+                formatWithWeekday(if (iso.isNotEmpty()) iso else dateStr)
+            }
+        }
         "price" -> {
             val priceStr = (p.price as? String) ?: p.price?.toString().orEmpty()
             val priceValue = parseCurrency(priceStr)
@@ -1408,6 +1416,32 @@ private fun purchaseSummaryField(p: dynamic, key: String): String {
         else -> ""
     }
     return raw
+}
+
+/** Calendar days from purchase date to today; blank if unparseable; future dates clamp to 0. */
+private fun purchaseSummaryDaysPassed(p: dynamic): String {
+    val dateStr = p.date?.toString()?.trim().orEmpty()
+    if (dateStr.isEmpty()) return ""
+    val iso = toIsoFromLabel(dateStr)
+    if (!iso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) return ""
+    val parts = iso.split("-")
+    val y = parts.getOrNull(0)?.toIntOrNull() ?: return ""
+    val m = parts.getOrNull(1)?.toIntOrNull() ?: return ""
+    val d = parts.getOrNull(2)?.toIntOrNull() ?: return ""
+    val bought = Date(y, m - 1, d)
+    val now = Date()
+    val today = Date(now.getFullYear(), now.getMonth(), now.getDate())
+    val diffMs = today.getTime() - bought.getTime()
+    val days = kotlin.math.floor(diffMs / 86_400_000.0).toInt().coerceAtLeast(0)
+    return if (days == 1) "1 day" else "$days days"
+}
+
+/** Display-only negotiate check for Vehicle Summary (mirrors Add/Edit fallback). */
+private fun purchaseSummaryNegotiateChecked(p: dynamic): Boolean {
+    val negotiate = p.negotiate
+    if (negotiate == true || negotiate == "true" || negotiate == 1) return true
+    val notes = p.notes?.toString() ?: ""
+    return notes.contains("NEGOTIATE", ignoreCase = true)
 }
 
 private fun handlePurchaseViewButtonClick(btn: HTMLElement) {
@@ -1446,21 +1480,41 @@ fun showVehicleSummaryModal(purchase: dynamic) {
         """.trimIndent()
     }
 
-    val fields = listOf(
-        "Chassis" to purchaseSummaryField(purchase, "chassis"),
-        "Grade" to purchaseSummaryField(purchase, "gradeExplicit"),
-        "Car Name" to purchaseSummaryField(purchase, "carName"),
-        "Color" to purchaseSummaryField(purchase, "colorExplicit"),
-        "Mileage" to purchaseSummaryField(purchase, "distance"),
-        "Fuel" to purchaseSummaryField(purchase, "fuelExplicit"),
-        "Supplier Name" to purchaseSummaryField(purchase, "auctionHouse"),
-        "Stock Location" to purchaseSummaryField(purchase, "stockLocation"),
-        "Rixo Company" to purchaseSummaryField(purchase, "rixoCompany"),
-        "Car Price" to purchaseSummaryField(purchase, "price"),
-        "Client Name" to purchaseSummaryField(purchase, "clientName"),
-        "Country" to purchaseSummaryField(purchase, "country"),
-    )
-    val gridHtml = fields.joinToString("") { (label, value) -> cell(label, value) }
+    fun carPriceWithNegotiateCell(): String {
+        val priceRaw = purchaseSummaryField(purchase, "price")
+        val priceHtml = if (priceRaw.isBlank()) "—" else escapeHtml(priceRaw)
+        val checkedAttr = if (purchaseSummaryNegotiateChecked(purchase)) " checked" else ""
+        return """
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
+                <label style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:.04em;">Car Price</label>
+                <div style="padding:10px 12px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;color:#111827;font-size:14px;line-height:1.4;display:flex;align-items:center;gap:12px;min-width:0;">
+                    <span style="flex:1;min-width:0;word-break:break-word;">$priceHtml</span>
+                    <label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#374151;white-space:nowrap;margin:0;pointer-events:none;user-select:none;cursor:default;">
+                        <input type="checkbox" tabindex="-1" aria-disabled="true" aria-readonly="true" onclick="return false;"$checkedAttr
+                               style="width:18px;height:18px;accent-color:#60a5fa;pointer-events:none;cursor:default;">
+                        NEGOTIATE
+                    </label>
+                </div>
+            </div>
+        """.trimIndent()
+    }
+
+    val gridHtml = buildString {
+        append(cell("Purchase Date", purchaseSummaryField(purchase, "date")))
+        append(cell("Days Passed", purchaseSummaryDaysPassed(purchase)))
+        append(cell("Chassis", purchaseSummaryField(purchase, "chassis")))
+        append(cell("Grade", purchaseSummaryField(purchase, "gradeExplicit")))
+        append(cell("Car Name", purchaseSummaryField(purchase, "carName")))
+        append(cell("Color", purchaseSummaryField(purchase, "colorExplicit")))
+        append(cell("Mileage", purchaseSummaryField(purchase, "distance")))
+        append(cell("Fuel", purchaseSummaryField(purchase, "fuel")))
+        append(cell("Supplier Name", purchaseSummaryField(purchase, "auctionHouse")))
+        append(cell("Stock Location", purchaseSummaryField(purchase, "stockLocation")))
+        append(cell("Rixo Company", purchaseSummaryField(purchase, "rixoCompany")))
+        append(carPriceWithNegotiateCell())
+        append(cell("Client Name", purchaseSummaryField(purchase, "clientName")))
+        append(cell("Country", purchaseSummaryField(purchase, "country")))
+    }
 
     val modal = document.createElement("div") as HTMLDivElement
     modal.id = "vehicleSummaryModal"
@@ -1832,7 +1886,6 @@ fun showShippingHistoryPage() {
             .shipping-k{min-width:120px;font-size:12px;color:#64748b;line-height:1.4;}
             .shipping-v{flex:1;min-width:0;}
             button.shipping-history-invoice-btn:focus-visible{outline:2px solid #15803d;outline-offset:2px;}
-            button.shipping-history-shipment-details-btn:focus-visible{outline:2px solid #475569;outline-offset:2px;}
             button.invoice-history-pdf-btn:focus-visible{outline:2px solid #b91c1c;outline-offset:2px;border-radius:50%;}
             @media (max-width: 1024px){
                 #shippingHistoryPage{padding:14px;border-radius:14px;}
@@ -1980,24 +2033,6 @@ fun showShippingHistoryPage() {
             autoCreateInvoicesFromShippingHistory(gRows)
         })
     }
-    if (wrap != null && !wrap.hasAttribute("data-shipping-history-shipment-details-delegation")) {
-        wrap.setAttribute("data-shipping-history-shipment-details-delegation", "true")
-        wrap.addEventListener("click", { e: Event ->
-            val target = e.target as? Element ?: return@addEventListener
-            val btn = target.closest("button[data-shipping-history-shipment-details]") ?: return@addEventListener
-            e.preventDefault()
-            e.stopPropagation()
-            val idsCsv = btn.getAttribute("data-shipping-group-ids")?.trim() ?: return@addEventListener
-            val idSet = idsCsv.split(",").mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() } }.toSet()
-            if (idSet.isEmpty()) return@addEventListener
-            val gRows = shippingHistoryCachedRows.filter { r ->
-                val id = shippingHistoryCell(r, "id").trim()
-                id.isNotEmpty() && id in idSet
-            }.toList()
-            if (gRows.isEmpty()) return@addEventListener
-            storeAndNavigateClientShipmentDetails(gRows)
-        })
-    }
     if (wrap != null && !wrap.hasAttribute("data-shipping-history-pdf-delegation")) {
         wrap.setAttribute("data-shipping-history-pdf-delegation", "true")
         wrap.addEventListener("click", { e: Event ->
@@ -2109,40 +2144,6 @@ private fun shippingHistoryInvoiceButtonHtml(sortedIdsCsv: String): String {
         aria-label="Create Invoice" title="Create Invoice"><span class="shipping-history-invoice-btn__text">INVOICE</span></button>"""
 }
 
-/** Opens Client-Based Shipment Details (client+vessel) — sits next to INVOICE. */
-private fun shippingHistoryShipmentDetailsButtonHtml(sortedIdsCsv: String): String {
-    if (sortedIdsCsv.isEmpty()) return ""
-    val safe = escapeHtml(sortedIdsCsv)
-    return """<button type="button" class="shipping-history-shipment-details-btn" data-shipping-history-shipment-details data-shipping-group-ids="$safe"
-        aria-label="Client-Based Shipment Details" title="Client-Based Shipment Details">
-        <span class="shipping-history-shipment-details-btn__icon" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M4 6.5h11.5a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7.5a1 1 0 0 1 1-1z" stroke="white" stroke-width="1.7"/>
-                <path d="M7 10h6M7 13h6M7 16h4" stroke="white" stroke-width="1.7" stroke-linecap="round"/>
-                <path d="M15.5 8.5H19a1 1 0 0 1 .9 1.45l-1.7 3.4a1 1 0 0 1-.9.55H15.5" stroke="white" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-        </span>
-    </button>"""
-}
-
-private fun storeAndNavigateClientShipmentDetails(gRows: List<dynamic>) {
-    val clientName = shippingHistoryFirstNonEmpty(gRows, "clientName").trim()
-    val vessel = shippingHistoryFirstNonEmpty(gRows, "vessel").trim()
-    if (clientName.isEmpty()) {
-        showMessage("Client name is required to open Shipment Details.", "warning")
-        return
-    }
-    if (vessel.isEmpty()) {
-        showMessage("Vessel is required to open Shipment Details.", "warning")
-        return
-    }
-    val payload = js("{}")
-    payload.clientName = clientName
-    payload.vessel = vessel
-    window.sessionStorage.setItem(CLIENT_SHIPMENT_DETAILS_PREFILL_SESSION_KEY, JSON.stringify(payload))
-    navigateToApp("/client-shipment-details")
-}
-
 private fun parseShippingHistoryYenAmount(raw: String): Double? {
     val t = raw.trim()
     if (t.isEmpty()) return null
@@ -2222,6 +2223,8 @@ private fun downloadShippingHistoryPdf(gRows: List<dynamic>, btn: HTMLButtonElem
     val mode = pdfRequest.calculationMode?.toString()?.trim().orEmpty()
     val isFob = mode.contains("FOB", ignoreCase = true)
     val bookingNo = pdfRequest.bookingNo?.toString()?.trim().orEmpty().ifEmpty { "unknown" }
+    val vessel = pdfRequest.vesselName?.toString()?.trim().orEmpty()
+    val docType = if (isFob) "FOB_ShippingSchedule" else "ShippingSchedule"
     val endpoint = if (isFob) {
         "purchases/fob-shipping-schedule/generate-pdf"
     } else {
@@ -2251,7 +2254,7 @@ private fun downloadShippingHistoryPdf(gRows: List<dynamic>, btn: HTMLButtonElem
             try {
                 val a = document.createElement("a") as HTMLAnchorElement
                 a.href = url
-                a.download = "shipping_schedule_${bookingNo.replace(Regex("[^a-zA-Z0-9._-]"), "_")}.pdf"
+                a.download = buildPdfFilename(docType, bookingNo, vessel)
                 document.body?.appendChild(a)
                 a.click()
                 document.body?.removeChild(a)
@@ -2502,7 +2505,6 @@ private fun appendShippingHistoryGroupTableRow(html: StringBuilder, gRows: List<
     html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryEditButtonHtml(groupIds)}</td>""")
     html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryPdfButtonHtml(groupIds)}</td>""")
     html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceButtonHtml(groupIds)}</td>""")
-    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryShipmentDetailsButtonHtml(groupIds)}</td>""")
     html.append(
         """<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceStatusCircleHtml(gRows)}</td>"""
     )
@@ -2526,7 +2528,6 @@ private fun appendShippingHistoryGroupCard(html: StringBuilder, gRows: List<dyna
                 ${shippingHistoryEditButtonHtml(groupIds)}
                 ${shippingHistoryPdfButtonHtml(groupIds)}
                 ${shippingHistoryInvoiceButtonHtml(groupIds)}
-                ${shippingHistoryShipmentDetailsButtonHtml(groupIds)}
             </div>
             <div class="shipping-card-status" title="Invoice created status">
                 ${shippingHistoryInvoiceStatusCircleHtml(gRows)}
@@ -3000,19 +3001,16 @@ private fun renderShippingHistoryTableFromCache() {
 
     if (!compact) {
         val bookingCol = if (shippingHistoryShowsBookingIdColumn()) 1 else 0
-        val colCountShip = 5 + bookingCol + shippingHistoryDisplayColumnKeys().size
-        // Wider action cols so Invoice / Ship Details / Invoice Created headers do not overlap
+        val colCountShip = 4 + bookingCol + shippingHistoryDisplayColumnKeys().size
+        // Wider action cols so Invoice / Invoice Created headers do not overlap
         html.append(
             """<div class="shipping-history-table-shell"><table class="purchase-list-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">""" +
-                htmlTableColgroupMultipleNarrowActionsEqualRest(colCountShip, 56, 56, 88, 112, 128) +
+                htmlTableColgroupMultipleNarrowActionsEqualRest(colCountShip, 56, 56, 88, 128) +
                 """<thead><tr style="background-color:#f8f9fa;">""",
         )
         html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">Edit</th>""")
         html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">PDF</th>""")
         html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">Invoice</th>""")
-        html.append(
-            """<th style="padding:10px 6px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;font-size:13px;" title="Client-Based Shipment Details">Ship Details</th>""",
-        )
         html.append(
             """<th style="padding:10px 6px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;font-size:13px;" title="Invoice created status">Invoice Created</th>"""
         )
