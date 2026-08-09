@@ -10,23 +10,33 @@ import org.springframework.beans.factory.annotation.Value
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.LocalDateTime
+import java.util.Base64
 import java.util.Hashtable
 import java.util.UUID
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import javax.naming.directory.InitialDirContext
 
 data class SignupRequest(val email: String, val name: String, val password: String, val role: UserRole, val createdByRole: UserRole? = null)
 data class LoginRequest(val email: String, val password: String)
 data class AuthResponse(val id: Long, val email: String, val name: String, val role: UserRole, val token: String)
+data class AuthenticatedUser(val id: Long, val email: String, val name: String, val role: UserRole)
 
 @Service
 class AuthService(
     private val userRepository: UserRepository,
     private val pendingSignupRepository: PendingSignupRepository,
     private val emailService: EmailService,
-    @Value("\${app.mail.validate-mx:true}") private val validateMx: Boolean
+    @Value("\${app.mail.validate-mx:true}") private val validateMx: Boolean,
+    @Value("\${app.auth.token-secret:change-me-automan-token-secret}") private val tokenSecret: String,
+    @Value("\${app.auth.token-ttl-hours:24}") private val tokenTtlHours: Long
 ) {
     private val encoder = BCryptPasswordEncoder()
+    private val tokenEncoder = Base64.getUrlEncoder().withoutPadding()
+    private val tokenDecoder = Base64.getUrlDecoder()
 
     /** Check if email is already registered (users) or pending (pending_signups). */
     fun emailExists(email: String): Boolean {
@@ -190,9 +200,65 @@ class AuthService(
     fun getUserCount(): Long = userRepository.count()
 
     private fun generateMockToken(user: User): String {
-        val randomComponent = UUID.randomUUID().toString().replace("-", "").substring(0, 16)
-        val timestamp = System.currentTimeMillis()
-        val userId = user.id ?: 0L
-        return "tok_${userId}_${timestamp}_$randomComponent"
+        val issuedAt = System.currentTimeMillis()
+        val ttlMillis = tokenTtlHours.coerceAtLeast(1) * 60L * 60L * 1000L
+        val expiresAt = issuedAt + ttlMillis
+        val nonce = UUID.randomUUID().toString().replace("-", "")
+        val payload = "${user.id ?: 0L}|${user.role.name}|$issuedAt|$expiresAt|$nonce"
+        val encodedPayload = tokenEncoder.encodeToString(payload.toByteArray(StandardCharsets.UTF_8))
+        val signature = sign(encodedPayload)
+        return "automan.$encodedPayload.$signature"
+    }
+
+    fun authenticate(authHeader: String?): AuthenticatedUser? {
+        val token = authHeader
+            ?.trim()
+            ?.removePrefix("Bearer")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return null
+
+        val parts = token.split(".")
+        if (parts.size != 3 || parts[0] != "automan") return null
+
+        val encodedPayload = parts[1]
+        val providedSignature = parts[2]
+        val expectedSignature = sign(encodedPayload)
+        if (!secureEquals(providedSignature, expectedSignature)) return null
+
+        val payload = try {
+            String(tokenDecoder.decode(encodedPayload), StandardCharsets.UTF_8)
+        } catch (e: Exception) {
+            return null
+        }
+        val fields = payload.split("|")
+        if (fields.size < 5) return null
+
+        val userId = fields[0].toLongOrNull() ?: return null
+        val role = try {
+            UserRole.valueOf(fields[1])
+        } catch (e: Exception) {
+            return null
+        }
+        val expiresAt = fields[3].toLongOrNull() ?: return null
+        if (expiresAt < System.currentTimeMillis()) return null
+
+        val user = userRepository.findById(userId).orElse(null) ?: return null
+        if (user.role != role) return null
+        return AuthenticatedUser(user.id!!, user.email, user.name, user.role)
+    }
+
+    private fun sign(encodedPayload: String): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        val secret = tokenSecret.ifBlank { "change-me-automan-token-secret" }
+        mac.init(SecretKeySpec(secret.toByteArray(StandardCharsets.UTF_8), "HmacSHA256"))
+        return tokenEncoder.encodeToString(mac.doFinal(encodedPayload.toByteArray(StandardCharsets.UTF_8)))
+    }
+
+    private fun secureEquals(left: String, right: String): Boolean {
+        return MessageDigest.isEqual(
+            left.toByteArray(StandardCharsets.UTF_8),
+            right.toByteArray(StandardCharsets.UTF_8)
+        )
     }
 }

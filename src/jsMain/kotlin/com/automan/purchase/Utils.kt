@@ -649,6 +649,38 @@ fun apiUrl(path: String): String {
     return fullUrl
 }
 
+fun installAuthenticatedFetch() {
+    js(
+        """
+        (function() {
+        if (!window.__automanAuthenticatedFetchInstalled) {
+            var originalFetch = window.fetch.bind(window);
+            window.fetch = function(input, init) {
+                try {
+                    var rawUrl = (typeof input === 'string') ? input : (input && input.url ? input.url : '');
+                    var isApiRequest = rawUrl.startsWith('/api') || rawUrl.indexOf('://localhost:8083/api') !== -1;
+                    var token = window.localStorage ? window.localStorage.getItem('authToken') : null;
+                    if (isApiRequest && token) {
+                        init = init || {};
+                        var existingHeaders = init.headers || (input && input.headers) || {};
+                        var headers = new Headers(existingHeaders);
+                        if (!headers.has('Authorization')) {
+                            headers.set('Authorization', 'Bearer ' + token);
+                        }
+                        init.headers = headers;
+                    }
+                } catch (e) {
+                    console.warn('Failed to attach auth token to API request', e);
+                }
+                return originalFetch(input, init);
+            };
+            window.__automanAuthenticatedFetchInstalled = true;
+        }
+        })()
+        """
+    )
+}
+
 // Helper function to safely extract numeric value from database field (handles strings with ¥, numbers, null, etc.)
 fun extractNumericFromDbValue(value: dynamic): String {
     if (value == null || value == js("undefined")) return ""

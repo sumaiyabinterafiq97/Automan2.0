@@ -2016,6 +2016,7 @@ fun main() {
     Logger.debug("INVOICE PDF BUTTON FIX - CACHE BUST - 1762413057")
     Logger.debug("INVOICE PDF BUTTON - GLOBAL EVENT DELEGATION ACTIVE!")
     Logger.debug("INVOICE PDF - 1762413057 - NEW CODE LOADED!")
+    installAuthenticatedFetch()
     
     // Initialize app setup (always run, regardless of root element)
     initializeAppSetup()

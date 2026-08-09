@@ -46,6 +46,9 @@ app:
     validate-mx: ${APP_MAIL_VALIDATE_MX:true}
   verification-base-url: ${APP_VERIFICATION_BASE_URL:http://localhost:8083/api}
   frontend-url: ${APP_FRONTEND_URL:http://localhost:8080}
+  auth:
+    token-secret: ${APP_AUTH_TOKEN_SECRET:${random.uuid}}
+    token-ttl-hours: ${APP_AUTH_TOKEN_TTL_HOURS:24}
 
 # Car picture storage (Cloudflare R2)
 automan:
