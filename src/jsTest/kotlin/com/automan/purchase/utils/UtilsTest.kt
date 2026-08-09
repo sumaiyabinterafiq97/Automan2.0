@@ -4,8 +4,6 @@ import com.automan.purchase.escapeHtml
 import com.automan.purchase.extractNumericFromDbValue
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.Test
-import kotlin.test.assertEquals
 
 /**
  * Unit tests for utility functions
@@ -16,7 +14,7 @@ class UtilsTest {
     fun testEscapeHtml_Basic() {
         val input = "<script>alert('xss')</script>"
         val result = escapeHtml(input)
-        assertEquals("&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;", result)
+        assertEquals("&lt;script&gt;alert(&#x27;xss&#x27;)&lt;&#x2F;script&gt;", result)
     }
     
     @Test

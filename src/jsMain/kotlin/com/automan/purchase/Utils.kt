@@ -665,9 +665,11 @@ fun extractNumericFromDbValue(value: dynamic): String {
     }
     // Use JavaScript-compatible check instead of Kotlin's isEmpty()
     if (str.length == 0) return ""
-    // Remove currency symbols (including corrupted "Â¥"), commas, spaces - keep only numbers and decimal point
-    // First remove corrupted "Â¥" pattern, then regular "¥", then commas and spaces, then any other non-numeric except decimal point
-    return str.replace(Regex("Â¥"), "").replace(Regex("[¥,\\s]"), "").replace(Regex("[^0-9.]"), "")
+    // Remove currency symbols (including corrupted "Â¥"), commas, spaces; keep a leading minus for validation.
+    return str.replace(Regex("Â¥"), "")
+        .replace(Regex("[¥,\\s]"), "")
+        .replace(Regex("(?!^)-"), "")
+        .replace(Regex("[^0-9.-]"), "")
 }
 
 /**
