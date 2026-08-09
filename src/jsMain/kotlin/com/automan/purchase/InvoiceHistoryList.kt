@@ -72,7 +72,7 @@ fun showInvoiceHistoryPage() {
             .invoice-cards{display:flex;flex-direction:column;gap:10px;}
             .invoice-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
             .invoice-card-top{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:10px;}
-            .invoice-card-actions{display:flex;align-items:center;gap:10px;}
+            .invoice-card-actions{display:inline-flex;flex-direction:column;align-items:center;gap:8px;}
             .invoice-card-grid{display:grid;gap:8px;}
             .invoice-kv{display:flex;gap:10px;align-items:flex-start;}
             .invoice-k{min-width:120px;font-size:12px;color:#64748b;line-height:1.4;}
@@ -344,9 +344,14 @@ private fun invoiceHistoryDisplayCellHtml(row: dynamic, key: String): String {
 private fun appendInvoiceHistoryTableRow(html: StringBuilder, row: dynamic) {
     html.append("<tr>")
     val invNum = invoiceHistoryCell(row, "invoiceNumber")
-    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryEditButtonHtml(invNum)}</td>""")
-    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryPdfButtonHtml(invNum)}</td>""")
-    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${invoiceHistoryShipmentDetailsButtonHtml(invNum)}</td>""")
+    html.append(
+        """<td style="padding: 12px; vertical-align: middle; text-align: center;">""" +
+            """<div class="history-table-actions-stack">""" +
+            invoiceHistoryEditButtonHtml(invNum) +
+            invoiceHistoryPdfButtonHtml(invNum) +
+            invoiceHistoryShipmentDetailsButtonHtml(invNum) +
+            """</div></td>"""
+    )
     for (key in invoiceHistoryDisplayColumnKeys()) {
         html.append("""<td style="padding: 12px; vertical-align: top;">${invoiceHistoryDisplayCellHtml(row, key)}</td>""")
     }
@@ -633,11 +638,9 @@ private fun renderInvoiceHistoryTableFromCache() {
     val html = StringBuilder()
 
     if (!compact) {
-        val colCountInv = 3 + invoiceHistoryDisplayColumnKeys().size
+        val colCountInv = 1 + invoiceHistoryDisplayColumnKeys().size
         val invoiceHistoryColWidthsPx = listOf(
-            56, // Edit
-            56, // PDF
-            56, // Shipment Details
+            64, // Actions (Edit + PDF + Ship stacked)
             132, // Invoice number
             96, // Vessel
             132, // Client name
@@ -654,9 +657,7 @@ private fun renderInvoiceHistoryTableFromCache() {
                 htmlTableColgroupFixedWidthsPx(colCountInv, invoiceHistoryColWidthsPx) +
                 """<thead><tr style="background-color:#f8f9fa;">"""
         )
-        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:56px;">Edit</th>""")
-        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:56px;">PDF</th>""")
-        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:56px;" title="Client-Based Shipment Details">Ship</th>""")
+        html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:64px;">Actions</th>""")
         for (key in invoiceHistoryDisplayColumnKeys()) {
             val label = escapeHtml(invoiceHistoryColumnLabel(key))
             val isActive = invoiceHistorySortField == key

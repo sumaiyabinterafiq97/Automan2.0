@@ -245,6 +245,7 @@ private fun populateCarBrandModalComboboxes() {
     populateEditableComboboxFromMasterMenu("carBrandBrand", "car_brands")
     populateEditableComboboxFromMasterMenu("carBrandFuel", "fuel")
     populateEditableComboboxFromMasterMenu("carBrandShift", "shift")
+    populateEditableComboboxFromMasterMenu("carBrandRank", "rank")
     populateEditableComboboxFromMasterMenu("carBrandColor", "color")
     populateEditableComboboxFromMasterMenu("carBrandGrade", "car_grade")
     populateEditableComboboxFromMasterMenu("carBrandVehicleType", "type_of_vehicle")
@@ -5050,7 +5051,7 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                         <div class="car-brand-modal-grid">
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Rank</label>
-                                ${createChipInput("carBrandRank", "Type Rank")}
+                                ${createChipMultiSelectCombobox("carBrandRank", "Select Rank")}
                             </div>
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Color</label>

@@ -84,7 +84,7 @@ fun showRixoHistoryPage() {
             .rixo-cards{display:flex;flex-direction:column;gap:10px;}
             .rixo-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
             .rixo-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;}
-            .rixo-card-actions{display:flex;align-items:center;gap:10px;}
+            .rixo-card-actions{display:inline-flex;flex-direction:column;align-items:center;gap:8px;}
             .rixo-card-select{display:flex;align-items:center;gap:10px;}
             .rixo-card-grid{display:grid;grid-template-columns:1fr;gap:8px;}
             .rixo-kv{display:flex;gap:10px;align-items:flex-start;}
@@ -934,10 +934,10 @@ private fun renderRixoHistoryTableFromCache() {
     rixoHistoryLastCompactLayout = rixoHistoryIsCompactLayout()
 
     val compact = rixoHistoryIsCompactLayout()
-    val colCountRixo = 3 + rixoHistoryDisplayColumnKeys().size
+    // Actions + Select + display columns
+    val colCountRixo = 2 + rixoHistoryDisplayColumnKeys().size
     val rixoHistoryColWidthsPx = listOf(
-        56, // Edit
-        56, // PDF
+        64, // Actions (Edit + PDF stacked)
         72, // Select checkbox
         96, // Rixo Confirmed
         120, // Rixo Confirmed Date
@@ -953,8 +953,7 @@ private fun renderRixoHistoryTableFromCache() {
                 htmlTableColgroupFixedWidthsPx(colCountRixo, rixoHistoryColWidthsPx) +
                 """<thead><tr style="background-color:#f8f9fa;">"""
         )
-        html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 56px;">Edit</th>""")
-        html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 56px;">PDF</th>""")
+        html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 64px;">Actions</th>""")
         html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 72px;">Select</th>""")
         for (key in rixoHistoryDisplayColumnKeys()) {
             val label = escapeHtml(rixoHistoryColumnLabel(key))
@@ -983,8 +982,13 @@ private fun renderRixoHistoryTableFromCache() {
             html.append("<tr>")
             val hid = rixoHistoryRowIdString(row)
             val checked = if (hid in rixoHistorySelectedIds) "checked" else ""
-            html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${rixoHistoryEditButtonHtml(hid)}</td>""")
-            html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${rixoHistoryPdfButtonHtml(hid)}</td>""")
+            html.append(
+                """<td style="padding: 12px; vertical-align: middle; text-align: center;">""" +
+                    """<div class="history-table-actions-stack">""" +
+                    rixoHistoryEditButtonHtml(hid) +
+                    rixoHistoryPdfButtonHtml(hid) +
+                    """</div></td>"""
+            )
             html.append(
                 """<td style="padding: 12px; text-align: center; vertical-align: middle;">""" +
                     """<input type="checkbox" data-rixo-history-select data-history-id="${escapeHtml(hid)}" $checked title="Select row" aria-label="Select row ${escapeHtml(hid)}" class="rixo-checkbox" />""" +

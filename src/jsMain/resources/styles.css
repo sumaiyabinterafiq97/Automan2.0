@@ -3566,6 +3566,15 @@ button.shipping-history-shipment-details-btn:active {
     gap: 8px;
 }
 
+/* History tables: stack Edit/PDF/(Ship|Invoice) in one Actions column */
+.history-table-actions-stack {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
 button.invoice-history-pdf-btn {
     display: inline-flex;
     align-items: center;

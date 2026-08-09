@@ -35,18 +35,6 @@ import java.time.format.DateTimeFormatter
 @Service
 class PdfService {
 
-    companion object {
-        /** Default footer for MEMON-style shipping-schedule invoice when no message is provided. */
-        private val DEFAULT_SHIPPING_CARGO_NOTE = listOf(
-            "CARGO IN TRANSIT TO FINAL DESTINATION:",
-            "KENCONT CFS FOR STRIPPING",
-            "ON MERCHANT'S FULL ACCOUNT, RESPONSIBILITY",
-            "AND RISK UNTIL EMPTY RETURN TO OUR",
-            "DESIGNATED INLAND EMPTY DEPOT IN",
-            "MOMBASA",
-        )
-    }
-
     private fun getJapaneseFont(): PdfFont {
         return try {
             Logger.debug("🎌 Font: Trying Noto Sans CJK Japanese font")
@@ -734,7 +722,7 @@ class PdfService {
             ?.map { it.trimEnd() }
             ?.filter { it.isNotEmpty() }
             ?.takeIf { it.isNotEmpty() }
-            ?: DEFAULT_SHIPPING_CARGO_NOTE
+            .orEmpty()
 
         cargoNoteLines.forEach { line ->
             document.add(

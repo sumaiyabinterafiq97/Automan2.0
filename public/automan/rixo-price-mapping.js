@@ -3281,8 +3281,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
     var venueIds = window.getUniqueValuesCaseInsensitive(mappings.map(function(m) { return m.venueId; }).filter(function(v) { return v && String(v).trim() !== ''; }));
     var rixoCompanies = window.getUniqueValuesCaseInsensitive(mappings.map(function(m) { return m.rixoCompany; }).filter(function(c) { return c && String(c).trim() !== ''; }));
     var polTokensFromMapping = window.flattenPolTokensFromMappings ? window.flattenPolTokensFromMappings(mappings) : [];
-    var vehicleMappings = __filterMappingsForSupplierSnapshot(mappings, snapHint);
-    var vehicleTypes = __vehicleTypesFromMappings(vehicleMappings.length ? vehicleMappings : mappings);
+    // Vehicle type is owned by Chassis Map — do not derive options from rixo mapping here
 
     window.beginSupplierMapProgrammatic();
     try {
@@ -3294,7 +3293,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
         } else {
             updateDropdown('pol', 'editPol', [], true);
         }
-        updateDropdown('shipmentSize', 'editShipmentSize', vehicleTypes, true);
+        // Vehicle type is owned by Chassis Map — do not rebuild shipmentSize from rixo mapping
     } finally {
         if (!options.holdProgrammaticUntilRestored) {
             window.endSupplierMapProgrammatic();
@@ -3321,7 +3320,6 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
                 var venuePick = venueIds.length > 0 ? __pickPreservedOrFirst(venueIds, cur.venue) : null;
                 var rixoPick = rixoCompanies.length > 0 ? __pickPreservedOrFirst(rixoCompanies, cur.rixo) : null;
                 var polPick = polTokensFromMapping.length > 0 ? __pickPreservedOrFirst(polTokensFromMapping, cur.pol) : null;
-                var vtPick = vehicleTypes.length > 0 ? __pickPreservedOrFirst(vehicleTypes, cur.vehicleType) : null;
                 if (stockPick) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', stockPick);
                 if (polPick || (polTokensFromMapping.length > 0 && !cur.pol)) {
                     restoreSupplierMasterFieldValue('pol', 'editPol', polPick || polTokensFromMapping[0]);
@@ -3330,7 +3328,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
                 }
                 if (venuePick) restoreSupplierMasterFieldValue('venueId', 'editVenueId', venuePick);
                 if (rixoPick) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', rixoPick);
-                if (vtPick) restoreSupplierMasterFieldValue('shipmentSize', 'editShipmentSize', vtPick);
+                // Do not auto-pick / restore Vehicle type from rixo mapping
                 if (stockPick && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
                     var keepPol = !!(cur.pol && __listContainsTokenCaseInsensitive(polTokensFromMapping, cur.pol));
                     window.fetchPolsByStockLocationAndUpdate(normalized, stockPick, !keepPol, polTokensFromMapping, seq);
@@ -3340,7 +3338,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
                 if (cur.pol) restoreSupplierMasterFieldValue('pol', 'editPol', cur.pol);
                 if (cur.venue) restoreSupplierMasterFieldValue('venueId', 'editVenueId', cur.venue);
                 if (cur.rixo) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', cur.rixo);
-                if (cur.vehicleType) restoreSupplierMasterFieldValue('shipmentSize', 'editShipmentSize', cur.vehicleType);
+                // Do not restore Vehicle type from supplier snapshot into form (chassis owns it)
                 if (cur.stock && typeof window.fetchPolsByStockLocationAndUpdate === 'function' && !options.skipPolFetchOnRestore) {
                     window.fetchPolsByStockLocationAndUpdate(normalized, cur.stock, false, cur.pol ? [cur.pol] : polTokensFromMapping, seq);
                 }

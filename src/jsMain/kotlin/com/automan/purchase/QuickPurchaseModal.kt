@@ -269,6 +269,7 @@ private fun resetQuickPurchaseModalForm() {
     resetPendingCarPictureUploads()
     writeCarModelYearInput("qpCarModelYear", "")
     window.asDynamic().__qpChassisMappingCache = null
+    window.asDynamic().__qpChassisVehicleType = null
     window.asDynamic().__qpResolvedSupplier = null
     val today = todayIsoLocalDate()
     (document.getElementById("qpDate") as? HTMLInputElement)?.value = today
@@ -598,7 +599,7 @@ fun applyQuickPurchaseSupplierSelection(selection: dynamic) {
                     rixoCompany: sel.rixoCompany || '',
                     venueId: sel.venueId || '',
                     pol: sel.pol || '',
-                    supportedVehicleType: sel.supportedVehicleType || '',
+                    supportedVehicleType: (window.__qpChassisVehicleType || sel.supportedVehicleType || ''),
                     selection: sel
                 });
             }

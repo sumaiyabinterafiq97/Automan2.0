@@ -1879,7 +1879,7 @@ fun showShippingHistoryPage() {
             .shipping-cards{display:flex;flex-direction:column;gap:10px;}
             .shipping-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
             .shipping-card-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap;}
-            .shipping-card-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+            .shipping-card-actions{display:inline-flex;flex-direction:column;align-items:center;gap:8px;}
             .shipping-card-status{display:inline-flex;align-items:center;gap:8px;margin-left:auto;}
             .shipping-card-grid{display:grid;gap:8px;}
             .shipping-kv{display:flex;gap:10px;align-items:flex-start;}
@@ -2492,7 +2492,19 @@ private fun shippingHistoryGroupIdsCsv(gRows: List<dynamic>): String =
         .sorted()
         .joinToString(",")
 
+private fun shippingHistoryGroupUnits(gRows: List<dynamic>): Int {
+    val chassisTokens = linkedSetOf<String>()
+    for (row in gRows) {
+        val raw = shippingHistoryCell(row, "chassis")
+        for (token in splitSemicolonDistinctTokens(raw)) {
+            chassisTokens.add(token.uppercase())
+        }
+    }
+    return if (chassisTokens.isNotEmpty()) chassisTokens.size else gRows.size
+}
+
 private fun shippingHistoryDisplayCellHtml(gRows: List<dynamic>, key: String): String = when (key) {
+    "units" -> formatHistoryListRectChipHtml(shippingHistoryGroupUnits(gRows).toString())
     "country" -> formatHistoryListRectChipHtml(shippingHistoryRepresentativeCountry(gRows))
     "chassis", "clientName", "amount" ->
         formatHistoryListCollapsibleChipsHtml(shippingHistoryUniqueSortedValues(gRows, key))
@@ -2502,9 +2514,14 @@ private fun shippingHistoryDisplayCellHtml(gRows: List<dynamic>, key: String): S
 private fun appendShippingHistoryGroupTableRow(html: StringBuilder, gRows: List<dynamic>) {
     html.append("<tr>")
     val groupIds = shippingHistoryGroupIdsCsv(gRows)
-    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryEditButtonHtml(groupIds)}</td>""")
-    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryPdfButtonHtml(groupIds)}</td>""")
-    html.append("""<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceButtonHtml(groupIds)}</td>""")
+    html.append(
+        """<td style="padding: 12px; vertical-align: middle; text-align: center;">""" +
+            """<div class="history-table-actions-stack">""" +
+            shippingHistoryEditButtonHtml(groupIds) +
+            shippingHistoryPdfButtonHtml(groupIds) +
+            shippingHistoryInvoiceButtonHtml(groupIds) +
+            """</div></td>"""
+    )
     html.append(
         """<td style="padding: 12px; vertical-align: middle; text-align: center;">${shippingHistoryInvoiceStatusCircleHtml(gRows)}</td>"""
     )
@@ -2656,19 +2673,20 @@ private fun shippingHistoryAllSelectableColumnKeys(): List<String> = listOf(
     "priceType",
     "chassis",
     "clientName",
+    "units",
     "amount",
 )
 
-private fun shippingHistoryLockedColumnKeys(): Set<String> = setOf("bookingId", "country", "chassis")
+private fun shippingHistoryLockedColumnKeys(): Set<String> = setOf("bookingId")
 
 private fun shippingHistoryDefaultColumnKeys(): List<String> = listOf(
-    "bookingId", "country", "consignee", "shipmentDate", "chassis", "clientName",
+    "bookingId", "pol", "pod", "shipmentDate", "consignee", "clientName", "units",
 )
 
-private const val SHIPPING_HISTORY_MAX_DATA_COLUMNS = 6
-private const val SHIPPING_HISTORY_COLUMNS_STORAGE_KEY = "selectedShippingHistoryColumns"
+private const val SHIPPING_HISTORY_MAX_DATA_COLUMNS = 8
+private const val SHIPPING_HISTORY_COLUMNS_STORAGE_KEY = "selectedShippingHistoryColumns_v2"
 
-/** Selected data columns (max 6). Booking ID / Country / Chassis are always included. */
+/** Selected data columns (max 8). Booking ID is always included. */
 private fun getSelectedShippingHistoryColumns(): List<String> {
     val defaults = shippingHistoryDefaultColumnKeys()
     val locked = shippingHistoryLockedColumnKeys()
@@ -2711,7 +2729,7 @@ private fun shippingHistoryShowsBookingIdColumn(): Boolean =
     "bookingId" in getSelectedShippingHistoryColumns()
 
 private fun shippingHistorySearchColumnKeys(): List<String> =
-    listOf("id", "createdAt") + shippingHistoryAllSelectableColumnKeys()
+    listOf("id", "createdAt") + shippingHistoryAllSelectableColumnKeys().filter { it != "units" }
 
 private fun shippingHistoryColumnLabel(key: String): String = when (key) {
     "country" -> "Country"
@@ -2730,6 +2748,7 @@ private fun shippingHistoryColumnLabel(key: String): String = when (key) {
     "priceType" -> "Price type"
     "chassis" -> "Chassis"
     "clientName" -> "Client name"
+    "units" -> "Units"
     "amount" -> "Amount"
     else -> key
 }
@@ -2875,6 +2894,9 @@ private fun compareShippingHistoryGroupRows(
             val nb = shippingHistoryUniqueSortedValues(rowsB, "amount").mapNotNull { it.toDoubleOrNull() }.minOrNull() ?: 0.0
             orient(na.compareTo(nb))
         }
+        "units" -> {
+            orient(shippingHistoryGroupUnits(rowsA).compareTo(shippingHistoryGroupUnits(rowsB)))
+        }
         "bookingId" -> {
             val sa = shippingHistoryBookingGroupKey(rowsA.first())
             val sb = shippingHistoryBookingGroupKey(rowsB.first())
@@ -2969,11 +2991,7 @@ private fun renderShippingHistoryTableFromCache() {
         return
     }
 
-    val rowList = if (shippingHistoryServerMode) {
-        shippingHistoryCachedRows.toList()
-    } else {
-        shippingHistoryCachedRows.filter { shippingHistoryRowMatchesQuery(it, q) }.toList()
-    }
+    val rowList = shippingHistoryCachedRows.toList()
 
     if (rowList.isEmpty()) {
         tableHost.innerHTML = """
@@ -2986,14 +3004,34 @@ private fun renderShippingHistoryTableFromCache() {
         return
     }
 
+    val qLower = q.trim().lowercase()
     val groups = rowList.groupBy { shippingHistoryBookingGroupKey(it) }
         .values
         .map { memberRows ->
             memberRows.sortedBy { shippingHistoryCell(it, "id").toLongOrNull() ?: 0L }
         }
+        .filter { gRows ->
+            if (shippingHistoryServerMode || qLower.isEmpty()) {
+                true
+            } else {
+                gRows.any { shippingHistoryRowMatchesQuery(it, q) } ||
+                    shippingHistoryGroupUnits(gRows).toString().contains(qLower)
+            }
+        }
         .sortedWith { a, b ->
             compareShippingHistoryGroupRows(a, b, shippingHistorySortField, shippingHistorySortOrder == "asc")
         }
+
+    if (groups.isEmpty()) {
+        tableHost.innerHTML = """
+            <div class="shipping-history-empty">
+                <strong>No matches</strong>
+                <div>No rows match your search.</div>
+                <button type="button" id="shippingHistoryClearSearchCta" class="shipping-history-empty-cta">Clear search</button>
+            </div>
+        """.trimIndent()
+        return
+    }
 
     val compact = shippingHistoryIsCompactLayout()
     shippingHistoryLastCompactLayout = compact
@@ -3001,16 +3039,14 @@ private fun renderShippingHistoryTableFromCache() {
 
     if (!compact) {
         val bookingCol = if (shippingHistoryShowsBookingIdColumn()) 1 else 0
-        val colCountShip = 4 + bookingCol + shippingHistoryDisplayColumnKeys().size
-        // Wider action cols so Invoice / Invoice Created headers do not overlap
+        // Actions + Invoice Created (+ optional Booking ID) + display columns
+        val colCountShip = 2 + bookingCol + shippingHistoryDisplayColumnKeys().size
         html.append(
             """<div class="shipping-history-table-shell"><table class="purchase-list-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">""" +
-                htmlTableColgroupMultipleNarrowActionsEqualRest(colCountShip, 56, 56, 88, 128) +
+                htmlTableColgroupMultipleNarrowActionsEqualRest(colCountShip, 64, 128) +
                 """<thead><tr style="background-color:#f8f9fa;">""",
         )
-        html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">Edit</th>""")
-        html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">PDF</th>""")
-        html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">Invoice</th>""")
+        html.append("""<th style="padding:10px 8px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;">Actions</th>""")
         html.append(
             """<th style="padding:10px 6px;text-align:center;border-bottom:1px solid #dee2e6;font-weight:600;color:#111827;white-space:nowrap;font-size:13px;" title="Invoice created status">Invoice Created</th>"""
         )
@@ -3221,7 +3257,7 @@ private fun showShippingHistoryColumnFilterModal() {
                 <h3 id="shippingHistoryColumnFilterTitle" style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 700;">Select Columns to Display</h3>
                 <button type="button" id="closeShippingHistoryColumnFilter" aria-label="Close" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 4px 8px; line-height: 1; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center;">&times;</button>
             </div>
-            <p style="margin: 0 0 8px 0; color: #64748b; font-size: 13px;">Max $SHIPPING_HISTORY_MAX_DATA_COLUMNS data columns. Booking ID, Country, and Chassis are always on. Action buttons are always visible.</p>
+            <p style="margin: 0 0 8px 0; color: #64748b; font-size: 13px;">Max $SHIPPING_HISTORY_MAX_DATA_COLUMNS data columns. Booking ID is always on. Action buttons are always visible.</p>
             <p id="shippingHistoryColumnCount" style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: #0f172a;"></p>
             <div id="shippingHistoryColumnCheckboxes" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;"></div>
             <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
