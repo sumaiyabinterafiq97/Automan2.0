@@ -328,10 +328,15 @@ class CarBrandMappingService(
     /**
      * Paginated browse for Car Brands Map UI (no search text). Prefer this over [getAllMappings] for UI.
      */
-    fun listMappingsPage(page: Int, rawSize: Int): CarBrandMappingPageResponse {
+    fun listMappingsPage(
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): CarBrandMappingPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveCarBrandMapSort(sortField, sortOrder))
         val pg = carBrandMappingRepository.findAll(pageable)
         val content = pg.content.map { toMap(it) }
         return CarBrandMappingPageResponse(
@@ -347,13 +352,20 @@ class CarBrandMappingService(
      * Paginated search for Car Brands Map UI.
      * [field]: `all`, `chassis`, `brand`, `carName`.
      */
-    fun searchMappingsPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): CarBrandMappingPageResponse {
+    fun searchMappingsPage(
+        rawQuery: String,
+        rawField: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): CarBrandMappingPageResponse {
         val q = sanitizeCarBrandMapSearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }
         val field = rawField.trim().lowercase().ifEmpty { "all" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveCarBrandMapSort(sortField, sortOrder))
         val pg = when (field) {
             "chassis" -> carBrandMappingRepository.searchCarBrandMappingChassisContains(q, pageable)
             "brand", "carbrand" -> carBrandMappingRepository.searchCarBrandMappingBrandContains(q, pageable)
@@ -371,6 +383,23 @@ class CarBrandMappingService(
             page = pg.number,
             size = pg.size,
         )
+    }
+
+    private fun resolveCarBrandMapSort(sortField: String?, sortOrder: String?): Sort {
+        val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
+            Sort.Direction.ASC
+        } else {
+            Sort.Direction.DESC
+        }
+        val prop = when (sortField?.trim()?.lowercase()) {
+            null, "", "id" -> "id"
+            "chassis" -> "chassis"
+            "carbrand", "car_brand", "brand" -> "carBrand"
+            "carname", "car_name" -> "carName"
+            "fuel" -> "fuel"
+            else -> "id"
+        }
+        return Sort.by(dir, prop)
     }
 
     private fun sanitizeCarBrandMapSearchToken(raw: String): String =

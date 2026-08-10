@@ -74,9 +74,11 @@ class ClientMapController(
     fun listPage(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "25") size: Int,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(required = false) order: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(clientMapService.listPage(page, size))
+            ResponseEntity.ok(clientMapService.listPage(page, size, sort, order))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }
@@ -91,9 +93,11 @@ class ClientMapController(
         @RequestParam(defaultValue = "all") field: String,
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "25") size: Int,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(required = false) order: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(clientMapService.searchPage(q, field, page, size))
+            ResponseEntity.ok(clientMapService.searchPage(q, field, page, size, sort, order))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }

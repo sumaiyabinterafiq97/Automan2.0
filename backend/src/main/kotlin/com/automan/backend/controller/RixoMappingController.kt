@@ -93,7 +93,7 @@ class RixoMappingController(
     private fun isSupplierFirstMode(mode: String): Boolean =
         mode in setOf("SUPPLIER", "VENUE", "POL", "RIXO_COMPANY")
 
-    /** Rixo Price Map: company → supplier → stock → pol → leaf. */
+    /** Rixo Price Map: company → stock → supplier → leaf (POL not edited on this page). */
     private fun isRpmMode(mode: String): Boolean =
         mode in setOf("RPM_COMPANY", "RPM_SUPPLIER", "RPM_STOCK", "RPM_POL", "RPM_FULL")
 
@@ -114,15 +114,21 @@ class RixoMappingController(
             if (!normEqStr(existing.rixoCompany, req.rixoCompany)) return "Row id does not match company"
             return when (mode) {
                 "RPM_COMPANY" -> "Merge is not supported for mode RPM_COMPANY"
-                "RPM_SUPPLIER" -> {
-                    if (!isBlankAuction(existing.auctionName)) return "Supplier already set on this row"
-                    null
-                }
                 "RPM_STOCK" -> {
-                    if (!normEqStr(existing.auctionName, req.auctionName)) {
+                    // Stock-before-supplier: merge into company skeleton (auction blank / "-").
+                    if (!isBlankAuction(existing.auctionName) &&
+                        !normEqStr(existing.auctionName, req.auctionName)
+                    ) {
                         return "Supplier name must match the row being updated"
                     }
                     if (!isBlankStock(existing.stockLocation)) return "Stock location already set on this row"
+                    null
+                }
+                "RPM_SUPPLIER" -> {
+                    if (!normEqStr(existing.stockLocation, req.stockLocation)) {
+                        return "Stock location must match the row being updated"
+                    }
+                    if (!isBlankAuction(existing.auctionName)) return "Supplier already set on this row"
                     null
                 }
                 "RPM_POL" -> {
@@ -142,7 +148,7 @@ class RixoMappingController(
                     if (!normEqStr(existing.stockLocation, req.stockLocation)) {
                         return "Stock location must match the row being updated"
                     }
-                    if (!normEqStr(existing.pol, req.pol)) return "POL must match the row being updated"
+                    // POL is not set from Rixo Price Map UI — do not require pol match.
                     val vt = existing.supportedVehicleType?.trim().orEmpty()
                     val pr = existing.rixoPrice?.trim().orEmpty()
                     if (vt.isNotEmpty() || pr.isNotEmpty()) {
@@ -225,12 +231,12 @@ class RixoMappingController(
             }
             "RPM_SUPPLIER" -> {
                 if (req.rixoCompany.isNullOrBlank()) return "Rixo company is required"
+                if (req.stockLocation.isNullOrBlank()) return "Stock location is required"
                 if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
                 validateRixoPriceIfPresent(req.rixoPrice)
             }
             "RPM_STOCK" -> {
                 if (req.rixoCompany.isNullOrBlank()) return "Rixo company is required"
-                if (req.auctionName.isNullOrBlank()) return "Supplier name is required"
                 if (req.stockLocation.isNullOrBlank()) return "Stock location is required"
                 validateRixoPriceIfPresent(req.rixoPrice)
             }
@@ -303,6 +309,8 @@ class RixoMappingController(
         val mode = req.insertMode?.uppercase() ?: "FULL"
         fun rpmVenue(auction: String?): String? =
             rixoMappingService.coalesceVenueWithUniqueForAuction(auction, req.venueId)
+        fun rpmPol(stock: String?, requested: String?, auction: String? = null): String? =
+            rixoMappingService.coalescePolWithUniqueForStock(stock, requested, auction)
         return when (mode) {
             "RPM_COMPANY" -> RixoMappingService.UpsertInput(
                 rixoCompany = req.rixoCompany!!.trim(),
@@ -315,34 +323,37 @@ class RixoMappingController(
             )
             "RPM_SUPPLIER" -> {
                 val auction = req.auctionName!!.trim()
+                val stock = req.stockLocation!!.trim()
                 RixoMappingService.UpsertInput(
                     rixoCompany = req.rixoCompany!!.trim(),
                     auctionName = auction,
-                    stockLocation = "-",
+                    stockLocation = stock,
                     venueId = rpmVenue(auction),
-                    pol = null,
+                    pol = rpmPol(stock, req.pol, auction),
                     supportedVehicleType = null,
                     rixoPrice = null,
                 )
             }
             "RPM_STOCK" -> {
-                val auction = req.auctionName!!.trim()
+                val auction = req.auctionName?.trim()?.takeIf { it.isNotEmpty() && it != "-" }
+                val stock = req.stockLocation!!.trim()
                 RixoMappingService.UpsertInput(
                     rixoCompany = req.rixoCompany!!.trim(),
                     auctionName = auction,
-                    stockLocation = req.stockLocation!!.trim(),
+                    stockLocation = stock,
                     venueId = rpmVenue(auction),
-                    pol = null,
+                    pol = rpmPol(stock, req.pol, auction),
                     supportedVehicleType = null,
                     rixoPrice = null,
                 )
             }
             "RPM_POL" -> {
                 val auction = req.auctionName!!.trim()
+                val stock = req.stockLocation!!.trim()
                 RixoMappingService.UpsertInput(
                     rixoCompany = req.rixoCompany!!.trim(),
                     auctionName = auction,
-                    stockLocation = req.stockLocation!!.trim(),
+                    stockLocation = stock,
                     venueId = rpmVenue(auction),
                     pol = req.pol!!.trim(),
                     supportedVehicleType = null,
@@ -351,12 +362,13 @@ class RixoMappingController(
             }
             "RPM_FULL" -> {
                 val auction = req.auctionName!!.trim()
+                val stock = req.stockLocation!!.trim()
                 RixoMappingService.UpsertInput(
                     rixoCompany = req.rixoCompany!!.trim(),
                     auctionName = auction,
-                    stockLocation = req.stockLocation!!.trim(),
+                    stockLocation = stock,
                     venueId = rpmVenue(auction),
-                    pol = req.pol?.trim()?.takeIf { it.isNotEmpty() },
+                    pol = rpmPol(stock, req.pol, auction),
                     supportedVehicleType = req.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
                     rixoPrice = req.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
                 )
@@ -379,15 +391,19 @@ class RixoMappingController(
                 supportedVehicleType = null,
                 rixoPrice = null,
             )
-            "STOCK" -> RixoMappingService.UpsertInput(
-                rixoCompany = "-",
-                auctionName = req.auctionName!!.trim(),
-                stockLocation = req.stockLocation!!.trim(),
-                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
-                pol = null,
-                supportedVehicleType = null,
-                rixoPrice = null,
-            )
+            "STOCK" -> {
+                val auction = req.auctionName!!.trim()
+                val stock = req.stockLocation!!.trim()
+                RixoMappingService.UpsertInput(
+                    rixoCompany = "-",
+                    auctionName = auction,
+                    stockLocation = stock,
+                    venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                    pol = rpmPol(stock, req.pol, auction),
+                    supportedVehicleType = null,
+                    rixoPrice = null,
+                )
+            }
             "POL" -> RixoMappingService.UpsertInput(
                 rixoCompany = "-",
                 auctionName = req.auctionName!!.trim(),
@@ -397,24 +413,32 @@ class RixoMappingController(
                 supportedVehicleType = null,
                 rixoPrice = null,
             )
-            "RIXO_COMPANY" -> RixoMappingService.UpsertInput(
-                rixoCompany = req.rixoCompany!!.trim(),
-                auctionName = req.auctionName!!.trim(),
-                stockLocation = req.stockLocation!!.trim(),
-                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
-                pol = req.pol?.trim()?.takeIf { it.isNotEmpty() },
-                supportedVehicleType = null,
-                rixoPrice = null,
-            )
-            "FULL" -> RixoMappingService.UpsertInput(
-                rixoCompany = req.rixoCompany!!.trim(),
-                auctionName = req.auctionName?.trim()?.takeIf { it.isNotEmpty() },
-                stockLocation = req.stockLocation!!.trim(),
-                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
-                pol = req.pol?.trim()?.takeIf { it.isNotEmpty() },
-                supportedVehicleType = req.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
-                rixoPrice = req.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
-            )
+            "RIXO_COMPANY" -> {
+                val auction = req.auctionName!!.trim()
+                val stock = req.stockLocation!!.trim()
+                RixoMappingService.UpsertInput(
+                    rixoCompany = req.rixoCompany!!.trim(),
+                    auctionName = auction,
+                    stockLocation = stock,
+                    venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                    pol = rpmPol(stock, req.pol, auction),
+                    supportedVehicleType = null,
+                    rixoPrice = null,
+                )
+            }
+            "FULL" -> {
+                val auction = req.auctionName?.trim()?.takeIf { it.isNotEmpty() }
+                val stock = req.stockLocation!!.trim()
+                RixoMappingService.UpsertInput(
+                    rixoCompany = req.rixoCompany!!.trim(),
+                    auctionName = auction,
+                    stockLocation = stock,
+                    venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                    pol = rpmPol(stock, req.pol, auction),
+                    supportedVehicleType = req.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
+                    rixoPrice = req.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
+                )
+            }
             "COMPANY" -> RixoMappingService.UpsertInput(
                 rixoCompany = req.rixoCompany!!.trim(),
                 auctionName = null,
@@ -429,15 +453,19 @@ class RixoMappingController(
                 supportedVehicleType = null,
                 rixoPrice = null,
             )
-            else -> RixoMappingService.UpsertInput(
-                rixoCompany = req.rixoCompany!!.trim(),
-                auctionName = req.auctionName?.trim()?.takeIf { it.isNotEmpty() },
-                stockLocation = req.stockLocation!!.trim(),
-                venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
-                pol = req.pol?.trim()?.takeIf { it.isNotEmpty() },
-                supportedVehicleType = req.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
-                rixoPrice = req.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
-            )
+            else -> {
+                val auction = req.auctionName?.trim()?.takeIf { it.isNotEmpty() }
+                val stock = req.stockLocation!!.trim()
+                RixoMappingService.UpsertInput(
+                    rixoCompany = req.rixoCompany!!.trim(),
+                    auctionName = auction,
+                    stockLocation = stock,
+                    venueId = req.venueId?.trim()?.takeIf { it.isNotEmpty() },
+                    pol = rpmPol(stock, req.pol, auction),
+                    supportedVehicleType = req.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
+                    rixoPrice = req.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
+                )
+            }
         }
     }
 
@@ -446,6 +474,13 @@ class RixoMappingController(
         val mode = req.insertMode?.uppercase() ?: "FULL"
         if (mode !in setOf("VENUE", "STOCK", "POL", "RIXO_COMPANY", "FULL")) return null
         return rixoMappingService.rejectSecondVenueForAuction(req.auctionName, req.venueId)
+    }
+
+    /** Soft one-POL-per-stock guard for create/expand that sets a POL. */
+    private fun rejectSecondPolIfNeeded(req: RixoMappingUpsertRequest): String? {
+        val mode = req.insertMode?.uppercase() ?: "FULL"
+        if (mode !in setOf("POL", "RPM_POL", "RIXO_COMPANY", "FULL", "RPM_FULL")) return null
+        return rixoMappingService.rejectSecondPolForStock(req.stockLocation, req.pol)
     }
 
     /** For PUT: fill blank request fields from DB so tree inline renames do not drop optional columns. */
@@ -516,6 +551,46 @@ class RixoMappingController(
                         "blankVenueRowCount" to c.blankVenueRowCount,
                     )
                 },
+            )
+        )
+    }
+
+    /**
+     * Read-only diagnostic: stock locations with more than one distinct non-blank pol.
+     */
+    @GetMapping("/pol-conflicts")
+    fun polConflicts(): ResponseEntity<Map<String, Any?>> {
+        val conflicts = rixoMappingService.listPolConflicts()
+        return ResponseEntity.ok(
+            mapOf(
+                "success" to true,
+                "count" to conflicts.size,
+                "data" to conflicts.map { c ->
+                    mapOf(
+                        "stockLocation" to c.stockLocation,
+                        "pols" to c.pols,
+                        "blankPolRowCount" to c.blankPolRowCount,
+                    )
+                },
+            )
+        )
+    }
+
+    /**
+     * Tiered POL resolve for a stock (optional supplier/auction scope).
+     * Explicit request pol is not used here — returns unique stock+auction, else stock-unique,
+     * else single-token derivePol, else null.
+     */
+    @GetMapping("/pol-by-stock")
+    fun polByStock(
+        @RequestParam stockLocation: String,
+        @RequestParam(required = false) auctionName: String?,
+    ): ResponseEntity<Map<String, Any?>> {
+        val pol = rixoMappingService.coalescePolWithUniqueForStock(stockLocation, null, auctionName)
+        return ResponseEntity.ok(
+            mapOf(
+                "success" to true,
+                "data" to pol,
             )
         )
     }
@@ -657,13 +732,25 @@ class RixoMappingController(
                 rejectSecondVenueIfNeeded(row)?.let { msg ->
                     return ResponseEntity.badRequest().body(mapOf("success" to false, "message" to "Row ${idx + 1}: $msg"))
                 }
+                rejectSecondPolIfNeeded(row)?.let { msg ->
+                    return ResponseEntity.badRequest().body(mapOf("success" to false, "message" to "Row ${idx + 1}: $msg"))
+                }
+                val stockForPol = row.stockLocation?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: existing.stockLocation
+                val auctionForPol = row.auctionName?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: existing.auctionName
+                val coalescedPol = rixoMappingService.coalescePolWithUniqueForStock(
+                    stockForPol,
+                    row.pol,
+                    auctionForPol,
+                )
                 val merged = rixoMappingService.mergeIncrementalRow(
                     existing = existing,
                     insertMode = mode,
                     auctionName = row.auctionName,
                     venueId = row.venueId,
                     stockLocation = row.stockLocation,
-                    pol = row.pol,
+                    pol = coalescedPol,
                     rixoCompany = row.rixoCompany,
                     supportedVehicleType = row.supportedVehicleType,
                     rixoPrice = row.rixoPrice,
@@ -675,6 +762,9 @@ class RixoMappingController(
                     return ResponseEntity.badRequest().body(mapOf("success" to false, "message" to "Row ${idx + 1}: $err"))
                 }
                 rejectSecondVenueIfNeeded(row)?.let { msg ->
+                    return ResponseEntity.badRequest().body(mapOf("success" to false, "message" to "Row ${idx + 1}: $msg"))
+                }
+                rejectSecondPolIfNeeded(row)?.let { msg ->
                     return ResponseEntity.badRequest().body(mapOf("success" to false, "message" to "Row ${idx + 1}: $msg"))
                 }
                 saved.addAll(rixoMappingService.addBulk(listOf(toInput(row))))

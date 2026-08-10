@@ -24,7 +24,6 @@ private data class RixoPriceMapTreeRowLite(
 private data class RpmLeafRow(val id: Long, val type: String, val priceDisplay: String)
 
 private const val RPM_PLACEHOLDER_SUPPLIER = "(no supplier)"
-private const val RPM_PLACEHOLDER_POL = "(no pol)"
 private const val RPM_SEMICOLON_REJECT_MSG =
     "Use a single value only. Do not use \";\" to join multiple values. Add separate mappings instead."
 
@@ -51,7 +50,6 @@ private var rpmLoadedCompanyKeys: MutableSet<String> = mutableSetOf()
 private var rpmSelectedCompany: String? = null
 private var rpmSelectedSupplier: String? = null
 private var rpmSelectedStock: String? = null
-private var rpmSelectedPol: String? = null
 private var rpmSelectedMappingId: Long? = null
 private var rpmLeafInlineEditMappingId: Long? = null
 private var rpmLeafInlineEditLineType: String = ""
@@ -59,20 +57,17 @@ private var rpmMasterVehicleTypes: List<String> = emptyList()
 private var rpmMasterCompanies: List<String> = emptyList()
 private var rpmMasterSuppliers: List<String> = emptyList()
 private var rpmMasterStocks: List<String> = emptyList()
-private var rpmMasterPols: List<String> = emptyList()
 private var rpmMasterOptionsReady: Boolean = false
 
 private var rpmCardInlineAddLevel: String? = null
 private var rpmCardInlineAddCompany: String = ""
 private var rpmCardInlineAddSupplier: String = ""
 private var rpmCardInlineAddStock: String = ""
-private var rpmCardInlineAddPol: String = ""
 
 private var rpmCardInlineEditLevel: String? = null
 private var rpmCardInlineEditCompany: String = ""
 private var rpmCardInlineEditSupplier: String = ""
 private var rpmCardInlineEditStock: String = ""
-private var rpmCardInlineEditPol: String = ""
 private var rpmCardInlineEditCurrentLabel: String = ""
 
 private var rpmFullRowAddOpen: Boolean = false
@@ -141,9 +136,6 @@ private fun rpmNormCompany(s: String) = s.trim().ifEmpty { "(no company)" }
 private fun rpmNormSupplier(s: String?) =
     s?.trim()?.takeIf { it.isNotEmpty() } ?: RPM_PLACEHOLDER_SUPPLIER
 
-private fun rpmNormPol(s: String?) =
-    s?.trim()?.takeIf { it.isNotEmpty() } ?: RPM_PLACEHOLDER_POL
-
 private fun rpmNormStock(s: String) = s.trim().ifEmpty { "(no stock location)" }
 
 private fun rpmIsBlankCompany(s: String): Boolean {
@@ -206,21 +198,11 @@ private fun rpmVisibleSuppliers(rows: List<RixoPriceMapTreeRowLite>): List<Strin
         .distinct()
         .sortedBy { it.lowercase() }
 
-private fun rpmVisiblePols(rows: List<RixoPriceMapTreeRowLite>): List<String> {
-    val hasNull = rows.any { it.pol.isNullOrBlank() }
-    val pols = rows.map { rpmNormPol(it.pol) }
-        .filter { it != RPM_PLACEHOLDER_POL }
-        .distinct()
-        .sortedBy { it.lowercase() }
-    return if (hasNull) listOf(RPM_PLACEHOLDER_POL) + pols else pols
-}
-
 private fun rpmVisibleStocks(rows: List<RixoPriceMapTreeRowLite>): List<String> =
     rows.map { rpmNormStock(it.stock) }.filter { it != "(no stock location)" && it != "-" }.distinct()
         .sortedBy { it.lowercase() }
 
 private fun rpmRowSupplierKey(row: RixoPriceMapTreeRowLite) = rpmNormSupplier(row.auctionName)
-private fun rpmRowPolKey(row: RixoPriceMapTreeRowLite) = rpmNormPol(row.pol)
 
 /**
  * Resolve venue for a supplier from loaded RPM cache.
@@ -249,6 +231,101 @@ private fun rpmApplyVenueToBulkPayload(obj: dynamic, supplier: String) {
     if (venue != null) obj.venueId = venue
 }
 
+/**
+ * Resolve POL for a stock from loaded RPM cache.
+ * Exactly one distinct non-blank → that POL; zero → null; two+ → null + warn.
+ */
+private fun rpmResolveUniquePolForStock(stock: String, warnOnConflict: Boolean = true): String? {
+    val key = stock.trim()
+    if (key.isEmpty() || key == "(no stock location)" || key == "-") return null
+    val pols = rpmTreeRowsCache
+        .filter { rpmNormStock(it.stock).equals(rpmNormStock(key), ignoreCase = true) }
+        .mapNotNull { it.pol?.trim()?.takeIf { p -> p.isNotEmpty() } }
+        .distinctBy { it.lowercase() }
+    if (pols.size == 1) return pols[0]
+    if (pols.size > 1 && warnOnConflict) {
+        showMessage(
+            "Stock “${rpmNormStock(key)}” has multiple POLs (${pols.joinToString(", ")}). " +
+                "POL was left blank — fix conflicts in Supplier Map.",
+            "warning",
+        )
+    }
+    return null
+}
+
+private fun rpmCachePolConflictCount(stock: String): Int {
+    val key = stock.trim()
+    if (key.isEmpty() || key == "(no stock location)" || key == "-") return 0
+    return rpmTreeRowsCache
+        .filter { rpmNormStock(it.stock).equals(rpmNormStock(key), ignoreCase = true) }
+        .mapNotNull { it.pol?.trim()?.takeIf { p -> p.isNotEmpty() } }
+        .distinctBy { it.lowercase() }
+        .size
+}
+
+/**
+ * Cache first; on miss call GET pol-by-stock (optional auction/supplier scope).
+ * When [auctionName] is known, still call API even if company cache shows multi-POL globally.
+ */
+private fun rpmResolvePolForStockAsync(stock: String, auctionName: String? = null, onDone: (String?) -> Unit) {
+    val key = stock.trim()
+    if (key.isEmpty() || key == "(no stock location)" || key == "-") {
+        onDone(null)
+        return
+    }
+    val auction = auctionName?.trim()?.takeIf { it.isNotEmpty() && it != "-" }
+    // Company-scoped unique only when no supplier — auction scope needs the API.
+    if (auction == null) {
+        val fromCache = rpmResolveUniquePolForStock(key, warnOnConflict = true)
+        if (fromCache != null) {
+            onDone(fromCache)
+            return
+        }
+        // Company cache already showed a multi-POL conflict — do not invent via stock-only API.
+        if (rpmCachePolConflictCount(key) > 1) {
+            onDone(null)
+            return
+        }
+    }
+    val encStock = js("encodeURIComponent")(key).unsafeCast<String>()
+    val encAuction = if (auction != null) {
+        "&auctionName=" + js("encodeURIComponent")(auction).unsafeCast<String>()
+    } else {
+        ""
+    }
+    window.fetch(apiUrl("rixo-mapping/pol-by-stock?stockLocation=$encStock$encAuction"))
+        .then { resp: dynamic ->
+            if (resp.ok as Boolean) resp.json() else js("Promise.resolve({ success:false, data:null })")
+        }
+        .then { result: dynamic ->
+            val ok = result.success as? Boolean ?: false
+            val raw = if (ok) result.data else null
+            val pol = when {
+                raw == null || raw == js("undefined") -> null
+                else -> raw.toString().trim().takeIf { it.isNotEmpty() && it != "null" && it != "undefined" }
+            }
+            onDone(pol)
+        }
+        .catch { _: dynamic ->
+            onDone(null)
+        }
+}
+
+private fun rpmApplyPolToBulkPayload(obj: dynamic, stock: String) {
+    // Prefer an existing payload pol; otherwise unique-from-cache; never invent on conflict.
+    val existing = (obj.pol as? String)?.trim()?.takeIf { it.isNotEmpty() }
+    if (existing != null) return
+    val pol = rpmResolveUniquePolForStock(stock, warnOnConflict = false)
+    if (pol != null) obj.pol = pol
+}
+
+private fun rpmPayloadNeedsStockPol(obj: dynamic): Boolean {
+    val stock = (obj.stockLocation as? String)?.trim().orEmpty()
+    if (stock.isEmpty() || stock == "-") return false
+    val pol = (obj.pol as? String)?.trim()?.takeIf { it.isNotEmpty() }
+    return pol == null
+}
+
 private fun rpmBuildLeafRows(polRows: List<RixoPriceMapTreeRowLite>): List<RpmLeafRow> {
     val out = mutableListOf<RpmLeafRow>()
     for (r in polRows) {
@@ -272,7 +349,6 @@ private fun clearRpmCardInlineAdd() {
     rpmCardInlineAddCompany = ""
     rpmCardInlineAddSupplier = ""
     rpmCardInlineAddStock = ""
-    rpmCardInlineAddPol = ""
 }
 
 private fun clearRpmCardInlineEdit() {
@@ -280,7 +356,6 @@ private fun clearRpmCardInlineEdit() {
     rpmCardInlineEditCompany = ""
     rpmCardInlineEditSupplier = ""
     rpmCardInlineEditStock = ""
-    rpmCardInlineEditPol = ""
     rpmCardInlineEditCurrentLabel = ""
 }
 
@@ -299,7 +374,6 @@ private fun rpmCardInlineAddId(level: String): String = when (level) {
     "rixo_company" -> "rpmCardInlineAddCompany"
     "supplier" -> "rpmCardInlineAddSupplier"
     "stock" -> "rpmCardInlineAddStock"
-    "pol" -> "rpmCardInlineAddPol"
     else -> "rpmCardInlineAddCompany"
 }
 
@@ -307,114 +381,85 @@ private fun rpmCardInlineEditId(level: String): String = when (level) {
     "rixo_company" -> "rpmCardInlineEditCompany"
     "supplier" -> "rpmCardInlineEditSupplier"
     "stock" -> "rpmCardInlineEditStock"
-    "pol" -> "rpmCardInlineEditPol"
     else -> "rpmCardInlineEditCompany"
 }
 
 private fun rpmCardInlineAddMatchesCompanyBranch(): Boolean =
     rpmCardInlineAddLevel == "rixo_company"
 
-private fun rpmCardInlineAddMatchesSupplierBranch(company: String): Boolean =
-    rpmCardInlineAddLevel == "supplier" &&
+private fun rpmCardInlineAddMatchesStockBranch(company: String): Boolean =
+    rpmCardInlineAddLevel == "stock" &&
         rpmNormCompany(rpmCardInlineAddCompany) == rpmNormCompany(company)
 
-private fun rpmCardInlineAddMatchesStockBranch(company: String, supplier: String): Boolean =
-    rpmCardInlineAddLevel == "stock" &&
+private fun rpmCardInlineAddMatchesSupplierBranch(company: String, stock: String): Boolean =
+    rpmCardInlineAddLevel == "supplier" &&
         rpmNormCompany(rpmCardInlineAddCompany) == rpmNormCompany(company) &&
-        rpmNormSupplier(rpmCardInlineAddSupplier) == rpmNormSupplier(supplier)
-
-private fun rpmCardInlineAddMatchesPolBranch(company: String, supplier: String, stock: String): Boolean =
-    rpmCardInlineAddLevel == "pol" &&
-        rpmNormCompany(rpmCardInlineAddCompany) == rpmNormCompany(company) &&
-        rpmNormSupplier(rpmCardInlineAddSupplier) == rpmNormSupplier(supplier) &&
         rpmNormStock(rpmCardInlineAddStock) == rpmNormStock(stock)
 
-private fun rpmCardInlineAddMatchesLeafBranch(company: String, supplier: String, stock: String, pol: String): Boolean =
+private fun rpmCardInlineAddMatchesLeafBranch(company: String, stock: String, supplier: String): Boolean =
     rpmCardInlineAddLevel == "leaf" &&
         rpmNormCompany(rpmCardInlineAddCompany) == rpmNormCompany(company) &&
-        rpmNormSupplier(rpmCardInlineAddSupplier) == rpmNormSupplier(supplier) &&
         rpmNormStock(rpmCardInlineAddStock) == rpmNormStock(stock) &&
-        rpmNormPol(rpmCardInlineAddPol) == rpmNormPol(pol)
+        rpmNormSupplier(rpmCardInlineAddSupplier) == rpmNormSupplier(supplier)
 
 private fun rpmCardInlineEditTargetMatches(
     level: String,
     label: String,
     company: String,
-    supplier: String,
     stock: String,
-    pol: String,
+    supplier: String,
 ): Boolean {
     if (rpmCardInlineEditLevel != level) return false
     if (!label.equals(rpmCardInlineEditCurrentLabel, ignoreCase = true)) return false
     return when (level) {
         "rixo_company" -> rpmNormCompany(rpmCardInlineEditCompany) == rpmNormCompany(company)
-        "supplier" -> rpmNormCompany(rpmCardInlineEditCompany) == rpmNormCompany(company) &&
-            rpmNormSupplier(rpmCardInlineEditSupplier) == rpmNormSupplier(supplier)
         "stock" -> rpmNormCompany(rpmCardInlineEditCompany) == rpmNormCompany(company) &&
-            rpmNormSupplier(rpmCardInlineEditSupplier) == rpmNormSupplier(supplier) &&
             rpmNormStock(rpmCardInlineEditStock) == rpmNormStock(stock)
-        "pol" -> rpmNormCompany(rpmCardInlineEditCompany) == rpmNormCompany(company) &&
-            rpmNormSupplier(rpmCardInlineEditSupplier) == rpmNormSupplier(supplier) &&
+        "supplier" -> rpmNormCompany(rpmCardInlineEditCompany) == rpmNormCompany(company) &&
             rpmNormStock(rpmCardInlineEditStock) == rpmNormStock(stock) &&
-            rpmNormPol(rpmCardInlineEditPol) == rpmNormPol(pol)
+            rpmNormSupplier(rpmCardInlineEditSupplier) == rpmNormSupplier(supplier)
         else -> false
     }
 }
 
-/** Company skeleton: no supplier yet, stock blank or `-` — merge target for RPM_SUPPLIER. */
+/** Company skeleton: stock blank/`-`, no supplier — merge target for RPM_STOCK. */
 private fun RixoPriceMapTreeRowLite.isRpmCompanySkeleton(): Boolean =
     rpmIsBlankSupplier(auctionName) &&
         (rpmNormStock(stock) == "(no stock location)" || stock == "-") &&
         vType.isNullOrBlank() && price.isNullOrBlank()
 
-/** Supplier skeleton: supplier set, stock blank or `-` — merge target for RPM_STOCK. */
-private fun RixoPriceMapTreeRowLite.isRpmSupplierSkeleton(): Boolean =
-    !rpmIsBlankSupplier(auctionName) &&
-        (rpmNormStock(stock) == "(no stock location)" || stock == "-") &&
-        vType.isNullOrBlank() && price.isNullOrBlank()
-
-/** Stock skeleton: stock set, pol blank — merge target for RPM_POL. */
+/** Stock skeleton: stock set, supplier blank — merge target for RPM_SUPPLIER. */
 private fun RixoPriceMapTreeRowLite.isRpmStockSkeleton(): Boolean =
     rpmNormStock(stock) != "(no stock location)" && stock != "-" &&
-        rpmRowPolKey(this) == RPM_PLACEHOLDER_POL &&
+        rpmIsBlankSupplier(auctionName) &&
         vType.isNullOrBlank() && price.isNullOrBlank()
 
-/** Leaf skeleton: pol set, type/price blank — merge target for RPM_FULL. */
+/** Leaf skeleton: supplier+stock set, type/price blank — merge target for RPM_FULL. */
 private fun RixoPriceMapTreeRowLite.isRpmLeafSkeleton(): Boolean =
-    rpmRowPolKey(this) != RPM_PLACEHOLDER_POL &&
+    rpmNormStock(stock) != "(no stock location)" && stock != "-" &&
+        !rpmIsBlankSupplier(auctionName) &&
         vType.isNullOrBlank() && price.isNullOrBlank()
 
-private fun rpmMergeRowIdForSupplier(company: String): Long? {
+private fun rpmMergeRowIdForStock(company: String): Long? {
     val rows = rpmTreeRowsCache.filter { rpmNormCompany(it.company) == rpmNormCompany(company) }
-    if (rpmVisibleSuppliers(rows).isNotEmpty()) return null
+    if (rpmVisibleStocks(rows).isNotEmpty()) return null
     return rows.filter { it.isRpmCompanySkeleton() }.singleOrNull()?.id?.toLongOrNull()
 }
 
-private fun rpmMergeRowIdForStock(company: String, supplier: String): Long? {
+private fun rpmMergeRowIdForSupplier(company: String, stock: String): Long? {
     val rows = rpmTreeRowsCache.filter {
         rpmNormCompany(it.company) == rpmNormCompany(company) &&
-            rpmRowSupplierKey(it) == rpmNormSupplier(supplier)
-    }
-    if (rpmVisibleStocks(rows).isNotEmpty()) return null
-    return rows.filter { it.isRpmSupplierSkeleton() }.singleOrNull()?.id?.toLongOrNull()
-}
-
-private fun rpmMergeRowIdForPol(company: String, supplier: String, stock: String): Long? {
-    val rows = rpmTreeRowsCache.filter {
-        rpmNormCompany(it.company) == rpmNormCompany(company) &&
-            rpmRowSupplierKey(it) == rpmNormSupplier(supplier) &&
             rpmNormStock(it.stock) == rpmNormStock(stock)
     }
-    if (rpmVisiblePols(rows).isNotEmpty()) return null
+    if (rpmVisibleSuppliers(rows).isNotEmpty()) return null
     return rows.filter { it.isRpmStockSkeleton() }.singleOrNull()?.id?.toLongOrNull()
 }
 
-private fun rpmMergeRowIdForLeaf(company: String, supplier: String, stock: String, pol: String): Long? {
+private fun rpmMergeRowIdForLeaf(company: String, stock: String, supplier: String): Long? {
     val rows = rpmTreeRowsCache.filter {
         rpmNormCompany(it.company) == rpmNormCompany(company) &&
-            rpmRowSupplierKey(it) == rpmNormSupplier(supplier) &&
             rpmNormStock(it.stock) == rpmNormStock(stock) &&
-            rpmRowPolKey(it) == rpmNormPol(pol)
+            rpmRowSupplierKey(it) == rpmNormSupplier(supplier)
     }
     return rows.filter { it.isRpmLeafSkeleton() }.singleOrNull()?.id?.toLongOrNull()
 }
@@ -422,14 +467,13 @@ private fun rpmMergeRowIdForLeaf(company: String, supplier: String, stock: Strin
 private fun rpmTreeAddButtonHtml(
     level: String,
     company: String?,
-    supplier: String?,
     stock: String?,
-    pol: String?,
+    supplier: String?,
 ): String {
     val wrapClass = if (level == "leaf") "rixo-tree-add-wrap rixo-tree-add-wrap--leaf" else "rixo-tree-add-wrap"
     return """<div class="$wrapClass"><button type="button" class="rixo-tree-add-btn" data-add-level="$level"
-        data-company="${escapeHtml(company ?: "")}" data-supplier="${escapeHtml(supplier ?: "")}"
-        data-stock="${escapeHtml(stock ?: "")}" data-pol="${escapeHtml(pol ?: "")}">+ Add</button></div>"""
+        data-company="${escapeHtml(company ?: "")}" data-stock="${escapeHtml(stock ?: "")}"
+        data-supplier="${escapeHtml(supplier ?: "")}">+ Add</button></div>"""
 }
 
 private fun buildRpmCardInlineAddHtml(level: String): String {
@@ -438,7 +482,6 @@ private fun buildRpmCardInlineAddHtml(level: String): String {
         "rixo_company" -> "Enter Rixo Company"
         "supplier" -> "Select Supplier Name"
         "stock" -> "Select Stock Location"
-        "pol" -> "Select POL"
         else -> ""
     }
     val fieldPrimary = if (level == "rixo_company") {
@@ -484,9 +527,8 @@ private fun rpmTreeHeadersHtml(): String = """
                 <span class="tree-map-col-sort-icon" aria-hidden="true">↕</span>
             </button>
         </div>
-        <div class="rixo-tree-header">Supplier Name</div>
         <div class="rixo-tree-header">Stock Location</div>
-        <div class="rixo-tree-header">POL</div>
+        <div class="rixo-tree-header">Supplier Name</div>
         <div class="rixo-tree-header">Supported Vehicle Type</div>
         <div class="rixo-tree-header rixo-tree-header--price">Rixo Price</div>
     </div>
@@ -498,14 +540,11 @@ private fun buildRpmFullRowAddHtml(): String = """
             <div class="rpm-tree-full-row-col rpm-tree-full-row-col--company">
                 ${createPlainTextInput("rpmFullRowCompany", "Enter Rixo Company", required = true)}
             </div>
-            <div class="rpm-tree-full-row-col rpm-tree-full-row-col--supplier">
-                ${createEditableCombobox("rpmFullRowSupplier", "Select Supplier Name", required = true)}
-            </div>
             <div class="rpm-tree-full-row-col rpm-tree-full-row-col--stock">
                 ${createEditableCombobox("rpmFullRowStock", "Select Stock Location", required = true)}
             </div>
-            <div class="rpm-tree-full-row-col rpm-tree-full-row-col--pol">
-                ${createEditableCombobox("rpmFullRowPol", "Select POL", required = false)}
+            <div class="rpm-tree-full-row-col rpm-tree-full-row-col--supplier">
+                ${createEditableCombobox("rpmFullRowSupplier", "Select Supplier Name", required = true)}
             </div>
             <div class="rpm-tree-full-row-col rpm-tree-full-row-col--vtype">
                 ${createEditableCombobox("rpmFullRowVehicleType", "Select Vehicle Type", required = false)}
@@ -523,9 +562,8 @@ private fun buildRpmFullRowAddHtml(): String = """
 
 private fun rpmCardWrapperClass(level: String): String = when (level) {
     "rixo_company" -> "rixo-tree-card-wrapper--company"
-    "supplier" -> "rixo-tree-card-wrapper--field"
     "stock" -> "rixo-tree-card-wrapper--stock"
-    "pol" -> "rixo-tree-card-wrapper--pol"
+    "supplier" -> "rixo-tree-card-wrapper--field"
     else -> "rixo-tree-card-wrapper--field"
 }
 
@@ -539,15 +577,13 @@ private fun rpmBuildCardHtml(
     label: String,
     open: Boolean,
     pathCompany: String,
-    pathSupplier: String = "",
     pathStock: String = "",
-    pathPol: String = "",
+    pathSupplier: String = "",
 ): String {
     val selected = when (level) {
         "rixo_company" -> rpmSelectedCompany == label
-        "supplier" -> rpmSelectedSupplier == label
         "stock" -> rpmSelectedStock == label
-        "pol" -> rpmSelectedPol == label
+        "supplier" -> rpmSelectedSupplier == label
         else -> false
     }
     val selectedClass = if (selected) " rixo-tree-card--selected" else ""
@@ -555,14 +591,13 @@ private fun rpmBuildCardHtml(
     val wrapperClass = rpmCardWrapperClass(level)
     val ariaExpanded = if (open) "true" else "false"
     val useCardInline = rpmCardInlineEditLevel == level &&
-        rpmCardInlineEditTargetMatches(level, label, pathCompany, pathSupplier, pathStock, pathPol)
+        rpmCardInlineEditTargetMatches(level, label, pathCompany, pathStock, pathSupplier)
     if (useCardInline) {
         val comboboxId = rpmCardInlineEditId(level)
         val placeholder = when (level) {
             "rixo_company" -> "Enter Rixo Company"
             "supplier" -> "Select Supplier Name"
             "stock" -> "Select Stock Location"
-            "pol" -> "Select POL"
             else -> "Select value"
         }
         val comboboxHtml = if (level == "rixo_company") {
@@ -573,9 +608,8 @@ private fun rpmBuildCardHtml(
         return """
             <div class="rixo-tree-card-wrapper $wrapperClass" data-card-level="$level"
                  data-path-company="${escapeHtml(pathCompany)}"
-                 data-path-supplier="${escapeHtml(pathSupplier)}"
                  data-path-stock="${escapeHtml(pathStock)}"
-                 data-path-pol="${escapeHtml(pathPol)}">
+                 data-path-supplier="${escapeHtml(pathSupplier)}">
                 <div class="rixo-tree-card$levelClass$selectedClass rixo-tree-card--inline-editing rixo-tree-card--inline-editing-with-actions" data-level="$level" data-value="${escapeHtml(label)}" aria-expanded="$ariaExpanded">
                     <span class="rixo-tree-exp-indicator" aria-hidden="true"></span>
                     <div class="rixo-tree-card-combobox-wrap">$comboboxHtml</div>
@@ -590,9 +624,8 @@ private fun rpmBuildCardHtml(
     return """
         <div class="rixo-tree-card-wrapper $wrapperClass" data-card-level="$level"
              data-path-company="${escapeHtml(pathCompany)}"
-             data-path-supplier="${escapeHtml(pathSupplier)}"
              data-path-stock="${escapeHtml(pathStock)}"
-             data-path-pol="${escapeHtml(pathPol)}">
+             data-path-supplier="${escapeHtml(pathSupplier)}">
             <button type="button" class="rixo-tree-card$levelClass$selectedClass" data-level="$level" data-value="${escapeHtml(label)}" aria-expanded="$ariaExpanded" title="${escapeHtml(label)}">
                 <span class="rixo-tree-exp-indicator" aria-hidden="true"></span>
                 <span class="rixo-tree-label">${escapeHtml(label)}</span>
@@ -654,7 +687,7 @@ private fun buildRixoPriceMapTreeHtmlFromCache(): String {
                 $fullRowHtml
                 <div class="rixo-tree-note" style="max-width:560px;">No Rixo price mappings yet. Use Add above to create your first mapping.</div>
                 $emptyCompanyAdd
-                <div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("rixo_company", null, null, null, null)}</div>
+                <div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("rixo_company", null, null, null)}</div>
             </div>
         """.trimIndent()
     }
@@ -662,9 +695,8 @@ private fun buildRixoPriceMapTreeHtmlFromCache(): String {
     val companies = rpmSortedCompanies(list)
     if (rpmSelectedCompany !in companies) {
         rpmSelectedCompany = null
-        rpmSelectedSupplier = null
         rpmSelectedStock = null
-        rpmSelectedPol = null
+        rpmSelectedSupplier = null
     }
 
     val sb = StringBuilder()
@@ -687,93 +719,71 @@ private fun buildRixoPriceMapTreeHtmlFromCache(): String {
         sb.append(rpmBuildCardHtml("rixo_company", company, companyOpen, company))
 
         if (companyOpen) {
-            val suppliers = rpmVisibleSuppliers(companyRows)
-            if (rpmSelectedSupplier != null && rpmSelectedSupplier !in suppliers) {
-                rpmSelectedSupplier = null
+            val stocks = rpmVisibleStocks(companyRows)
+            if (rpmSelectedStock != null && rpmSelectedStock !in stocks) {
                 rpmSelectedStock = null
-                rpmSelectedPol = null
+                rpmSelectedSupplier = null
             }
             sb.append("""<div class="rixo-tree-children">""")
-            if (suppliers.isEmpty()) {
-                if (rpmCardInlineAddMatchesSupplierBranch(company)) {
-                    sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("supplier")}</div>""")
+            if (stocks.isEmpty()) {
+                if (rpmCardInlineAddMatchesStockBranch(company)) {
+                    sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("stock")}</div>""")
                 }
-                sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("supplier", company, null, null, null)}</div>""")
+                sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("stock", company, null, null)}</div>""")
             } else {
-                for (supplier in suppliers) {
-                    val supplierRows = companyRows.filter { rpmRowSupplierKey(it) == supplier }
-                    val supplierOpen = supplier == rpmSelectedSupplier
+                for (stock in stocks) {
+                    val stockRows = companyRows.filter { rpmNormStock(it.stock) == stock }
+                    val stockOpen = stock == rpmSelectedStock
                     sb.append("""<div class="rixo-tree-node">""")
-                    sb.append(rpmBuildCardHtml("supplier", supplier, supplierOpen, company, supplier))
+                    sb.append(rpmBuildCardHtml("stock", stock, stockOpen, company, stock))
 
-                    if (supplierOpen) {
-                        val stocks = rpmVisibleStocks(supplierRows)
+                    if (stockOpen) {
+                        val suppliers = rpmVisibleSuppliers(stockRows)
+                        if (rpmSelectedSupplier != null && rpmSelectedSupplier !in suppliers) {
+                            rpmSelectedSupplier = null
+                        }
                         sb.append("""<div class="rixo-tree-children">""")
-                        if (stocks.isEmpty()) {
-                            if (rpmCardInlineAddMatchesStockBranch(company, supplier)) {
-                                sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("stock")}</div>""")
+                        if (suppliers.isEmpty()) {
+                            if (rpmCardInlineAddMatchesSupplierBranch(company, stock)) {
+                                sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("supplier")}</div>""")
                             }
-                            sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("stock", company, supplier, null, null)}</div>""")
+                            sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("supplier", company, stock, null)}</div>""")
                         } else {
-                            for (stock in stocks) {
-                                val stockRows = supplierRows.filter { rpmNormStock(it.stock) == stock }
-                                val stockOpen = stock == rpmSelectedStock
+                            for (supplier in suppliers) {
+                                val supplierRows = stockRows.filter { rpmRowSupplierKey(it) == supplier }
+                                val supplierOpen = supplier == rpmSelectedSupplier
                                 sb.append("""<div class="rixo-tree-node">""")
-                                sb.append(rpmBuildCardHtml("stock", stock, stockOpen, company, supplier, stock))
+                                sb.append(rpmBuildCardHtml("supplier", supplier, supplierOpen, company, stock, supplier))
 
-                                if (stockOpen) {
-                                    val pols = rpmVisiblePols(stockRows)
-                                    sb.append("""<div class="rixo-tree-children">""")
-                                    if (pols.isEmpty()) {
-                                        if (rpmCardInlineAddMatchesPolBranch(company, supplier, stock)) {
-                                            sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("pol")}</div>""")
-                                        }
-                                        sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("pol", company, supplier, stock, null)}</div>""")
-                                    } else {
-                                        for (pol in pols) {
-                                            val polRows = stockRows.filter { rpmRowPolKey(it) == pol }
-                                            val polOpen = pol == rpmSelectedPol
-                                            sb.append("""<div class="rixo-tree-node">""")
-                                            sb.append(rpmBuildCardHtml("pol", pol, polOpen, company, supplier, stock, pol))
-
-                                            if (polOpen) {
-                                                val leaves = rpmBuildLeafRows(polRows)
-                                                sb.append("""<div class="rixo-tree-children"><div class="rixo-tree-leaf-wrap"><div class="rixo-tree-leaf-grid">""")
-                                                var seq = 0
-                                                for (leaf in leaves) {
-                                                    val base = polRows.firstOrNull { it.id.toLongOrNull() == leaf.id }
-                                                    if (base != null) sb.append(rpmBuildLeafRowHtml(leaf, base, seq++))
-                                                }
-                                                if (rpmCardInlineAddMatchesLeafBranch(company, supplier, stock, pol)) {
-                                                    sb.append(buildRpmLeafInlineAddHtml())
-                                                }
-                                                sb.append(rpmTreeAddButtonHtml("leaf", company, supplier, stock, pol))
-                                                sb.append("""</div></div></div>""")
-                                            }
-                                            sb.append("""</div>""")
-                                        }
-                                        if (rpmCardInlineAddMatchesPolBranch(company, supplier, stock)) {
-                                            sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("pol")}</div>""")
-                                        }
-                                        sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("pol", company, supplier, stock, null)}</div>""")
+                                if (supplierOpen) {
+                                    val leaves = rpmBuildLeafRows(supplierRows)
+                                    sb.append("""<div class="rixo-tree-children"><div class="rixo-tree-leaf-wrap"><div class="rixo-tree-leaf-grid">""")
+                                    var seq = 0
+                                    for (leaf in leaves) {
+                                        val base = supplierRows.firstOrNull { it.id.toLongOrNull() == leaf.id }
+                                        if (base != null) sb.append(rpmBuildLeafRowHtml(leaf, base, seq++))
                                     }
-                                    sb.append("""</div>""")
+                                    if (rpmCardInlineAddMatchesLeafBranch(company, stock, supplier)) {
+                                        sb.append(buildRpmLeafInlineAddHtml())
+                                    }
+                                    sb.append(rpmTreeAddButtonHtml("leaf", company, stock, supplier))
+                                    sb.append("""</div></div></div>""")
                                 }
                                 sb.append("""</div>""")
                             }
-                            if (rpmCardInlineAddMatchesStockBranch(company, supplier)) {
-                                sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("stock")}</div>""")
+                            if (rpmCardInlineAddMatchesSupplierBranch(company, stock)) {
+                                sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("supplier")}</div>""")
                             }
-                            sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("stock", company, supplier, null, null)}</div>""")
+                            sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("supplier", company, stock, null)}</div>""")
                         }
                         sb.append("""</div>""")
                     }
                     sb.append("""</div>""")
                 }
-                if (rpmCardInlineAddMatchesSupplierBranch(company)) {
-                    sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("supplier")}</div>""")
+                if (rpmCardInlineAddMatchesStockBranch(company)) {
+                    sb.append("""<div class="rixo-tree-node">${buildRpmCardInlineAddHtml("stock")}</div>""")
                 }
-                sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("supplier", company, null, null, null)}</div>""")
+                sb.append("""<div class="rixo-tree-col-footer">${rpmTreeAddButtonHtml("stock", company, null, null)}</div>""")
             }
             sb.append("""</div>""")
         }
@@ -835,12 +845,11 @@ private fun rpmEnsureMasterOptions(callback: (Boolean) -> Unit) {
     requests.push(window.fetch(apiUrl("rixo-mapping/distinct-rixo-companies")))
     requests.push(window.fetch(apiUrl("rixo-mapping/distinct-auction-names")))
     requests.push(window.fetch(apiUrl("master-menu/stock_location")))
-    requests.push(window.fetch(apiUrl("master-menu/pol")))
     requests.push(window.fetch(apiUrl("master-menu/type_of_vehicle")))
     js("Promise.all")(requests)
         .then { responses: dynamic ->
             val parsePromises = js("[]")
-            for (i in 0 until 5) {
+            for (i in 0 until 4) {
                 val resp = responses[i]
                 parsePromises.push(if (resp.ok as Boolean) resp.json() else js("Promise.resolve([])"))
             }
@@ -850,8 +859,7 @@ private fun rpmEnsureMasterOptions(callback: (Boolean) -> Unit) {
             rpmMasterCompanies = rpmFilterRealCompanies(parseMasterListArray(results[0])).sortedBy { it.lowercase() }
             rpmMasterSuppliers = parseMasterListArray(results[1]).distinct().sortedBy { it.lowercase() }
             rpmMasterStocks = parseMasterListArray(results[2]).distinct().sortedBy { it.lowercase() }
-            rpmMasterPols = parseMasterListArray(results[3]).distinct().sortedBy { it.lowercase() }
-            rpmMasterVehicleTypes = parseMasterListArray(results[4]).distinct().sortedBy { it.lowercase() }
+            rpmMasterVehicleTypes = parseMasterListArray(results[3]).distinct().sortedBy { it.lowercase() }
             rpmMasterOptionsReady = true
             callback(true)
         }
@@ -882,25 +890,18 @@ private fun rpmPopulateCombobox(selectId: String, values: List<String>, selected
 private fun rpmRowsForBranch(
     level: String,
     company: String,
-    supplier: String,
     stock: String,
-    pol: String,
+    supplier: String,
 ): List<RixoPriceMapTreeRowLite> = when (level) {
     "rixo_company" -> rpmTreeRowsCache.filter { rpmNormCompany(it.company) == rpmNormCompany(company) }
-    "supplier" -> rpmTreeRowsCache.filter {
-        rpmNormCompany(it.company) == rpmNormCompany(company) &&
-            rpmRowSupplierKey(it) == rpmNormSupplier(supplier)
-    }
     "stock" -> rpmTreeRowsCache.filter {
         rpmNormCompany(it.company) == rpmNormCompany(company) &&
-            rpmRowSupplierKey(it) == rpmNormSupplier(supplier) &&
             rpmNormStock(it.stock) == rpmNormStock(stock)
     }
-    "pol" -> rpmTreeRowsCache.filter {
+    "supplier" -> rpmTreeRowsCache.filter {
         rpmNormCompany(it.company) == rpmNormCompany(company) &&
-            rpmRowSupplierKey(it) == rpmNormSupplier(supplier) &&
             rpmNormStock(it.stock) == rpmNormStock(stock) &&
-            rpmRowPolKey(it) == rpmNormPol(pol)
+            rpmRowSupplierKey(it) == rpmNormSupplier(supplier)
     }
     else -> emptyList()
 }
@@ -910,13 +911,14 @@ private fun rpmPutPayloadFromRow(
     newCompany: String? = null,
     newSupplier: String? = null,
     newStock: String? = null,
-    newPol: String? = null,
     pathEditOnly: Boolean = false,
 ): dynamic {
     val p = js("{}")
     p.rixoCompany = (newCompany ?: row.company).trim()
     p.stockLocation = (newStock ?: row.stock).trim()
-    p.pol = (newPol ?: row.pol)?.trim()?.takeIf { it.isNotEmpty() }
+    // Never send null/blank pol — omit so backend keeps existing value (healPol).
+    val existingPol = row.pol?.trim()?.takeIf { it.isNotEmpty() }
+    if (existingPol != null) p.pol = existingPol
     val auction = newSupplier ?: row.auctionName
     p.auctionName = auction?.trim()?.takeIf { it.isNotEmpty() }
     p.venueId = row.venueId?.trim()?.takeIf { it.isNotEmpty() }
@@ -972,14 +974,13 @@ private fun runRpmPutBatchSequential(
 private fun postRpmMappingBulkOneRow(
     insertMode: String?,
     company: String,
-    supplier: String,
     stock: String,
-    pol: String,
+    supplier: String,
     vtype: String,
     price: String,
     onSuccess: () -> Unit,
 ) {
-    if (rpmRejectIfSemicolon(company, supplier, stock, pol, vtype, price)) return
+    if (rpmRejectIfSemicolon(company, stock, supplier, vtype, price)) return
     val mode = insertMode ?: "RPM_FULL"
     val obj: dynamic = js("{}")
     when (mode) {
@@ -989,40 +990,30 @@ private fun postRpmMappingBulkOneRow(
             obj.rixoCompany = company.trim()
             obj.stockLocation = "-"
         }
-        "RPM_SUPPLIER" -> {
-            if (company.isBlank() || supplier.isBlank()) {
-                showMessage("Company and supplier name are required", "error"); return
-            }
-            obj.insertMode = "RPM_SUPPLIER"
-            obj.rixoCompany = company.trim()
-            obj.auctionName = supplier.trim()
-            obj.stockLocation = "-"
-            rpmApplyVenueToBulkPayload(obj, supplier)
-        }
         "RPM_STOCK" -> {
-            if (company.isBlank() || supplier.isBlank() || stock.isBlank()) {
-                showMessage("Company, supplier, and stock location are required", "error"); return
+            if (company.isBlank() || stock.isBlank()) {
+                showMessage("Company and stock location are required", "error"); return
             }
             obj.insertMode = "RPM_STOCK"
             obj.rixoCompany = company.trim()
-            obj.auctionName = supplier.trim()
             obj.stockLocation = stock.trim()
-            rpmApplyVenueToBulkPayload(obj, supplier)
+            // Auction left unset so stock-before-supplier skeletons stay blank/`-`.
+            rpmApplyPolToBulkPayload(obj, stock)
         }
-        "RPM_POL" -> {
-            if (company.isBlank() || supplier.isBlank() || stock.isBlank() || pol.isBlank() || pol == RPM_PLACEHOLDER_POL) {
-                showMessage("POL is required", "error"); return
+        "RPM_SUPPLIER" -> {
+            if (company.isBlank() || stock.isBlank() || supplier.isBlank()) {
+                showMessage("Company, stock location, and supplier name are required", "error"); return
             }
-            obj.insertMode = "RPM_POL"
+            obj.insertMode = "RPM_SUPPLIER"
             obj.rixoCompany = company.trim()
-            obj.auctionName = supplier.trim()
             obj.stockLocation = stock.trim()
-            obj.pol = pol.trim()
+            obj.auctionName = supplier.trim()
             rpmApplyVenueToBulkPayload(obj, supplier)
+            rpmApplyPolToBulkPayload(obj, stock)
         }
         else -> {
-            if (company.isBlank() || supplier.isBlank() || stock.isBlank()) {
-                showMessage("Complete the path (Rixo company, supplier, and stock location)", "error"); return
+            if (company.isBlank() || stock.isBlank() || supplier.isBlank()) {
+                showMessage("Complete the path (Rixo company, stock location, and supplier)", "error"); return
             }
             if (vtype.isNotBlank() && !rpmListContains(rpmMasterVehicleTypes, vtype)) {
                 showMessage("Please select a vehicle type from the list", "error"); return
@@ -1032,47 +1023,58 @@ private fun postRpmMappingBulkOneRow(
             }
             obj.insertMode = if (mode == "FULL") "FULL" else "RPM_FULL"
             obj.rixoCompany = company.trim()
-            obj.auctionName = supplier.trim()
             obj.stockLocation = stock.trim()
-            obj.pol = pol.trim().takeIf { it.isNotEmpty() && it != RPM_PLACEHOLDER_POL }
+            obj.auctionName = supplier.trim()
+            rpmApplyVenueToBulkPayload(obj, supplier)
+            rpmApplyPolToBulkPayload(obj, stock)
             obj.supportedVehicleType = vtype.trim().takeIf { it.isNotEmpty() }
             obj.rixoPrice = if (price.isBlank()) price else rpmNormalizePriceForDb(price)
-            rpmApplyVenueToBulkPayload(obj, supplier)
         }
     }
     val mergeId = when (mode) {
         "RPM_COMPANY" -> null
-        "RPM_SUPPLIER" -> rpmMergeRowIdForSupplier(company)
-        "RPM_STOCK" -> rpmMergeRowIdForStock(company, supplier)
-        "RPM_POL" -> rpmMergeRowIdForPol(company, supplier, stock)
-        "RPM_FULL", "FULL" -> rpmMergeRowIdForLeaf(company, supplier, stock, pol)
-        else -> rpmMergeRowIdForLeaf(company, supplier, stock, pol)
+        "RPM_STOCK" -> rpmMergeRowIdForStock(company)
+        "RPM_SUPPLIER" -> rpmMergeRowIdForSupplier(company, stock)
+        "RPM_FULL", "FULL" -> rpmMergeRowIdForLeaf(company, stock, supplier)
+        else -> rpmMergeRowIdForLeaf(company, stock, supplier)
     }
     if (mergeId != null) obj.id = mergeId.toDouble()
-    val payload = js("{}")
-    payload.rows = arrayOf(obj)
-    window.fetch(apiUrl("rixo-mapping/bulk"), js("""{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
-        .then { resp: dynamic ->
-            resp.json().then { result: dynamic ->
-                val pair = js("{}")
-                pair.resp = resp
-                pair.result = result
-                pair
+    fun sendBulk() {
+        val payload = js("{}")
+        payload.rows = arrayOf(obj)
+        window.fetch(apiUrl("rixo-mapping/bulk"), js("""{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
+            .then { resp: dynamic ->
+                resp.json().then { result: dynamic ->
+                    val pair = js("{}")
+                    pair.resp = resp
+                    pair.result = result
+                    pair
+                }
             }
-        }
-        .then { pair: dynamic ->
-            if (pair.resp.ok && (pair.result.success as? Boolean == true)) {
-                rpmDispatchUpdated()
-                onSuccess()
-                showMessage(pair.result.message?.toString() ?: "Mapping added", "success")
-            } else {
-                showMessage(pair.result.message?.toString() ?: "Failed to add mapping", "error")
+            .then { pair: dynamic ->
+                if (pair.resp.ok && (pair.result.success as? Boolean == true)) {
+                    rpmDispatchUpdated()
+                    onSuccess()
+                    showMessage(pair.result.message?.toString() ?: "Mapping added", "success")
+                } else {
+                    showMessage(pair.result.message?.toString() ?: "Failed to add mapping", "error")
+                }
             }
+            .catch { err: dynamic ->
+                Logger.error("Rixo price map add failed: ${err.toString()}")
+                showMessage("Failed to add mapping", "error")
+            }
+    }
+    if (rpmPayloadNeedsStockPol(obj)) {
+        val stockKey = (obj.stockLocation as? String)?.trim().orEmpty()
+        val auctionKey = (obj.auctionName as? String)?.trim()?.takeIf { it.isNotEmpty() && it != "-" }
+        rpmResolvePolForStockAsync(stockKey, auctionKey) { apiPol ->
+            if (apiPol != null) obj.pol = apiPol
+            sendBulk()
         }
-        .catch { err: dynamic ->
-            Logger.error("Rixo price map add failed: ${err.toString()}")
-            showMessage("Failed to add mapping", "error")
-        }
+    } else {
+        sendBulk()
+    }
 }
 
 private fun wireRpmInlineAddComboboxes() {
@@ -1080,7 +1082,6 @@ private fun wireRpmInlineAddComboboxes() {
         "rixo_company" -> Unit // plain text — no dropdown options
         "supplier" -> rpmPopulateCombobox("rpmCardInlineAddSupplier", rpmMasterSuppliers, "")
         "stock" -> rpmPopulateCombobox("rpmCardInlineAddStock", rpmMasterStocks, "")
-        "pol" -> rpmPopulateCombobox("rpmCardInlineAddPol", rpmMasterPols, "")
         "leaf" -> {
             rpmPopulateCombobox("rpmCardInlineAddLeafType", rpmMasterVehicleTypes, "")
             (document.getElementById("rpmCardInlineAddLeafPrice") as? HTMLInputElement)?.value = ""
@@ -1096,16 +1097,14 @@ private fun wireRpmCardInlineCombobox() {
         "rixo_company" -> Unit // plain text — value set via createPlainTextInput initialValue
         "supplier" -> rpmPopulateCombobox(id, rpmMasterSuppliers, rpmCardInlineEditCurrentLabel)
         "stock" -> rpmPopulateCombobox(id, rpmMasterStocks, rpmCardInlineEditCurrentLabel)
-        "pol" -> rpmPopulateCombobox(id, rpmMasterPols, rpmCardInlineEditCurrentLabel)
         else -> Unit
     }
 }
 
 private fun wireRpmFullRowAddComboboxes() {
     // Rixo Company is plain text (no dropdown).
-    rpmPopulateCombobox("rpmFullRowSupplier", rpmMasterSuppliers, "")
     rpmPopulateCombobox("rpmFullRowStock", rpmMasterStocks, "")
-    rpmPopulateCombobox("rpmFullRowPol", rpmMasterPols, "")
+    rpmPopulateCombobox("rpmFullRowSupplier", rpmMasterSuppliers, "")
     rpmPopulateCombobox("rpmFullRowVehicleType", rpmMasterVehicleTypes, "")
     (document.getElementById("rpmFullRowPrice") as? HTMLInputElement)?.value = ""
 }
@@ -1129,9 +1128,8 @@ private fun startRpmFullRowAdd(root: HTMLElement) {
 
 private fun executeRpmFullRowAddSave() {
     val company = getEditableComboboxValue("rpmFullRowCompany").trim()
-    val supplier = getEditableComboboxValue("rpmFullRowSupplier").trim()
     val stock = getEditableComboboxValue("rpmFullRowStock").trim()
-    val pol = getEditableComboboxValue("rpmFullRowPol").trim()
+    val supplier = getEditableComboboxValue("rpmFullRowSupplier").trim()
     val vtype = getEditableComboboxValue("rpmFullRowVehicleType").trim()
     val price = (document.getElementById("rpmFullRowPrice") as? HTMLInputElement)?.value?.trim().orEmpty()
     if (company.isEmpty()) {
@@ -1140,11 +1138,11 @@ private fun executeRpmFullRowAddSave() {
     if (rpmIsBlankCompany(company)) {
         showMessage("Rixo company cannot be blank or '-'", "error"); return
     }
-    if (supplier.isEmpty()) {
-        showMessage("Supplier name is required", "error"); return
-    }
     if (stock.isEmpty() || !rpmListContains(rpmMasterStocks, stock)) {
         showMessage("Please select a stock location from the list", "error"); return
+    }
+    if (supplier.isEmpty()) {
+        showMessage("Supplier name is required", "error"); return
     }
     if (vtype.isNotBlank() && !rpmListContains(rpmMasterVehicleTypes, vtype)) {
         showMessage("Please select a vehicle type from the list", "error"); return
@@ -1152,12 +1150,11 @@ private fun executeRpmFullRowAddSave() {
     if (price.isNotBlank() && rpmParseMoney(price) == null) {
         showMessage("Rixo price must be numeric", "error"); return
     }
-    postRpmMappingBulkOneRow(null, company, supplier, stock, pol, vtype, price) {
+    postRpmMappingBulkOneRow(null, company, stock, supplier, vtype, price) {
         clearRpmFullRowAdd()
         rpmSelectedCompany = rpmNormCompany(company)
-        rpmSelectedSupplier = rpmNormSupplier(supplier)
         rpmSelectedStock = rpmNormStock(stock)
-        rpmSelectedPol = pol.takeIf { it.isNotEmpty() }?.let { rpmNormPol(it) }
+        rpmSelectedSupplier = rpmNormSupplier(supplier)
         rpmMasterOptionsReady = false
         refreshRixoPriceMapTreeData()
     }
@@ -1229,9 +1226,8 @@ private fun bindRpmSearchToolbar() {
 private fun startRpmInlineAdd(
     level: String,
     pathCompany: String,
-    pathSupplier: String,
     pathStock: String,
-    pathPol: String,
+    pathSupplier: String,
     root: HTMLElement,
 ) {
     rpmLeafInlineEditMappingId = null
@@ -1242,47 +1238,34 @@ private fun startRpmInlineAdd(
         "rixo_company" -> {
             // Root-level company add when list empty
         }
-        "supplier" -> {
+        "stock" -> {
             if (pathCompany.isEmpty()) { showMessage("Select a Rixo company first", "error"); return }
             rpmSelectedCompany = rpmNormCompany(pathCompany)
+            rpmSelectedStock = null
             rpmSelectedSupplier = null
-            rpmSelectedStock = null
-            rpmSelectedPol = null
         }
-        "stock" -> {
-            if (pathCompany.isEmpty() || pathSupplier.isEmpty()) {
-                showMessage("Select company and supplier first", "error"); return
+        "supplier" -> {
+            if (pathCompany.isEmpty() || pathStock.isEmpty()) {
+                showMessage("Select company and stock location first", "error"); return
             }
             rpmSelectedCompany = rpmNormCompany(pathCompany)
-            rpmSelectedSupplier = rpmNormSupplier(pathSupplier)
-            rpmSelectedStock = null
-            rpmSelectedPol = null
-        }
-        "pol" -> {
-            if (pathCompany.isEmpty() || pathSupplier.isEmpty() || pathStock.isEmpty()) {
-                showMessage("Select company, supplier, and stock first", "error"); return
-            }
-            rpmSelectedCompany = rpmNormCompany(pathCompany)
-            rpmSelectedSupplier = rpmNormSupplier(pathSupplier)
             rpmSelectedStock = rpmNormStock(pathStock)
-            rpmSelectedPol = null
+            rpmSelectedSupplier = null
         }
         "leaf" -> {
-            if (pathCompany.isEmpty() || pathSupplier.isEmpty() || pathStock.isEmpty() || pathPol.isEmpty()) {
-                showMessage("Select company, supplier, stock, and POL first", "error"); return
+            if (pathCompany.isEmpty() || pathStock.isEmpty() || pathSupplier.isEmpty()) {
+                showMessage("Select company, stock location, and supplier first", "error"); return
             }
             rpmSelectedCompany = rpmNormCompany(pathCompany)
-            rpmSelectedSupplier = rpmNormSupplier(pathSupplier)
             rpmSelectedStock = rpmNormStock(pathStock)
-            rpmSelectedPol = rpmNormPol(pathPol)
+            rpmSelectedSupplier = rpmNormSupplier(pathSupplier)
         }
         else -> return
     }
     rpmCardInlineAddLevel = level
     rpmCardInlineAddCompany = pathCompany.trim()
-    rpmCardInlineAddSupplier = pathSupplier.trim()
     rpmCardInlineAddStock = pathStock.trim()
-    rpmCardInlineAddPol = pathPol.trim()
+    rpmCardInlineAddSupplier = pathSupplier.trim()
     rpmEnsureMasterOptions { ok ->
         if (!ok) {
             clearRpmCardInlineAdd()
@@ -1305,43 +1288,33 @@ private fun executeRpmCardInlineAddSave() {
                 showMessage("Rixo company cannot be blank or '-'", "error"); return
             }
             if (rpmRejectIfSemicolon(company)) return
-            postRpmMappingBulkOneRow("RPM_COMPANY", company, "", "", "", "", "") {
+            postRpmMappingBulkOneRow("RPM_COMPANY", company, "", "", "", "") {
                 clearRpmCardInlineAdd()
                 rpmSelectedCompany = rpmNormCompany(company)
                 rpmMasterOptionsReady = false
                 refreshRixoPriceMapTreeData()
             }
         }
-        "supplier" -> {
-            val company = rpmFirstNonBlank(rpmCardInlineAddCompany, rpmSelectedCompany)
-            val supplier = getEditableComboboxValue("rpmCardInlineAddSupplier").trim()
-            if (supplier.isEmpty()) { showMessage("Supplier name is required", "error"); return }
-            postRpmMappingBulkOneRow("RPM_SUPPLIER", company, supplier, "", "", "", "") {
-                clearRpmCardInlineAdd()
-                rpmSelectedSupplier = rpmNormSupplier(supplier)
-                refreshRixoPriceMapTreeData()
-            }
-        }
         "stock" -> {
             val company = rpmFirstNonBlank(rpmCardInlineAddCompany, rpmSelectedCompany)
-            val supplier = rpmFirstNonBlank(rpmCardInlineAddSupplier, rpmSelectedSupplier)
             val stock = getEditableComboboxValue("rpmCardInlineAddStock").trim()
             if (stock.isEmpty() || !rpmListContains(rpmMasterStocks, stock)) {
                 showMessage("Please select a stock location from the list", "error"); return
             }
-            postRpmMappingBulkOneRow("RPM_STOCK", company, supplier, stock, "", "", "") {
+            postRpmMappingBulkOneRow("RPM_STOCK", company, stock, "", "", "") {
                 clearRpmCardInlineAdd()
+                rpmSelectedStock = rpmNormStock(stock)
                 refreshRixoPriceMapTreeData()
             }
         }
-        "pol" -> {
+        "supplier" -> {
             val company = rpmFirstNonBlank(rpmCardInlineAddCompany, rpmSelectedCompany)
-            val supplier = rpmFirstNonBlank(rpmCardInlineAddSupplier, rpmSelectedSupplier)
             val stock = rpmFirstNonBlank(rpmCardInlineAddStock, rpmSelectedStock)
-            val pol = getEditableComboboxValue("rpmCardInlineAddPol").trim()
-            if (pol.isEmpty()) { showMessage("POL is required", "error"); return }
-            postRpmMappingBulkOneRow("RPM_POL", company, supplier, stock, pol, "", "") {
+            val supplier = getEditableComboboxValue("rpmCardInlineAddSupplier").trim()
+            if (supplier.isEmpty()) { showMessage("Supplier name is required", "error"); return }
+            postRpmMappingBulkOneRow("RPM_SUPPLIER", company, stock, supplier, "", "") {
                 clearRpmCardInlineAdd()
+                rpmSelectedSupplier = rpmNormSupplier(supplier)
                 refreshRixoPriceMapTreeData()
             }
         }
@@ -1352,9 +1325,8 @@ private fun executeRpmCardInlineAddSave() {
 private fun executeRpmLeafInlineAddSave() {
     if (rpmCardInlineAddLevel != "leaf") return
     val company = rpmFirstNonBlank(rpmCardInlineAddCompany, rpmSelectedCompany)
-    val supplier = rpmFirstNonBlank(rpmCardInlineAddSupplier, rpmSelectedSupplier)
     val stock = rpmFirstNonBlank(rpmCardInlineAddStock, rpmSelectedStock)
-    val pol = rpmFirstNonBlank(rpmCardInlineAddPol, rpmSelectedPol)
+    val supplier = rpmFirstNonBlank(rpmCardInlineAddSupplier, rpmSelectedSupplier)
     val vtype = getEditableComboboxValue("rpmCardInlineAddLeafType").trim()
     val price = (document.getElementById("rpmCardInlineAddLeafPrice") as? HTMLInputElement)?.value?.trim().orEmpty()
     if (vtype.isNotBlank() && !rpmListContains(rpmMasterVehicleTypes, vtype)) {
@@ -1363,7 +1335,7 @@ private fun executeRpmLeafInlineAddSave() {
     if (price.isNotBlank() && rpmParseMoney(price) == null) {
         showMessage("Rixo price must be numeric", "error"); return
     }
-    postRpmMappingBulkOneRow(null, company, supplier, stock, pol, vtype, price) {
+    postRpmMappingBulkOneRow(null, company, stock, supplier, vtype, price) {
         clearRpmCardInlineAdd()
         refreshRixoPriceMapTreeData()
     }
@@ -1378,9 +1350,8 @@ private fun cancelRpmCardInlineEdit(root: HTMLElement) {
 private fun executeRpmCardInlineSave(root: HTMLElement) {
     val level = rpmCardInlineEditLevel ?: return
     val pathCompany = rpmCardInlineEditCompany
-    val pathSupplier = rpmCardInlineEditSupplier
     val pathStock = rpmCardInlineEditStock
-    val pathPol = rpmCardInlineEditPol
+    val pathSupplier = rpmCardInlineEditSupplier
     val currentLabel = rpmCardInlineEditCurrentLabel
     val comboboxId = rpmCardInlineEditId(level)
     val newVal = getEditableComboboxValue(comboboxId).trim()
@@ -1391,7 +1362,7 @@ private fun executeRpmCardInlineSave(root: HTMLElement) {
         return
     }
     val listOk = when (level) {
-        "pol", "supplier", "rixo_company" -> true
+        "supplier", "rixo_company" -> true
         "stock" -> rpmListContains(rpmMasterStocks, newVal)
         else -> false
     }
@@ -1401,19 +1372,17 @@ private fun executeRpmCardInlineSave(root: HTMLElement) {
     }
     val branchKey = when (level) {
         "rixo_company" -> currentLabel
-        "supplier" -> pathSupplier
         "stock" -> pathStock
-        "pol" -> pathPol
+        "supplier" -> pathSupplier
         else -> currentLabel
     }
-    val rows = rpmRowsForBranch(level, pathCompany, pathSupplier, pathStock, branchKey).distinctBy { it.id }
+    val rows = rpmRowsForBranch(level, pathCompany, pathStock, branchKey).distinctBy { it.id }
     if (rows.isEmpty()) { showMessage("No rows to update", "error"); return }
     val payloadBuilder: (RixoPriceMapTreeRowLite) -> dynamic = { row ->
         when (level) {
             "rixo_company" -> rpmPutPayloadFromRow(row, newCompany = newVal, pathEditOnly = true)
-            "supplier" -> rpmPutPayloadFromRow(row, newSupplier = newVal, pathEditOnly = true)
             "stock" -> rpmPutPayloadFromRow(row, newStock = newVal, pathEditOnly = true)
-            "pol" -> rpmPutPayloadFromRow(row, newPol = newVal, pathEditOnly = true)
+            "supplier" -> rpmPutPayloadFromRow(row, newSupplier = newVal, pathEditOnly = true)
             else -> rpmPutPayloadFromRow(row)
         }
     }
@@ -1422,9 +1391,8 @@ private fun executeRpmCardInlineSave(root: HTMLElement) {
             clearRpmCardInlineEdit()
             when (level) {
                 "rixo_company" -> if (rpmSelectedCompany == rpmNormCompany(pathCompany)) rpmSelectedCompany = rpmNormCompany(newVal)
-                "supplier" -> if (rpmSelectedSupplier == rpmNormSupplier(pathSupplier)) rpmSelectedSupplier = rpmNormSupplier(newVal)
                 "stock" -> if (rpmSelectedStock == rpmNormStock(pathStock)) rpmSelectedStock = rpmNormStock(newVal)
-                "pol" -> if (rpmSelectedPol == rpmNormPol(pathPol)) rpmSelectedPol = rpmNormPol(newVal)
+                "supplier" -> if (rpmSelectedSupplier == rpmNormSupplier(pathSupplier)) rpmSelectedSupplier = rpmNormSupplier(newVal)
             }
             rpmDispatchUpdated()
             refreshRixoPriceMapTreeData()
@@ -1444,25 +1412,22 @@ private fun rpmRerenderTree(root: HTMLElement) {
 
 private fun rpmBranchDeleteTitle(level: String): String = when (level) {
     "rixo_company" -> "Delete company branch?"
-    "supplier" -> "Delete supplier branch?"
     "stock" -> "Delete stock branch?"
-    "pol" -> "Delete POL branch?"
+    "supplier" -> "Delete supplier branch?"
     else -> "Delete branch?"
 }
 
 private fun rpmBranchDeleteMessageHtml(
     level: String,
     company: String,
-    supplier: String,
     stock: String,
     label: String,
     rowCount: Int,
 ): String {
     val pathParts = when (level) {
         "rixo_company" -> listOf(label)
-        "supplier" -> listOf(company, label)
-        "stock" -> listOf(company, supplier, label)
-        "pol" -> listOf(company, supplier, stock, label)
+        "stock" -> listOf(company, label)
+        "supplier" -> listOf(company, stock, label)
         else -> listOf(label)
     }.filter { it.isNotBlank() }
     val pathLine = pathParts.joinToString(" → ") { escapeHtml(it) }
@@ -1480,9 +1445,8 @@ private fun rpmLeafDeleteMessageHtml(baseRow: RixoPriceMapTreeRowLite, typeLabel
     val price = rpmFormatPriceDisplay(baseRow.price)
     val path = listOfNotNull(
         baseRow.company.takeIf { it.isNotBlank() },
-        baseRow.auctionName?.takeIf { it.isNotBlank() },
         baseRow.stock.takeIf { it.isNotBlank() && it != "-" },
-        baseRow.pol?.takeIf { it.isNotBlank() },
+        baseRow.auctionName?.takeIf { it.isNotBlank() },
     ).joinToString(" → ") { escapeHtml(it) }
     return "Delete mapping?<br><br>" +
         "Type: <strong>${escapeHtml(type)}</strong><br>" +
@@ -1515,14 +1479,13 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
             ev.preventDefault()
             ev.stopPropagation()
             val level = addBtn.getAttribute("data-add-level").orEmpty()
-            if (level !in setOf("rixo_company", "supplier", "stock", "pol", "leaf")) return@click
+            if (level !in setOf("rixo_company", "stock", "supplier", "leaf")) return@click
             clearRpmFullRowAdd()
             startRpmInlineAdd(
                 level,
                 addBtn.getAttribute("data-company")?.trim().orEmpty(),
-                addBtn.getAttribute("data-supplier")?.trim().orEmpty(),
                 addBtn.getAttribute("data-stock")?.trim().orEmpty(),
-                addBtn.getAttribute("data-pol")?.trim().orEmpty(),
+                addBtn.getAttribute("data-supplier")?.trim().orEmpty(),
                 root,
             )
             return@click
@@ -1536,11 +1499,10 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
             val action = menuItem.getAttribute("data-menu-action").orEmpty()
             val wrap = menuItem.closest(".rixo-tree-card-wrapper") as? HTMLElement ?: return@click
             val level = wrap.getAttribute("data-card-level").orEmpty()
-            if (level !in setOf("rixo_company", "supplier", "stock", "pol")) return@click
+            if (level !in setOf("rixo_company", "stock", "supplier")) return@click
             val company = wrap.getAttribute("data-path-company").orEmpty()
-            val supplier = wrap.getAttribute("data-path-supplier").orEmpty()
             val stock = wrap.getAttribute("data-path-stock").orEmpty()
-            val pol = wrap.getAttribute("data-path-pol").orEmpty()
+            val supplier = wrap.getAttribute("data-path-supplier").orEmpty()
             val label = wrap.querySelector(".rixo-tree-card")?.getAttribute("data-value").orEmpty()
             when (action) {
                 "edit" -> {
@@ -1550,9 +1512,8 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
                     clearRpmFullRowAdd()
                     rpmCardInlineEditLevel = level
                     rpmCardInlineEditCompany = company
-                    rpmCardInlineEditSupplier = supplier
                     rpmCardInlineEditStock = stock
-                    rpmCardInlineEditPol = pol
+                    rpmCardInlineEditSupplier = supplier
                     rpmCardInlineEditCurrentLabel = label
                     rpmEnsureMasterOptions { ok ->
                         if (!ok) {
@@ -1571,12 +1532,9 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
                             rpmNormCompany(row.company) == rpmNormCompany(company) &&
                                 when (level) {
                                     "rixo_company" -> true
-                                    "supplier" -> rpmRowSupplierKey(row) == rpmNormSupplier(label)
-                                    "stock" -> rpmRowSupplierKey(row) == rpmNormSupplier(supplier) &&
-                                        rpmNormStock(row.stock) == label
-                                    "pol" -> rpmRowSupplierKey(row) == rpmNormSupplier(supplier) &&
-                                        rpmNormStock(row.stock) == rpmNormStock(stock) &&
-                                        rpmRowPolKey(row) == label
+                                    "stock" -> rpmNormStock(row.stock) == label
+                                    "supplier" -> rpmNormStock(row.stock) == rpmNormStock(stock) &&
+                                        rpmRowSupplierKey(row) == rpmNormSupplier(label)
                                     else -> false
                                 }
                         }
@@ -1585,7 +1543,7 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
                         showRixoMappingDeleteConfirm(
                             title = rpmBranchDeleteTitle(level),
                             messageHtml = rpmBranchDeleteMessageHtml(
-                                level, company, supplier, stock, label, rowsToDelete.size,
+                                level, company, stock, label, rowsToDelete.size,
                             ),
                             onConfirm = {
                                 fun deleteNext(idx: Int) {
@@ -1751,7 +1709,9 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
             payload.stockLocation = baseRow.stock
             payload.venueId = baseRow.venueId?.trim()?.takeIf { it.isNotEmpty() }
                 ?: baseRow.auctionName?.let { rpmResolveUniqueVenueForSupplier(it, warnOnConflict = false) }
-            payload.pol = baseRow.pol
+            val leafPol = baseRow.pol?.trim()?.takeIf { it.isNotEmpty() }
+                ?: rpmResolveUniquePolForStock(baseRow.stock, warnOnConflict = false)
+            if (leafPol != null) payload.pol = leafPol
             // Always send string (incl. "") so PUT can clear vehicle type; omit/null would coalesce to old value.
             payload.supportedVehicleType = vtype
             payload.rixoPrice = rpmNormalizePriceForDb(price)
@@ -1804,43 +1764,30 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
             "rixo_company" -> {
                 if (rpmSelectedCompany == value) {
                     rpmSelectedCompany = null
-                    rpmSelectedSupplier = null
                     rpmSelectedStock = null
-                    rpmSelectedPol = null
+                    rpmSelectedSupplier = null
                     rpmSelectedMappingId = null
                     rpmRerenderTree(root)
                 } else {
                     rpmSelectedCompany = value
-                    rpmSelectedSupplier = null
                     rpmSelectedStock = null
-                    rpmSelectedPol = null
+                    rpmSelectedSupplier = null
                     rpmSelectedMappingId = null
                     ensureRpmCompanyBranchLoaded(value) { rpmRerenderTree(root) }
                 }
                 return@click
             }
-            "supplier" -> {
-                if (rpmSelectedSupplier == value) {
-                    rpmSelectedSupplier = null
-                    rpmSelectedStock = null
-                    rpmSelectedPol = null
-                } else {
-                    rpmSelectedSupplier = value
-                    rpmSelectedStock = null
-                    rpmSelectedPol = null
-                }
-            }
             "stock" -> {
                 if (rpmSelectedStock == value) {
                     rpmSelectedStock = null
-                    rpmSelectedPol = null
+                    rpmSelectedSupplier = null
                 } else {
                     rpmSelectedStock = value
-                    rpmSelectedPol = null
+                    rpmSelectedSupplier = null
                 }
             }
-            "pol" -> {
-                rpmSelectedPol = if (rpmSelectedPol == value) null else value
+            "supplier" -> {
+                rpmSelectedSupplier = if (rpmSelectedSupplier == value) null else value
             }
             else -> return@click
         }
@@ -1912,7 +1859,6 @@ fun loadRixoPriceMapTree() {
             rpmSelectedCompany = null
             rpmSelectedSupplier = null
             rpmSelectedStock = null
-            rpmSelectedPol = null
             rpmSelectedMappingId = null
             rpmLeafInlineEditMappingId = null
             rpmLeafInlineEditLineType = ""

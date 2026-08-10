@@ -2645,8 +2645,22 @@ class PurchaseService(
         return purchaseRepository.findDistinctStockLocations()
     }
     
+    /**
+     * Distinct stock locations for Booking dropdown: only stocks that still have
+     * bookable cars (Rixo confirmed, booking not requested) in [country].
+     * Matches [getFilteredPurchasesByCountryAndStocks] eligibility — excludes shipped-only stocks.
+     */
     fun getStockLocationsByCountry(country: String): List<String> {
-        return purchaseRepository.findDistinctStockLocationsByCountry(country)
+        val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
+        val out = mutableListOf<String>()
+        val seen = HashSet<String>()
+        for (p in purchases) {
+            val stock = p.stockLocation?.trim().orEmpty()
+            if (stock.isEmpty() || stock == "-") continue
+            val key = stock.lowercase()
+            if (seen.add(key)) out.add(stock)
+        }
+        return out.sortedBy { it.lowercase() }
     }
     
     /**
@@ -2709,6 +2723,74 @@ class PurchaseService(
                 }
                 .sortedBy { it.chassis },
         )
+    }
+
+    /** Parse comma- or semicolon-separated stock location tokens (blank/`-` ignored). */
+    private fun parseStockLocationFilters(raw: String?): Set<String> =
+        raw.orEmpty()
+            .split(',', ';')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != "-" }
+            .map { it.lowercase() }
+            .toSet()
+
+    private fun purchaseMatchesAnyStock(p: Purchase, stockKeys: Set<String>): Boolean {
+        if (stockKeys.isEmpty()) return false
+        val stock = p.stockLocation?.trim().orEmpty()
+        if (stock.isEmpty() || stock == "-") return false
+        return stock.lowercase() in stockKeys
+    }
+
+    @Transactional(readOnly = true)
+    fun getFilteredPurchasesByCountryAndStocks(country: String, stockLocations: String): List<Purchase> {
+        val stockKeys = parseStockLocationFilters(stockLocations)
+        if (stockKeys.isEmpty()) return emptyList()
+        val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
+        return applyReadAdapters(
+            purchases
+                .filter { purchaseMatchesAnyStock(it, stockKeys) }
+                .sortedBy { it.chassis },
+        )
+    }
+
+    @Transactional(readOnly = true)
+    fun getFilteredChassisByCountryAndStocks(country: String, stockLocations: String): List<String> {
+        val stockKeys = parseStockLocationFilters(stockLocations)
+        if (stockKeys.isEmpty()) return emptyList()
+        val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
+        return purchases
+            .asSequence()
+            .filter { purchaseMatchesAnyStock(it, stockKeys) }
+            .mapNotNull { it.chassis?.trim()?.takeIf { c -> c.isNotEmpty() } }
+            .distinct()
+            .sorted()
+            .toList()
+    }
+
+    /**
+     * Distinct POL options for booking after stock selection:
+     * effectivePol from matching purchases, then single-token hard-map from selected stock tokens.
+     */
+    @Transactional(readOnly = true)
+    fun getPolsForStocks(country: String, stockLocations: String): List<String> {
+        val stockKeys = parseStockLocationFilters(stockLocations)
+        if (stockKeys.isEmpty()) return emptyList()
+        val out = mutableListOf<String>()
+        val seen = HashSet<String>()
+        fun addPol(raw: String?) {
+            val pol = raw?.trim()?.takeIf { it.isNotEmpty() && it != "---" } ?: return
+            if (seen.add(pol.lowercase())) out.add(pol)
+        }
+        val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
+        for (p in purchases) {
+            if (!purchaseMatchesAnyStock(p, stockKeys)) continue
+            addPol(effectivePol(p.pol, p.stockLocation))
+        }
+        // Hard-map fallback for selected stock tokens with no purchase-derived POL yet.
+        for (token in stockLocations.orEmpty().split(',', ';').map { it.trim() }.filter { it.isNotEmpty() && it != "-" }) {
+            addPol(polFromStockLocation(token))
+        }
+        return out
     }
     
     fun getChassisWithoutBookingRequestByPol(polPort: String): List<String> {

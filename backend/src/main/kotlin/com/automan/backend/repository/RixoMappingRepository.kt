@@ -100,6 +100,29 @@ interface RixoMappingRepository : JpaRepository<RixoMapping, Long> {
 
     fun findByAuctionNameIgnoreCase(auctionName: String): List<RixoMapping>
 
+    @Query(
+        """
+        SELECT rm FROM RixoMapping rm
+        WHERE UPPER(TRIM(rm.stockLocation)) = UPPER(TRIM(:stockLocation))
+        ORDER BY rm.id ASC
+        """
+    )
+    fun findByStockLocationIgnoreCase(@Param("stockLocation") stockLocation: String): List<RixoMapping>
+
+    @Query(
+        """
+        SELECT rm FROM RixoMapping rm
+        WHERE UPPER(TRIM(rm.stockLocation)) = UPPER(TRIM(:stockLocation))
+          AND rm.auctionName IS NOT NULL
+          AND UPPER(TRIM(rm.auctionName)) = UPPER(TRIM(:auctionName))
+        ORDER BY rm.id ASC
+        """
+    )
+    fun findByStockLocationAndAuctionNameIgnoreCase(
+        @Param("stockLocation") stockLocation: String,
+        @Param("auctionName") auctionName: String,
+    ): List<RixoMapping>
+
     fun findByRixoCompanyIgnoreCase(rixoCompany: String): List<RixoMapping>
 
     fun findFirstByAuctionNameIgnoreCase(auctionName: String): RixoMapping?

@@ -1737,6 +1737,8 @@ fun saveShippingHistoryAndBooking() {
                 val row: dynamic = js("{}")
                 row.chassis = chassis
                 row.clientName = extractClientNameFromCar(enriched)
+                val stock = (enriched.stockLocation ?: enriched.stock_location)?.toString()?.trim().orEmpty()
+                if (stock.isNotEmpty() && stock != "-") row.stockLocation = stock
                 row.amount = computeTotalCnfOrFobForChassis(enriched, chassis, isFob)
                 items.push(row)
             }

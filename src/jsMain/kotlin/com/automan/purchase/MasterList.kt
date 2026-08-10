@@ -167,28 +167,31 @@ private fun extractConsigneeMapSortKey(m: dynamic, field: String): String {
 }
 
 private fun toggleCarBrandMapSort(field: String) {
-    if (carBrandMapSearchServerMode) {
-        showMessage("Clear the search box to sort the full list.", "info")
-        return
-    }
     val cur = carBrandMapSortOrderByField[field] ?: "desc"
     carBrandMapSortOrderByField[field] = if (cur == "asc") "desc" else "asc"
     carBrandMapSortField = field
+    carBrandMapSearchPageZeroBased = 0
     carBrandsCurrentPage = 1
     loadMasterCarBrands()
 }
 
 
 private fun toggleConsigneeMapSort(field: String) {
-    if (consigneeMapSearchServerMode) {
-        showMessage("Clear the search box to sort the full list.", "info")
-        return
-    }
     val cur = consigneeMapSortOrderByField[field] ?: "desc"
     consigneeMapSortOrderByField[field] = if (cur == "asc") "desc" else "asc"
     consigneeMapSortField = field
+    consigneeMapSearchPageZeroBased = 0
     consigneesCurrentPage = 1
     loadMasterConsignee()
+}
+
+private fun masterMapSortQueryParams(sortField: String?, orderByField: Map<String, String>): String {
+    val sf = sortField?.trim().orEmpty()
+    if (sf.isEmpty()) return ""
+    val ord = (orderByField[sf] ?: "desc").trim().lowercase().let { if (it == "asc") "asc" else "desc" }
+    val encS = js("encodeURIComponent")(sf).unsafeCast<String>()
+    val encO = js("encodeURIComponent")(ord).unsafeCast<String>()
+    return "&sort=$encS&order=$encO"
 }
 
 
@@ -2606,7 +2609,7 @@ fun loadMasterConsigneesWithTable() {
         val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
         val encF = js("encodeURIComponent")(consigneeMapSearchFieldChoice).unsafeCast<String>()
         val p = consigneeMapSearchPageZeroBased
-        val url = apiUrl("booking/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$consigneesItemsPerPage")
+        val url = apiUrl("booking/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$consigneesItemsPerPage${masterMapSortQueryParams(consigneeMapSortField, consigneeMapSortOrderByField)}")
         window.fetch(url)
             .then { response: dynamic ->
                 if (response.ok) response.json() else throw js("Error('Search failed')")
@@ -2663,7 +2666,7 @@ fun loadMasterConsigneesWithTable() {
 
     consigneeMapSearchServerMode = true
     val p = consigneeMapSearchPageZeroBased
-    val url = apiUrl("booking/mappings/page?page=$p&size=$consigneesItemsPerPage")
+    val url = apiUrl("booking/mappings/page?page=$p&size=$consigneesItemsPerPage${masterMapSortQueryParams(consigneeMapSortField, consigneeMapSortOrderByField)}")
     window.fetch(url)
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load consignee')")
@@ -4098,7 +4101,7 @@ fun loadMasterCarBrandsWithCards() {
         val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
         val encF = js("encodeURIComponent")(carBrandMapSearchFieldChoice).unsafeCast<String>()
         val p = carBrandMapSearchPageZeroBased
-        val url = apiUrl("car-brand-mapping/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$carBrandsItemsPerPage")
+        val url = apiUrl("car-brand-mapping/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$carBrandsItemsPerPage${masterMapSortQueryParams(carBrandMapSortField, carBrandMapSortOrderByField)}")
         window.fetch(url)
         .then { response: dynamic ->
                 if (response.ok) response.json() else throw js("Error('Search failed')")
@@ -4143,7 +4146,7 @@ fun loadMasterCarBrandsWithCards() {
 
     carBrandMapSearchServerMode = true
     val pBrowse = carBrandMapSearchPageZeroBased
-    val browseUrl = apiUrl("car-brand-mapping/mappings/page?page=$pBrowse&size=$carBrandsItemsPerPage")
+    val browseUrl = apiUrl("car-brand-mapping/mappings/page?page=$pBrowse&size=$carBrandsItemsPerPage${masterMapSortQueryParams(carBrandMapSortField, carBrandMapSortOrderByField)}")
     window.fetch(browseUrl)
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load car brands')")
@@ -4456,7 +4459,7 @@ fun loadMasterCarBrandsWithTable() {
         val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
         val encF = js("encodeURIComponent")(carBrandMapSearchFieldChoice).unsafeCast<String>()
         val p = carBrandMapSearchPageZeroBased
-        val url = apiUrl("car-brand-mapping/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$carBrandsItemsPerPage")
+        val url = apiUrl("car-brand-mapping/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$carBrandsItemsPerPage${masterMapSortQueryParams(carBrandMapSortField, carBrandMapSortOrderByField)}")
         window.fetch(url)
             .then { response: dynamic ->
                 if (response.ok) response.json() else throw js("Error('Search failed')")
@@ -4527,7 +4530,7 @@ fun loadMasterCarBrandsWithTable() {
 
     carBrandMapSearchServerMode = true
     val pBrowse = carBrandMapSearchPageZeroBased
-    val browseUrl = apiUrl("car-brand-mapping/mappings/page?page=$pBrowse&size=$carBrandsItemsPerPage")
+    val browseUrl = apiUrl("car-brand-mapping/mappings/page?page=$pBrowse&size=$carBrandsItemsPerPage${masterMapSortQueryParams(carBrandMapSortField, carBrandMapSortOrderByField)}")
     window.fetch(browseUrl)
         .then { response: dynamic ->
             if (response.ok) response.json() else throw js("Error('Failed to load car brands')")

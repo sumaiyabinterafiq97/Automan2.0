@@ -11750,7 +11750,7 @@ input.client-form-readonly:read-only {
     min-width: 1280px;
 }
 
-/* Rixo Price Map tree — 6-col company → supplier → stock → pol → vehicle + price */
+/* Rixo Price Map tree — 5-col company → stock → supplier → vehicle + price */
 @media (max-width: 1024px) {
     #rixoPriceMapTreePage .rixo-tree-headers {
         display: none;
@@ -11770,7 +11770,6 @@ input.client-form-readonly:read-only {
     #rixoPriceMapTreePage .rixo-tree-card-wrapper,
     #rixoPriceMapTreePage .rixo-tree-card-wrapper--company,
     #rixoPriceMapTreePage .rixo-tree-card-wrapper--stock,
-    #rixoPriceMapTreePage .rixo-tree-card-wrapper--pol,
     #rixoPriceMapTreePage .rixo-tree-card-wrapper--field {
         width: 100%;
         max-width: 100%;
@@ -11780,9 +11779,8 @@ input.client-form-readonly:read-only {
     }
 
     #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level="rixo_company"]::before { content: "Rixo Company"; }
-    #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level="supplier"]::before { content: "Supplier Name"; }
     #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level="stock"]::before { content: "Stock Location"; }
-    #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level="pol"]::before { content: "POL"; }
+    #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level="supplier"]::before { content: "Supplier Name"; }
 
     #rixoPriceMapTreePage .rixo-tree-card-wrapper[data-card-level]::before {
         display: block;
@@ -11840,9 +11838,8 @@ input.client-form-readonly:read-only {
     }
 
     #rixoPriceMapTreePage .rpm-tree-full-row-col--company::before { content: "Rixo Company"; }
-    #rixoPriceMapTreePage .rpm-tree-full-row-col--supplier::before { content: "Supplier Name"; }
     #rixoPriceMapTreePage .rpm-tree-full-row-col--stock::before { content: "Stock Location"; }
-    #rixoPriceMapTreePage .rpm-tree-full-row-col--pol::before { content: "POL"; }
+    #rixoPriceMapTreePage .rpm-tree-full-row-col--supplier::before { content: "Supplier Name"; }
     #rixoPriceMapTreePage .rpm-tree-full-row-col--vtype::before { content: "Vehicle Type"; }
     #rixoPriceMapTreePage .rpm-tree-full-row-col--price::before { content: "Rixo Price"; }
 
@@ -11863,15 +11860,13 @@ input.client-form-readonly:read-only {
 @media (min-width: 1025px) {
     #rixoPriceMapTreePage.rixo-tree-page {
         --rpm-col-company: minmax(110px, 1.1fr);
-        --rpm-col-supplier: minmax(110px, 1.1fr);
         --rpm-col-stock: minmax(100px, 1fr);
-        --rpm-col-pol: minmax(80px, 0.85fr);
+        --rpm-col-supplier: minmax(110px, 1.1fr);
         --rpm-col-vtype: minmax(100px, 1fr);
         --rpm-col-price: minmax(80px, 0.85fr);
         --rpm-col-gap: 8px;
         --rpm-card-company: 140px;
         --rpm-card-stock: 120px;
-        --rpm-card-pol: 100px;
         max-width: none;
         width: 100%;
         padding: 8px 16px 32px;
@@ -11894,9 +11889,8 @@ input.client-form-readonly:read-only {
         display: grid;
         grid-template-columns:
             var(--rpm-col-company)
-            var(--rpm-col-supplier)
             var(--rpm-col-stock)
-            var(--rpm-col-pol)
+            var(--rpm-col-supplier)
             var(--rpm-col-vtype)
             var(--rpm-col-price);
         gap: var(--rpm-col-gap);
@@ -11921,7 +11915,7 @@ input.client-form-readonly:read-only {
         padding-left: 8px !important;
     }
 
-    #rixoPriceMapTreePage .rixo-tree-header:nth-child(6).rixo-tree-header--price {
+    #rixoPriceMapTreePage .rixo-tree-header:nth-child(5).rixo-tree-header--price {
         text-align: right;
         padding-right: 4px !important;
     }
@@ -11934,9 +11928,8 @@ input.client-form-readonly:read-only {
         display: grid;
         grid-template-columns:
             var(--rpm-col-company)
-            var(--rpm-col-supplier)
             var(--rpm-col-stock)
-            var(--rpm-col-pol)
+            var(--rpm-col-supplier)
             var(--rpm-col-vtype)
             var(--rpm-col-price);
         column-gap: var(--rpm-col-gap);
@@ -12049,7 +12042,6 @@ input.client-form-readonly:read-only {
 
     #rixoPriceMapTreePage .rixo-tree-card-wrapper--company,
     #rixoPriceMapTreePage .rixo-tree-card-wrapper--stock,
-    #rixoPriceMapTreePage .rixo-tree-card-wrapper--pol,
     #rixoPriceMapTreePage .rixo-tree-card-wrapper--field {
         width: auto !important;
         max-width: none !important;
@@ -12206,9 +12198,8 @@ input.client-form-readonly:read-only {
         display: grid;
         grid-template-columns:
             var(--rpm-col-company)
-            var(--rpm-col-supplier)
             var(--rpm-col-stock)
-            var(--rpm-col-pol)
+            var(--rpm-col-supplier)
             var(--rpm-col-vtype)
             var(--rpm-col-price);
         gap: var(--rpm-col-gap);

@@ -47,10 +47,15 @@ class InvoiceHistoryService(
         return invoiceHistoryRepository.findAll(sort).map { toRowDto(it) }
     }
 
-    fun listRowsPage(page: Int, rawSize: Int): InvoiceHistoryPageResponse {
+    fun listRowsPage(
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): InvoiceHistoryPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        val pageable = PageRequest.of(pageIdx, size, resolveInvoiceHistorySort(sortField, sortOrder))
         val pg = invoiceHistoryRepository.findAll(pageable)
         return InvoiceHistoryPageResponse(
             content = pg.content.map { toRowDto(it) },
@@ -61,12 +66,18 @@ class InvoiceHistoryService(
         )
     }
 
-    fun searchRowsPage(rawQuery: String, page: Int, rawSize: Int): InvoiceHistoryPageResponse {
+    fun searchRowsPage(
+        rawQuery: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): InvoiceHistoryPageResponse {
         val q = sanitizeHistorySearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "createdAt"))
+        val pageable = PageRequest.of(pageIdx, size, resolveInvoiceHistorySort(sortField, sortOrder))
         val pg = invoiceHistoryRepository.searchKeyFields(q, pageable)
         return InvoiceHistoryPageResponse(
             content = pg.content.map { toRowDto(it) },
@@ -75,6 +86,32 @@ class InvoiceHistoryService(
             page = pg.number,
             size = pg.size,
         )
+    }
+
+    /**
+     * Whitelist entity columns only. Joined line fields (`chassis`, `totalAmount`) fall back to `createdAt`.
+     */
+    private fun resolveInvoiceHistorySort(sortField: String?, sortOrder: String?): Sort {
+        val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
+            Sort.Direction.ASC
+        } else {
+            Sort.Direction.DESC
+        }
+        val prop = when (sortField?.trim()?.lowercase()) {
+            null, "", "createdat", "created_at", "id" -> "createdAt"
+            "invoicenumber", "invoice_number" -> "invoiceNumber"
+            "vessel" -> "vessel"
+            "clientname", "client_name" -> "clientName"
+            "shippingdate", "shipping_date" -> "shippingDate"
+            "pol" -> "pol"
+            "pod" -> "pod"
+            "lcno", "lc_no" -> "lcNo"
+            "pricetype", "price_type" -> "priceType"
+            // Not entity columns on invoice_history — keep stable default
+            "chassis", "totalamount", "total_amount" -> "createdAt"
+            else -> "createdAt"
+        }
+        return Sort.by(dir, prop)
     }
 
     private fun toRowDto(h: InvoiceHistory): InvoiceHistoryRowDto {

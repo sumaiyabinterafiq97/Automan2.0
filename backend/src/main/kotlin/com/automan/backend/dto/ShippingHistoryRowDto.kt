@@ -10,6 +10,7 @@ data class ShippingHistoryRowDto(
     val cyCutDate: String? = null,
     val eta: String? = null,
     val pol: String? = null,
+    val stockLocation: String? = null,
     val pod: String? = null,
     val finalDestination: String? = null,
     val bookingId: String? = null,

@@ -28,10 +28,15 @@ class ClientMapService(
      * Paginated browse for Client Map UI (no search text). Prefer this over [listAll] for UI.
      */
     @Transactional(readOnly = true)
-    fun listPage(page: Int, rawSize: Int): ClientMapPageResponse {
+    fun listPage(
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): ClientMapPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveClientMapSort(sortField, sortOrder))
         val pg = clientMapRepository.findAll(pageable)
         return ClientMapPageResponse(
             content = pg.content,
@@ -47,13 +52,20 @@ class ClientMapService(
      * [field]: `all`, `clientName`, `country`.
      */
     @Transactional(readOnly = true)
-    fun searchPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): ClientMapPageResponse {
+    fun searchPage(
+        rawQuery: String,
+        rawField: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): ClientMapPageResponse {
         val q = sanitizeClientMapSearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }
         val field = rawField.trim().lowercase().ifEmpty { "all" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveClientMapSort(sortField, sortOrder))
         val pg = when (field) {
             "clientname", "client_name" ->
                 clientMapRepository.searchClientMapClientNameContains(q, pageable)
@@ -71,6 +83,26 @@ class ClientMapService(
             page = pg.number,
             size = pg.size,
         )
+    }
+
+    private fun resolveClientMapSort(sortField: String?, sortOrder: String?): Sort {
+        val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
+            Sort.Direction.ASC
+        } else {
+            Sort.Direction.DESC
+        }
+        val prop = when (sortField?.trim()?.lowercase()) {
+            null, "", "id" -> "id"
+            "clientname", "client_name" -> "clientName"
+            "country" -> "country"
+            "pod" -> "pod"
+            "address" -> "address"
+            "bankinfo", "bank_info" -> "bankInfo"
+            "consignee" -> "consignee"
+            "debitlimit", "debit_limit" -> "debitLimit"
+            else -> "id"
+        }
+        return Sort.by(dir, prop)
     }
 
     private fun sanitizeClientMapSearchToken(raw: String): String =

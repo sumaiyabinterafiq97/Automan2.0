@@ -273,6 +273,30 @@ private fun smRejectSecondVenue(supplier: String, requestedVenue: String): Boole
     return true
 }
 
+/** Distinct non-blank pols for a stock location across the loaded cache. */
+private fun smRealPolsForStock(stock: String): List<String> {
+    val key = smNormStock(stock)
+    if (key == "(no stock location)" || key == "-") return emptyList()
+    return smTreeRowsCache
+        .filter { smNormStock(it.stock).equals(key, ignoreCase = true) }
+        .mapNotNull { it.pol?.trim()?.takeIf { p -> p.isNotEmpty() } }
+        .distinctBy { it.lowercase() }
+}
+
+/** Block adding a second distinct POL under the same stock location. */
+private fun smRejectSecondPol(stock: String, requestedPol: String): Boolean {
+    val requested = requestedPol.trim()
+    if (requested.isEmpty() || requested == SM_PLACEHOLDER_POL) return false
+    val existing = smRealPolsForStock(stock)
+    if (existing.isEmpty()) return false
+    if (existing.any { it.equals(requested, ignoreCase = true) }) return false
+    showMessage(
+        "This stock location already has POL ${existing.joinToString(", ")}. Only one POL per stock location is allowed.",
+        "error",
+    )
+    return true
+}
+
 private fun smVisiblePols(rows: List<SupplierMapTreeRowLite>): List<String> {
     val hasNull = rows.any { it.pol.isNullOrBlank() }
     val pols = rows.map { smNormPol(it.pol) }
@@ -794,12 +818,15 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
 
                                 if (stockOpen) {
                                     val pols = smVisiblePols(stockRows)
+                                    val allowAddPol = pols.none { it != SM_PLACEHOLDER_POL }
                                     sb.append("""<div class="rixo-tree-children">""")
                                     if (pols.isEmpty()) {
                                         if (smCardInlineAddMatchesPolBranch(supplier, venue, stock)) {
                                             sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("pol")}</div>""")
                                         }
-                                        sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("pol", supplier, venue, stock, null, null)}</div>""")
+                                        if (allowAddPol) {
+                                            sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("pol", supplier, venue, stock, null, null)}</div>""")
+                                        }
                                     } else {
                                         for (pol in pols) {
                                             val polRows = stockRows.filter { smRowPolKey(it) == pol }
@@ -847,10 +874,12 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
                                             }
                                             sb.append("""</div>""")
                                         }
-                                        if (smCardInlineAddMatchesPolBranch(supplier, venue, stock)) {
-                                            sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("pol")}</div>""")
+                                        if (allowAddPol) {
+                                            if (smCardInlineAddMatchesPolBranch(supplier, venue, stock)) {
+                                                sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("pol")}</div>""")
+                                            }
+                                            sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("pol", supplier, venue, stock, null, null)}</div>""")
                                         }
-                                        sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("pol", supplier, venue, stock, null, null)}</div>""")
                                     }
                                     sb.append("""</div>""")
                                 }
@@ -1116,6 +1145,7 @@ private fun postSmMappingBulkOneRow(
             if (supplier.isBlank() || stock.isBlank() || pol.isBlank() || pol == SM_PLACEHOLDER_POL) {
                 showMessage("POL is required", "error"); return
             }
+            if (smRejectSecondPol(stock, pol)) return
             obj.insertMode = "POL"
             obj.auctionName = supplier.trim()
             obj.venueId = venue.trim().takeIf { it.isNotEmpty() && it != SM_PLACEHOLDER_VENUE }
@@ -1139,6 +1169,7 @@ private fun postSmMappingBulkOneRow(
                 showMessage("Complete the path (supplier, stock location, and Rixo company)", "error"); return
             }
             if (smRejectSecondVenue(supplier, venue)) return
+            if (smRejectSecondPol(stock, pol)) return
             if (vtype.isNotBlank() && !smListContains(smMasterVehicleTypes, vtype)) {
                 showMessage("Please select a vehicle type from the list", "error"); return
             }

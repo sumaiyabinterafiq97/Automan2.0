@@ -5,6 +5,7 @@ import java.math.BigDecimal
 data class ShippingHistoryItemRequest(
     val chassis: String,
     val clientName: String? = null,
+    val stockLocation: String? = null,
     val amount: BigDecimal? = null,
 )
 

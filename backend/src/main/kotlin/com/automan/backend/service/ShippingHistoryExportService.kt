@@ -130,6 +130,7 @@ class ShippingHistoryExportService(
         ShippingHistoryExportColumnDef("Consignee", ShippingHistoryExportCellKind.STRING) { str { it.consignee } },
         ShippingHistoryExportColumnDef("Shipment Date", ShippingHistoryExportCellKind.DATETIME) { it.shipmentDate },
         ShippingHistoryExportColumnDef("POL", ShippingHistoryExportCellKind.STRING) { str { it.pol } },
+        ShippingHistoryExportColumnDef("Stock Location", ShippingHistoryExportCellKind.STRING) { str { it.stockLocation } },
         ShippingHistoryExportColumnDef("POD", ShippingHistoryExportCellKind.STRING) { str { it.pod } },
         ShippingHistoryExportColumnDef("Booking ID", ShippingHistoryExportCellKind.STRING) { str { it.bookingId } },
         ShippingHistoryExportColumnDef("Vessel", ShippingHistoryExportCellKind.STRING) { str { it.vessel } },

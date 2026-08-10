@@ -40,9 +40,11 @@ class BookingMappingController(
     fun listPage(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "25") size: Int,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(required = false) order: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(bookingMappingService.listConsigneeMapPage(page, size))
+            ResponseEntity.ok(bookingMappingService.listConsigneeMapPage(page, size, sort, order))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }
@@ -57,9 +59,11 @@ class BookingMappingController(
         @RequestParam(defaultValue = "all") field: String,
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "25") size: Int,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(required = false) order: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(bookingMappingService.searchConsigneeMapPage(q, field, page, size))
+            ResponseEntity.ok(bookingMappingService.searchConsigneeMapPage(q, field, page, size, sort, order))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }

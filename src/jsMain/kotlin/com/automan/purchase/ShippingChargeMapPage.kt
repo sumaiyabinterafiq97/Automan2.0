@@ -34,8 +34,28 @@ private var scmLastRenderSlice: List<ScmGroupRow>? = null
 private var scmLastRenderPage: Int = 1
 private var scmLastRenderTotalPages: Int = 1
 private var scmLastRenderFooter: String = ""
+private var scmSortField: String = "stockLocation"
+private var scmSortOrder: String = "asc"
 
 private const val SCM_MAP_COMPACT_MAX_WIDTH_PX = 860
+
+private fun scmSortQueryParams(): String {
+    val encS = js("encodeURIComponent")(scmSortField).unsafeCast<String>()
+    val encO = js("encodeURIComponent")(scmSortOrder).unsafeCast<String>()
+    return "&sort=$encS&order=$encO"
+}
+
+private fun toggleScmMapSort(field: String) {
+    if (scmSortField == field) {
+        scmSortOrder = if (scmSortOrder == "asc") "desc" else "asc"
+    } else {
+        scmSortField = field
+        scmSortOrder = "asc"
+    }
+    scmSearchPageZeroBased = 0
+    scmCurrentPage = 1
+    loadShippingChargeMapTable()
+}
 
 private fun scmPriceTokenForJoin(v: Any?): String {
     if (v == null || v == js("undefined")) return ""
@@ -88,7 +108,8 @@ private fun groupShippingChargesForView(rows: List<dynamic>): List<ScmGroupRow> 
             ),
         )
     }
-    return out.sortedWith(compareBy({ it.stockLocation.lowercase() }, { it.minCars }))
+    // Preserve first-seen order from the server-sorted page (do not re-sort alphabetically).
+    return out
 }
 
 private fun formatScmPriceChipsCell(rawJoined: String): String {
@@ -461,7 +482,11 @@ private fun renderGroupedTableUi(
             <thead>
             <tr style="background:#f9fafb;text-align:left;">
             <th style="padding:12px 14px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;">Actions</th>
-            <th style="padding:12px 14px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;">Stock location</th>
+            <th style="padding:12px 14px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;">
+                <button type="button" data-scm-sort="stockLocation" title="Sort by stock location" style="background:none;border:none;cursor:pointer;font:inherit;font-weight:700;color:#6b7280;text-transform:uppercase;padding:0;display:inline-flex;align-items:center;gap:6px;">
+                    <span>Stock location</span><span style="font-size:14px;">↕</span>
+                </button>
+            </th>
             <th style="padding:12px 14px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;">Cars per container / Shipping price per car</th>
             </tr>
             </thead>
@@ -482,6 +507,15 @@ private fun renderGroupedTableUi(
 
     host.innerHTML = html.toString()
     bindScmRowActionButtons(host)
+    val sortBtns = host.querySelectorAll("button[data-scm-sort]")
+    for (i in 0 until sortBtns.length) {
+        val el = sortBtns.item(i) as? HTMLElement ?: continue
+        el.addEventListener("click", { e: Event ->
+            e.preventDefault()
+            val field = el.getAttribute("data-scm-sort") ?: return@addEventListener
+            toggleScmMapSort(field)
+        })
+    }
     renderScmPagerAndBind(host, page, totalPages, footerNote)
 }
 
@@ -497,7 +531,7 @@ fun loadShippingChargeMapTable() {
         val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
         val encF = js("encodeURIComponent")(scmApiFieldParam()).unsafeCast<String>()
         val p = scmSearchPageZeroBased
-        val url = apiUrl("shipping-charge-map/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$scmItemsPerPage")
+        val url = apiUrl("shipping-charge-map/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$scmItemsPerPage${scmSortQueryParams()}")
         window.fetch(url)
             .then { resp: dynamic ->
                 if (resp.ok) resp.json() else throw js("Error('Search failed')")
@@ -556,7 +590,7 @@ fun loadShippingChargeMapTable() {
 
     scmSearchServerMode = true
     val pBrowse = scmSearchPageZeroBased
-    val browseUrl = apiUrl("shipping-charge-map/mappings/page?page=$pBrowse&size=$scmItemsPerPage")
+    val browseUrl = apiUrl("shipping-charge-map/mappings/page?page=$pBrowse&size=$scmItemsPerPage${scmSortQueryParams()}")
     window.fetch(browseUrl)
         .then { resp: dynamic ->
             if (resp.ok) resp.json() else throw js("Error('Failed to load')")

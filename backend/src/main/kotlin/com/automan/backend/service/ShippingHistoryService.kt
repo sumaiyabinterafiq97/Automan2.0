@@ -37,10 +37,15 @@ class ShippingHistoryService(
         return mapRowsWithInvoiceFlags(shippingHistoryRepository.findAll(sort))
     }
 
-    fun listRowsPage(page: Int, rawSize: Int): ShippingHistoryPageResponse {
+    fun listRowsPage(
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): ShippingHistoryPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveShippingHistorySort(sortField, sortOrder))
         val pg = shippingHistoryRepository.findAll(pageable)
         return ShippingHistoryPageResponse(
             content = mapRowsWithInvoiceFlags(pg.content),
@@ -51,12 +56,18 @@ class ShippingHistoryService(
         )
     }
 
-    fun searchRowsPage(rawQuery: String, page: Int, rawSize: Int): ShippingHistoryPageResponse {
+    fun searchRowsPage(
+        rawQuery: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): ShippingHistoryPageResponse {
         val q = sanitizeHistorySearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveShippingHistorySort(sortField, sortOrder))
         val pg = shippingHistoryRepository.searchKeyFields(q, pageable)
         return ShippingHistoryPageResponse(
             content = mapRowsWithInvoiceFlags(pg.content),
@@ -65,6 +76,43 @@ class ShippingHistoryService(
             page = pg.number,
             size = pg.size,
         )
+    }
+
+    /**
+     * Whitelist entity columns. Computed UI fields (`units`, `invoiceCreated`) fall back to `id`.
+     */
+    private fun resolveShippingHistorySort(sortField: String?, sortOrder: String?): Sort {
+        val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
+            Sort.Direction.ASC
+        } else {
+            Sort.Direction.DESC
+        }
+        val prop = when (sortField?.trim()?.lowercase()) {
+            null, "", "id" -> "id"
+            "bookingid", "booking_id" -> "bookingId"
+            "country" -> "country"
+            "consignee" -> "consignee"
+            "notifyparty", "notify_party" -> "notifyParty"
+            "intransitclause", "in_transit_clause" -> "inTransitClause"
+            "shipmentdate", "shipment_date" -> "shipmentDate"
+            "cycutdate", "cy_cut_date" -> "cyCutDate"
+            "eta" -> "eta"
+            "pol" -> "pol"
+            "stocklocation", "stock_location" -> "stockLocation"
+            "pod" -> "pod"
+            "finaldestination", "final_destination" -> "finalDestination"
+            "vessel" -> "vessel"
+            "carrier" -> "carrier"
+            "blno", "bl_no" -> "blNo"
+            "pricetype", "price_type" -> "priceType"
+            "chassis" -> "chassis"
+            "clientname", "client_name" -> "clientName"
+            "amount" -> "amount"
+            "createdat", "created_at" -> "createdAt"
+            "units", "invoicecreated", "invoice_created" -> "id"
+            else -> "id"
+        }
+        return Sort.by(dir, prop)
     }
 
     private fun mapRowsWithInvoiceFlags(entities: List<ShippingHistory>): List<ShippingHistoryRowDto> {
@@ -89,6 +137,7 @@ class ShippingHistoryService(
             cyCutDate = e.cyCutDate?.toString(),
             eta = e.eta?.toString(),
             pol = e.pol,
+            stockLocation = e.stockLocation,
             pod = e.pod,
             finalDestination = e.finalDestination,
             bookingId = e.bookingId,
@@ -142,12 +191,13 @@ class ShippingHistoryService(
             if (chassis.isEmpty()) {
                 throw IllegalArgumentException("chassis must not be blank")
             }
-            val fromPurchase = purchaseService.getPurchaseByChassis(chassis)
-                ?.clientName
-                ?.trim()
-                ?.takeIf { it.isNotEmpty() }
-            val fromRequest = item.clientName?.trim()?.takeIf { it.isNotEmpty() }
-            val clientName = fromPurchase ?: fromRequest
+            val purchase = purchaseService.getPurchaseByChassis(chassis)
+            val fromPurchaseClient = purchase?.clientName?.trim()?.takeIf { it.isNotEmpty() }
+            val fromRequestClient = item.clientName?.trim()?.takeIf { it.isNotEmpty() }
+            val clientName = fromPurchaseClient ?: fromRequestClient
+            val fromRequestStock = item.stockLocation?.trim()?.takeIf { it.isNotEmpty() && it != "-" }
+            val fromPurchaseStock = purchase?.stockLocation?.trim()?.takeIf { it.isNotEmpty() && it != "-" }
+            val stockLocation = fromRequestStock ?: fromPurchaseStock
             val amount = item.amount ?: BigDecimal.ZERO
 
             val existing = shippingHistoryRepository.findFirstByChassisOrderByIdDesc(chassis)
@@ -161,6 +211,7 @@ class ShippingHistoryService(
                     cyCutDate = cyCutDate,
                     eta = eta,
                     pol = pol,
+                    stockLocation = stockLocation ?: existing.stockLocation,
                     pod = pod,
                     finalDestination = finalDestination,
                     bookingId = bookingIdStored,
@@ -183,6 +234,7 @@ class ShippingHistoryService(
                     cyCutDate = cyCutDate,
                     eta = eta,
                     pol = pol,
+                    stockLocation = stockLocation,
                     pod = pod,
                     finalDestination = finalDestination,
                     bookingId = bookingIdStored,

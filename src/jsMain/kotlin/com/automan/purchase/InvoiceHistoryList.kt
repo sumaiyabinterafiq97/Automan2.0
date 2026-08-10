@@ -86,12 +86,13 @@ fun showInvoiceHistoryPage() {
             }
             @media (min-width: 1025px){
                 .invoice-history-toolbar{
-                    grid-template-columns:auto 1fr minmax(200px,25%);
-                    grid-template-areas:"title . search";
+                    grid-template-columns:auto 1fr minmax(200px,25%) auto;
+                    grid-template-areas:"title . search cols";
                     column-gap:12px;
                     row-gap:0;
                 }
                 .invoice-history-title{text-align:left;justify-self:start;}
+                #invoiceHistoryColumnFilterBtn{grid-area:cols;justify-self:end;}
             }
         </style>
         <div id="invoiceHistoryPage">
@@ -104,6 +105,11 @@ fun showInvoiceHistoryPage() {
                     <input type="text" id="invoiceHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search invoice number, vessel, client, POL, POD, LC, price type, chassis, amount…" aria-label="Search invoice history" />
                     <button type="button" id="invoiceHistorySearchClearBtn" class="invoice-search-clear" title="Clear search" aria-label="Clear search">×</button>
                 </div>
+                <button type="button" id="invoiceHistoryColumnFilterBtn" title="Select columns to display" aria-label="Select columns to display" style="padding:8px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;min-height:40px;display:inline-flex;align-items:center;justify-content:center;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
             </div>
             <div id="invoiceHistoryTableWrap">
                 <div id="invoiceHistoryTable" style="margin-top: 8px;">
@@ -124,6 +130,9 @@ fun showInvoiceHistoryPage() {
         searchInput?.value = ""
         invoiceHistoryPageZeroBased = 0
         loadInvoiceHistory(0)
+    })
+    document.getElementById("invoiceHistoryColumnFilterBtn")?.addEventListener("click", { _: Event ->
+        showInvoiceHistoryColumnFilterModal()
     })
 
     setupInvoiceHistoryResizeListener()
@@ -432,11 +441,14 @@ private fun loadInvoiceHistory(page0: Int = invoiceHistoryPageZeroBased) {
     invoiceHistoryActiveSearchQ = q
     invoiceHistoryPageZeroBased = page0.coerceAtLeast(0)
     val size = invoiceHistoryItemsPerPage.coerceAtLeast(1)
+    val encSort = js("encodeURIComponent")(invoiceHistorySortField).unsafeCast<String>()
+    val encOrder = js("encodeURIComponent")(invoiceHistorySortOrder).unsafeCast<String>()
+    val sortQs = "&sort=$encSort&order=$encOrder"
     val endpoint = if (q.isNotEmpty()) {
         val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
-        "invoice-history/page-search?q=$encQ&page=$invoiceHistoryPageZeroBased&size=$size"
+        "invoice-history/page-search?q=$encQ&page=$invoiceHistoryPageZeroBased&size=$size$sortQs"
     } else {
-        "invoice-history/page?page=$invoiceHistoryPageZeroBased&size=$size"
+        "invoice-history/page?page=$invoiceHistoryPageZeroBased&size=$size$sortQs"
     }
 
     MainScope().launch {
@@ -468,11 +480,194 @@ private fun loadInvoiceHistory(page0: Int = invoiceHistoryPageZeroBased) {
 }
 
 /** Columns shown in the history table/cards. Bank/messages stay in API + edit payload, not displayed. */
-private fun invoiceHistoryDisplayColumnKeys(): List<String> = listOf(
+private fun invoiceHistoryAllSelectableColumnKeys(): List<String> = listOf(
     "invoiceNumber", "vessel", "clientName", "shippingDate", "pol", "pod", "lcNo", "priceType", "chassis", "totalAmount",
 )
 
-private fun invoiceHistorySearchColumnKeys(): List<String> = invoiceHistoryDisplayColumnKeys()
+private fun invoiceHistoryLockedColumnKeys(): Set<String> = setOf("invoiceNumber")
+
+private fun invoiceHistoryDefaultColumnKeys(): List<String> = invoiceHistoryAllSelectableColumnKeys()
+
+private const val INVOICE_HISTORY_MAX_DATA_COLUMNS = 10
+private const val INVOICE_HISTORY_COLUMNS_STORAGE_KEY = "selectedInvoiceHistoryColumns_v1"
+private var invoiceHistoryColumnFilterKeyHandler: ((Event) -> Unit)? = null
+
+private fun getSelectedInvoiceHistoryColumns(): List<String> {
+    val defaults = invoiceHistoryDefaultColumnKeys()
+    val locked = invoiceHistoryLockedColumnKeys()
+    val allowed = invoiceHistoryAllSelectableColumnKeys().toSet()
+    val saved = safeLocalStorageGet(INVOICE_HISTORY_COLUMNS_STORAGE_KEY)
+    val savedColumns = if (saved != null) {
+        try {
+            JSON.parse<Array<String>>(saved).toList().filter { it in allowed }
+        } catch (_: dynamic) {
+            null
+        }
+    } else {
+        null
+    }
+    val base = if (savedColumns.isNullOrEmpty()) defaults else savedColumns
+    val withLocked = (locked.toList() + base).distinct()
+    val ordered = invoiceHistoryAllSelectableColumnKeys().filter { it in withLocked.toSet() }
+    return if (ordered.size > INVOICE_HISTORY_MAX_DATA_COLUMNS) {
+        defaults.take(INVOICE_HISTORY_MAX_DATA_COLUMNS)
+    } else {
+        ordered
+    }
+}
+
+private fun saveSelectedInvoiceHistoryColumns(columns: List<String>) {
+    val locked = invoiceHistoryLockedColumnKeys()
+    val allowed = invoiceHistoryAllSelectableColumnKeys().toSet()
+    val merged = (locked.toList() + columns.filter { it in allowed }).distinct()
+    val ordered = invoiceHistoryAllSelectableColumnKeys().filter { it in merged.toSet() }
+        .take(INVOICE_HISTORY_MAX_DATA_COLUMNS)
+    val finalCols = if (ordered.size < locked.size) {
+        invoiceHistoryDefaultColumnKeys().take(INVOICE_HISTORY_MAX_DATA_COLUMNS)
+    } else {
+        ordered
+    }
+    safeLocalStorageSet(INVOICE_HISTORY_COLUMNS_STORAGE_KEY, JSON.stringify(finalCols.toTypedArray()))
+}
+
+private fun invoiceHistoryDisplayColumnKeys(): List<String> = getSelectedInvoiceHistoryColumns()
+
+private fun invoiceHistorySearchColumnKeys(): List<String> = invoiceHistoryAllSelectableColumnKeys()
+
+private fun invoiceHistoryColumnWidthPx(key: String): Int = when (key) {
+    "invoiceNumber" -> 132
+    "vessel" -> 96
+    "clientName" -> 132
+    "shippingDate" -> 104
+    "pol" -> 96
+    "pod" -> 104
+    "lcNo" -> 72
+    "priceType" -> 96
+    "chassis" -> 152
+    "totalAmount" -> 116
+    else -> 120
+}
+
+private fun showInvoiceHistoryColumnFilterModal() {
+    document.getElementById("invoiceHistoryColumnFilterModal")?.remove()
+    invoiceHistoryColumnFilterKeyHandler?.let { document.removeEventListener("keydown", it) }
+    invoiceHistoryColumnFilterKeyHandler = null
+
+    val returnFocus = document.activeElement as? HTMLElement
+    val modal = document.createElement("div")
+    modal.id = "invoiceHistoryColumnFilterModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; inset: 0;
+        background-color: rgba(15,23,42,0.45); z-index: 10000;
+        display: flex; align-items: center; justify-content: center; padding: 16px;
+    """
+
+    val selected = getSelectedInvoiceHistoryColumns().toSet()
+    val locked = invoiceHistoryLockedColumnKeys()
+
+    modal.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="invoiceHistoryColumnFilterTitle"
+             style="background: white; border-radius: 12px; padding: 24px; max-width: 520px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.2);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 id="invoiceHistoryColumnFilterTitle" style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 700;">Select Columns to Display</h3>
+                <button type="button" id="closeInvoiceHistoryColumnFilter" aria-label="Close" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 4px 8px; line-height: 1; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center;">&times;</button>
+            </div>
+            <p style="margin: 0 0 8px 0; color: #64748b; font-size: 13px;">Max $INVOICE_HISTORY_MAX_DATA_COLUMNS data columns. Invoice number is always on. Action buttons are always visible.</p>
+            <p id="invoiceHistoryColumnCount" style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: #0f172a;"></p>
+            <div id="invoiceHistoryColumnCheckboxes" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;"></div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+                <button type="button" id="resetInvoiceHistoryColumns" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; min-height: 40px;">Reset to Default</button>
+                <button type="button" id="applyInvoiceHistoryColumns" style="padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; min-height: 40px;">Apply Changes</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    fun closeModal() {
+        invoiceHistoryColumnFilterKeyHandler?.let { document.removeEventListener("keydown", it) }
+        invoiceHistoryColumnFilterKeyHandler = null
+        modal.remove()
+        returnFocus?.focus()
+    }
+
+    fun updateCountAndLocks() {
+        val boxes = document.querySelectorAll("#invoiceHistoryColumnCheckboxes input[type=checkbox]")
+        var count = 0
+        for (i in 0 until boxes.length) {
+            val el = boxes.item(i) as? HTMLInputElement ?: continue
+            if (el.checked) count++
+        }
+        document.getElementById("invoiceHistoryColumnCount")?.textContent =
+            "Selected: $count / $INVOICE_HISTORY_MAX_DATA_COLUMNS"
+        for (i in 0 until boxes.length) {
+            val el = boxes.item(i) as? HTMLInputElement ?: continue
+            val key = el.getAttribute("data-column") ?: continue
+            if (key in locked) {
+                el.checked = true
+                el.disabled = true
+                continue
+            }
+            el.disabled = !el.checked && count >= INVOICE_HISTORY_MAX_DATA_COLUMNS
+        }
+    }
+
+    val checkboxesDiv = document.getElementById("invoiceHistoryColumnCheckboxes")
+    for (key in invoiceHistoryAllSelectableColumnKeys()) {
+        val row = document.createElement("div")
+        row.asDynamic().style.cssText = "display:flex;align-items:center;gap:8px;"
+        val input = document.createElement("input") as HTMLInputElement
+        input.type = "checkbox"
+        input.id = "invoiceHistCol_$key"
+        input.setAttribute("data-column", key)
+        input.checked = key in selected || key in locked
+        if (key in locked) input.disabled = true
+        input.addEventListener("change", { _: Event -> updateCountAndLocks() })
+        val labelEl = document.createElement("label") as HTMLLabelElement
+        labelEl.htmlFor = "invoiceHistCol_$key"
+        labelEl.textContent = invoiceHistoryColumnLabel(key) + if (key in locked) " (always on)" else ""
+        labelEl.asDynamic().style.cssText = "cursor:pointer;margin:0;"
+        row.appendChild(input)
+        row.appendChild(labelEl)
+        checkboxesDiv?.appendChild(row)
+    }
+    updateCountAndLocks()
+
+    document.getElementById("closeInvoiceHistoryColumnFilter")?.addEventListener("click", { _: Event ->
+        closeModal()
+    })
+    modal.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "invoiceHistoryColumnFilterModal") closeModal()
+    })
+    document.getElementById("resetInvoiceHistoryColumns")?.addEventListener("click", { _: Event ->
+        saveSelectedInvoiceHistoryColumns(invoiceHistoryDefaultColumnKeys())
+        closeModal()
+        renderInvoiceHistoryTableFromCache()
+    })
+    document.getElementById("applyInvoiceHistoryColumns")?.addEventListener("click", { _: Event ->
+        val boxes = document.querySelectorAll("#invoiceHistoryColumnCheckboxes input[type=checkbox]")
+        val picked = mutableListOf<String>()
+        for (i in 0 until boxes.length) {
+            val el = boxes.item(i) as? HTMLInputElement ?: continue
+            if (el.checked) {
+                val key = el.getAttribute("data-column") ?: continue
+                picked.add(key)
+            }
+        }
+        saveSelectedInvoiceHistoryColumns(picked)
+        closeModal()
+        renderInvoiceHistoryTableFromCache()
+    })
+
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val ke = event.asDynamic()
+        if (ke.key == "Escape" || ke.keyCode == 27) {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    invoiceHistoryColumnFilterKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+}
 
 private fun invoiceHistoryColumnLabel(key: String): String = when (key) {
     "invoiceNumber" -> "Invoice number"
@@ -561,7 +756,11 @@ private fun toggleInvoiceHistorySort(field: String) {
         invoiceHistorySortField = field
         invoiceHistorySortOrder = "desc"
     }
-    renderInvoiceHistoryTableFromCache()
+    if (invoiceHistoryServerMode) {
+        loadInvoiceHistory(0)
+    } else {
+        renderInvoiceHistoryTableFromCache()
+    }
 }
 
 private fun appendInvoiceHistoryPager(html: StringBuilder) {
@@ -628,37 +827,30 @@ private fun renderInvoiceHistoryTableFromCache() {
         return
     }
 
-    val comparator = Comparator<dynamic> { a, b ->
-        compareInvoiceHistoryRows(a, b, invoiceHistorySortField, invoiceHistorySortOrder == "asc")
+    // Joined line fields only: page-local reorder. Entity columns are ordered by the API.
+    val pageLocalOnly = invoiceHistorySortField == "chassis" || invoiceHistorySortField == "totalAmount"
+    if (!invoiceHistoryServerMode || pageLocalOnly) {
+        val comparator = Comparator<dynamic> { a, b ->
+            compareInvoiceHistoryRows(a, b, invoiceHistorySortField, invoiceHistorySortOrder == "asc")
+        }
+        rows = rows.sortedWith(comparator).toTypedArray()
     }
-    rows = rows.sortedWith(comparator).toTypedArray()
 
     val compact = invoiceHistoryIsCompactLayout()
     invoiceHistoryLastCompactLayout = compact
     val html = StringBuilder()
 
     if (!compact) {
-        val colCountInv = 1 + invoiceHistoryDisplayColumnKeys().size
-        val invoiceHistoryColWidthsPx = listOf(
-            64, // Actions (Edit + PDF + Ship stacked)
-            132, // Invoice number
-            96, // Vessel
-            132, // Client name
-            104, // Date
-            96, // POL
-            104, // POD
-            72, // LC
-            96, // Price type
-            152, // Chassis
-            116, // Amount
-        )
+        val displayKeys = invoiceHistoryDisplayColumnKeys()
+        val colCountInv = 1 + displayKeys.size
+        val invoiceHistoryColWidthsPx = listOf(64) + displayKeys.map { invoiceHistoryColumnWidthPx(it) }
         html.append(
             """<div class="invoice-history-table-shell"><table class="purchase-list-table" style="width:100%;border-collapse:collapse;table-layout:fixed;">""" +
                 htmlTableColgroupFixedWidthsPx(colCountInv, invoiceHistoryColWidthsPx) +
                 """<thead><tr style="background-color:#f8f9fa;">"""
         )
         html.append("""<th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;width:64px;">Actions</th>""")
-        for (key in invoiceHistoryDisplayColumnKeys()) {
+        for (key in displayKeys) {
             val label = escapeHtml(invoiceHistoryColumnLabel(key))
             val isActive = invoiceHistorySortField == key
             val sortOrder = if (isActive) invoiceHistorySortOrder else "desc"

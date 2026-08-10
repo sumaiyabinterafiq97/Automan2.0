@@ -47,6 +47,9 @@ data class ShippingHistory(
     @Column(name = "pol")
     val pol: String? = null,
 
+    @Column(name = "stock_location")
+    val stockLocation: String? = null,
+
     @Column(name = "pod")
     val pod: String? = null,
 

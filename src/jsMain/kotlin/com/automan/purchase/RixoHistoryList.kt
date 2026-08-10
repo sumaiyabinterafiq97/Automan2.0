@@ -101,14 +101,15 @@ fun showRixoHistoryPage() {
             }
             @media (min-width: 1025px){
                 .rixo-history-toolbar{
-                    grid-template-columns:auto 1fr minmax(200px,25%) auto;
-                    grid-template-areas:"title . search confirm";
+                    grid-template-columns:auto 1fr minmax(160px,22%) auto auto;
+                    grid-template-areas:"title . search cols confirm";
                     column-gap:12px;
                     row-gap:0;
                     align-items:center;
                 }
                 .rixo-history-title{text-align:left;justify-self:start;}
                 .rixo-search{width:100%;max-width:100%;justify-self:stretch;}
+                #rixoHistoryColumnFilterBtn{grid-area:cols;justify-self:end;}
                 #rixoConfirmSelectedBtn{justify-self:end;}
             }
         </style>
@@ -123,6 +124,11 @@ fun showRixoHistoryPage() {
                     <input type="text" id="rixoHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search buying date, Rixo company, message, chassis…" aria-label="Search Rixo history" />
                     <button type="button" id="rixoHistorySearchClearBtn" class="rixo-search-clear" title="Clear search" aria-label="Clear search">×</button>
                 </div>
+                <button type="button" id="rixoHistoryColumnFilterBtn" title="Select columns to display" aria-label="Select columns to display" style="padding:8px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;min-height:40px;display:inline-flex;align-items:center;justify-content:center;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
                 <button id="rixoConfirmSelectedBtn" type="button" class="rixo-primary-btn" disabled>
                     Rixo Confirmed
                 </button>
@@ -146,6 +152,9 @@ fun showRixoHistoryPage() {
         searchInput?.value = ""
         rixoHistoryPageZeroBased = 0
         loadRixoHistory(0)
+    })
+    document.getElementById("rixoHistoryColumnFilterBtn")?.addEventListener("click", { _: Event ->
+        showRixoHistoryColumnFilterModal()
     })
 
     setupRixoHistoryResizeListener()
@@ -691,11 +700,14 @@ private fun loadRixoHistory(page0: Int = rixoHistoryPageZeroBased) {
     rixoHistoryActiveSearchQ = q
     rixoHistoryPageZeroBased = page0.coerceAtLeast(0)
     val size = rixoHistoryItemsPerPage.coerceAtLeast(1)
+    val encSort = js("encodeURIComponent")(rixoHistorySortField).unsafeCast<String>()
+    val encOrder = js("encodeURIComponent")(rixoHistorySortOrder).unsafeCast<String>()
+    val sortQs = "&sort=$encSort&order=$encOrder"
     val endpoint = if (q.isNotEmpty()) {
         val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
-        "rixo-history/page-search?q=$encQ&page=$rixoHistoryPageZeroBased&size=$size"
+        "rixo-history/page-search?q=$encQ&page=$rixoHistoryPageZeroBased&size=$size$sortQs"
     } else {
-        "rixo-history/page?page=$rixoHistoryPageZeroBased&size=$size"
+        "rixo-history/page?page=$rixoHistoryPageZeroBased&size=$size$sortQs"
     }
 
     MainScope().launch {
@@ -726,12 +738,191 @@ private fun loadRixoHistory(page0: Int = rixoHistoryPageZeroBased) {
     }
 }
 
-private fun rixoHistoryDisplayColumnKeys(): List<String> = listOf(
+private fun rixoHistoryAllSelectableColumnKeys(): List<String> = listOf(
     "rixoConfirmed", "rixoConfirmedDate", "buyingDate", "rixoCompany", "message", "chassis",
 )
 
+private fun rixoHistoryLockedColumnKeys(): Set<String> = setOf("chassis")
+
+private fun rixoHistoryDefaultColumnKeys(): List<String> = rixoHistoryAllSelectableColumnKeys()
+
+private const val RIXO_HISTORY_MAX_DATA_COLUMNS = 6
+private const val RIXO_HISTORY_COLUMNS_STORAGE_KEY = "selectedRixoHistoryColumns_v1"
+private var rixoHistoryColumnFilterKeyHandler: ((Event) -> Unit)? = null
+
+private fun getSelectedRixoHistoryColumns(): List<String> {
+    val defaults = rixoHistoryDefaultColumnKeys()
+    val locked = rixoHistoryLockedColumnKeys()
+    val allowed = rixoHistoryAllSelectableColumnKeys().toSet()
+    val saved = safeLocalStorageGet(RIXO_HISTORY_COLUMNS_STORAGE_KEY)
+    val savedColumns = if (saved != null) {
+        try {
+            JSON.parse<Array<String>>(saved).toList().filter { it in allowed }
+        } catch (_: dynamic) {
+            null
+        }
+    } else {
+        null
+    }
+    val base = if (savedColumns.isNullOrEmpty()) defaults else savedColumns
+    val withLocked = (locked.toList() + base).distinct()
+    val ordered = rixoHistoryAllSelectableColumnKeys().filter { it in withLocked.toSet() }
+    return if (ordered.size > RIXO_HISTORY_MAX_DATA_COLUMNS) {
+        defaults.take(RIXO_HISTORY_MAX_DATA_COLUMNS)
+    } else {
+        ordered
+    }
+}
+
+private fun saveSelectedRixoHistoryColumns(columns: List<String>) {
+    val locked = rixoHistoryLockedColumnKeys()
+    val allowed = rixoHistoryAllSelectableColumnKeys().toSet()
+    val merged = (locked.toList() + columns.filter { it in allowed }).distinct()
+    val ordered = rixoHistoryAllSelectableColumnKeys().filter { it in merged.toSet() }
+        .take(RIXO_HISTORY_MAX_DATA_COLUMNS)
+    val finalCols = if (ordered.size < locked.size) {
+        rixoHistoryDefaultColumnKeys().take(RIXO_HISTORY_MAX_DATA_COLUMNS)
+    } else {
+        ordered
+    }
+    safeLocalStorageSet(RIXO_HISTORY_COLUMNS_STORAGE_KEY, JSON.stringify(finalCols.toTypedArray()))
+}
+
+private fun rixoHistoryDisplayColumnKeys(): List<String> = getSelectedRixoHistoryColumns()
+
 private fun rixoHistorySearchColumnKeys(): List<String> =
-    listOf("id") + rixoHistoryDisplayColumnKeys()
+    listOf("id") + rixoHistoryAllSelectableColumnKeys()
+
+private fun rixoHistoryColumnWidthPx(key: String): Int = when (key) {
+    "rixoConfirmed" -> 96
+    "rixoConfirmedDate" -> 120
+    "buyingDate" -> 112
+    "rixoCompany" -> 132
+    "message" -> 180
+    "chassis" -> 152
+    else -> 120
+}
+
+private fun showRixoHistoryColumnFilterModal() {
+    document.getElementById("rixoHistoryColumnFilterModal")?.remove()
+    rixoHistoryColumnFilterKeyHandler?.let { document.removeEventListener("keydown", it) }
+    rixoHistoryColumnFilterKeyHandler = null
+
+    val returnFocus = document.activeElement as? HTMLElement
+    val modal = document.createElement("div")
+    modal.id = "rixoHistoryColumnFilterModal"
+    modal.asDynamic().style.cssText = """
+        position: fixed; inset: 0;
+        background-color: rgba(15,23,42,0.45); z-index: 10000;
+        display: flex; align-items: center; justify-content: center; padding: 16px;
+    """
+
+    val selected = getSelectedRixoHistoryColumns().toSet()
+    val locked = rixoHistoryLockedColumnKeys()
+
+    modal.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="rixoHistoryColumnFilterTitle"
+             style="background: white; border-radius: 12px; padding: 24px; max-width: 520px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 50px rgba(0,0,0,0.2);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <h3 id="rixoHistoryColumnFilterTitle" style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 700;">Select Columns to Display</h3>
+                <button type="button" id="closeRixoHistoryColumnFilter" aria-label="Close" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 4px 8px; line-height: 1; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center;">&times;</button>
+            </div>
+            <p style="margin: 0 0 8px 0; color: #64748b; font-size: 13px;">Max $RIXO_HISTORY_MAX_DATA_COLUMNS data columns. Chassis is always on. Select and Actions stay visible.</p>
+            <p id="rixoHistoryColumnCount" style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: #0f172a;"></p>
+            <div id="rixoHistoryColumnCheckboxes" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;"></div>
+            <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+                <button type="button" id="resetRixoHistoryColumns" style="padding: 8px 16px; background-color: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; min-height: 40px;">Reset to Default</button>
+                <button type="button" id="applyRixoHistoryColumns" style="padding: 8px 16px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; min-height: 40px;">Apply Changes</button>
+            </div>
+        </div>
+    """
+    document.body?.appendChild(modal)
+
+    fun closeModal() {
+        rixoHistoryColumnFilterKeyHandler?.let { document.removeEventListener("keydown", it) }
+        rixoHistoryColumnFilterKeyHandler = null
+        modal.remove()
+        returnFocus?.focus()
+    }
+
+    fun updateCountAndLocks() {
+        val boxes = document.querySelectorAll("#rixoHistoryColumnCheckboxes input[type=checkbox]")
+        var count = 0
+        for (i in 0 until boxes.length) {
+            val el = boxes.item(i) as? HTMLInputElement ?: continue
+            if (el.checked) count++
+        }
+        document.getElementById("rixoHistoryColumnCount")?.textContent =
+            "Selected: $count / $RIXO_HISTORY_MAX_DATA_COLUMNS"
+        for (i in 0 until boxes.length) {
+            val el = boxes.item(i) as? HTMLInputElement ?: continue
+            val key = el.getAttribute("data-column") ?: continue
+            if (key in locked) {
+                el.checked = true
+                el.disabled = true
+                continue
+            }
+            el.disabled = !el.checked && count >= RIXO_HISTORY_MAX_DATA_COLUMNS
+        }
+    }
+
+    val checkboxesDiv = document.getElementById("rixoHistoryColumnCheckboxes")
+    for (key in rixoHistoryAllSelectableColumnKeys()) {
+        val row = document.createElement("div")
+        row.asDynamic().style.cssText = "display:flex;align-items:center;gap:8px;"
+        val input = document.createElement("input") as HTMLInputElement
+        input.type = "checkbox"
+        input.id = "rixoHistCol_$key"
+        input.setAttribute("data-column", key)
+        input.checked = key in selected || key in locked
+        if (key in locked) input.disabled = true
+        input.addEventListener("change", { _: Event -> updateCountAndLocks() })
+        val labelEl = document.createElement("label") as HTMLLabelElement
+        labelEl.htmlFor = "rixoHistCol_$key"
+        labelEl.textContent = rixoHistoryColumnLabel(key) + if (key in locked) " (always on)" else ""
+        labelEl.asDynamic().style.cssText = "cursor:pointer;margin:0;"
+        row.appendChild(input)
+        row.appendChild(labelEl)
+        checkboxesDiv?.appendChild(row)
+    }
+    updateCountAndLocks()
+
+    document.getElementById("closeRixoHistoryColumnFilter")?.addEventListener("click", { _: Event ->
+        closeModal()
+    })
+    modal.addEventListener("click", { event: Event ->
+        if ((event.target as? HTMLElement)?.id == "rixoHistoryColumnFilterModal") closeModal()
+    })
+    document.getElementById("resetRixoHistoryColumns")?.addEventListener("click", { _: Event ->
+        saveSelectedRixoHistoryColumns(rixoHistoryDefaultColumnKeys())
+        closeModal()
+        renderRixoHistoryTableFromCache()
+    })
+    document.getElementById("applyRixoHistoryColumns")?.addEventListener("click", { _: Event ->
+        val boxes = document.querySelectorAll("#rixoHistoryColumnCheckboxes input[type=checkbox]")
+        val picked = mutableListOf<String>()
+        for (i in 0 until boxes.length) {
+            val el = boxes.item(i) as? HTMLInputElement ?: continue
+            if (el.checked) {
+                val key = el.getAttribute("data-column") ?: continue
+                picked.add(key)
+            }
+        }
+        saveSelectedRixoHistoryColumns(picked)
+        closeModal()
+        renderRixoHistoryTableFromCache()
+    })
+
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val ke = event.asDynamic()
+        if (ke.key == "Escape" || ke.keyCode == 27) {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    rixoHistoryColumnFilterKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+}
 
 private fun rixoHistoryColumnLabel(key: String): String = when (key) {
     "rixoConfirmed" -> "Rixo Confirmed"
@@ -858,7 +1049,11 @@ private fun toggleRixoHistorySort(field: String) {
         rixoHistorySortField = field
         rixoHistorySortOrder = "desc"
     }
-    renderRixoHistoryTableFromCache()
+    if (rixoHistoryServerMode) {
+        loadRixoHistory(0)
+    } else {
+        renderRixoHistoryTableFromCache()
+    }
 }
 
 private fun appendRixoHistoryPager(html: StringBuilder) {
@@ -927,25 +1122,22 @@ private fun renderRixoHistoryTableFromCache() {
         return
     }
 
-    val comparator = Comparator<dynamic> { a, b ->
-        compareRixoHistoryRows(a, b, rixoHistorySortField, rixoHistorySortOrder == "asc")
+    // Enriched purchase flags only: page-local reorder. Entity columns are ordered by the API.
+    val pageLocalOnly =
+        rixoHistorySortField == "rixoConfirmed" || rixoHistorySortField == "rixoConfirmedDate"
+    if (!rixoHistoryServerMode || pageLocalOnly) {
+        val comparator = Comparator<dynamic> { a, b ->
+            compareRixoHistoryRows(a, b, rixoHistorySortField, rixoHistorySortOrder == "asc")
+        }
+        rows = rows.sortedWith(comparator).toTypedArray()
     }
-    rows = rows.sortedWith(comparator).toTypedArray()
     rixoHistoryLastCompactLayout = rixoHistoryIsCompactLayout()
 
     val compact = rixoHistoryIsCompactLayout()
+    val displayKeys = rixoHistoryDisplayColumnKeys()
     // Actions + Select + display columns
-    val colCountRixo = 2 + rixoHistoryDisplayColumnKeys().size
-    val rixoHistoryColWidthsPx = listOf(
-        64, // Actions (Edit + PDF stacked)
-        72, // Select checkbox
-        96, // Rixo Confirmed
-        120, // Rixo Confirmed Date
-        112, // Buying date
-        128, // Rixo company
-        160, // Message
-        200, // Chassis
-    )
+    val colCountRixo = 2 + displayKeys.size
+    val rixoHistoryColWidthsPx = listOf(64, 72) + displayKeys.map { rixoHistoryColumnWidthPx(it) }
     val html = StringBuilder()
     if (!compact) {
         html.append(
@@ -955,7 +1147,7 @@ private fun renderRixoHistoryTableFromCache() {
         )
         html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 64px;">Actions</th>""")
         html.append("""<th style="padding: 12px; text-align: center; border-bottom: 1px solid #dee2e6; width: 72px;">Select</th>""")
-        for (key in rixoHistoryDisplayColumnKeys()) {
+        for (key in displayKeys) {
             val label = escapeHtml(rixoHistoryColumnLabel(key))
             val thAlign = if (key == "rixoConfirmed") "center" else "left"
             val isActive = rixoHistorySortField == key

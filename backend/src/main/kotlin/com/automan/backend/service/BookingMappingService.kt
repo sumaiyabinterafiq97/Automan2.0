@@ -184,10 +184,15 @@ class BookingMappingService(
      * Paginated browse for Consignee Map UI (no search text). Prefer this over findAll for UI.
      */
     @Transactional(readOnly = true)
-    fun listConsigneeMapPage(page: Int, rawSize: Int): ConsigneeMapPageResponse {
+    fun listConsigneeMapPage(
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): ConsigneeMapPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveConsigneeMapSort(sortField, sortOrder))
         val pg = repo.findAll(pageable)
         return ConsigneeMapPageResponse(
             content = pg.content,
@@ -203,13 +208,20 @@ class BookingMappingService(
      * [field]: `all`, `consigneeName`, `country`.
      */
     @Transactional(readOnly = true)
-    fun searchConsigneeMapPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): ConsigneeMapPageResponse {
+    fun searchConsigneeMapPage(
+        rawQuery: String,
+        rawField: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): ConsigneeMapPageResponse {
         val q = sanitizeConsigneeMapSearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }
         val field = rawField.trim().lowercase().ifEmpty { "all" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveConsigneeMapSort(sortField, sortOrder))
         val pg = when (field) {
             "consigneename", "consignee_name" ->
                 repo.searchConsigneeMapConsigneeNameContains(q, pageable)
@@ -227,6 +239,22 @@ class BookingMappingService(
             page = pg.number,
             size = pg.size,
         )
+    }
+
+    private fun resolveConsigneeMapSort(sortField: String?, sortOrder: String?): Sort {
+        val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
+            Sort.Direction.ASC
+        } else {
+            Sort.Direction.DESC
+        }
+        val prop = when (sortField?.trim()?.lowercase()) {
+            null, "", "id" -> "id"
+            "consigneename", "consignee_name" -> "consigneeName"
+            "country" -> "country"
+            "pod" -> "pod"
+            else -> "id"
+        }
+        return Sort.by(dir, prop)
     }
 
     private fun sanitizeConsigneeMapSearchToken(raw: String): String =

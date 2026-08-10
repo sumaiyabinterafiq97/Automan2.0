@@ -23,6 +23,7 @@ interface ShippingHistoryRepository : JpaRepository<ShippingHistory, Long> {
                 "LOWER(COALESCE(h.vessel,'')) LIKE LOWER(CONCAT('%',:q,'%')) OR " +
                 "LOWER(COALESCE(h.country,'')) LIKE LOWER(CONCAT('%',:q,'%')) OR " +
                 "LOWER(COALESCE(h.pol,'')) LIKE LOWER(CONCAT('%',:q,'%')) OR " +
+                "LOWER(COALESCE(h.stockLocation,'')) LIKE LOWER(CONCAT('%',:q,'%')) OR " +
                 "LOWER(COALESCE(h.pod,'')) LIKE LOWER(CONCAT('%',:q,'%'))"
             ),
         countQuery = (
@@ -33,6 +34,7 @@ interface ShippingHistoryRepository : JpaRepository<ShippingHistory, Long> {
                 "LOWER(COALESCE(h.vessel,'')) LIKE LOWER(CONCAT('%',:q,'%')) OR " +
                 "LOWER(COALESCE(h.country,'')) LIKE LOWER(CONCAT('%',:q,'%')) OR " +
                 "LOWER(COALESCE(h.pol,'')) LIKE LOWER(CONCAT('%',:q,'%')) OR " +
+                "LOWER(COALESCE(h.stockLocation,'')) LIKE LOWER(CONCAT('%',:q,'%')) OR " +
                 "LOWER(COALESCE(h.pod,'')) LIKE LOWER(CONCAT('%',:q,'%'))"
             ),
     )

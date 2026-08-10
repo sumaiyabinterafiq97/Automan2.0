@@ -31,10 +31,15 @@ class ClientService(
 
     /** Paginated browse for Client Accounts UI (no search text). Prefer this over [getAllClients] for lists. */
     @Transactional(readOnly = true)
-    fun listPage(page: Int, rawSize: Int): ClientPageResponse {
+    fun listPage(
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): ClientPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.ASC, "clientName"))
+        val pageable = PageRequest.of(pageIdx, size, resolveClientListSort(sortField, sortOrder))
         val pg = clientRepository.findAll(pageable)
         return ClientPageResponse(
             content = pg.content,
@@ -47,12 +52,18 @@ class ClientService(
 
     /** Paginated search for Client Accounts UI (client number / name). */
     @Transactional(readOnly = true)
-    fun searchPage(rawQuery: String, page: Int, rawSize: Int): ClientPageResponse {
+    fun searchPage(
+        rawQuery: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): ClientPageResponse {
         val q = sanitizeClientSearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.ASC, "clientName"))
+        val pageable = PageRequest.of(pageIdx, size, resolveClientListSort(sortField, sortOrder))
         val pg = clientRepository.searchClientsPage(q, pageable)
         return ClientPageResponse(
             content = pg.content,
@@ -61,6 +72,23 @@ class ClientService(
             page = pg.number,
             size = pg.size,
         )
+    }
+
+    private fun resolveClientListSort(sortField: String?, sortOrder: String?): Sort {
+        val dir = if (sortOrder?.trim().equals("desc", ignoreCase = true) == true) {
+            Sort.Direction.DESC
+        } else {
+            Sort.Direction.ASC
+        }
+        val prop = when (sortField?.trim()?.lowercase()) {
+            null, "", "clientname", "client_name", "name" -> "clientName"
+            "clientnumber", "client_number", "number" -> "clientNumber"
+            "currentbalance", "current_balance", "balance" -> "currentBalance"
+            "creditlimit", "credit_limit" -> "creditLimit"
+            "id" -> "id"
+            else -> "clientName"
+        }
+        return Sort.by(dir, prop)
     }
 
     private fun sanitizeClientSearchToken(raw: String): String =

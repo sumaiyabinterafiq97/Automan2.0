@@ -337,6 +337,7 @@ CREATE TABLE shipping_history (
     consignee VARCHAR(512),
     shipment_date DATE NULL,
     pol VARCHAR(255),
+    stock_location VARCHAR(255),
     pod VARCHAR(512),
     booking_id VARCHAR(255),
     vessel VARCHAR(255),

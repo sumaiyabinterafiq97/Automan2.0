@@ -272,6 +272,36 @@ class PurchaseController(
         return ResponseEntity.ok(purchases)
     }
 
+    /** Booking UI: unshipped purchases for country whose stock_location is in [stockLocations] (comma/semicolon). */
+    @GetMapping("/filtered-purchases-by-stocks")
+    fun getFilteredPurchasesByStocks(
+        @RequestParam country: String,
+        @RequestParam stockLocations: String,
+    ): ResponseEntity<List<Purchase>> {
+        val purchases = purchaseService.getFilteredPurchasesByCountryAndStocks(country, stockLocations)
+        return ResponseEntity.ok(purchases)
+    }
+
+    /** Booking UI: chassis suggestions for country + selected stock locations. */
+    @GetMapping("/filtered-chassis-by-stocks")
+    fun getFilteredChassisByStocks(
+        @RequestParam country: String,
+        @RequestParam stockLocations: String,
+    ): ResponseEntity<List<String>> {
+        val chassis = purchaseService.getFilteredChassisByCountryAndStocks(country, stockLocations)
+        return ResponseEntity.ok(chassis)
+    }
+
+    /** Booking UI: POL dropdown options after stock selection (not used for list filtering). */
+    @GetMapping("/pols-for-stocks")
+    fun getPolsForStocks(
+        @RequestParam country: String,
+        @RequestParam stockLocations: String,
+    ): ResponseEntity<List<String>> {
+        val pols = purchaseService.getPolsForStocks(country, stockLocations)
+        return ResponseEntity.ok(pols)
+    }
+
     /** Car booking: load LIST rows that share this [bookingId] (`booking_id` column). */
     @GetMapping("/by-booking/{bookingId}")
     fun getPurchasesByBookingId(@PathVariable bookingId: Long): ResponseEntity<List<Purchase>> {

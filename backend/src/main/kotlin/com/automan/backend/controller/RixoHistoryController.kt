@@ -25,9 +25,11 @@ class RixoHistoryController(
     fun listPage(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(required = false) order: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(rixoHistoryService.listRowsPage(page, size))
+            ResponseEntity.ok(rixoHistoryService.listRowsPage(page, size, sort, order))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }
@@ -38,9 +40,11 @@ class RixoHistoryController(
         @RequestParam q: String,
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(required = false) order: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(rixoHistoryService.searchRowsPage(q, page, size))
+            ResponseEntity.ok(rixoHistoryService.searchRowsPage(q, page, size, sort, order))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }

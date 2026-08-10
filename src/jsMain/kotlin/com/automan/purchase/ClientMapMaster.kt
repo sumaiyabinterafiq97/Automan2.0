@@ -43,15 +43,21 @@ private fun extractClientMapSortKey(m: dynamic, field: String): String =
     clientMapCellText(m, field).trim().lowercase()
 
 private fun toggleClientMapSort(field: String) {
-    if (clientMapSearchServerMode) {
-        showMessage("Clear the search box to sort the full list.", "info")
-        return
-    }
     val cur = clientMapSortOrderByField[field] ?: "desc"
     clientMapSortOrderByField[field] = if (cur == "asc") "desc" else "asc"
     clientMapSortField = field
+    clientMapSearchPageZeroBased = 0
     clientMapCurrentPage = 1
     loadClientMaps()
+}
+
+private fun clientMapSortQueryParams(): String {
+    val sf = clientMapSortField?.trim().orEmpty()
+    if (sf.isEmpty()) return ""
+    val ord = (clientMapSortOrderByField[sf] ?: "desc").trim().lowercase().let { if (it == "asc") "asc" else "desc" }
+    val encS = js("encodeURIComponent")(sf).unsafeCast<String>()
+    val encO = js("encodeURIComponent")(ord).unsafeCast<String>()
+    return "&sort=$encS&order=$encO"
 }
 
 private fun clientMapCellText(mapping: dynamic, key: String): String {
@@ -105,6 +111,8 @@ private fun applyClientMapTextSearch(rows: List<dynamic>): List<dynamic> {
 }
 
 private fun applyClientMapSorting(rows: List<dynamic>): List<dynamic> {
+    // Server page/page-search already apply sort when clientMapSearchServerMode.
+    if (clientMapSearchServerMode) return rows
     val sf = clientMapSortField ?: return rows
     if (sf !in clientMapSortableCols) return rows
     val ord = clientMapSortOrderByField[sf] ?: "desc"
@@ -248,10 +256,10 @@ fun loadClientMaps() {
         clientMapSearchServerMode = true
         val encQ = js("encodeURIComponent")(searchQ).unsafeCast<String>()
         val encF = js("encodeURIComponent")(clientMapSearchFieldChoice).unsafeCast<String>()
-        apiUrl("client-map/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$clientMapItemsPerPage")
+        apiUrl("client-map/mappings/page-search?q=$encQ&field=$encF&page=$p&size=$clientMapItemsPerPage${clientMapSortQueryParams()}")
     } else {
         clientMapSearchServerMode = true
-        apiUrl("client-map/mappings/page?page=$p&size=$clientMapItemsPerPage")
+        apiUrl("client-map/mappings/page?page=$p&size=$clientMapItemsPerPage${clientMapSortQueryParams()}")
     }
     window.fetch(url)
         .then { r: dynamic -> if (r.ok) r.json() else throw js("Error('Failed to load')") }

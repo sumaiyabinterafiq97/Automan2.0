@@ -39,6 +39,8 @@ private val bookingDefaultDataColumns: List<String> = listOf(
 )
 
 private var bookingSelectedDataColumns: MutableList<String> = mutableListOf()
+private var bookingListSortField: String = "chassis"
+private var bookingListSortOrder: String = "asc"
 
 private fun bookingColumnStorageKey(): String = "bookingSelectedColumns"
 
@@ -131,7 +133,21 @@ private fun paintBookingListTableHeader(forceRecreateMode: Boolean? = null) {
     val dataCols = bookingResolvedDataColumns()
     val dataTh = dataCols.joinToString("") { key ->
         val cls = if (key == "carModelYear") " class=\"booking-col-year\"" else ""
-        "<th$cls>${escapeHtml(bookingColumnLabel(key))}</th>"
+        val isActive = bookingListSortField == key
+        val tip = when {
+            !isActive -> "Sort by ${bookingColumnLabel(key)}"
+            bookingListSortOrder == "asc" -> "Sorted A-Z (click for Z-A)"
+            else -> "Sorted Z-A (click for A-Z)"
+        }
+        val arrow = when {
+            !isActive -> "↕"
+            bookingListSortOrder == "asc" -> "↑"
+            else -> "↓"
+        }
+        val arrowColor = if (isActive) "#0f172a" else "#64748b"
+        """<th$cls><button type="button" data-booking-sort="$key" title="${escapeHtml(tip)}" style="background:none;border:none;cursor:pointer;font:inherit;font-weight:700;padding:0;display:inline-flex;align-items:center;gap:4px;color:#475569;">
+            <span>${escapeHtml(bookingColumnLabel(key))}</span><span style="font-size:12px;color:$arrowColor;">$arrow</span>
+        </button></th>"""
     }
     theadRow.innerHTML = """
         ${bookingListSelectHeaderHtml(isRecreateMode)}
@@ -154,6 +170,38 @@ private fun paintBookingListTableHeader(forceRecreateMode: Boolean? = null) {
             updateBookingCarsSelectedCount()
         })
     }
+    val sortBtns = theadRow.querySelectorAll("button[data-booking-sort]")
+    for (i in 0 until sortBtns.length) {
+        val el = sortBtns.item(i) as? HTMLElement ?: continue
+        el.addEventListener("click", { e: Event ->
+            e.preventDefault()
+            val field = el.getAttribute("data-booking-sort") ?: return@addEventListener
+            toggleBookingListSort(field)
+        })
+    }
+}
+
+private fun applyBookingListCurrentSort() {
+    val field = bookingListSortField
+    val asc = bookingListSortOrder == "asc"
+    carBookingDisplayedCars = carBookingDisplayedCars.sortedWith { a, b ->
+        val sa = bookingListCellDisplayValue(a, field).trim().lowercase()
+        val sb = bookingListCellDisplayValue(b, field).trim().lowercase()
+        val c = sa.compareTo(sb)
+        if (asc) c else -c
+    }.toTypedArray()
+}
+
+private fun toggleBookingListSort(field: String) {
+    if (bookingListSortField == field) {
+        bookingListSortOrder = if (bookingListSortOrder == "asc") "desc" else "asc"
+    } else {
+        bookingListSortField = field
+        bookingListSortOrder = "asc"
+    }
+    val checked = bookingListCheckedChassisSet()
+    applyBookingListCurrentSort()
+    rebuildBookingListTableFromDisplayedCars(checked)
 }
 
 private fun bookingListCheckedChassisSet(): Set<String> {
@@ -595,12 +643,13 @@ fun showCarBookingPage() {
             false
         } else run {
             val cc = (carBookingFormState.consigneeCountry as? String)?.trim().orEmpty()
+            val stocks = (carBookingFormState.stockLocations as? String)?.trim().orEmpty()
             val pol = (carBookingFormState.polPort as? String)?.trim().orEmpty()
             val pod = (carBookingFormState.podPort as? String)?.trim().orEmpty()
             val bn = (carBookingFormState.bookingNo as? String)?.trim().orEmpty()
             val vs = (carBookingFormState.vesselSelect as? String)?.trim().orEmpty()
             val carrier = (carBookingFormState.carrierSelect as? String)?.trim().orEmpty()
-            cc.isNotEmpty() || pol.isNotEmpty() || pod.isNotEmpty() || bn.isNotEmpty() ||
+            cc.isNotEmpty() || stocks.isNotEmpty() || pol.isNotEmpty() || pod.isNotEmpty() || bn.isNotEmpty() ||
                 vs.isNotEmpty() || carrier.isNotEmpty() || carBookingDisplayedCars.isNotEmpty()
         }
         
@@ -678,7 +727,16 @@ fun showCarBookingPage() {
                             <input type="text" id="consigneeName" placeholder="Consignee name" aria-label="Consignee name">
                         </div>
                         
-                        <!-- POL -->
+                        <!-- Stock location (multi) — primary list filter -->
+                        <div class="booking-form-group">
+                            <label for="bookingStockLocationsInput">Stock location</label>
+                            <div class="booking-stock-multi-wrap">
+                                ${createChipMultiSelectCombobox("bookingStockLocations", "Select stock location(s)")}
+                            </div>
+                            <div class="booking-field-hint" style="margin-top:6px;font-size:12px;color:#6b7280;">List filters by selected stock locations. Choose POL after selecting stock.</div>
+                        </div>
+                        
+                        <!-- POL (editable after stock; not used for list filtering) -->
                         <div class="booking-form-group">
                             <label id="bookingPolLabel">POL</label>
                             <div class="booking-fab-field rixo-company-fab-wrap" id="bookingPolFabWrap">
@@ -686,10 +744,10 @@ fun showCarBookingPage() {
                                     <option value="">Select Port of Loading</option>
                                 </select>
                                 <div class="rixo-company-fab">
-                                    <button type="button" id="bookingPolFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingPolFabActions" aria-labelledby="bookingPolLabel">
+                                    <button type="button" id="bookingPolFabTrigger" class="rixo-fab-trigger" aria-expanded="false" aria-haspopup="listbox" aria-controls="bookingPolFabActions" aria-labelledby="bookingPolLabel" disabled>
                                         <span class="rixo-fab-trigger-text-wrap">
                                             <span class="rixo-fab-trigger-label" id="bookingPolFabLabel">Select Port of Loading</span>
-                                            <span class="rixo-fab-trigger-hint">Tap to choose POL</span>
+                                            <span class="rixo-fab-trigger-hint">Select stock location first</span>
                                         </span>
                                         <span class="rixo-fab-trigger-chevron" aria-hidden="true">▼</span>
                                     </button>
@@ -917,9 +975,12 @@ fun showCarBookingPage() {
     
     // Setup event listeners
     setupCarBookingPageListeners()
+    ensureSupplierChipJs()
+    wireBookingStockLocationsChipChange()
     loadBookingSelectedColumnsFromStorage()
     paintBookingListTableHeader(isRecreateMode)
     updateBookingListEmptyState()
+    setBookingPolEnabled(false)
     if (isRecreateMode) {
         setupBookingRecreatePageListeners()
         lockBookingRecreateCountryAndPol()
@@ -1009,7 +1070,7 @@ fun showCarBookingPage() {
         }
     }
     
-    // Auto-load purchases into LIST table if both country and POL are selected (after state restoration)
+    // Auto-load purchases into LIST table if country + stock locations are selected (after state restoration)
     // Chassis search is a plain input with API suggestions - no dropdown. Skip loadFilteredPurchasesIntoTable when returning from C&F/FOB.
     val skipAutoFilteredLoadForShippingEdit = shippingHistoryEditPrefillRaw != null
     window.setTimeout({
@@ -1017,22 +1078,26 @@ fun showCarBookingPage() {
             Logger.debug("Skipping loadFilteredPurchasesIntoTable (shipping history edit prefill)")
             return@setTimeout
         }
-        val polSelect = document.getElementById("polPort") as? HTMLSelectElement
         val countrySelect = document.getElementById("consigneeCountry") as? HTMLSelectElement
-        var selectedPol = bookingDynString(nativeSelectValueOrText(polSelect))
         var selectedCountry = bookingDynString(nativeSelectValueOrText(countrySelect))
         if (selectedCountry.isEmpty()) {
             selectedCountry = currentSelectedCountry.trim()
         }
-        if (selectedPol.isNotEmpty() && selectedCountry.isNotEmpty()) {
+        val stocks = getBookingSelectedStockLocationsCsv()
+        if (stocks.isNotEmpty() && selectedCountry.isNotEmpty()) {
+            setBookingPolEnabled(true)
             if (carBookingDisplayedCars.isEmpty()) {
-                Logger.debug("Loading purchases into table after state restoration (Country: $selectedCountry, POL: $selectedPol)")
+                Logger.debug("Loading purchases into table after state restoration (Country: $selectedCountry, stocks: $stocks)")
                 loadFilteredPurchasesIntoTable()
             } else {
                 Logger.debug("Skipping loadFilteredPurchasesIntoTable - restoring ${carBookingDisplayedCars.size} cars from state (backtrack/FINISH)")
+                // Seed stocks from restored cars if chips empty
+                if (getChipFieldValue("bookingStockLocations").isBlank()) {
+                    seedBookingStockLocationsFromDisplayedCars()
+                }
             }
         } else {
-            Logger.warn("Cannot load - Country or POL is empty (Country: '$selectedCountry', POL: '$selectedPol')")
+            Logger.warn("Cannot load - Country or stock location is empty (Country: '$selectedCountry', stocks: '$stocks')")
         }
     }, 2000)
     
@@ -1079,6 +1144,7 @@ private fun proceedCarBookingCalculateToCnf(
     etd: String,
     bookingNo: String,
     vessel: String,
+    pol: String,
 ) {
     Logger.debug("Booking Calculate: opening calculation page in $selectedMode mode")
 
@@ -1159,11 +1225,14 @@ private fun proceedCarBookingCalculateToCnf(
 
     val consigneeName = (document.getElementById("consigneeName") as? HTMLInputElement)?.value?.trim() ?: ""
     val consignee = consigneeName
+    val polTrimmed = pol.trim()
+    carBookingFormState.polPort = polTrimmed
 
     console.log("📋 Booking form values:")
     console.log("   ETD: $etd")
     console.log("   Booking No: $bookingNo")
     console.log("   Vessel: $vessel")
+    console.log("   POL: $polTrimmed")
     console.log("   POD: $podPort (from form: ${podPortEl?.let { if (it.tagName == "SELECT") (it as HTMLSelectElement).value else (it as HTMLInputElement).value } ?: ""}, from state: ${carBookingFormState.podPort})")
     console.log("   Consignee: $consignee")
 
@@ -1176,6 +1245,7 @@ private fun proceedCarBookingCalculateToCnf(
         vessel = vessel,
         destination = podPort,
         consignee = consignee,
+        pol = polTrimmed,
         onComplete = {
             Logger.debug("All purchases updated with booking data and booking_id")
 
@@ -1301,13 +1371,21 @@ fun setupCarBookingPageListeners() {
         
         Logger.debug("Country changed")
         
-        // Reload POL dropdown based on selected country
+        // Reload stock multi-select for country; POL stays disabled until stocks chosen
         if (selectedCountry.isNotEmpty()) {
-            Logger.debug("Reloading POL dropdown for country: $selectedCountry")
-            loadStockLocations(selectedCountry)
+            Logger.debug("Reloading stock locations for country: $selectedCountry")
+            clearBookingStockLocationsChips()
+            clearPolDropdownNoCountry()
+            setBookingPolEnabled(false)
+            loadBookingStockLocationOptions(selectedCountry)
+            if (!(js("window.__bookingRestoreInProgress === true") as Boolean)) {
+                clearBookingListTable()
+            }
         } else {
-            Logger.debug("Country is empty, loading all stock locations")
-            loadStockLocations()
+            Logger.debug("Country is empty, clearing stock + POL + list")
+            clearBookingStockLocationsChips()
+            clearPolDropdownNoCountry()
+            setBookingPolEnabled(false)
             clearBookingListTable()
         }
     })
@@ -1320,24 +1398,12 @@ fun setupCarBookingPageListeners() {
         showConsigneeMapRefreshNoticeModal()
     })
     
-    // POL dropdown change - auto-load purchases into LIST table
+    // POL change — booking/PDF/write-back only; does NOT reload the list
     document.getElementById("polPort")?.addEventListener("change", { event: Event ->
-        val restoring = js("window.__bookingRestoreInProgress === true") as Boolean
-        if (restoring) {
-            Logger.debug("Skipping loadFilteredPurchasesIntoTable (booking restore in progress)")
-            return@addEventListener
-        }
         val selectedPol = (event.target as HTMLSelectElement).value
-        Logger.debug("POL selected: $selectedPol")
-        val countrySelect = document.getElementById("consigneeCountry") as? HTMLSelectElement
-        val selectedCountry = countrySelect?.value ?: ""
-        if (selectedCountry.isNotEmpty() && selectedPol.isNotEmpty()) {
-            Logger.debug("Loading purchases into table after POL change")
-            loadFilteredPurchasesIntoTable()
-        } else {
-            Logger.warn("Cannot reload - Country or POL is empty")
-            if (selectedPol.isEmpty()) clearBookingListTable()
-        }
+        Logger.debug("POL selected (list not filtered): $selectedPol")
+        carBookingFormState.polPort = selectedPol
+        refreshBookingFabPolUi()
     })
     
     // POD field change - save to state immediately to preserve it
@@ -1522,6 +1588,17 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
             showMessage("Please enter VESSEL before calculating", "error")
             return@addEventListener
         }
+        val stocksCsv = getBookingSelectedStockLocationsCsv()
+        if (stocksCsv.isEmpty()) {
+            showMessage("Please select at least one stock location before calculating", "error")
+            return@addEventListener
+        }
+        val polForCalc = (document.getElementById("polPort") as? HTMLSelectElement)?.value?.trim().orEmpty()
+            .ifEmpty { bookingDynString(carBookingFormState.polPort) }
+        if (polForCalc.isEmpty()) {
+            showMessage("Please select POL before calculating", "error")
+            return@addEventListener
+        }
 
         val selectedCars = getSelectedCarsFromTable()
         Logger.debug("Selected cars for calculation: ${selectedCars.size}")
@@ -1551,6 +1628,7 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
                 etd = etd,
                 bookingNo = bookingNo,
                 vessel = vessel,
+                pol = polForCalc,
             )
         }
     })
@@ -1687,7 +1765,7 @@ fun loadCarriers(onComplete: (() -> Unit)? = null) {
         }
 }
 
-/** POL dropdown: empty until a country is chosen (no global fetch on page load). */
+/** POL dropdown: empty until stock location(s) are chosen. */
 fun clearPolDropdownNoCountry() {
     val polSelect = document.getElementById("polPort") as? HTMLSelectElement ?: return
     polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
@@ -1696,66 +1774,179 @@ fun clearPolDropdownNoCountry() {
     refreshBookingFabPolUi()
 }
 
-/**
- * Loads POL options from purchases for [country] via [purchases/pols-by-country].
- * First value in the list auto-fills POL; rest appear in the dropdown.
- * If [country] is null/blank, clears POL (does not load all POLs).
- */
-fun loadStockLocations(country: String? = null, onComplete: (() -> Unit)? = null) {
-    val countryParam = (country ?: "").trim()
-    console.log("Loading POL from purchases for country='$countryParam'...")
+fun getBookingSelectedStockLocationsRaw(): String =
+    getChipFieldValue("bookingStockLocations").trim()
 
-    fun done() {
-        onComplete?.invoke()
+/** Comma-separated for API query params. */
+fun getBookingSelectedStockLocationsCsv(): String =
+    getBookingSelectedStockLocationsRaw()
+        .split(';', ',')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && it != "-" }
+        .joinToString(",")
+
+fun clearBookingStockLocationsChips() {
+    setChipFieldValue("bookingStockLocations", "")
+    carBookingFormState.stockLocations = ""
+}
+
+fun setBookingPolEnabled(enabled: Boolean) {
+    val trigger = document.getElementById("bookingPolFabTrigger") as? HTMLButtonElement
+    if (trigger != null && !isCarBookingRecreateSession()) {
+        trigger.disabled = !enabled
+        trigger.asDynamic().style.opacity = if (enabled) "1" else "0.55"
+        trigger.asDynamic().style.pointerEvents = if (enabled) "auto" else "none"
+        val hint = trigger.querySelector(".rixo-fab-trigger-hint") as? HTMLElement
+        hint?.textContent = if (enabled) "Tap to choose POL" else "Select stock location first"
     }
+    if (!enabled && isCarBookingRecreateSession()) {
+        lockBookingRecreateCountryAndPol()
+    }
+}
 
-    if (countryParam.isEmpty()) {
-        clearPolDropdownNoCountry()
-        done()
+fun wireBookingStockLocationsChipChange() {
+    js(
+        """
+        (function() {
+          if (window.__bookingStockChipWrapped) return;
+          window.__bookingStockChipWrapped = true;
+          var wrapAdd = window.supplierChipAdd;
+          var wrapRemove = window.supplierChipRemove;
+          var wrapSet = window.supplierChipSetValue;
+          function notify(id) {
+            if (id === 'bookingStockLocations' && typeof window.onBookingStockLocationsChanged === 'function') {
+              window.onBookingStockLocationsChanged();
+            }
+          }
+          if (typeof wrapAdd === 'function') {
+            window.supplierChipAdd = function(id, value) {
+              wrapAdd(id, value);
+              notify(id);
+            };
+          }
+          if (typeof wrapRemove === 'function') {
+            window.supplierChipRemove = function(id, value) {
+              wrapRemove(id, value);
+              notify(id);
+            };
+          }
+          if (typeof wrapSet === 'function') {
+            window.supplierChipSetValue = function(id, value) {
+              wrapSet(id, value);
+              notify(id);
+            };
+          }
+        })();
+        """
+    )
+    window.asDynamic().onBookingStockLocationsChanged = {
+        handleBookingStockLocationsChanged()
+    }
+}
+
+fun handleBookingStockLocationsChanged() {
+    val restoring = js("window.__bookingRestoreInProgress === true") as Boolean
+    val stocksRaw = getBookingSelectedStockLocationsRaw()
+    carBookingFormState.stockLocations = stocksRaw
+    val stocksCsv = getBookingSelectedStockLocationsCsv()
+    Logger.debug("Stock locations changed: $stocksCsv")
+    if (restoring) {
+        Logger.debug("Skipping stock-driven list reload (booking restore in progress)")
         return
     }
+    val country = (document.getElementById("consigneeCountry") as? HTMLSelectElement)?.value?.trim().orEmpty()
+        .ifEmpty { currentSelectedCountry.trim() }
+    if (stocksCsv.isEmpty() || country.isEmpty()) {
+        setBookingPolEnabled(false)
+        clearPolDropdownNoCountry()
+        if (carBookingDisplayedCars.isEmpty() || !isCarBookingRecreateSession()) {
+            clearBookingListTable()
+        }
+        return
+    }
+    setBookingPolEnabled(true)
+    loadPolOptionsForSelectedStocks(country, stocksCsv)
+    loadFilteredPurchasesIntoTable()
+}
 
-    val encodedCountry = js("encodeURIComponent")(countryParam).unsafeCast<String>()
-    val polApiUrl = apiUrl("purchases/pols-by-country?country=$encodedCountry")
-
-    window.fetch(polApiUrl)
+fun loadBookingStockLocationOptions(country: String, onComplete: (() -> Unit)? = null) {
+    val countryParam = country.trim()
+    if (countryParam.isEmpty()) {
+        onComplete?.invoke()
+        return
+    }
+    ensureSupplierChipJs()
+    val select = document.getElementById("bookingStockLocations") as? HTMLSelectElement
+    if (select == null) {
+        onComplete?.invoke()
+        return
+    }
+    val encoded = js("encodeURIComponent")(countryParam).unsafeCast<String>()
+    window.fetch(apiUrl("purchases/stock-locations-by-country?country=$encoded"))
         .then { response: dynamic ->
-            console.log("POLs by country API response status:", response.status)
-            if (response.ok) {
-                response.json()
-            } else {
-                console.log("POLs by country API failed, fetching purchases to filter client-side")
-                window.fetch(apiUrl("purchases"))
-                    .then { purchasesResponse: dynamic ->
-                        if (purchasesResponse.ok) purchasesResponse.json() else js("Promise.resolve([])")
-                    }
-                    .then { purchases: dynamic ->
-                        val purchasesArray = purchases as Array<dynamic>
-                        val ordered = mutableListOf<String>()
-                        val seen = mutableSetOf<String>()
-                        purchasesArray.forEach { purchase ->
-                            val purchaseCountry = js("purchase.country")?.toString() ?: ""
-                            if (!purchaseCountry.equals(countryParam, ignoreCase = true)) return@forEach
-                            val pol = js("purchase.pol")?.toString()?.trim() ?: ""
-                            if (pol.isEmpty()) return@forEach
-                            val key = pol.lowercase()
-                            if (seen.add(key)) ordered.add(pol)
-                        }
-                        ordered.toTypedArray()
-                    }
+            if (response.ok) response.json() else js("Promise.resolve([])")
+        }
+        .then { data: dynamic ->
+            val arr = js("Array.isArray(data) ? data : []") as Array<dynamic>
+            val bookableStocks = arr.map { (it?.toString() ?: "").trim() }
+                .filter { it.isNotEmpty() && it != "-" }
+                .distinctBy { it.lowercase() }
+            select.innerHTML = "<option value=\"\">▼</option>"
+            bookableStocks.forEach { stock ->
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = stock
+                opt.textContent = stock
+                select.appendChild(opt)
             }
+            val restoring = js("window.__bookingRestoreInProgress === true") as Boolean
+            val isRecreate = isCarBookingRecreateSession()
+            val saved = bookingDynString(carBookingFormState.stockLocations)
+            val currentChips = getBookingSelectedStockLocationsRaw()
+            val preferred = if (currentChips.isNotEmpty()) currentChips else saved
+            if (preferred.isNotEmpty()) {
+                val preferredTokens = preferred.split(';', ',')
+                    .map { it.trim() }
+                    .filter { it.isNotEmpty() && it != "-" }
+                val allowedKeys = bookableStocks.map { it.lowercase() }.toSet()
+                val kept = if (restoring || isRecreate) {
+                    // Recreate/restore: keep seeded chips even if not currently bookable
+                    preferredTokens
+                } else {
+                    preferredTokens.filter { it.lowercase() in allowedKeys }
+                }
+                val joined = kept.joinToString(";")
+                setChipFieldValue("bookingStockLocations", joined)
+                carBookingFormState.stockLocations = joined
+            }
+            onComplete?.invoke()
+        }
+        .catch { _: dynamic ->
+            onComplete?.invoke()
+        }
+}
+
+fun loadPolOptionsForSelectedStocks(country: String, stocksCsv: String, onComplete: (() -> Unit)? = null) {
+    val countryParam = country.trim()
+    if (countryParam.isEmpty() || stocksCsv.isBlank()) {
+        clearPolDropdownNoCountry()
+        onComplete?.invoke()
+        return
+    }
+    val encodedCountry = js("encodeURIComponent")(countryParam).unsafeCast<String>()
+    val encodedStocks = js("encodeURIComponent")(stocksCsv).unsafeCast<String>()
+    val url = apiUrl("purchases/pols-for-stocks?country=$encodedCountry&stockLocations=$encodedStocks")
+    window.fetch(url)
+        .then { response: dynamic ->
+            if (response.ok) response.json() else js("Promise.resolve([])")
         }
         .then { pols: dynamic ->
-            console.log("POL data received:", pols)
-            val polSelect = document.getElementById("polPort") as HTMLSelectElement?
+            val polSelect = document.getElementById("polPort") as? HTMLSelectElement
             if (polSelect != null) {
                 val currentPolValue = bookingDynString(nativeSelectValueOrText(polSelect))
                 val statePolValue = bookingDynString(carBookingFormState.polPort)
                 val preservedPolValue = if (currentPolValue.isNotEmpty()) currentPolValue else statePolValue
-
                 polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
-
-                val polsArray = pols as Array<dynamic>
+                val polsArray = js("Array.isArray(pols) ? pols : []") as Array<dynamic>
                 val normalizedPols = polsArray.map { (it?.toString() ?: "").trim() }.filter { it.isNotEmpty() }
                 normalizedPols.forEach { pol ->
                     val option = document.createElement("option") as HTMLOptionElement
@@ -1763,105 +1954,104 @@ fun loadStockLocations(country: String? = null, onComplete: (() -> Unit)? = null
                     option.textContent = pol
                     polSelect.appendChild(option)
                 }
-
-                val preservedExists = preservedPolValue.isNotEmpty() && normalizedPols.any { it == preservedPolValue }
-                val desiredPol = if (preservedExists) preservedPolValue else normalizedPols.firstOrNull() ?: ""
-
+                val preservedExists = preservedPolValue.isNotEmpty() &&
+                    normalizedPols.any { it.equals(preservedPolValue, ignoreCase = true) }
+                val desiredPol = when {
+                    preservedExists -> preservedPolValue
+                    normalizedPols.isNotEmpty() -> normalizedPols.first()
+                    else -> ""
+                }
                 if (desiredPol.isNotEmpty()) {
                     polSelect.value = desiredPol
                     carBookingFormState.polPort = desiredPol
-                    val changeEvent = js("new Event('change', { bubbles: true })")
-                    polSelect.dispatchEvent(changeEvent.unsafeCast<Event>())
                 } else {
                     carBookingFormState.polPort = ""
                 }
-
-                console.log("✅ POL values loaded: ${normalizedPols.size} POLs for country: $countryParam (selected: '${polSelect.value}')")
                 refreshBookingFabPolUi()
             }
-            done()
+            onComplete?.invoke()
         }
-        .catch { error: dynamic ->
-            console.error("Error loading POL values:", error)
-            loadStockLocationsFallback()
-            done()
+        .catch { _: dynamic ->
+            onComplete?.invoke()
         }
 }
 
+/**
+ * Legacy name kept for recreate callers. Loads stock options for [country];
+ * POL fills after stock selection via [loadPolOptionsForSelectedStocks].
+ */
+fun loadStockLocations(country: String? = null, onComplete: (() -> Unit)? = null) {
+    val countryParam = (country ?: "").trim()
+    if (countryParam.isEmpty()) {
+        clearBookingStockLocationsChips()
+        clearPolDropdownNoCountry()
+        setBookingPolEnabled(false)
+        onComplete?.invoke()
+        return
+    }
+    loadBookingStockLocationOptions(countryParam) {
+        val stocksCsv = getBookingSelectedStockLocationsCsv()
+        if (stocksCsv.isNotEmpty()) {
+            setBookingPolEnabled(true)
+            loadPolOptionsForSelectedStocks(countryParam, stocksCsv, onComplete)
+        } else {
+            setBookingPolEnabled(false)
+            clearPolDropdownNoCountry()
+            onComplete?.invoke()
+        }
+    }
+}
+
 fun loadStockLocationsFallback() {
-    console.log("Loading fallback stock location data...")
-    
-    val countrySelect = document.getElementById("consigneeCountry") as? HTMLSelectElement
-    val countryNow = (countrySelect?.value ?: "").trim()
+    console.log("Stock/POL fallback: clearing POL until stocks selected")
+    val countryNow = (document.getElementById("consigneeCountry") as? HTMLSelectElement)?.value?.trim().orEmpty()
     if (countryNow.isEmpty()) {
         clearPolDropdownNoCountry()
         return
     }
-
-    val polSelect = document.getElementById("polPort") as HTMLSelectElement?
-    if (polSelect == null) {
-        console.error("POL select element not found in fallback!")
-        return
-    }
-    
-    console.log("Clearing POL select and adding default option...")
-    polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
-    
-    // Stock location data from your CSV file - unique locations
-    val fallbackStockLocations = listOf(
-        "GLOBAL KAWASAKI",
-        "GLOBAL HAKATA", 
-        "GLOBAL NAGOYA",
-        "KLC",
-        "BARAKI",
-        "-"
-    )
-    
-    console.log("Adding", fallbackStockLocations.size, "stock locations to dropdown...")
-    
-    fallbackStockLocations.forEach { location ->
-        val option = document.createElement("option")
-        option.setAttribute("value", location)
-        option.textContent = location
-        polSelect.appendChild(option)
-        console.log("Added stock location:", location)
-    }
-    
-    console.log("Fallback stock locations loaded successfully:", fallbackStockLocations.size, "locations")
-    console.log("Final POL select options count:", polSelect.options.length)
     refreshBookingFabPolUi()
 }
 
+fun seedBookingStockLocationsFromDisplayedCars() {
+    val stocks = carBookingDisplayedCars
+        .mapNotNull { car ->
+            val s = (car.stockLocation ?: car.stock_location)?.toString()?.trim().orEmpty()
+            s.takeIf { it.isNotEmpty() && it != "-" }
+        }
+        .distinctBy { it.lowercase() }
+    if (stocks.isEmpty()) return
+    val joined = stocks.joinToString(";")
+    setChipFieldValue("bookingStockLocations", joined)
+    carBookingFormState.stockLocations = joined
+}
+
 fun loadFilteredChassis() {
-    val polSelect = document.getElementById("polPort") as HTMLSelectElement?
     val countrySelect = document.getElementById("consigneeCountry") as HTMLSelectElement?
     val chassisSelect = document.getElementById("chassisSearch") as HTMLSelectElement?
     val chassisInput = document.getElementById("chassisSearchInput") as HTMLInputElement?
-    
+
     if (chassisSelect == null) {
         Logger.error("Chassis select element not found!")
         return
     }
-    
-    val selectedPol = polSelect?.value ?: ""
+
     val selectedCountry = countrySelect?.value ?: ""
-    
-    // Both country and POL are required for filtering
-    if (selectedPol.isEmpty() || selectedCountry.isEmpty()) {
-        Logger.debug("Country or POL not selected, clearing chassis data (Country: '$selectedCountry', POL: '$selectedPol')")
-        // Clear combobox dropdown
+    val stocksCsv = getBookingSelectedStockLocationsCsv()
+
+    if (stocksCsv.isEmpty() || selectedCountry.isEmpty()) {
+        Logger.debug("Country or stock location not selected, clearing chassis data")
         chassisSelect.innerHTML = "<option value=\"\">▼</option>"
         if (chassisInput != null) {
             chassisInput.value = ""
         }
         return
     }
-    
-    Logger.debug("Loading unshipped chassis for Country: $selectedCountry, POL: $selectedPol")
-    
+
+    Logger.debug("Loading unshipped chassis for Country: $selectedCountry, stocks: $stocksCsv")
+
     val encodedCountry = js("encodeURIComponent")(selectedCountry) as String
-    val encodedPol = js("encodeURIComponent")(selectedPol) as String
-    val url = apiUrl("purchases/filtered-chassis?country=$encodedCountry&polPort=$encodedPol")
+    val encodedStocks = js("encodeURIComponent")(stocksCsv) as String
+    val url = apiUrl("purchases/filtered-chassis-by-stocks?country=$encodedCountry&stockLocations=$encodedStocks")
     console.log("🔍 Fetching filtered chassis from:", url)
     window.fetch(url)
         .then { response: dynamic ->
@@ -1875,8 +2065,6 @@ fun loadFilteredChassis() {
         }
         .then { chassis: dynamic ->
             console.log("Filtered chassis data received:", chassis)
-            
-            // Populate combobox dropdown with chassis options
             val chassisArray = chassis as Array<dynamic>
             chassisSelect.innerHTML = "<option value=\"\">▼</option>"
             chassisArray.forEach { chassisValue ->
@@ -1884,7 +2072,7 @@ fun loadFilteredChassis() {
                 val option = js("new Option(chassisStr, chassisStr)")
                 chassisSelect.appendChild(option.unsafeCast<HTMLOptionElement>())
             }
-            console.log("✅ Chassis dropdown populated with ${chassisArray.size} options (filtered by Country: $selectedCountry, POL: $selectedPol)")
+            console.log("✅ Chassis dropdown populated with ${chassisArray.size} options (filtered by Country: $selectedCountry, stocks: $stocksCsv)")
         }
         .catch { error: dynamic ->
             console.error("Error loading filtered chassis:", error)
@@ -1894,22 +2082,20 @@ fun loadFilteredChassis() {
 
 fun loadFilteredChassisFallback() {
     console.log("Using fallback chassis data")
-    // Fallback implementation can be added if needed
 }
 
 fun loadFilteredPurchasesIntoTable() {
-    val polSelect = document.getElementById("polPort") as? HTMLSelectElement
     val countrySelect = document.getElementById("consigneeCountry") as? HTMLSelectElement
-    val selectedPol = polSelect?.value ?: ""
-    val selectedCountry = countrySelect?.value ?: ""
-    if (selectedPol.isEmpty() || selectedCountry.isEmpty()) {
-        Logger.debug("Country or POL empty, clearing list table")
+    val selectedCountry = countrySelect?.value?.trim().orEmpty().ifEmpty { currentSelectedCountry.trim() }
+    val stocksCsv = getBookingSelectedStockLocationsCsv()
+    if (stocksCsv.isEmpty() || selectedCountry.isEmpty()) {
+        Logger.debug("Country or stock location empty, clearing list table")
         clearBookingListTable()
         return
     }
     val encodedCountry = js("encodeURIComponent")(selectedCountry) as String
-    val encodedPol = js("encodeURIComponent")(selectedPol) as String
-    val url = apiUrl("purchases/filtered-purchases?country=$encodedCountry&polPort=$encodedPol")
+    val encodedStocks = js("encodeURIComponent")(stocksCsv) as String
+    val url = apiUrl("purchases/filtered-purchases-by-stocks?country=$encodedCountry&stockLocations=$encodedStocks")
     Logger.debug("Fetching filtered purchases from: $url")
     window.fetch(url)
         .then { response: dynamic ->
@@ -1922,7 +2108,7 @@ fun loadFilteredPurchasesIntoTable() {
         }
         .then { purchases: dynamic ->
             val purchasesArray = js("Array.isArray(purchases) ? purchases : (purchases ? [purchases] : [])") as Array<dynamic>
-            Logger.debug("Loaded ${purchasesArray.size} purchases for Country: $selectedCountry, POL: $selectedPol")
+            Logger.debug("Loaded ${purchasesArray.size} purchases for Country: $selectedCountry, stocks: $stocksCsv")
             clearBookingListTable()
             if (purchasesArray.isNotEmpty()) {
                 displayPurchasesAsCarsAPPEND(purchasesArray)
@@ -2006,21 +2192,21 @@ fun hideChassisSuggestions() {
     }
 }
 
-/** Fetch chassis suggestions from purchases, filtered by selected Country & POL and matching query. */
+/** Fetch chassis suggestions from purchases, filtered by selected Country & stock locations and matching query. */
 fun fetchChassisSuggestionsForBooking(query: String) {
     if (query.trim().isEmpty()) {
         hideChassisSuggestions()
         return
     }
     val selectedCountry = (document.getElementById("consigneeCountry") as? HTMLSelectElement)?.value?.trim() ?: ""
-    val selectedPol = (document.getElementById("polPort") as? HTMLSelectElement)?.value?.trim() ?: ""
+    val stocksCsv = getBookingSelectedStockLocationsCsv()
     val encoded = js("encodeURIComponent")(query.trim()) as String
 
-    // If both country and POL are selected, use filtered-chassis endpoint for accuracy
-    if (selectedCountry.isNotEmpty() && selectedPol.isNotEmpty()) {
+    // If both country and stock(s) are selected, use stock-scoped chassis endpoint
+    if (selectedCountry.isNotEmpty() && stocksCsv.isNotEmpty()) {
         val encodedCountry = js("encodeURIComponent")(selectedCountry) as String
-        val encodedPol = js("encodeURIComponent")(selectedPol) as String
-        val url = apiUrl("purchases/filtered-chassis?country=$encodedCountry&polPort=$encodedPol")
+        val encodedStocks = js("encodeURIComponent")(stocksCsv) as String
+        val url = apiUrl("purchases/filtered-chassis-by-stocks?country=$encodedCountry&stockLocations=$encodedStocks")
         window.fetch(url)
             .then { response: dynamic ->
                 if (response.ok) response.json() else js("Promise.resolve([])")
@@ -2044,12 +2230,12 @@ fun fetchChassisSuggestionsForBooking(query: String) {
             }
             .then { data: dynamic ->
                 val arr = js("Array.isArray(data) ? data : (data ? [data] : [])") as Array<dynamic>
-                val chassisSet = mutableSetOf<String>()
-                for (i in arr.indices) {
-                    val ch = (js("arr[i].chassis") as? String) ?: ""
-                    if (ch.isNotBlank()) chassisSet.add(ch)
-                }
-                showChassisSuggestions(chassisSet.toTypedArray())
+                val q = query.trim().lowercase()
+                val matching = arr
+                    .map { it?.toString() ?: "" }
+                    .filter { it.isNotBlank() && it.lowercase().contains(q) }
+                    .toTypedArray()
+                showChassisSuggestions(matching)
             }
             .catch { _: dynamic -> hideChassisSuggestions() }
     }
@@ -2209,56 +2395,28 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
     // Save displayed cars data for state persistence - ACCUMULATE instead of overwrite
     val displayedCarsArray = js("Array.isArray(purchases) ? purchases : [purchases]") as Array<dynamic>
     
-    // Add new cars to existing displayed cars (avoid duplicates)
+    // Add new cars to existing displayed cars (avoid duplicates); merge updates into existing rows
     val newCars = mutableListOf<dynamic>()
     for (newCar in displayedCarsArray) {
         val chassis = newCar.chassis
         val alreadyExists = carBookingDisplayedCars.any { it.chassis == chassis }
-        if (!alreadyExists) {
+        if (alreadyExists) {
+            mergePurchaseIntoDisplayedCars(newCar)
+        } else {
             newCars.add(newCar)
         }
     }
-    carBookingDisplayedCars = carBookingDisplayedCars + newCars.toTypedArray()
+    if (newCars.isNotEmpty()) {
+        carBookingDisplayedCars = carBookingDisplayedCars + newCars.toTypedArray()
+    }
     
     console.log("💾 Accumulated displayed cars for state persistence:", carBookingDisplayedCars.size)
-    
-    val tbody = document.getElementById("carSelectionTableBody")
-    if (tbody == null) {
-        console.error("Car table body not found!")
-        return
-    }
-    
-    val purchasesArray = js("Array.isArray(purchases) ? purchases : [purchases]") as Array<dynamic>
-    
-    for (index in purchasesArray.indices) {
-        val purchase = purchasesArray[index]
-        val chassisNumber = purchase.chassis?.toString() ?: "N/A"
-        
-        // Prefer data-chassis on the row (stable when Column Filter reorders data columns)
-        val existingRows = tbody.querySelectorAll("tr[data-chassis]")
-        var carAlreadyExists = false
-        for (i in 0 until existingRows.length) {
-            val row = existingRows.item(i) as? HTMLElement ?: continue
-            if (row.getAttribute("data-chassis")?.trim() == chassisNumber) {
-                carAlreadyExists = true
-                break
-            }
-        }
-        
-        if (carAlreadyExists) {
-            mergePurchaseIntoDisplayedCars(purchase)
-            updateBookingTablePriceCellForChassis(chassisNumber, purchase)
-            continue
-        }
-        
-        val rowNumber = tbody.children.length + 1
-        appendBookingListRow(purchase, rowNumber)
-    }
-    
-    console.log("✅ Added", purchasesArray.size, "new cars to table")
-    updateBookingCarsSelectedCount()
-    updateBookingSelectAllCheckbox()
-    updateBookingListEmptyState()
+
+    // Keep table order aligned with active column sort (client-only; no DB round-trip).
+    val checked = bookingListCheckedChassisSet()
+    applyBookingListCurrentSort()
+    rebuildBookingListTableFromDisplayedCars(checked)
+    console.log("✅ Refreshed booking list with", carBookingDisplayedCars.size, "cars (sorted)")
 }
 
 fun searchCarsFallback(searchTerm: String) {
@@ -2446,6 +2604,7 @@ fun updateSelectedPurchasesWithBookingData(
     vessel: String,
     destination: String,
     consignee: String,
+    pol: String,
     onComplete: () -> Unit
 ) {
     if (purchaseIds.isEmpty()) {
@@ -2461,6 +2620,7 @@ fun updateSelectedPurchasesWithBookingData(
     console.log("   VESSEL → vessel: $vessel")
     console.log("   POD → pod column: $destination")
     console.log("   CONSIGNEE → consignee: $consignee")
+    console.log("   POL → pol: $pol")
     
     var completedUpdates = 0
     val totalUpdates = purchaseIds.size
@@ -2500,11 +2660,12 @@ fun updateSelectedPurchasesWithBookingData(
         payload["pod"] = destination
         // CONSIGNEE → consignee (name only; no "Country - " prefix — see consigneeNameWithoutCountryPrefix)
         payload["consignee"] = consigneeNameWithoutCountryPrefix(consignee)
+        // POL → purchases.pol (Calculate write-back for Purchase List)
+        payload["pol"] = pol.trim()
         // Note: booking_requested is set via the Booking Requested button, not Calculate
-        // POL is not sent to database (not needed)
         
         Logger.debug("Sending update payload for purchase $purchaseId")
-        Logger.debug("Payload contents: bookingId=$bookingIdLong, shipmentDate=$etd, vessel=$vessel, pod=$destination")
+        Logger.debug("Payload contents: bookingId=$bookingIdLong, shipmentDate=$etd, vessel=$vessel, pod=$destination, pol=$pol")
         console.log("📦 Update payload for purchase $purchaseId:", JSON.stringify(payload))
         
         val req = js("({})")
@@ -3042,6 +3203,18 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
         }
 
         displayPurchasesAsCarsAPPEND(matched.toTypedArray())
+        seedBookingStockLocationsFromDisplayedCars()
+        val stocksCsv = getBookingSelectedStockLocationsCsv()
+        if (country.isNotEmpty() && stocksCsv.isNotEmpty()) {
+            setBookingPolEnabled(true)
+            loadPolOptionsForSelectedStocks(country, stocksCsv) {
+                bookingEnsurePolOption(pol)
+                refreshBookingFabPolUi()
+            }
+        } else if (pol.isNotEmpty()) {
+            bookingEnsurePolOption(pol)
+            refreshBookingFabPolUi()
+        }
         lockBookingRecreateCountryAndPol()
 
         if (matched.isEmpty() && allChassisTokens.isNotEmpty()) {
@@ -3088,6 +3261,15 @@ private fun lockBookingRecreateCountryAndPol() {
             btn.disabled = true
             btn.asDynamic().style.pointerEvents = "none"
             btn.asDynamic().style.opacity = "0.7"
+        }
+    }
+    // Lock stock multi-select chips during recreate
+    listOf("bookingStockLocationsInput", "bookingStockLocationsButton", "bookingStockLocations").forEach { id ->
+        val el = document.getElementById(id) as? HTMLElement ?: return@forEach
+        el.asDynamic().style.pointerEvents = "none"
+        el.asDynamic().style.opacity = "0.7"
+        if (el is HTMLInputElement || el is HTMLSelectElement) {
+            el.setAttribute("disabled", "true")
         }
     }
     document.getElementById("manageBookingMappingsBtn")?.asDynamic()?.style?.display = "none"
@@ -3371,6 +3553,8 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
                     row.chassis = chassis
                     val client = extractClientNameFromCar(enriched)
                     if (client.isNotEmpty()) row.clientName = client
+                    val stock = (enriched.stockLocation ?: enriched.stock_location)?.toString()?.trim().orEmpty()
+                    if (stock.isNotEmpty() && stock != "-") row.stockLocation = stock
                     row.amount = total
                     items.push(row)
                 }

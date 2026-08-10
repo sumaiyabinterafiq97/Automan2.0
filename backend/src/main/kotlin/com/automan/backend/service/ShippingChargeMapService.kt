@@ -32,10 +32,15 @@ class ShippingChargeMapService(
      * Paginated browse for Shipping Charge Map UI (no search text). Prefer this over [findAllAsMaps] for UI.
      */
     @Transactional(readOnly = true)
-    fun listPage(page: Int, rawSize: Int): SupplierMapPageResponse {
+    fun listPage(
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): SupplierMapPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveShippingChargeMapSort(sortField, sortOrder))
         val pg = shippingChargeMapRepository.findAll(pageable)
         val content = pg.content.map { toDto(it) }
         return SupplierMapPageResponse(
@@ -48,13 +53,20 @@ class ShippingChargeMapService(
     }
 
     @Transactional(readOnly = true)
-    fun searchPage(rawQuery: String, rawField: String, page: Int, rawSize: Int): SupplierMapPageResponse {
+    fun searchPage(
+        rawQuery: String,
+        rawField: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): SupplierMapPageResponse {
         val q = sanitizeSearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }
         val field = rawField.trim().lowercase().ifEmpty { "all" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveShippingChargeMapSort(sortField, sortOrder))
         val pg = when (field) {
             "stocklocation", "stock_location" ->
                 shippingChargeMapRepository.searchStockLocationContains(q, pageable)
@@ -77,6 +89,22 @@ class ShippingChargeMapService(
             page = pg.number,
             size = pg.size,
         )
+    }
+
+    private fun resolveShippingChargeMapSort(sortField: String?, sortOrder: String?): Sort {
+        val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
+            Sort.Direction.ASC
+        } else {
+            Sort.Direction.DESC
+        }
+        val prop = when (sortField?.trim()?.lowercase()) {
+            null, "", "id" -> "id"
+            "stocklocation", "stock_location" -> "stockLocation"
+            "carspercontainer", "cars_per_container", "cars" -> "carsPerContainer"
+            "shippingpricepercar", "shipping_price_per_car", "price" -> "shippingPricePerCar"
+            else -> "id"
+        }
+        return Sort.by(dir, prop)
     }
 
     @Transactional(readOnly = true)

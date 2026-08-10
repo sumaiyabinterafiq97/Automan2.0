@@ -2286,6 +2286,7 @@ private fun shippingHistoryRowsPayloadArray(gRows: List<dynamic>): dynamic {
         o.cyCutDate = shippingHistoryCell(r, "cyCutDate")
         o.eta = shippingHistoryCell(r, "eta")
         o.pol = shippingHistoryCell(r, "pol")
+        o.stockLocation = shippingHistoryCell(r, "stockLocation")
         o.pod = shippingHistoryCell(r, "pod")
         o.finalDestination = shippingHistoryCell(r, "finalDestination")
         o.bookingId = shippingHistoryCell(r, "bookingId")
@@ -2620,11 +2621,14 @@ private fun loadShippingHistory(page0: Int = shippingHistoryPageZeroBased) {
     shippingHistoryActiveSearchQ = q
     shippingHistoryPageZeroBased = page0.coerceAtLeast(0)
     val size = shippingHistoryItemsPerPage.coerceAtLeast(1)
+    val encSort = js("encodeURIComponent")(shippingHistorySortField).unsafeCast<String>()
+    val encOrder = js("encodeURIComponent")(shippingHistorySortOrder).unsafeCast<String>()
+    val sortQs = "&sort=$encSort&order=$encOrder"
     val endpoint = if (q.isNotEmpty()) {
         val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
-        "shipping-history/page-search?q=$encQ&page=$shippingHistoryPageZeroBased&size=$size"
+        "shipping-history/page-search?q=$encQ&page=$shippingHistoryPageZeroBased&size=$size$sortQs"
     } else {
-        "shipping-history/page?page=$shippingHistoryPageZeroBased&size=$size"
+        "shipping-history/page?page=$shippingHistoryPageZeroBased&size=$size$sortQs"
     }
 
     MainScope().launch {
@@ -2666,6 +2670,7 @@ private fun shippingHistoryAllSelectableColumnKeys(): List<String> = listOf(
     "cyCutDate",
     "eta",
     "pol",
+    "stockLocation",
     "pod",
     "finalDestination",
     "vessel",
@@ -2680,11 +2685,11 @@ private fun shippingHistoryAllSelectableColumnKeys(): List<String> = listOf(
 private fun shippingHistoryLockedColumnKeys(): Set<String> = setOf("bookingId")
 
 private fun shippingHistoryDefaultColumnKeys(): List<String> = listOf(
-    "bookingId", "pol", "pod", "shipmentDate", "consignee", "clientName", "units",
+    "bookingId", "pol", "stockLocation", "pod", "shipmentDate", "consignee", "clientName", "units",
 )
 
 private const val SHIPPING_HISTORY_MAX_DATA_COLUMNS = 8
-private const val SHIPPING_HISTORY_COLUMNS_STORAGE_KEY = "selectedShippingHistoryColumns_v2"
+private const val SHIPPING_HISTORY_COLUMNS_STORAGE_KEY = "selectedShippingHistoryColumns_v3"
 
 /** Selected data columns (max 8). Booking ID is always included. */
 private fun getSelectedShippingHistoryColumns(): List<String> {
@@ -2740,6 +2745,7 @@ private fun shippingHistoryColumnLabel(key: String): String = when (key) {
     "cyCutDate" -> "CY CUT"
     "eta" -> "ETA"
     "pol" -> "POL"
+    "stockLocation" -> "Stock location"
     "pod" -> "POD"
     "finalDestination" -> "Final Destination"
     "bookingId" -> "Booking ID"
@@ -2766,6 +2772,7 @@ private fun shippingHistoryRawField(row: dynamic, key: String): String {
         "cyCutDate" -> d.cyCutDate
         "eta" -> d.eta
         "pol" -> d.pol
+        "stockLocation" -> d.stockLocation
         "pod" -> d.pod
         "finalDestination" -> d.finalDestination
         "bookingId" -> d.bookingId
@@ -2796,6 +2803,7 @@ private fun shippingHistoryCell(row: dynamic, key: String): String {
         "cyCutDate" -> d.cyCutDate
         "eta" -> d.eta
         "pol" -> d.pol
+        "stockLocation" -> d.stockLocation
         "pod" -> d.pod
         "finalDestination" -> d.finalDestination
         "bookingId" -> d.bookingId
@@ -2930,7 +2938,11 @@ private fun toggleShippingHistorySort(field: String) {
         shippingHistorySortField = field
         shippingHistorySortOrder = "desc"
     }
-    renderShippingHistoryTableFromCache()
+    if (shippingHistoryServerMode) {
+        loadShippingHistory(0)
+    } else {
+        renderShippingHistoryTableFromCache()
+    }
 }
 
 private fun appendShippingHistoryPager(html: StringBuilder) {
@@ -3005,6 +3017,10 @@ private fun renderShippingHistoryTableFromCache() {
     }
 
     val qLower = q.trim().lowercase()
+    val pageLocalGroupSort =
+        !shippingHistoryServerMode ||
+            shippingHistorySortField == "units" ||
+            shippingHistorySortField == "invoiceCreated"
     val groups = rowList.groupBy { shippingHistoryBookingGroupKey(it) }
         .values
         .map { memberRows ->
@@ -3018,8 +3034,15 @@ private fun renderShippingHistoryTableFromCache() {
                     shippingHistoryGroupUnits(gRows).toString().contains(qLower)
             }
         }
-        .sortedWith { a, b ->
-            compareShippingHistoryGroupRows(a, b, shippingHistorySortField, shippingHistorySortOrder == "asc")
+        .let { list ->
+            if (pageLocalGroupSort) {
+                list.sortedWith { a, b ->
+                    compareShippingHistoryGroupRows(a, b, shippingHistorySortField, shippingHistorySortOrder == "asc")
+                }
+            } else {
+                // Preserve first-seen order from server-sorted flat rows.
+                list
+            }
         }
 
     if (groups.isEmpty()) {

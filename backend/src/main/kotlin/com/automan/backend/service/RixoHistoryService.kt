@@ -97,10 +97,15 @@ class RixoHistoryService(
         return enrichRows(rixoHistoryRepository.findAll(sort))
     }
 
-    fun listRowsPage(page: Int, rawSize: Int): RixoHistoryPageResponse {
+    fun listRowsPage(
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): RixoHistoryPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveRixoHistorySort(sortField, sortOrder))
         val pg = rixoHistoryRepository.findAll(pageable)
         return RixoHistoryPageResponse(
             content = enrichRows(pg.content),
@@ -111,12 +116,18 @@ class RixoHistoryService(
         )
     }
 
-    fun searchRowsPage(rawQuery: String, page: Int, rawSize: Int): RixoHistoryPageResponse {
+    fun searchRowsPage(
+        rawQuery: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+    ): RixoHistoryPageResponse {
         val q = sanitizeHistorySearchToken(rawQuery)
         require(q.isNotEmpty()) { "Search text is required" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, Sort.by(Sort.Direction.DESC, "id"))
+        val pageable = PageRequest.of(pageIdx, size, resolveRixoHistorySort(sortField, sortOrder))
         val pg = rixoHistoryRepository.searchKeyFields(q, pageable)
         return RixoHistoryPageResponse(
             content = enrichRows(pg.content),
@@ -125,6 +136,28 @@ class RixoHistoryService(
             page = pg.number,
             size = pg.size,
         )
+    }
+
+    /**
+     * Whitelist entity columns. Enriched purchase flags (`rixoConfirmed*`) fall back to `id`.
+     */
+    private fun resolveRixoHistorySort(sortField: String?, sortOrder: String?): Sort {
+        val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
+            Sort.Direction.ASC
+        } else {
+            Sort.Direction.DESC
+        }
+        val prop = when (sortField?.trim()?.lowercase()) {
+            null, "", "id" -> "id"
+            "buyingdate", "buying_date" -> "buyingDate"
+            "rixocompany", "rixo_company" -> "rixoCompany"
+            "message" -> "message"
+            "chassis" -> "chassis"
+            "createdat", "created_at" -> "createdAt"
+            "rixoconfirmed", "rixo_confirmed", "rixoconfirmeddate", "rixo_confirmed_date" -> "id"
+            else -> "id"
+        }
+        return Sort.by(dir, prop)
     }
 
     /**

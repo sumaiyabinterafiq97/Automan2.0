@@ -21451,6 +21451,7 @@ private fun persistCarBookingFormToSessionStorage() {
         s.asDynamic().cyCutDate = carBookingFormState.cyCutDate ?: ""
         s.asDynamic().etaDate = carBookingFormState.etaDate ?: ""
         s.asDynamic().polPort = carBookingFormState.polPort ?: ""
+        s.asDynamic().stockLocations = carBookingFormState.stockLocations ?: ""
         s.asDynamic().podPort = carBookingFormState.podPort ?: ""
         s.asDynamic().finalDestination = carBookingFormState.finalDestination ?: ""
         s.asDynamic().notifyParty = carBookingFormState.notifyParty ?: ""
@@ -21495,6 +21496,7 @@ private fun mergeCarBookingFormFromSessionStorageIfNeeded() {
     mergeKey("cyCutDate")
     mergeKey("etaDate")
     mergeKey("polPort")
+    mergeKey("stockLocations")
     mergeKey("podPort")
     mergeKey("finalDestination")
     mergeKey("notifyParty")
@@ -21588,11 +21590,13 @@ fun saveCarBookingState() {
         }
         
         val polVal = nativeSelectValueOrText(polPortEl)
+        val stockLocationsVal = getChipFieldValue("bookingStockLocations")
         
         console.log("🔍 Form elements found:")
         console.log("  - consigneeCountry: ${consigneeCountryEl?.value ?: "null"} (effective: $countryVal)")
         console.log("  - consigneeName: ${consigneeNameEl?.value ?: "null"}")
         console.log("  - etdDate: ${etdDateEl?.value ?: "null"}")
+        console.log("  - stockLocations: $stockLocationsVal")
         console.log("  - polPort: ${polPortEl?.value ?: "null"} (effective: $polVal)")
         console.log("  - podPort: $podPortValue (element type: ${podPortEl?.tagName ?: "null"}, from form: ${if (podPortEl != null) { if (podPortEl.tagName == "SELECT") (podPortEl as HTMLSelectElement).value else (podPortEl as HTMLInputElement).value } else ""}, from state: ${carBookingFormState.podPort})")
         console.log("  - bookingNo: ${bookingNoEl?.value ?: "null"}")
@@ -21605,6 +21609,7 @@ fun saveCarBookingState() {
         carBookingFormState.etdDate = etdDateEl?.value ?: ""
         carBookingFormState.cyCutDate = (document.getElementById("cyCutDate") as? HTMLInputElement)?.value ?: ""
         carBookingFormState.etaDate = (document.getElementById("etaDate") as? HTMLInputElement)?.value ?: ""
+        carBookingFormState.stockLocations = stockLocationsVal
         carBookingFormState.polPort = polVal
         carBookingFormState.podPort = podPortValue
         carBookingFormState.finalDestination = bookingFormFieldValue("finalDestination")
@@ -21758,20 +21763,37 @@ fun restoreCarBookingState() {
     setBookingSelectFieldValue("finalDestination", bookingDynString(carBookingFormState.finalDestination))
     setBookingSelectFieldValue("notifyParty", bookingDynString(carBookingFormState.notifyParty))
     setBookingSelectFieldValue("inTransitClause", bookingDynString(carBookingFormState.inTransitClause))
-    // POL options come from purchases only after country is set — repopulate before restoring POL value
+    // Stock options + POL after country; restore stock chips from form state
     val restoredCountry = syncCountry
     if (restoredCountry.isNotEmpty()) {
         loadStockLocations(restoredCountry) {
-            js(
-                """
-                if (typeof window.refreshBookingFabSelect === 'function') {
-                  window.refreshBookingFabSelect('polPort');
+            val savedStocks = bookingDynString(carBookingFormState.stockLocations)
+            if (savedStocks.isNotEmpty()) {
+                setChipFieldValue("bookingStockLocations", savedStocks)
+            } else if (carBookingDisplayedCars.isNotEmpty()) {
+                seedBookingStockLocationsFromDisplayedCars()
+            }
+            val stocksCsv = getBookingSelectedStockLocationsCsv()
+            if (stocksCsv.isNotEmpty()) {
+                setBookingPolEnabled(true)
+                loadPolOptionsForSelectedStocks(restoredCountry, stocksCsv) {
+                    js(
+                        """
+                        if (typeof window.refreshBookingFabSelect === 'function') {
+                          window.refreshBookingFabSelect('polPort');
+                        }
+                        """
+                    )
                 }
-                """
-            )
+            } else {
+                setBookingPolEnabled(false)
+                clearPolDropdownNoCountry()
+            }
         }
     } else {
+        clearBookingStockLocationsChips()
         clearPolDropdownNoCountry()
+        setBookingPolEnabled(false)
     }
     // Restore POD value - handle both input and select elements
     // Use a delay to ensure booking mappings have completed first
@@ -24440,10 +24462,29 @@ private val rixoDefaultDataColumns: List<String> = listOf(
 
 private val RIXO_RELOAD_HINT_COLUMNS: Set<String> = setOf("chassis", "rixoCompany", "date")
 private var rixoCurrentRows: List<dynamic> = emptyList()
+private var rixoGridSortField: String = "chassis"
+private var rixoGridSortOrder: String = "asc"
 /** Set when opening #/rixo-updater from Rixo History edit; used by Delete on that page. */
 private var rixoUpdaterHistoryId: Long? = null
 private var rixoUpdaterHistoryRowHasBookingRequested: Boolean = false
 private var rixoInlineEditingId: Long? = null
+
+private fun toggleRixoGridSort(field: String) {
+    if (rixoGridSortField == field) {
+        rixoGridSortOrder = if (rixoGridSortOrder == "asc") "desc" else "asc"
+    } else {
+        rixoGridSortField = field
+        rixoGridSortOrder = "asc"
+    }
+    val asc = rixoGridSortOrder == "asc"
+    val sorted = rixoCurrentRows.sortedWith { a, b ->
+        val sa = purchaseTableCellValue(asDynamicRow(a), field).trim().lowercase()
+        val sb = purchaseTableCellValue(asDynamicRow(b), field).trim().lowercase()
+        val c = sa.compareTo(sb)
+        if (asc) c else -c
+    }
+    renderRixoRowsPreview(sorted)
+}
 
 private fun isRixoUpdaterEditSession(): Boolean = rixoUpdaterHistoryId != null
 
@@ -25355,7 +25396,23 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
                         </label>
                     """.trimIndent()}</th>
                     <th class="rixo-col-edit"></th>
-                    ${dataColumns.joinToString("") { """<th class="${columnClassFor(it)}">${escapeHtml(rixoColumnLabel(it))}</th>""" }}
+                    ${dataColumns.joinToString("") { key ->
+                        val isActive = rixoGridSortField == key
+                        val tip = when {
+                            !isActive -> "Sort by ${rixoColumnLabel(key)}"
+                            rixoGridSortOrder == "asc" -> "Sorted A-Z (click for Z-A)"
+                            else -> "Sorted Z-A (click for A-Z)"
+                        }
+                        val arrow = when {
+                            !isActive -> "↕"
+                            rixoGridSortOrder == "asc" -> "↑"
+                            else -> "↓"
+                        }
+                        val arrowColor = if (isActive) "#0f172a" else "#64748b"
+                        """<th class="${columnClassFor(key)}"><button type="button" data-rixo-grid-sort="$key" title="${escapeHtml(tip)}" style="background:none;border:none;cursor:pointer;font:inherit;font-weight:700;padding:0;display:inline-flex;align-items:center;gap:4px;color:#111827;">
+                            <span>${escapeHtml(rixoColumnLabel(key))}</span><span style="font-size:12px;color:$arrowColor;">$arrow</span>
+                        </button></th>"""
+                    }}
                 </tr>
             </thead>
             <tbody>
@@ -25440,6 +25497,16 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
         recomputeRixoUpdaterRowHasBookingRequested()
     } else {
         selectedCount.textContent = "Selected: ${purchases.size} of ${purchases.size}"
+    }
+
+    val sortBtns = preview.querySelectorAll("button[data-rixo-grid-sort]")
+    for (i in 0 until sortBtns.length) {
+        val el = sortBtns.item(i) as? HTMLElement ?: continue
+        el.addEventListener("click", { e: Event ->
+            e.preventDefault()
+            val field = el.getAttribute("data-rixo-grid-sort") ?: return@addEventListener
+            toggleRixoGridSort(field)
+        })
     }
     
     // Set up checkbox / remove listeners

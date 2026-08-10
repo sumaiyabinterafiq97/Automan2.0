@@ -21,8 +21,41 @@ private var clientListItemsPerPage: Int = AppConstants.DEFAULT_ITEMS_PER_PAGE
 private var clientListActiveSearchQ: String = ""
 private var clientListSearchDebounceHandle: Int? = null
 private var clientListCachedRows: Array<dynamic> = emptyArray()
+private var clientListSortField: String = "clientName"
+private var clientListSortOrder: String = "asc"
+private var clientLedgerCachedEvents: Array<dynamic> = emptyArray()
+private var clientLedgerClientId: Long? = null
+private var clientLedgerSortField: String = "eventDate"
+private var clientLedgerSortOrder: String = "desc"
 private var clientModalEscapeHandler: ((Event) -> Unit)? = null
 private var clientConfirmModalKeyHandler: ((Event) -> Unit)? = null
+
+private fun clientListSortQueryParams(): String {
+    val encS = js("encodeURIComponent")(clientListSortField).unsafeCast<String>()
+    val encO = js("encodeURIComponent")(clientListSortOrder).unsafeCast<String>()
+    return "&sort=$encS&order=$encO"
+}
+
+private fun toggleClientListSort(field: String) {
+    if (clientListSortField == field) {
+        clientListSortOrder = if (clientListSortOrder == "asc") "desc" else "asc"
+    } else {
+        clientListSortField = field
+        clientListSortOrder = if (field == "clientName" || field == "clientNumber") "asc" else "desc"
+    }
+    loadClients(0)
+}
+
+private fun toggleClientLedgerSort(field: String) {
+    if (clientLedgerSortField == field) {
+        clientLedgerSortOrder = if (clientLedgerSortOrder == "asc") "desc" else "asc"
+    } else {
+        clientLedgerSortField = field
+        clientLedgerSortOrder = if (field == "eventType") "asc" else "desc"
+    }
+    val cid = clientLedgerClientId ?: return
+    displayClientEvents(cid, clientLedgerCachedEvents)
+}
 
 private fun clearClientModalEscape() {
     clientModalEscapeHandler?.let { document.removeEventListener("keydown", it) }
@@ -274,6 +307,12 @@ fun showClientAccountsPage() {
                         <label for="clientSearchInput" class="visually-hidden">Search clients</label>
                         <input id="clientSearchInput" type="text" role="searchbox" autocomplete="off" inputmode="search"
                                placeholder="Search clients…" class="client-search-input" aria-label="Search clients">
+                        <div class="client-list-sort" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center;">
+                            <span style="font-size:13px;color:#64748b;">Sort:</span>
+                            <button type="button" class="client-btn client-btn-secondary" data-client-list-sort="clientName" style="min-height:36px;padding:6px 10px;font-size:13px;">Name ↕</button>
+                            <button type="button" class="client-btn client-btn-secondary" data-client-list-sort="clientNumber" style="min-height:36px;padding:6px 10px;font-size:13px;">Number ↕</button>
+                            <button type="button" class="client-btn client-btn-secondary" data-client-list-sort="currentBalance" style="min-height:36px;padding:6px 10px;font-size:13px;">Balance ↕</button>
+                        </div>
                     </div>
                     <div id="clientListTable" class="client-list-container">
                         ${clientStatusBlock("Loading clients…")}
@@ -301,6 +340,16 @@ fun showClientAccountsPage() {
     document.getElementById("clientSearchInput")?.addEventListener("input", { _: Event ->
         scheduleClientListSearchDebounced()
     })
+    run {
+        val sortBtns = document.querySelectorAll("[data-client-list-sort]")
+        for (i in 0 until sortBtns.length) {
+            val el = sortBtns.item(i) as? HTMLElement ?: continue
+            el.addEventListener("click", { _: Event ->
+                val field = el.getAttribute("data-client-list-sort") ?: return@addEventListener
+                toggleClientListSort(field)
+            })
+        }
+    }
     
     // Load clients
     clientListPageZeroBased = 0
@@ -331,9 +380,9 @@ fun loadClients(page0: Int = clientListPageZeroBased) {
     val size = clientListItemsPerPage.coerceAtLeast(1)
     val url = if (q.isNotEmpty()) {
         val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
-        apiUrl("clients/page-search?q=$encQ&page=$clientListPageZeroBased&size=$size")
+        apiUrl("clients/page-search?q=$encQ&page=$clientListPageZeroBased&size=$size${clientListSortQueryParams()}")
     } else {
-        apiUrl("clients/page?page=$clientListPageZeroBased&size=$size")
+        apiUrl("clients/page?page=$clientListPageZeroBased&size=$size${clientListSortQueryParams()}")
     }
     window.fetch(url)
         .then { response ->
@@ -632,6 +681,8 @@ fun displayClientEvents(clientId: Long, events: dynamic) {
     if (clientEventsTable == null) return
     
     if (js("Array.isArray(events)") as Boolean && (events as Array<dynamic>).isEmpty()) {
+        clientLedgerCachedEvents = emptyArray()
+        clientLedgerClientId = clientId
         clientEventsTable.innerHTML = """
             <h3>Ledger</h3>
             ${clientStatusBlock("No ledger entries yet. Invoices post automatically when confirmed in Invoice.")}
@@ -639,9 +690,26 @@ fun displayClientEvents(clientId: Long, events: dynamic) {
         return
     }
     
-    val eventsArray = events as Array<dynamic>
+    clientLedgerClientId = clientId
+    val rawEvents = events as Array<dynamic>
+    clientLedgerCachedEvents = rawEvents
+    val eventsArray = sortClientLedgerEvents(rawEvents)
     val showActions = isEditor()
     val actionsHeader = if (showActions) """<th scope="col">Actions</th>""" else ""
+    val asc = clientLedgerSortOrder == "asc"
+    fun ledgerSortBtn(field: String, label: String, alignRight: Boolean = false): String {
+        val tip = if (clientLedgerSortField == field) {
+            if (asc) "Sorted ascending (click for descending)" else "Sorted descending (click for ascending)"
+        } else {
+            "Sort by $label"
+        }
+        val align = if (alignRight) "text-align:right;" else ""
+        return """<th scope="col" style="$align">
+            <button type="button" data-ledger-sort="$field" title="$tip" style="background:none;border:none;cursor:pointer;font:inherit;font-weight:700;padding:0;display:inline-flex;align-items:center;gap:4px;${if (alignRight) "margin-left:auto;" else ""}">
+                <span>$label</span><span style="font-size:12px;color:#64748b;">↕</span>
+            </button>
+        </th>"""
+    }
 
     val rowsHtml = eventsArray.map { event ->
         val eventType = event.eventType?.toString()
@@ -734,12 +802,12 @@ fun displayClientEvents(clientId: Long, events: dynamic) {
             <table class="transactions-table">
                 <thead>
                     <tr>
-                        <th scope="col">Date</th>
-                        <th scope="col">Type</th>
+                        ${ledgerSortBtn("eventDate", "Date")}
+                        ${ledgerSortBtn("eventType", "Type")}
                         <th scope="col">Description</th>
                         <th scope="col">Reference</th>
-                        <th scope="col" style="text-align: right;">Debit</th>
-                        <th scope="col" style="text-align: right;">Credit</th>
+                        ${ledgerSortBtn("transactionPrice", "Debit", alignRight = true)}
+                        ${ledgerSortBtn("paymentReceived", "Credit", alignRight = true)}
                         <th scope="col" style="text-align: right;">Balance</th>
                         $actionsHeader
                     </tr>
@@ -756,6 +824,38 @@ fun displayClientEvents(clientId: Long, events: dynamic) {
         </div>
     """
     wireLedgerActionButtons(clientId, eventsArray)
+    val ledgerSortBtns = clientEventsTable.querySelectorAll("button[data-ledger-sort]")
+    for (i in 0 until ledgerSortBtns.length) {
+        val el = ledgerSortBtns.item(i) as? HTMLElement ?: continue
+        el.addEventListener("click", { _: Event ->
+            val field = el.getAttribute("data-ledger-sort") ?: return@addEventListener
+            toggleClientLedgerSort(field)
+        })
+    }
+}
+
+private fun sortClientLedgerEvents(events: Array<dynamic>): Array<dynamic> {
+    val asc = clientLedgerSortOrder == "asc"
+    fun num(v: dynamic): Double {
+        if (v == null || v == js("undefined")) return Double.NEGATIVE_INFINITY
+        return when (v) {
+            is Number -> v.toDouble()
+            else -> v.toString().toDoubleOrNull() ?: Double.NEGATIVE_INFINITY
+        }
+    }
+    fun str(v: dynamic): String {
+        if (v == null || v == js("undefined")) return ""
+        return v.toString().trim().lowercase()
+    }
+    return events.sortedWith { a, b ->
+        val c = when (clientLedgerSortField) {
+            "eventType" -> str(a.eventType).compareTo(str(b.eventType))
+            "transactionPrice" -> num(a.transactionPrice).compareTo(num(b.transactionPrice))
+            "paymentReceived" -> num(a.paymentReceived).compareTo(num(b.paymentReceived))
+            else -> str(a.eventDate).compareTo(str(b.eventDate))
+        }
+        if (asc) c else -c
+    }.toTypedArray()
 }
 
 private fun wireLedgerActionButtons(clientId: Long, events: Array<dynamic>) {
