@@ -30,8 +30,8 @@ var carBookingShippingRecreateRowIds: MutableList<Long> = mutableListOf()
 var carBookingShippingRecreateChassisToHistoryId: MutableMap<String, Long> = mutableMapOf()
 
 // --- Booking LIST Column Filter (Rixo-style; Booking-scoped state) ---
-/** Fixed UI columns (not in filter): SELECT + NO. Data columns max 4 including chassis. */
-private const val BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS: Int = 4
+/** Fixed UI columns (not in filter): SELECT + view. Data columns max 6 including chassis. */
+private const val BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS: Int = 6
 private const val BOOKING_MAX_NON_CHASSIS_COLUMNS: Int = BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS - 1
 
 private val bookingDefaultDataColumns: List<String> = listOf(
@@ -53,6 +53,7 @@ private fun bookingColumnLabel(key: String): String = when (key) {
     "carName" -> "NAME"
     "carModelYear" -> "YEAR"
     "stockLocation" -> "STOCK"
+    "vehicleType", "shipmentSize", "typeOfVehicle" -> "TYPE"
     else -> (purchaseListColumnLabels()[key] ?: key).uppercase()
 }
 
@@ -123,7 +124,7 @@ private fun bookingListSelectHeaderHtml(isRecreateMode: Boolean): String =
         "<th class=\"booking-th-select\"></th>"
     } else {
         """<th class="booking-th-select">
-            <input type="checkbox" id="selectAllCars" class="booking-select-all-cb" aria-label="Select all"> SELECT
+            <input type="checkbox" id="selectAllCars" class="booking-select-all-cb" aria-label="Select all">
         </th>"""
     }
 
@@ -132,7 +133,11 @@ private fun paintBookingListTableHeader(forceRecreateMode: Boolean? = null) {
     val isRecreateMode = forceRecreateMode ?: isCarBookingRecreateSession()
     val dataCols = bookingResolvedDataColumns()
     val dataTh = dataCols.joinToString("") { key ->
-        val cls = if (key == "carModelYear") " class=\"booking-col-year\"" else ""
+        val extraCls = buildString {
+            if (key == "carModelYear") append(" booking-col-year")
+            if (key == "carName") append(" booking-col-name")
+            if (key == "chassis") append(" booking-col-chassis")
+        }
         val isActive = bookingListSortField == key
         val tip = when {
             !isActive -> "Sort by ${bookingColumnLabel(key)}"
@@ -144,14 +149,14 @@ private fun paintBookingListTableHeader(forceRecreateMode: Boolean? = null) {
             bookingListSortOrder == "asc" -> "↑"
             else -> "↓"
         }
-        val arrowColor = if (isActive) "#0f172a" else "#64748b"
-        """<th$cls><button type="button" data-booking-sort="$key" title="${escapeHtml(tip)}" style="background:none;border:none;cursor:pointer;font:inherit;font-weight:700;padding:0;display:inline-flex;align-items:center;gap:4px;color:#475569;">
-            <span>${escapeHtml(bookingColumnLabel(key))}</span><span style="font-size:12px;color:$arrowColor;">$arrow</span>
+        val activeClass = if (isActive) " is-active" else ""
+        """<th class="booking-th-data$extraCls"><button type="button" class="booking-list-sort-btn$activeClass" data-booking-sort="$key" title="${escapeHtml(tip)}" aria-label="${escapeHtml(tip)}">
+            <span>${escapeHtml(bookingColumnLabel(key))}</span><span class="booking-list-sort-icon" aria-hidden="true">$arrow</span>
         </button></th>"""
     }
     theadRow.innerHTML = """
+        <th class="booking-th-view" aria-label="Vehicle Summary"></th>
         ${bookingListSelectHeaderHtml(isRecreateMode)}
-        <th>NO.</th>
         $dataTh
     """.trimIndent()
     // Re-bind select-all after header rebuild (new DOM node)
@@ -226,7 +231,7 @@ private fun rebuildBookingListTableFromDisplayedCars(restoreCheckedChassis: Set<
     tbody.innerHTML = ""
     val cars = carBookingDisplayedCars
     for (i in cars.indices) {
-        appendBookingListRow(cars[i], i + 1)
+        appendBookingListRow(cars[i])
     }
     if (!isCarBookingRecreateSession()) {
         val checkboxes = tbody.querySelectorAll("input[type='checkbox'].car-checkbox")
@@ -241,7 +246,7 @@ private fun rebuildBookingListTableFromDisplayedCars(restoreCheckedChassis: Set<
     updateBookingListEmptyState()
 }
 
-private fun appendBookingListRow(purchase: dynamic, rowNumber: Int) {
+private fun appendBookingListRow(purchase: dynamic) {
     val tbody = document.getElementById("carSelectionTableBody") as? HTMLElement ?: return
     val chassisNumber = purchase.chassis?.toString() ?: "N/A"
     val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
@@ -258,24 +263,29 @@ private fun appendBookingListRow(purchase: dynamic, rowNumber: Int) {
     } else {
         """<input type="checkbox" class="car-checkbox" data-purchase-id="$purchaseId" data-chassis="$chAttr" aria-label="Select row">"""
     }
-    val noChip = formatPurchaseListCellChipHtml(rowNumber.toString())
     val dataCols = bookingResolvedDataColumns()
     val dataTds = dataCols.joinToString("") { key ->
         val raw = bookingListCellDisplayValue(purchase, key)
         val chip = if (raw.isNotBlank()) formatPurchaseListCellChipHtml(raw) else ""
-        val yearCls = if (key == "carModelYear") " booking-col-year" else ""
+        val extraCls = buildString {
+            if (key == "carModelYear") append(" booking-col-year")
+            if (key == "carName") append(" booking-col-name")
+            if (key == "chassis") append(" booking-col-chassis")
+        }
         val label = escapeHtml(bookingColumnLabel(key))
-        """<td class="booking-td$yearCls" data-label="$label">$chip</td>"""
+        """<td class="booking-td$extraCls" data-label="$label">$chip</td>"""
     }
     val row = document.createElement("tr")
     row.setAttribute("data-purchase-id", purchaseId.toString())
     row.setAttribute("data-chassis", chStr)
     if (isSold) row.setAttribute("data-sold", "true")
     row.innerHTML = """
+        <td class="booking-td booking-td-view" data-label="">
+            ${purchaseListViewButtonHtml(purchaseId, chAttr)}
+        </td>
         <td class="booking-td booking-td-select" data-label="Select">
             $selectCellHtml
         </td>
-        <td class="booking-td" data-label="No.">$noChip</td>
         $dataTds
     """
     tbody.appendChild(row)
@@ -284,16 +294,20 @@ private fun appendBookingListRow(purchase: dynamic, rowNumber: Int) {
 
 private fun showBookingColumnFilterModal() {
     document.getElementById("bookingColumnFilterModal")?.remove()
+    bookingColumnFilterKeyHandler?.let { document.removeEventListener("keydown", it) }
+    bookingColumnFilterKeyHandler = null
 
+    val returnFocus = document.activeElement as? HTMLElement
     val available = bookingAvailableDataColumns()
     val selected = bookingResolvedDataColumns().toSet()
     val checks = available.sortedBy { bookingColumnLabel(it).lowercase() }.joinToString("") { key ->
         val checked = if (selected.contains(key)) "checked" else ""
         val disabled = if (key == "chassis") "disabled" else ""
+        val alwaysOn = if (key == "chassis") " (always on)" else ""
         """
         <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;">
-            <input type="checkbox" class="booking-col-check" value="$key" $checked $disabled style="transform:scale(1.05);">
-            <span style="font-size:13px;color:#374151;">${escapeHtml(bookingColumnLabel(key))}</span>
+            <input type="checkbox" class="booking-col-check" value="$key" $checked $disabled>
+            <span style="font-size:13px;color:#374151;">${escapeHtml(bookingColumnLabel(key))}$alwaysOn</span>
         </label>
         """.trimIndent()
     }
@@ -301,30 +315,34 @@ private fun showBookingColumnFilterModal() {
     val modal = document.createElement("div")
     modal.id = "bookingColumnFilterModal"
     modal.asDynamic().style.cssText =
-        "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;"
+        "position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:10001;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box;"
     modal.innerHTML = """
-        <div style="background:#fff;border-radius:10px;padding:18px;max-width:420px;width:100%;max-height:75vh;display:flex;flex-direction:column;box-shadow:0 18px 36px rgba(0,0,0,0.22);">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-                <h3 style="margin:0;font-size:18px;font-weight:700;color:#111827;">Select Columns to Display</h3>
-                <button id="bookingColFilterClose" type="button" style="border:none;background:transparent;font-size:22px;cursor:pointer;color:#6b7280;">&times;</button>
+        <div role="dialog" aria-modal="true" aria-labelledby="bookingColFilterTitle"
+             style="background:#fff;border-radius:12px;padding:24px;max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 50px rgba(0,0,0,0.2);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 id="bookingColFilterTitle" style="margin:0;font-size:18px;font-weight:700;color:#0f172a;">Select Columns to Display</h3>
+                <button id="bookingColFilterClose" type="button" aria-label="Close" style="border:none;background:transparent;font-size:28px;cursor:pointer;color:#666;padding:4px 8px;line-height:1;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;">&times;</button>
             </div>
-            <div id="bookingColFilterCount" style="font-size:12px;color:#6b7280;margin-bottom:10px;">
+            <p id="bookingColFilterCount" style="margin:0 0 16px 0;font-size:13px;font-weight:600;color:#0f172a;">
                 Choose up to $BOOKING_MAX_NON_CHASSIS_COLUMNS optional columns plus Chassis (max $BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS data columns). Chassis is always shown.
-            </div>
+            </p>
             <div id="bookingColChecksWrap" style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;display:grid;grid-template-columns:1fr 1fr;gap:2px;">
                 $checks
             </div>
-            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
-                <button id="bookingColFilterDefault" type="button" style="padding:8px 14px;border:1px solid #0ea5e9;background:#f0f9ff;color:#0369a1;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Default</button>
-                <button id="bookingColFilterCancel" type="button" style="padding:8px 14px;border:1px solid #d1d5db;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;">Cancel</button>
-                <button id="bookingColFilterApply" type="button" style="padding:8px 14px;border:none;background:#0ea5e9;color:#fff;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">Apply</button>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px;flex-wrap:wrap;">
+                <button id="bookingColFilterDefault" type="button" style="padding:8px 16px;border:1px solid #0ea5e9;background:#f0f9ff;color:#0369a1;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;min-height:40px;">Default</button>
+                <button id="bookingColFilterCancel" type="button" style="padding:8px 16px;border:1px solid #d1d5db;background:#fff;border-radius:8px;cursor:pointer;font-size:13px;min-height:40px;">Cancel</button>
+                <button id="bookingColFilterApply" type="button" style="padding:8px 16px;border:none;background:#007bff;color:#fff;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;min-height:40px;">Apply</button>
             </div>
         </div>
     """.trimIndent()
     document.body?.appendChild(modal)
 
     fun closeModal() {
+        bookingColumnFilterKeyHandler?.let { document.removeEventListener("keydown", it) }
+        bookingColumnFilterKeyHandler = null
         document.getElementById("bookingColumnFilterModal")?.remove()
+        returnFocus?.focus()
     }
 
     fun updateBookingColFilterChecks() {
@@ -400,9 +418,20 @@ private fun showBookingColumnFilterModal() {
         rebuildBookingListTableFromDisplayedCars()
         closeModal()
     })
+
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val ke = event.asDynamic()
+        if (ke.key == "Escape" || ke.keyCode == 27) {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    bookingColumnFilterKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
 }
 
 private var bookingConfirmModalKeyHandler: ((Event) -> Unit)? = null
+private var bookingColumnFilterKeyHandler: ((Event) -> Unit)? = null
 
 private fun bookingIconUserSvg(): String =
     """<svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M20 21a8 8 0 0 0-16 0" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.75"/></svg>"""
@@ -702,7 +731,7 @@ fun showCarBookingPage() {
                         
                         <!-- Consignee (country + name): FAB UI matches Rixo Company picker on Rixo Transport page -->
                         <div class="booking-form-group">
-                            <label for="consigneeName">Consignee</label>
+                            <label for="consigneeName">Consignee <span class="booking-req" aria-hidden="true">*</span></label>
                             <div class="booking-consignee-row">
                                 <span class="booking-field-icon" aria-hidden="true">${bookingIconUserSvg()}</span>
                                 <div class="booking-fab-field rixo-company-fab-wrap" id="bookingCountryFabWrap" style="flex: 1; min-width: 0;">
@@ -729,16 +758,16 @@ fun showCarBookingPage() {
                         
                         <!-- Stock location (multi) — primary list filter -->
                         <div class="booking-form-group">
-                            <label for="bookingStockLocationsInput">Stock location</label>
+                            <label for="bookingStockLocationsInput">Stock location <span class="booking-req" aria-hidden="true">*</span></label>
                             <div class="booking-stock-multi-wrap">
                                 ${createChipMultiSelectCombobox("bookingStockLocations", "Select stock location(s)")}
                             </div>
-                            <div class="booking-field-hint" style="margin-top:6px;font-size:12px;color:#6b7280;">List filters by selected stock locations. Choose POL after selecting stock.</div>
+                            <div class="booking-field-hint">List filters by selected stock locations. Choose POL after selecting stock.</div>
                         </div>
                         
                         <!-- POL (editable after stock; not used for list filtering) -->
                         <div class="booking-form-group">
-                            <label id="bookingPolLabel">POL</label>
+                            <label id="bookingPolLabel">POL <span class="booking-req" aria-hidden="true">*</span></label>
                             <div class="booking-fab-field rixo-company-fab-wrap" id="bookingPolFabWrap">
                                 <select id="polPort" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
                                     <option value="">Select Port of Loading</option>
@@ -756,21 +785,6 @@ fun showCarBookingPage() {
                             </div>
                         </div>
                         
-                        <!-- ETD -->
-                        <div class="booking-form-group">
-                            <label for="etdDateText">ETD</label>
-                            <div class="booking-date-field">
-                                <div class="booking-date-field-row">
-                                    <input type="text" id="etdDateText" maxlength="10" inputmode="numeric" autocomplete="off"
-                                           placeholder="MM/DD/YYYY" class="booking-date-text-input">
-                                    <button type="button" id="etdDateCalendarBtn" class="booking-calendar-btn" title="Open calendar" aria-label="Open ETD calendar">
-                                        ${bookingIconCalendarSvg()}
-                                    </button>
-                                </div>
-                                <input type="date" id="etdDate" tabindex="-1" aria-hidden="true" class="booking-date-native-input">
-                            </div>
-                        </div>
-
                         <!-- CY CUT Date -->
                         <div class="booking-form-group">
                             <label for="cyCutDateText">CY CUT date</label>
@@ -783,6 +797,21 @@ fun showCarBookingPage() {
                                     </button>
                                 </div>
                                 <input type="date" id="cyCutDate" tabindex="-1" aria-hidden="true" class="booking-date-native-input">
+                            </div>
+                        </div>
+
+                        <!-- ETD -->
+                        <div class="booking-form-group">
+                            <label for="etdDateText">ETD <span class="booking-req" aria-hidden="true">*</span></label>
+                            <div class="booking-date-field">
+                                <div class="booking-date-field-row">
+                                    <input type="text" id="etdDateText" maxlength="10" inputmode="numeric" autocomplete="off"
+                                           placeholder="MM/DD/YYYY" class="booking-date-text-input">
+                                    <button type="button" id="etdDateCalendarBtn" class="booking-calendar-btn" title="Open calendar" aria-label="Open ETD calendar">
+                                        ${bookingIconCalendarSvg()}
+                                    </button>
+                                </div>
+                                <input type="date" id="etdDate" tabindex="-1" aria-hidden="true" class="booking-date-native-input">
                             </div>
                         </div>
 
@@ -869,13 +898,13 @@ fun showCarBookingPage() {
                         
                         <!-- Booking no -->
                         <div class="booking-form-group">
-                            <label for="bookingNo">Booking no</label>
+                            <label for="bookingNo">Booking no <span class="booking-req" aria-hidden="true">*</span></label>
                             <input type="text" id="bookingNo" placeholder="">
                         </div>
                         
                         <!-- Vessel -->
                         <div class="booking-form-group">
-                            <label for="vesselSelect">Vessel</label>
+                            <label for="vesselSelect">Vessel <span class="booking-req" aria-hidden="true">*</span></label>
                             <input type="text" id="vesselSelect" placeholder="Enter vessel">
                         </div>
 
@@ -923,11 +952,10 @@ fun showCarBookingPage() {
                             <h2 class="booking-section-header">List</h2>
                             <div class="booking-list-header-actions">
                                 <span id="bookingCarsSelectedCount" class="booking-cars-selected-count is-empty" aria-live="polite">0 cars selected</span>
-                                <button id="bookingColumnFilterBtn" type="button" class="rixo-generator-col-filter-btn booking-col-filter-btn" aria-label="Column filter" title="Column filter">
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                        <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
+                                <button id="bookingColumnFilterBtn" type="button" class="booking-col-filter-btn" aria-label="Select columns to display" title="Select columns to display">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                        <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
                                     </svg>
-                                    Column Filter
                                 </button>
                             </div>
                         </div>
@@ -935,8 +963,14 @@ fun showCarBookingPage() {
                         <!-- Search chassis: plain input, suggestions from purchase table search (no dropdown button) -->
                         <div class="booking-form-group booking-chassis-search-wrap">
                             <label for="chassisSearchInput">Search chassis</label>
-                            <input type="text" id="chassisSearchInput" class="booking-chassis-search-input" placeholder="Type to search chassis from purchases…"
-                                   autocomplete="off">
+                            <div class="booking-chassis-search">
+                                <span class="booking-chassis-search-icon" aria-hidden="true">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                                </span>
+                                <input type="text" id="chassisSearchInput" class="booking-chassis-search-input" role="searchbox" autocomplete="off" inputmode="search"
+                                       placeholder="Type to search chassis from purchases…" aria-label="Search chassis from purchases">
+                                <button type="button" id="chassisSearchClearBtn" class="booking-chassis-search-clear is-hidden" title="Clear search" aria-label="Clear chassis search">×</button>
+                            </div>
                             <div id="chassisSuggestions" class="booking-chassis-suggestions"></div>
                         </div>
                         
@@ -944,7 +978,7 @@ fun showCarBookingPage() {
                         <div class="booking-table-card is-empty">
                             <div id="bookingListEmpty" class="booking-list-empty" role="status">
                                 <p class="booking-list-empty-title">No cars in the list yet</p>
-                                <p class="booking-list-empty-hint">Choose Country and POL, then search a chassis — or wait for the filtered purchase list to load.</p>
+                                <p class="booking-list-empty-hint">Choose country and stock location, then search a chassis — or wait for matching purchases to load.</p>
                             </div>
                             <table class="booking-chassis-table">
                                 <thead>
@@ -1306,6 +1340,21 @@ fun setupCarBookingPageListeners() {
         updateBookingCarsSelectedCount()
         updateBookingSelectAllCheckbox()
     })
+
+    document.getElementById("carSelectionTableBody")?.addEventListener("click", { event: Event ->
+        val target = event.target as? Element ?: return@addEventListener
+        val viewBtn = target.closest(".purchase-view-btn") as? HTMLElement ?: return@addEventListener
+        event.preventDefault()
+        event.stopPropagation()
+        val id = viewBtn.getAttribute("data-id")?.trim()?.toLongOrNull() ?: 0L
+        val chassis = viewBtn.getAttribute("data-chassis")?.trim()
+        val cached = carBookingDisplayedCars.firstOrNull { car ->
+            val pid = (car.id as? Number)?.toLong() ?: 0L
+            val ch = car.chassis?.toString()?.trim().orEmpty()
+            (id > 0L && pid == id) || (chassis != null && chassis.isNotEmpty() && ch.equals(chassis, ignoreCase = true))
+        }
+        openVehicleSummaryByPurchaseId(id, chassis, cached)
+    })
     
     // Purchase List button
     document.getElementById("purchaseListBtn")?.addEventListener("click", { _: Event ->
@@ -1523,13 +1572,27 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
     // Chassis search: plain input - show suggestions from purchase table search, add car on Enter or suggestion click
     window.asDynamic().addCarToBookingTable = ::addCarToBookingTable
     var chassisSearchDebounceTimer: dynamic = 0
+    fun syncChassisSearchClearVisibility() {
+        val input = document.getElementById("chassisSearchInput") as? HTMLInputElement
+        val clearBtn = document.getElementById("chassisSearchClearBtn") as? HTMLElement ?: return
+        val hasQuery = (input?.value?.trim().orEmpty()).isNotEmpty()
+        if (hasQuery) clearBtn.classList.remove("is-hidden") else clearBtn.classList.add("is-hidden")
+    }
     document.getElementById("chassisSearchInput")?.addEventListener("input", { event: Event ->
         val input = event.target as? HTMLInputElement ?: return@addEventListener
+        syncChassisSearchClearVisibility()
         val q = input.value.trim()
         window.clearTimeout(chassisSearchDebounceTimer)
         chassisSearchDebounceTimer = window.setTimeout({
             fetchChassisSuggestionsForBooking(q)
         }, 250)
+    })
+    document.getElementById("chassisSearchClearBtn")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("chassisSearchInput") as? HTMLInputElement
+        input?.value = ""
+        syncChassisSearchClearVisibility()
+        hideChassisSuggestions()
+        input?.focus()
     })
     document.getElementById("chassisSearchInput")?.addEventListener("keydown", { event: Event ->
         val keyEvent = event.asDynamic()
@@ -2810,6 +2873,7 @@ fun addCarToBookingTable(chassis: String) {
                 displayPurchasesAsCarsAPPEND(purchasesArray)
                 val chassisInput = document.getElementById("chassisSearchInput") as? HTMLInputElement
                 chassisInput?.value = ""
+                document.getElementById("chassisSearchClearBtn")?.classList?.add("is-hidden")
             } else {
                 Logger.debug("No purchase found for chassis: $chassis")
                 showMessage("No purchase found for chassis: $chassis", "warning")
@@ -3402,16 +3466,6 @@ private fun removeBookingTableRowForChassis(chassis: String, purchaseId: Long?) 
 }
 
 private fun renumberBookingListTable() {
-    val tbody = document.getElementById("carSelectionTableBody") ?: return
-    val rows = tbody.querySelectorAll("tr[data-chassis], tr[data-purchase-id]")
-    for (i in 0 until rows.length) {
-        val row = rows.item(i) as? HTMLElement ?: continue
-        val noCell = row.querySelector("td[data-label='No.']")
-            ?: row.querySelector("td:nth-child(2)")
-        if (noCell != null) {
-            noCell.innerHTML = formatPurchaseListCellChipHtml((i + 1).toString())
-        }
-    }
     updateBookingCarsSelectedCount()
     updateBookingListEmptyState()
 }

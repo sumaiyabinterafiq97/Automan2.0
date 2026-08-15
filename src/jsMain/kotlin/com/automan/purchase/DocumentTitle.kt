@@ -76,6 +76,7 @@ fun documentTitleForRoute(route: String): String {
         routeAtStartsWith(r, "/master/consignee") -> "Consignee"
         routeAtStartsWith(r, "/master/country") -> "Country"
         routeAtStartsWith(r, "/master/shipping-charge-map") -> "Shipping Charge Map"
+        routeAtStartsWith(r, "/master/stock-location-map") -> "Stock Location Map"
         routeAtStartsWith(r, "/master/supplier-map") -> "Supplier Map"
         routeAtStartsWith(r, "/master/rixo-mapping") -> "Rixo Price Map"
         routeAtStartsWith(r, "/master/supplier") -> "Supplier"

@@ -30,10 +30,11 @@ body {
     color: #333;
 }
 
-/* Rixo table polish — equal-width data columns; select/edit widths come from <colgroup> in markup */
+/* Rixo table — action cols from <colgroup>; data cols keep min-width and scroll */
 .rixo-table {
-    width: 100%;
-    table-layout: fixed;
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto;
     border-collapse: collapse;
 }
 
@@ -47,9 +48,9 @@ body {
     padding: 8px 10px;
 }
 
-.rixo-table thead th:not(.rixo-col-select):not(.rixo-col-edit),
-.rixo-table tbody td:not(.rixo-col-select):not(.rixo-col-edit) {
-    min-width: 0;
+.rixo-table thead th:not(.rixo-col-select):not(.rixo-col-view):not(.rixo-col-edit),
+.rixo-table tbody td:not(.rixo-col-select):not(.rixo-col-view):not(.rixo-col-edit) {
+    min-width: 112px;
 }
 
 .rixo-row { transition: background-color 140ms ease-in, box-shadow 140ms ease-in; }
@@ -2240,25 +2241,31 @@ div[id$="_dropdown"] {
 }
 
 .rixo-generator-col-filter-btn {
-    padding: 8px 14px;
-    background-color: #6c757d;
-    color: white;
-    border: none;
-    border-radius: 8px;
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 0;
+    background: #f3f4f6;
+    color: #4b5563;
+    border: 1px solid #e5e7eb;
+    border-radius: 50%;
     cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-height: 40px;
-    white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
     flex-shrink: 0;
 }
 
 .rixo-generator-col-filter-btn:hover {
-    background-color: #5a6268;
+    background: #e8eaed;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.rixo-generator-col-filter-btn:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
 }
 
 /* Number cut inline edit (Cars to Rixo) */
@@ -2382,6 +2389,7 @@ div[id$="_dropdown"] {
     }
 
     #rixoGeneratorPage .rixo-table td.rixo-col-select,
+    #rixoGeneratorPage .rixo-table td.rixo-col-view,
     #rixoGeneratorPage .rixo-table td.rixo-col-edit {
         flex: 0 0 auto;
         width: auto;
@@ -2391,17 +2399,21 @@ div[id$="_dropdown"] {
         padding: 0 12px 10px 0;
     }
 
-    #rixoGeneratorPage .rixo-table td.rixo-col-select {
+    #rixoGeneratorPage .rixo-table td.rixo-col-view {
         order: 1;
     }
 
-    #rixoGeneratorPage .rixo-table td.rixo-col-edit {
+    #rixoGeneratorPage .rixo-table td.rixo-col-select {
         order: 2;
+    }
+
+    #rixoGeneratorPage .rixo-table td.rixo-col-edit {
+        order: 3;
         margin-left: auto;
         padding-right: 0;
     }
 
-    #rixoGeneratorPage .rixo-table td:not(.rixo-col-select):not(.rixo-col-edit) {
+    #rixoGeneratorPage .rixo-table td:not(.rixo-col-select):not(.rixo-col-view):not(.rixo-col-edit) {
         flex: 1 1 100%;
         order: 10;
     }
@@ -2648,7 +2660,8 @@ div[id$="_dropdown"] {
     }
 
     #rixoGeneratorPage .rixo-generator-col-filter-btn {
-        width: 100%;
+        width: 48px;
+        align-self: end;
     }
 }
 
@@ -2739,7 +2752,8 @@ div[id$="_dropdown"] {
     }
 
     #rixoGeneratorPage .rixo-generator-col-filter-btn {
-        width: 100%;
+        width: 48px;
+        align-self: end;
     }
     
     /* Table responsive on tablet */
@@ -4544,7 +4558,31 @@ button.invoice-history-pdf-btn:disabled {
 }
 
 .booking-col-filter-btn {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 50%;
+    border: 1px solid #e5e7eb;
+    background: #f3f4f6;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    padding: 0;
+    color: #4b5563;
     flex-shrink: 0;
+}
+
+.booking-col-filter-btn:hover {
+    background: #e8eaed;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.booking-col-filter-btn:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
 }
 
 .booking-cars-selected-count {
@@ -4584,6 +4622,18 @@ button.invoice-history-pdf-btn:disabled {
     font-size: 14px;
 }
 
+.booking-req {
+    color: #dc2626;
+    font-weight: 700;
+}
+
+.booking-field-hint {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.4;
+}
+
 .booking-form-group input,
 .booking-form-group select,
 .booking-form-group textarea {
@@ -4609,19 +4659,76 @@ button.invoice-history-pdf-btn:disabled {
     position: relative;
 }
 
+.booking-chassis-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    border: 1px solid #e5e7eb;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.booking-chassis-search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: #9ca3af;
+    display: flex;
+}
+
 .booking-chassis-search-input {
     width: 100%;
-    padding: 11px 14px !important;
-    border-radius: 10px !important;
-    border: 1px solid #cbd5e1 !important;
+    box-sizing: border-box;
+    padding: 11px 36px 11px 40px !important;
+    border: none !important;
+    border-radius: 999px !important;
     font-size: 14px !important;
-    transition: border-color 0.2s, box-shadow 0.2s !important;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .booking-chassis-search-input:focus {
     outline: none !important;
-    border-color: #3b82f6 !important;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+    box-shadow: none !important;
+}
+
+.booking-chassis-search:focus-within {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.booking-chassis-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 20px;
+    padding: 6px 8px;
+    min-height: 36px;
+    min-width: 36px;
+    border-radius: 8px;
+}
+
+.booking-chassis-search-clear:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.booking-chassis-search-clear.is-hidden {
+    display: none;
+}
+
+.booking-chassis-search-clear:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
 }
 
 .booking-chassis-suggestions {
@@ -4952,6 +5059,11 @@ button.invoice-history-pdf-btn:disabled {
     box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
 }
 
+.booking-calculate-btn:focus-visible {
+    outline: 2px solid #1d4ed8;
+    outline-offset: 2px;
+}
+
 /* Action Buttons Row */
 .booking-action-buttons {
     display: flex;
@@ -5250,27 +5362,30 @@ button.invoice-history-pdf-btn:disabled {
 
 /* Chassis Search Table */
 .booking-chassis-table {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
     border-collapse: collapse;
     table-layout: auto;
 }
 
 .booking-chassis-table .purchase-list-cell-chip {
-    white-space: nowrap;
-    word-break: normal;
+    white-space: nowrap !important;
+    word-break: normal !important;
     max-width: none;
 }
 
 .booking-chassis-table th:nth-child(3),
 .booking-chassis-table td:nth-child(3) {
-    min-width: 108px;
+    min-width: 120px;
 }
 
 .booking-chassis-table th,
 .booking-chassis-table td {
-    padding: 12px 14px;
+    padding: 10px 12px;
     text-align: left;
     border-bottom: 1px solid #eef2f7;
+    white-space: nowrap;
+    vertical-align: middle;
 }
 
 .booking-th,
@@ -5281,16 +5396,65 @@ button.invoice-history-pdf-btn:disabled {
     letter-spacing: 0.04em;
     color: #475569;
     background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    white-space: nowrap;
+}
+
+.booking-th-data {
+    min-width: 88px;
+}
+
+.booking-col-chassis {
+    min-width: 120px;
+}
+
+.booking-col-name {
+    min-width: 140px;
 }
 
 .booking-th-select {
     white-space: nowrap;
+    width: 40px;
+    min-width: 40px;
+    max-width: 44px;
+    padding: 8px 4px !important;
+    text-align: center;
 }
 
 .booking-select-all-cb {
-    margin-right: 8px;
+    margin: 0;
     vertical-align: middle;
     accent-color: #2563eb;
+}
+
+.booking-list-sort-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #475569;
+    min-height: 32px;
+    white-space: nowrap;
+}
+
+.booking-list-sort-btn:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.booking-list-sort-btn.is-active .booking-list-sort-icon {
+    color: #0f766e;
+    font-weight: 800;
+}
+
+.booking-list-sort-icon {
+    font-size: 12px;
+    color: #64748b;
 }
 
 .booking-td {
@@ -5301,8 +5465,24 @@ button.invoice-history-pdf-btn:disabled {
 }
 
 .booking-td-select {
-    width: 52px;
+    width: 40px;
+    min-width: 40px;
+    max-width: 44px;
     text-align: center;
+    padding: 8px 4px !important;
+}
+
+.booking-th-view,
+.booking-td-view {
+    width: 40px;
+    min-width: 40px;
+    max-width: 44px;
+    text-align: center;
+    padding: 8px 2px 8px 8px !important;
+}
+
+.booking-td-view .purchase-view-btn {
+    vertical-align: middle;
 }
 
 .booking-td-select .car-checkbox {
@@ -5453,6 +5633,10 @@ button.invoice-history-pdf-btn:disabled {
         padding: 6px 0;
         border: none;
         font-size: 14px;
+        white-space: normal;
+        min-width: 0;
+        max-width: none;
+        width: auto;
     }
     .booking-list-section .booking-chassis-table td::before {
         content: attr(data-label);
@@ -5460,12 +5644,19 @@ button.invoice-history-pdf-btn:disabled {
         color: #374151;
         margin-right: 8px;
     }
+    .booking-list-section .booking-chassis-table td[data-label=""]::before {
+        content: none;
+    }
     .booking-list-section .booking-chassis-table tbody td.booking-col-year {
         display: none !important;
     }
-    .booking-list-section .booking-chassis-table td:first-child {
+    .booking-list-section .booking-chassis-table td:first-child,
+    .booking-list-section .booking-chassis-table td.booking-td-view {
         flex-wrap: wrap;
         gap: 8px;
+        width: auto;
+        max-width: none;
+        justify-content: flex-start;
     }
     /* Form group spacing on mobile */
     .booking-form-group {
@@ -7729,6 +7920,21 @@ input.client-form-readonly:read-only {
 
 .qp-number-cut {
     margin-top: 4px;
+}
+
+.qp-options {
+    margin: 8px 0;
+}
+
+.qp-options-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.qp-options-custom {
+    flex: 1;
 }
 
 .qp-shaken-row {
@@ -10683,6 +10889,10 @@ input.client-form-readonly:read-only {
         padding: 6px 0;
         border: none;
         font-size: 14px;
+        white-space: normal;
+        min-width: 0;
+        max-width: none;
+        width: auto;
     }
 
     .booking-list-section .booking-chassis-table td::before {
@@ -10693,12 +10903,23 @@ input.client-form-readonly:read-only {
         flex-shrink: 0;
     }
 
+    .booking-list-section .booking-chassis-table td[data-label=""]::before {
+        content: none;
+    }
+
+    .booking-list-section .booking-chassis-table td.booking-td-view,
+    .booking-list-section .booking-chassis-table td.booking-td-select {
+        width: auto;
+        max-width: none;
+        justify-content: flex-start;
+    }
+
     .booking-list-section .booking-chassis-table tbody td.booking-col-year {
         display: none !important;
     }
 
     .booking-list-section .booking-chassis-table .purchase-list-cell-chip {
-        white-space: normal;
+        white-space: normal !important;
         word-break: break-word;
     }
 

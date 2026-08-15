@@ -2,6 +2,7 @@ package com.automan.backend.service
 
 import com.automan.backend.model.InvoiceHistory
 import com.automan.backend.model.InvoiceHistoryLine
+import com.automan.backend.repository.ClientMapRepository
 import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.InvoiceHistoryLineRepository
 import com.automan.backend.repository.InvoiceHistoryRepository
@@ -24,6 +25,9 @@ class InvoiceHistoryServiceDeleteLedgerTest {
     @Mock private lateinit var clientRepository: ClientRepository
     @Mock private lateinit var clientService: ClientService
     @Mock private lateinit var eventService: EventService
+    @Mock private lateinit var shippingHistoryService: ShippingHistoryService
+    @Mock private lateinit var bookingMappingService: BookingMappingService
+    @Mock private lateinit var clientMapRepository: ClientMapRepository
 
     @InjectMocks private lateinit var invoiceHistoryService: InvoiceHistoryService
 

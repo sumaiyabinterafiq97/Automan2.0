@@ -127,7 +127,7 @@ class PdfService {
 
         fun metaLine(label: String, value: String, align: TextAlignment = TextAlignment.LEFT): Paragraph =
             Paragraph()
-                .add(Text("$label ").setFont(fontBold).setBold())
+                .add(Text("$label ").setFont(fontLatin))
                 .add(Text(value).setFont(fontLatin))
                 .setFontSize(9f)
                 .setFixedLeading(12f)
@@ -203,27 +203,16 @@ class PdfService {
                     .setFixedLeading(12f)
                     .setMarginBottom(2f),
             )
-        val consigneeName = request.consignee?.trim()?.takeIf { it.isNotEmpty() }
-        if (consigneeName != null) {
+        request.clientAddress?.trim()?.takeIf { it.isNotEmpty() }?.let { addr ->
             leftCustomer.add(
-                Paragraph(consigneeName)
-                    .setFont(fontBold)
-                    .setBold()
-                    .setFontSize(10f)
-                    .setFixedLeading(12f)
-                    .setMarginBottom(2f),
-            )
-        }
-        val consigneeAddr = request.consigneeAddress?.trim()?.takeIf { it.isNotEmpty() }
-        if (consigneeAddr != null) {
-            leftCustomer.add(
-                Paragraph(consigneeAddr)
+                Paragraph(addr)
                     .setFont(font)
                     .setFontSize(8f)
                     .setFixedLeading(10f)
-                    .setMarginBottom(4f),
+                    .setMarginBottom(2f),
             )
         }
+        // Consignee / OTA name+address intentionally omitted from Local Customer Invoice PDF.
         leftCustomer
             .setBorder(noBorder)
             .setPadding(0f)
@@ -257,8 +246,7 @@ class PdfService {
             Cell()
                 .add(
                     Paragraph(text)
-                        .setFont(fontBold)
-                        .setBold()
+                        .setFont(fontLatin)
                         .setFontSize(9f)
                         .setTextAlignment(align),
                 )
@@ -271,32 +259,8 @@ class PdfService {
         table.addHeaderCell(headerCell("AMOUNT", TextAlignment.RIGHT))
 
         fun descriptionParagraph(item: com.automan.backend.dto.InvoiceItem): Paragraph {
-            val desc = item.description ?: ""
-            val chassis = item.chassisNo?.trim()?.takeIf { it.isNotEmpty() }
-                ?: desc.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { it.isNotEmpty() }
-            if (chassis == null || desc.isEmpty()) {
-                return Paragraph(desc)
-                    .setFont(font)
-                    .setFontSize(8f)
-                    .setTextAlignment(TextAlignment.LEFT)
-                    .setFixedLeading(11f)
-            }
-            val idx = desc.indexOf(chassis, ignoreCase = true)
-            if (idx < 0) {
-                return Paragraph()
-                    .add(Text(chassis).setFont(fontBold).setBold())
-                    .add(Text(" " + desc.removePrefix(chassis).trimStart()).setFont(font))
-                    .setFontSize(8f)
-                    .setTextAlignment(TextAlignment.LEFT)
-                    .setFixedLeading(11f)
-            }
-            val before = desc.substring(0, idx)
-            val matched = desc.substring(idx, idx + chassis.length)
-            val after = desc.substring(idx + chassis.length)
-            return Paragraph()
-                .add(Text(before).setFont(font))
-                .add(Text(matched).setFont(fontBold).setBold())
-                .add(Text(after).setFont(font))
+            return Paragraph(item.description)
+                .setFont(font)
                 .setFontSize(8f)
                 .setTextAlignment(TextAlignment.LEFT)
                 .setFixedLeading(11f)
@@ -325,8 +289,7 @@ class PdfService {
                 Cell()
                     .add(
                         Paragraph(item.amount)
-                            .setFont(fontBold)
-                            .setBold()
+                            .setFont(fontLatin)
                             .setFontSize(8f)
                             .setTextAlignment(TextAlignment.RIGHT)
                             .setFixedLeading(11f),
@@ -345,8 +308,7 @@ class PdfService {
             Cell()
                 .add(
                     Paragraph("GRAND TOTAL:")
-                        .setFont(fontBold)
-                        .setBold()
+                        .setFont(fontLatin)
                         .setFontSize(10f)
                         .setTextAlignment(TextAlignment.RIGHT),
                 )
@@ -358,8 +320,7 @@ class PdfService {
             Cell()
                 .add(
                     Paragraph(dash(request.totalAmount))
-                        .setFont(fontBold)
-                        .setBold()
+                        .setFont(fontLatin)
                         .setFontSize(10f)
                         .setTextAlignment(TextAlignment.RIGHT),
                 )
@@ -373,10 +334,8 @@ class PdfService {
         request.bankAccount?.trim()?.takeIf { it.isNotEmpty() }?.let { bank ->
             document.add(
                 Paragraph("BANKING DETAILS")
-                    .setFont(fontBold)
-                    .setBold()
+                    .setFont(fontLatin)
                     .setFontSize(10f)
-                    .setUnderline()
                     .setMarginTop(14f)
                     .setMarginBottom(4f),
             )
@@ -419,8 +378,7 @@ class PdfService {
                 .add(rule(0f, 4f))
                 .add(
                     Paragraph("M. Asif Memon")
-                        .setFont(fontBold)
-                        .setBold()
+                        .setFont(fontLatin)
                         .setFontSize(9f)
                         .setTextAlignment(TextAlignment.CENTER)
                         .setMarginBottom(1f),

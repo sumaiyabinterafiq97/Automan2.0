@@ -182,6 +182,15 @@ fun openQuickPurchaseModal() {
                         </div>
                     </div>
                 </div>
+                <div class="qp-options">
+                    <label class="qp-label" for="qpOptions">Options</label>
+                    <div class="options-buttons-grid" id="qpOptionsButtonsGrid"></div>
+                    <input type="hidden" id="qpOptionsPredefined" value="">
+                    <div class="qp-options-row">
+                        <button type="button" class="option-btn option-btn-basic" data-option="Basic" title="Select ABS, Air Bag, Power Window, Power Steering, AC">Basic</button>
+                        <input type="text" id="qpOptions" placeholder="Type custom option and press Enter..." class="qp-input qp-options-custom">
+                    </div>
+                </div>
                 <div class="qp-field">
                     <label class="qp-label" for="qpNotes">Note</label>
                     <textarea id="qpNotes" placeholder="Optional" class="qp-textarea" rows="3"></textarea>
@@ -223,6 +232,9 @@ fun openQuickPurchaseModal() {
     setupQuickPurchaseModalListeners()
     setupQuickPurchaseNumberCutListeners()
     preloadQuickPurchaseDropdowns()
+    fetchAndRenderPurchaseOptionButtons("qpOptionsButtonsGrid") {
+        js("if (typeof window.setupOptionButtons === 'function') window.setupOptionButtons();")
+    }
 
     window.setTimeout({
         (document.getElementById("qpChassisInput") as? HTMLInputElement)?.focus()
@@ -264,6 +276,11 @@ private fun resetQuickPurchaseModalForm() {
     (document.getElementById("qpNumberCutNumber2") as? HTMLInputElement)?.value = ""
     (document.getElementById("qpNumberCutString") as? HTMLInputElement)?.value = ""
     (document.getElementById("qpNumberCutFieldsWrap") as? HTMLElement)?.style?.display = "none"
+    (document.getElementById("qpOptionsPredefined") as? HTMLInputElement)?.value = ""
+    (document.getElementById("qpOptions") as? HTMLInputElement)?.value = ""
+    document.getElementById("quickPurchaseModalContent")?.querySelectorAll(".option-btn")?.asDynamic()?.forEach { btn: dynamic ->
+        (btn as? HTMLElement)?.classList?.remove("selected")
+    }
     (document.getElementById("carPicturePreview") as? HTMLElement)?.innerHTML = ""
     (document.getElementById("carPictures") as? HTMLInputElement)?.value = ""
     resetPendingCarPictureUploads()
@@ -291,7 +308,9 @@ private fun preloadQuickPurchaseDropdowns() {
     populateComboboxFromApiForField("qpClientName", "client-map/dropdowns/client-names", "")
     populateComboboxFromApiForField("qpColor", "master-menu/color", "Select Color")
     populateComboboxFromApiForField("qpFuel", "master-menu/fuel", "Select Fuel")
-    populateComboboxFromApiForField("qpRank", "master-menu/rank", "Select Rank")
+    populateChassisMappingWithMasterListAsync(
+        "qpRank", "Select Rank", emptyList(), getComboboxValueSafe("qpRank"), "master-menu/rank",
+    )
     refreshPurchaseClientNameToCountryMap()
     ensureNumberCutPlaceOptionsLoaded {
         repopulateNumberCutPlaceCombobox("qpNumberCutPlace")
@@ -703,6 +722,10 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
     val (shaken, numberCut) = readQuickPurchaseShakenAndNumberCut()
     purchaseData.shaken = shaken
     purchaseData.numberCut = numberCut
+    val predefinedOpts = (document.getElementById("qpOptionsPredefined") as? HTMLInputElement)?.value?.trim() ?: ""
+    val customOpts = (document.getElementById("qpOptions") as? HTMLInputElement)?.value?.trim() ?: ""
+    val optionsJoined = listOf(predefinedOpts, customOpts).filter { it.isNotEmpty() }.joinToString(", ")
+    if (optionsJoined.isNotBlank()) purchaseData.options = optionsJoined
     val priceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpPrice') : ''").unsafeCast<String>().trim()
     purchaseData.price = if (priceValue.isNotBlank()) "¥$priceValue" else ""
     val rixoPriceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpRixoPrice') : ''").unsafeCast<String>().trim()

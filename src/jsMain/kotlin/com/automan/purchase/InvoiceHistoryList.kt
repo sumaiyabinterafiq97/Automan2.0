@@ -49,7 +49,7 @@ fun showInvoiceHistoryPage() {
             .invoice-history-toolbar{
                 display:grid;
                 grid-template-columns:1fr;
-                grid-template-areas:"title" "search";
+                grid-template-areas:"title" "search" "actions";
                 gap:12px;
                 margin-bottom:16px;
                 align-items:center;
@@ -57,42 +57,68 @@ fun showInvoiceHistoryPage() {
             .invoice-history-title{margin:0;font-size:18px;font-weight:700;color:#0f172a;letter-spacing:-0.01em;grid-area:title;text-align:center;}
             .invoice-search{grid-area:search;width:100%;position:relative;display:flex;align-items:center;min-width:0;border:1px solid #e5e7eb;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
             .invoice-search input{width:100%;box-sizing:border-box;padding:11px 36px 11px 40px;border:none;font-size:14px;background:transparent;border-radius:999px;outline:none;}
-            .invoice-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;}
+            .invoice-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#9ca3af;cursor:pointer;font-size:20px;padding:6px 8px;min-height:36px;min-width:36px;border-radius:8px;}
             .invoice-search-clear:hover{background:#f3f4f6;color:#111827;}
+            .invoice-search-clear.is-hidden{display:none;}
+            .invoice-search-clear:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
+            .invoice-history-actions{grid-area:actions;display:flex;justify-content:flex-end;align-items:center;gap:10px;}
+            .invoice-column-filter-btn{
+                width:48px;height:48px;min-width:48px;min-height:48px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;
+                cursor:pointer;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.06);padding:0;color:#4b5563;
+            }
+            .invoice-column-filter-btn:hover{background:#e8eaed;box-shadow:0 2px 8px rgba(0,0,0,0.08);}
+            .invoice-column-filter-btn:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
+            .invoice-history-edit-btn{
+                display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;
+                background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 4px rgba(76,201,255,0.30);padding:0;
+            }
+            .invoice-history-edit-btn:hover{filter:brightness(1.05);}
+            .invoice-history-edit-btn:focus-visible{outline:2px solid #0284c7;outline-offset:2px;}
             .invoice-history-table-shell{overflow-x:auto;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,0.04);border:1px solid #eef2f7;}
             table.purchase-list-table thead th{position:sticky;top:0;z-index:10;}
-            .invoice-history-empty{display:flex;flex-direction:column;align-items:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
+            .invoice-history-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;color:#475569;padding:44px 16px;gap:8px;}
             .invoice-history-empty strong{color:#0f172a;}
+            .invoice-history-empty--error{color:#b91c1c;}
+            .invoice-history-empty--error strong{color:#991b1b;}
+            .invoice-history-empty-cta{margin-top:8px;padding:8px 14px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:#0f172a;font-size:13px;font-weight:600;cursor:pointer;min-height:40px;}
+            .invoice-history-empty-cta:hover{background:#f8fafc;}
+            .invoice-history-empty-cta:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
             .invoice-history-pager{display:flex;justify-content:space-between;align-items:center;padding:16px;background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:12px;margin-top:12px;flex-wrap:wrap;gap:12px;}
             .invoice-history-pager-meta{color:#6b7280;font-size:14px;}
             .invoice-history-pager-btns{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-            .invoice-history-pager-btn{padding:8px 16px;background-color:#007bff;color:#fff;border:none;border-radius:4px;cursor:pointer;min-height:40px;font-size:14px;}
+            .invoice-history-pager-btn{padding:8px 16px;background-color:#007bff;color:#fff;border:none;border-radius:8px;cursor:pointer;min-height:40px;font-size:14px;font-weight:600;}
+            .invoice-history-pager-btn:hover:not(:disabled):not(.is-disabled){background-color:#0069d9;}
+            .invoice-history-pager-btn:focus-visible{outline:2px solid #0069d9;outline-offset:2px;}
             .invoice-history-pager-btn:disabled,.invoice-history-pager-btn.is-disabled{background-color:#ccc;cursor:not-allowed;}
-            .invoice-history-pager-page{color:#374151;font-size:14px;padding:0 8px;}
+            .invoice-history-sort-btn{background:none;border:none;cursor:pointer;font-weight:700;color:#0f172a;padding:0;display:inline-flex;align-items:center;gap:6px;min-height:36px;}
+            .invoice-history-sort-btn:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;border-radius:4px;}
+            .invoice-history-sort-btn.is-active .invoice-history-sort-icon{color:#0f766e;font-weight:800;}
+            .invoice-history-sort-icon{font-size:14px;color:#64748b;}
             .invoice-cards{display:flex;flex-direction:column;gap:10px;}
             .invoice-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,0.04);padding:12px;}
-            .invoice-card-top{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:10px;}
-            .invoice-card-actions{display:inline-flex;flex-direction:column;align-items:center;gap:8px;}
+            .invoice-card-top{display:flex;align-items:center;justify-content:flex-start;gap:10px;margin-bottom:10px;flex-wrap:wrap;}
+            .invoice-card-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
             .invoice-card-grid{display:grid;gap:8px;}
             .invoice-kv{display:flex;gap:10px;align-items:flex-start;}
             .invoice-k{min-width:120px;font-size:12px;color:#64748b;line-height:1.4;}
             .invoice-v{flex:1;min-width:0;}
             button.invoice-history-shipment-details-btn:focus-visible{outline:2px solid #475569;outline-offset:2px;}
+            button.invoice-history-pdf-btn:focus-visible{outline:2px solid #b91c1c;outline-offset:2px;border-radius:50%;}
             @media (max-width: 1024px){
                 #invoiceHistoryPage{padding:14px;border-radius:14px;}
                 .invoice-history-toolbar{gap:14px;margin-bottom:14px;}
                 .invoice-history-title{font-size:17px;}
                 .invoice-search input{font-size:13px;padding:10px 34px 10px 38px;}
+                .invoice-history-actions{justify-self:end;}
             }
             @media (min-width: 1025px){
                 .invoice-history-toolbar{
                     grid-template-columns:auto 1fr minmax(200px,25%) auto;
-                    grid-template-areas:"title . search cols";
+                    grid-template-areas:"title . search actions";
                     column-gap:12px;
                     row-gap:0;
                 }
                 .invoice-history-title{text-align:left;justify-self:start;}
-                #invoiceHistoryColumnFilterBtn{grid-area:cols;justify-self:end;}
             }
         </style>
         <div id="invoiceHistoryPage">
@@ -103,13 +129,15 @@ fun showInvoiceHistoryPage() {
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                     </span>
                     <input type="text" id="invoiceHistorySearchInput" role="searchbox" autocomplete="off" inputmode="search" placeholder="Search invoice number, vessel, client, POL, POD, LC, price type, chassis, amount…" aria-label="Search invoice history" />
-                    <button type="button" id="invoiceHistorySearchClearBtn" class="invoice-search-clear" title="Clear search" aria-label="Clear search">×</button>
+                    <button type="button" id="invoiceHistorySearchClearBtn" class="invoice-search-clear is-hidden" title="Clear search" aria-label="Clear search">×</button>
                 </div>
-                <button type="button" id="invoiceHistoryColumnFilterBtn" title="Select columns to display" aria-label="Select columns to display" style="padding:8px 10px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;cursor:pointer;min-height:40px;display:inline-flex;align-items:center;justify-content:center;">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                </button>
+                <div class="invoice-history-actions">
+                    <button type="button" id="invoiceHistoryColumnFilterBtn" class="invoice-column-filter-btn" title="Select columns to display" aria-label="Select columns to display">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
             </div>
             <div id="invoiceHistoryTableWrap">
                 <div id="invoiceHistoryTable" style="margin-top: 8px;">
@@ -123,14 +151,22 @@ fun showInvoiceHistoryPage() {
     ensureSidebarPresent()
 
     val searchInput = document.getElementById("invoiceHistorySearchInput") as? HTMLInputElement
+    fun syncInvoiceHistorySearchClearVisibility() {
+        val clearBtn = document.getElementById("invoiceHistorySearchClearBtn") as? HTMLElement ?: return
+        val hasQuery = (searchInput?.value?.trim().orEmpty()).isNotEmpty()
+        if (hasQuery) clearBtn.classList.remove("is-hidden") else clearBtn.classList.add("is-hidden")
+    }
     searchInput?.addEventListener("input", { _: Event ->
+        syncInvoiceHistorySearchClearVisibility()
         scheduleInvoiceHistorySearchDebounced()
     })
     document.getElementById("invoiceHistorySearchClearBtn")?.addEventListener("click", { _: Event ->
         searchInput?.value = ""
+        syncInvoiceHistorySearchClearVisibility()
         invoiceHistoryPageZeroBased = 0
         loadInvoiceHistory(0)
     })
+    syncInvoiceHistorySearchClearVisibility()
     document.getElementById("invoiceHistoryColumnFilterBtn")?.addEventListener("click", { _: Event ->
         showInvoiceHistoryColumnFilterModal()
     })
@@ -138,6 +174,21 @@ fun showInvoiceHistoryPage() {
     setupInvoiceHistoryResizeListener()
 
     val wrap = document.getElementById("invoiceHistoryTableWrap")
+    if (wrap != null && !wrap.hasAttribute("data-invoice-empty-cta-delegation")) {
+        wrap.setAttribute("data-invoice-empty-cta-delegation", "true")
+        wrap.addEventListener("click", { e: Event ->
+            val target = e.target as? Element ?: return@addEventListener
+            target.closest("#invoiceHistoryClearSearchCta") ?: return@addEventListener
+            e.preventDefault()
+            val input = document.getElementById("invoiceHistorySearchInput") as? HTMLInputElement
+            input?.value = ""
+            val clearBtn = document.getElementById("invoiceHistorySearchClearBtn") as? HTMLElement
+            clearBtn?.classList?.add("is-hidden")
+            invoiceHistoryPageZeroBased = 0
+            loadInvoiceHistory(0)
+            input?.focus()
+        })
+    }
     if (wrap != null && !wrap.hasAttribute("data-invoice-history-sort-delegation")) {
         wrap.setAttribute("data-invoice-history-sort-delegation", "true")
         wrap.addEventListener("click", { e: Event ->
@@ -213,9 +264,8 @@ private fun storeAndNavigateInvoiceHistoryEdit(row: dynamic) {
 private fun invoiceHistoryEditButtonHtml(invoiceNumber: String): String {
     if (invoiceNumber.isEmpty()) return ""
     val safeInv = escapeHtml(invoiceNumber)
-    return """<button type="button" data-invoice-history-edit data-invoice-number="$safeInv" aria-label="Edit" title="Edit to Create Invoice"
-        style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;background-color:#4CC9FF;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 4px rgba(76,201,255,0.30);padding:0;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+    return """<button type="button" class="invoice-history-edit-btn" data-invoice-history-edit data-invoice-number="$safeInv" aria-label="Edit invoice" title="Edit to Create Invoice">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
             <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z" fill="white"/>
             <path d="M20.71 7.04a1.003 1.003 0 0 0 0-1.42l-2.34-2.34a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.82z" fill="white"/>
         </svg>
@@ -469,7 +519,7 @@ private fun loadInvoiceHistory(page0: Int = invoiceHistoryPageZeroBased) {
             onError = { message, _ ->
                 ErrorHandler.showError("Failed to load invoice history: $message")
                 tableHost.innerHTML = """
-                    <div class="invoice-history-empty" style="color:#b91c1c;">
+                    <div class="invoice-history-empty invoice-history-empty--error">
                         <strong>Could not load</strong>
                         <div>Unable to load invoice history. Please reload and try again.</div>
                     </div>
@@ -486,9 +536,11 @@ private fun invoiceHistoryAllSelectableColumnKeys(): List<String> = listOf(
 
 private fun invoiceHistoryLockedColumnKeys(): Set<String> = setOf("invoiceNumber")
 
-private fun invoiceHistoryDefaultColumnKeys(): List<String> = invoiceHistoryAllSelectableColumnKeys()
+private fun invoiceHistoryDefaultColumnKeys(): List<String> = listOf(
+    "invoiceNumber", "vessel", "clientName", "shippingDate", "chassis", "totalAmount",
+)
 
-private const val INVOICE_HISTORY_MAX_DATA_COLUMNS = 10
+private const val INVOICE_HISTORY_MAX_DATA_COLUMNS = 6
 private const val INVOICE_HISTORY_COLUMNS_STORAGE_KEY = "selectedInvoiceHistoryColumns_v1"
 private var invoiceHistoryColumnFilterKeyHandler: ((Event) -> Unit)? = null
 
@@ -773,11 +825,10 @@ private fun appendInvoiceHistoryPager(html: StringBuilder) {
     html.append(
         """
         <div id="invoiceHistoryPager" class="invoice-history-pager">
-            <div class="invoice-history-pager-meta">Page $currentPage of $totalPages · $invoiceHistoryTotalElements row(s)</div>
+            <div class="invoice-history-pager-meta">Showing page $currentPage of $totalPages · $invoiceHistoryTotalElements row(s)</div>
             <div class="invoice-history-pager-btns">
-                <button type="button" id="invoiceHistoryPrevPage" class="invoice-history-pager-btn${if (prevDisabled) " is-disabled" else ""}" ${if (prevDisabled) "disabled" else ""}>Previous</button>
-                <span class="invoice-history-pager-page">Page $currentPage of $totalPages</span>
-                <button type="button" id="invoiceHistoryNextPage" class="invoice-history-pager-btn${if (nextDisabled) " is-disabled" else ""}" ${if (nextDisabled) "disabled" else ""}>Next</button>
+                <button type="button" id="invoiceHistoryPrevPage" class="invoice-history-pager-btn${if (prevDisabled) " is-disabled" else ""}" ${if (prevDisabled) "disabled" else ""} aria-label="Previous page">Previous</button>
+                <button type="button" id="invoiceHistoryNextPage" class="invoice-history-pager-btn${if (nextDisabled) " is-disabled" else ""}" ${if (nextDisabled) "disabled" else ""} aria-label="Next page">Next</button>
             </div>
         </div>
         """
@@ -805,7 +856,13 @@ private fun renderInvoiceHistoryTableFromCache() {
 
     if (invoiceHistoryCachedRows.isEmpty()) {
         val emptyHtml = if (q.isNotEmpty()) {
-            """<div class="invoice-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
+            """
+            <div class="invoice-history-empty">
+                <strong>No matches</strong>
+                <div>No rows match your search.</div>
+                <button type="button" id="invoiceHistoryClearSearchCta" class="invoice-history-empty-cta">Clear search</button>
+            </div>
+            """.trimIndent()
         } else {
             """<div class="invoice-history-empty"><strong>No history yet</strong><div>No invoice history records yet.</div></div>"""
         }
@@ -823,7 +880,13 @@ private fun renderInvoiceHistoryTableFromCache() {
     }
 
     if (rows.isEmpty()) {
-        tableHost.innerHTML = """<div class="invoice-history-empty"><strong>No matches</strong><div>No rows match your search.</div></div>"""
+        tableHost.innerHTML = """
+            <div class="invoice-history-empty">
+                <strong>No matches</strong>
+                <div>No rows match your search.</div>
+                <button type="button" id="invoiceHistoryClearSearchCta" class="invoice-history-empty-cta">Clear search</button>
+            </div>
+        """.trimIndent()
         return
     }
 
@@ -854,6 +917,12 @@ private fun renderInvoiceHistoryTableFromCache() {
             val label = escapeHtml(invoiceHistoryColumnLabel(key))
             val isActive = invoiceHistorySortField == key
             val sortOrder = if (isActive) invoiceHistorySortOrder else "desc"
+            val sortIcon = when {
+                !isActive -> "↕"
+                sortOrder == "asc" -> "↑"
+                else -> "↓"
+            }
+            val activeClass = if (isActive) " is-active" else ""
             val tooltipRaw = when {
                 !isActive -> "Sort by ${invoiceHistoryColumnLabel(key)}"
                 sortOrder == "asc" -> "Sorted ascending (click for descending)"
@@ -863,8 +932,8 @@ private fun renderInvoiceHistoryTableFromCache() {
             html.append(
                 """
                 <th style="padding:12px;text-align:left;border-bottom:1px solid #dee2e6;">
-                    <button type="button" data-invoice-history-sort="$key" title="$tooltip" style="background:none;border:none;cursor:pointer;font-weight:700;color:#0f172a;padding:0;display:inline-flex;align-items:center;gap:6px;">
-                        <span>$label</span><span style="font-size:14px;color:#64748b;">↕</span>
+                    <button type="button" class="invoice-history-sort-btn$activeClass" data-invoice-history-sort="$key" title="$tooltip" aria-label="$tooltip">
+                        <span>$label</span><span class="invoice-history-sort-icon" aria-hidden="true">$sortIcon</span>
                     </button>
                 </th>
                 """

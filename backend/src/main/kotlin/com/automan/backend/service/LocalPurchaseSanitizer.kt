@@ -5,21 +5,18 @@ import org.springframework.stereotype.Service
 
 /**
  * When [Purchase.local] is true, strips export/shipping fields before persistence adapters run.
- * UI may still display prior values until save; canonical stores are cleared on write.
+ * Rixo Information (company, stock location, price) and Rixo workflow flags are kept:
+ * LOCAL still allows yard/Rixo cost, and Rixo Save must be able to mark requested.
  */
 @Service
 class LocalPurchaseSanitizer {
     fun apply(purchase: Purchase): Purchase {
         if (!purchase.local) return purchase
         return purchase.copy(
-            rixoCompany = null,
-            stockLocation = null,
             pol = null,
             pod = null,
             country = null,
             bookingId = null,
-            rixoRequested = null,
-            rixoConfirmed = null,
             bookingRequested = false,
             shipmentDate = null,
             blNo = null,
@@ -27,7 +24,6 @@ class LocalPurchaseSanitizer {
             shipmentCharges = null,
             freight = null,
             inspectionFee = null,
-            rixoPrice = null,
         )
     }
 }

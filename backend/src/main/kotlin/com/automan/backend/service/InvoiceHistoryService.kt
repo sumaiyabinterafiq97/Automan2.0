@@ -189,7 +189,8 @@ class InvoiceHistoryService(
         chassisTokens: Collection<String> = emptyList(),
     ): InvoicePdfRequest {
         val (fromShipping, country) = shippingHistoryService.enrichInvoicePdfFromShippingHistory(pdf, chassisTokens)
-        val clientMapConsignee = firstClientMapConsigneeToken(fromShipping.clientName)
+        val clientMapRow = clientMapRowByClientName(fromShipping.clientName)
+        val clientMapConsignee = firstConsigneeTokenFromRaw(clientMapRow?.consignee)
         val consigneeForPdf = clientMapConsignee
             ?: fromShipping.consignee?.trim()?.takeIf { it.isNotEmpty() }
         val consigneeChanged = clientMapConsignee != null &&
@@ -211,21 +212,37 @@ class InvoiceHistoryService(
                     fromShipping.to.takeIf { it.isNotBlank() && it != "-" },
                 ).takeIf { it.isNotEmpty() }
         }
+        val clientAddress = fromShipping.clientAddress?.trim()?.takeIf { it.isNotEmpty() }
+            ?: formatClientMapAddressForInvoicePdf(clientMapRow?.address)
         return fromShipping.copy(
             consignee = consigneeForPdf,
             consigneeAddress = address,
+            clientAddress = clientAddress,
         )
     }
 
+    private fun clientMapRowByClientName(clientName: String?) =
+        clientName?.trim()?.takeIf { it.isNotEmpty() }?.let { clientMapRepository.findByClientNameIgnoreCase(it) }
+
     /** First non-empty Client Map consignee token (comma / semicolon / newline lists). */
-    private fun firstClientMapConsigneeToken(clientName: String?): String? {
-        val name = clientName?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val row = clientMapRepository.findByClientNameIgnoreCase(name) ?: return null
-        val raw = row.consignee?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    private fun firstConsigneeTokenFromRaw(rawConsignee: String?): String? {
+        val raw = rawConsignee?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         return Regex("""[,;\n]+""")
             .split(raw)
             .map { it.trim() }
             .firstOrNull { it.isNotEmpty() }
+    }
+
+    /** Client Map address chips may be `;`-joined; PDF prints one line per token. */
+    private fun formatClientMapAddressForInvoicePdf(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val lines = raw.replace("\r\n", "\n")
+            .replace('\r', '\n')
+            .split(Regex("""[;\n]+"""))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        if (lines.isEmpty()) return null
+        return lines.joinToString("\n")
     }
 
     private fun computePersistedLineTotal(invoiceNumber: String): Double? {

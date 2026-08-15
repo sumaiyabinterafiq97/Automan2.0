@@ -955,6 +955,8 @@ fun initializeAppSetup() {
     window.asDynamic().duplicateMasterClientMap = ::duplicateMasterClientMap
     window.asDynamic().editMasterShippingCharge = ::editMasterShippingCharge
     window.asDynamic().duplicateMasterShippingCharge = ::duplicateMasterShippingCharge
+    window.asDynamic().editMasterStockLocationMap = ::editMasterStockLocationMap
+    window.asDynamic().deleteMasterStockLocationMap = ::deleteMasterStockLocationMap
     window.asDynamic().addClientTransaction = ::addClientTransaction
     
     // Expose date conversion functions for edit form
@@ -2511,9 +2513,9 @@ fun prefillEditNumberCutDetailFields(numberCutRaw: Any?) {
 private fun rixoEffectiveDataColumns(columns: List<String>): List<String> =
     columns.filter { it != "shaken" }
 
-/** Cars-to-Rixo data columns include Chassis; user picks 2–4 additional fields → 3–5 data columns total (plus select + edit). */
+/** Cars-to-Rixo data columns include Chassis; user picks 2–5 additional fields → 3–6 data columns total (plus select + view + edit). */
 private const val RIXO_MIN_DATA_COLUMNS_INCLUDING_CHASSIS: Int = 3
-private const val RIXO_MAX_DATA_COLUMNS_INCLUDING_CHASSIS: Int = 5
+private const val RIXO_MAX_DATA_COLUMNS_INCLUDING_CHASSIS: Int = 6
 private const val RIXO_MIN_NON_CHASSIS_COLUMNS_USER: Int = RIXO_MIN_DATA_COLUMNS_INCLUDING_CHASSIS - 1
 private const val RIXO_MAX_NON_CHASSIS_COLUMNS_USER: Int = RIXO_MAX_DATA_COLUMNS_INCLUDING_CHASSIS - 1
 private const val RIXO_MAX_NON_CHASSIS_AFTER_EFFECTIVE: Int = RIXO_MAX_NON_CHASSIS_COLUMNS_USER
@@ -6130,6 +6132,7 @@ fun createApp(root: Element) {
                                 <button id="masterClientMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Client Map</button>
                                 <button id="masterConsigneeMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Consignee Map</button>
                                 <button id="masterShippingChargeMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Shipping Charge Map</button>
+                                <button id="masterStockLocationMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Stock Location Map</button>
                                 <button id="masterSupplierMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
                                 <button id="masterRixoPriceMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Price Map</button>
                             </div>
@@ -6578,6 +6581,10 @@ fun createApp(root: Element) {
         closeSidebar()
         navigateToApp("/master/shipping-charge-map")
     })
+    document.getElementById("masterStockLocationMapBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        navigateToApp("/master/stock-location-map")
+    })
     document.getElementById("masterSupplierMapBtn")?.addEventListener("click", { _: Event ->
         closeSidebar()
         navigateToApp("/master/supplier-map")
@@ -6848,6 +6855,12 @@ fun updateContent(root: Element) {
         }
         routeAtStartsWith(route, "master/shipping-charge-map") -> {
             showShippingChargeMapPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        routeAtStartsWith(route, "master/stock-location-map") -> {
+            showStockLocationMapPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -9359,6 +9372,7 @@ fun setupRixoDropdowns() {
                 elementId === 'shipmentSize' || elementId === 'editShipmentSize' ||
                 elementId === 'typeOfVehicle' || elementId === 'editTypeOfVehicle' ||
                 elementId === 'fuel' || elementId === 'editFuel' ||
+                elementId === 'rank' || elementId === 'editRank' || elementId === 'qpRank' ||
                 elementId === 'shift' || elementId === 'editShift' ||
                 elementId === 'rixoCompany' || elementId === 'editRixoCompany' ||
                 elementId === 'stockLocation' || elementId === 'editStockLocation' ||
@@ -10594,9 +10608,9 @@ fun ensurePurchaseOptionButtonsInfrastructure() {
             var btn = (t && t.closest) ? t.closest('.option-btn') : null;
             if (!btn || !btn.classList || !btn.classList.contains('option-btn')) return;
             var option = btn.getAttribute('data-option');
-            var form = btn.closest('form');
-            var grid = btn.closest('.options-buttons-grid') || (form ? form.querySelector('.options-buttons-grid') : null);
-            var predefinedInput = form ? form.querySelector('input[type="hidden"][id$="Predefined"]') : null;
+            var container = btn.closest('form') || btn.closest('#quickPurchaseModalContent');
+            var grid = btn.closest('.options-buttons-grid') || (container ? container.querySelector('.options-buttons-grid') : null);
+            var predefinedInput = container ? container.querySelector('input[type="hidden"][id$="Predefined"]') : null;
             if (!predefinedInput || predefinedInput.type !== 'hidden') return;
             e.preventDefault();
             if (option === 'Basic') {
@@ -10617,7 +10631,7 @@ fun ensurePurchaseOptionButtonsInfrastructure() {
                 btn.classList.add('selected');
                 updatePredefinedInput(predefinedInput, option, true);
             }
-            syncBasicButtonState(form);
+            syncBasicButtonState(container);
         }
         if (!window.__optionButtonClickBound) {
             window.__optionButtonClickBound = true;
@@ -10626,6 +10640,7 @@ fun ensurePurchaseOptionButtonsInfrastructure() {
         function setupOptionButtons() {
             var optionsInput = document.getElementById('options');
             var editOptionsInput = document.getElementById('editOptions');
+            var qpOptionsInput = document.getElementById('qpOptions');
             if (optionsInput && !optionsInput._optionsCustomBound) {
                 optionsInput._optionsCustomBound = true;
                 optionsInput.addEventListener('keypress', function(e) {
@@ -10648,8 +10663,20 @@ fun ensurePurchaseOptionButtonsInfrastructure() {
                     }
                 });
             }
+            if (qpOptionsInput && !qpOptionsInput._optionsCustomBound) {
+                qpOptionsInput._optionsCustomBound = true;
+                qpOptionsInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        var v = qpOptionsInput.value.trim();
+                        var opts = v ? v.split(',').map(function(o) { return o.trim(); }).filter(Boolean) : [];
+                        qpOptionsInput.value = opts.join(', ');
+                    }
+                });
+            }
             syncBasicButtonState(document.getElementById('addForm'));
             syncBasicButtonState(document.getElementById('editForm'));
+            syncBasicButtonState(document.getElementById('quickPurchaseModalContent'));
         }
         window.setupOptionButtons = setupOptionButtons;
         window.syncPurchaseBasicButtonState = syncBasicButtonState;
@@ -11219,8 +11246,6 @@ private fun applyLocalFlagAndNullLockedFields(purchaseData: dynamic, isEdit: Boo
     val isLocal = isLocalPurchaseCheckboxChecked(isEdit)
     purchaseData.local = isLocal
     if (!isLocal) return
-    purchaseData.rixoRequested = "FALSE"
-    purchaseData.rixoConfirmed = "FALSE"
     purchaseData.bookingRequested = false
     purchaseData.country = null
     purchaseData.pol = null
@@ -11359,6 +11384,7 @@ fun setupAddFormListeners() {
     populateMasterMenuComboboxesForPurchaseForm()
     populateNumberCutPlaceComboboxesForPurchaseForm()
     preloadColorComboboxForPurchaseForm(isEditForm = false)
+    preloadRankComboboxForPurchaseForm(isEditForm = false)
     fetchAndRenderPurchaseOptionButtons("optionsButtonsGrid")
     
     // Load all chassis from car_brand_mapping table (chassis-first flow support)
@@ -13345,6 +13371,19 @@ private fun preloadColorComboboxForPurchaseForm(isEditForm: Boolean) {
     )
 }
 
+/** Preload Rank master-menu options (and chassis-master separator UI) before chassis is selected. */
+private fun preloadRankComboboxForPurchaseForm(isEditForm: Boolean) {
+    val rankId = if (isEditForm) "editRank" else "rank"
+    val currentValue = getComboboxValueSafe(rankId)
+    populateChassisMappingWithMasterListAsync(
+        rankId,
+        "Select Rank",
+        emptyList(),
+        currentValue,
+        "master-menu/rank",
+    )
+}
+
 /** Populate a combobox `<select>` with label row + one option per token. */
 private fun populateComboboxTokensWithSeeMore(
     selectId: String,
@@ -13478,7 +13517,7 @@ private fun getMasterFieldApiPath(selectId: String): String? = when (selectId) {
     "venueId", "editVenueId" -> "master-menu/venue_id"
     "shipmentSize", "editShipmentSize", "typeOfVehicle", "editTypeOfVehicle" -> "master-menu/type_of_vehicle"
     "fuel", "editFuel" -> "master-menu/fuel"
-    "rank", "editRank" -> "master-menu/rank"
+    "rank", "editRank", "qpRank" -> "master-menu/rank"
     "shift", "editShift" -> "master-menu/shift"
     "rixoCompany", "editRixoCompany" -> "rixo-mapping/distinct-rixo-companies"
     "stockLocation", "editStockLocation" -> "master-menu/stock_location"
@@ -18732,6 +18771,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
     populateMasterMenuComboboxesForPurchaseForm()
     populateNumberCutPlaceComboboxesForPurchaseForm()
     preloadColorComboboxForPurchaseForm(isEditForm = true)
+    preloadRankComboboxForPurchaseForm(isEditForm = true)
     setupRixoDropdowns()
     ensurePurchaseOptionButtonsInfrastructure()
     fetchAndRenderPurchaseOptionButtons("editOptionsButtonsGrid") {
@@ -23237,11 +23277,10 @@ FAX: 047-711-0409
                 <div class="rixo-rows-preview-panel">
                     <div class="rixo-rows-header rixo-generator-toolbar">
                         <h2 class="rixo-rows-title">Cars to Rixo</h2>
-                        <button id="rixoColumnFilterBtn" type="button" class="rixo-generator-col-filter-btn">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                <path d="M3 17h6v-2H3v2zm0-5h6v-2H3v2zm0-5h6V5H3v2zm10 10h8v-2h-8v2zm0-5h8V7h-8v2zm0-5h8V2h-8v2z" fill="currentColor"/>
+                        <button id="rixoColumnFilterBtn" type="button" class="rixo-generator-col-filter-btn" aria-label="Select columns to display" title="Select columns to display">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                <path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                             </svg>
-                            Column Filter
                         </button>
                     </div>
                     <div id="selectedCount" class="rixo-selected-count">Selected: 0 of 0</div>
@@ -23301,19 +23340,18 @@ FAX: 047-711-0409
             }
             
             .rixo-table {
-                width: 100%;
+                width: max-content;
+                min-width: 100%;
                 border-collapse: collapse;
-                table-layout: fixed;
+                table-layout: auto;
             }
             
             .rixo-table th,
             .rixo-table td {
-                padding: 12px;
+                padding: 10px 12px;
                 text-align: left;
                 border-bottom: 1px solid #e5e7eb;
                 white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
             }
             
             .rixo-table th {
@@ -23329,26 +23367,50 @@ FAX: 047-711-0409
                 background: #f9fafb;
             }
             
-            /* Select + Edit fixed width via <colgroup>; data columns share the rest equally */
+            /* View + Select + Edit fixed; data columns keep readable min-width (horizontal scroll if needed) */
+            .rixo-table col.rixo-col-view {
+                width: 42px;
+            }
             .rixo-table col.rixo-col-select {
-                width: 100px;
+                width: 42px;
             }
             .rixo-table col.rixo-col-edit {
-                width: 50px;
+                width: 46px;
             }
-            .rixo-table thead th:not(.rixo-col-select):not(.rixo-col-edit),
-            .rixo-table tbody td:not(.rixo-col-select):not(.rixo-col-edit) {
-                min-width: 0;
+            .rixo-table col.rixo-col-data {
+                min-width: 112px;
+            }
+            .rixo-table thead th.rixo-col-view,
+            .rixo-table tbody td.rixo-col-view,
+            .rixo-table thead th.rixo-col-select,
+            .rixo-table tbody td.rixo-col-select,
+            .rixo-table thead th.rixo-col-edit,
+            .rixo-table tbody td.rixo-col-edit {
+                padding: 8px 4px;
+                overflow: visible;
+                text-overflow: clip;
+                white-space: nowrap;
+            }
+            .rixo-col-view {
+                width: 42px;
+                min-width: 42px;
+                max-width: 46px;
+                text-align: center;
             }
             .rixo-col-select {
-                width: 100px;
-                min-width: 80px;
-                max-width: 100px;
+                width: 42px;
+                min-width: 42px;
+                max-width: 46px;
+                text-align: center;
             }
             .rixo-col-edit {
-                width: 50px;
-                min-width: 50px;
+                width: 46px;
+                min-width: 46px;
                 max-width: 50px;
+                text-align: center;
+            }
+            .rixo-col-chassis {
+                min-width: 128px;
             }
             
             .rixo-edit-btn {
@@ -24455,7 +24517,7 @@ fun loadRowsForDateAndCompany() {
     }
 }
 
-private val rixoFixedColumns: List<String> = listOf("select", "edit")
+private val rixoFixedColumns: List<String> = listOf("view", "select", "edit")
 private val rixoDefaultDataColumns: List<String> = listOf(
     "chassis", "numberCut", "carModelYear", "rixoCompany", "auctionHouse",
 )
@@ -24577,6 +24639,8 @@ private fun rixoColumnLabel(key: String): String = when (key) {
     "carName" -> "Car"
     "auctionHouse" -> "Supplier"
     "stockLocation" -> "Stock"
+    "carModelYear" -> "Reg. date"
+    "vehicleType", "shipmentSize" -> "Type"
     else -> purchaseListColumnLabels()[key] ?: key
 }
 
@@ -25384,12 +25448,14 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
     tableHTML.append("""
         <table class="rixo-table">
             <colgroup>
+                <col class="rixo-col-view" />
                 <col class="rixo-col-select" />
                 <col class="rixo-col-edit" />
                 $dataColgroup
             </colgroup>
             <thead>
                 <tr>
+                    <th class="rixo-col-view" aria-label="Vehicle Summary"></th>
                     <th class="rixo-col-select">${if (updaterEditSession) "" else """
                         <label class="rixo-checkwrap">
                             <input type="checkbox" id="selectAllRixo" class="rixo-check" aria-label="Select all rows">
@@ -25459,6 +25525,9 @@ fun renderRixoRowsPreview(purchases: List<dynamic>) {
         }
         tableHTML.append("""
             <tr>
+                <td class="rixo-col-view" data-label="">
+                    ${purchaseListViewButtonHtml(id.toLongOrNull() ?: 0L, chassisAttr)}
+                </td>
                 <td class="rixo-col-select" data-label="">
                     $selectOrRemoveCell
                 </td>
@@ -25566,6 +25635,22 @@ fun setupRixoCheckboxListeners() {
     }
 
     // Edit: inline mode on this row; Update: save partial PUT then refresh row from response
+    val viewButtons = document.querySelectorAll("#rixoGeneratorPage .purchase-view-btn, .rixo-table .purchase-view-btn")
+    for (i in 0 until viewButtons.length) {
+        val button = viewButtons.item(i) as HTMLElement
+        button.addEventListener("click", { event ->
+            event.preventDefault()
+            event.stopPropagation()
+            val btn = event.currentTarget as HTMLElement
+            val id = btn.getAttribute("data-id")?.toLongOrNull() ?: 0L
+            val chassis = btn.getAttribute("data-chassis")?.trim()
+            val cached = rixoCurrentRows.firstOrNull { purchaseIdFromDynamic(it) == id }
+                ?: rixoCurrentRows.firstOrNull {
+                    purchaseChassisFromDynamic(it).equals(chassis.orEmpty(), ignoreCase = true)
+                }
+            openVehicleSummaryByPurchaseId(id, chassis, cached)
+        })
+    }
     val editButtons = document.querySelectorAll(".rixo-edit-btn")
     for (i in 0 until editButtons.length) {
         val button = editButtons.item(i) as HTMLElement
@@ -25686,7 +25771,9 @@ fun generateRixoRequestPdf(
     preview: Boolean = false,
 ) {
     val buyingDate = getRixoBuyingDateValue()
-    val rixoCompany = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
+    val rixoCompany = persistableRixoCompanyFromCombobox(
+        js("window.getComboboxValue('rixoCompany')") as? String ?: "",
+    )
     val headMessage = (document.getElementById("headMessage") as HTMLTextAreaElement).value
     val footerMessage = (document.getElementById("footerMessage") as HTMLTextAreaElement).value
     val extraMessage = (document.getElementById("extraMessage") as HTMLTextAreaElement).value

@@ -3281,7 +3281,8 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
     var venueIds = window.getUniqueValuesCaseInsensitive(mappings.map(function(m) { return m.venueId; }).filter(function(v) { return v && String(v).trim() !== ''; }));
     var rixoCompanies = window.getUniqueValuesCaseInsensitive(mappings.map(function(m) { return m.rixoCompany; }).filter(function(c) { return c && String(c).trim() !== ''; }));
     var polTokensFromMapping = window.flattenPolTokensFromMappings ? window.flattenPolTokensFromMappings(mappings) : [];
-    // Vehicle type is owned by Chassis Map — do not derive options from rixo mapping here
+    var vehicleMappings = __filterMappingsForSupplierSnapshot(mappings, snapHint);
+    var vehicleTypes = __vehicleTypesFromMappings(vehicleMappings.length ? vehicleMappings : mappings);
 
     window.beginSupplierMapProgrammatic();
     try {
@@ -3293,7 +3294,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
         } else {
             updateDropdown('pol', 'editPol', [], true);
         }
-        // Vehicle type is owned by Chassis Map — do not rebuild shipmentSize from rixo mapping
+        updateDropdown('shipmentSize', 'editShipmentSize', vehicleTypes, true);
     } finally {
         if (!options.holdProgrammaticUntilRestored) {
             window.endSupplierMapProgrammatic();
@@ -3320,6 +3321,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
                 var venuePick = venueIds.length > 0 ? __pickPreservedOrFirst(venueIds, cur.venue) : null;
                 var rixoPick = rixoCompanies.length > 0 ? __pickPreservedOrFirst(rixoCompanies, cur.rixo) : null;
                 var polPick = polTokensFromMapping.length > 0 ? __pickPreservedOrFirst(polTokensFromMapping, cur.pol) : null;
+                var vtPick = vehicleTypes.length > 0 ? __pickPreservedOrFirst(vehicleTypes, cur.vehicleType) : null;
                 if (stockPick) restoreSupplierMasterFieldValue('stockLocation', 'editStockLocation', stockPick);
                 if (polPick || (polTokensFromMapping.length > 0 && !cur.pol)) {
                     restoreSupplierMasterFieldValue('pol', 'editPol', polPick || polTokensFromMapping[0]);
@@ -3328,7 +3330,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
                 }
                 if (venuePick) restoreSupplierMasterFieldValue('venueId', 'editVenueId', venuePick);
                 if (rixoPick) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', rixoPick);
-                // Do not auto-pick / restore Vehicle type from rixo mapping
+                if (vtPick) restoreSupplierMasterFieldValue('shipmentSize', 'editShipmentSize', vtPick);
                 if (stockPick && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
                     var keepPol = !!(cur.pol && __listContainsTokenCaseInsensitive(polTokensFromMapping, cur.pol));
                     window.fetchPolsByStockLocationAndUpdate(normalized, stockPick, !keepPol, polTokensFromMapping, seq);
@@ -3338,7 +3340,7 @@ window.rebuildSupplierDependentDropdowns = function(auctionName, options) {
                 if (cur.pol) restoreSupplierMasterFieldValue('pol', 'editPol', cur.pol);
                 if (cur.venue) restoreSupplierMasterFieldValue('venueId', 'editVenueId', cur.venue);
                 if (cur.rixo) restoreSupplierMasterFieldValue('rixoCompany', 'editRixoCompany', cur.rixo);
-                // Do not restore Vehicle type from supplier snapshot into form (chassis owns it)
+                if (cur.vehicleType) restoreSupplierMasterFieldValue('shipmentSize', 'editShipmentSize', cur.vehicleType);
                 if (cur.stock && typeof window.fetchPolsByStockLocationAndUpdate === 'function' && !options.skipPolFetchOnRestore) {
                     window.fetchPolsByStockLocationAndUpdate(normalized, cur.stock, false, cur.pol ? [cur.pol] : polTokensFromMapping, seq);
                 }
@@ -5260,12 +5262,30 @@ window.applyRixoPriceToInput = function(isEditForm, priceRaw, inputIdOverride) {
     return true;
 };
 
+/** True when the Rixo Price input is missing, blank, or parses to numeric 0. */
+window.isRixoPriceInputBlankOrZero = function(isEditForm, inputIdOverride) {
+    var inputId = inputIdOverride || (isEditForm ? 'editRixoPriceInput' : 'rixoPriceInput');
+    var input = document.getElementById(inputId);
+    if (!input) return true;
+    var raw = (input.value != null ? String(input.value) : '').trim();
+    if (!raw) return true;
+    var numericValue = (typeof window.parseRixoPrice === 'function') ? window.parseRixoPrice(raw) : raw;
+    if (!numericValue) numericValue = raw.replace(/[¥,\s]/g, '').replace(/[^0-9.]/g, '');
+    if (!numericValue) return true;
+    var n = parseFloat(numericValue);
+    return isNaN(n) || n === 0;
+};
+
 window.scheduleAutofillRixoPriceFromMapping = function(isEditForm, fields) {
     fields = fields || {};
     if (window.__rixoPriceAutofillTimer) clearTimeout(window.__rixoPriceAutofillTimer);
     window.__rixoPriceAutofillTimer = setTimeout(function() {
         window.__rixoPriceAutofillTimer = null;
-        window.autofillRixoPriceFromMapping(isEditForm, { fields: fields, force: fields.force === true });
+        window.autofillRixoPriceFromMapping(isEditForm, {
+            fields: fields,
+            force: fields.force === true,
+            allowOverwriteBlankOrZero: fields.allowOverwriteBlankOrZero === true
+        });
     }, fields.delay != null ? fields.delay : 180);
 };
 
@@ -5286,6 +5306,14 @@ window.autofillRixoPriceFromMapping = function(isEditForm, options) {
 
     if (window.__editPurchaseHydrating === true && !options.force) return;
     if (window.__rixoPriceUserOverride === true && !options.force) return;
+
+    // Edit only: do not map-fill over empty/0 unless caller opted in (user supplier-field change).
+    var allowOverwriteBlankOrZero = options.allowOverwriteBlankOrZero === true ||
+        fields.allowOverwriteBlankOrZero === true;
+    if (isEditForm && !allowOverwriteBlankOrZero &&
+        window.isRixoPriceInputBlankOrZero(isEditForm, inputIdOverride)) {
+        return;
+    }
 
     var auctionName = (fields.auctionName || (window.getComboboxValue ? window.getComboboxValue(auctionNameId) : '') || '').toString().trim();
     var stockLocation = (fields.stockLocation || (window.getComboboxValue ? window.getComboboxValue(stockLocationId) : '') || '').toString().trim();
@@ -5362,6 +5390,8 @@ window.onSupplierMapFieldChanged = function(fieldId) {
     var priceFields = typeof window.buildSupplierMapAutofillFields === 'function'
         ? window.buildSupplierMapAutofillFields(isEdit)
         : { delay: 120 };
+    // User changed a supplier/map field — allow filling over empty/0 on Edit.
+    priceFields.allowOverwriteBlankOrZero = true;
     var snap = typeof __snapshotSupplierFormForPreserve === 'function' ? __snapshotSupplierFormForPreserve() : null;
     var shipmentOnly = fieldId === 'shipmentSize' || fieldId === 'editShipmentSize';
     if (shipmentOnly && typeof window.scheduleAutofillRixoPriceFromMapping === 'function') {
@@ -5404,7 +5434,7 @@ window.wireSupplierMapCascadeAutofill = function() {
             inp.addEventListener('change', function() { window.onSupplierMapFieldChanged(id); });
         }
     });
-    ['rixoPriceInput', 'editRixoPriceInput', 'qpRixoPrice'].forEach(function(priceId) {
+    ['rixoPriceInput', 'editRixoPriceInput'].forEach(function(priceId) {
         var priceInp = document.getElementById(priceId);
         if (priceInp && !priceInp.__rixoOverrideWired) {
             priceInp.__rixoOverrideWired = true;

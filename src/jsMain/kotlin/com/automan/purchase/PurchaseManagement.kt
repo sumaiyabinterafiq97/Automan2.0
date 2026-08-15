@@ -1334,7 +1334,7 @@ fun invalidatePurchaseListLoads() {
     purchaseListLoadGeneration++
 }
 
-private fun purchaseListViewButtonHtml(purchaseId: Long, chassisAttr: String, extraClass: String = ""): String {
+fun purchaseListViewButtonHtml(purchaseId: Long, chassisAttr: String, extraClass: String = ""): String {
     val cls = listOf("purchase-view-btn", extraClass).filter { it.isNotEmpty() }.joinToString(" ")
     return """
         <button type="button" class="$cls" data-id="$purchaseId" data-chassis="$chassisAttr"
@@ -1446,17 +1446,56 @@ private fun purchaseSummaryNegotiateChecked(p: dynamic): Boolean {
 
 private fun handlePurchaseViewButtonClick(btn: HTMLElement) {
     val id = btn.getAttribute("data-id")?.trim()?.toLongOrNull() ?: 0L
-    if (id <= 0L) {
-        showMessage("Cannot open summary: missing purchase id.", "error")
+    val chassis = btn.getAttribute("data-chassis")
+    openVehicleSummaryByPurchaseId(id, chassis, findPurchaseInListById(id))
+}
+
+/**
+ * Open the Purchase List Vehicle Summary modal from any page.
+ * Uses [cachedPurchase] when present; otherwise loads by id, then chassis.
+ */
+fun openVehicleSummaryByPurchaseId(
+    id: Long,
+    chassis: String? = null,
+    cachedPurchase: Any? = null,
+) {
+    if (cachedPurchase != null) {
+        showVehicleSummaryModal(cachedPurchase.unsafeCast<dynamic>())
         return
     }
-    val cached = findPurchaseInListById(id)
-    if (cached != null) {
-        showVehicleSummaryModal(cached)
+    if (id > 0L) {
+        val listCached = findPurchaseInListById(id)
+        if (listCached != null) {
+            showVehicleSummaryModal(listCached)
+            return
+        }
+        MainScope().launch {
+            ApiClient.get<dynamic>("purchases/purchase/$id").fold(
+                onSuccess = { purchase -> showVehicleSummaryModal(purchase) },
+                onError = { message, _ ->
+                    val ch = chassis?.trim().orEmpty()
+                    if (ch.isNotEmpty()) {
+                        fetchVehicleSummaryByChassis(ch)
+                    } else {
+                        showMessage("Failed to load vehicle summary: $message", "error")
+                    }
+                },
+            )
+        }
         return
     }
+    val ch = chassis?.trim().orEmpty()
+    if (ch.isNotEmpty()) {
+        fetchVehicleSummaryByChassis(ch)
+        return
+    }
+    showMessage("Cannot open summary: missing purchase id.", "error")
+}
+
+private fun fetchVehicleSummaryByChassis(chassis: String) {
+    val encoded = js("encodeURIComponent")(chassis).unsafeCast<String>()
     MainScope().launch {
-        ApiClient.get<dynamic>("purchases/purchase/$id").fold(
+        ApiClient.get<dynamic>("purchases/chassis/$encoded").fold(
             onSuccess = { purchase -> showVehicleSummaryModal(purchase) },
             onError = { message, _ ->
                 showMessage("Failed to load vehicle summary: $message", "error")

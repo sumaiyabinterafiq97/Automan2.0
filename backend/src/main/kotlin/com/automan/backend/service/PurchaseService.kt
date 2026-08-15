@@ -5,6 +5,7 @@ import com.automan.backend.dto.PurchasePageFilterRequest
 import com.automan.backend.dto.PurchasePageResponse
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
+import com.automan.backend.model.WorkflowStatus
 import com.automan.backend.model.BookingMapping
 import com.automan.backend.repository.BookingMappingRepository
 import com.automan.backend.repository.ClientRepository
@@ -1149,11 +1150,16 @@ class PurchaseService(
         for (id in purchaseIds) {
             val existingPurchase = purchaseRepository.findById(id).orElse(null)
             if (existingPurchase != null) {
-                val updatedPurchase = existingPurchase.copy(
-                    rixoRequested = "TRUE",
-                    updatedAt = java.time.LocalDateTime.now()
+                val status = existingPurchase.workflowStatus
+                if (status in PurchaseWorkflowService.WORKFLOW_RIXO_CONFIRMED_OR_LATER) {
+                    updatedPurchases.add(existingPurchase)
+                    Logger.debug("Purchase $id already $status; leaving workflow unchanged")
+                    continue
+                }
+                val savedPurchase = purchaseWorkflowService.setWorkflowStatus(
+                    existingPurchase,
+                    WorkflowStatus.RIXO_REQUESTED,
                 )
-                val savedPurchase = persistPurchase(updatedPurchase)
                 updatedPurchases.add(savedPurchase)
                 Logger.debug("Marked purchase $id as rixo_requested=TRUE")
             } else {
