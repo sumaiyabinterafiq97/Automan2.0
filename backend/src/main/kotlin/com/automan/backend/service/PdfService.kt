@@ -1734,10 +1734,8 @@ class PdfService {
         }
     }
 
-    private fun rixoDestName(purchase: Purchase): String {
-        val raw = purchase.stockLocation?.trim().orEmpty()
-        return raw.ifEmpty { "KLC" }
-    }
+    private fun rixoDestName(purchase: Purchase): String =
+        purchase.stockLocation?.trim().orEmpty()
 
     /** Recipient line for 陸送依頼書: blank / Undefined sentinel maps to display label, not KLC. */
     private fun rixoTransportRecipientName(raw: String?): String {

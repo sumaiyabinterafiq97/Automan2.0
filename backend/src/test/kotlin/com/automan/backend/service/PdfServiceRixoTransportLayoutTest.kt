@@ -90,6 +90,24 @@ class PdfServiceRixoTransportLayoutTest {
         assertFalse(text.contains("KLC"), text)
     }
 
+    @Test
+    fun generateRixoTransportPdf_blankStockLocationDoesNotEmitKlc() {
+        val purchase = Purchase(
+            chassis = "AAHP45W",
+            auctionHouse = "TAA CHUBU",
+            stockLocation = null,
+            venueId = "111",
+        )
+        val bytes = pdfService.generateRixoTransportPdf(
+            listOf(purchase),
+            mapOf("rixoCompany" to "LOGICO", "buyingDate" to "2026-07-15"),
+            emptyMap(),
+        )
+        val text = extractPdfText(bytes)
+        assertTrue(text.contains("AAHP45W"), text)
+        assertFalse(text.contains("KLC"), text)
+    }
+
     private fun extractPdfText(bytes: ByteArray): String {
         val pdf = PdfDocument(PdfReader(ByteArrayInputStream(bytes)))
         val out = StringBuilder()
