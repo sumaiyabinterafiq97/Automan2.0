@@ -52,6 +52,7 @@ class RixoTransportPdfServiceTest {
         }.`when`(pdfService).generateRixoTransportPdf(
             ArgumentMatchers.anyList(),
             ArgumentMatchers.anyMap(),
+            ArgumentMatchers.anyMap(),
         )
 
         purchaseService.generateRixoTransportPdf(

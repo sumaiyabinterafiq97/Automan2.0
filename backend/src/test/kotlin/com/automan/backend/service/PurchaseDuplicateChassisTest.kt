@@ -28,6 +28,7 @@ class PurchaseDuplicateChassisTest {
         shippingSnapshotService = mock(ShippingSnapshotService::class.java),
         localPurchaseSanitizer = LocalPurchaseSanitizer(),
         clientRepository = mock(ClientRepository::class.java),
+        stockLocationMapService = mock(StockLocationMapService::class.java),
     )
 
     @Test

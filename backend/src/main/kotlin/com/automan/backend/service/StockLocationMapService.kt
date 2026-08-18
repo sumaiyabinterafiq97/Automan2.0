@@ -123,6 +123,32 @@ class StockLocationMapService(
         stockLocationMapRepository.deleteById(id)
     }
 
+    @Transactional(readOnly = true)
+    fun findAddressByStockLocation(stockLocation: String): String? {
+        val loc = stockLocation.trim()
+        if (loc.isEmpty()) return null
+        return stockLocationMapRepository.findByStockLocationIgnoreCase(loc)
+            ?.address
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+    }
+
+    /** Keys include original names plus lowercase so PDF lookup is case-insensitive. */
+    @Transactional(readOnly = true)
+    fun buildAddressMapForStockLocations(locations: Collection<String>): Map<String, String> {
+        val result = linkedMapOf<String, String>()
+        locations
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
+            .forEach { loc ->
+                val addr = findAddressByStockLocation(loc) ?: return@forEach
+                result[loc] = addr
+                result[loc.lowercase()] = addr
+            }
+        return result
+    }
+
     private fun resolveSort(sortField: String?, sortOrder: String?): Sort {
         val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
             Sort.Direction.ASC

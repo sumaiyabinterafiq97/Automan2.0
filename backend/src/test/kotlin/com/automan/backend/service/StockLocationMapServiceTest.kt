@@ -69,4 +69,32 @@ class StockLocationMapServiceTest {
         }
         assertTrue(ex.message!!.contains("already exists"))
     }
+
+    @Test
+    fun findAddressByStockLocation_isCaseInsensitiveAndTrims() {
+        val repo = Mockito.mock(StockLocationMapRepository::class.java)
+        `when`(repo.findByStockLocationIgnoreCase("aqua logistics")).thenReturn(
+            StockLocationMap(id = 1L, stockLocation = "AQUA LOGISTICS", pol = "YOKOHAMA", address = "  1 Yard Rd  "),
+        )
+        val svc = StockLocationMapService(repo)
+        assertEquals("1 Yard Rd", svc.findAddressByStockLocation("  aqua logistics  "))
+        assertNull(svc.findAddressByStockLocation("   "))
+        assertNull(svc.findAddressByStockLocation(""))
+    }
+
+    @Test
+    fun buildAddressMapForStockLocations_includesOriginalAndLowercaseKeys() {
+        val repo = Mockito.mock(StockLocationMapRepository::class.java)
+        `when`(repo.findByStockLocationIgnoreCase("AQUA LOGISTICS")).thenReturn(
+            StockLocationMap(id = 1L, stockLocation = "AQUA LOGISTICS", pol = null, address = "Yard A"),
+        )
+        `when`(repo.findByStockLocationIgnoreCase("KLC")).thenReturn(
+            StockLocationMap(id = 2L, stockLocation = "KLC", pol = null, address = null),
+        )
+        val svc = StockLocationMapService(repo)
+        val map = svc.buildAddressMapForStockLocations(listOf("AQUA LOGISTICS", "aqua logistics", "KLC", "  "))
+        assertEquals("Yard A", map["AQUA LOGISTICS"])
+        assertEquals("Yard A", map["aqua logistics"])
+        assertNull(map["KLC"])
+    }
 }

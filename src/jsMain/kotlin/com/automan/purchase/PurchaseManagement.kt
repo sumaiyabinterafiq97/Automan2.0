@@ -1452,7 +1452,8 @@ private fun handlePurchaseViewButtonClick(btn: HTMLElement) {
 
 /**
  * Open the Purchase List Vehicle Summary modal from any page.
- * Uses [cachedPurchase] when present; otherwise loads by id, then chassis.
+ * Uses [cachedPurchase] when present; if that row has no stored country, loads by id so the
+ * modal shows the database value (LOCAL rows keep country, but list/Rixo cache may omit it).
  */
 fun openVehicleSummaryByPurchaseId(
     id: Long,
@@ -1460,28 +1461,25 @@ fun openVehicleSummaryByPurchaseId(
     cachedPurchase: Any? = null,
 ) {
     if (cachedPurchase != null) {
-        showVehicleSummaryModal(cachedPurchase.unsafeCast<dynamic>())
+        val cached = cachedPurchase.unsafeCast<dynamic>()
+        if (id > 0L && purchaseSummaryCountryBlank(cached)) {
+            fetchVehicleSummaryById(id, chassis, cached)
+            return
+        }
+        showVehicleSummaryModal(cached)
         return
     }
     if (id > 0L) {
         val listCached = findPurchaseInListById(id)
         if (listCached != null) {
+            if (purchaseSummaryCountryBlank(listCached)) {
+                fetchVehicleSummaryById(id, chassis, listCached)
+                return
+            }
             showVehicleSummaryModal(listCached)
             return
         }
-        MainScope().launch {
-            ApiClient.get<dynamic>("purchases/purchase/$id").fold(
-                onSuccess = { purchase -> showVehicleSummaryModal(purchase) },
-                onError = { message, _ ->
-                    val ch = chassis?.trim().orEmpty()
-                    if (ch.isNotEmpty()) {
-                        fetchVehicleSummaryByChassis(ch)
-                    } else {
-                        showMessage("Failed to load vehicle summary: $message", "error")
-                    }
-                },
-            )
-        }
+        fetchVehicleSummaryById(id, chassis, fallback = null)
         return
     }
     val ch = chassis?.trim().orEmpty()
@@ -1490,6 +1488,30 @@ fun openVehicleSummaryByPurchaseId(
         return
     }
     showMessage("Cannot open summary: missing purchase id.", "error")
+}
+
+private fun purchaseSummaryCountryBlank(p: dynamic): Boolean {
+    return purchaseSummaryField(p, "country").isBlank()
+}
+
+private fun fetchVehicleSummaryById(id: Long, chassis: String?, fallback: dynamic?) {
+    MainScope().launch {
+        ApiClient.get<dynamic>("purchases/purchase/$id").fold(
+            onSuccess = { purchase -> showVehicleSummaryModal(purchase) },
+            onError = { message, _ ->
+                if (fallback != null) {
+                    showVehicleSummaryModal(fallback)
+                    return@fold
+                }
+                val ch = chassis?.trim().orEmpty()
+                if (ch.isNotEmpty()) {
+                    fetchVehicleSummaryByChassis(ch)
+                } else {
+                    showMessage("Failed to load vehicle summary: $message", "error")
+                }
+            },
+        )
+    }
 }
 
 private fun fetchVehicleSummaryByChassis(chassis: String) {

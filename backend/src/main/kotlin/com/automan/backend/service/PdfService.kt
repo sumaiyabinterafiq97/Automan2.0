@@ -19,6 +19,7 @@ import com.itextpdf.layout.properties.TextAlignment
 import com.itextpdf.layout.properties.UnitValue
 import com.itextpdf.io.font.PdfEncodings
 import com.itextpdf.kernel.colors.ColorConstants
+import com.itextpdf.kernel.colors.DeviceRgb
 import com.itextpdf.kernel.font.PdfFont
 import com.itextpdf.kernel.font.PdfFontFactory
 import com.itextpdf.kernel.pdf.canvas.draw.SolidLine
@@ -1205,197 +1206,216 @@ class PdfService {
         return outputStream.toByteArray()
     }
 
-    fun generateRixoTransportPdf(purchases: List<Purchase>, transportData: Map<String, String>): ByteArray {
-        Logger.debug("PDF Service: Starting Japanese PDF generation, purchases count: ${purchases.size}")
-        
+    fun generateRixoTransportPdf(
+        purchases: List<Purchase>,
+        transportData: Map<String, String>,
+    ): ByteArray = generateRixoTransportPdf(purchases, transportData, emptyMap())
+
+    fun generateRixoTransportPdf(
+        purchases: List<Purchase>,
+        transportData: Map<String, String>,
+        stockLocationAddresses: Map<String, String>,
+    ): ByteArray {
+        Logger.debug("PDF Service: Starting 陸送依頼書 PDF generation, purchases count: ${purchases.size}")
+
         val outputStream = ByteArrayOutputStream()
         val pdfWriter = PdfWriter(outputStream)
         val pdfDocument = PdfDocument(pdfWriter)
-        // Set page size to A4 landscape (horizontal)
         pdfDocument.setDefaultPageSize(PageSize.A4.rotate())
         val document = Document(pdfDocument)
-        
-        // Get Japanese-compatible font
+
         val japaneseFont = getJapaneseFont()
+        val fontLatin = try {
+            getVerdanaFont(false)
+        } catch (_: Exception) {
+            japaneseFont
+        }
+        val fontLatinBold = try {
+            getVerdanaFont(true)
+        } catch (_: Exception) {
+            japaneseFont
+        }
+        val fonts = TransportFonts(japaneseFont, fontLatin, fontLatinBold)
         Logger.debug("PDF Service: Using font: ${japaneseFont.fontProgram?.fontNames?.getFontName()}")
 
-        // Add title: "陸送 STYLISH AUTO 様" (one space, left-aligned), date (right)
-        val titleTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
-            .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginBottom(10f)
-        
-        // 陸送 + one space + Rixo Company 様 in one cell, left-aligned
-        val rixoCompany = transportData["rixoCompany"] ?: "KLC"
-        titleTable.addCell(createTitleCellLeft("陸送 $rixoCompany 様", japaneseFont))
-        
-        // Date on right: always "today" in Japan (document locale), e.g. 2026年4月27日月曜日
-        Logger.debug("PDF Service: transportData keys: ${transportData.keys}")
+        document.add(
+            Paragraph("陸送依頼書")
+                .setFont(japaneseFont)
+                .setFontSize(18f)
+                .setBold()
+                .setTextAlignment(TextAlignment.CENTER)
+                .setMarginBottom(8f),
+        )
+
+        val rixoCompany = rixoTransportRecipientName(transportData["rixoCompany"])
         val transportDate = transportData["buyingDate"] ?: ""
         val todayJapan = LocalDate.now(ZoneId.of("Asia/Tokyo"))
-        val formattedDateWithWeekday = formatDateToJapanese(todayJapan.toString(), includeYear = true)
-        Logger.debug("PDF Service: Header 日付 (today JST): '$formattedDateWithWeekday'; table buyingDate raw: '$transportDate'")
-        
-        val dateCell = Cell()
-            .add(Paragraph()
-                .add(Text("日付 ").setBold().setFont(japaneseFont))
-                .add(Text(" ").setFont(japaneseFont)) // Add extra space after 日付
-                .add(Text(formattedDateWithWeekday).setFont(japaneseFont))
-                .setFontSize(12f))
-            .setPadding(8f)
-            .setTextAlignment(TextAlignment.CENTER)
-            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
-            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        titleTable.addCell(dateCell)
-        document.add(titleTable)
+        val formattedToday = formatDateToJapanese(todayJapan.toString(), includeYear = true)
+        val formattedEventDate = formatDateToJapanese(transportDate, includeYear = true)
+        Logger.debug("PDF Service: Header 日付 (today JST): '$formattedToday'; 開催日 raw: '$transportDate'")
 
-
-        // Add thank you message in Japanese
-        val thankYou = Paragraph("いつもお世話になっております。")
-            .setFont(japaneseFont)
-            .setFontSize(10f)
-            .setFixedLeading(12f) // Tighter line spacing
-            .setMarginBottom(2f) // Reduced margin
-        document.add(thankYou)
-
-        val request = Paragraph("下記の車両の陸送手配をお願いいたします。")
-            .setFont(japaneseFont)
-            .setFontSize(10f)
-            .setFixedLeading(12f) // Tighter line spacing
-            .setMarginBottom(10f) // Reduced from 20f to 10f
-        document.add(request)
-
-        // Create table for vehicle data with Japanese headers
-        // Column widths: 日付 (12f), 出品番号 (7f), 型式・車体番号 (14f), 年式 (12f), 車名 (9f), 取引先名 (9f), 搬入先名 (10f), 会場ID (14f), ナンバーカット (13f)
-        val table = Table(UnitValue.createPercentArray(floatArrayOf(12f, 7f, 14f, 12f, 9f, 9f, 10f, 14f, 13f)))
+        val headerTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginBottom(10f) // Reduced from 20f to 10f
-            .setKeepTogether(false) // Allow table to break across pages for many vehicles
+            .setMarginBottom(8f)
+        val leftHeader = Cell()
+            .add(
+                mixedFontParagraph("$rixoCompany 様", fonts, 14f, bold = true)
+                    .setMarginBottom(4f),
+            )
+            .add(
+                Paragraph()
+                    .add(Text("開催日: ").setBold().setFont(japaneseFont))
+                    .also { addMixedFontRuns(it, formattedEventDate, fonts, bold = false) }
+                    .setFontSize(11f),
+            )
+            .setPadding(4f)
+            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+        val rightHeader = Cell()
+            .add(
+                Paragraph()
+                    .add(Text("日付: ").setBold().setFont(japaneseFont))
+                    .also { addMixedFontRuns(it, formattedToday, fonts, bold = false) }
+                    .setFontSize(12f),
+            )
+            .setPadding(4f)
+            .setTextAlignment(TextAlignment.RIGHT)
+            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.TOP)
+            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+        headerTable.addCell(leftHeader)
+        headerTable.addCell(rightHeader)
+        document.add(headerTable)
 
-        // Add table headers in Japanese
-        val headers = listOf("日付", "出品番号", "型式・車体番号", "年式", "車名", "取引先名", "搬入先名", "会場ID", "ナンバーカット")
-        Logger.debug("PDF Service: Adding Japanese headers: $headers")
+        val defaultHead = "いつもお世話になっております。\n下記の車両の陸送手配をお願いいたします。"
+        val headMessage = transportData["headMessage"]?.takeIf { it.isNotBlank() } ?: defaultHead
+        val headLines = headMessage.split("\n")
+        headLines.forEachIndexed { index, line ->
+            document.add(
+                mixedFontParagraph(line.trim(), fonts, 10f, leading = 12f)
+                    .setMarginBottom(if (index < headLines.lastIndex) 2f else 10f),
+            )
+        }
+
+        val sortedPurchases = purchases.sortedWith(
+            compareBy(
+                { it.auctionHouse?.trim().orEmpty().lowercase() },
+                { it.venueId?.trim().orEmpty().lowercase() },
+                { rixoDestName(it).lowercase() },
+                { it.chassis?.trim().orEmpty().lowercase() },
+            ),
+        )
+        val (showSupplier, supplierSpan) = consecutiveGroupStarts(sortedPurchases.size) { a, b ->
+            rixoSupplierKey(sortedPurchases[a]) == rixoSupplierKey(sortedPurchases[b])
+        }
+        val (showDest, destSpan) = consecutiveGroupStarts(sortedPurchases.size) { a, b ->
+            rixoDestKey(sortedPurchases[a]) == rixoDestKey(sortedPurchases[b])
+        }
+
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(16f, 10f, 16f, 10f, 12f, 14f, 22f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginBottom(10f)
+            .setKeepTogether(false)
+
+        val headers = listOf("取引先", "出品番号", "車体番号", "年式", "車名", "ナンバーカット", "搬入先")
         headers.forEach { header ->
-            Logger.debug("PDF Service: Adding header: '$header'")
             table.addCell(createHeaderCell(header, japaneseFont))
         }
 
-        // Add vehicle data rows only (no empty rows; table height = selected row count)
-        purchases.forEachIndexed { index, purchase ->
-            // Date (only show in first row, formatted as "2025年9月11日Thursday")
-            if (index == 0) {
-                // Table cell wants short date without year, e.g. 9月30日 火曜日
-                val shortDate = formatDateToJapanese(transportDate, includeYear = false)
-                table.addCell(createCell(shortDate, japaneseFont))
-            } else {
-                table.addCell(createCell("", japaneseFont)) // Empty for other rows
+        sortedPurchases.forEachIndexed { index, purchase ->
+            if (showSupplier[index]) {
+                val supplierName = purchase.auctionHouse?.trim().orEmpty()
+                val venueId = purchase.venueId?.trim().orEmpty()
+                table.addCell(
+                    createMultilineCell(
+                        listOf(supplierName, "POS番号: $venueId"),
+                        fonts,
+                        rowspan = supplierSpan[index],
+                    ),
+                )
             }
-            
-            // Lot Number (using auctionNo)
-            table.addCell(createCell(purchase.auctionNo ?: "", japaneseFont))
-            
-            // Chassis
-            table.addCell(createCell(purchase.chassis ?: "", japaneseFont))
-            
-            // Car Model Year - Japanese calendar (e.g. 令和8年)
+
+            table.addCell(createTransportBodyCell(purchase.auctionNo ?: "", fonts))
+            table.addCell(createTransportBodyCell(purchase.chassis ?: "", fonts))
             val yearOnly = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear?.toString())
-            val japaneseEraYear = westernYearToJapaneseEra(yearOnly)
-            table.addCell(createCell(japaneseEraYear, japaneseFont))
-            
-            // Car Name
-            table.addCell(createCell(purchase.carName ?: "", japaneseFont))
-            
-            // Auction House (取引先名 - Supplier Name)
-            val auctionHouseValue = purchase.auctionHouse ?: ""
-            Logger.debug("PDF Service: Auction House value: '$auctionHouseValue' for purchase ID: ${purchase.id}")
-            table.addCell(createCell(auctionHouseValue, japaneseFont))
-            
-            // Stock Location (from purchase data or default to KLC)
-            table.addCell(createCell(purchase.stockLocation ?: "KLC", japaneseFont))
-            
-            // Venue ID (from purchase data or "Not Found")
-            table.addCell(createCell(purchase.venueId ?: "Not Found", japaneseFont))
-            
-            // Number Cut (from purchase data or empty)
-            table.addCell(createCell(purchase.numberCut ?: "", japaneseFont))
+            table.addCell(createTransportBodyCell(westernYearToJapaneseEra(yearOnly), fonts))
+            table.addCell(createTransportBodyCell(purchase.carName ?: "", fonts))
+            table.addCell(createTransportBodyCell(purchase.numberCut ?: "", fonts))
+
+            if (showDest[index]) {
+                val destName = rixoDestName(purchase)
+                val address = lookupStockAddress(destName, stockLocationAddresses)
+                    ?: lookupStockAddress(purchase.stockLocation ?: "", stockLocationAddresses)
+                val destLines = if (address.isNullOrBlank()) listOf(destName) else listOf(destName, address)
+                table.addCell(createMultilineCell(destLines, fonts, rowspan = destSpan[index]))
+            }
         }
-        
+
         document.add(table)
 
-        // Create a table to position extra message on left and total count on right, same level
-        val extraMessage = transportData["extraMessage"]?.takeIf { it.isNotBlank() }
         val totalTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginBottom(8f) // Reduced from 20f to 8f
-        
-        // Extra message on the left side (if provided), otherwise empty
-        val leftCell = if (extraMessage != null) {
-            Cell()
-                .add(Paragraph(extraMessage)
-                    .setFont(japaneseFont)
-                    .setFontSize(9f)
-                    .setFixedLeading(11f)) // Tighter line spacing
-                .setPadding(8f)
-                .setTextAlignment(TextAlignment.LEFT)
-                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
-                .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        } else {
+            .setMarginBottom(8f)
+        totalTable.addCell(
             Cell()
                 .add(Paragraph("").setFont(japaneseFont))
-                .setPadding(8f)
-                .setTextAlignment(TextAlignment.LEFT)
-                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
                 .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        }
-        totalTable.addCell(leftCell)
-        
-        // Total count on the right side - use actual purchases count, not total rows
-        val totalCell = Cell()
-            .add(Paragraph("合計 ${purchases.size} 台")
-                .setFont(japaneseFont)
-                .setFontSize(10f)
-                .setFixedLeading(12f)) // Tighter line spacing
-            .setPadding(8f)
-            .setTextAlignment(TextAlignment.LEFT)
-            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
-            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        totalTable.addCell(totalCell)
+                .setPadding(4f),
+        )
+        totalTable.addCell(
+            Cell()
+                .add(
+                    mixedFontParagraph("合計 ${purchases.size} 台", fonts, 10f, leading = 12f),
+                )
+                .setPadding(4f)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER),
+        )
         document.add(totalTable)
 
-        // Footer: disclaimer (bottom-left) and contact (bottom-right) on the same baseline
-        val footerMessage = transportData["footerMessage"]?.takeIf { it.isNotBlank() } 
+        val footerMessage = transportData["footerMessage"]?.takeIf { it.isNotBlank() }
             ?: "※港や船での盗難が多発の為、スペアキーやリモコンキーが車内にありましたら弊社まで郵送していただけると助かります。"
-        val footerLines = footerMessage.split("\n")
+        val extraMessage = transportData["extraMessage"]?.takeIf { it.isNotBlank() }
+        val extraRed = DeviceRgb(255, 0, 0)
         val footerBlock = com.itextpdf.layout.element.Div()
+        val footerLines = footerMessage.split("\n")
         footerLines.forEachIndexed { index, line ->
-            footerBlock.add(Paragraph(line.trim())
-                .setFont(japaneseFont)
-                .setFontSize(9f)
-                .setFixedLeading(11f)
-                .setMarginBottom(if (index < footerLines.size - 1) 2f else 0f))
+            footerBlock.add(
+                mixedFontParagraph(line.trim(), fonts, 9f, leading = 11f)
+                    .setFontColor(ColorConstants.BLACK)
+                    .setMarginBottom(
+                        if (index < footerLines.lastIndex || extraMessage != null) 2f else 0f,
+                    ),
+            )
         }
-        val contactBlock = Paragraph()
-            .add(Text("担当：芽紋 080-3918-1478\n").setFont(japaneseFont))
-            .add(Text("FAX: 047-711-0409\n").setFont(japaneseFont))
-            .add(Text("有限会社メモン").setFont(japaneseFont).setBold())
-            .setFontSize(9f)
-            .setFixedLeading(11f)
+        if (extraMessage != null) {
+            val extraLines = extraMessage.split("\n")
+            extraLines.forEachIndexed { index, line ->
+                footerBlock.add(
+                    mixedFontParagraph(line.trim(), fonts, 9f, leading = 11f)
+                        .setFontColor(extraRed)
+                        .setMarginBottom(if (index < extraLines.lastIndex) 2f else 0f),
+                )
+            }
+        }
+
         val footerTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginTop(10f)
-        val leftFooterCell = Cell()
-            .add(footerBlock)
-            .setPadding(8f)
-            .setTextAlignment(TextAlignment.LEFT)
-            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.BOTTOM)
-            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        val rightFooterCell = Cell()
-            .add(contactBlock)
-            .setPadding(8f)
-            .setTextAlignment(TextAlignment.RIGHT)
-            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.BOTTOM)
-            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        footerTable.addCell(leftFooterCell)
-        footerTable.addCell(rightFooterCell)
+        footerTable.addCell(
+            Cell()
+                .add(footerBlock)
+                .setPadding(8f)
+                .setTextAlignment(TextAlignment.LEFT)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.BOTTOM)
+                .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER),
+        )
+        footerTable.addCell(
+            Cell()
+                .add(contactBlockFromTransport(transportData["contactDetails"], fonts))
+                .setPadding(8f)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.BOTTOM)
+                .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER),
+        )
         document.add(footerTable)
 
         document.close()
@@ -1712,6 +1732,169 @@ class PdfService {
             }
             else -> westernYearStr
         }
+    }
+
+    private fun rixoDestName(purchase: Purchase): String {
+        val raw = purchase.stockLocation?.trim().orEmpty()
+        return raw.ifEmpty { "KLC" }
+    }
+
+    /** Recipient line for 陸送依頼書: blank / Undefined sentinel maps to display label, not KLC. */
+    private fun rixoTransportRecipientName(raw: String?): String {
+        val t = raw?.trim().orEmpty()
+        if (t.isEmpty() ||
+            t.equals("__RIXO_COMPANY_UNDEFINED__", ignoreCase = true) ||
+            t.equals("Undefined", ignoreCase = true)
+        ) {
+            return "Undefined"
+        }
+        return t
+    }
+
+    private fun rixoSupplierKey(purchase: Purchase): String =
+        "${purchase.auctionHouse?.trim().orEmpty().lowercase()}|${purchase.venueId?.trim().orEmpty().lowercase()}"
+
+    private fun rixoDestKey(purchase: Purchase): String = rixoDestName(purchase).lowercase()
+
+    private fun consecutiveGroupStarts(size: Int, sameGroup: (Int, Int) -> Boolean): Pair<BooleanArray, IntArray> {
+        val show = BooleanArray(size)
+        val span = IntArray(size)
+        var i = 0
+        while (i < size) {
+            var j = i + 1
+            while (j < size && sameGroup(i, j)) j++
+            val n = j - i
+            show[i] = true
+            span[i] = n
+            for (k in i + 1 until j) {
+                show[k] = false
+                span[k] = n
+            }
+            i = j
+        }
+        return show to span
+    }
+
+    private fun lookupStockAddress(stockName: String, addresses: Map<String, String>): String? {
+        val t = stockName.trim()
+        if (t.isEmpty()) return null
+        return addresses[t]?.trim()?.takeIf { it.isNotEmpty() }
+            ?: addresses[t.lowercase()]?.trim()?.takeIf { it.isNotEmpty() }
+    }
+
+    private data class TransportFonts(
+        val japanese: PdfFont,
+        val latin: PdfFont,
+        val latinBold: PdfFont,
+    )
+
+    private fun isCjkPdfChar(c: Char): Boolean {
+        val block = Character.UnicodeBlock.of(c) ?: return false
+        return block == Character.UnicodeBlock.HIRAGANA ||
+            block == Character.UnicodeBlock.KATAKANA ||
+            block == Character.UnicodeBlock.KATAKANA_PHONETIC_EXTENSIONS ||
+            block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS ||
+            block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A ||
+            block == Character.UnicodeBlock.CJK_COMPATIBILITY ||
+            block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS ||
+            block == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION ||
+            block == Character.UnicodeBlock.CJK_RADICALS_SUPPLEMENT ||
+            block == Character.UnicodeBlock.HALFWIDTH_AND_FULLWIDTH_FORMS ||
+            block == Character.UnicodeBlock.ENCLOSED_CJK_LETTERS_AND_MONTHS ||
+            block == Character.UnicodeBlock.IDEOGRAPHIC_DESCRIPTION_CHARACTERS
+    }
+
+    private fun mixedFontParagraph(
+        text: String,
+        fonts: TransportFonts,
+        fontSize: Float,
+        leading: Float? = null,
+        bold: Boolean = false,
+    ): Paragraph {
+        val paragraph = Paragraph().setFontSize(fontSize)
+        if (leading != null) paragraph.setFixedLeading(leading)
+        addMixedFontRuns(paragraph, text, fonts, bold)
+        return paragraph
+    }
+
+    private fun addMixedFontRuns(paragraph: Paragraph, text: String, fonts: TransportFonts, bold: Boolean) {
+        if (text.isEmpty()) {
+            paragraph.add(Text("").setFont(if (bold) fonts.latinBold else fonts.latin))
+            return
+        }
+        val buffer = StringBuilder()
+        var runCjk: Boolean? = null
+        fun flush() {
+            if (buffer.isEmpty()) return
+            val cjk = runCjk == true
+            val font = when {
+                cjk -> fonts.japanese
+                bold -> fonts.latinBold
+                else -> fonts.latin
+            }
+            val chunk = Text(buffer.toString()).setFont(font)
+            if (bold) chunk.setBold()
+            paragraph.add(chunk)
+            buffer.setLength(0)
+        }
+        for (c in text) {
+            val cjk = if (c.isWhitespace() && runCjk != null) runCjk == true else isCjkPdfChar(c)
+            if (runCjk != null && cjk != runCjk) flush()
+            runCjk = cjk
+            buffer.append(c)
+        }
+        flush()
+    }
+
+    private fun createTransportBodyCell(text: String, fonts: TransportFonts): Cell {
+        return Cell()
+            .add(mixedFontParagraph(text, fonts, 9f, leading = 11f))
+            .setPadding(8f)
+            .setTextAlignment(TextAlignment.LEFT)
+            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+            .setBorder(
+                com.itextpdf.layout.borders.SolidBorder(
+                    ColorConstants.BLACK,
+                    1f,
+                ),
+            )
+    }
+
+    private fun createMultilineCell(lines: List<String>, fonts: TransportFonts, rowspan: Int = 1): Cell {
+        val cell = Cell(rowspan.coerceAtLeast(1), 1)
+            .setPadding(8f)
+            .setTextAlignment(TextAlignment.LEFT)
+            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+            .setBorder(
+                com.itextpdf.layout.borders.SolidBorder(
+                    ColorConstants.BLACK,
+                    1f,
+                ),
+            )
+        val content = if (lines.isEmpty()) listOf("") else lines
+        content.forEachIndexed { idx, line ->
+            cell.add(
+                mixedFontParagraph(line, fonts, 9f, leading = 11f)
+                    .setMarginBottom(if (idx < content.lastIndex) 1f else 0f),
+            )
+        }
+        return cell
+    }
+
+    private fun contactBlockFromTransport(contactDetails: String?, fonts: TransportFonts): Paragraph {
+        val raw = contactDetails?.trim().orEmpty()
+        val text = if (raw.isNotEmpty()) {
+            raw
+        } else {
+            "担当：芽紋 080-3918-1478\nFAX: 047-711-0409\n有限会社メモン"
+        }
+        val lines = text.split("\n")
+        val paragraph = Paragraph().setFontSize(9f).setFixedLeading(11f)
+        lines.forEachIndexed { idx, line ->
+            val suffix = if (idx < lines.lastIndex) "\n" else ""
+            addMixedFontRuns(paragraph, line.trimEnd() + suffix, fonts, bold = idx == lines.lastIndex)
+        }
+        return paragraph
     }
 
 }

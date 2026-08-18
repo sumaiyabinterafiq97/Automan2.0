@@ -755,7 +755,7 @@ class RixoMappingController(
                     supportedVehicleType = row.supportedVehicleType,
                     rixoPrice = row.rixoPrice,
                 )
-                saved.add(rixoMappingService.saveRow(merged))
+                saved.add(rixoMappingService.saveRow(merged, existing))
             } else {
                 val err = validate(row)
                 if (err != null) {

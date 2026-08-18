@@ -55,7 +55,7 @@ class LocalPurchaseSanitizerTest {
         assertEquals("TRUE", result.rixoRequested)
         assertEquals("TRUE", result.rixoConfirmed)
         assertNull(result.pol)
-        assertNull(result.country)
+        assertEquals("PAKISTAN", result.country)
         assertNull(result.bookingId)
         assertFalse(result.bookingRequested)
         assertNull(result.shipmentDate)

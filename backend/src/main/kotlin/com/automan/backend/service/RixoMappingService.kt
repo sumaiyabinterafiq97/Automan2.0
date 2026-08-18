@@ -10,7 +10,8 @@ import org.springframework.transaction.annotation.Transactional
 
 @Service
 class RixoMappingService(
-    private val rixoMappingRepository: RixoMappingRepository
+    private val rixoMappingRepository: RixoMappingRepository,
+    private val purchaseRixoPriceSyncService: PurchaseRixoPriceSyncService,
 ) {
     data class UpsertInput(
         val rixoCompany: String,
@@ -329,8 +330,13 @@ class RixoMappingService(
         }
     }
 
-    fun saveRow(entity: RixoMapping): RixoMapping =
-        rixoMappingRepository.save(entity)
+    fun saveRow(entity: RixoMapping, previous: RixoMapping? = null): RixoMapping {
+        val saved = rixoMappingRepository.save(entity)
+        if (previous != null) {
+            purchaseRixoPriceSyncService.syncIfPriceChanged(previous, saved)
+        }
+        return saved
+    }
 
     fun addBulk(rows: List<UpsertInput>): List<RixoMapping> {
         val entities = rows.map { row ->
@@ -372,7 +378,9 @@ class RixoMappingService(
             supportedVehicleType = row.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
             rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
         )
-        return rixoMappingRepository.save(updated)
+        val saved = rixoMappingRepository.save(updated)
+        purchaseRixoPriceSyncService.syncIfPriceChanged(existing, saved)
+        return saved
     }
 
     fun delete(id: Long): Boolean {

@@ -39,6 +39,7 @@ class PurchaseService(
     private val shippingSnapshotService: ShippingSnapshotService,
     private val localPurchaseSanitizer: LocalPurchaseSanitizer,
     private val clientRepository: ClientRepository,
+    private val stockLocationMapService: StockLocationMapService,
 ) {
     companion object {
         const val DUPLICATE_CHASSIS_MESSAGE = "the chassis number already exist"
@@ -2579,7 +2580,9 @@ class PurchaseService(
             Logger.debug("PurchaseService: transportData keys: ${transportData.keys}")
             Logger.debug("PurchaseService: transportData values: ${transportData.values}")
             Logger.debug("PurchaseService: buyingDate value: '${transportData["buyingDate"]}'")
-            return pdfService.generateRixoTransportPdf(updatedPurchases, transportData)
+            val stockLocations = updatedPurchases.mapNotNull { it.stockLocation?.trim()?.takeIf { s -> s.isNotEmpty() } }
+            val stockLocationAddresses = stockLocationMapService.buildAddressMapForStockLocations(stockLocations)
+            return pdfService.generateRixoTransportPdf(updatedPurchases, transportData, stockLocationAddresses)
             
         } catch (e: Exception) {
             Logger.error("Error generating Rixo Transport PDF: ${e.message}", e)

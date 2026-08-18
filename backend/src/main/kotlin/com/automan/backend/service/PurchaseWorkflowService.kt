@@ -42,6 +42,12 @@ class PurchaseWorkflowService(
         const val SQL_BOOKING_NOT_REQUESTED =
             "(p.workflow_status IS NULL OR p.workflow_status NOT IN ('BOOKING_REQUESTED', 'INVOICE_CONFIRMED'))"
 
+        /** JPQL: exclude LOCAL domestic sales from the car booking pool. */
+        const val JPQL_NOT_LOCAL = "p.local = false"
+
+        /** Native SQL: exclude LOCAL domestic sales (`local` is reserved in MySQL). */
+        const val SQL_NOT_LOCAL = "p.`local` = 0"
+
         const val JPQL_INVOICE_NOT_CONFIRMED =
             "(p.workflowStatus IS NULL OR p.workflowStatus <> com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED)"
 

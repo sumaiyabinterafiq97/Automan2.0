@@ -16,6 +16,7 @@ import java.io.InputStreamReader
 class RixoImportService(
     private val rixoMappingRepository: RixoMappingRepository,
     private val jdbcTemplate: JdbcTemplate,
+    private val purchaseRixoPriceSyncService: PurchaseRixoPriceSyncService,
 ) {
 
     fun importRixoPricesFromCsv(csvContent: String): ImportResult {
@@ -256,6 +257,7 @@ class RixoImportService(
                 createdAt = existing.createdAt,
             ),
         )
+        purchaseRixoPriceSyncService.syncIfPriceChanged(existing, saved)
         return SupplierMapRowDto.from(saved)
     }
 }

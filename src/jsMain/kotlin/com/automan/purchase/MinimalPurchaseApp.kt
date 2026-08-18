@@ -2578,6 +2578,9 @@ internal fun persistableRixoCompanyFromCombobox(raw: String): String {
     }
 }
 
+/** True when the generator/updater FAB has a company option, including Undefined. False for the empty placeholder. */
+internal fun rixoCompanyComboboxIsSelected(raw: String): Boolean = raw.trim().isNotEmpty()
+
 /**
  * Reads combobox fields the same way across Add/Edit.
  * For Rixo company, prefer the native `<select>` value (canonical option value / FAB) over `#rixoCompanyInput`,
@@ -2593,6 +2596,13 @@ internal fun getComboboxValueSafe(fieldId: String): String {
     val input = document.getElementById("${fieldId}Input") as? HTMLInputElement
     val select = document.getElementById(fieldId) as? HTMLSelectElement
     return input?.value?.takeIf { it.isNotBlank() } ?: (select?.value ?: "")
+}
+
+/** Edit form Vehicle type lives on `editShipmentSize`; `editTypeOfVehicle` is a legacy id that is not in the DOM. */
+private fun readEditVehicleTypeFromDom(): String {
+    val fromShipmentSize = getComboboxValueSafe("editShipmentSize")
+    if (fromShipmentSize.isNotBlank()) return fromShipmentSize
+    return getComboboxValueSafe("editTypeOfVehicle")
 }
 
 // Client name suggestions for Add/Edit purchase (Shipment Information)
@@ -11247,7 +11257,6 @@ private fun applyLocalFlagAndNullLockedFields(purchaseData: dynamic, isEdit: Boo
     purchaseData.local = isLocal
     if (!isLocal) return
     purchaseData.bookingRequested = false
-    purchaseData.country = null
     purchaseData.pol = null
     purchaseData.pod = null
     purchaseData.destination = null
@@ -12995,6 +13004,10 @@ private fun applySavedPurchaseFieldSnapshot(purchaseForMerge: dynamic) {
     if (polVal.isNotBlank()) setEditCombobox("editPol", polVal)
     if (venueVal.isNotBlank()) setEditCombobox("editVenueId", venueVal)
     setEditCombobox("editRixoCompany", firstSemicolonToken(pdStr(pd.rixoCompany)))
+    val savedRixoPrice = extractNumericFromDbValue(pd.rixoPrice)
+    if (savedRixoPrice.isNotBlank() && savedRixoPrice != "0") {
+        (document.getElementById("editRixoPriceInput") as? HTMLInputElement)?.value = savedRixoPrice
+    }
 }
 
 private fun applySupplierSelectionToForm(selection: dynamic, isEditForm: Boolean, auctionName: String) {
@@ -13062,7 +13075,7 @@ private fun applySupplierSelectionToForm(selection: dynamic, isEditForm: Boolean
                 window.__rixoPriceUserOverride = false;
                 var vtForPrice = readFormVt();
                 window.scheduleAutofillRixoPriceFromMapping(isEdit, {
-                    force: true,
+                    force: userSupplierChange === true,
                     delay: userSupplierChange ? 0 : 180,
                     // Only overwrite empty/0 on Edit when the user changed supplier (not hydrate/open).
                     allowOverwriteBlankOrZero: userSupplierChange === true,
@@ -16211,7 +16224,7 @@ fun fetchMappingByChassisOnly(
                                 vt = (window.getComboboxValue(isEdit ? 'editShipmentSize' : 'shipmentSize') || '').toString().trim();
                             }
                             window.scheduleAutofillRixoPriceFromMapping(isEdit, {
-                                force: true,
+                                force: !isEdit,
                                 delay: 180,
                                 supportedVehicleType: vt
                             });
@@ -16508,7 +16521,7 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                                 }
                                 window.scheduleAutofillRixoPriceFromMapping(isEdit, {
                                     delay: 0,
-                                    force: true,
+                                    force: !isEdit,
                                     auctionName: (typeof window.getComboboxValue === 'function')
                                         ? window.getComboboxValue(isEdit ? 'editAuctionName' : 'auctionName') : '',
                                     stockLocation: sel.stockLocation || '',
@@ -19806,7 +19819,7 @@ fun collectCurrentEditFormData(): dynamic {
     val manufactureYear = readManufactureYearInput("editManufactureYear")
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
-    val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
+    val vehicleTypeValue = readEditVehicleTypeFromDom()
     val grade = getComboboxValueSafe("editGrade")
     val rank = getComboboxValueSafe("editRank")
     val color = getComboboxValueSafe("editColor")
@@ -19835,7 +19848,6 @@ fun collectCurrentEditFormData(): dynamic {
     val clientName = getComboboxValueSafe("editClientName")
     val country = getComboboxValueSafe("editCountry")
     val venueId = getComboboxValueSafe("editVenueId")
-    val shipmentSize = getComboboxValueSafe("editShipmentSize")
     // IMPORTANT:
     // Confirm-changes modal must compare against the *same* values used by the real save flow.
     // The save flow reads money inputs directly from their `.value`.
@@ -19911,8 +19923,8 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.manufactureYear = manufactureYear
     purchaseData.brand = brand
     purchaseData.carName = carName
-    purchaseData.shipmentSize = shipmentSize.ifEmpty { vehicleType }
-    purchaseData.vehicleType = vehicleType
+    purchaseData.shipmentSize = vehicleTypeValue
+    purchaseData.vehicleType = vehicleTypeValue
     purchaseData.grade = grade
     purchaseData.rank = rank
     purchaseData.color = color
@@ -20030,7 +20042,7 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
     console.log("🔍 [COMPARE] Current data:", JSON.stringify(current))
     
     val fieldsToCompare = listOf(
-        "date", "chassis", "carModelYear", "manufactureYear", "brand", "carName", "vehicleType", "shipmentSize",
+        "date", "chassis", "carModelYear", "manufactureYear", "brand", "carName", "shipmentSize",
         "grade", "rank", "color", "fuel", "seat", "door", "distance", "options", "cc",
         "shift", "wd", "driveType", "auctionNo", "auctionHouse", "stockLocation", "pol",
         "rixoCompany", "clientName", "country", "consignee", "pod", "venueId", "price", "auctionFee", "auctionPenaltyFee", "recycleFee",
@@ -20357,7 +20369,7 @@ fun handleEditPurchase() {
     val pol = getComboboxValueSafe("editPol")
     val venueId = getComboboxValueSafe("editVenueId")
     val rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
-    val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
+    val vehicleType = readEditVehicleTypeFromDom()
     
     // Check if at least one field is filled
     val hasAtLeastOneField = listOf(
@@ -20504,7 +20516,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     val valShift = getComboboxValueSafe("editShift")
     val valSupplierName = getComboboxValueSafe("editAuctionName")
     val valVenueId = getComboboxValueSafe("editVenueId")
-    val valVehicleType = getComboboxValueSafe("editTypeOfVehicle")
+    val valVehicleType = readEditVehicleTypeFromDom()
     val valRixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
     val valStockLocation = getComboboxValueSafe("editStockLocation")
     val valPol = getComboboxValueSafe("editPol")
@@ -20548,7 +20560,7 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     val manufactureYear = readManufactureYearInput("editManufactureYear")
     val brand = getComboboxValueSafe("editBrand")
     val carName = getComboboxValueSafe("editCarName")
-    val vehicleType = getComboboxValueSafe("editTypeOfVehicle")
+    val vehicleTypeValue = readEditVehicleTypeFromDom()
     val grade = getComboboxValueSafe("editGrade")
     val rank = getComboboxValueSafe("editRank")
     val color = getComboboxValueSafe("editColor")
@@ -20577,7 +20589,6 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     val clientName = getComboboxValueSafe("editClientName")
     val country = getComboboxValueSafe("editCountry")
     val venueId = getComboboxValueSafe("editVenueId")
-    val shipmentSize = getComboboxValueSafe("editShipmentSize")
     // Money fields: display may contain commas; save comma-less using getMoneyRawValue.
     val priceRaw = js("window.getMoneyRawValue ? window.getMoneyRawValue('editPrice') : ''").unsafeCast<String>().trim()
     val price = if (priceRaw.isNotBlank()) "¥$priceRaw" else ""
@@ -20647,8 +20658,8 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.brand = brand
     purchaseData.carName = carName
     // Send shipment size using the canonical field name; keep legacy vehicleType for compatibility
-    purchaseData.shipmentSize = shipmentSize.ifEmpty { vehicleType }
-    purchaseData.vehicleType = vehicleType
+    purchaseData.shipmentSize = vehicleTypeValue
+    purchaseData.vehicleType = vehicleTypeValue
     purchaseData.grade = grade
     purchaseData.rank = rank
     purchaseData.color = color
@@ -20731,7 +20742,7 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     console.log("📷 Car pictures data:", carPictures)
     console.log("Request URL: /purchases/$id")
     console.log("🔍 DEBUG: venueId = ${getComboboxValueSafe("editVenueId")}")
-    console.log("🔍 DEBUG: vehicleType = $vehicleType")
+    console.log("🔍 DEBUG: vehicleType = $vehicleTypeValue")
     console.log("🔍 DEBUG: shipmentSize = ${purchaseData.shipmentSize}")
     
     // Submit the purchase update
@@ -25771,15 +25782,14 @@ fun generateRixoRequestPdf(
     preview: Boolean = false,
 ) {
     val buyingDate = getRixoBuyingDateValue()
-    val rixoCompany = persistableRixoCompanyFromCombobox(
-        js("window.getComboboxValue('rixoCompany')") as? String ?: "",
-    )
+    val rixoCompanyRaw = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
+    val rixoCompany = persistableRixoCompanyFromCombobox(rixoCompanyRaw)
     val headMessage = (document.getElementById("headMessage") as HTMLTextAreaElement).value
     val footerMessage = (document.getElementById("footerMessage") as HTMLTextAreaElement).value
     val extraMessage = (document.getElementById("extraMessage") as HTMLTextAreaElement).value
     val contactDetails = (document.getElementById("contactDetails") as HTMLTextAreaElement).value
     
-    if (buyingDate.isEmpty() || rixoCompany.isEmpty()) {
+    if (buyingDate.isEmpty() || !rixoCompanyComboboxIsSelected(rixoCompanyRaw)) {
         showMessage("Please select a buying date and Rixo company", "error")
         return
     }

@@ -36,6 +36,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
         "SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT(:prefix, '%') " +
             "AND ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
             "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
+            "AND ${PurchaseWorkflowService.JPQL_NOT_LOCAL} " +
             "ORDER BY p.chassis ASC",
     )
     fun searchByChassisPrefix(@Param("prefix") prefix: String, pageable: Pageable): List<Purchase>
@@ -47,6 +48,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
         "SELECT p FROM Purchase p WHERE p.chassis LIKE CONCAT('%', :q, '%') " +
             "AND ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
             "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
+            "AND ${PurchaseWorkflowService.JPQL_NOT_LOCAL} " +
             "ORDER BY p.chassis ASC",
     )
     fun searchByChassisContains(@Param("q") q: String, pageable: Pageable): List<Purchase>
@@ -107,6 +109,11 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     fun findByAuctionHouseContainingIgnoreCase(auctionHouse: String): List<Purchase>
     fun findByClientNameContainingIgnoreCase(clientName: String): List<Purchase>
     fun findByDateContainingIgnoreCase(date: String): List<Purchase>
+
+    @Query(
+        "SELECT p FROM Purchase p WHERE UPPER(TRIM(COALESCE(p.auctionHouse,''))) = UPPER(TRIM(:auctionHouse))",
+    )
+    fun findByAuctionHouseIgnoreCaseTrim(@Param("auctionHouse") auctionHouse: String): List<Purchase>
     
     // Method to find purchases by chassis (can return multiple since chassis is no longer unique)
     fun findByChassis(chassis: String): List<Purchase>
@@ -158,6 +165,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "WHERE p.country IS NOT NULL AND p.country != '' " +
             "AND ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
             "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
+            "AND ${PurchaseWorkflowService.JPQL_NOT_LOCAL} " +
             "ORDER BY p.country",
     )
     fun findDistinctCountriesWithPendingBooking(): List<String>
@@ -174,6 +182,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
         "SELECT p FROM Purchase p " +
             "WHERE ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
             "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
+            "AND ${PurchaseWorkflowService.JPQL_NOT_LOCAL} " +
             "AND LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
             "ORDER BY p.chassis",
     )
@@ -216,6 +225,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "AND p.chassis IS NOT NULL AND p.chassis != '' " +
             "AND ${PurchaseWorkflowService.SQL_BOOKING_NOT_REQUESTED} " +
             "AND ${PurchaseWorkflowService.SQL_RIXO_CONFIRMED_ELIGIBILITY} " +
+            "AND ${PurchaseWorkflowService.SQL_NOT_LOCAL} " +
             "ORDER BY p.chassis",
         nativeQuery = true,
     )
@@ -227,6 +237,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "AND LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
             "AND ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
             "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
+            "AND ${PurchaseWorkflowService.JPQL_NOT_LOCAL} " +
             "ORDER BY p.chassis",
     )
     fun findFilteredPurchasesByCountryAndPol(
@@ -240,6 +251,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "WHERE LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
             "AND ${PurchaseWorkflowService.SQL_BOOKING_NOT_REQUESTED} " +
             "AND ${PurchaseWorkflowService.SQL_RIXO_CONFIRMED_ELIGIBILITY} " +
+            "AND ${PurchaseWorkflowService.SQL_NOT_LOCAL} " +
             "AND p.chassis IS NOT NULL AND p.chassis != '' " +
             "ORDER BY p.chassis",
         nativeQuery = true,

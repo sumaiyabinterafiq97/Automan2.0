@@ -5307,11 +5307,12 @@ window.autofillRixoPriceFromMapping = function(isEditForm, options) {
     if (window.__editPurchaseHydrating === true && !options.force) return;
     if (window.__rixoPriceUserOverride === true && !options.force) return;
 
-    // Edit only: do not map-fill over empty/0 unless caller opted in (user supplier-field change).
+    // Edit only: mapping fills blank/0 when opted in (user supplier-field change).
+    // Never overwrite a saved non-zero DB price unless that same opt-in is set.
     var allowOverwriteBlankOrZero = options.allowOverwriteBlankOrZero === true ||
         fields.allowOverwriteBlankOrZero === true;
-    if (isEditForm && !allowOverwriteBlankOrZero &&
-        window.isRixoPriceInputBlankOrZero(isEditForm, inputIdOverride)) {
+    if (isEditForm && !allowOverwriteBlankOrZero) {
+        if (window.isRixoPriceInputBlankOrZero(isEditForm, inputIdOverride)) return;
         return;
     }
 
