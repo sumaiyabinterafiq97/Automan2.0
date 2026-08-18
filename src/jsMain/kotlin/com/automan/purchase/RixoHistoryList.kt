@@ -1122,9 +1122,8 @@ private fun renderRixoHistoryTableFromCache() {
         return
     }
 
-    // Enriched purchase flags only: page-local reorder. Entity columns are ordered by the API.
-    val pageLocalOnly =
-        rixoHistorySortField == "rixoConfirmed" || rixoHistorySortField == "rixoConfirmedDate"
+    // Enriched date flag only: page-local reorder. rixoConfirmed is ordered by the API across all pages.
+    val pageLocalOnly = rixoHistorySortField == "rixoConfirmedDate"
     if (!rixoHistoryServerMode || pageLocalOnly) {
         val comparator = Comparator<dynamic> { a, b ->
             compareRixoHistoryRows(a, b, rixoHistorySortField, rixoHistorySortOrder == "asc")
@@ -1152,10 +1151,18 @@ private fun renderRixoHistoryTableFromCache() {
             val thAlign = if (key == "rixoConfirmed") "center" else "left"
             val isActive = rixoHistorySortField == key
             val sortOrder = if (isActive) rixoHistorySortOrder else "desc"
-            val tooltipRaw = when {
-                !isActive -> "Sort by ${rixoHistoryColumnLabel(key)}"
-                sortOrder == "asc" -> "Sorted ascending (click for descending)"
-                else -> "Sorted descending (click for ascending)"
+            val tooltipRaw = if (key == "rixoConfirmed") {
+                when {
+                    !isActive -> "Show confirmed first"
+                    sortOrder == "asc" -> "Unconfirmed first (click for confirmed first)"
+                    else -> "Confirmed first (click for unconfirmed first)"
+                }
+            } else {
+                when {
+                    !isActive -> "Sort by ${rixoHistoryColumnLabel(key)}"
+                    sortOrder == "asc" -> "Sorted ascending (click for descending)"
+                    else -> "Sorted descending (click for ascending)"
+                }
             }
             val tooltip = escapeHtml(tooltipRaw)
             html.append(

@@ -6,6 +6,7 @@ import com.automan.backend.model.RixoHistory
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.RixoHistoryRepository
 import com.automan.backend.util.Logger
+import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
@@ -105,6 +106,10 @@ class RixoHistoryService(
     ): RixoHistoryPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
+        if (isRixoConfirmedSortField(sortField)) {
+            val sorted = sortEnrichedByRixoConfirmed(enrichRows(rixoHistoryRepository.findAll()), sortOrder)
+            return pageEnrichedRows(sorted, pageIdx, size)
+        }
         val pageable = PageRequest.of(pageIdx, size, resolveRixoHistorySort(sortField, sortOrder))
         val pg = rixoHistoryRepository.findAll(pageable)
         return RixoHistoryPageResponse(
@@ -127,6 +132,11 @@ class RixoHistoryService(
         require(q.isNotEmpty()) { "Search text is required" }
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
+        if (isRixoConfirmedSortField(sortField)) {
+            val matches = rixoHistoryRepository.searchKeyFields(q, Pageable.unpaged()).content
+            val sorted = sortEnrichedByRixoConfirmed(enrichRows(matches), sortOrder)
+            return pageEnrichedRows(sorted, pageIdx, size)
+        }
         val pageable = PageRequest.of(pageIdx, size, resolveRixoHistorySort(sortField, sortOrder))
         val pg = rixoHistoryRepository.searchKeyFields(q, pageable)
         return RixoHistoryPageResponse(
@@ -139,7 +149,8 @@ class RixoHistoryService(
     }
 
     /**
-     * Whitelist entity columns. Enriched purchase flags (`rixoConfirmed*`) fall back to `id`.
+     * Whitelist entity columns. Enriched [rixoConfirmedDate] still falls back to `id`.
+     * [rixoConfirmed] is sorted in memory after enrich (see [listRowsPage] / [searchRowsPage]).
      */
     private fun resolveRixoHistorySort(sortField: String?, sortOrder: String?): Sort {
         val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
@@ -158,6 +169,31 @@ class RixoHistoryService(
             else -> "id"
         }
         return Sort.by(dir, prop)
+    }
+
+    private fun isRixoConfirmedSortField(sortField: String?): Boolean =
+        isRixoConfirmedSortFieldKey(sortField)
+
+    private fun pageEnrichedRows(
+        sorted: List<RixoHistoryRowDto>,
+        pageIdx: Int,
+        size: Int,
+    ): RixoHistoryPageResponse {
+        val total = sorted.size.toLong()
+        val totalPages = if (total == 0L) 1 else ((total + size - 1) / size).toInt().coerceAtLeast(1)
+        val from = (pageIdx.toLong() * size).toInt().coerceAtLeast(0)
+        val content = if (from >= sorted.size) {
+            emptyList()
+        } else {
+            sorted.subList(from, (from + size).coerceAtMost(sorted.size))
+        }
+        return RixoHistoryPageResponse(
+            content = content,
+            totalElements = total,
+            totalPages = totalPages,
+            page = pageIdx,
+            size = size,
+        )
     }
 
     /**
@@ -567,5 +603,26 @@ class RixoHistoryService(
         parts.removeAt(removeIdx)
         if (parts.isEmpty()) return Pair(null, true)
         return Pair(parts.joinToString(";"), true)
+    }
+
+    companion object {
+        internal fun isRixoConfirmedSortFieldKey(sortField: String?): Boolean {
+            val k = sortField?.trim()?.lowercase().orEmpty()
+            return k == "rixoconfirmed" || k == "rixo_confirmed"
+        }
+
+        /** desc / default = confirmed first; asc = unconfirmed first; ties by id descending. */
+        internal fun sortEnrichedByRixoConfirmed(
+            rows: List<RixoHistoryRowDto>,
+            sortOrder: String?,
+        ): List<RixoHistoryRowDto> {
+            val confirmedFirst = !sortOrder?.trim().equals("asc", ignoreCase = true)
+            return rows.sortedWith(
+                compareBy<RixoHistoryRowDto> { row ->
+                    val unconfirmedRank = if (row.rixoConfirmed) 0 else 1
+                    if (confirmedFirst) unconfirmedRank else 1 - unconfirmedRank
+                }.thenByDescending { it.id },
+            )
+        }
     }
 }
