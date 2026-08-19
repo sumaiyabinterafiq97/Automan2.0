@@ -8484,8 +8484,8 @@ fun createAddFormHTML(): String {
                         </div>
                     </div>
                     <div>
-                        <label for="chassisNumberInput">Chassis Number</label>
-                        ${createPlainTextInput("chassisNumber", "Suffix (optional)")}
+                        <label for="chassisNumberInput">Chassis Number *</label>
+                        ${createPlainTextInput("chassisNumber", "Suffix", required = true)}
                     </div>
                     <div>
                         <label for="brandInput">Brand</label>
@@ -17347,6 +17347,8 @@ fun readPurchaseChassisNumber(isEditForm: Boolean): String =
 fun readPurchaseChassisForSave(isEditForm: Boolean): String =
     composePurchaseChassisForSave(readPurchaseChassisCode(isEditForm), readPurchaseChassisNumber(isEditForm))
 
+const val CHASSIS_NUMBER_SUFFIX_REQUIRED = "Chassis Number (suffix) is required."
+
 fun validateChassisNumber(number: String): Pair<Boolean, String> {
     if (number.isBlank()) return Pair(true, "")
     if (number.contains(' ')) return Pair(false, "Chassis Number cannot contain spaces.")
@@ -17354,6 +17356,12 @@ fun validateChassisNumber(number: String): Pair<Boolean, String> {
         return Pair(false, "Chassis Number must be alphanumeric only.")
     }
     return Pair(true, "")
+}
+
+/** Blank suffix is invalid; otherwise same alphanumeric rules as [validateChassisNumber]. */
+fun validateRequiredChassisNumber(number: String): Pair<Boolean, String> {
+    if (number.isBlank()) return Pair(false, CHASSIS_NUMBER_SUFFIX_REQUIRED)
+    return validateChassisNumber(number)
 }
 
 /** Returns composed chassis for save, or null with an error message. */
@@ -17366,7 +17374,7 @@ fun validatePurchaseChassisForSave(isEditForm: Boolean): Pair<String?, String?> 
     if (!validateChassisPart1(code, isEditForm = isEditForm)) {
         return Pair(null, "Please select Chassis Code from the dropdown.")
     }
-    val (validNumber, numberError) = validateChassisNumber(number)
+    val (validNumber, numberError) = validateRequiredChassisNumber(number)
     if (!validNumber) return Pair(null, numberError)
     return Pair(composePurchaseChassisForSave(code, number), null)
 }
@@ -18141,8 +18149,8 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     </div>
                     <div>
-                        <label for="editChassisNumberInput">Chassis Number</label>
-                        ${createPlainTextInput("editChassisNumber", "Suffix (optional)", initialValue = editChassisNumberDisp)}
+                        <label for="editChassisNumberInput">Chassis Number *</label>
+                        ${createPlainTextInput("editChassisNumber", "Suffix", required = true, initialValue = editChassisNumberDisp)}
                     </div>
                     <div>
                         <label for="editBrandInput">Brand</label>

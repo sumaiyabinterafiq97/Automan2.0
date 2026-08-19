@@ -676,15 +676,7 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
             // If user typed CODE-NUMBER into Chassis, keep the suffix
             if (chassis.contains("-")) chassis.substringAfter("-").trim() else ""
         }
-    if (chassisNumber.isBlank()) {
-        saveBtn?.disabled = false
-        saveMoreBtn?.disabled = false
-        saveBtn?.textContent = originalSave
-        saveMoreBtn?.textContent = originalMore
-        showErrorModal("Validation Error", "Chassis Number (suffix) is required.")
-        return
-    }
-    val (validNumber, numberError) = validateChassisNumber(chassisNumber)
+    val (validNumber, numberError) = validateRequiredChassisNumber(chassisNumber)
     if (!validNumber) {
         saveBtn?.disabled = false
         saveMoreBtn?.disabled = false
