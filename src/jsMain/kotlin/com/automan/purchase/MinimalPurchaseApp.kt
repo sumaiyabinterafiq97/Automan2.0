@@ -1224,6 +1224,12 @@ fun initializeAppSetup() {
                 optionsContainer.style.overflowY = 'auto';
 
                 options.forEach(function(opt) {
+                    var value = (opt && typeof opt === 'object' && opt.value != null)
+                        ? String(opt.value)
+                        : String(opt == null ? '' : opt);
+                    var price = (opt && typeof opt === 'object' && opt.price != null)
+                        ? String(opt.price).trim()
+                        : '';
                     var btn = document.createElement('button');
                     btn.type = 'button';
                     btn.style.width = '100%';
@@ -1238,21 +1244,43 @@ fun initializeAppSetup() {
                     btn.style.textAlign = 'left';
                     btn.style.transition = 'all 0.15s ease';
 
+                    var nameEl = null;
+                    if (price) {
+                        btn.style.display = 'flex';
+                        btn.style.justifyContent = 'space-between';
+                        btn.style.alignItems = 'center';
+                        btn.style.gap = '12px';
+                        nameEl = document.createElement('span');
+                        nameEl.textContent = value;
+                        nameEl.style.color = '#1f2937';
+                        nameEl.style.fontWeight = '500';
+                        var priceEl = document.createElement('span');
+                        priceEl.textContent = price;
+                        priceEl.style.color = '#6b7280';
+                        priceEl.style.fontWeight = '500';
+                        priceEl.style.flexShrink = '0';
+                        btn.appendChild(nameEl);
+                        btn.appendChild(priceEl);
+                    } else {
+                        btn.textContent = value;
+                    }
+
                     btn.onmouseenter = function() {
                         btn.style.backgroundColor = '#eff6ff';
                         btn.style.borderColor = '#bfdbfe';
-                        btn.style.color = '#1d4ed8';
+                        if (nameEl) nameEl.style.color = '#1d4ed8';
+                        else btn.style.color = '#1d4ed8';
                     };
                     btn.onmouseleave = function() {
                         btn.style.backgroundColor = '#f3f4f6';
                         btn.style.borderColor = '#e5e7eb';
-                        btn.style.color = '#1f2937';
+                        if (nameEl) nameEl.style.color = '#1f2937';
+                        else btn.style.color = '#1f2937';
                     };
                     btn.onclick = function() {
                         backdrop.remove();
-                        settle(opt);
+                        settle(value);
                     };
-                    btn.textContent = opt;
                     optionsContainer.appendChild(btn);
                 });
 
@@ -1766,6 +1794,35 @@ fun initializeAppSetup() {
             };
         };
 
+        window.formatRixoPriceForModalDisplay = function(raw) {
+            if (raw == null || String(raw).trim() === '') return '';
+            var numeric = (typeof window.parseRixoPrice === 'function')
+                ? window.parseRixoPrice(raw)
+                : String(raw).replace(/[¥Â¥,\s]/g, '').replace(/[^0-9.]/g, '');
+            if (!numeric) return String(raw).trim();
+            var n = Number(numeric);
+            if (!isFinite(n)) return String(raw).trim();
+            return '¥' + Math.round(n).toLocaleString('en-US');
+        };
+
+        window.buildRixoCompanyModalOptions = function(companyNames, partialSel, auctionName) {
+            var names = companyNames || [];
+            var sel = partialSel || {};
+            return names.map(function(name) {
+                var price = '';
+                if (typeof window.findRixoPriceFromSupplierSelection === 'function') {
+                    var raw = window.findRixoPriceFromSupplierSelection({
+                        stockLocation: sel.stockLocation || '',
+                        venueId: sel.venueId || '',
+                        pol: sel.pol || '',
+                        rixoCompany: name
+                    }, auctionName || '');
+                    price = window.formatRixoPriceForModalDisplay(raw);
+                }
+                return { value: name, price: price };
+            });
+        };
+
         window.resolveSupplierFieldsSequentially = function(supplier, branches, firstBranch) {
             return new Promise(function(resolve) {
                 var result = {};
@@ -1813,7 +1870,11 @@ fun initializeAppSetup() {
                             res(distinct.length ? distinct[0] : (defaultValue || ''));
                             return;
                         }
-                        window.showFieldSelectionModal('Supplier: ' + supplier, label, distinct).then(function(chosen) {
+                        var modalOptions = distinct;
+                        if (label === 'Rixo Company' && typeof window.buildRixoCompanyModalOptions === 'function') {
+                            modalOptions = window.buildRixoCompanyModalOptions(distinct, result, supplier);
+                        }
+                        window.showFieldSelectionModal('Supplier: ' + supplier, label, modalOptions).then(function(chosen) {
                             if (chosen === null) rej('CANCELLED');
                             else res(chosen);
                         });
@@ -1927,7 +1988,11 @@ fun initializeAppSetup() {
                             res(distinct.length ? distinct[0] : (defaultValue || ''));
                             return;
                         }
-                        window.showFieldSelectionModal('Supplier: ' + supplier, label, distinct).then(function(chosen) {
+                        var modalOptions = distinct;
+                        if (label === 'Rixo Company' && typeof window.buildRixoCompanyModalOptions === 'function') {
+                            modalOptions = window.buildRixoCompanyModalOptions(distinct, result, supplier);
+                        }
+                        window.showFieldSelectionModal('Supplier: ' + supplier, label, modalOptions).then(function(chosen) {
                             if (chosen === null) rej('CANCELLED');
                             else res(chosen);
                         });
@@ -8496,6 +8561,10 @@ fun createAddFormHTML(): String {
                         ${createEditableCombobox("carName", "Select Car Name")}
                     </div>
                     <div>
+                        <label for="gradeInput">Grade</label>
+                        ${createEditableCombobox("grade", "Select Grade", showDropdownButton = false)}
+                    </div>
+                    <div>
                         <label for="carModelYearText">Registration Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
@@ -8508,7 +8577,7 @@ fun createAddFormHTML(): String {
                             <input type="hidden" id="carModelYear" value="">
                             <span id="carModelYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">MM/YYYY</span>
                         </div>
-                </div>
+                    </div>
                     <div>
                         <label for="manufactureYearText">Manufacture Year</label>
                         <div style="position:relative; width:100%;">
@@ -8521,10 +8590,6 @@ fun createAddFormHTML(): String {
                             <input type="hidden" id="manufactureYear" value="">
                             <span id="manufactureYearHint" style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:#9ca3af; pointer-events:none;">YYYY</span>
                         </div>
-                    </div>
-                    <div>
-                        <label for="gradeInput">Grade</label>
-                        ${createEditableCombobox("grade", "Select Grade", showDropdownButton = false)}
                     </div>
                     <div>
                         <label for="auctionNo">Auction No</label>
@@ -12627,6 +12692,9 @@ private fun applyChassisDerivedPricingFieldsIfEmpty(
         if (directFee.isNotBlank()) {
             (document.getElementById(recycleId) as? HTMLInputElement)?.value = directFee
         } else {
+            // Mapping has no recycle-fee rows for this exact chassis — clear any leftover value
+            // from a previous chassis selection (do not clear when purchase already has a saved fee).
+            (document.getElementById(recycleId) as? HTMLInputElement)?.value = ""
             lookupRecycleFeeForCarModelYear(chassisPrefix, carModelBase, recycleId, isEditForm)
         }
     }

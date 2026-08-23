@@ -550,7 +550,8 @@ class CarBrandMappingService(
     /**
      * Looks up the recycle fee for a specific production date (MM/YYYY) from the chassis map.
      *
-     * The [chassisPrefix] is the prefix portion of the chassis number (e.g. "ACR50" from "ACR50-67h").
+     * The [chassisPrefix] is the exact chassis code from Chassis Map (e.g. "ACR50" from "ACR50-67h").
+     * Lookup uses exact chassis match only (never a prefix LIKE), so "GK3" cannot inherit fees from "GK30".
      * The [productionDate] should be in MM/YYYY or YYYY-MM format.
      *
      * The recycle_fee column stores a semicolon-delimited string of "YYYY-MM:fee" pairs,
@@ -564,8 +565,8 @@ class CarBrandMappingService(
         // Normalize productionDate to YYYY-MM format for comparison
         val normalizedInput = normalizeProductionDate(productionDate) ?: return null
 
-        // Find all mappings whose chassis starts with the given prefix
-        val mappings = carBrandMappingRepository.findByChassisStartingWith(chassisPrefix)
+        // Exact chassis code only (same row as Chassis Map) — never LIKE prefix (GK3 must not pick up GK30).
+        val mappings = carBrandMappingRepository.findByChassis(chassisPrefix)
         if (mappings.isEmpty()) return null
 
         for (mapping in mappings) {
@@ -613,7 +614,7 @@ class CarBrandMappingService(
     /**
      * Looks up the manufacture year for a chassis suffix from the chassis map.
      *
-     * The [chassisPrefix] is the code portion (e.g. "ACR50" from "ACR50-67h").
+     * The [chassisPrefix] is the exact chassis code (e.g. "ACR50" from "ACR50-67h") — exact match only.
      * The [chassisNumber] is the suffix after the hyphen (e.g. "67h" or "230000").
      *
      * The chassis_number column stores semicolon-delimited pairs:
@@ -625,7 +626,8 @@ class CarBrandMappingService(
         val normalizedNumber = chassisNumber.trim()
         if (normalizedNumber.isBlank()) return null
 
-        val mappings = carBrandMappingRepository.findByChassisStartingWith(chassisPrefix)
+        // Exact chassis code only — never LIKE prefix (ACR50 must not pick up ACR500).
+        val mappings = carBrandMappingRepository.findByChassis(chassisPrefix)
         if (mappings.isEmpty()) return null
 
         for (mapping in mappings) {
