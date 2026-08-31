@@ -8642,7 +8642,7 @@ fun createAddFormHTML(): String {
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label for="rankInput">Rank</label>
-                        ${createEditableCombobox("rank", "Select Rank")}
+                        ${createEditableCombobox("rank", "Select Rank", showDropdownButton = false)}
                     </div>
                     <div>
                         <label for="colorInput">Color</label>
@@ -11458,7 +11458,6 @@ fun setupAddFormListeners() {
     populateMasterMenuComboboxesForPurchaseForm()
     populateNumberCutPlaceComboboxesForPurchaseForm()
     preloadColorComboboxForPurchaseForm(isEditForm = false)
-    preloadRankComboboxForPurchaseForm(isEditForm = false)
     fetchAndRenderPurchaseOptionButtons("optionsButtonsGrid")
     
     // Load all chassis from car_brand_mapping table (chassis-first flow support)
@@ -13449,19 +13448,6 @@ private fun preloadColorComboboxForPurchaseForm(isEditForm: Boolean) {
         emptyList(),
         currentValue,
         "master-menu/color",
-    )
-}
-
-/** Preload Rank master-menu options (and chassis-master separator UI) before chassis is selected. */
-private fun preloadRankComboboxForPurchaseForm(isEditForm: Boolean) {
-    val rankId = if (isEditForm) "editRank" else "rank"
-    val currentValue = getComboboxValueSafe(rankId)
-    populateChassisMappingWithMasterListAsync(
-        rankId,
-        "Select Rank",
-        emptyList(),
-        currentValue,
-        "master-menu/rank",
     )
 }
 
@@ -15529,8 +15515,8 @@ fun fetchMappingByChassisOnly(
                     populateComboboxTokensWithSeeMore(
                         "qpGrade", "Select Grade", gradeOptions, preferGrade, false,
                     )
-                    populateChassisMappingWithMasterListAsync(
-                        "qpRank", "Select Rank", rankOptions, preferRank, "master-menu/rank",
+                    populateComboboxTokensWithSeeMore(
+                        "qpRank", "Select Rank", rankOptions, preferRank, false,
                     )
                     populateChassisMappingWithMasterListAsync(
                         "qpColor", "Select Color", colorOptions, preferColor, "master-menu/color",
@@ -15545,6 +15531,7 @@ fun fetchMappingByChassisOnly(
                         "qpSeat", "Select Seat", seatOptions, preferSeat, false,
                     )
                     updateConditionalComboboxButtonVisibility("qpGrade", gradeOptions, preferGrade)
+                    updateConditionalComboboxButtonVisibility("qpRank", rankOptions, preferRank)
                     updateConditionalComboboxButtonVisibility("qpSeat", seatOptions, preferSeat)
                     updateConditionalComboboxButtonVisibility("qpDoor", doorsForDropdown, preferDoor)
                     updateConditionalComboboxButtonVisibility("qpCc", ccsForDropdown, preferCc)
@@ -15762,8 +15749,8 @@ fun fetchMappingByChassisOnly(
             
             val rankOptions = ranks.sorted().toList()
             val rankId = if (isEditForm) "editRank" else "rank"
-            populateChassisMappingWithMasterListAsync(
-                rankId, "Select Rank", rankOptions, rank, "master-menu/rank",
+            populateComboboxTokensWithSeeMore(
+                rankId, "Select Rank", rankOptions, rank, false,
                 specPreserveOrEmpty(preserveSnap, "rank"),
             )
             
@@ -15808,8 +15795,8 @@ fun fetchMappingByChassisOnly(
             )
 
             // Chassis-dependent fields: show dropdown only when mapping yields 2+ options.
-            // Rank stays Fuel/Color-style (always visible; list = chassis → separator → master).
             updateConditionalComboboxButtonVisibility(gradeId, gradeOptions, grade)
+            updateConditionalComboboxButtonVisibility(rankId, rankOptions, rank)
             updateConditionalComboboxButtonVisibility(seatId, seatOptions, seat)
             updateConditionalComboboxButtonVisibility(doorId, doorsForDropdown, door)
             updateConditionalComboboxButtonVisibility(ccId, ccsForDropdown, cc)
@@ -18327,7 +18314,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-content form-grid-2col" data-section="specifications">
                     <div>
                         <label for="editRankInput">Rank</label>
-                        ${createEditableCombobox("editRank", "Select Rank", initialValue = editRankDisp)}
+                        ${createEditableCombobox("editRank", "Select Rank", initialValue = editRankDisp, showDropdownButton = false)}
                     </div>
                     <div>
                         <label for="editColorInput">Color</label>
@@ -18860,7 +18847,6 @@ fun showEditFormWithData(purchaseData: dynamic) {
     populateMasterMenuComboboxesForPurchaseForm()
     populateNumberCutPlaceComboboxesForPurchaseForm()
     preloadColorComboboxForPurchaseForm(isEditForm = true)
-    preloadRankComboboxForPurchaseForm(isEditForm = true)
     setupRixoDropdowns()
     ensurePurchaseOptionButtonsInfrastructure()
     fetchAndRenderPurchaseOptionButtons("editOptionsButtonsGrid") {
