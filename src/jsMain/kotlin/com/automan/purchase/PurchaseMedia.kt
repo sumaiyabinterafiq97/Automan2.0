@@ -11,6 +11,23 @@ private var cachedR2MediaEnabled: Boolean? = null
 private var cachedMaxFileSizeBytes: Int = 5 * 1024 * 1024
 private val pendingCarPictureFiles = mutableListOf<File>()
 
+private val allowedCarPictureExtensions = setOf(
+    "jpg", "jpeg", "png", "gif", "webp", "bmp", "heic", "heif", "tif", "tiff",
+)
+
+internal const val CAR_PICTURE_FILE_ACCEPT =
+    "image/*,.heic,.heif,.bmp,.tif,.tiff,.gif,.webp,.jpg,.jpeg,.png"
+
+internal fun isAllowedCarPictureFile(file: File): Boolean {
+    val name = (file.name as? String).orEmpty().lowercase()
+    val ext = name.substringAfterLast('.', missingDelimiterValue = "")
+    if (ext == "svg") return false
+    val type = (file.type as? String)?.trim()?.lowercase().orEmpty()
+    if (type == "image/svg+xml" || type == "image/svg") return false
+    if (type.startsWith("image/")) return true
+    return ext in allowedCarPictureExtensions
+}
+
 fun isR2CarPictureStorageEnabled(): Boolean = cachedR2MediaEnabled == true
 
 fun ensureCarPictureMediaConfig(onReady: (Boolean) -> Unit = {}) {
@@ -404,7 +421,10 @@ fun handleR2CarPictureUpload(input: HTMLInputElement, purchaseId: Long?) {
 
     for (i in 0 until files.length) {
         val file = files.item(i) as? File ?: continue
-        if ((file.type as? String)?.startsWith("image/") != true) continue
+        if (!isAllowedCarPictureFile(file)) {
+            showMessage("File ${file.name} is not a supported image type", "error")
+            continue
+        }
         val fileSize = (file.asDynamic().size as? Number)?.toInt() ?: 0
         if (fileSize > cachedMaxFileSizeBytes) {
             showMessage("File ${file.name} exceeds maximum image size", "error")
@@ -481,7 +501,10 @@ private fun handleLegacyCarPictureUpload(input: HTMLInputElement) {
     var scheduledCount = 0
     for (i in 0 until files.length) {
         val file = files.item(i) as? File ?: continue
-        if ((file.type as? String)?.startsWith("image/") != true) continue
+        if (!isAllowedCarPictureFile(file)) {
+            showMessage("File ${file.name} is not a supported image type", "error")
+            continue
+        }
         val fileSize = (file.asDynamic().size as? Number)?.toInt() ?: 0
         if (fileSize > cachedMaxFileSizeBytes) {
             showMessage("File ${file.name} exceeds maximum image size", "error")

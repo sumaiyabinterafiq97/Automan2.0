@@ -1,5 +1,6 @@
 package com.automan.backend.controller
 
+import com.automan.backend.dto.SuggestionFrequencyDto
 import com.automan.backend.dto.PurchaseChangeHistoryPageRequest
 import com.automan.backend.dto.PurchaseChangeHistoryPageResponse
 import com.automan.backend.dto.PurchaseChangeHistorySingleRowDto
@@ -241,6 +242,11 @@ class PurchaseController(
         val companies = purchaseService.getUniqueRixoCompanies()
         return ResponseEntity.ok(companies)
     }
+
+    /** Read-only purchase counts for Stock Location / Rixo Company suggestion order. */
+    @GetMapping("/suggestion-frequency")
+    fun getSuggestionFrequency(@RequestParam(required = false) supplier: String?): ResponseEntity<SuggestionFrequencyDto> =
+        ResponseEntity.ok(purchaseService.getSuggestionFrequency(supplier))
     
     @GetMapping("/repair-companies")
     fun getRepairCompanies(): ResponseEntity<List<String>> {

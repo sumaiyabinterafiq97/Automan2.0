@@ -3,6 +3,7 @@ package com.automan.backend.service
 import com.automan.backend.dto.PurchasePageFilterClause
 import com.automan.backend.dto.PurchasePageFilterRequest
 import com.automan.backend.dto.PurchasePageResponse
+import com.automan.backend.dto.SuggestionFrequencyDto
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
 import com.automan.backend.model.WorkflowStatus
@@ -2652,6 +2653,39 @@ class PurchaseService(
     
     fun getUniqueStockLocations(): List<String> {
         return purchaseRepository.findDistinctStockLocations()
+    }
+
+    fun getSuggestionFrequency(supplier: String?): SuggestionFrequencyDto {
+        val name = supplier?.trim().orEmpty()
+        if (name.isEmpty()) return SuggestionFrequencyDto()
+        val stockLocation = countPairsToMap(purchaseRepository.countStockLocationsBySupplier(name))
+        val rixoCompany = countPairsToMap(purchaseRepository.countRixoCompaniesBySupplier(name))
+        val rixoCompanyByStock = linkedMapOf<String, MutableMap<String, Long>>()
+        for (row in purchaseRepository.countRixoCompaniesBySupplierAndStock(name)) {
+            if (row.size < 3) continue
+            val stock = row[0]?.toString()?.trim()?.lowercase().orEmpty()
+            val company = row[1]?.toString()?.trim()?.lowercase().orEmpty()
+            val count = (row[2] as? Number)?.toLong() ?: 0L
+            if (stock.isEmpty() || company.isEmpty()) continue
+            rixoCompanyByStock.getOrPut(stock) { linkedMapOf() }[company] = count
+        }
+        return SuggestionFrequencyDto(
+            stockLocation = stockLocation,
+            rixoCompany = rixoCompany,
+            rixoCompanyByStock = rixoCompanyByStock,
+        )
+    }
+
+    private fun countPairsToMap(rows: List<Array<Any>>): Map<String, Long> {
+        val out = linkedMapOf<String, Long>()
+        for (row in rows) {
+            if (row.isEmpty()) continue
+            val key = row[0]?.toString()?.trim()?.lowercase().orEmpty()
+            if (key.isEmpty()) continue
+            val count = if (row.size > 1) (row[1] as? Number)?.toLong() ?: 0L else 0L
+            out[key] = count
+        }
+        return out
     }
     
     /**

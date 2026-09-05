@@ -408,6 +408,31 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "FROM Purchase p",
     )
     fun findDashboardRows(): List<DashboardPurchaseRowProjection>
+
+    @Query(
+        "SELECT LOWER(TRIM(p.stockLocation)), COUNT(p.id) FROM Purchase p " +
+            "WHERE p.auctionHouse IS NOT NULL AND LOWER(TRIM(p.auctionHouse)) = LOWER(TRIM(:supplier)) " +
+            "AND p.stockLocation IS NOT NULL AND TRIM(p.stockLocation) <> '' " +
+            "GROUP BY LOWER(TRIM(p.stockLocation))",
+    )
+    fun countStockLocationsBySupplier(@Param("supplier") supplier: String): List<Array<Any>>
+
+    @Query(
+        "SELECT LOWER(TRIM(p.rixoCompany)), COUNT(p.id) FROM Purchase p " +
+            "WHERE p.auctionHouse IS NOT NULL AND LOWER(TRIM(p.auctionHouse)) = LOWER(TRIM(:supplier)) " +
+            "AND p.rixoCompany IS NOT NULL AND TRIM(p.rixoCompany) <> '' " +
+            "GROUP BY LOWER(TRIM(p.rixoCompany))",
+    )
+    fun countRixoCompaniesBySupplier(@Param("supplier") supplier: String): List<Array<Any>>
+
+    @Query(
+        "SELECT LOWER(TRIM(p.stockLocation)), LOWER(TRIM(p.rixoCompany)), COUNT(p.id) FROM Purchase p " +
+            "WHERE p.auctionHouse IS NOT NULL AND LOWER(TRIM(p.auctionHouse)) = LOWER(TRIM(:supplier)) " +
+            "AND p.stockLocation IS NOT NULL AND TRIM(p.stockLocation) <> '' " +
+            "AND p.rixoCompany IS NOT NULL AND TRIM(p.rixoCompany) <> '' " +
+            "GROUP BY LOWER(TRIM(p.stockLocation)), LOWER(TRIM(p.rixoCompany))",
+    )
+    fun countRixoCompaniesBySupplierAndStock(@Param("supplier") supplier: String): List<Array<Any>>
 }
 
 /** Closed projection: purchase date string + workflow (rixo_requested is @Transient). */

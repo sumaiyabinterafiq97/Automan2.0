@@ -200,7 +200,7 @@ fun openQuickPurchaseModal() {
                     <div class="qp-pictures-box">
                         <div class="qp-pictures-actions">
                             <label for="carPictures" class="qp-upload-btn">Upload Car Pictures</label>
-                            <input type="file" id="carPictures" multiple accept="image/*" class="qp-file-input" onchange="handleCarPictureUpload(this)">
+                            <input type="file" id="carPictures" multiple accept="${CAR_PICTURE_FILE_ACCEPT}" class="qp-file-input" onchange="handleCarPictureUpload(this)">
                         </div>
                         <div id="carPicturePreview" class="qp-picture-preview"></div>
                         <div id="uploadProgress" class="qp-upload-progress" style="display:none;">

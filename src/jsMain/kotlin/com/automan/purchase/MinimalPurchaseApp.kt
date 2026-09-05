@@ -1805,6 +1805,64 @@ fun initializeAppSetup() {
             return '¥' + Math.round(n).toLocaleString('en-US');
         };
 
+        window.__suggestionFrequencyCache = window.__suggestionFrequencyCache || {};
+        window.__suggestionFrequencyInflight = window.__suggestionFrequencyInflight || {};
+
+        window.ensureSuggestionFrequency = function(supplier) {
+            var key = String(supplier || '').trim().toLowerCase();
+            if (!key) return Promise.resolve(null);
+            if (window.__suggestionFrequencyCache[key]) {
+                return Promise.resolve(window.__suggestionFrequencyCache[key]);
+            }
+            if (window.__suggestionFrequencyInflight[key]) {
+                return window.__suggestionFrequencyInflight[key];
+            }
+            var path = 'purchases/suggestion-frequency?supplier=' + encodeURIComponent(String(supplier).trim());
+            var url = (typeof window.apiUrl === 'function') ? window.apiUrl(path) : ('/api/' + path);
+            var p = fetch(url).then(function(r) {
+                if (!r.ok) return null;
+                return r.json();
+            }).then(function(data) {
+                if (data) window.__suggestionFrequencyCache[key] = data;
+                delete window.__suggestionFrequencyInflight[key];
+                return data || null;
+            }).catch(function() {
+                delete window.__suggestionFrequencyInflight[key];
+                return null;
+            });
+            window.__suggestionFrequencyInflight[key] = p;
+            return p;
+        };
+
+        window.countForSuggestion = function(field, value, stockHint, freq) {
+            if (!freq) return 0;
+            var k = String(value == null ? '' : value).trim().toLowerCase();
+            if (!k) return 0;
+            if (field === 'Stock Location') {
+                return Number((freq.stockLocation && freq.stockLocation[k]) || 0);
+            }
+            var stock = String(stockHint || '').trim().toLowerCase();
+            if (stock && freq.rixoCompanyByStock && freq.rixoCompanyByStock[stock]) {
+                return Number(freq.rixoCompanyByStock[stock][k] || 0);
+            }
+            return Number((freq.rixoCompany && freq.rixoCompany[k]) || 0);
+        };
+
+        window.sortSuggestionOptionsByFrequency = function(supplier, field, values, stockLocationHint) {
+            if (!values || !values.length) return values;
+            var key = String(supplier || '').trim().toLowerCase();
+            var freq = (window.__suggestionFrequencyCache || {})[key];
+            if (!freq) return values;
+            return values.map(function(v, i) { return { v: v, i: i }; }).sort(function(a, b) {
+                var nameA = (a.v && typeof a.v === 'object' && a.v.value != null) ? a.v.value : a.v;
+                var nameB = (b.v && typeof b.v === 'object' && b.v.value != null) ? b.v.value : b.v;
+                var ca = window.countForSuggestion(field, nameA, stockLocationHint, freq);
+                var cb = window.countForSuggestion(field, nameB, stockLocationHint, freq);
+                if (cb !== ca) return cb - ca;
+                return a.i - b.i;
+            }).map(function(x) { return x.v; });
+        };
+
         window.buildRixoCompanyModalOptions = function(companyNames, partialSel, auctionName) {
             var names = companyNames || [];
             var sel = partialSel || {};
@@ -1871,13 +1929,27 @@ fun initializeAppSetup() {
                             return;
                         }
                         var modalOptions = distinct;
-                        if (label === 'Rixo Company' && typeof window.buildRixoCompanyModalOptions === 'function') {
-                            modalOptions = window.buildRixoCompanyModalOptions(distinct, result, supplier);
+                        function showSortedModal() {
+                            if (label === 'Stock Location' && typeof window.sortSuggestionOptionsByFrequency === 'function') {
+                                modalOptions = window.sortSuggestionOptionsByFrequency(supplier, label, distinct, '');
+                            }
+                            if (label === 'Rixo Company' && typeof window.buildRixoCompanyModalOptions === 'function') {
+                                var names = distinct;
+                                if (typeof window.sortSuggestionOptionsByFrequency === 'function') {
+                                    names = window.sortSuggestionOptionsByFrequency(supplier, label, distinct, result.stockLocation || '');
+                                }
+                                modalOptions = window.buildRixoCompanyModalOptions(names, result, supplier);
+                            }
+                            window.showFieldSelectionModal('Supplier: ' + supplier, label, modalOptions).then(function(chosen) {
+                                if (chosen === null) rej('CANCELLED');
+                                else res(chosen);
+                            });
                         }
-                        window.showFieldSelectionModal('Supplier: ' + supplier, label, modalOptions).then(function(chosen) {
-                            if (chosen === null) rej('CANCELLED');
-                            else res(chosen);
-                        });
+                        if ((label === 'Stock Location' || label === 'Rixo Company') && typeof window.ensureSuggestionFrequency === 'function') {
+                            window.ensureSuggestionFrequency(supplier).then(showSortedModal);
+                        } else {
+                            showSortedModal();
+                        }
                     });
                 }
 
@@ -1989,13 +2061,27 @@ fun initializeAppSetup() {
                             return;
                         }
                         var modalOptions = distinct;
-                        if (label === 'Rixo Company' && typeof window.buildRixoCompanyModalOptions === 'function') {
-                            modalOptions = window.buildRixoCompanyModalOptions(distinct, result, supplier);
+                        function showSortedModal() {
+                            if (label === 'Stock Location' && typeof window.sortSuggestionOptionsByFrequency === 'function') {
+                                modalOptions = window.sortSuggestionOptionsByFrequency(supplier, label, distinct, '');
+                            }
+                            if (label === 'Rixo Company' && typeof window.buildRixoCompanyModalOptions === 'function') {
+                                var names = distinct;
+                                if (typeof window.sortSuggestionOptionsByFrequency === 'function') {
+                                    names = window.sortSuggestionOptionsByFrequency(supplier, label, distinct, result.stockLocation || '');
+                                }
+                                modalOptions = window.buildRixoCompanyModalOptions(names, result, supplier);
+                            }
+                            window.showFieldSelectionModal('Supplier: ' + supplier, label, modalOptions).then(function(chosen) {
+                                if (chosen === null) rej('CANCELLED');
+                                else res(chosen);
+                            });
                         }
-                        window.showFieldSelectionModal('Supplier: ' + supplier, label, modalOptions).then(function(chosen) {
-                            if (chosen === null) rej('CANCELLED');
-                            else res(chosen);
-                        });
+                        if ((label === 'Stock Location' || label === 'Rixo Company') && typeof window.ensureSuggestionFrequency === 'function') {
+                            window.ensureSuggestionFrequency(supplier).then(showSortedModal);
+                        } else {
+                            showSortedModal();
+                        }
                     });
                 }
 
@@ -9039,7 +9125,7 @@ fun createAddFormHTML(): String {
                         <label for="carPictures" style="display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background-color 0.3s;">
                             📷 Upload Car Pictures
                         </label>
-                        <input type="file" id="carPictures" multiple accept="image/*" style="display: none;" onchange="handleCarPictureUpload(this)">
+                        <input type="file" id="carPictures" multiple accept="${CAR_PICTURE_FILE_ACCEPT}" style="display: none;" onchange="handleCarPictureUpload(this)">
                     </div>
 
                     <div id="carPicturePreview" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-top: 20px;">
@@ -9713,9 +9799,15 @@ fun setupRixoDropdowns() {
                 var file = files[i];
                 var index = i;
                 
-                // Validate file type
-                if (!file.type.startsWith('image/')) {
-                    console.warn('Skipping non-image file:', file.name);
+                // Validate file type (MIME image/* or common photo extensions; skip SVG)
+                var fileName = (file.name || '').toLowerCase();
+                var fileExt = fileName.indexOf('.') >= 0 ? fileName.split('.').pop() : '';
+                var fileType = (file.type || '').toLowerCase();
+                var allowedExt = { jpg:1, jpeg:1, png:1, gif:1, webp:1, bmp:1, heic:1, heif:1, tif:1, tiff:1 };
+                var isSvg = fileExt === 'svg' || fileType === 'image/svg+xml' || fileType === 'image/svg';
+                var isImage = !isSvg && (fileType.indexOf('image/') === 0 || !!allowedExt[fileExt]);
+                if (!isImage) {
+                    alert('File ' + file.name + ' is not a supported image type');
                     continue;
                 }
                 
@@ -18749,7 +18841,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                         <label for="carPictures" style="display: inline-block; padding: 12px 24px; background-color: #007bff; color: white; border-radius: 6px; cursor: pointer; font-weight: 600; transition: background-color 0.3s;">
                             📷 Upload Car Pictures
                         </label>
-                        <input type="file" id="carPictures" multiple accept="image/*" style="display: none;" onchange="handleCarPictureUpload(this)">
+                        <input type="file" id="carPictures" multiple accept="${CAR_PICTURE_FILE_ACCEPT}" style="display: none;" onchange="handleCarPictureUpload(this)">
                     </div>
                     
                     <!-- Picture Preview Area -->

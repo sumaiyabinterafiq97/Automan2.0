@@ -49,10 +49,12 @@ class PurchaseMediaService(
             )
         }
 
-        val contentType = file.contentType?.trim()?.lowercase()
-            ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Missing content type")
         val bytes = file.bytes
-        MediaFileValidator.validate(contentType, bytes, properties.maxFileSizeBytes)
+        val contentType = try {
+            MediaFileValidator.resolveAndValidate(file.contentType, bytes, properties.maxFileSizeBytes)
+        } catch (e: IllegalArgumentException) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, e.message)
+        }
 
         val chassis = purchase.chassis
         val ext = MediaFileValidator.extensionFor(contentType)
