@@ -158,7 +158,7 @@ class PdfService {
                 )
                 .add(
                     Paragraph(
-                        "〒272-0133 CHIBA KEN, ICHIKAWA-SHI,\n" +
+                        "272-0133 CHIBA KEN, ICHIKAWA-SHI,\n" +
                             "GYOTOKUEKIMA 3-6-1, TAIYO MANSION 112\n" +
                             "TEL: +81-47-303-3098\n" +
                             "FAX: +81-47-711-0409\n" +
@@ -1221,8 +1221,7 @@ class PdfService {
         val outputStream = ByteArrayOutputStream()
         val pdfWriter = PdfWriter(outputStream)
         val pdfDocument = PdfDocument(pdfWriter)
-        pdfDocument.setDefaultPageSize(PageSize.A4.rotate())
-        val document = Document(pdfDocument)
+        val document = Document(pdfDocument, PageSize.A4)
 
         val japaneseFont = getJapaneseFont()
         val fontLatin = try {
@@ -1238,15 +1237,6 @@ class PdfService {
         val fonts = TransportFonts(japaneseFont, fontLatin, fontLatinBold)
         Logger.debug("PDF Service: Using font: ${japaneseFont.fontProgram?.fontNames?.getFontName()}")
 
-        document.add(
-            Paragraph("陸送依頼書")
-                .setFont(japaneseFont)
-                .setFontSize(18f)
-                .setBold()
-                .setTextAlignment(TextAlignment.CENTER)
-                .setMarginBottom(8f),
-        )
-
         val rixoCompany = rixoTransportRecipientName(transportData["rixoCompany"])
         val transportDate = transportData["buyingDate"] ?: ""
         val todayJapan = LocalDate.now(ZoneId.of("Asia/Tokyo"))
@@ -1254,44 +1244,77 @@ class PdfService {
         val formattedEventDate = formatDateToJapanese(transportDate, includeYear = true)
         Logger.debug("PDF Service: Header 日付 (today JST): '$formattedToday'; 開催日 raw: '$transportDate'")
 
-        val headerTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
-            .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginBottom(8f)
-        val leftHeader = Cell()
-            .add(
-                mixedFontParagraph("$rixoCompany 様", fonts, 14f, bold = true)
-                    .setMarginBottom(4f),
-            )
-            .add(
-                Paragraph()
-                    .add(Text("開催日: ").setBold().setFont(japaneseFont))
-                    .also { addMixedFontRuns(it, formattedEventDate, fonts, bold = false) }
-                    .setFontSize(11f),
-            )
-            .setPadding(4f)
-            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        val rightHeader = Cell()
-            .add(
-                Paragraph()
-                    .add(Text("日付: ").setBold().setFont(japaneseFont))
-                    .also { addMixedFontRuns(it, formattedToday, fonts, bold = false) }
-                    .setFontSize(12f),
-            )
-            .setPadding(4f)
-            .setTextAlignment(TextAlignment.RIGHT)
-            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.TOP)
-            .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
-        headerTable.addCell(leftHeader)
-        headerTable.addCell(rightHeader)
-        document.add(headerTable)
-
         val defaultHead = "いつもお世話になっております。\n下記の車両の陸送手配をお願いいたします。"
         val headMessage = transportData["headMessage"]?.takeIf { it.isNotBlank() } ?: defaultHead
+        val footerMessage = transportData["footerMessage"]?.takeIf { it.isNotBlank() }
+            ?: "※港や船での盗難が多発の為、スペアキーやリモコンキーが車内にありましたら弊社まで郵送していただけると助かります。"
+        val extraMessage = transportData["extraMessage"]?.takeIf { it.isNotBlank() }
+        val contactText = resolvedTransportContact(transportData["contactDetails"])
+
+        val sideMargin = 28f
+        val topMargin = 28f
+        val footerBottom = 18f
+        val footerBandHeight = transportFooterBandHeight(footerMessage, extraMessage, contactText)
+        document.setMargins(topMargin, sideMargin, footerBottom + footerBandHeight + 12f, sideMargin)
+
+        fun thickRule(): LineSeparator {
+            val line = SolidLine(1.5f)
+            line.color = ColorConstants.BLACK
+            return LineSeparator(line).setMarginTop(1f).setMarginBottom(1f)
+        }
+
+        document.add(
+            Paragraph("陸送依頼書")
+                .setFont(japaneseFont)
+                .setFontSize(16f)
+                .setBold()
+                .setTextAlignment(TextAlignment.CENTER)
+                .setMarginTop(0f)
+                .setMarginBottom(2f),
+        )
+        document.add(thickRule())
+
+        val headerTable = Table(UnitValue.createPercentArray(floatArrayOf(52f, 48f)))
+            .setWidth(UnitValue.createPercentValue(100f))
+            .setMarginTop(2f)
+            .setMarginBottom(2f)
+        headerTable.addCell(
+            Cell()
+                .add(mixedFontParagraph("$rixoCompany 様", fonts, 13f, bold = true).setMargin(0f))
+                .setPadding(2f)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+                .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER),
+        )
+        headerTable.addCell(
+            Cell()
+                .add(
+                    Paragraph()
+                        .add(Text("日付: ").setBold().setFont(japaneseFont))
+                        .also { addMixedFontRuns(it, formattedToday, fonts, bold = false) }
+                        .setFontSize(11f)
+                        .setMargin(0f),
+                )
+                .setPadding(2f)
+                .setTextAlignment(TextAlignment.RIGHT)
+                .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+                .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER),
+        )
+        document.add(headerTable)
+
+        document.add(
+            Paragraph()
+                .add(Text("開催日: ").setBold().setFont(japaneseFont))
+                .also { addMixedFontRuns(it, formattedEventDate, fonts, bold = false) }
+                .setFontSize(10f)
+                .setMarginTop(6f)
+                .setMarginBottom(4f),
+        )
+
         val headLines = headMessage.split("\n")
         headLines.forEachIndexed { index, line ->
             document.add(
-                mixedFontParagraph(line.trim(), fonts, 10f, leading = 12f)
-                    .setMarginBottom(if (index < headLines.lastIndex) 2f else 10f),
+                mixedFontParagraph(line.trim(), fonts, 9f, leading = 11f)
+                    .setMarginBottom(if (index < headLines.lastIndex) 1f else 8f),
             )
         }
 
@@ -1307,20 +1330,33 @@ class PdfService {
             rixoSupplierKey(sortedPurchases[a]) == rixoSupplierKey(sortedPurchases[b])
         }
         val (showDest, destSpan) = consecutiveGroupStarts(sortedPurchases.size) { a, b ->
-            rixoDestKey(sortedPurchases[a]) == rixoDestKey(sortedPurchases[b])
+            rixoSupplierKey(sortedPurchases[a]) == rixoSupplierKey(sortedPurchases[b]) &&
+                rixoDestKey(sortedPurchases[a]) == rixoDestKey(sortedPurchases[b])
+        }
+        fun supplierBlockEndsAt(index: Int): Boolean {
+            if (index >= sortedPurchases.lastIndex) return true
+            return rixoSupplierKey(sortedPurchases[index]) != rixoSupplierKey(sortedPurchases[index + 1])
         }
 
-        val table = Table(UnitValue.createPercentArray(floatArrayOf(16f, 10f, 16f, 10f, 12f, 14f, 22f)))
+        val table = Table(UnitValue.createPercentArray(floatArrayOf(16f, 10f, 17f, 10f, 12f, 13f, 22f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginBottom(10f)
             .setKeepTogether(false)
 
         val headers = listOf("取引先", "出品番号", "車体番号", "年式", "車名", "ナンバーカット", "搬入先")
-        headers.forEach { header ->
-            table.addCell(createHeaderCell(header, japaneseFont))
+        headers.forEachIndexed { headerIndex, header ->
+            table.addCell(
+                createTransportHeaderCell(
+                    header,
+                    fonts,
+                    leftEdge = headerIndex == 0,
+                    rightEdge = headerIndex == headers.lastIndex,
+                ),
+            )
         }
 
         sortedPurchases.forEachIndexed { index, purchase ->
+            val closeSupplier = supplierBlockEndsAt(index)
             if (showSupplier[index]) {
                 val supplierName = purchase.auctionHouse?.trim().orEmpty()
                 val venueId = purchase.venueId?.trim().orEmpty()
@@ -1329,23 +1365,45 @@ class PdfService {
                         listOf(supplierName, "POS番号: $venueId"),
                         fonts,
                         rowspan = supplierSpan[index],
+                        leftEdge = true,
+                        rightEdge = false,
+                        boldBottom = true,
                     ),
                 )
             }
 
-            table.addCell(createTransportBodyCell(purchase.auctionNo ?: "", fonts))
-            table.addCell(createTransportBodyCell(purchase.chassis ?: "", fonts))
+            table.addCell(createTransportBodyCell(purchase.auctionNo ?: "", fonts, boldBottom = closeSupplier))
+            table.addCell(createTransportBodyCell(purchase.chassis ?: "", fonts, boldBottom = closeSupplier))
             val yearOnly = CarModelYearUtils.extractYearFromCarModelYear(purchase.carModelYear?.toString())
-            table.addCell(createTransportBodyCell(westernYearToJapaneseEra(yearOnly), fonts))
-            table.addCell(createTransportBodyCell(purchase.carName ?: "", fonts))
-            table.addCell(createTransportBodyCell(purchase.numberCut ?: "", fonts))
+            table.addCell(createTransportBodyCell(westernYearToJapaneseEra(yearOnly), fonts, boldBottom = closeSupplier))
+            table.addCell(createTransportBodyCell(purchase.carName ?: "", fonts, boldBottom = closeSupplier))
+            table.addCell(createTransportBodyCell(purchase.numberCut ?: "", fonts, boldBottom = closeSupplier))
 
             if (showDest[index]) {
                 val destName = rixoDestName(purchase)
                 val address = lookupStockAddress(destName, stockLocationAddresses)
                     ?: lookupStockAddress(purchase.stockLocation ?: "", stockLocationAddresses)
-                val destLines = if (address.isNullOrBlank()) listOf(destName) else listOf(destName, address)
-                table.addCell(createMultilineCell(destLines, fonts, rowspan = destSpan[index]))
+                val destLines = buildList {
+                    if (destName.isNotEmpty()) add(destName)
+                    if (!address.isNullOrBlank()) {
+                        address.split(Regex("\\r?\\n"))
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                            .forEach { add(it) }
+                    }
+                    if (isEmpty()) add("")
+                }
+                val destEnd = index + destSpan[index] - 1
+                table.addCell(
+                    createMultilineCell(
+                        destLines,
+                        fonts,
+                        rowspan = destSpan[index],
+                        leftEdge = false,
+                        rightEdge = true,
+                        boldBottom = supplierBlockEndsAt(destEnd),
+                    ),
+                )
             }
         }
 
@@ -1371,16 +1429,12 @@ class PdfService {
         )
         document.add(totalTable)
 
-        val footerMessage = transportData["footerMessage"]?.takeIf { it.isNotBlank() }
-            ?: "※港や船での盗難が多発の為、スペアキーやリモコンキーが車内にありましたら弊社まで郵送していただけると助かります。"
-        val extraMessage = transportData["extraMessage"]?.takeIf { it.isNotBlank() }
         val extraRed = DeviceRgb(255, 0, 0)
         val footerBlock = com.itextpdf.layout.element.Div()
         val footerLines = footerMessage.split("\n")
         footerLines.forEachIndexed { index, line ->
             footerBlock.add(
-                mixedFontParagraph(line.trim(), fonts, 9f, leading = 11f)
-                    .setFontColor(ColorConstants.BLACK)
+                mixedFontParagraph(line.trim(), fonts, 9f, leading = 11f, color = ColorConstants.BLACK)
                     .setMarginBottom(
                         if (index < footerLines.lastIndex || extraMessage != null) 2f else 0f,
                     ),
@@ -1390,33 +1444,36 @@ class PdfService {
             val extraLines = extraMessage.split("\n")
             extraLines.forEachIndexed { index, line ->
                 footerBlock.add(
-                    mixedFontParagraph(line.trim(), fonts, 9f, leading = 11f)
-                        .setFontColor(extraRed)
+                    mixedFontParagraph(line.trim(), fonts, 9f, leading = 11f, color = extraRed)
                         .setMarginBottom(if (index < extraLines.lastIndex) 2f else 0f),
                 )
             }
         }
 
-        val footerTable = Table(UnitValue.createPercentArray(floatArrayOf(70f, 30f)))
+        val footerTable = Table(UnitValue.createPercentArray(floatArrayOf(68f, 32f)))
             .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginTop(10f)
         footerTable.addCell(
             Cell()
                 .add(footerBlock)
-                .setPadding(8f)
+                .setPadding(0f)
                 .setTextAlignment(TextAlignment.LEFT)
                 .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.BOTTOM)
                 .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER),
         )
         footerTable.addCell(
             Cell()
-                .add(contactBlockFromTransport(transportData["contactDetails"], fonts))
-                .setPadding(8f)
+                .add(contactBlockFromTransport(contactText, fonts))
+                .setPadding(0f)
                 .setTextAlignment(TextAlignment.RIGHT)
                 .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.BOTTOM)
                 .setBorder(com.itextpdf.layout.borders.Border.NO_BORDER),
         )
-        document.add(footerTable)
+        val contentWidth = PageSize.A4.width - sideMargin * 2
+        val lastPage = pdfDocument.numberOfPages.coerceAtLeast(1)
+        val footerDiv = com.itextpdf.layout.element.Div()
+            .setFixedPosition(lastPage, sideMargin, footerBottom, contentWidth)
+            .add(footerTable)
+        document.add(footerDiv)
 
         document.close()
         return outputStream.toByteArray()
@@ -1808,16 +1865,26 @@ class PdfService {
         fontSize: Float,
         leading: Float? = null,
         bold: Boolean = false,
+        color: com.itextpdf.kernel.colors.Color? = null,
     ): Paragraph {
         val paragraph = Paragraph().setFontSize(fontSize)
         if (leading != null) paragraph.setFixedLeading(leading)
-        addMixedFontRuns(paragraph, text, fonts, bold)
+        if (color != null) paragraph.setFontColor(color)
+        addMixedFontRuns(paragraph, text, fonts, bold, color)
         return paragraph
     }
 
-    private fun addMixedFontRuns(paragraph: Paragraph, text: String, fonts: TransportFonts, bold: Boolean) {
+    private fun addMixedFontRuns(
+        paragraph: Paragraph,
+        text: String,
+        fonts: TransportFonts,
+        bold: Boolean,
+        color: com.itextpdf.kernel.colors.Color? = null,
+    ) {
         if (text.isEmpty()) {
-            paragraph.add(Text("").setFont(if (bold) fonts.latinBold else fonts.latin))
+            val empty = Text("").setFont(if (bold) fonts.latinBold else fonts.latin)
+            if (color != null) empty.setFontColor(color)
+            paragraph.add(empty)
             return
         }
         val buffer = StringBuilder()
@@ -1832,6 +1899,7 @@ class PdfService {
             }
             val chunk = Text(buffer.toString()).setFont(font)
             if (bold) chunk.setBold()
+            if (color != null) chunk.setFontColor(color)
             paragraph.add(chunk)
             buffer.setLength(0)
         }
@@ -1844,48 +1912,129 @@ class PdfService {
         flush()
     }
 
-    private fun createTransportBodyCell(text: String, fonts: TransportFonts): Cell {
-        return Cell()
-            .add(mixedFontParagraph(text, fonts, 9f, leading = 11f))
-            .setPadding(8f)
-            .setTextAlignment(TextAlignment.LEFT)
-            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
-            .setBorder(
-                com.itextpdf.layout.borders.SolidBorder(
-                    ColorConstants.BLACK,
-                    1f,
-                ),
+    private fun createTransportHeaderCell(
+        text: String,
+        fonts: TransportFonts,
+        leftEdge: Boolean,
+        rightEdge: Boolean,
+    ): Cell {
+        val cell = Cell()
+            .add(
+                mixedFontParagraph(text, fonts, 8f, leading = 10f, bold = true)
+                    .setTextAlignment(TextAlignment.CENTER)
+                    .setMargin(0f),
             )
+            .setPadding(4f)
+            .setTextAlignment(TextAlignment.CENTER)
+            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+        applyTransportGridBorder(
+            cell,
+            leftEdge = leftEdge,
+            rightEdge = rightEdge,
+            topEdge = true,
+            boldBottom = true,
+        )
+        return cell
     }
 
-    private fun createMultilineCell(lines: List<String>, fonts: TransportFonts, rowspan: Int = 1): Cell {
-        val cell = Cell(rowspan.coerceAtLeast(1), 1)
-            .setPadding(8f)
+    private fun createTransportBodyCell(text: String, fonts: TransportFonts, boldBottom: Boolean): Cell {
+        val cell = Cell()
+            .add(mixedFontParagraph(text, fonts, 8f, leading = 10f).setMargin(0f))
+            .setPadding(4f)
             .setTextAlignment(TextAlignment.LEFT)
             .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
-            .setBorder(
-                com.itextpdf.layout.borders.SolidBorder(
-                    ColorConstants.BLACK,
-                    1f,
-                ),
-            )
-        val content = if (lines.isEmpty()) listOf("") else lines
+        applyTransportGridBorder(
+            cell,
+            leftEdge = false,
+            rightEdge = false,
+            topEdge = false,
+            boldBottom = boldBottom,
+        )
+        return cell
+    }
+
+    private fun createMultilineCell(
+        lines: List<String>,
+        fonts: TransportFonts,
+        rowspan: Int = 1,
+        leftEdge: Boolean = false,
+        rightEdge: Boolean = false,
+        boldBottom: Boolean = true,
+    ): Cell {
+        val cell = Cell(rowspan.coerceAtLeast(1), 1)
+            .setPadding(4f)
+            .setTextAlignment(TextAlignment.LEFT)
+            .setVerticalAlignment(com.itextpdf.layout.properties.VerticalAlignment.MIDDLE)
+        applyTransportGridBorder(
+            cell,
+            leftEdge = leftEdge,
+            rightEdge = rightEdge,
+            topEdge = false,
+            boldBottom = boldBottom,
+        )
+        val content = lines
+            .flatMap { line ->
+                if (line.contains('\n') || line.contains('\r')) {
+                    line.split(Regex("\\r?\\n")).map { it.trim() }.filter { it.isNotEmpty() }
+                } else {
+                    listOf(line)
+                }
+            }
+            .ifEmpty { listOf("") }
         content.forEachIndexed { idx, line ->
             cell.add(
-                mixedFontParagraph(line, fonts, 9f, leading = 11f)
+                mixedFontParagraph(line, fonts, 8f, leading = 10f)
+                    .setMargin(0f)
                     .setMarginBottom(if (idx < content.lastIndex) 1f else 0f),
             )
         }
         return cell
     }
 
-    private fun contactBlockFromTransport(contactDetails: String?, fonts: TransportFonts): Paragraph {
+    /** Outer frame and each supplier-block close are 1.5pt. Chassis lines inside a block stay 0.5pt. */
+    private fun applyTransportGridBorder(
+        cell: Cell,
+        leftEdge: Boolean,
+        rightEdge: Boolean,
+        topEdge: Boolean,
+        boldBottom: Boolean,
+    ) {
+        fun stroke(width: Float) =
+            com.itextpdf.layout.borders.SolidBorder(ColorConstants.BLACK, width)
+        cell.setBorder(com.itextpdf.layout.borders.Border.NO_BORDER)
+        if (leftEdge) cell.setBorderLeft(stroke(1.5f))
+        cell.setBorderRight(stroke(if (rightEdge) 1.5f else 0.5f))
+        if (topEdge) cell.setBorderTop(stroke(1.5f))
+        cell.setBorderBottom(stroke(if (boldBottom) 1.5f else 0.5f))
+    }
+
+    private fun resolvedTransportContact(contactDetails: String?): String {
         val raw = contactDetails?.trim().orEmpty()
-        val text = if (raw.isNotEmpty()) {
+        return if (raw.isNotEmpty()) {
             raw
         } else {
             "担当：芽紋 080-3918-1478\nFAX: 047-711-0409\n有限会社メモン"
         }
+    }
+
+    private fun transportFooterBandHeight(footer: String, extra: String?, contact: String): Float {
+        val left = estimateWrappedRows(footer, 26) + estimateWrappedRows(extra.orEmpty(), 26)
+        val right = estimateWrappedRows(contact, 14)
+        val rows = maxOf(left, right, 1)
+        return rows * 13f + 8f
+    }
+
+    private fun estimateWrappedRows(text: String, charsPerRow: Int): Int {
+        if (text.isBlank()) return 0
+        val per = charsPerRow.coerceAtLeast(1)
+        return text.split(Regex("\\r?\\n")).sumOf { line ->
+            val len = line.trim().length
+            if (len == 0) 1 else (len + per - 1) / per
+        }
+    }
+
+    private fun contactBlockFromTransport(contactDetails: String?, fonts: TransportFonts): Paragraph {
+        val text = resolvedTransportContact(contactDetails)
         val lines = text.split("\n")
         val paragraph = Paragraph().setFontSize(9f).setFixedLeading(11f)
         lines.forEachIndexed { idx, line ->

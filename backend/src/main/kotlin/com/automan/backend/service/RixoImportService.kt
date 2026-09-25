@@ -3,7 +3,6 @@ package com.automan.backend.service
 import com.automan.backend.dto.SupplierMapRowDto
 import com.automan.backend.model.RixoMapping
 import com.automan.backend.repository.RixoMappingRepository
-import com.automan.backend.util.RixoPolFromStockLocation
 import org.springframework.data.domain.Sort
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
@@ -56,7 +55,6 @@ class RixoImportService(
                             stockLocation = parsed.stockLocation,
                             rixoCompany = parsed.rixoCompany,
                             venueId = parsed.venueId,
-                            pol = RixoPolFromStockLocation.derivePol(parsed.stockLocation),
                         )
                         successCount++
                     } else {
@@ -128,7 +126,7 @@ class RixoImportService(
     @Transactional(readOnly = true)
     fun getAllRixoPricesAsMaps(): List<Map<String, Any>> {
         val sql = """
-            SELECT id, auction_name, stock_location, rixo_company, venue_id, pol,
+            SELECT id, auction_name, stock_location, rixo_company, venue_id,
                    supported_vehicle_type, rixo_price
             FROM rixo_mapping
             WHERE auction_name IS NOT NULL AND TRIM(auction_name) <> ''
@@ -142,7 +140,6 @@ class RixoImportService(
                     stockLocation = rs.getString("stock_location").orEmpty(),
                     rixoCompany = rs.getString("rixo_company").orEmpty(),
                     venueId = rs.getString("venue_id"),
-                    pol = rs.getString("pol"),
                     supportedVehicleType = rs.getString("supported_vehicle_type"),
                     rixoPrice = rs.getString("rixo_price"),
                 ),
@@ -173,7 +170,6 @@ class RixoImportService(
                 stockLocation = row.stockLocation.trim(),
                 rixoCompany = row.rixoCompany.trim(),
                 venueId = row.venueId?.trim()?.takeIf { it.isNotBlank() },
-                pol = row.pol?.trim()?.takeIf { it.isNotBlank() },
                 supportedVehicleType = row.supportedVehicleType?.trim()?.takeIf { it.isNotBlank() },
                 rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotBlank() },
                 createdAt = existing.createdAt,
@@ -188,14 +184,11 @@ class RixoImportService(
         stockLocation: String,
         rixoCompany: String,
         venueId: String?,
-        pol: String? = null,
     ): SaveRixoMappingResult {
         val auction = auctionHouse.trim()
         val incomingStock = stockLocation.trim().ifBlank { "-" }
         val incomingRixo = rixoCompany.trim().ifBlank { "-" }
         val incomingVenue = venueId?.trim()?.takeIf { it.isNotBlank() }
-        val incomingPol = pol?.trim()?.takeIf { it.isNotBlank() }
-            ?: RixoPolFromStockLocation.derivePol(incomingStock)
 
         val existing = rixoMappingRepository.findByAuctionStockRixo(auction, incomingStock, incomingRixo)
             .firstOrNull()
@@ -203,7 +196,6 @@ class RixoImportService(
         if (existing != null) {
             val updated = existing.copy(
                 venueId = incomingVenue ?: existing.venueId,
-                pol = incomingPol ?: existing.pol,
                 createdAt = existing.createdAt,
             )
             val saved = rixoMappingRepository.save(updated)
@@ -216,7 +208,6 @@ class RixoImportService(
                 auctionName = auction,
                 stockLocation = incomingStock,
                 venueId = incomingVenue,
-                pol = incomingPol,
             ),
         )
         return SaveRixoMappingResult(price = SupplierMapRowDto.from(saved), merged = false)
@@ -237,7 +228,6 @@ class RixoImportService(
         stockLocation: String?,
         rixoCompany: String?,
         venueId: String?,
-        pol: String?,
         supportedVehicleType: String? = null,
         rixoPrice: String? = null,
     ): SupplierMapRowDto? {
@@ -249,9 +239,6 @@ class RixoImportService(
                 stockLocation = newStock,
                 rixoCompany = rixoCompany?.trim()?.takeIf { it.isNotBlank() } ?: existing.rixoCompany,
                 venueId = venueId?.trim()?.takeIf { it.isNotBlank() },
-                pol = pol?.trim()?.takeIf { it.isNotBlank() }
-                    ?: RixoPolFromStockLocation.derivePol(newStock)
-                    ?: existing.pol,
                 supportedVehicleType = supportedVehicleType?.trim()?.takeIf { it.isNotBlank() },
                 rixoPrice = rixoPrice?.trim()?.takeIf { it.isNotBlank() },
                 createdAt = existing.createdAt,

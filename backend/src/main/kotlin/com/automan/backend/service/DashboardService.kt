@@ -5,6 +5,8 @@ import com.automan.backend.dto.DashboardChartsDto
 import com.automan.backend.dto.DashboardKpiDto
 import com.automan.backend.dto.DashboardNamedValueDto
 import com.automan.backend.dto.DashboardPeriodDto
+import com.automan.backend.dto.DashboardRecentPurchaseRowDto
+import com.automan.backend.dto.DashboardRecentPurchasesDto
 import com.automan.backend.dto.DashboardPurchaseRowDto
 import com.automan.backend.dto.DashboardQuickActionDto
 import com.automan.backend.dto.DashboardResponse
@@ -12,10 +14,12 @@ import com.automan.backend.dto.DashboardTablesDto
 import com.automan.backend.dto.DashboardWorkflowStageDto
 import com.automan.backend.model.WorkflowStatus
 import com.automan.backend.repository.DashboardPurchaseRowProjection
+import com.automan.backend.repository.DashboardRecentPurchaseProjection
 import com.automan.backend.repository.InvoiceHistoryLineRepository
 import com.automan.backend.repository.InvoiceHistoryRepository
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.ShippingHistoryRepository
+import com.automan.backend.util.CarModelYearUtils
 import com.automan.backend.util.PurchaseDateParseUtils
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -39,6 +43,8 @@ class DashboardService(
     private val shippingHistoryRepository: ShippingHistoryRepository,
     private val invoiceHistoryRepository: InvoiceHistoryRepository,
     private val invoiceHistoryLineRepository: InvoiceHistoryLineRepository,
+    private val purchaseExtendedAttributesService: PurchaseExtendedAttributesService,
+    private val purchaseVehicleOverrideService: PurchaseVehicleOverrideService,
 ) {
     companion object {
         private val ISO_DATE: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
@@ -161,6 +167,53 @@ class DashboardService(
             alerts = buildAlerts(pipeline),
             quickActions = QUICK_ACTIONS,
         )
+    }
+
+    fun recentPurchases(dayRaw: String): DashboardRecentPurchasesDto {
+        val day = dayRaw.trim().lowercase(Locale.ROOT)
+        val target = when (day) {
+            "today" -> LocalDate.now()
+            "yesterday" -> LocalDate.now().minusDays(1)
+            else -> throw IllegalArgumentException("day must be today or yesterday")
+        }
+        val matched = purchaseRepository.findRecentPurchaseCandidates()
+            .mapNotNull { row ->
+                val parsed = PurchaseDateParseUtils.parseToLocalDate(row.getDate()?.trim().orEmpty())
+                if (parsed != target) null else row
+            }
+            .sortedWith(compareByDescending<DashboardRecentPurchaseProjection> { it.getId() ?: 0L })
+            .take(50)
+        val hydratedById = purchaseRepository.findAllById(matched.mapNotNull { it.getId() })
+            .associate { purchase ->
+                val withLot = purchaseExtendedAttributesService.applyForRead(purchase)
+                val withYear = purchaseVehicleOverrideService.applyForRead(withLot)
+                purchase.id to withYear
+            }
+        val rows = matched.map { row ->
+            val status = row.getWorkflowStatus() ?: WorkflowStatus.PURCHASED
+            val hydrated = row.getId()?.let { hydratedById[it] }
+            val modelYear = CarModelYearUtils.extractYearFromCarModelYear(hydrated?.carModelYear)
+                .trim()
+                .ifEmpty { null }
+            val year = modelYear ?: row.getManufactureYear()?.trim()?.takeIf { it.isNotEmpty() }
+            DashboardRecentPurchaseRowDto(
+                id = row.getId(),
+                date = row.getDate(),
+                lotNo = hydrated?.auctionNo,
+                chassis = row.getChassis(),
+                carName = row.getCarName(),
+                year = year,
+                auctionHouse = row.getAuctionHouse(),
+                stockLocation = row.getStockLocation(),
+                rixoCompany = row.getRixoCompany(),
+                client = row.getClientName(),
+                country = row.getCountry(),
+                price = row.getTotalPrice(),
+                rixoRequested = status != WorkflowStatus.PURCHASED,
+                rixoConfirmed = status in PurchaseWorkflowService.WORKFLOW_RIXO_CONFIRMED_OR_LATER,
+            )
+        }
+        return DashboardRecentPurchasesDto(day = day, rows = rows)
     }
 
     private data class PeriodWindow(

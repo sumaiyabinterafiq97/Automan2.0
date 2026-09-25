@@ -101,29 +101,18 @@ class PurchaseService(
             purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)),
         )
 
-    /** POL from stock_location mapping (same mapping used in Rixo import). */
+    /** POL from Stock Location Map when the purchase POL is blank (exactly one token). */
     private fun polFromStockLocation(stockLocation: String?): String? {
-        val s = stockLocation?.trim() ?: return null
-        return when {
-            s.startsWith("GLOBAL KAWASAKI", ignoreCase = true) -> "YOKOHAMA"
-            s.equals("AQUA LOGISTICS", ignoreCase = true) -> "YOKOHAMA"
-            s.startsWith("GLOBAL NAGOYA", ignoreCase = true) -> "NAGOYA"
-            s.equals("FLASHRISE", ignoreCase = true) -> "NAGOYA"
-            s.equals("KLC", ignoreCase = true) -> "OSAKA"
-            s.startsWith("GLOBAL HAKATA", ignoreCase = true) -> "HAKATA"
-            s.equals("BARAKI PARKING", ignoreCase = true) -> "---"
-            s.equals("LOCAL", ignoreCase = true) -> "---"
-            else -> null
-        }
+        val s = stockLocation?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return stockLocationMapService.polsForSelectedStocks(s).singleOrNull()
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() && it != "---" }
     }
 
     private fun effectivePol(pol: String?, stockLocation: String?): String? {
         val rawPol = pol?.trim().orEmpty()
         if (rawPol.isNotBlank()) return rawPol
-        val derived = polFromStockLocation(stockLocation)
-        val d = derived?.trim().orEmpty()
-        if (d.isBlank() || d == "---") return null
-        return d
+        return polFromStockLocation(stockLocation)
     }
     
     /**
@@ -561,6 +550,13 @@ class PurchaseService(
         return null
     }
     
+    /** Edit-page status radios. A single-field update must not clear workflow. */
+    private fun updateDataHasStatusRadios(updateData: Map<String, Any>): Boolean =
+        updateData.containsKey("rixoRequested") &&
+            updateData.containsKey("rixoConfirmed") &&
+            (updateData.containsKey("bookingRequested") || updateData.containsKey("booking_requested")) &&
+            (updateData.containsKey("invoiceConfirmed") || updateData.containsKey("invoice_confirmed"))
+
     @Transactional
     fun updatePurchasePartial(id: Long, updateData: Map<String, Any>): Purchase? {
         Logger.debug("🔍 [Service] Updating purchase ID: $id with partial data")
@@ -898,10 +894,24 @@ class PurchaseService(
             )
             
             // CRITICAL: Ensure the entity ID is set correctly for JPA to recognize it as an update
-            val purchaseToSave = if (updatedPurchase.id != null) {
+            val purchaseWithId = if (updatedPurchase.id != null) {
                 updatedPurchase
             } else {
                 updatedPurchase.copy(id = id)
+            }
+            val purchaseToSave = if (updateDataHasStatusRadios(updateData)) {
+                val nextStatus = purchaseWorkflowService.statusFromSubmittedFlags(purchaseWithId)
+                val now = java.time.LocalDateTime.now()
+                purchaseWithId.copy(
+                    workflowStatus = nextStatus,
+                    workflowStatusUpdatedAt = if (existingPurchase.workflowStatus != nextStatus) {
+                        now
+                    } else {
+                        existingPurchase.workflowStatusUpdatedAt
+                    },
+                )
+            } else {
+                purchaseWithId
             }
             
             Logger.debug("Entity ID before save: ${purchaseToSave.id}")
@@ -958,17 +968,26 @@ class PurchaseService(
     }
     
     @Transactional
-    fun markPurchasesAsBookingRequested(purchaseIds: List<Long>): List<Purchase> {
+    fun markPurchasesAsBookingRequested(purchaseIds: List<Long>, pol: String? = null): List<Purchase> {
         Logger.log("Marking ${purchaseIds.size} purchases as booking_requested: $purchaseIds")
+        val polWrite = pol?.trim()?.takeIf { it.isNotEmpty() && it != "---" }?.take(255)
         val updatedPurchases = mutableListOf<Purchase>()
         
         for (id in purchaseIds) {
             val existingPurchase = purchaseRepository.findById(id).orElse(null)
             if (existingPurchase != null) {
-                val updatedPurchase = existingPurchase.copy(
-                    bookingRequested = true,
-                    updatedAt = java.time.LocalDateTime.now()
-                )
+                val updatedPurchase = if (polWrite != null) {
+                    existingPurchase.copy(
+                        bookingRequested = true,
+                        pol = polWrite,
+                        updatedAt = java.time.LocalDateTime.now(),
+                    )
+                } else {
+                    existingPurchase.copy(
+                        bookingRequested = true,
+                        updatedAt = java.time.LocalDateTime.now(),
+                    )
+                }
                 val savedPurchase = persistPurchase(updatedPurchase)
                 updatedPurchases.add(savedPurchase)
                 Logger.debug("Marked purchase $id as booking_requested")
@@ -2812,28 +2831,11 @@ class PurchaseService(
 
     /**
      * Distinct POL options for booking after stock selection:
-     * effectivePol from matching purchases, then single-token hard-map from selected stock tokens.
+     * Stock Location Map POL tokens only (not purchase POL or hardcoded stock→POL).
      */
     @Transactional(readOnly = true)
-    fun getPolsForStocks(country: String, stockLocations: String): List<String> {
-        val stockKeys = parseStockLocationFilters(stockLocations)
-        if (stockKeys.isEmpty()) return emptyList()
-        val out = mutableListOf<String>()
-        val seen = HashSet<String>()
-        fun addPol(raw: String?) {
-            val pol = raw?.trim()?.takeIf { it.isNotEmpty() && it != "---" } ?: return
-            if (seen.add(pol.lowercase())) out.add(pol)
-        }
-        val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
-        for (p in purchases) {
-            if (!purchaseMatchesAnyStock(p, stockKeys)) continue
-            addPol(effectivePol(p.pol, p.stockLocation))
-        }
-        // Hard-map fallback for selected stock tokens with no purchase-derived POL yet.
-        for (token in stockLocations.orEmpty().split(',', ';').map { it.trim() }.filter { it.isNotEmpty() && it != "-" }) {
-            addPol(polFromStockLocation(token))
-        }
-        return out
+    fun getPolsForStocks(@Suppress("UNUSED_PARAMETER") country: String, stockLocations: String): List<String> {
+        return stockLocationMapService.polsForSelectedStocks(stockLocations)
     }
     
     fun getChassisWithoutBookingRequestByPol(polPort: String): List<String> {

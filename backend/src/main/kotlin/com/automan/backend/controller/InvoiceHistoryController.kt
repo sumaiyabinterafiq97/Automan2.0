@@ -23,15 +23,25 @@ class InvoiceHistoryController(
     @GetMapping
     fun list(): List<InvoiceHistoryRowDto> = invoiceHistoryService.listAllRows()
 
+    @GetMapping("/filter-options")
+    fun filterOptions(): Map<String, List<String>> = invoiceHistoryService.filterOptions()
+
     @GetMapping("/page")
     fun listPage(
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) sort: String?,
         @RequestParam(required = false) order: String?,
+        @RequestParam(required = false) clientName: String?,
+        @RequestParam(required = false) vessel: String?,
+        @RequestParam(required = false) bookingNo: String?,
+        @RequestParam(required = false) from: String?,
+        @RequestParam(required = false) to: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(invoiceHistoryService.listRowsPage(page, size, sort, order))
+            ResponseEntity.ok(
+                invoiceHistoryService.listRowsPage(page, size, sort, order, clientName, vessel, bookingNo, from, to),
+            )
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }
@@ -44,9 +54,37 @@ class InvoiceHistoryController(
         @RequestParam(defaultValue = "20") size: Int,
         @RequestParam(required = false) sort: String?,
         @RequestParam(required = false) order: String?,
+        @RequestParam(required = false) clientName: String?,
+        @RequestParam(required = false) vessel: String?,
+        @RequestParam(required = false) bookingNo: String?,
+        @RequestParam(required = false) from: String?,
+        @RequestParam(required = false) to: String?,
     ): ResponseEntity<Any> {
         return try {
-            ResponseEntity.ok(invoiceHistoryService.searchRowsPage(q, page, size, sort, order))
+            ResponseEntity.ok(
+                invoiceHistoryService.searchRowsPage(q, page, size, sort, order, clientName, vessel, bookingNo, from, to),
+            )
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    /** Zip of one PDF per invoice matching the current filters. */
+    @GetMapping("/print-all")
+    fun printAll(
+        @RequestParam(required = false) q: String?,
+        @RequestParam(required = false) clientName: String?,
+        @RequestParam(required = false) vessel: String?,
+        @RequestParam(required = false) bookingNo: String?,
+        @RequestParam(required = false) from: String?,
+        @RequestParam(required = false) to: String?,
+    ): ResponseEntity<Any> {
+        return try {
+            val zip = invoiceHistoryService.zipFilteredInvoices(q, clientName, vessel, bookingNo, from, to)
+            val headers = HttpHeaders()
+            headers.contentType = MediaType.parseMediaType("application/zip")
+            headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"invoice-history.zip\"")
+            ResponseEntity.ok().headers(headers).body(zip)
         } catch (e: IllegalArgumentException) {
             ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
         }

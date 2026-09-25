@@ -19,14 +19,19 @@ import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.InvoiceHistoryLineRepository
 import com.automan.backend.repository.InvoiceHistoryRepository
 import com.automan.backend.util.Logger
+import jakarta.persistence.criteria.Predicate
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
+import org.springframework.data.jpa.domain.Specification
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.io.ByteArrayOutputStream
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeParseException
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 @Service
 class InvoiceHistoryService(
@@ -52,11 +57,108 @@ class InvoiceHistoryService(
         rawSize: Int,
         sortField: String? = null,
         sortOrder: String? = null,
+        clientName: String? = null,
+        vessel: String? = null,
+        bookingNo: String? = null,
+        fromDate: String? = null,
+        toDate: String? = null,
+    ): InvoiceHistoryPageResponse =
+        pageFiltered(null, page, rawSize, sortField, sortOrder, clientName, vessel, bookingNo, fromDate, toDate)
+
+    fun searchRowsPage(
+        rawQuery: String,
+        page: Int,
+        rawSize: Int,
+        sortField: String? = null,
+        sortOrder: String? = null,
+        clientName: String? = null,
+        vessel: String? = null,
+        bookingNo: String? = null,
+        fromDate: String? = null,
+        toDate: String? = null,
+    ): InvoiceHistoryPageResponse {
+        val q = sanitizeHistorySearchToken(rawQuery)
+        require(q.isNotEmpty()) { "Search text is required" }
+        return pageFiltered(q, page, rawSize, sortField, sortOrder, clientName, vessel, bookingNo, fromDate, toDate)
+    }
+
+    fun filterOptions(): Map<String, List<String>> = mapOf(
+        "clients" to invoiceHistoryRepository.findDistinctClientNames(),
+        "vessels" to invoiceHistoryRepository.findDistinctVessels(),
+        "bookingNumbers" to invoiceHistoryRepository.findDistinctBookingNumbers(),
+    )
+
+    fun zipFilteredInvoices(
+        query: String?,
+        clientName: String?,
+        vessel: String?,
+        bookingNo: String?,
+        fromDate: String?,
+        toDate: String?,
+    ): ByteArray {
+        val spec = historyFilterSpec(
+            query = query?.trim()?.takeIf { it.isNotEmpty() }?.let { sanitizeHistorySearchToken(it) },
+            clientName = clientName,
+            vessel = vessel,
+            bookingNo = bookingNo,
+            fromDate = parseFilterDate(fromDate, "from"),
+            toDate = parseFilterDate(toDate, "to"),
+        )
+        if (!spec.hasNarrowingFilter) {
+            throw IllegalArgumentException("Choose a client, vessel, booking number, or date range before printing all.")
+        }
+        val rows = invoiceHistoryRepository.findAll(spec.specification, Sort.by(Sort.Direction.DESC, "createdAt"))
+        if (rows.isEmpty()) {
+            throw IllegalArgumentException("No invoices match these filters.")
+        }
+        val out = ByteArrayOutputStream()
+        ZipOutputStream(out).use { zip ->
+            val usedNames = mutableSetOf<String>()
+            for (row in rows) {
+                val number = row.invoiceNumber.trim()
+                if (number.isEmpty()) continue
+                val pdf = generatePdfForInvoiceNumber(number)
+                var name = com.automan.backend.util.PdfFilenameUtils.build("Final_Invoice", row.clientName, number)
+                if (!usedNames.add(name)) {
+                    name = com.automan.backend.util.PdfFilenameUtils.build("Final_Invoice", number, row.clientName)
+                }
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(pdf)
+                zip.closeEntry()
+            }
+        }
+        return out.toByteArray()
+    }
+
+    private data class HistoryFilterSpec(
+        val specification: Specification<InvoiceHistory>,
+        val hasNarrowingFilter: Boolean,
+    )
+
+    private fun pageFiltered(
+        query: String?,
+        page: Int,
+        rawSize: Int,
+        sortField: String?,
+        sortOrder: String?,
+        clientName: String?,
+        vessel: String?,
+        bookingNo: String?,
+        fromDate: String?,
+        toDate: String?,
     ): InvoiceHistoryPageResponse {
         val pageIdx = page.coerceAtLeast(0)
         val size = rawSize.coerceIn(1, 100)
+        val spec = historyFilterSpec(
+            query = query,
+            clientName = clientName,
+            vessel = vessel,
+            bookingNo = bookingNo,
+            fromDate = parseFilterDate(fromDate, "from"),
+            toDate = parseFilterDate(toDate, "to"),
+        )
         val pageable = PageRequest.of(pageIdx, size, resolveInvoiceHistorySort(sortField, sortOrder))
-        val pg = invoiceHistoryRepository.findAll(pageable)
+        val pg = invoiceHistoryRepository.findAll(spec.specification, pageable)
         return InvoiceHistoryPageResponse(
             content = pg.content.map { toRowDto(it) },
             totalElements = pg.totalElements,
@@ -66,26 +168,64 @@ class InvoiceHistoryService(
         )
     }
 
-    fun searchRowsPage(
-        rawQuery: String,
-        page: Int,
-        rawSize: Int,
-        sortField: String? = null,
-        sortOrder: String? = null,
-    ): InvoiceHistoryPageResponse {
-        val q = sanitizeHistorySearchToken(rawQuery)
-        require(q.isNotEmpty()) { "Search text is required" }
-        val pageIdx = page.coerceAtLeast(0)
-        val size = rawSize.coerceIn(1, 100)
-        val pageable = PageRequest.of(pageIdx, size, resolveInvoiceHistorySort(sortField, sortOrder))
-        val pg = invoiceHistoryRepository.searchKeyFields(q, pageable)
-        return InvoiceHistoryPageResponse(
-            content = pg.content.map { toRowDto(it) },
-            totalElements = pg.totalElements,
-            totalPages = pg.totalPages,
-            page = pg.number,
-            size = pg.size,
-        )
+    private fun parseFilterDate(raw: String?, label: String): LocalDate? {
+        val t = raw?.trim().orEmpty()
+        if (t.isEmpty()) return null
+        return try {
+            LocalDate.parse(t)
+        } catch (_: DateTimeParseException) {
+            throw IllegalArgumentException("$label must be a date (yyyy-MM-dd)")
+        }
+    }
+
+    private fun historyFilterSpec(
+        query: String?,
+        clientName: String?,
+        vessel: String?,
+        bookingNo: String?,
+        fromDate: LocalDate?,
+        toDate: LocalDate?,
+    ): HistoryFilterSpec {
+        val client = clientName?.trim().orEmpty()
+        val vesselKey = vessel?.trim().orEmpty()
+        val booking = bookingNo?.trim().orEmpty()
+        val q = query?.trim().orEmpty()
+        val narrowing = client.isNotEmpty() || vesselKey.isNotEmpty() || booking.isNotEmpty() ||
+            fromDate != null || toDate != null
+        val specification = Specification<InvoiceHistory> { root, _, cb ->
+            val preds = mutableListOf<Predicate>()
+            if (q.isNotEmpty()) {
+                val like = "%${q.lowercase(Locale.ROOT)}%"
+                fun fieldLike(name: String) =
+                    cb.like(cb.lower(cb.coalesce(root.get(name), "")), like)
+                preds.add(
+                    cb.or(
+                        fieldLike("invoiceNumber"),
+                        fieldLike("clientName"),
+                        fieldLike("vessel"),
+                        fieldLike("pol"),
+                        fieldLike("pod"),
+                    ),
+                )
+            }
+            if (client.isNotEmpty()) {
+                preds.add(cb.equal(cb.lower(cb.trim(root.get("clientName"))), client.lowercase(Locale.ROOT)))
+            }
+            if (vesselKey.isNotEmpty()) {
+                preds.add(cb.equal(cb.lower(cb.trim(root.get("vessel"))), vesselKey.lowercase(Locale.ROOT)))
+            }
+            if (booking.isNotEmpty()) {
+                preds.add(cb.equal(cb.lower(cb.trim(root.get("bookingNo"))), booking.lowercase(Locale.ROOT)))
+            }
+            if (fromDate != null) {
+                preds.add(cb.greaterThanOrEqualTo(root.get("shippingDate"), fromDate))
+            }
+            if (toDate != null) {
+                preds.add(cb.lessThanOrEqualTo(root.get("shippingDate"), toDate))
+            }
+            if (preds.isEmpty()) cb.conjunction() else cb.and(*preds.toTypedArray())
+        }
+        return HistoryFilterSpec(specification, narrowing)
     }
 
     /**
@@ -103,6 +243,7 @@ class InvoiceHistoryService(
             "vessel" -> "vessel"
             "clientname", "client_name" -> "clientName"
             "shippingdate", "shipping_date" -> "shippingDate"
+            "bookingno", "booking_no" -> "bookingNo"
             "pol" -> "pol"
             "pod" -> "pod"
             "lcno", "lc_no" -> "lcNo"
@@ -124,6 +265,7 @@ class InvoiceHistoryService(
             invoiceNumber = h.invoiceNumber,
             vessel = h.vessel,
             clientName = h.clientName,
+            bookingNo = h.bookingNo,
             shippingDate = h.shippingDate?.toString(),
             pol = h.pol,
             pod = h.pod,
@@ -714,6 +856,7 @@ class InvoiceHistoryService(
 
     private fun buildInvoicePdfDescription(purchase: Purchase): String {
         val chassis = purchase.chassis.trim()
+        val brand = purchase.brand?.trim().orEmpty()
         val carName = purchase.carName?.trim().orEmpty()
         val grade = purchase.grade?.trim().orEmpty()
         val carModelYear = purchase.carModelYear?.trim().orEmpty()
@@ -727,9 +870,13 @@ class InvoiceHistoryService(
 
         val line1 = buildString {
             if (chassis.isNotEmpty()) append(chassis)
-            if (carName.isNotEmpty()) {
+            val title = buildList {
+                if (brand.isNotEmpty() && !carName.startsWith(brand, ignoreCase = true)) add(brand)
+                if (carName.isNotEmpty()) add(carName)
+            }.joinToString(" ")
+            if (title.isNotEmpty()) {
                 if (isNotEmpty()) append("   ")
-                append(carName)
+                append(title)
             }
             if (grade.isNotEmpty()) {
                 if (isNotEmpty()) append("   ")
@@ -760,7 +907,7 @@ class InvoiceHistoryService(
             }
             if (distance.isNotEmpty()) {
                 if (isNotEmpty()) append("     ")
-                append(distance)
+                append(if (distance.endsWith("km", ignoreCase = true)) distance else "$distance km")
             }
             if (fuel.isNotEmpty()) {
                 if (isNotEmpty()) append("     ")

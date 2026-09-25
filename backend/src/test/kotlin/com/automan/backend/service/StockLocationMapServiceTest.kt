@@ -97,4 +97,28 @@ class StockLocationMapServiceTest {
         assertEquals("Yard A", map["aqua logistics"])
         assertNull(map["KLC"])
     }
+
+    @Test
+    fun polsForSelectedStocks_unionsMapPolsAndIgnoresBlank() {
+        val repo = Mockito.mock(StockLocationMapRepository::class.java)
+        `when`(repo.findByStockLocationIgnoreCase(Mockito.anyString())).thenAnswer { inv ->
+            when (inv.getArgument<String>(0).trim().lowercase()) {
+                "global kawasaki" ->
+                    StockLocationMap(id = 1L, stockLocation = "GLOBAL KAWASAKI", pol = "Kawasaki", address = null)
+                "aqua logistics" ->
+                    StockLocationMap(id = 2L, stockLocation = "AQUA LOGISTICS", pol = "YOKOHAMA; Kobe", address = null)
+                "klc" ->
+                    StockLocationMap(id = 3L, stockLocation = "KLC", pol = "", address = "x")
+                else -> null
+            }
+        }
+        val svc = StockLocationMapService(repo)
+        assertEquals(listOf("Kawasaki"), svc.polsForSelectedStocks("GLOBAL KAWASAKI"))
+        assertEquals(
+            listOf("Kawasaki", "YOKOHAMA", "Kobe"),
+            svc.polsForSelectedStocks("global kawasaki,AQUA LOGISTICS,KLC"),
+        )
+        assertEquals(emptyList<String>(), svc.polsForSelectedStocks("UNKNOWN YARD"))
+        assertEquals(emptyList<String>(), svc.polsForSelectedStocks("KLC"))
+    }
 }

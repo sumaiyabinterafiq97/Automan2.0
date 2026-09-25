@@ -2,11 +2,8 @@ package com.automan.backend.service
 
 import com.automan.backend.model.RixoMapping
 import com.automan.backend.repository.RixoMappingRepository
-import com.automan.backend.util.RixoMappingSemicolon
-import com.automan.backend.util.RixoPolFromStockLocation
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Service
-import org.springframework.transaction.annotation.Transactional
 
 @Service
 class RixoMappingService(
@@ -18,18 +15,8 @@ class RixoMappingService(
         val auctionName: String?,
         val stockLocation: String,
         val venueId: String? = null,
-        val pol: String? = null,
         val supportedVehicleType: String?,
         val rixoPrice: String?,
-    )
-
-    data class NormalizePolResult(
-        val dryRun: Boolean,
-        val scannedMultiPol: Int,
-        val inserted: Int,
-        val skippedDuplicates: Int,
-        val deletedOriginals: Int,
-        val sampleOriginalIds: List<Long>,
     )
 
     fun findRixoPrice(
@@ -163,73 +150,6 @@ class RixoMappingService(
         return RixoMappingVenueRules.conflictSuppliers(all.map { it.auctionName to it.venueId })
     }
 
-    /** Distinct non-blank pol values for a stock location (case-insensitive distinct). */
-    fun distinctPolsForStock(stockLocation: String): List<String> {
-        val s = stockLocation.trim()
-        if (RixoMappingPolRules.isBlankStock(s)) return emptyList()
-        return RixoMappingPolRules.distinctPols(
-            rixoMappingRepository.findByStockLocationIgnoreCase(s).map { it.pol },
-        )
-    }
-
-    /** POL only when the stock has exactly one distinct non-blank pol. */
-    fun resolveUniquePolForStock(stockLocation: String): String? {
-        val s = stockLocation.trim()
-        if (RixoMappingPolRules.isBlankStock(s)) return null
-        return RixoMappingPolRules.resolveUnique(
-            rixoMappingRepository.findByStockLocationIgnoreCase(s).map { it.pol },
-        )
-    }
-
-    /** Unique POL among rows for the same stock + supplier (auction). */
-    fun resolveUniquePolForStockAndAuction(stockLocation: String, auctionName: String): String? {
-        val s = stockLocation.trim()
-        val a = auctionName.trim()
-        if (RixoMappingPolRules.isBlankStock(s) || a.isEmpty() || a == "-") return null
-        return RixoMappingPolRules.resolveUnique(
-            rixoMappingRepository.findByStockLocationAndAuctionNameIgnoreCase(s, a).map { it.pol },
-        )
-    }
-
-    /**
-     * Tiered POL autofill for RPM / heal:
-     * 1) explicit request pol
-     * 2) unique pol for stock+auction (when auction known)
-     * 3) unique pol for stock globally
-     * 4) single-token [RixoPolFromStockLocation.derivePol]
-     * 5) null
-     */
-    fun coalescePolWithUniqueForStock(
-        stockLocation: String?,
-        pol: String?,
-        auctionName: String? = null,
-    ): String? {
-        val explicit = RixoMappingPolRules.normalizePol(pol)
-        if (explicit != null) return explicit
-        val stock = stockLocation?.trim()?.takeIf { !RixoMappingPolRules.isBlankStock(it) } ?: return null
-        val auction = auctionName?.trim()?.takeIf { it.isNotEmpty() && it != "-" }
-        if (auction != null) {
-            resolveUniquePolForStockAndAuction(stock, auction)?.let { return it }
-        }
-        resolveUniquePolForStock(stock)?.let { return it }
-        return RixoMappingPolRules.singleTokenDerivedPol(stock) { RixoPolFromStockLocation.derivePol(it) }
-    }
-
-    /** Reject a new distinct POL when the stock already has a different one. */
-    fun rejectSecondPolForStock(stockLocation: String?, requestedPol: String?): String? {
-        val stock = stockLocation?.trim()?.takeIf { !RixoMappingPolRules.isBlankStock(it) } ?: return null
-        return RixoMappingPolRules.rejectSecondPol(
-            rixoMappingRepository.findByStockLocationIgnoreCase(stock).map { it.pol },
-            requestedPol,
-        )
-    }
-
-    /** Stocks with more than one distinct non-blank pol (read-only diagnostic). */
-    fun listPolConflicts(): List<RixoMappingPolRules.PolConflict> {
-        val all = rixoMappingRepository.findAll()
-        return RixoMappingPolRules.conflictStocks(all.map { it.stockLocation to it.pol })
-    }
-
     /**
      * Fills the next level on an existing partial row (same DB row as user expands company → stock → supplier → leaf).
      */
@@ -239,7 +159,6 @@ class RixoMappingService(
         auctionName: String? = null,
         venueId: String? = null,
         stockLocation: String? = null,
-        pol: String? = null,
         rixoCompany: String? = null,
         supportedVehicleType: String? = null,
         rixoPrice: String? = null,
@@ -250,16 +169,6 @@ class RixoMappingService(
                 ?: RixoMappingVenueRules.normalizeVenue(existing.venueId)
             if (kept != null) return kept
             return coalesceVenueWithUniqueForAuction(auction ?: existing.auctionName, null)
-        }
-        fun healPol(requested: String?, stock: String?, auction: String? = null): String? {
-            val kept = RixoMappingPolRules.normalizePol(requested)
-                ?: RixoMappingPolRules.normalizePol(existing.pol)
-            if (kept != null) return kept
-            return coalescePolWithUniqueForStock(
-                stock ?: existing.stockLocation,
-                null,
-                auction ?: auctionName ?: existing.auctionName,
-            )
         }
         return when (insertMode.uppercase()) {
             "AUCTION" -> existing.copy(
@@ -272,7 +181,6 @@ class RixoMappingService(
                 existing.copy(
                     stockLocation = nextStock,
                     venueId = healVenue(nextAuction, venueId),
-                    pol = healPol(pol, nextStock, nextAuction),
                     createdAt = created,
                 )
             }
@@ -282,7 +190,6 @@ class RixoMappingService(
                 existing.copy(
                     stockLocation = nextStock,
                     venueId = healVenue(nextAuction, venueId),
-                    pol = healPol(pol, nextStock, nextAuction),
                     createdAt = created,
                 )
             }
@@ -293,7 +200,6 @@ class RixoMappingService(
                     auctionName = nextAuction,
                     stockLocation = nextStock,
                     venueId = healVenue(nextAuction, venueId),
-                    pol = healPol(pol, nextStock, nextAuction),
                     createdAt = created,
                 )
             }
@@ -301,28 +207,20 @@ class RixoMappingService(
                 venueId = venueId!!.trim().takeIf { it.isNotEmpty() },
                 createdAt = created,
             )
-            "POL", "RPM_POL" -> existing.copy(
-                pol = pol!!.trim().takeIf { it.isNotEmpty() },
-                venueId = healVenue(auctionName ?: existing.auctionName, venueId),
-                createdAt = created,
-            )
             "RIXO_COMPANY" -> {
                 val nextAuction = auctionName ?: existing.auctionName
                 existing.copy(
                     rixoCompany = rixoCompany!!.trim(),
                     venueId = healVenue(nextAuction, venueId),
-                    pol = healPol(pol, stockLocation ?: existing.stockLocation, nextAuction),
                     createdAt = created,
                 )
             }
             "FULL", "RPM_FULL" -> {
                 val nextAuction = auctionName ?: existing.auctionName
                 existing.copy(
-                    // Vehicle type is optional (nullable DB column); blank clears / leaves null.
                     supportedVehicleType = supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
                     rixoPrice = rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
                     venueId = healVenue(nextAuction, venueId),
-                    pol = healPol(pol, stockLocation ?: existing.stockLocation, nextAuction),
                     createdAt = created,
                 )
             }
@@ -343,13 +241,11 @@ class RixoMappingService(
             val stock = row.stockLocation.trim()
             val venue = coalesceVenueWithUniqueForAuction(row.auctionName, row.venueId)
             val auction = row.auctionName?.trim()?.takeIf { it.isNotEmpty() }
-            val pol = coalescePolWithUniqueForStock(stock, row.pol, auction)
             RixoMapping(
                 rixoCompany = row.rixoCompany.trim(),
                 auctionName = auction,
                 stockLocation = stock,
                 venueId = venue,
-                pol = pol,
                 supportedVehicleType = row.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
                 rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
             )
@@ -363,18 +259,11 @@ class RixoMappingService(
         val venue = RixoMappingVenueRules.normalizeVenue(row.venueId)
             ?: RixoMappingVenueRules.normalizeVenue(existing.venueId)
             ?: coalesceVenueWithUniqueForAuction(row.auctionName ?: existing.auctionName, null)
-        val nextStock = row.stockLocation.trim().ifEmpty { existing.stockLocation }
-        val nextAuction = row.auctionName?.trim()?.takeIf { it.isNotEmpty() } ?: existing.auctionName
-        // Never clear an existing POL when the request omits/blanks it; heal blank rows when unique.
-        val pol = RixoMappingPolRules.normalizePol(row.pol)
-            ?: RixoMappingPolRules.normalizePol(existing.pol)
-            ?: coalescePolWithUniqueForStock(nextStock, null, nextAuction)
         val updated = existing.copy(
             rixoCompany = row.rixoCompany.trim(),
             auctionName = row.auctionName?.trim()?.takeIf { it.isNotEmpty() },
             stockLocation = row.stockLocation.trim(),
             venueId = venue,
-            pol = pol,
             supportedVehicleType = row.supportedVehicleType?.trim()?.takeIf { it.isNotEmpty() },
             rixoPrice = row.rixoPrice?.trim()?.takeIf { it.isNotEmpty() },
         )
@@ -387,83 +276,6 @@ class RixoMappingService(
         if (!rixoMappingRepository.existsById(id)) return false
         rixoMappingRepository.deleteById(id)
         return true
-    }
-
-    /**
-     * Surgical expand: rows whose [RixoMapping.pol] contains `;` become one row per token.
-     * Single-POL rows (client-added or otherwise) are never modified.
-     * Never truncates the table.
-     */
-    @Transactional
-    fun normalizePolSemicolons(dryRun: Boolean = true): NormalizePolResult {
-        val all = rixoMappingRepository.findAll()
-        val keySet = all.map { rowIdentityKey(it) }.toMutableSet()
-        val multiPol = all.filter { RixoMappingSemicolon.splitTokens(it.pol).size >= 2 }
-            .sortedBy { it.id ?: 0L }
-
-        var inserted = 0
-        var skippedDuplicates = 0
-        var deletedOriginals = 0
-        val sampleIds = multiPol.mapNotNull { it.id }.take(20)
-        val toInsert = mutableListOf<RixoMapping>()
-        val toDeleteIds = mutableListOf<Long>()
-
-        for (source in multiPol) {
-            val tokens = RixoMappingSemicolon.splitTokens(source.pol)
-            var ensuredTokenRow = false
-            for (token in tokens) {
-                val clone = source.copy(id = null, pol = token)
-                val key = rowIdentityKey(clone)
-                if (keySet.contains(key)) {
-                    skippedDuplicates++
-                    ensuredTokenRow = true
-                    continue
-                }
-                keySet.add(key)
-                toInsert.add(clone)
-                inserted++
-                ensuredTokenRow = true
-            }
-            val sourceId = source.id
-            if (ensuredTokenRow && sourceId != null) {
-                toDeleteIds.add(sourceId)
-                deletedOriginals++
-                // Remove original multi-POL identity so re-runs stay clean
-                keySet.remove(rowIdentityKey(source))
-            }
-        }
-
-        if (!dryRun) {
-            if (toInsert.isNotEmpty()) {
-                rixoMappingRepository.saveAll(toInsert)
-            }
-            for (id in toDeleteIds) {
-                rixoMappingRepository.deleteById(id)
-            }
-        }
-
-        return NormalizePolResult(
-            dryRun = dryRun,
-            scannedMultiPol = multiPol.size,
-            inserted = inserted,
-            skippedDuplicates = skippedDuplicates,
-            deletedOriginals = deletedOriginals,
-            sampleOriginalIds = sampleIds,
-        )
-    }
-
-    /** Case-insensitive identity for dedupe across expand (includes pol + vehicle + price). */
-    private fun rowIdentityKey(row: RixoMapping): String {
-        fun n(s: String?) = s?.trim()?.lowercase().orEmpty()
-        return listOf(
-            n(row.rixoCompany),
-            n(row.auctionName),
-            n(row.stockLocation),
-            n(row.venueId),
-            n(row.pol),
-            n(row.supportedVehicleType),
-            n(row.rixoPrice),
-        ).joinToString("\u0001")
     }
 }
 

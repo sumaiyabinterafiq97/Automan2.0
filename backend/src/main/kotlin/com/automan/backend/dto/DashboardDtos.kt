@@ -72,6 +72,28 @@ data class DashboardTablesDto(
     val waitingInvoice: List<DashboardPurchaseRowDto>,
 )
 
+data class DashboardRecentPurchasesDto(
+    val day: String,
+    val rows: List<DashboardRecentPurchaseRowDto>,
+)
+
+data class DashboardRecentPurchaseRowDto(
+    val id: Long?,
+    val date: String?,
+    val lotNo: String?,
+    val chassis: String?,
+    val carName: String?,
+    val year: String?,
+    val auctionHouse: String?,
+    val stockLocation: String?,
+    val rixoCompany: String?,
+    val client: String?,
+    val country: String?,
+    val price: String?,
+    val rixoRequested: Boolean,
+    val rixoConfirmed: Boolean,
+)
+
 data class DashboardPurchaseRowDto(
     val id: Long?,
     val date: String?,

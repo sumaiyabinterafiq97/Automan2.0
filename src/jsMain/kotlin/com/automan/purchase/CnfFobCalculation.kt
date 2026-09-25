@@ -1664,18 +1664,28 @@ private fun postBookingRequestedThen(
     purchaseIds: List<Long>,
     onDone: () -> Unit,
     onFailed: (String) -> Unit,
+    pol: String? = null,
 ) {
     if (purchaseIds.isEmpty()) {
         onDone()
         return
     }
-    val bodyJson = "{\"purchaseIds\":[" + purchaseIds.joinToString(",") + "]}"
+    val payload = js("{}")
+    val idsArr = js("[]")
+    for (id in purchaseIds) {
+        idsArr.push(id.toDouble())
+    }
+    payload.purchaseIds = idsArr
+    val polWrite = pol?.trim().orEmpty()
+    if (polWrite.isNotEmpty()) {
+        payload.pol = polWrite
+    }
     val req = js("{}")
     req.method = "POST"
     val headers = js("{}")
     headers["Content-Type"] = "application/json"
     req.headers = headers
-    req.body = bodyJson
+    req.body = JSON.stringify(payload)
     window.fetch(apiUrl("purchases/booking-requested"), req)
         .then { response: dynamic ->
             if (js("response.ok") as Boolean) {
@@ -1749,14 +1759,11 @@ fun saveShippingHistoryAndBooking() {
                 val req: dynamic = js("{}")
                 req.country = bd.consigneeCountry
                 req.consignee = bd.consigneeName
-                req.notifyParty = bd.notifyParty
-                req.inTransitClause = bd.inTransitClause
-                req.shipmentDate = bd.shippingDate
-                req.cyCutDate = bd.cyCutDate
-                req.eta = bd.eta
-                req.pol = bd.pol
-                req.pod = bd.pod
-                req.finalDestination = bd.finalDestination
+                req.pol = blankIfBookingSelectPlaceholder(bd.pol?.toString() ?: "")
+                req.pod = blankIfBookingSelectPlaceholder(bd.pod?.toString() ?: "")
+                req.finalDestination = blankIfBookingSelectPlaceholder(bd.finalDestination?.toString() ?: "")
+                req.notifyParty = blankIfBookingSelectPlaceholder(bd.notifyParty?.toString() ?: "")
+                req.inTransitClause = blankIfBookingSelectPlaceholder(bd.inTransitClause?.toString() ?: "")
                 req.bookingId = bd.bookingNo
                 req.vessel = bd.vesselName
                 req.carrier = bd.carrier
@@ -1793,6 +1800,7 @@ fun saveShippingHistoryAndBooking() {
                         } else {
                             postBookingRequestedThen(
                                 purchaseIds = idsToMark,
+                                pol = bd.pol?.toString()?.trim().orEmpty(),
                                 onDone = {
                                     showSuccessModal(
                                         "Saved",

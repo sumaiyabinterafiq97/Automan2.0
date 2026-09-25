@@ -4,6 +4,7 @@ import com.automan.backend.model.Purchase
 import com.itextpdf.kernel.pdf.PdfDocument
 import com.itextpdf.kernel.pdf.PdfReader
 import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -37,6 +38,7 @@ class PdfServiceRixoTransportLayoutTest {
             ),
             mapOf("ARAI BAYSIDE (FUKUOKA YARD)" to "1 Fukuoka Yard Rd"),
         )
+        assertPortraitSinglePage(bytes)
         val text = extractPdfText(bytes)
         assertTrue(text.contains("陸送依頼書"), text)
         assertTrue(text.contains("LOGICO"), text)
@@ -91,6 +93,38 @@ class PdfServiceRixoTransportLayoutTest {
     }
 
     @Test
+    fun generateRixoTransportPdf_sameStockDifferentSupplierPrintsDestinationTwice() {
+        val sharedStock = "GLOBAL NAGOYA"
+        val bytes = pdfService.generateRixoTransportPdf(
+            listOf(
+                Purchase(
+                    chassis = "ACA33-5250467",
+                    auctionNo = "10253",
+                    auctionHouse = "MIRIVE AICHI",
+                    carName = "VANGUARD",
+                    stockLocation = sharedStock,
+                    venueId = "710596",
+                ),
+                Purchase(
+                    chassis = "A200A-0128614",
+                    auctionNo = "53574",
+                    auctionHouse = "USS NAGOYA",
+                    carName = "RAIZE",
+                    stockLocation = sharedStock,
+                    venueId = "E0483",
+                ),
+            ),
+            mapOf("rixoCompany" to "STYLISH AUTO", "buyingDate" to "2026-09-04"),
+            mapOf(sharedStock to "愛知県弥富市"),
+        )
+        val text = extractPdfText(bytes)
+        assertTrue(text.contains("MIRIVE AICHI"), text)
+        assertTrue(text.contains("USS NAGOYA"), text)
+        assertEquals(2, Regex(Regex.escape(sharedStock)).findAll(text).count(), text)
+        assertEquals(2, Regex("愛知県弥富市").findAll(text).count(), text)
+    }
+
+    @Test
     fun generateRixoTransportPdf_blankStockLocationDoesNotEmitKlc() {
         val purchase = Purchase(
             chassis = "AAHP45W",
@@ -106,6 +140,17 @@ class PdfServiceRixoTransportLayoutTest {
         val text = extractPdfText(bytes)
         assertTrue(text.contains("AAHP45W"), text)
         assertFalse(text.contains("KLC"), text)
+    }
+
+    private fun assertPortraitSinglePage(bytes: ByteArray) {
+        val pdf = PdfDocument(PdfReader(ByteArrayInputStream(bytes)))
+        try {
+            assertEquals(1, pdf.numberOfPages)
+            val size = pdf.getPage(1).pageSize
+            assertTrue(size.width < size.height, "expected portrait, was ${size.width} x ${size.height}")
+        } finally {
+            pdf.close()
+        }
     }
 
     private fun extractPdfText(bytes: ByteArray): String {

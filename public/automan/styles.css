@@ -11234,7 +11234,6 @@ input.client-form-readonly:read-only {
     #supplierMapTreePage .rixo-tree-card-wrapper--company,
     #supplierMapTreePage .rixo-tree-card-wrapper--venue,
     #supplierMapTreePage .rixo-tree-card-wrapper--stock,
-    #supplierMapTreePage .rixo-tree-card-wrapper--pol,
     #supplierMapTreePage .rixo-tree-card-wrapper--field {
         width: 100%;
         max-width: 100%;
@@ -11246,7 +11245,6 @@ input.client-form-readonly:read-only {
     #supplierMapTreePage .rixo-tree-card-wrapper[data-card-level="supplier"]::before { content: "Supplier Name"; }
     #supplierMapTreePage .rixo-tree-card-wrapper[data-card-level="venue"]::before { content: "Venue ID"; }
     #supplierMapTreePage .rixo-tree-card-wrapper[data-card-level="stock"]::before { content: "Stock Location"; }
-    #supplierMapTreePage .rixo-tree-card-wrapper[data-card-level="pol"]::before { content: "POL"; }
     #supplierMapTreePage .rixo-tree-card-wrapper[data-card-level="rixo_company"]::before { content: "Rixo Company"; }
 
     #supplierMapTreePage .rixo-tree-card-wrapper[data-card-level]::before {
@@ -11307,7 +11305,6 @@ input.client-form-readonly:read-only {
     #supplierMapTreePage .sm-tree-full-row-col--supplier::before { content: "Supplier Name"; }
     #supplierMapTreePage .sm-tree-full-row-col--venue::before { content: "Venue ID"; }
     #supplierMapTreePage .sm-tree-full-row-col--stock::before { content: "Stock Location"; }
-    #supplierMapTreePage .sm-tree-full-row-col--pol::before { content: "POL"; }
     #supplierMapTreePage .sm-tree-full-row-col--company::before { content: "Rixo Company"; }
     #supplierMapTreePage .sm-tree-full-row-col--vtype::before { content: "Vehicle Type"; }
     #supplierMapTreePage .sm-tree-full-row-col--price::before { content: "Rixo Price"; }
@@ -11325,13 +11322,12 @@ input.client-form-readonly:read-only {
     width: 100%;
 }
 
-/* Supplier Map PC: shared narrow 7-col system (headers + Add + tree) */
+/* Supplier Map PC: shared 6-col system (headers + Add + tree) */
 @media (min-width: 1025px) {
     #supplierMapTreePage.rixo-tree-page {
         --sm-col-supplier: minmax(150px, 1.25fr);
         --sm-col-venue: minmax(72px, 0.7fr);
         --sm-col-stock: minmax(110px, 1fr);
-        --sm-col-pol: minmax(80px, 0.85fr);
         --sm-col-company: minmax(100px, 1fr);
         --sm-col-vtype: minmax(100px, 1fr);
         --sm-col-price: minmax(80px, 0.85fr);
@@ -11339,7 +11335,6 @@ input.client-form-readonly:read-only {
         --sm-card-supplier: 170px;
         --sm-card-venue: 90px;
         --sm-card-stock: 130px;
-        --sm-card-pol: 100px;
         --sm-card-company: 120px;
         max-width: none;
         width: 100%;
@@ -11365,7 +11360,6 @@ input.client-form-readonly:read-only {
             var(--sm-col-supplier)
             var(--sm-col-venue)
             var(--sm-col-stock)
-            var(--sm-col-pol)
             var(--sm-col-company)
             var(--sm-col-vtype)
             var(--sm-col-price);
@@ -11391,7 +11385,7 @@ input.client-form-readonly:read-only {
         padding-left: 8px !important;
     }
 
-    #supplierMapTreePage .rixo-tree-header:nth-child(7).rixo-tree-header--price {
+    #supplierMapTreePage .rixo-tree-header:nth-child(6).rixo-tree-header--price {
         text-align: right;
         padding-right: 4px !important;
     }
@@ -11401,14 +11395,13 @@ input.client-form-readonly:read-only {
         gap: 0;
     }
 
-    /* Collapsed + expanded tree: same 7-col grid as headers (subgrid keeps cards under columns) */
+    /* Collapsed + expanded tree: same 6-col grid as headers (subgrid keeps cards under columns) */
     #supplierMapTreePage .supplier-map-tree > .rixo-tree-node {
         display: grid;
         grid-template-columns:
             var(--sm-col-supplier)
             var(--sm-col-venue)
             var(--sm-col-stock)
-            var(--sm-col-pol)
             var(--sm-col-company)
             var(--sm-col-vtype)
             var(--sm-col-price);
@@ -11428,6 +11421,13 @@ input.client-form-readonly:read-only {
         max-width: none !important;
         flex: none !important;
         min-width: 0;
+    }
+
+    #supplierMapTreePage .supplier-map-tree > .rixo-tree-node > .sm-supplier-duplicate-form {
+        grid-column: 1;
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
     }
 
     #supplierMapTreePage .supplier-map-tree > .rixo-tree-node > .rixo-tree-children {
@@ -11526,7 +11526,6 @@ input.client-form-readonly:read-only {
     #supplierMapTreePage .rixo-tree-card-wrapper--company,
     #supplierMapTreePage .rixo-tree-card-wrapper--venue,
     #supplierMapTreePage .rixo-tree-card-wrapper--stock,
-    #supplierMapTreePage .rixo-tree-card-wrapper--pol,
     #supplierMapTreePage .rixo-tree-card-wrapper--field {
         width: auto !important;
         max-width: none !important;
@@ -11688,7 +11687,6 @@ input.client-form-readonly:read-only {
             var(--sm-col-supplier)
             var(--sm-col-venue)
             var(--sm-col-stock)
-            var(--sm-col-pol)
             var(--sm-col-company)
             var(--sm-col-vtype)
             var(--sm-col-price);
@@ -12416,6 +12414,65 @@ input.client-form-readonly:read-only {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
+}
+
+.home-dash-recent-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.home-dash-recent-head select {
+    min-height: 36px;
+    border: 1px solid var(--home-dash-border);
+    border-radius: 8px;
+    background: #fff;
+    padding: 0 10px;
+    font-size: 14px;
+    color: #0f172a;
+}
+
+.home-dash-recent-scroll {
+    overflow-x: auto;
+}
+
+.home-dash-recent-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.home-dash-recent-table th,
+.home-dash-recent-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--home-dash-border);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.home-dash-recent-table th {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    color: var(--home-dash-muted);
+    font-weight: 700;
+}
+
+.home-dash-recent-check {
+    text-align: center;
+}
+
+.home-dash-recent-more {
+    display: block;
+    width: 100%;
+    margin-top: 12px;
+    min-height: 40px;
+    border: 1px dashed var(--home-dash-border);
+    border-radius: 10px;
+    background: transparent;
+    color: #334155;
+    font-weight: 600;
+    cursor: pointer;
 }
 
 .home-dash-kpi {

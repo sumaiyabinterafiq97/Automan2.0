@@ -1,5 +1,6 @@
 package com.automan.backend.service
 
+import com.automan.backend.dto.RixoHistoryChassisConfirmDto
 import com.automan.backend.dto.RixoHistoryPageResponse
 import com.automan.backend.dto.RixoHistoryRowDto
 import com.automan.backend.model.RixoHistory
@@ -36,6 +37,20 @@ class RixoHistoryService(
         return raw.split(';', ',', '\n', '\r')
             .mapNotNull { it.trim().takeIf { t -> t.isNotEmpty() }?.uppercase(Locale.ROOT) }
             .toSet()
+    }
+
+    /** Chassis segments in stored order, original casing, one entry per distinct token. */
+    private fun chassisSegmentsInOrder(raw: String?): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        val seen = linkedSetOf<String>()
+        val out = mutableListOf<String>()
+        for (part in raw.split(';', ',', '\n', '\r')) {
+            val trimmed = part.trim()
+            if (trimmed.isEmpty()) continue
+            if (!seen.add(trimmed.uppercase(Locale.ROOT))) continue
+            out.add(trimmed)
+        }
+        return out
     }
 
     private fun expandTokenSet(tokens: Set<String>): Set<String> {
@@ -220,6 +235,9 @@ class RixoHistoryService(
         return rows.map { e ->
             val matched = matchedPurchasesForHistoryRow(e, byNormalizedChassis)
             val rixoConfirmed = isHistoryRowRixoConfirmedStrict(matched)
+            val chassisConfirms = chassisSegmentsInOrder(e.chassis).map { segment ->
+                chassisConfirmForToken(segment, byNormalizedChassis)
+            }
             RixoHistoryRowDto(
                 id = e.id ?: 0L,
                 buyingDate = e.buyingDate?.toString(),
@@ -227,8 +245,9 @@ class RixoHistoryService(
                 message = e.message,
                 chassis = e.chassis,
                 rixoConfirmed = rixoConfirmed,
-                rixoConfirmedDate = if (rixoConfirmed) historyRowRixoConfirmedAtIso(matched) else null,
+                rixoConfirmedDate = historyRowRixoConfirmedAtIso(matched),
                 hasBookingRequested = matchedPurchasesHaveBookingRequested(matched),
+                chassisConfirms = chassisConfirms,
             )
         }
     }
@@ -276,6 +295,35 @@ class RixoHistoryService(
             allMatchedPurchaseIds.addAll(foundIds)
         }
         return allMatchedPurchaseIds
+    }
+
+    private fun matchedPurchasesForChassisToken(
+        token: String,
+        byNormalizedChassis: Map<String, List<com.automan.backend.model.Purchase>>,
+    ): List<com.automan.backend.model.Purchase> {
+        val key = token.trim().uppercase(Locale.ROOT)
+        if (key.isEmpty()) return emptyList()
+        val found = linkedMapOf<Long, com.automan.backend.model.Purchase>()
+        for (expanded in expandTokenSet(setOf(key))) {
+            for (p in byNormalizedChassis[expanded].orEmpty()) {
+                p.id?.let { found[it] = p }
+            }
+        }
+        return found.values.toList()
+    }
+
+    private fun chassisConfirmForToken(
+        token: String,
+        byNormalizedChassis: Map<String, List<com.automan.backend.model.Purchase>>,
+    ): RixoHistoryChassisConfirmDto {
+        val matched = matchedPurchasesForChassisToken(token, byNormalizedChassis)
+        val confirmed = matched.isNotEmpty() &&
+            matched.all { PurchaseWorkflowService.isRixoConfirmedForBooking(it) }
+        return RixoHistoryChassisConfirmDto(
+            chassis = token,
+            confirmed = confirmed,
+            confirmedDate = if (confirmed) historyRowRixoConfirmedAtIso(matched) else null,
+        )
     }
 
     private fun isHistoryRowRixoConfirmedStrict(
@@ -474,6 +522,56 @@ class RixoHistoryService(
             matchedChassisTokens = expandedTokens.size,
             skippedRowsWithoutChassis = skippedNoChassis,
         )
+    }
+
+    /**
+     * Marks purchases for one chassis token on one history row as Rixo Confirmed.
+     * Other chassis on the row are left unchanged. Cars already confirmed or booking-requested are skipped.
+     */
+    @Transactional
+    fun confirmChassisOnHistoryRow(historyId: Long, chassisTokenRaw: String): Int {
+        val row = rixoHistoryRepository.findById(historyId).orElse(null)
+            ?: throw IllegalArgumentException("Rixo history row not found")
+        val tokenClean = chassisTokenRaw.trim()
+        if (tokenClean.isEmpty()) throw IllegalArgumentException("chassisToken is required")
+        val tokenKey = tokenClean.uppercase(Locale.ROOT)
+        if (tokenKey !in parseChassisTokens(row.chassis)) {
+            throw IllegalArgumentException("Chassis is not on this Rixo history row")
+        }
+        val purchases = linkedMapOf<Long, com.automan.backend.model.Purchase>()
+        for (token in expandTokenSet(setOf(tokenKey))) {
+            for (p in purchaseRepository.findByChassisToken(token)) {
+                val id = p.id ?: continue
+                purchases[id] = p
+            }
+        }
+        if (purchases.isEmpty()) {
+            throw IllegalArgumentException("No purchase matches this chassis")
+        }
+        var updated = 0
+        for ((_, p) in purchases) {
+            if (PurchaseWorkflowService.isRixoConfirmedForBooking(p)) continue
+            purchaseWorkflowService.setWorkflowStatus(p, com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED)
+            updated += 1
+        }
+        return updated
+    }
+
+    /**
+     * Confirms each listed chassis on its history row in one transaction.
+     * Other chassis on those rows are left unchanged.
+     */
+    @Transactional
+    fun confirmSelectedChassis(items: List<Pair<Long, String>>): Int {
+        if (items.isEmpty()) return 0
+        val seen = linkedSetOf<String>()
+        var updated = 0
+        for ((historyId, token) in items) {
+            val key = "$historyId|${token.trim().uppercase(Locale.ROOT)}"
+            if (!seen.add(key)) continue
+            updated += confirmChassisOnHistoryRow(historyId, token)
+        }
+        return updated
     }
 
     @Transactional

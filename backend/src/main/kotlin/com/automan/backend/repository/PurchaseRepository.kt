@@ -410,6 +410,15 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     fun findDashboardRows(): List<DashboardPurchaseRowProjection>
 
     @Query(
+        "SELECT p.id AS id, p.date AS date, p.chassis AS chassis, p.carName AS carName, " +
+            "p.manufactureYear AS manufactureYear, p.auctionHouse AS auctionHouse, " +
+            "p.stockLocation AS stockLocation, p.rixoCompany AS rixoCompany, " +
+            "p.clientName AS clientName, p.country AS country, p.totalPrice AS totalPrice, " +
+            "p.workflowStatus AS workflowStatus FROM Purchase p",
+    )
+    fun findRecentPurchaseCandidates(): List<DashboardRecentPurchaseProjection>
+
+    @Query(
         "SELECT LOWER(TRIM(p.stockLocation)), COUNT(p.id) FROM Purchase p " +
             "WHERE p.auctionHouse IS NOT NULL AND LOWER(TRIM(p.auctionHouse)) = LOWER(TRIM(:supplier)) " +
             "AND p.stockLocation IS NOT NULL AND TRIM(p.stockLocation) <> '' " +
@@ -455,6 +464,22 @@ interface DashboardPurchaseRowProjection {
     fun getBrand(): String?
     fun getCarName(): String?
     fun getAuctionHouse(): String?
+    fun getClientName(): String?
+    fun getCountry(): String?
+    fun getTotalPrice(): String?
+    fun getWorkflowStatus(): com.automan.backend.model.WorkflowStatus?
+}
+
+/** Persistent fields for the Home recent-purchases table. Lot and model year are filled later. */
+interface DashboardRecentPurchaseProjection {
+    fun getId(): Long?
+    fun getDate(): String?
+    fun getChassis(): String?
+    fun getCarName(): String?
+    fun getManufactureYear(): String?
+    fun getAuctionHouse(): String?
+    fun getStockLocation(): String?
+    fun getRixoCompany(): String?
     fun getClientName(): String?
     fun getCountry(): String?
     fun getTotalPrice(): String?

@@ -62,6 +62,13 @@ fun showInvoiceHistoryPage() {
             .invoice-search-clear.is-hidden{display:none;}
             .invoice-search-clear:focus-visible{outline:2px solid #3b82f6;outline-offset:2px;}
             .invoice-history-actions{grid-area:actions;display:flex;justify-content:flex-end;align-items:center;gap:10px;}
+            .invoice-history-filters{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:0 0 14px;}
+            .invoice-history-filters label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#64748b;font-weight:600;min-width:0;}
+            .invoice-history-filters select,.invoice-history-filters input[type="date"]{min-height:40px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;padding:0 10px;font-size:14px;color:#0f172a;max-width:220px;}
+            .invoice-history-filter-clear,.invoice-history-print-all{min-height:40px;border-radius:8px;padding:8px 14px;font-size:14px;font-weight:600;cursor:pointer;}
+            .invoice-history-filter-clear{border:1px solid #cbd5e1;background:#fff;color:#0f172a;}
+            .invoice-history-print-all{border:none;background:linear-gradient(135deg,#14b8a6,#0f766e);color:#fff;}
+            .invoice-history-print-all:disabled{background:#cbd5e1;color:#64748b;cursor:not-allowed;}
             .invoice-column-filter-btn{
                 width:48px;height:48px;min-width:48px;min-height:48px;border-radius:50%;border:1px solid #e5e7eb;background:#f3f4f6;
                 cursor:pointer;display:inline-flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,0.06);padding:0;color:#4b5563;
@@ -132,12 +139,31 @@ fun showInvoiceHistoryPage() {
                     <button type="button" id="invoiceHistorySearchClearBtn" class="invoice-search-clear is-hidden" title="Clear search" aria-label="Clear search">×</button>
                 </div>
                 <div class="invoice-history-actions">
+                    <button type="button" id="invoiceHistoryPrintAllBtn" class="invoice-history-print-all" disabled title="Download every invoice in the current filter" aria-label="Print all filtered invoices">Print all</button>
                     <button type="button" id="invoiceHistoryColumnFilterBtn" class="invoice-column-filter-btn" title="Select columns to display" aria-label="Select columns to display">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
                         </svg>
                     </button>
                 </div>
+            </div>
+            <div class="invoice-history-filters">
+                <label>Client
+                    <select id="invoiceHistoryFilterClient" aria-label="Filter by client"><option value="">All</option></select>
+                </label>
+                <label>Vessel
+                    <select id="invoiceHistoryFilterVessel" aria-label="Filter by vessel"><option value="">All</option></select>
+                </label>
+                <label>Booking number
+                    <select id="invoiceHistoryFilterBooking" aria-label="Filter by booking number"><option value="">All</option></select>
+                </label>
+                <label>From
+                    <input type="date" id="invoiceHistoryFilterFrom" aria-label="From date" />
+                </label>
+                <label>To
+                    <input type="date" id="invoiceHistoryFilterTo" aria-label="To date" />
+                </label>
+                <button type="button" id="invoiceHistoryFilterClear" class="invoice-history-filter-clear">Clear</button>
             </div>
             <div id="invoiceHistoryTableWrap">
                 <div id="invoiceHistoryTable" style="margin-top: 8px;">
@@ -170,6 +196,30 @@ fun showInvoiceHistoryPage() {
     document.getElementById("invoiceHistoryColumnFilterBtn")?.addEventListener("click", { _: Event ->
         showInvoiceHistoryColumnFilterModal()
     })
+    fun onInvoiceHistoryFilterChanged() {
+        updateInvoiceHistoryPrintAllEnabled()
+        invoiceHistoryPageZeroBased = 0
+        loadInvoiceHistory(0)
+    }
+    listOf("invoiceHistoryFilterClient", "invoiceHistoryFilterVessel", "invoiceHistoryFilterBooking").forEach { id ->
+        document.getElementById(id)?.addEventListener("change", { _: Event -> onInvoiceHistoryFilterChanged() })
+    }
+    listOf("invoiceHistoryFilterFrom", "invoiceHistoryFilterTo").forEach { id ->
+        document.getElementById(id)?.addEventListener("change", { _: Event -> onInvoiceHistoryFilterChanged() })
+    }
+    document.getElementById("invoiceHistoryFilterClear")?.addEventListener("click", { _: Event ->
+        (document.getElementById("invoiceHistoryFilterClient") as? HTMLSelectElement)?.value = ""
+        (document.getElementById("invoiceHistoryFilterVessel") as? HTMLSelectElement)?.value = ""
+        (document.getElementById("invoiceHistoryFilterBooking") as? HTMLSelectElement)?.value = ""
+        (document.getElementById("invoiceHistoryFilterFrom") as? HTMLInputElement)?.value = ""
+        (document.getElementById("invoiceHistoryFilterTo") as? HTMLInputElement)?.value = ""
+        onInvoiceHistoryFilterChanged()
+    })
+    document.getElementById("invoiceHistoryPrintAllBtn")?.addEventListener("click", { _: Event ->
+        downloadInvoiceHistoryPrintAll()
+    })
+    updateInvoiceHistoryPrintAllEnabled()
+    loadInvoiceHistoryFilterOptions()
 
     setupInvoiceHistoryResizeListener()
 
@@ -483,6 +533,113 @@ private fun applyInvoiceHistoryPageBody(body: dynamic) {
     }
 }
 
+private fun invoiceHistoryFilterValue(id: String): String =
+    (document.getElementById(id) as? HTMLInputElement)?.value?.trim().orEmpty()
+        .ifEmpty { (document.getElementById(id) as? HTMLSelectElement)?.value?.trim().orEmpty() }
+
+private fun invoiceHistoryHasNarrowingFilter(): Boolean =
+    invoiceHistoryFilterValue("invoiceHistoryFilterClient").isNotEmpty() ||
+        invoiceHistoryFilterValue("invoiceHistoryFilterVessel").isNotEmpty() ||
+        invoiceHistoryFilterValue("invoiceHistoryFilterBooking").isNotEmpty() ||
+        invoiceHistoryFilterValue("invoiceHistoryFilterFrom").isNotEmpty() ||
+        invoiceHistoryFilterValue("invoiceHistoryFilterTo").isNotEmpty()
+
+private fun updateInvoiceHistoryPrintAllEnabled() {
+    val btn = document.getElementById("invoiceHistoryPrintAllBtn") as? HTMLButtonElement ?: return
+    btn.disabled = !invoiceHistoryHasNarrowingFilter()
+}
+
+private fun invoiceHistoryFilterQueryString(): String {
+    fun part(name: String, value: String): String {
+        if (value.isEmpty()) return ""
+        val enc = js("encodeURIComponent")(value).unsafeCast<String>()
+        return "&$name=$enc"
+    }
+    return part("clientName", invoiceHistoryFilterValue("invoiceHistoryFilterClient")) +
+        part("vessel", invoiceHistoryFilterValue("invoiceHistoryFilterVessel")) +
+        part("bookingNo", invoiceHistoryFilterValue("invoiceHistoryFilterBooking")) +
+        part("from", invoiceHistoryFilterValue("invoiceHistoryFilterFrom")) +
+        part("to", invoiceHistoryFilterValue("invoiceHistoryFilterTo"))
+}
+
+private fun fillInvoiceHistoryFilterSelect(id: String, values: Array<dynamic>) {
+    val select = document.getElementById(id) as? HTMLSelectElement ?: return
+    val current = select.value
+    select.innerHTML = """<option value="">All</option>"""
+    val seen = mutableSetOf<String>()
+    for (raw in values) {
+        val text = raw?.toString()?.trim().orEmpty()
+        if (text.isEmpty() || !seen.add(text)) continue
+        val opt = document.createElement("option") as HTMLOptionElement
+        opt.value = text
+        opt.textContent = text
+        select.appendChild(opt)
+    }
+    select.value = if (current.isNotEmpty() && seen.contains(current)) current else ""
+}
+
+private fun loadInvoiceHistoryFilterOptions() {
+    MainScope().launch {
+        ApiClient.get<dynamic>("invoice-history/filter-options").fold(
+            onSuccess = { body ->
+                if (body == null) return@fold
+                val clients = js("Array.from((body && body.clients) ? body.clients : [])").unsafeCast<Array<dynamic>>()
+                val vessels = js("Array.from((body && body.vessels) ? body.vessels : [])").unsafeCast<Array<dynamic>>()
+                val bookings = js("Array.from((body && body.bookingNumbers) ? body.bookingNumbers : [])").unsafeCast<Array<dynamic>>()
+                fillInvoiceHistoryFilterSelect("invoiceHistoryFilterClient", clients)
+                fillInvoiceHistoryFilterSelect("invoiceHistoryFilterVessel", vessels)
+                fillInvoiceHistoryFilterSelect("invoiceHistoryFilterBooking", bookings)
+            },
+            onError = { _, _ -> },
+        )
+    }
+}
+
+private fun downloadInvoiceHistoryPrintAll() {
+    if (!invoiceHistoryHasNarrowingFilter()) {
+        showMessage("Choose a client, vessel, booking number, or date range first.", "warning")
+        return
+    }
+    val btn = document.getElementById("invoiceHistoryPrintAllBtn") as? HTMLButtonElement
+    btn?.disabled = true
+    val prev = btn?.textContent ?: "Print all"
+    btn?.textContent = "Preparing..."
+    val q = (document.getElementById("invoiceHistorySearchInput") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val qPart = if (q.isEmpty()) "" else {
+        val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
+        "q=$encQ&"
+    }
+    val filterQs = invoiceHistoryFilterQueryString().removePrefix("&")
+    MainScope().launch {
+        try {
+            val response = window.fetch(apiUrl("invoice-history/print-all?$qPart$filterQs")).await()
+            if (!response.ok) {
+                val errorText = response.text().await()
+                ErrorHandler.showError(ErrorHandler.extractErrorMessage(errorText))
+                return@launch
+            }
+            val blob = response.blob().await()
+            val url = js("URL.createObjectURL(blob)") as String
+            try {
+                val a = document.createElement("a") as HTMLAnchorElement
+                a.href = url
+                a.download = "invoice-history.zip"
+                document.body?.appendChild(a)
+                a.click()
+                document.body?.removeChild(a)
+                showMessage("Invoices downloaded.", "success")
+            } finally {
+                js("URL.revokeObjectURL(url)")
+            }
+        } catch (e: dynamic) {
+            ErrorHandler.showError("Failed to download invoices: ${e.toString()}")
+        } finally {
+            btn?.textContent = prev
+            updateInvoiceHistoryPrintAllEnabled()
+        }
+    }
+}
+
 private fun loadInvoiceHistory(page0: Int = invoiceHistoryPageZeroBased) {
     val tableHost = document.getElementById("invoiceHistoryTable") ?: return
     tableHost.innerHTML = """<div class="invoice-history-empty"><strong>Loading</strong><div>Loading invoice history…</div></div>"""
@@ -494,11 +651,12 @@ private fun loadInvoiceHistory(page0: Int = invoiceHistoryPageZeroBased) {
     val encSort = js("encodeURIComponent")(invoiceHistorySortField).unsafeCast<String>()
     val encOrder = js("encodeURIComponent")(invoiceHistorySortOrder).unsafeCast<String>()
     val sortQs = "&sort=$encSort&order=$encOrder"
+    val filterQs = invoiceHistoryFilterQueryString()
     val endpoint = if (q.isNotEmpty()) {
         val encQ = js("encodeURIComponent")(q).unsafeCast<String>()
-        "invoice-history/page-search?q=$encQ&page=$invoiceHistoryPageZeroBased&size=$size$sortQs"
+        "invoice-history/page-search?q=$encQ&page=$invoiceHistoryPageZeroBased&size=$size$sortQs$filterQs"
     } else {
-        "invoice-history/page?page=$invoiceHistoryPageZeroBased&size=$size$sortQs"
+        "invoice-history/page?page=$invoiceHistoryPageZeroBased&size=$size$sortQs$filterQs"
     }
 
     MainScope().launch {
@@ -531,10 +689,10 @@ private fun loadInvoiceHistory(page0: Int = invoiceHistoryPageZeroBased) {
 
 /** Columns shown in the history table/cards. Bank/messages stay in API + edit payload, not displayed. */
 private fun invoiceHistoryAllSelectableColumnKeys(): List<String> = listOf(
-    "invoiceNumber", "vessel", "clientName", "shippingDate", "pol", "pod", "lcNo", "priceType", "chassis", "totalAmount",
+    "invoiceNumber", "vessel", "clientName", "shippingDate", "bookingNo", "pol", "pod", "lcNo", "priceType", "chassis", "totalAmount",
 )
 
-private fun invoiceHistoryLockedColumnKeys(): Set<String> = setOf("invoiceNumber")
+private fun invoiceHistoryLockedColumnKeys(): Set<String> = emptySet()
 
 private fun invoiceHistoryDefaultColumnKeys(): List<String> = listOf(
     "invoiceNumber", "vessel", "clientName", "shippingDate", "chassis", "totalAmount",
@@ -591,6 +749,7 @@ private fun invoiceHistoryColumnWidthPx(key: String): Int = when (key) {
     "vessel" -> 96
     "clientName" -> 132
     "shippingDate" -> 104
+    "bookingNo" -> 120
     "pol" -> 96
     "pod" -> 104
     "lcNo" -> 72
@@ -624,7 +783,7 @@ private fun showInvoiceHistoryColumnFilterModal() {
                 <h3 id="invoiceHistoryColumnFilterTitle" style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 700;">Select Columns to Display</h3>
                 <button type="button" id="closeInvoiceHistoryColumnFilter" aria-label="Close" style="background: none; border: none; font-size: 28px; cursor: pointer; color: #666; padding: 4px 8px; line-height: 1; min-width: 44px; min-height: 44px; display: flex; align-items: center; justify-content: center;">&times;</button>
             </div>
-            <p style="margin: 0 0 8px 0; color: #64748b; font-size: 13px;">Max $INVOICE_HISTORY_MAX_DATA_COLUMNS data columns. Invoice number is always on. Action buttons are always visible.</p>
+            <p style="margin: 0 0 8px 0; color: #64748b; font-size: 13px;">Max $INVOICE_HISTORY_MAX_DATA_COLUMNS data columns. Action buttons are always visible.</p>
             <p id="invoiceHistoryColumnCount" style="margin: 0 0 16px 0; font-size: 13px; font-weight: 600; color: #0f172a;"></p>
             <div id="invoiceHistoryColumnCheckboxes" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;"></div>
             <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
@@ -726,6 +885,7 @@ private fun invoiceHistoryColumnLabel(key: String): String = when (key) {
     "vessel" -> "Vessel"
     "clientName" -> "Client name"
     "shippingDate" -> "Date"
+    "bookingNo" -> "Booking number"
     "pol" -> "POL"
     "pod" -> "POD"
     "lcNo" -> "LC"
@@ -744,6 +904,7 @@ private fun invoiceHistoryCell(row: dynamic, key: String): String {
         "vessel" -> d.vessel
         "clientName" -> d.clientName
         "shippingDate" -> d.shippingDate
+        "bookingNo" -> d.bookingNo
         "pol" -> d.pol
         "pod" -> d.pod
         "lcNo" -> d.lcNo

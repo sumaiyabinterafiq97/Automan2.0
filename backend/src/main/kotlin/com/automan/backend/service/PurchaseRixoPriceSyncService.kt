@@ -79,8 +79,6 @@ class PurchaseRixoPriceSyncService(
         if (!tokenMatch(purchase.rixoCompany, mapping.rixoCompany)) return false
         val mapVenue = mapping.venueId?.trim().orEmpty()
         if (mapVenue.isNotEmpty() && !tokenMatch(purchase.venueId, mapVenue)) return false
-        val mapPol = mapping.pol?.trim().orEmpty()
-        if (mapPol.isNotEmpty() && !tokenMatch(purchase.pol, mapPol)) return false
         val mapVt = mapping.supportedVehicleType?.trim().orEmpty()
         if (mapVt.isNotEmpty() && mapVt != "-" && !tokenMatch(purchase.shipmentSize, mapVt)) return false
         return true

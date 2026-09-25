@@ -19,6 +19,7 @@ private var rixoHistoryCachedRows: Array<dynamic> = emptyArray()
 private var rixoHistorySortField: String = "buyingDate"
 private var rixoHistorySortOrder: String = "desc"
 private val rixoHistorySelectedIds: MutableSet<String> = mutableSetOf()
+private val rixoHistorySelectedChassis: MutableList<Pair<String, String>> = mutableListOf()
 private var rixoHistoryResizeDebounceHandle: Int? = null
 private var rixoHistorySearchDebounceHandle: Int? = null
 private var rixoHistoryLastCompactLayout: Boolean? = null
@@ -29,6 +30,7 @@ private var rixoHistoryTotalPages: Int = 1
 private var rixoHistoryTotalElements: Long = 0L
 private var rixoHistoryItemsPerPage: Int = AppConstants.DEFAULT_ITEMS_PER_PAGE
 private var rixoHistoryActiveSearchQ: String = ""
+private var rixoHistoryChassisConfirmInFlight: Boolean = false
 
 private const val RIXO_HISTORY_COMPACT_MAX_WIDTH_PX = 860
 
@@ -39,6 +41,7 @@ fun showRixoHistoryPage() {
     rixoHistorySortField = "buyingDate"
     rixoHistorySortOrder = "desc"
     rixoHistorySelectedIds.clear()
+    rixoHistorySelectedChassis.clear()
     rixoHistoryServerMode = true
     rixoHistoryPageZeroBased = 0
     rixoHistoryTotalPages = 1
@@ -197,6 +200,19 @@ fun showRixoHistoryPage() {
             downloadRixoHistoryPdf(row, btn as? HTMLButtonElement)
         })
     }
+    if (wrap != null && !wrap.hasAttribute("data-rixo-chassis-confirm-delegation")) {
+        wrap.setAttribute("data-rixo-chassis-confirm-delegation", "true")
+        wrap.addEventListener("click", { e: Event ->
+            val target = e.target as? Element ?: return@addEventListener
+            val btn = target.closest("button[data-rixo-chassis-select]") ?: return@addEventListener
+            e.preventDefault()
+            e.stopPropagation()
+            val hid = btn.getAttribute("data-history-id")?.trim().orEmpty()
+            val token = btn.getAttribute("data-chassis-token")?.trim().orEmpty()
+            if (hid.isEmpty() || token.isEmpty()) return@addEventListener
+            toggleRixoHistoryChassisSelection(hid, token)
+        })
+    }
     if (wrap != null && !wrap.hasAttribute("data-rixo-history-selection-delegation")) {
         wrap.setAttribute("data-rixo-history-selection-delegation", "true")
         wrap.addEventListener("click", { e: Event ->
@@ -250,12 +266,29 @@ private fun setupRixoHistoryResizeListener() {
     window.addEventListener("resize", resizeListener)
 }
 
+private fun rixoHistoryChassisIsSelected(historyId: String, chassis: String): Boolean =
+    rixoHistorySelectedChassis.any { it.first == historyId && it.second.equals(chassis, ignoreCase = true) }
+
+private fun toggleRixoHistoryChassisSelection(historyId: String, chassis: String) {
+    val idx = rixoHistorySelectedChassis.indexOfFirst {
+        it.first == historyId && it.second.equals(chassis, ignoreCase = true)
+    }
+    if (idx >= 0) rixoHistorySelectedChassis.removeAt(idx) else rixoHistorySelectedChassis.add(historyId to chassis)
+    renderRixoHistoryTableFromCache()
+    updateRixoHistorySelectionUi()
+}
+
 private fun updateRixoHistorySelectionUi() {
     val confirmBtn = document.getElementById("rixoConfirmSelectedBtn") as? HTMLButtonElement
     if (confirmBtn != null) {
-        val hasAny = rixoHistorySelectedIds.isNotEmpty()
-        confirmBtn.disabled = !hasAny
-        confirmBtn.textContent = if (hasAny) "Rixo Confirmed (${rixoHistorySelectedIds.size})" else "Rixo Confirmed"
+        val rows = rixoHistorySelectedIds.size
+        val cars = rixoHistorySelectedChassis.size
+        confirmBtn.disabled = rows == 0 && cars == 0
+        confirmBtn.textContent = when {
+            cars > 0 -> "Rixo Confirmed ($cars)"
+            rows > 0 -> "Rixo Confirmed ($rows)"
+            else -> "Rixo Confirmed"
+        }
     }
 }
 
@@ -325,14 +358,23 @@ private fun showRixoHistoryConfirmModal(
 }
 
 private fun confirmSelectedRixoHistoryRows() {
-    if (rixoHistorySelectedIds.isEmpty()) {
-        showMessage("Select at least one history row.", "warning")
+    val cars = rixoHistorySelectedChassis.size
+    val rows = rixoHistorySelectedIds.size
+    if (cars == 0 && rows == 0) {
+        showMessage("Select at least one car or history row.", "warning")
         return
     }
-    val count = rixoHistorySelectedIds.size
+    val message = when {
+        cars > 0 && rows > 0 ->
+            "Mark $cars selected car(s) as Rixo Confirmed, and every car on $rows selected row(s)?"
+        cars > 0 ->
+            "Mark $cars selected car(s) as Rixo Confirmed?"
+        else ->
+            "Mark all cars under $rows selected Rixo history row(s) as Rixo Confirmed?"
+    }
     showRixoHistoryConfirmModal(
         title = "Confirm Rixo",
-        message = "Mark all cars under $count selected Rixo history row(s) as Rixo Confirmed?",
+        message = message,
         confirmLabel = "Rixo Confirmed",
     ) {
         performConfirmSelectedRixoHistoryRows()
@@ -340,57 +382,95 @@ private fun confirmSelectedRixoHistoryRows() {
 }
 
 private fun performConfirmSelectedRixoHistoryRows() {
-    if (rixoHistorySelectedIds.isEmpty()) {
-        showMessage("Select at least one history row.", "warning")
+    val rowIds = rixoHistorySelectedIds.toList()
+    val cars = rixoHistorySelectedChassis.toList()
+    if (rowIds.isEmpty() && cars.isEmpty()) {
+        showMessage("Select at least one car or history row.", "warning")
         return
     }
+    if (rixoHistoryChassisConfirmInFlight) return
 
     val btn = document.getElementById("rixoConfirmSelectedBtn") as? HTMLButtonElement
     btn?.disabled = true
     val prevLabel = btn?.textContent ?: "Rixo Confirmed"
     btn?.textContent = "Sending..."
+    rixoHistoryChassisConfirmInFlight = true
 
     MainScope().launch {
-        val idLongs = rixoHistorySelectedIds.mapNotNull { it.toLongOrNull() }.distinct()
-        if (idLongs.isEmpty()) {
-            showMessage("Could not read selected row ids. Reload the page and try again.", "error")
-            btn?.textContent = prevLabel
-            btn?.disabled = false
-            updateRixoHistorySelectionUi()
-            return@launch
+        var chassisUpdated = 0
+        var rowUpdated = 0
+        var confirmedRows = 0
+        var failed: String? = null
+
+        if (cars.isNotEmpty()) {
+            val parts = cars.mapNotNull { (hid, token) ->
+                val id = hid.toLongOrNull() ?: return@mapNotNull null
+                "{\"historyId\":$id,\"chassisToken\":" + JSON.stringify(token) + "}"
+            }
+            if (parts.isEmpty()) {
+                failed = "Could not read the selected cars. Reload the page and try again."
+            } else {
+                val body = JSON.parse<dynamic>("{\"items\":[" + parts.joinToString(",") + "]}")
+                ApiClient.post<dynamic>("rixo-history/confirm-chassis-batch", body).fold(
+                    onSuccess = { data ->
+                        val d: dynamic = (data as Any).unsafeCast<dynamic>()
+                        chassisUpdated = d.updatedPurchases?.toString()?.toIntOrNull() ?: 0
+                        rixoHistorySelectedChassis.clear()
+                    },
+                    onError = { message, _ ->
+                        failed = message
+                    },
+                )
+            }
         }
-        // Plain JSON array of numbers — avoids Kotlin Long/JS interop breaking JSON.stringify(historyIds).
-        val bodyJson = "{\"historyIds\":[" + idLongs.joinToString(",") + "]}"
-        val body = JSON.parse<dynamic>(bodyJson)
-        ApiClient.post<dynamic>("rixo-history/confirm-selected", body).fold(
-            onSuccess = { data ->
-                // JSON.parse yields a plain object; avoid .asDynamic() (not a function on that prototype in JS IR).
-                val d: dynamic = (data as Any).unsafeCast<dynamic>()
-                val updated = d.updatedPurchases?.toString() ?: "0"
-                val rows = d.selectedRows?.toString() ?: "0"
-                when {
-                    rows == "0" || rows.isEmpty() ->
-                        showMessage("No history rows were marked as Rixo Confirmed (server got no ids). Try again.", "warning")
-                    updated == "0" ->
-                        showMessage(
-                            "Selected $rows Rixo history row(s), but no purchase rows were updated. " +
-                                "Chassis in history must match purchase chassis (exact or prefix before \"-\"), " +
-                                "or purchases may already be Rixo Confirmed.",
-                            "warning",
-                        )
-                    else ->
-                        showSuccessModal(
-                            "Saved",
-                            "Rixo Confirmed for $updated purchase row(s) from $rows selected history row(s).",
-                        )
-                }
-                rixoHistorySelectedIds.clear()
-                loadRixoHistory()
-            },
-            onError = { message, _ ->
-                showMessage("Failed to mark Rixo Confirmed: $message", "error")
-            },
-        )
+
+        if (failed == null && rowIds.isNotEmpty()) {
+            val idLongs = rowIds.mapNotNull { it.toLongOrNull() }.distinct()
+            if (idLongs.isEmpty()) {
+                failed = "Could not read selected row ids. Reload the page and try again."
+            } else {
+                val body = JSON.parse<dynamic>("{\"historyIds\":[" + idLongs.joinToString(",") + "]}")
+                ApiClient.post<dynamic>("rixo-history/confirm-selected", body).fold(
+                    onSuccess = { data ->
+                        val d: dynamic = (data as Any).unsafeCast<dynamic>()
+                        rowUpdated = d.updatedPurchases?.toString()?.toIntOrNull() ?: 0
+                        confirmedRows = d.selectedRows?.toString()?.toIntOrNull() ?: 0
+                        rixoHistorySelectedIds.clear()
+                    },
+                    onError = { message, _ ->
+                        failed = message
+                    },
+                )
+            }
+        }
+
+        val updated = chassisUpdated + rowUpdated
+        when {
+            failed != null && updated == 0 ->
+                showMessage("Failed to mark Rixo Confirmed: $failed", "error")
+            failed != null ->
+                showMessage("Some cars were confirmed, then this failed: $failed", "error")
+            updated == 0 ->
+                showMessage(
+                    "Nothing was updated. Those cars may already be Rixo Confirmed, " +
+                        "or the chassis must match a purchase.",
+                    "warning",
+                )
+            cars.isNotEmpty() && rowIds.isNotEmpty() ->
+                showSuccessModal(
+                    "Saved",
+                    "Rixo Confirmed for $updated purchase row(s) from the selected cars and history rows.",
+                )
+            cars.isNotEmpty() ->
+                showSuccessModal("Saved", "Rixo Confirmed for $updated purchase row(s).")
+            else ->
+                showSuccessModal(
+                    "Saved",
+                    "Rixo Confirmed for $rowUpdated purchase row(s) from $confirmedRows selected history row(s).",
+                )
+        }
+        if (failed == null || updated > 0) loadRixoHistory()
+        rixoHistoryChassisConfirmInFlight = false
         btn?.textContent = prevLabel
         btn?.disabled = false
         updateRixoHistorySelectionUi()
@@ -637,6 +717,56 @@ private fun rixoHistoryHasBookingRequestedFromRow(row: dynamic): Boolean {
     return s == "true" || s == "1"
 }
 
+private fun rixoHistoryJsFlag(v: dynamic): Boolean {
+    if (v == null || v == js("undefined")) return false
+    if (v is Boolean) return v
+    val s = v.toString().trim().lowercase()
+    return s == "true" || s == "1"
+}
+
+private fun rixoHistoryChassisConfirmItems(row: dynamic): List<Pair<String, Boolean>> {
+    val raw: dynamic = row.chassisConfirms
+    if (raw == null || raw == js("undefined")) return emptyList()
+    val lengthRaw: dynamic = raw.length
+    val length = when (lengthRaw) {
+        is Int -> lengthRaw
+        is Double -> lengthRaw.toInt()
+        else -> return emptyList()
+    }
+    if (length <= 0) return emptyList()
+    val out = mutableListOf<Pair<String, Boolean>>()
+    for (i in 0 until length) {
+        val item: dynamic = raw[i]
+        val chassis = item?.chassis?.toString()?.trim().orEmpty()
+        if (chassis.isEmpty()) continue
+        out.add(chassis to rixoHistoryJsFlag(item.confirmed))
+    }
+    return out
+}
+
+private fun rixoHistoryChassisChipHtml(historyId: String, chassis: String, confirmed: Boolean): String {
+    val safeId = escapeHtml(historyId)
+    val safeChassis = escapeHtml(chassis)
+    val selected = !confirmed && rixoHistoryChassisIsSelected(historyId, chassis)
+    val circle = if (confirmed) {
+        """<span role="img" aria-label="Rixo Confirmed" title="Rixo Confirmed" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:#d1fae5;border:2px solid #6ee7b7;color:#047857;font-size:11px;line-height:1;font-weight:700;flex:0 0 auto;">✓</span>"""
+    } else if (selected) {
+        """<button type="button" data-rixo-chassis-select data-history-id="$safeId" data-chassis-token="$safeChassis" title="Selected" aria-label="Deselect $safeChassis" aria-pressed="true" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border-radius:50%;background:#ccfbf1;border:2px solid #0f766e;cursor:pointer;flex:0 0 auto;"></button>"""
+    } else {
+        """<button type="button" data-rixo-chassis-select data-history-id="$safeId" data-chassis-token="$safeChassis" title="Select this car" aria-label="Select $safeChassis" aria-pressed="false" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border-radius:50%;background:#fff;border:2px solid #d1d5db;cursor:pointer;flex:0 0 auto;"></button>"""
+    }
+    return """<span class="purchase-list-cell-chip" style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:9999px;font-size:13px;font-weight:500;background:#f8fafc;color:#111827;line-height:1.35;max-width:100%;box-shadow:0 1px 6px rgba(15,23,42,0.18);">$circle<span style="word-break:break-word;">$safeChassis</span></span>"""
+}
+
+private fun rixoHistoryChassisCellHtml(row: dynamic, historyId: String): String {
+    val items = rixoHistoryChassisConfirmItems(row)
+    if (items.isEmpty()) return formatRixoHistoryChassisChipsHtml(rixoHistoryCell(row, "chassis"), historyId)
+    val chips = items.joinToString("") { (chassis, confirmed) ->
+        rixoHistoryChassisChipHtml(historyId, chassis, confirmed)
+    }
+    return """<span style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center;">$chips</span>"""
+}
+
 private fun rixoHistoryConfirmedIndicatorHtml(confirmed: Boolean): String {
     val label = if (confirmed) "Rixo Confirmed" else "Not Rixo Confirmed"
     val safeLabel = escapeHtml(label)
@@ -696,6 +826,7 @@ private fun loadRixoHistory(page0: Int = rixoHistoryPageZeroBased) {
     val q = (document.getElementById("rixoHistorySearchInput") as? HTMLInputElement)?.value?.trim() ?: ""
     if (q != rixoHistoryActiveSearchQ) {
         rixoHistorySelectedIds.clear()
+        rixoHistorySelectedChassis.clear()
     }
     rixoHistoryActiveSearchQ = q
     rixoHistoryPageZeroBased = page0.coerceAtLeast(0)
@@ -1201,7 +1332,7 @@ private fun renderRixoHistoryTableFromCache() {
                 val raw = rixoHistoryCell(row, key)
                 val cellHtml = when {
                     raw.isEmpty() -> ""
-                    key == "chassis" -> formatRixoHistoryChassisChipsHtml(raw, hid)
+                    key == "chassis" -> rixoHistoryChassisCellHtml(row, hid)
                     else -> formatPurchaseListNeutralChipHtml(raw)
                 }
                 html.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
@@ -1250,7 +1381,7 @@ private fun renderRixoHistoryTableFromCache() {
                 html.append("""<div class="rixo-kv"><div class="rixo-k">Message</div><div class="rixo-v">${formatPurchaseListNeutralChipHtml(msg)}</div></div>""")
             }
             if (chassisRaw.isNotEmpty()) {
-                html.append("""<div class="rixo-kv"><div class="rixo-k">Chassis</div><div class="rixo-v">${formatRixoHistoryChassisChipsHtml(chassisRaw, hid)}</div></div>""")
+                html.append("""<div class="rixo-kv"><div class="rixo-k">Chassis</div><div class="rixo-v">${rixoHistoryChassisCellHtml(row, hid)}</div></div>""")
             }
             html.append("""</div></div>""")
         }

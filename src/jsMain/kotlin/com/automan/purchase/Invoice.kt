@@ -1374,6 +1374,7 @@ private fun syncWindowInvoicePdfLinesFromPurchases(purchases: Array<dynamic>) {
 
 private fun buildInvoicePdfDescription(purchase: dynamic): String {
     val chassis = js("purchase.chassis")?.toString()?.trim() ?: ""
+    val brand = js("purchase.brand")?.toString()?.trim() ?: ""
     val carName = js("purchase.carName")?.toString()?.trim() ?: ""
     val grade = js("purchase.grade")?.toString()?.trim() ?: ""
     val carModelYear = js("purchase.carModelYear")?.toString()?.trim() ?: ""
@@ -1387,9 +1388,13 @@ private fun buildInvoicePdfDescription(purchase: dynamic): String {
 
     val line1 = buildString {
         if (chassis.isNotEmpty()) append(chassis)
-        if (carName.isNotEmpty()) {
+        val title = buildList {
+            if (brand.isNotEmpty() && !carName.startsWith(brand, ignoreCase = true)) add(brand)
+            if (carName.isNotEmpty()) add(carName)
+        }.joinToString(" ")
+        if (title.isNotEmpty()) {
             if (isNotEmpty()) append("   ")
-            append(carName)
+            append(title)
         }
         if (grade.isNotEmpty()) {
             if (isNotEmpty()) append("   ")
@@ -1420,7 +1425,7 @@ private fun buildInvoicePdfDescription(purchase: dynamic): String {
         }
         if (distance.isNotEmpty()) {
             if (isNotEmpty()) append("     ")
-            append(distance)
+            append(if (distance.endsWith("km", ignoreCase = true)) distance else "$distance km")
         }
         if (fuel.isNotEmpty()) {
             if (isNotEmpty()) append("     ")

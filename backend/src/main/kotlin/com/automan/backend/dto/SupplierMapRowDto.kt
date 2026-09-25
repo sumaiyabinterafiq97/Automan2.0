@@ -13,7 +13,6 @@ data class SupplierMapRowDto(
     val stockLocation: String,
     val rixoCompany: String,
     val venueId: String? = null,
-    val pol: String? = null,
     val supportedVehicleType: String? = null,
     val rixoPrice: String? = null,
 ) {
@@ -24,7 +23,6 @@ data class SupplierMapRowDto(
             stockLocation = mapping.stockLocation,
             rixoCompany = mapping.rixoCompany,
             venueId = mapping.venueId,
-            pol = mapping.pol,
             supportedVehicleType = mapping.supportedVehicleType,
             rixoPrice = mapping.rixoPrice,
         )
@@ -36,7 +34,6 @@ data class SupplierMapRowDto(
             "stockLocation" to dto.stockLocation,
             "rixoCompany" to dto.rixoCompany,
             "venueId" to (dto.venueId ?: ""),
-            "pol" to (dto.pol ?: ""),
             "supportedVehicleType" to (dto.supportedVehicleType ?: ""),
             "rixoPrice" to (dto.rixoPrice ?: ""),
         )

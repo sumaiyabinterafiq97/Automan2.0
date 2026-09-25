@@ -78,6 +78,10 @@ private var smCardInlineEditStock: String = ""
 private var smCardInlineEditPol: String = ""
 private var smCardInlineEditCurrentLabel: String = ""
 
+/** Venue-card duplicate: new supplier name, same venue, empty stock/company/price. */
+private var smVenueDuplicateSupplier: String = ""
+private var smVenueDuplicateVenue: String = ""
+
 private var smFullRowAddOpen: Boolean = false
 private var smSearchQuery: String = ""
 private var smSupplierSortOrder: String? = null // null = newest-first; "asc" | "desc"
@@ -353,6 +357,33 @@ private fun clearSmCardInlineEdit() {
     smCardInlineEditCurrentLabel = ""
 }
 
+private fun clearSmVenueDuplicate() {
+    smVenueDuplicateSupplier = ""
+    smVenueDuplicateVenue = ""
+}
+
+private fun smSupplierDuplicateFormHtml(supplier: String): String {
+    if (smVenueDuplicateSupplier.isEmpty()) return ""
+    if (smNormSupplier(supplier) != smNormSupplier(smVenueDuplicateSupplier)) return ""
+    val nameField = createPlainTextInput(
+        "smVenueDuplicateName",
+        "New supplier name",
+        required = true,
+        initialValue = supplier,
+    )
+    return """
+        <div class="sm-supplier-duplicate-form">
+            <div class="rixo-tree-card rixo-tree-card--company rixo-tree-card--inline-editing rixo-tree-card--inline-editing-with-actions">
+                <div class="rixo-tree-card-combobox-wrap">$nameField</div>
+                <div class="rixo-tree-card-inline-actions">
+                    <button type="button" class="rixo-tree-card-inline-cancel sm-venue-duplicate-cancel">Cancel</button>
+                    <button type="button" class="rixo-tree-card-inline-save sm-venue-duplicate-save">Save</button>
+                </div>
+            </div>
+        </div>
+    """.trimIndent()
+}
+
 private fun smListContains(list: List<String>, value: String): Boolean =
     list.any { it.equals(value.trim(), ignoreCase = true) }
 
@@ -486,8 +517,7 @@ private fun smMergeRowIdForCompany(supplier: String, venue: String, stock: Strin
     val rows = smTreeRowsCache.filter {
         smNormSupplier(it.supplier) == smNormSupplier(supplier) &&
             smRowVenueKey(it) == smNormVenue(venue) &&
-            smNormStock(it.stock) == smNormStock(stock) &&
-            smRowPolKey(it) == smNormPol(pol)
+            smNormStock(it.stock) == smNormStock(stock)
     }
     if (smVisibleCompanies(rows).isNotEmpty()) return null
     return rows.filter { it.isSmCompanySkeleton() }.singleOrNull()?.id?.toLongOrNull()
@@ -498,7 +528,6 @@ private fun smMergeRowIdForLeaf(supplier: String, venue: String, stock: String, 
         smNormSupplier(it.supplier) == smNormSupplier(supplier) &&
             smRowVenueKey(it) == smNormVenue(venue) &&
             smNormStock(it.stock) == smNormStock(stock) &&
-            smRowPolKey(it) == smNormPol(pol) &&
             smNormCompany(it.company) == smNormCompany(company)
     }
     return rows.filter { it.isSmLeafSkeleton() }.singleOrNull()?.id?.toLongOrNull()
@@ -574,7 +603,6 @@ private fun smTreeHeadersHtml(): String = """
         </div>
         <div class="rixo-tree-header">Venue ID</div>
         <div class="rixo-tree-header">Stock Location</div>
-        <div class="rixo-tree-header">POL</div>
         <div class="rixo-tree-header">Rixo Company</div>
         <div class="rixo-tree-header">Supported Vehicle Type</div>
         <div class="rixo-tree-header rixo-tree-header--price">Rixo Price</div>
@@ -592,9 +620,6 @@ private fun buildSmFullRowAddHtml(): String = """
             </div>
             <div class="sm-tree-full-row-col sm-tree-full-row-col--stock">
                 ${createEditableCombobox("smFullRowStock", "Select Stock Location", required = true)}
-            </div>
-            <div class="sm-tree-full-row-col sm-tree-full-row-col--pol">
-                ${createEditableCombobox("smFullRowPol", "Select POL", required = false)}
             </div>
             <div class="sm-tree-full-row-col sm-tree-full-row-col--company">
                 ${createEditableCombobox("smFullRowCompany", "Select Rixo Company", required = true)}
@@ -616,9 +641,8 @@ private fun buildSmFullRowAddHtml(): String = """
 private fun smCardWrapperClass(level: String): String = when (level) {
     "supplier" -> "rixo-tree-card-wrapper--company"
     "venue" -> "rixo-tree-card-wrapper--venue"
-    "stock" -> "rixo-tree-card-wrapper--stock"
-    "pol" -> "rixo-tree-card-wrapper--pol"
-    else -> "rixo-tree-card-wrapper--field"
+        "stock" -> "rixo-tree-card-wrapper--stock"
+        else -> "rixo-tree-card-wrapper--field"
 }
 
 private fun smCardLevelClass(level: String): String = when (level) {
@@ -640,7 +664,6 @@ private fun smBuildCardHtml(
         "supplier" -> smSelectedSupplier == label
         "venue" -> smSelectedVenue == label
         "stock" -> smSelectedStock == label
-        "pol" -> smSelectedPol == label
         "rixo_company" -> smSelectedCompany == label
         else -> false
     }
@@ -656,7 +679,6 @@ private fun smBuildCardHtml(
             "supplier" -> "Enter Supplier Name"
             "venue" -> "Enter Venue ID"
             "stock" -> "Select Stock Location"
-            "pol" -> "Select POL"
             else -> "Select Rixo Company"
         }
         val comboboxHtml = if (level == "supplier" || level == "venue") {
@@ -695,6 +717,11 @@ private fun smBuildCardHtml(
                 <button type="button" class="rixo-tree-card-menu-btn" aria-label="More actions" aria-haspopup="true">&#8942;</button>
                 <div class="rixo-tree-card-menu-panel" role="menu">
                     <button type="button" class="rixo-tree-card-menu-item" data-menu-action="edit" role="menuitem">Edit</button>
+                    ${if (level == "supplier") {
+                        """<button type="button" class="rixo-tree-card-menu-item" data-menu-action="duplicate" role="menuitem">Duplicate</button>"""
+                    } else {
+                        ""
+                    }}
                     ${if (level != "venue") {
                         """<button type="button" class="rixo-tree-card-menu-item rixo-tree-card-menu-item--danger" data-menu-action="delete" role="menuitem">Delete branch</button>"""
                     } else {
@@ -782,6 +809,7 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
         val supplierOpen = supplier == smSelectedSupplier
         sb.append("""<div class="rixo-tree-node">""")
         sb.append(smBuildCardHtml("supplier", supplier, supplierOpen, supplier))
+        sb.append(smSupplierDuplicateFormHtml(supplier))
 
         if (supplierOpen) {
             val venues = smVisibleVenues(supplierRows)
@@ -817,69 +845,40 @@ private fun buildSupplierMapTreeHtmlFromCache(): String {
                                 sb.append(smBuildCardHtml("stock", stock, stockOpen, supplier, venue, stock))
 
                                 if (stockOpen) {
-                                    val pols = smVisiblePols(stockRows)
-                                    val allowAddPol = pols.none { it != SM_PLACEHOLDER_POL }
+                                    val companies = smVisibleCompanies(stockRows)
                                     sb.append("""<div class="rixo-tree-children">""")
-                                    if (pols.isEmpty()) {
-                                        if (smCardInlineAddMatchesPolBranch(supplier, venue, stock)) {
-                                            sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("pol")}</div>""")
+                                    if (companies.isEmpty()) {
+                                        if (smCardInlineAddMatchesCompanyBranch(supplier, venue, stock, "")) {
+                                            sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("rixo_company")}</div>""")
                                         }
-                                        if (allowAddPol) {
-                                            sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("pol", supplier, venue, stock, null, null)}</div>""")
-                                        }
+                                        sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("rixo_company", supplier, venue, stock, "", null)}</div>""")
                                     } else {
-                                        for (pol in pols) {
-                                            val polRows = stockRows.filter { smRowPolKey(it) == pol }
-                                            val polOpen = pol == smSelectedPol
+                                        for (company in companies) {
+                                            val companyRows = stockRows.filter { smNormCompany(it.company) == company }
+                                            val companyOpen = company == smSelectedCompany
                                             sb.append("""<div class="rixo-tree-node">""")
-                                            sb.append(smBuildCardHtml("pol", pol, polOpen, supplier, venue, stock, pol))
+                                            sb.append(smBuildCardHtml("rixo_company", company, companyOpen, supplier, venue, stock, ""))
 
-                                            if (polOpen) {
-                                                val companies = smVisibleCompanies(polRows)
-                                                sb.append("""<div class="rixo-tree-children">""")
-                                                if (companies.isEmpty()) {
-                                                    if (smCardInlineAddMatchesCompanyBranch(supplier, venue, stock, pol)) {
-                                                        sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("rixo_company")}</div>""")
-                                                    }
-                                                    sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("rixo_company", supplier, venue, stock, pol, null)}</div>""")
-                                                } else {
-                                                    for (company in companies) {
-                                                        val companyRows = polRows.filter { smNormCompany(it.company) == company }
-                                                        val companyOpen = company == smSelectedCompany
-                                                        sb.append("""<div class="rixo-tree-node">""")
-                                                        sb.append(smBuildCardHtml("rixo_company", company, companyOpen, supplier, venue, stock, pol))
-
-                                                        if (companyOpen) {
-                                                            val leaves = smBuildLeafRows(companyRows)
-                                                            sb.append("""<div class="rixo-tree-children"><div class="rixo-tree-leaf-wrap"><div class="rixo-tree-leaf-grid">""")
-                                                            var seq = 0
-                                                            for (leaf in leaves) {
-                                                                val base = companyRows.firstOrNull { it.id.toLongOrNull() == leaf.id }
-                                                                if (base != null) sb.append(smBuildLeafRowHtml(leaf, base, seq++))
-                                                            }
-                                                            if (smCardInlineAddMatchesLeafBranch(supplier, venue, stock, pol, company)) {
-                                                                sb.append(buildSmLeafInlineAddHtml())
-                                                            }
-                                                            sb.append(smTreeAddButtonHtml("leaf", supplier, venue, stock, pol, company))
-                                                            sb.append("""</div></div></div>""")
-                                                        }
-                                                        sb.append("""</div>""")
-                                                    }
-                                                    if (smCardInlineAddMatchesCompanyBranch(supplier, venue, stock, pol)) {
-                                                        sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("rixo_company")}</div>""")
-                                                    }
-                                                    sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("rixo_company", supplier, venue, stock, pol, null)}</div>""")
+                                            if (companyOpen) {
+                                                val leaves = smBuildLeafRows(companyRows)
+                                                sb.append("""<div class="rixo-tree-children"><div class="rixo-tree-leaf-wrap"><div class="rixo-tree-leaf-grid">""")
+                                                var seq = 0
+                                                for (leaf in leaves) {
+                                                    val base = companyRows.firstOrNull { it.id.toLongOrNull() == leaf.id }
+                                                    if (base != null) sb.append(smBuildLeafRowHtml(leaf, base, seq++))
                                                 }
-                                                sb.append("""</div>""")
+                                                if (smCardInlineAddMatchesLeafBranch(supplier, venue, stock, "", company)) {
+                                                    sb.append(buildSmLeafInlineAddHtml())
+                                                }
+                                                sb.append(smTreeAddButtonHtml("leaf", supplier, venue, stock, "", company))
+                                                sb.append("""</div></div></div>""")
                                             }
                                             sb.append("""</div>""")
                                         }
-                                        if (allowAddPol) {
-                                            if (smCardInlineAddMatchesPolBranch(supplier, venue, stock)) {
-                                                sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("pol")}</div>""")
-                                            }
-                                            sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("pol", supplier, venue, stock, null, null)}</div>""")
+                                        if (smCardInlineAddMatchesCompanyBranch(supplier, venue, stock, "")) {
+                                            sb.append("""<div class="rixo-tree-node">${buildSmCardInlineAddHtml("rixo_company")}</div>""")
                                         }
+                                        sb.append("""<div class="rixo-tree-col-footer">${smTreeAddButtonHtml("rixo_company", supplier, venue, stock, "", null)}</div>""")
                                     }
                                     sb.append("""</div>""")
                                 }
@@ -1033,7 +1032,6 @@ private fun smRowsForBranch(
         smNormSupplier(it.supplier) == smNormSupplier(supplier) &&
             smRowVenueKey(it) == smNormVenue(venue) &&
             smNormStock(it.stock) == smNormStock(stock) &&
-            smRowPolKey(it) == smNormPol(pol) &&
             smNormCompany(it.company) == smNormCompany(company)
     }
     else -> emptyList()
@@ -1052,7 +1050,6 @@ private fun smPutPayloadFromRow(
     p.auctionName = (newSupplier ?: row.supplier).trim()
     p.venueId = (newVenue ?: row.venueId)?.trim()?.takeIf { it.isNotEmpty() }
     p.stockLocation = (newStock ?: row.stock).trim()
-    p.pol = (newPol ?: row.pol)?.trim()?.takeIf { it.isNotEmpty() }
     p.rixoCompany = (newCompany ?: row.company).trim()
     if (!pathEditOnly) {
         p.supportedVehicleType = row.vType?.trim()?.takeIf { it.isNotEmpty() }
@@ -1102,6 +1099,73 @@ private fun runSmPutBatchSequential(
         .catch { err: dynamic -> onFail(err.toString()) }
 }
 
+private fun smSupplierNameTaken(name: String): Boolean {
+    val trimmed = name.trim()
+    if (trimmed.isEmpty()) return false
+    if (smRootSuppliers.any { it.trim().equals(trimmed, ignoreCase = true) }) return true
+    return smTreeRowsCache.any { it.supplier.trim().equals(trimmed, ignoreCase = true) }
+}
+
+/** New supplier + copied venue only. No row id, so this does not merge into the source branch. */
+private fun postSmDuplicateSupplierVenue(newName: String, venue: String, onSuccess: () -> Unit) {
+    val obj: dynamic = js("{}")
+    obj.insertMode = "VENUE"
+    obj.auctionName = newName.trim()
+    obj.venueId = venue.trim()
+    obj.rixoCompany = "-"
+    obj.stockLocation = "-"
+    val payload = js("{}")
+    payload.rows = arrayOf(obj)
+    window.fetch(apiUrl("rixo-mapping/bulk"), js("""{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
+        .then { resp: dynamic ->
+            resp.json().then { result: dynamic ->
+                val pair = js("{}")
+                pair.resp = resp
+                pair.result = result
+                pair
+            }
+        }
+        .then { pair: dynamic ->
+            if (pair.resp.ok && (pair.result.success as? Boolean == true)) {
+                smDispatchUpdated()
+                onSuccess()
+                showMessage("Supplier duplicated", "success")
+            } else {
+                showMessage(pair.result.message?.toString() ?: "Failed to duplicate supplier", "error")
+            }
+        }
+        .catch { err: dynamic -> showMessage("Failed to duplicate supplier: $err", "error") }
+}
+
+private fun executeSmVenueDuplicateSave() {
+    val source = smVenueDuplicateSupplier.trim()
+    val venue = smVenueDuplicateVenue.trim()
+    val newName = (document.getElementById("smVenueDuplicateNameInput") as? HTMLInputElement)?.value?.trim().orEmpty()
+    if (venue.isEmpty() || venue == SM_PLACEHOLDER_VENUE) {
+        showMessage("Set a venue id before duplicating", "error")
+        return
+    }
+    if (newName.isEmpty()) {
+        showMessage("Supplier name is required", "error")
+        return
+    }
+    if (smRejectIfSemicolon(newName)) return
+    if (newName.equals(source, ignoreCase = true)) {
+        showMessage("Enter a new supplier name", "error")
+        return
+    }
+    if (smSupplierNameTaken(newName)) {
+        showMessage("A supplier named $newName already exists", "error")
+        return
+    }
+    postSmDuplicateSupplierVenue(newName, venue) {
+        clearSmVenueDuplicate()
+        smClearSelectionChain()
+        smSelectedSupplier = smNormSupplier(newName)
+        refreshSupplierMapTreeData()
+    }
+}
+
 private fun postSmMappingBulkOneRow(
     insertMode: String?,
     supplier: String,
@@ -1141,18 +1205,6 @@ private fun postSmMappingBulkOneRow(
             obj.stockLocation = stock.trim()
             obj.rixoCompany = "-"
         }
-        "POL" -> {
-            if (supplier.isBlank() || stock.isBlank() || pol.isBlank() || pol == SM_PLACEHOLDER_POL) {
-                showMessage("POL is required", "error"); return
-            }
-            if (smRejectSecondPol(stock, pol)) return
-            obj.insertMode = "POL"
-            obj.auctionName = supplier.trim()
-            obj.venueId = venue.trim().takeIf { it.isNotEmpty() && it != SM_PLACEHOLDER_VENUE }
-            obj.stockLocation = stock.trim()
-            obj.pol = pol.trim()
-            obj.rixoCompany = "-"
-        }
         "RIXO_COMPANY" -> {
             if (supplier.isBlank() || stock.isBlank() || company.isBlank()) {
                 showMessage("Rixo company is required", "error"); return
@@ -1161,7 +1213,6 @@ private fun postSmMappingBulkOneRow(
             obj.auctionName = supplier.trim()
             obj.venueId = venue.trim().takeIf { it.isNotEmpty() && it != SM_PLACEHOLDER_VENUE }
             obj.stockLocation = stock.trim()
-            obj.pol = pol.trim().takeIf { it.isNotEmpty() && it != SM_PLACEHOLDER_POL }
             obj.rixoCompany = company.trim()
         }
         else -> {
@@ -1169,7 +1220,6 @@ private fun postSmMappingBulkOneRow(
                 showMessage("Complete the path (supplier, stock location, and Rixo company)", "error"); return
             }
             if (smRejectSecondVenue(supplier, venue)) return
-            if (smRejectSecondPol(stock, pol)) return
             if (vtype.isNotBlank() && !smListContains(smMasterVehicleTypes, vtype)) {
                 showMessage("Please select a vehicle type from the list", "error"); return
             }
@@ -1180,7 +1230,6 @@ private fun postSmMappingBulkOneRow(
             obj.auctionName = supplier.trim()
             obj.venueId = venue.trim().takeIf { it.isNotEmpty() && it != SM_PLACEHOLDER_VENUE }
             obj.stockLocation = stock.trim()
-            obj.pol = pol.trim().takeIf { it.isNotEmpty() && it != SM_PLACEHOLDER_POL }
             obj.rixoCompany = company.trim()
             obj.supportedVehicleType = vtype.trim().takeIf { it.isNotEmpty() }
             obj.rixoPrice = if (price.isBlank()) price else smNormalizePriceForDb(price)
@@ -1189,9 +1238,8 @@ private fun postSmMappingBulkOneRow(
     val mergeId = when (mode) {
         "VENUE" -> smMergeRowIdForVenue(supplier)
         "STOCK" -> smMergeRowIdForStock(supplier, venue)
-        "POL" -> smMergeRowIdForPol(supplier, venue, stock)
-        "RIXO_COMPANY" -> smMergeRowIdForCompany(supplier, venue, stock, pol)
-        "FULL" -> smMergeRowIdForLeaf(supplier, venue, stock, pol, company)
+        "RIXO_COMPANY" -> smMergeRowIdForCompany(supplier, venue, stock, "")
+        "FULL" -> smMergeRowIdForLeaf(supplier, venue, stock, "", company)
         else -> null
     }
     if (mergeId != null) obj.id = mergeId.toDouble()
@@ -1230,7 +1278,6 @@ private fun wireSmInlineAddComboboxes() {
             setEditableComboboxValue("smCardInlineAddVenue", "")
         }
         "stock" -> smPopulateCombobox("smCardInlineAddStock", smMasterStocks, "")
-        "pol" -> smPopulateCombobox("smCardInlineAddPol", smMasterPols, "")
         "rixo_company" -> smPopulateCombobox("smCardInlineAddCompany", smMasterCompanies, "")
         "leaf" -> {
             smPopulateCombobox("smCardInlineAddLeafType", smMasterVehicleTypes, "")
@@ -1247,7 +1294,6 @@ private fun wireSmCardInlineCombobox() {
         "supplier" -> setEditableComboboxValue(id, smCardInlineEditCurrentLabel)
         "venue" -> setEditableComboboxValue(id, smCardInlineEditCurrentLabel)
         "stock" -> smPopulateCombobox(id, smMasterStocks, smCardInlineEditCurrentLabel)
-        "pol" -> smPopulateCombobox(id, smMasterPols, smCardInlineEditCurrentLabel)
         "rixo_company" -> smPopulateCombobox(id, smMasterCompanies, smCardInlineEditCurrentLabel)
         else -> Unit
     }
@@ -1257,7 +1303,6 @@ private fun wireSmFullRowAddComboboxes() {
     setEditableComboboxValue("smFullRowSupplier", "")
     setEditableComboboxValue("smFullRowVenue", "")
     smPopulateCombobox("smFullRowStock", smMasterStocks, "")
-    smPopulateCombobox("smFullRowPol", smMasterPols, "")
     smPopulateCombobox("smFullRowCompany", smMasterCompanies, "")
     smPopulateCombobox("smFullRowVehicleType", smMasterVehicleTypes, "")
     (document.getElementById("smFullRowPrice") as? HTMLInputElement)?.value = ""
@@ -1268,6 +1313,7 @@ private fun startSmFullRowAdd(root: HTMLElement) {
     smLeafInlineEditLineType = ""
     clearSmCardInlineEdit()
     clearSmCardInlineAdd()
+    clearSmVenueDuplicate()
     smFullRowAddOpen = true
     smEnsureMasterOptions { ok ->
         if (!ok) {
@@ -1284,7 +1330,6 @@ private fun executeSmFullRowAddSave() {
     val supplier = getEditableComboboxValue("smFullRowSupplier").trim()
     val venue = getEditableComboboxValue("smFullRowVenue").trim()
     val stock = getEditableComboboxValue("smFullRowStock").trim()
-    val pol = getEditableComboboxValue("smFullRowPol").trim()
     val company = getEditableComboboxValue("smFullRowCompany").trim()
     val vtype = getEditableComboboxValue("smFullRowVehicleType").trim()
     val price = (document.getElementById("smFullRowPrice") as? HTMLInputElement)?.value?.trim().orEmpty()
@@ -1303,12 +1348,11 @@ private fun executeSmFullRowAddSave() {
     if (price.isNotBlank() && smParseMoney(price) == null) {
         showMessage("Rixo price must be numeric", "error"); return
     }
-    postSmMappingBulkOneRow(null, supplier, venue, stock, pol, company, vtype, price) {
+    postSmMappingBulkOneRow(null, supplier, venue, stock, "", company, vtype, price) {
         clearSmFullRowAdd()
         smSelectedSupplier = smNormSupplier(supplier)
         smSelectedVenue = venue.takeIf { it.isNotEmpty() }?.let { smNormVenue(it) }
         smSelectedStock = smNormStock(stock)
-        smSelectedPol = pol.takeIf { it.isNotEmpty() }?.let { smNormPol(it) }
         smSelectedCompany = smNormCompany(company)
         refreshSupplierMapTreeData()
     }
@@ -1392,6 +1436,7 @@ private fun startSmInlineAdd(
     smLeafInlineEditLineType = ""
     clearSmCardInlineEdit()
     clearSmFullRowAdd()
+    clearSmVenueDuplicate()
     when (level) {
         "venue" -> {
             if (pathSupplier.isEmpty()) { showMessage("Select a supplier first", "error"); return }
@@ -1409,27 +1454,19 @@ private fun startSmInlineAdd(
             smSelectedSupplier = smNormSupplier(pathSupplier)
             smSelectedVenue = smNormVenue(pathVenue)
         }
-        "pol" -> {
-            if (pathSupplier.isEmpty() || pathStock.isEmpty()) { showMessage("Select supplier and stock first", "error"); return }
-            smSelectedSupplier = smNormSupplier(pathSupplier)
-            smSelectedVenue = smNormVenue(pathVenue)
-            smSelectedStock = smNormStock(pathStock)
-        }
         "rixo_company" -> {
-            if (pathSupplier.isEmpty() || pathStock.isEmpty() || pathPol.isEmpty()) {
-                showMessage("Select supplier, stock, and POL first", "error"); return
+            if (pathSupplier.isEmpty() || pathStock.isEmpty()) {
+                showMessage("Select supplier and stock first", "error"); return
             }
             smSelectedSupplier = smNormSupplier(pathSupplier)
             smSelectedVenue = smNormVenue(pathVenue)
             smSelectedStock = smNormStock(pathStock)
-            smSelectedPol = smNormPol(pathPol)
         }
         "leaf" -> {
             if (pathCompany.isEmpty()) { showMessage("Select a Rixo company branch first", "error"); return }
             smSelectedSupplier = smNormSupplier(pathSupplier)
             smSelectedVenue = smNormVenue(pathVenue)
             smSelectedStock = smNormStock(pathStock)
-            smSelectedPol = smNormPol(pathPol)
             smSelectedCompany = smNormCompany(pathCompany)
         }
         else -> return
@@ -1474,27 +1511,15 @@ private fun executeSmCardInlineAddSave() {
                 refreshSupplierMapTreeData()
             }
         }
-        "pol" -> {
-            val supplier = smFirstNonBlank(smCardInlineAddSupplier, smSelectedSupplier)
-            val venue = smFirstNonBlank(smCardInlineAddVenue, smSelectedVenue)
-            val stock = smFirstNonBlank(smCardInlineAddStock, smSelectedStock)
-            val pol = getEditableComboboxValue("smCardInlineAddPol").trim()
-            if (pol.isEmpty()) { showMessage("POL is required", "error"); return }
-            postSmMappingBulkOneRow("POL", supplier, venue, stock, pol, "", "", "") {
-                clearSmCardInlineAdd()
-                refreshSupplierMapTreeData()
-            }
-        }
         "rixo_company" -> {
             val supplier = smFirstNonBlank(smCardInlineAddSupplier, smSelectedSupplier)
             val venue = smFirstNonBlank(smCardInlineAddVenue, smSelectedVenue)
             val stock = smFirstNonBlank(smCardInlineAddStock, smSelectedStock)
-            val pol = smFirstNonBlank(smCardInlineAddPol, smSelectedPol)
             val company = getEditableComboboxValue("smCardInlineAddCompany").trim()
             if (company.isEmpty() || !smListContains(smMasterCompanies, company)) {
                 showMessage("Please select a Rixo company from the list", "error"); return
             }
-            postSmMappingBulkOneRow("RIXO_COMPANY", supplier, venue, stock, pol, company, "", "") {
+            postSmMappingBulkOneRow("RIXO_COMPANY", supplier, venue, stock, "", company, "", "") {
                 clearSmCardInlineAdd()
                 refreshSupplierMapTreeData()
             }
@@ -1508,7 +1533,7 @@ private fun executeSmLeafInlineAddSave() {
     val supplier = smFirstNonBlank(smCardInlineAddSupplier, smSelectedSupplier)
     val venue = smFirstNonBlank(smCardInlineAddVenue, smSelectedVenue)
     val stock = smFirstNonBlank(smCardInlineAddStock, smSelectedStock)
-    val pol = smFirstNonBlank(smCardInlineAddPol, smSelectedPol)
+    val pol = ""
     val company = smFirstNonBlank(smCardInlineAddCompany, smSelectedCompany)
     val vtype = getEditableComboboxValue("smCardInlineAddLeafType").trim()
     val price = (document.getElementById("smCardInlineAddLeafPrice") as? HTMLInputElement)?.value?.trim().orEmpty()
@@ -1546,7 +1571,7 @@ private fun executeSmCardInlineSave(root: HTMLElement) {
         return
     }
     val listOk = when (level) {
-        "supplier", "venue", "pol" -> true
+        "supplier", "venue" -> true
         "stock" -> smListContains(smMasterStocks, newVal)
         "rixo_company" -> smListContains(smMasterCompanies, newVal)
         else -> false
@@ -1559,7 +1584,6 @@ private fun executeSmCardInlineSave(root: HTMLElement) {
             "supplier" -> smPutPayloadFromRow(row, newSupplier = newVal, pathEditOnly = true)
             "venue" -> smPutPayloadFromRow(row, newVenue = newVal, pathEditOnly = true)
             "stock" -> smPutPayloadFromRow(row, newStock = newVal, pathEditOnly = true)
-            "pol" -> smPutPayloadFromRow(row, newPol = newVal, pathEditOnly = true)
             "rixo_company" -> smPutPayloadFromRow(row, newCompany = newVal, pathEditOnly = true)
             else -> smPutPayloadFromRow(row)
         }
@@ -1680,6 +1704,7 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                     smLeafInlineEditLineType = ""
                     clearSmCardInlineAdd()
                     clearSmFullRowAdd()
+                    clearSmVenueDuplicate()
                     smCardInlineEditLevel = level
                     smCardInlineEditSupplier = supplier
                     smCardInlineEditVenue = venue
@@ -1728,7 +1753,7 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                         ).joinToString(" · ")
                         val levelNote = when (level) {
                             "supplier" ->
-                                "<br><br><b>High impact:</b> Deleting this supplier branch removes all nested venues, stocks, POLs, and prices for this supplier."
+                                "<br><br><b>High impact:</b> Deleting this supplier branch removes all nested venues, stocks, and prices for this supplier."
                             "rixo_company" ->
                                 "<br><br>This removes the Rixo company path under this supplier."
                             else -> ""
@@ -1754,7 +1779,57 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
                         )
                     }
                 }
+                "duplicate" -> {
+                    if (level != "supplier") return@click
+                    val sourceName = label.trim().ifEmpty { supplier.trim() }
+                    if (sourceName.isBlank()) {
+                        showMessage("Select a supplier first", "error")
+                        return@click
+                    }
+                    ensureSmSupplierBranchLoaded(sourceName) {
+                        val venues = smRealVenuesForSupplier(sourceName)
+                        when {
+                            venues.isEmpty() ->
+                                showMessage("Set a venue id before duplicating", "error")
+                            venues.size > 1 ->
+                                showMessage(
+                                    "This supplier has more than one venue (${venues.joinToString(", ")}). Only a supplier with one venue can be duplicated.",
+                                    "error",
+                                )
+                            else -> {
+                                smLeafInlineEditMappingId = null
+                                smLeafInlineEditLineType = ""
+                                clearSmCardInlineAdd()
+                                clearSmCardInlineEdit()
+                                clearSmFullRowAdd()
+                                smVenueDuplicateSupplier = sourceName
+                                smVenueDuplicateVenue = venues[0]
+                                smRerenderTree(root)
+                                window.setTimeout({
+                                    (document.getElementById("smVenueDuplicateNameInput") as? HTMLInputElement)?.focus()
+                                }, 0)
+                            }
+                        }
+                    }
+                }
             }
+            return@click
+        }
+
+        val duplicateSave = target.closest(".sm-venue-duplicate-save") as? HTMLElement
+        if (duplicateSave != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            executeSmVenueDuplicateSave()
+            return@click
+        }
+
+        val duplicateCancel = target.closest(".sm-venue-duplicate-cancel") as? HTMLElement
+        if (duplicateCancel != null) {
+            ev.preventDefault()
+            ev.stopPropagation()
+            clearSmVenueDuplicate()
+            smRerenderTree(root)
             return@click
         }
 
@@ -1919,7 +1994,6 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
             payload.auctionName = baseRow.supplier
             payload.stockLocation = baseRow.stock
             payload.venueId = baseRow.venueId
-            payload.pol = baseRow.pol
             // Always send string (incl. "") so PUT can clear vehicle type; omit/null would coalesce to old value.
             payload.supportedVehicleType = vtype
             payload.rixoPrice = smNormalizePriceForDb(price)
@@ -2005,20 +2079,9 @@ private fun bindSupplierMapTreeClicks(root: HTMLElement) {
             "stock" -> {
                 if (smSelectedStock == value) {
                     smSelectedStock = null
-                    smSelectedPol = null
                     smSelectedCompany = null
                 } else {
                     smSelectedStock = value
-                    smSelectedPol = null
-                    smSelectedCompany = null
-                }
-            }
-            "pol" -> {
-                if (smSelectedPol == value) {
-                    smSelectedPol = null
-                    smSelectedCompany = null
-                } else {
-                    smSelectedPol = value
                     smSelectedCompany = null
                 }
             }

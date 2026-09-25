@@ -23,9 +23,6 @@ data class RixoMapping(
     @Column(name = "venue_id", nullable = true)
     val venueId: String? = null,
 
-    @Column(name = "pol", nullable = true)
-    val pol: String? = null,
-
     @Column(name = "supported_vehicle_type", nullable = true)
     val supportedVehicleType: String? = null,
 

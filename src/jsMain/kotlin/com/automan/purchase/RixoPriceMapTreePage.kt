@@ -231,101 +231,6 @@ private fun rpmApplyVenueToBulkPayload(obj: dynamic, supplier: String) {
     if (venue != null) obj.venueId = venue
 }
 
-/**
- * Resolve POL for a stock from loaded RPM cache.
- * Exactly one distinct non-blank → that POL; zero → null; two+ → null + warn.
- */
-private fun rpmResolveUniquePolForStock(stock: String, warnOnConflict: Boolean = true): String? {
-    val key = stock.trim()
-    if (key.isEmpty() || key == "(no stock location)" || key == "-") return null
-    val pols = rpmTreeRowsCache
-        .filter { rpmNormStock(it.stock).equals(rpmNormStock(key), ignoreCase = true) }
-        .mapNotNull { it.pol?.trim()?.takeIf { p -> p.isNotEmpty() } }
-        .distinctBy { it.lowercase() }
-    if (pols.size == 1) return pols[0]
-    if (pols.size > 1 && warnOnConflict) {
-        showMessage(
-            "Stock “${rpmNormStock(key)}” has multiple POLs (${pols.joinToString(", ")}). " +
-                "POL was left blank — fix conflicts in Supplier Map.",
-            "warning",
-        )
-    }
-    return null
-}
-
-private fun rpmCachePolConflictCount(stock: String): Int {
-    val key = stock.trim()
-    if (key.isEmpty() || key == "(no stock location)" || key == "-") return 0
-    return rpmTreeRowsCache
-        .filter { rpmNormStock(it.stock).equals(rpmNormStock(key), ignoreCase = true) }
-        .mapNotNull { it.pol?.trim()?.takeIf { p -> p.isNotEmpty() } }
-        .distinctBy { it.lowercase() }
-        .size
-}
-
-/**
- * Cache first; on miss call GET pol-by-stock (optional auction/supplier scope).
- * When [auctionName] is known, still call API even if company cache shows multi-POL globally.
- */
-private fun rpmResolvePolForStockAsync(stock: String, auctionName: String? = null, onDone: (String?) -> Unit) {
-    val key = stock.trim()
-    if (key.isEmpty() || key == "(no stock location)" || key == "-") {
-        onDone(null)
-        return
-    }
-    val auction = auctionName?.trim()?.takeIf { it.isNotEmpty() && it != "-" }
-    // Company-scoped unique only when no supplier — auction scope needs the API.
-    if (auction == null) {
-        val fromCache = rpmResolveUniquePolForStock(key, warnOnConflict = true)
-        if (fromCache != null) {
-            onDone(fromCache)
-            return
-        }
-        // Company cache already showed a multi-POL conflict — do not invent via stock-only API.
-        if (rpmCachePolConflictCount(key) > 1) {
-            onDone(null)
-            return
-        }
-    }
-    val encStock = js("encodeURIComponent")(key).unsafeCast<String>()
-    val encAuction = if (auction != null) {
-        "&auctionName=" + js("encodeURIComponent")(auction).unsafeCast<String>()
-    } else {
-        ""
-    }
-    window.fetch(apiUrl("rixo-mapping/pol-by-stock?stockLocation=$encStock$encAuction"))
-        .then { resp: dynamic ->
-            if (resp.ok as Boolean) resp.json() else js("Promise.resolve({ success:false, data:null })")
-        }
-        .then { result: dynamic ->
-            val ok = result.success as? Boolean ?: false
-            val raw = if (ok) result.data else null
-            val pol = when {
-                raw == null || raw == js("undefined") -> null
-                else -> raw.toString().trim().takeIf { it.isNotEmpty() && it != "null" && it != "undefined" }
-            }
-            onDone(pol)
-        }
-        .catch { _: dynamic ->
-            onDone(null)
-        }
-}
-
-private fun rpmApplyPolToBulkPayload(obj: dynamic, stock: String) {
-    // Prefer an existing payload pol; otherwise unique-from-cache; never invent on conflict.
-    val existing = (obj.pol as? String)?.trim()?.takeIf { it.isNotEmpty() }
-    if (existing != null) return
-    val pol = rpmResolveUniquePolForStock(stock, warnOnConflict = false)
-    if (pol != null) obj.pol = pol
-}
-
-private fun rpmPayloadNeedsStockPol(obj: dynamic): Boolean {
-    val stock = (obj.stockLocation as? String)?.trim().orEmpty()
-    if (stock.isEmpty() || stock == "-") return false
-    val pol = (obj.pol as? String)?.trim()?.takeIf { it.isNotEmpty() }
-    return pol == null
-}
-
 private fun rpmBuildLeafRows(polRows: List<RixoPriceMapTreeRowLite>): List<RpmLeafRow> {
     val out = mutableListOf<RpmLeafRow>()
     for (r in polRows) {
@@ -916,9 +821,6 @@ private fun rpmPutPayloadFromRow(
     val p = js("{}")
     p.rixoCompany = (newCompany ?: row.company).trim()
     p.stockLocation = (newStock ?: row.stock).trim()
-    // Never send null/blank pol — omit so backend keeps existing value (healPol).
-    val existingPol = row.pol?.trim()?.takeIf { it.isNotEmpty() }
-    if (existingPol != null) p.pol = existingPol
     val auction = newSupplier ?: row.auctionName
     p.auctionName = auction?.trim()?.takeIf { it.isNotEmpty() }
     p.venueId = row.venueId?.trim()?.takeIf { it.isNotEmpty() }
@@ -998,7 +900,6 @@ private fun postRpmMappingBulkOneRow(
             obj.rixoCompany = company.trim()
             obj.stockLocation = stock.trim()
             // Auction left unset so stock-before-supplier skeletons stay blank/`-`.
-            rpmApplyPolToBulkPayload(obj, stock)
         }
         "RPM_SUPPLIER" -> {
             if (company.isBlank() || stock.isBlank() || supplier.isBlank()) {
@@ -1009,7 +910,6 @@ private fun postRpmMappingBulkOneRow(
             obj.stockLocation = stock.trim()
             obj.auctionName = supplier.trim()
             rpmApplyVenueToBulkPayload(obj, supplier)
-            rpmApplyPolToBulkPayload(obj, stock)
         }
         else -> {
             if (company.isBlank() || stock.isBlank() || supplier.isBlank()) {
@@ -1026,7 +926,6 @@ private fun postRpmMappingBulkOneRow(
             obj.stockLocation = stock.trim()
             obj.auctionName = supplier.trim()
             rpmApplyVenueToBulkPayload(obj, supplier)
-            rpmApplyPolToBulkPayload(obj, stock)
             obj.supportedVehicleType = vtype.trim().takeIf { it.isNotEmpty() }
             obj.rixoPrice = if (price.isBlank()) price else rpmNormalizePriceForDb(price)
         }
@@ -1065,16 +964,7 @@ private fun postRpmMappingBulkOneRow(
                 showMessage("Failed to add mapping", "error")
             }
     }
-    if (rpmPayloadNeedsStockPol(obj)) {
-        val stockKey = (obj.stockLocation as? String)?.trim().orEmpty()
-        val auctionKey = (obj.auctionName as? String)?.trim()?.takeIf { it.isNotEmpty() && it != "-" }
-        rpmResolvePolForStockAsync(stockKey, auctionKey) { apiPol ->
-            if (apiPol != null) obj.pol = apiPol
-            sendBulk()
-        }
-    } else {
-        sendBulk()
-    }
+    sendBulk()
 }
 
 private fun wireRpmInlineAddComboboxes() {
@@ -1709,9 +1599,6 @@ private fun bindRixoPriceMapTreeClicks(root: HTMLElement) {
             payload.stockLocation = baseRow.stock
             payload.venueId = baseRow.venueId?.trim()?.takeIf { it.isNotEmpty() }
                 ?: baseRow.auctionName?.let { rpmResolveUniqueVenueForSupplier(it, warnOnConflict = false) }
-            val leafPol = baseRow.pol?.trim()?.takeIf { it.isNotEmpty() }
-                ?: rpmResolveUniquePolForStock(baseRow.stock, warnOnConflict = false)
-            if (leafPol != null) payload.pol = leafPol
             // Always send string (incl. "") so PUT can clear vehicle type; omit/null would coalesce to old value.
             payload.supportedVehicleType = vtype
             payload.rixoPrice = rpmNormalizePriceForDb(price)

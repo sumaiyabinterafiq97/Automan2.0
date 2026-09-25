@@ -149,6 +149,26 @@ class StockLocationMapService(
         return result
     }
 
+    /** Distinct POL tokens from Stock Location Map for the given stock names (CSV or semicolon). */
+    @Transactional(readOnly = true)
+    fun polsForSelectedStocks(stockLocations: String): List<String> {
+        val tokens = stockLocations.split(',', ';')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it != "-" }
+            .distinctBy { it.lowercase() }
+        val out = mutableListOf<String>()
+        val seen = HashSet<String>()
+        for (token in tokens) {
+            val row = stockLocationMapRepository.findByStockLocationIgnoreCase(token) ?: continue
+            val joined = normalizePol(row.pol) ?: continue
+            for (pol in joined.split(';').map { it.trim() }) {
+                if (pol.isEmpty() || pol == "---") continue
+                if (seen.add(pol.lowercase())) out.add(pol)
+            }
+        }
+        return out
+    }
+
     private fun resolveSort(sortField: String?, sortOrder: String?): Sort {
         val dir = if (sortOrder?.trim().equals("asc", ignoreCase = true) == true) {
             Sort.Direction.ASC

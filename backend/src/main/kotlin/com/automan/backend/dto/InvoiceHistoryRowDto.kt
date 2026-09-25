@@ -5,6 +5,8 @@ data class InvoiceHistoryRowDto(
     val invoiceNumber: String,
     val vessel: String? = null,
     val clientName: String? = null,
+    /** Saved booking number. Used by filters; not a default history column. */
+    val bookingNo: String? = null,
     val shippingDate: String? = null,
     val pol: String? = null,
     val pod: String? = null,

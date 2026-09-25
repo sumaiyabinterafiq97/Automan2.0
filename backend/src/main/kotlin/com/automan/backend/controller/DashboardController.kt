@@ -28,4 +28,16 @@ class DashboardController(
     ): ResponseEntity<DashboardResponse> {
         return ResponseEntity.ok(dashboardService.getDashboard(period, from, to))
     }
+
+    /** Purchases whose purchase date is today or yesterday. Independent of the Home period selector. */
+    @GetMapping("/recent-purchases")
+    fun recentPurchases(
+        @RequestParam(required = false, defaultValue = "today") day: String,
+    ): ResponseEntity<Any> {
+        return try {
+            ResponseEntity.ok(dashboardService.recentPurchases(day))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
 }

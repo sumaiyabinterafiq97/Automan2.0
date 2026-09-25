@@ -42,7 +42,8 @@ class RixoHistoryListAllRowsBatchTest {
         val row = RixoHistory(id = 10L, chassis = "X-1;Y-2", rixoCompany = "Y'S")
 
         `when`(rixoRepo.findAll(sort)).thenReturn(listOf(row))
-        `when`(purchaseRepo.findAll()).thenReturn(listOf(p1, p2))
+        `when`(purchaseRepo.findByChassisToken("X-1")).thenReturn(listOf(p1))
+        `when`(purchaseRepo.findByChassisToken("Y-2")).thenReturn(listOf(p2))
 
         val dto = service(rixoRepo, purchaseRepo).listAllRows().single()
         assertTrue(dto.rixoConfirmed)
@@ -59,7 +60,8 @@ class RixoHistoryListAllRowsBatchTest {
         val row = RixoHistory(id = 10L, chassis = "X;MISS")
 
         `when`(rixoRepo.findAll(sort)).thenReturn(listOf(row))
-        `when`(purchaseRepo.findAll()).thenReturn(listOf(p1))
+        `when`(purchaseRepo.findByChassisToken("X")).thenReturn(listOf(p1))
+        `when`(purchaseRepo.findByChassisToken("MISS")).thenReturn(emptyList())
 
         val dto = service(rixoRepo, purchaseRepo).listAllRows().single()
         assertFalse(dto.rixoConfirmed)

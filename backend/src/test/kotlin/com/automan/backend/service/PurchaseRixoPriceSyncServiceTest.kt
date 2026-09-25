@@ -40,7 +40,6 @@ class PurchaseRixoPriceSyncServiceTest {
             auctionName = "JU AICHI",
             stockLocation = "GLOBAL NAGOYA",
             venueId = "95518",
-            pol = "NAGOYA",
             rixoPrice = "¥5,000",
         )
         val hit = Purchase(
@@ -79,7 +78,6 @@ class PurchaseRixoPriceSyncServiceTest {
             auctionName = "JU AICHI",
             stockLocation = "GLOBAL NAGOYA",
             venueId = "95518",
-            pol = "NAGOYA",
             rixoPrice = "¥4,000",
         )
 

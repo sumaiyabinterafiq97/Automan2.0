@@ -73,6 +73,53 @@ class RixoHistoryController(
         )
     }
 
+    /** Mark purchases for one chassis on one history row as Rixo Confirmed. */
+    @PostMapping("/confirm-chassis")
+    fun confirmChassis(@RequestBody body: Map<String, Any>): ResponseEntity<Any> {
+        return try {
+            val historyIdRaw = body["historyId"]
+            val historyId = when (historyIdRaw) {
+                is Number -> historyIdRaw.toLong()
+                is String -> historyIdRaw.toLongOrNull()
+                else -> null
+            } ?: return ResponseEntity.badRequest().body(mapOf("error" to "historyId is required"))
+            val chassisToken = (body["chassisToken"] as? String)?.trim().orEmpty()
+            if (chassisToken.isEmpty()) {
+                return ResponseEntity.badRequest().body(mapOf("error" to "chassisToken is required"))
+            }
+            val updated = rixoHistoryService.confirmChassisOnHistoryRow(historyId, chassisToken)
+            ResponseEntity.ok(
+                mapOf(
+                    "historyId" to historyId,
+                    "chassisToken" to chassisToken,
+                    "updatedPurchases" to updated,
+                ),
+            )
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST).body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    /** Mark purchases for the listed chassis tokens as Rixo Confirmed. Other cars on those rows are left alone. */
+    @PostMapping("/confirm-chassis-batch")
+    fun confirmChassisBatch(@RequestBody body: Map<String, Any>): ResponseEntity<Any> {
+        return try {
+            val items = parseChassisConfirmItems(body["items"])
+            if (items.isEmpty()) {
+                return ResponseEntity.badRequest().body(mapOf("error" to "items is required"))
+            }
+            val updated = rixoHistoryService.confirmSelectedChassis(items)
+            ResponseEntity.ok(
+                mapOf(
+                    "selectedChassis" to items.size,
+                    "updatedPurchases" to updated,
+                ),
+            )
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST).body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
     /** Delete selected history rows and reset affected purchases when chassis is no longer in any row. */
     @PostMapping("/remove-selected")
     fun removeSelected(@RequestBody request: Map<String, Any>): Map<String, Any> {
@@ -126,6 +173,20 @@ class RixoHistoryController(
             ResponseEntity.ok(rixoHistoryService.removeChassisTokenFromHistoryRow(historyId, chassisToken))
         } catch (e: IllegalArgumentException) {
             ResponseEntity.status(HttpStatus.BAD_REQUEST).body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    private fun parseChassisConfirmItems(raw: Any?): List<Pair<Long, String>> {
+        val list = raw as? List<*> ?: return emptyList()
+        return list.mapNotNull { item ->
+            val map = item as? Map<*, *> ?: return@mapNotNull null
+            val historyId = when (val id = map["historyId"]) {
+                is Number -> id.toLong()
+                is String -> id.toLongOrNull()
+                else -> null
+            } ?: return@mapNotNull null
+            val token = (map["chassisToken"] as? String)?.trim().orEmpty()
+            if (token.isEmpty()) null else historyId to token
         }
     }
 }

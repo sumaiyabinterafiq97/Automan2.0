@@ -997,6 +997,7 @@ private fun purchaseDateQuickFilterMenuPortalHtml(): String = """
     <div id="purchaseDateQuickFilterMenu" class="purchase-date-quick-filter-menu" style="display: none;" role="dialog" aria-label="Filter by purchase date">
         <div class="purchase-date-quick-filter-menu__quick-row">
             <button type="button" id="purchaseDateQuickTodayBtn">Today</button>
+            <button type="button" id="purchaseDateQuickYesterdayBtn">Yesterday</button>
             <button type="button" id="purchaseDateQuickLast7Btn">Last 7 days</button>
             <button type="button" id="purchaseDateQuickThisMonthBtn">This month</button>
             <button type="button" id="purchaseDateQuickClearBtn" class="is-muted">Clear</button>
@@ -1183,6 +1184,13 @@ private fun setupPurchaseDateQuickFilterMenuPortal() {
                 syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", today)
                 syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", today)
                 applyPurchaseDateFilterRange(today, today)
+                closeAfterAction()
+            }
+            target.id == "purchaseDateQuickYesterdayBtn" || target.closest("#purchaseDateQuickYesterdayBtn") != null -> {
+                val yesterday = isoLocalOffsetDays(-1)
+                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", yesterday)
+                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", yesterday)
+                applyPurchaseDateFilterRange(yesterday, yesterday)
                 closeAfterAction()
             }
             target.id == "purchaseDateQuickLast7Btn" || target.closest("#purchaseDateQuickLast7Btn") != null -> {
@@ -2849,7 +2857,7 @@ private fun shippingHistoryRawField(row: dynamic, key: String): String {
     if (v == null) return ""
     val undef = js("void 0")
     if (v === undef) return ""
-    return v.toString().trim()
+    return blankIfBookingSelectPlaceholder(v.toString())
 }
 
 private fun shippingHistoryCell(row: dynamic, key: String): String {
@@ -2891,7 +2899,7 @@ private fun shippingHistoryCell(row: dynamic, key: String): String {
     if (v == null) return ""
     val undef = js("void 0")
     if (v === undef) return ""
-    return v.toString().trim()
+    return blankIfBookingSelectPlaceholder(v.toString())
 }
 
 private fun shippingHistoryRowMatchesQuery(row: dynamic, q: String): Boolean {

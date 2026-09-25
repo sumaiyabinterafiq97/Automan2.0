@@ -85,6 +85,18 @@ class PurchaseWorkflowService(
         return p.workflowStatus ?: WorkflowStatus.PURCHASED
     }
 
+    /**
+     * Edit-page radios. Cleared flags become [WorkflowStatus.PURCHASED].
+     * [computeStatus] still keeps the stored status when transient flags are empty.
+     */
+    fun statusFromSubmittedFlags(p: Purchase): WorkflowStatus {
+        if (p.invoiceConfirmed == true) return WorkflowStatus.INVOICE_CONFIRMED
+        if (p.bookingRequested) return WorkflowStatus.BOOKING_REQUESTED
+        if (isRixoFlagTrue(p.rixoConfirmed)) return WorkflowStatus.RIXO_CONFIRMED
+        if (isRixoFlagTrue(p.rixoRequested)) return WorkflowStatus.RIXO_REQUESTED
+        return WorkflowStatus.PURCHASED
+    }
+
     @Transactional(readOnly = true)
     fun applyForRead(purchase: Purchase): Purchase {
         val status = purchase.workflowStatus ?: WorkflowStatus.PURCHASED

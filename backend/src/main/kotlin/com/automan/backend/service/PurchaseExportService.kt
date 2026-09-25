@@ -2,6 +2,7 @@ package com.automan.backend.service
 
 import com.automan.backend.model.Purchase
 import com.automan.backend.repository.PurchaseRepository
+import com.automan.backend.util.CarModelYearUtils
 import com.automan.backend.util.Logger
 import org.apache.poi.ss.usermodel.Cell
 import org.apache.poi.ss.usermodel.CellType
@@ -136,7 +137,23 @@ class PurchaseExportService(
     private fun money(p: Purchase, getter: (Purchase) -> String?): Double? =
         str(p, getter)?.let { parseMoney(it) }
 
+    private fun registrationYear(p: Purchase): String? =
+        CarModelYearUtils.extractYearFromCarModelYear(p.carModelYear).trim().ifBlank { null }
+
+    private fun details(p: Purchase): String? =
+        listOfNotNull(str(p) { it.shift }, str(p) { it.color }, str(p) { it.grade })
+            .joinToString(", ")
+            .ifBlank { null }
+
     private fun exportColumns(): List<PurchaseExportColumnDef> = listOf(
+        PurchaseExportColumnDef("Date of purchase", PurchaseExportCellKind.STRING) { str(it) { p -> p.date } },
+        PurchaseExportColumnDef("Auction no", PurchaseExportCellKind.STRING) { str(it) { p -> p.auctionNo } },
+        PurchaseExportColumnDef("Chassis and suffix", PurchaseExportCellKind.STRING) { it.chassis },
+        PurchaseExportColumnDef("Registration year", PurchaseExportCellKind.STRING) { registrationYear(it) },
+        PurchaseExportColumnDef("Car name", PurchaseExportCellKind.STRING) { str(it) { p -> p.carName } },
+        PurchaseExportColumnDef("Supplier name", PurchaseExportCellKind.STRING) { str(it) { p -> p.auctionHouse } },
+        PurchaseExportColumnDef("Details", PurchaseExportCellKind.STRING) { details(it) },
+        PurchaseExportColumnDef("Car price", PurchaseExportCellKind.NUMERIC) { money(it) { p -> p.price } },
         PurchaseExportColumnDef("ID", PurchaseExportCellKind.INTEGER) { it.id },
         PurchaseExportColumnDef("Purchase Date", PurchaseExportCellKind.STRING) { str(it) { p -> p.date } },
         PurchaseExportColumnDef("Chassis", PurchaseExportCellKind.STRING) { it.chassis },

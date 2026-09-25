@@ -2010,7 +2010,14 @@ fun loadPolOptionsForSelectedStocks(country: String, stocksCsv: String, onComple
                 val preservedPolValue = if (currentPolValue.isNotEmpty()) currentPolValue else statePolValue
                 polSelect.innerHTML = "<option value=\"\">Select Port of Loading</option>"
                 val polsArray = js("Array.isArray(pols) ? pols : []") as Array<dynamic>
-                val normalizedPols = polsArray.map { (it?.toString() ?: "").trim() }.filter { it.isNotEmpty() }
+                val normalizedPols = polsArray.map { (it?.toString() ?: "").trim() }.filter { it.isNotEmpty() }.toMutableList()
+                val restoring = js("window.__bookingRestoreInProgress === true") as Boolean
+                val keepPreserved = preservedPolValue.isNotEmpty() &&
+                    !normalizedPols.any { it.equals(preservedPolValue, ignoreCase = true) } &&
+                    (restoring || isCarBookingRecreateSession())
+                if (keepPreserved) {
+                    normalizedPols.add(preservedPolValue)
+                }
                 normalizedPols.forEach { pol ->
                     val option = document.createElement("option") as HTMLOptionElement
                     option.setAttribute("value", pol)
@@ -3620,14 +3627,14 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
                 val req: dynamic = js("{}")
                 req.country = selectedCountry
                 req.consignee = consigneeName
-                req.notifyParty = bookingFormFieldValue("notifyParty")
-                req.inTransitClause = bookingFormFieldValue("inTransitClause")
+                req.notifyParty = blankIfBookingSelectPlaceholder(bookingFormFieldValue("notifyParty"))
+                req.inTransitClause = blankIfBookingSelectPlaceholder(bookingFormFieldValue("inTransitClause"))
                 req.shipmentDate = etd
                 req.cyCutDate = bookingFormCyCutIso()
                 req.eta = bookingFormEtaIso()
-                req.pol = pol
-                req.pod = pod
-                req.finalDestination = bookingFormFieldValue("finalDestination")
+                req.pol = blankIfBookingSelectPlaceholder(pol)
+                req.pod = blankIfBookingSelectPlaceholder(pod)
+                req.finalDestination = blankIfBookingSelectPlaceholder(bookingFormFieldValue("finalDestination"))
                 req.bookingId = bookingNo
                 req.vessel = vessel
                 req.carrier = carrier

@@ -1,7 +1,6 @@
 package com.automan.backend.controller
 
 import com.automan.backend.service.RixoImportService
-import com.automan.backend.util.RixoPolFromStockLocation
 import com.automan.backend.util.Logger
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
@@ -184,7 +183,6 @@ class RixoImportController(
             val stockLocation = (request["stockLocation"] as? String)?.trim()
             val rixoCompany = (request["rixoCompany"] as? String)?.trim()
             val venueId = (request["venueId"] as? String)?.trim()
-            val pol = (request["pol"] as? String)?.trim()
 
             if (auctionHouse.isNullOrBlank()) {
                 return ResponseEntity.badRequest().body(mapOf(
@@ -204,7 +202,6 @@ class RixoImportController(
                 stockLocation = finalStockLocation,
                 rixoCompany = finalRixoCompany,
                 venueId = venueId?.takeIf { it.isNotBlank() },
-                pol = pol?.takeIf { it.isNotBlank() }
             )
 
             val message = if (result.merged) {
@@ -242,7 +239,6 @@ class RixoImportController(
             }
 
             val newStock = (request["stockLocation"] as? String)?.trim() ?: existingMapping.stockLocation
-            val newPol = (request["pol"] as? String)?.trim()
             val savedMapping = rixoImportService.updateSupplierMapRow(
                 id = id,
                 auctionHouse = request["auctionHouse"] as? String ?: existingMapping.auctionHouse,
@@ -252,15 +248,6 @@ class RixoImportController(
                     (request["venueId"] as? String)?.trim()?.takeIf { it.isNotBlank() }
                 } else {
                     existingMapping.venueId
-                },
-                pol = if (request.containsKey("pol") && !newPol.isNullOrBlank()) {
-                    newPol
-                } else if (request.containsKey("pol")) {
-                    null
-                } else if (!newPol.isNullOrBlank()) {
-                    newPol
-                } else {
-                    RixoPolFromStockLocation.derivePol(newStock)
                 },
                 supportedVehicleType = if (request.containsKey("supportedVehicleType")) {
                     (request["supportedVehicleType"] as? String)?.trim()?.takeIf { it.isNotBlank() }

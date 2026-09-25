@@ -781,32 +781,6 @@ private fun putScmReplaceTiers(stock: String, previousStock: String?, tiers: Lis
         }
 }
 
-private fun deleteScmStock(stock: String, onComplete: (Boolean) -> Unit) {
-    val enc = js("encodeURIComponent")(stock.trim()).unsafeCast<String>()
-    window.fetch(apiUrl("shipping-charge-map/mappings/by-stock-location?stockLocation=$enc"), js("{ method: 'DELETE' }").unsafeCast<org.w3c.fetch.RequestInit>())
-        .then { r: dynamic -> r.json() }
-        .then { jsonRaw: dynamic ->
-            val ok = js("(function(j){ return !!(j && j.success); })")(jsonRaw).unsafeCast<Boolean>()
-            val msg =
-                js("(function(j,d){ if(!j) return d; var m=j.message; return (m==null||m===undefined)?d:String(m); })")(
-                    jsonRaw,
-                    if (ok) "Deleted" else "Delete failed",
-                ).unsafeCast<String>()
-            if (ok) {
-                showMessage(msg, "success")
-                onComplete(true)
-            } else {
-                showMessage(msg, "error")
-                onComplete(false)
-            }
-        }
-        .catch { e: dynamic ->
-            Logger.error("delete stock failed: ${e.toString()}")
-            showMessage("Delete failed", "error")
-            onComplete(false)
-        }
-}
-
 private fun closeScmModal() {
     document.getElementById("scmModalOverlay")?.remove()
 }
@@ -862,7 +836,6 @@ private fun openScmModal(isDuplicate: Boolean) {
                             </div>
                         </div>
                         <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
-                            ${if (stockArg.isNotBlank()) """<button type="button" id="scmModalDelete" style="padding:10px 16px;border-radius:8px;border:1px solid #ef4444;background:#fff;color:#ef4444;cursor:pointer;font-size:14px;">Delete all tiers</button>""" else ""}
                             <button type="button" id="scmModalCancel" style="padding:10px 16px;border-radius:8px;border:1px solid #d1d5db;background:#fff;cursor:pointer;font-size:14px;">Cancel</button>
                             <button type="button" id="scmModalSave" style="padding:10px 16px;border-radius:8px;border:none;background:#059669;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">Save</button>
                         </div>
@@ -892,6 +865,7 @@ private fun openScmModal(isDuplicate: Boolean) {
                     showMessage("Choose a stock location.", "error")
                     return@addEventListener
                 }
+                js("if (typeof window._tryCommitScmDraftPair === 'function') window._tryCommitScmDraftPair('scm');")
                 val tiers = collectScmTierPairs("scmCarsPerContainer", "scmShippingPricePerCar") ?: return@addEventListener
                 val original = (document.getElementById("scmOriginalStockHidden") as? HTMLInputElement)?.value?.trim().orEmpty()
                 val prevForApi =
@@ -900,20 +874,6 @@ private fun openScmModal(isDuplicate: Boolean) {
                     if (ok) {
                         closeScmModal()
                         scmCurrentPage = 1
-                        loadShippingChargeMapTable()
-                    }
-                }
-            },
-        )
-        document.getElementById("scmModalDelete")?.addEventListener(
-            "click",
-            {
-                val original = (document.getElementById("scmOriginalStockHidden") as? HTMLInputElement)?.value?.trim().orEmpty()
-                if (original.isBlank()) return@addEventListener
-                if (!js("confirm('Delete all tiers for this stock location?')").unsafeCast<Boolean>()) return@addEventListener
-                deleteScmStock(original) { ok ->
-                    if (ok) {
-                        closeScmModal()
                         loadShippingChargeMapTable()
                     }
                 }
@@ -987,6 +947,7 @@ private fun openScmModal(isDuplicate: Boolean) {
                 showMessage("Choose a stock location.", "error")
                 return@addEventListener
             }
+            js("if (typeof window._tryCommitScmDraftPair === 'function') window._tryCommitScmDraftPair('dupScm');")
             val tiers = collectScmTierPairs("dupScmCarsPerContainer", "dupScmShippingPricePerCar") ?: return@addEventListener
             putScmReplaceTiers(sel, null, tiers) { ok ->
                 if (ok) {

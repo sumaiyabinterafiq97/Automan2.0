@@ -776,15 +776,15 @@ fun storeBookingDetailsForPdf() {
     // Get POD value - handle both input and select elements, and fallback to saved state
     var podValue = ""
     if (podPortEl != null) {
-        if (podPortEl.tagName == "SELECT") {
-            podValue = (podPortEl as HTMLSelectElement).value?.trim() ?: ""
+        podValue = if (podPortEl.tagName == "SELECT") {
+            nativeSelectValueOrText(podPortEl as HTMLSelectElement)
         } else {
-            podValue = (podPortEl as HTMLInputElement).value?.trim() ?: ""
+            blankIfBookingSelectPlaceholder((podPortEl as HTMLInputElement).value ?: "")
         }
     }
     // If POD is empty, try to get from saved state
     if (podValue.isEmpty()) {
-        val savedPod = carBookingFormState.podPort as? String ?: ""
+        val savedPod = blankIfBookingSelectPlaceholder(carBookingFormState.podPort as? String ?: "")
         if (savedPod.isNotEmpty()) {
             podValue = savedPod
             Logger.warn("POD was empty in form, using saved POD from state: $podValue")
@@ -793,9 +793,11 @@ fun storeBookingDetailsForPdf() {
     
     val bookingNoValue = bookingNoField?.value?.trim() ?: ""
     val vesselNameValue = vesselField?.value?.trim() ?: ""
-    val carrierValue = carrierSelect?.value?.trim().orEmpty()
-        .ifEmpty { bookingDynString(carBookingFormState.carrierSelect) }
-    val polValue = polSelect?.selectedOptions?.item(0)?.textContent?.trim() ?: ""
+    val carrierValue = blankIfBookingSelectPlaceholder(
+        carrierSelect?.value?.trim().orEmpty()
+            .ifEmpty { bookingDynString(carBookingFormState.carrierSelect) },
+    )
+    val polValue = nativeSelectValueOrText(polSelect)
     val shippingDateValue = etdField?.value?.trim() ?: ""
     fun optionalBookingDateIso(hiddenId: String, textId: String): String {
         val fromHidden = (document.getElementById(hiddenId) as? HTMLInputElement)?.value?.trim().orEmpty()
@@ -1327,6 +1329,47 @@ fun initializeAppSetup() {
             });
         };
 
+        window.ensureMasterRankSet = function() {
+            if (window.__masterRankSet && window.__masterRankSet.length) {
+                return Promise.resolve(window.__masterRankSet);
+            }
+            if (window.__masterRankSetInflight) return window.__masterRankSetInflight;
+            var path = 'master-menu/rank';
+            var url = (typeof window.apiUrl === 'function') ? window.apiUrl(path) : ('/api/' + path);
+            window.__masterRankSetInflight = fetch(url).then(function(r) {
+                if (!r.ok) return [];
+                return r.json();
+            }).then(function(raw) {
+                var list = [];
+                var seen = {};
+                if (Array.isArray(raw)) {
+                    raw.forEach(function(x) {
+                        var s = String(x == null ? '' : x).trim();
+                        if (!s) return;
+                        var k = s.toLowerCase();
+                        if (!seen[k]) { seen[k] = true; list.push(s); }
+                    });
+                }
+                window.__masterRankSet = list;
+                window.__masterRankSetInflight = null;
+                return list;
+            }).catch(function() {
+                window.__masterRankSetInflight = null;
+                return [];
+            });
+            return window.__masterRankSetInflight;
+        };
+
+        window.showChassisFieldSelectionModal = function(chassis, label, distinct) {
+            function openModal(opts) {
+                return window.showFieldSelectionModal('Chassis: ' + chassis, label, opts);
+            }
+            if (label !== 'Rank') return openModal(distinct);
+            return window.ensureMasterRankSet().then(function(rankSet) {
+                return openModal((rankSet && rankSet.length) ? rankSet : distinct);
+            });
+        };
+
         window.resolveChassisFieldsSequentially = function(chassis, uniqueValues, firstRow, allRows) {
             return new Promise(function(resolve) {
                 var result = {};
@@ -1358,7 +1401,6 @@ fun initializeAppSetup() {
                     if (result.cc && !cellMatchesValue(row.cc, result.cc)) return false;
                     if (result.door && !cellMatchesValue(row.door, result.door)) return false;
                     if (result.seat && !cellMatchesValue(row.seat, result.seat)) return false;
-                    if (result.rank && !cellMatchesValue(row.rank, result.rank)) return false;
                     if (result.color && !cellMatchesValue(row.color, result.color)) return false;
                     if (result.driveType && !cellMatchesValue(row.driveType, result.driveType)) return false;
                     if (result.vehicleType && !cellMatchesValue(row.vehicleType, result.vehicleType)) return false;
@@ -1426,7 +1468,7 @@ fun initializeAppSetup() {
                             return;
                         }
 
-                        window.showFieldSelectionModal('Chassis: ' + chassis, label, distinct).then(function(chosen) {
+                        window.showChassisFieldSelectionModal(chassis, label, distinct).then(function(chosen) {
                             if (chosen === null) {
                                 rej('CANCELLED');
                             } else {
@@ -1530,7 +1572,6 @@ fun initializeAppSetup() {
                     if (result.cc && !cellMatchesValue(row.cc, result.cc)) return false;
                     if (result.door && !cellMatchesValue(row.door, result.door)) return false;
                     if (result.seat && !cellMatchesValue(row.seat, result.seat)) return false;
-                    if (result.rank && !cellMatchesValue(row.rank, result.rank)) return false;
                     if (result.color && !cellMatchesValue(row.color, result.color)) return false;
                     if (result.vehicleType && !cellMatchesValue(row.vehicleType, result.vehicleType)) return false;
                     return true;
@@ -1590,7 +1631,7 @@ fun initializeAppSetup() {
                             res(distinct.length ? distinct[0] : (defaultValue || ''));
                             return;
                         }
-                        window.showFieldSelectionModal('Chassis: ' + chassis, label, distinct).then(function(chosen) {
+                        window.showChassisFieldSelectionModal(chassis, label, distinct).then(function(chosen) {
                             if (chosen === null) {
                                 rej('CANCELLED');
                             } else {
@@ -1716,7 +1757,6 @@ fun initializeAppSetup() {
             }
             if (distinctCount(function(b) { return b.venueId ? [b.venueId] : []; }) > 1) return true;
             if (distinctCount(function(b) { return [b.stockLocation]; }) > 1) return true;
-            if (distinctCount(function(b) { return b.pol ? [b.pol] : []; }) > 1) return true;
             if (distinctCount(function(b) {
                 if (b.rixoOptions && b.rixoOptions.length) return b.rixoOptions;
                 return b.rixoCompany ? [b.rixoCompany] : [];
@@ -1741,7 +1781,6 @@ fun initializeAppSetup() {
             }
             if (!tokenMatch(row.stockLocation || row.stock_location, sel.stockLocation)) return false;
             if (!tokenMatch(row.venueId || row.venue_id, sel.venueId)) return false;
-            if (!tokenMatch(row.pol, sel.pol)) return false;
             var rixos = window.splitSupplierSemicolonTokens(row.rixoCompany || row.rixo_company);
             if (sel.rixoCompany && rixos.length) {
                 var ru = String(sel.rixoCompany).trim().toLowerCase();
@@ -1775,7 +1814,7 @@ fun initializeAppSetup() {
             var rixo = String((sel && sel.rixoCompany) || '').trim();
             var pol = String((sel && sel.pol) || '').trim();
             var venue = String((sel && sel.venueId) || '').trim();
-            if (pol && venue) return { pol: pol, venueId: venue };
+            if (venue) return { pol: pol, venueId: venue };
             if (!branches || !Array.isArray(branches) || branches.length === 0) {
                 return { pol: pol, venueId: venue };
             }
@@ -1789,7 +1828,7 @@ fun initializeAppSetup() {
             });
             var pick = matched.length ? matched[0] : branches[0];
             return {
-                pol: pol || String((pick && pick.pol) || '').trim(),
+                pol: pol,
                 venueId: venue || String((pick && pick.venueId) || '').trim()
             };
         };
@@ -1889,7 +1928,6 @@ fun initializeAppSetup() {
                 function branchMatches(b) {
                     if (result.venueId && String(b.venueId || '').trim() && String(b.venueId).trim().toLowerCase() !== String(result.venueId).trim().toLowerCase()) return false;
                     if (result.stockLocation && String(b.stockLocation || '').trim().toLowerCase() !== String(result.stockLocation).trim().toLowerCase()) return false;
-                    if (result.pol && String(b.pol || '').trim() && String(b.pol).trim().toLowerCase() !== String(result.pol).trim().toLowerCase()) return false;
                     if (result.rixoCompany) {
                         var ru = String(result.rixoCompany).trim().toLowerCase();
                         var opts = [];
@@ -1962,7 +2000,18 @@ fun initializeAppSetup() {
                 })
                 .then(function(v) {
                     result.stockLocation = v;
-                    return resolveField('POL', function(b) { return b.pol ? [b.pol] : []; }, fb.pol);
+                    var preservePol = '';
+                    if (typeof window.getComboboxValue === 'function') {
+                        preservePol = String(window.getComboboxValue('editPol') || window.getComboboxValue('pol') || '').trim();
+                    }
+                    if (typeof window.resolvePolFromStockLocationMap === 'function') {
+                        return window.resolvePolFromStockLocationMap(v, {
+                            supplier: supplier,
+                            preservePol: preservePol,
+                            allowModal: true
+                        });
+                    }
+                    return '';
                 })
                 .then(function(v) {
                     result.pol = v;
@@ -2105,7 +2154,7 @@ fun initializeAppSetup() {
                     var matched = filteredBranches();
                     var pick = matched.length ? matched[0] : fb;
                     result.venueId = pick.venueId ? String(pick.venueId).trim() : '';
-                    result.pol = pick.pol ? String(pick.pol).trim() : '';
+                    result.pol = '';
                     // Vehicle type comes from Chassis Map — not supplier mapping
                     result.supportedVehicleType = (window.__qpChassisVehicleType || '').toString().trim();
                     resolve(result);
@@ -2248,7 +2297,7 @@ fun createEditableCombobox(
             <select id="$id" $requiredAttr 
                     style="position: absolute; top: 0; right: 0; width: 40px; height: 100%; border: none; border-left: 1px solid #ddd; background: #f5f5f5; cursor: pointer; border-radius: 0 4px 4px 0; appearance: none; -webkit-appearance: none; -moz-appearance: none; padding: 0; text-align: center; font-size: 14px; z-index: 2; font-weight: bold; color: #666; opacity: 0; display: $selectDisplay;"
                     onmousedown="event.preventDefault(); event.stopPropagation(); openComboboxDropdown('$id');"
-                    onchange="syncComboboxInput('$id'); if (typeof handleRixoCompanyChange === 'function' && '$id' === 'rixoCompany') { handleRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleEditRixoCompanyChange === 'function' && '$id' === 'editRixoCompany') { handleEditRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleChassisSearchChange === 'function' && '$id' === 'chassisSearch') { handleChassisSearchChange(); } if (typeof window.fetchPolsAfterStockChange === 'function' && ('$id' === 'stockLocation' || '$id' === 'editStockLocation')) { window.fetchPolsAfterStockChange('$id'); }">
+                    onchange="if (typeof window.fetchPolsAfterStockChange === 'function' && ('$id' === 'stockLocation' || '$id' === 'editStockLocation')) { window.fetchPolsAfterStockChange('$id'); } syncComboboxInput('$id'); if (typeof handleRixoCompanyChange === 'function' && '$id' === 'rixoCompany') { handleRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleEditRixoCompanyChange === 'function' && '$id' === 'editRixoCompany') { handleEditRixoCompanyChange(window.getComboboxValue('$id')); } if (typeof handleChassisSearchChange === 'function' && '$id' === 'chassisSearch') { handleChassisSearchChange(); }">
                 <option value="">▼</option>
             </select>
             <div id="${id}Button" onclick="openComboboxDropdown('$id')" 
@@ -3599,7 +3648,82 @@ internal fun parseApiDataStringArray(raw: dynamic): List<String> {
     }
 }
 
-/** Supplier Name comboboxes: distinct ordered `rixo_prices.auction_name` via API. Returns a Promise for [setupRixoDropdowns] sequencing. */
+private fun rixoPriceMappingAuctionKeys(): List<String> {
+    return try {
+        val mapping = window.asDynamic().rixoPriceMapping
+        if (mapping == null || mapping == js("undefined")) return emptyList()
+        val keys = js("Object.keys(mapping)").unsafeCast<Array<String>>()
+        keys.map { it.trim() }.filter { it.isNotEmpty() && it != "__add_new_supplier__" }
+    } catch (_: dynamic) {
+        emptyList()
+    }
+}
+
+private fun unionAuctionNames(vararg lists: List<String>): List<String> {
+    val seen = mutableSetOf<String>()
+    val out = mutableListOf<String>()
+    for (list in lists) {
+        for (n in list) {
+            val t = n.trim()
+            if (t.isNotEmpty() && seen.add(t.lowercase())) out.add(t)
+        }
+    }
+    return out.sortedBy { it.lowercase() }
+}
+
+private fun applySupplierAuctionNameOptions(names: List<String>, preserved: Map<String, String>) {
+    for (selectId in listOf("auctionName", "editAuctionName")) {
+        val select = document.getElementById(selectId) as? HTMLSelectElement ?: continue
+        val currentValue = preserved[selectId] ?: ""
+        val incoming = names.map { it.trim() }.filter { it.isNotEmpty() }
+        if (incoming.isEmpty()) {
+            var existingReal = 0
+            for (i in 0 until select.options.length) {
+                val o = select.options[i] as HTMLOptionElement
+                if (o.value.trim().isNotEmpty()) existingReal++
+            }
+            if (existingReal > 0) continue
+        }
+        val frag = document.createDocumentFragment()
+        val def = document.createElement("option") as HTMLOptionElement
+        def.value = ""
+        def.textContent = "▼"
+        frag.appendChild(def)
+        val seen = mutableSetOf<String>()
+        for (n in incoming) {
+            if (seen.add(n.lowercase())) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = n
+                opt.textContent = n
+                frag.appendChild(opt)
+            }
+        }
+        select.innerHTML = ""
+        select.appendChild(frag)
+        if (currentValue.isNotEmpty() && currentValue != "__add_new_supplier__") {
+            var matched = false
+            for (i in 0 until select.options.length) {
+                val o = select.options[i] as HTMLOptionElement
+                if (o.value.isNotEmpty() && o.value.equals(currentValue, ignoreCase = true)) {
+                    select.value = o.value
+                    matched = true
+                    break
+                }
+            }
+            if (!matched) {
+                val opt = document.createElement("option") as HTMLOptionElement
+                opt.value = currentValue
+                opt.textContent = currentValue
+                select.appendChild(opt)
+                select.value = currentValue
+            }
+        }
+        val input = document.getElementById("${selectId}Input") as? HTMLInputElement
+        if (input != null && select.value.isNotEmpty()) input.value = select.value
+    }
+}
+
+/** Supplier Name comboboxes: distinct auction names via API, with mapping-key fallback. */
 fun populateSupplierAuctionNameDropdownsFromRixoPricesApi(): dynamic {
     val preserved = mutableMapOf<String, String>()
     val snap = window.asDynamic().__rixoSupplierPreserveSnapshot
@@ -3619,6 +3743,19 @@ fun populateSupplierAuctionNameDropdownsFromRixoPricesApi(): dynamic {
             }
         }
     }
+    fun applyFallbackNames(): dynamic {
+        return window.fetch(apiUrl("rixo-mapping/distinct-auction-names"))
+            .then { response: dynamic ->
+                if (response.ok as Boolean) response.json() else js("[]")
+            }
+            .then { raw: dynamic ->
+                val extra = parseApiDataStringArray(raw)
+                applySupplierAuctionNameOptions(unionAuctionNames(extra, rixoPriceMappingAuctionKeys()), preserved)
+            }
+            .catch { _: dynamic ->
+                applySupplierAuctionNameOptions(unionAuctionNames(rixoPriceMappingAuctionKeys()), preserved)
+            }
+    }
     return window.fetch(apiUrl("rixo/dropdowns/auction-names"))
         .then { response: dynamic ->
             if (!response.ok) throw RuntimeException("rixo/dropdowns/auction-names failed: ${response.status}")
@@ -3626,47 +3763,17 @@ fun populateSupplierAuctionNameDropdownsFromRixoPricesApi(): dynamic {
         }
         .then { raw: dynamic ->
             val names = parseApiDataStringArray(raw)
-            for (selectId in listOf("auctionName", "editAuctionName")) {
-                val select = document.getElementById(selectId) as? HTMLSelectElement ?: continue
-                val currentValue = preserved[selectId] ?: ""
-                select.innerHTML = ""
-                val def = document.createElement("option") as HTMLOptionElement
-                def.value = ""
-                def.textContent = "▼"
-                select.appendChild(def)
-                val seen = mutableSetOf<String>()
-                for (n in names) {
-                    val t = n.trim()
-                    if (t.isNotEmpty() && seen.add(t.lowercase())) {
-                        val opt = document.createElement("option") as HTMLOptionElement
-                        opt.value = t
-                        opt.textContent = t
-                        select.appendChild(opt)
-                    }
-                }
-                if (currentValue.isNotEmpty() && currentValue != "__add_new_supplier__") {
-                    var matched = false
-                    for (i in 0 until select.options.length) {
-                        val o = select.options[i] as HTMLOptionElement
-                        if (o.value.isNotEmpty() && o.value.equals(currentValue, ignoreCase = true)) {
-                            select.value = o.value
-                            matched = true
-                            break
-                        }
-                    }
-                    if (!matched) {
-                        val opt = document.createElement("option") as HTMLOptionElement
-                        opt.value = currentValue
-                        opt.textContent = currentValue
-                        select.appendChild(opt)
-                        select.value = currentValue
-                    }
-                }
-                val input = document.getElementById("${selectId}Input") as? HTMLInputElement
-                if (input != null && select.value.isNotEmpty()) input.value = select.value
+            if (names.isEmpty()) {
+                applyFallbackNames()
+            } else {
+                applySupplierAuctionNameOptions(names, preserved)
+                js("Promise.resolve()")
             }
-            Unit
-    }
+        }
+        .catch { _: dynamic ->
+            console.warn("Supplier (auction) names from rixo/dropdowns/auction-names failed; using fallbacks")
+            applyFallbackNames()
+        }
 }
 
 // JavaScript function to sync combobox input and select
@@ -3678,7 +3785,7 @@ fun setupEditableComboboxHandlers() {
 
         // Add/Edit Purchase editable comboboxes: arrow-key nav + light-ash hover (preview without change/cascade).
         window.ADD_PURCHASE_COMBOBOX_KEY_NAV_IDS = [
-            'auctionName', 'chassisCode', 'brand', 'carName', 'color', 'fuel', 'shift', 'shipmentSize',
+            'auctionName', 'editAuctionName', 'chassisCode', 'brand', 'carName', 'color', 'fuel', 'shift', 'shipmentSize',
             'rixoCompany', 'stockLocation', 'clientName', 'country', 'pol',
             'consignee', 'pod', 'repairCompany',
             // Edit Purchase
@@ -4943,6 +5050,11 @@ fun setupEditableComboboxHandlers() {
                             var changeEvent = new Event('change', { bubbles: true });
                             select.dispatchEvent(changeEvent);
                         }
+                        // Stock overlay pick must fire select onchange so fetchPolsAfterStockChange (SLM POL) runs.
+                        if (selectId === 'stockLocation' || selectId === 'editStockLocation' || selectId === 'qpStockLocation') {
+                            var stockChangeEvent = new Event('change', { bubbles: true });
+                            select.dispatchEvent(stockChangeEvent);
+                        }
                         
                         syncComboboxInput(selectId);
                         // Chassis: sync overwrites input with select; restore full value if we preserved suffix
@@ -5023,6 +5135,38 @@ fun setupEditableComboboxHandlers() {
                                 window.openComboboxDropdown(selectId);
                             }
                         }, 500);
+                        return;
+                    }
+                }
+            }
+            
+            // Lazy refill Supplier Name if populate never filled the hidden select (empty overlay).
+            if (selectId === 'auctionName' || selectId === 'editAuctionName') {
+                var auctionSelect = document.getElementById(selectId);
+                var auctionRealCount = 0;
+                if (auctionSelect && auctionSelect.options) {
+                    for (var ai = 0; ai < auctionSelect.options.length; ai++) {
+                        if ((auctionSelect.options[ai].value || '').trim()) auctionRealCount++;
+                    }
+                }
+                if (auctionRealCount === 0 && typeof window.populateSupplierAuctionNameDropdownsFromRixoPricesApi === 'function') {
+                    var auctionLoadKey = selectId + '_auction_loading';
+                    if (window[auctionLoadKey]) return;
+                    if (window[selectId + '_auction_retried']) {
+                        // Already tried once this page; open whatever is there.
+                    } else {
+                        window[auctionLoadKey] = true;
+                        window[selectId + '_auction_retried'] = true;
+                        var auctionPr = window.populateSupplierAuctionNameDropdownsFromRixoPricesApi();
+                        var reopenAuction = function() {
+                            window[auctionLoadKey] = false;
+                            window.openComboboxDropdown(selectId);
+                        };
+                        if (auctionPr && typeof auctionPr.then === 'function') {
+                            auctionPr.then(reopenAuction).catch(reopenAuction);
+                        } else {
+                            setTimeout(reopenAuction, 50);
+                        }
                         return;
                     }
                 }
@@ -8705,7 +8849,7 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label for="numberCutNumber1">Number (English)</label>
-                        <input type="number" id="numberCutNumber1" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="text" id="numberCutNumber1" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label for="numberCutHiraganaInput">Hiragana Character</label>
@@ -8713,7 +8857,7 @@ fun createAddFormHTML(): String {
                     </div>
                     <div>
                         <label for="numberCutNumber2">Number (English)</label>
-                        <input type="number" id="numberCutNumber2" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="text" id="numberCutNumber2" placeholder="Enter number" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
                 <div style="margin-bottom: 20px;">
@@ -9228,18 +9372,6 @@ private val editAutofillPreserveIfEmptyFields = arrayOf(
     "venueId", "rixoPrice", "pol", "stockLocation", "rixoCompany", "brand", "carName",
 )
 
-/**
- * Vehicle specs that are DERIVED on read from car_brand_mapping (not stored on the purchase
- * unless explicitly overridden). For change detection we baseline these against the explicitly
- * STORED value (from `vehicleSpecExplicit`), so a mapping-inherited value shown on the form
- * counts as a real change and gets snapshotted onto the purchase on Update. `vehicleType` is an
- * alias of the `shipmentSize` override key.
- */
-private val editMappingSpecFields = arrayOf(
-    "grade", "rank", "color", "fuel", "seat", "door", "cc", "shift", "wd", "driveType",
-    "shipmentSize", "vehicleType",
-)
-
 private fun isBlankSnapshotValue(v: dynamic): Boolean {
     if (v == null || v == js("undefined")) return true
     return v.toString().trim().isEmpty()
@@ -9262,13 +9394,8 @@ private fun finalizeEditFormOriginalBaselineFromDom() {
                 js("baseline[field] = apiSnap[field]")
             }
         }
-        // Baseline mapping-derived specs against the explicitly-stored value (empty when inherited)
-        // so inherited specs count as changes and get snapshotted onto the purchase on Update.
-        val explicit = js("apiSnap.vehicleSpecExplicit || {}")
-        for (field in editMappingSpecFields) {
-            val key = if (field == "vehicleType") "shipmentSize" else field
-            js("baseline[field] = (explicit[key] != null && String(explicit[key]).trim() !== '') ? String(explicit[key]) : ''")
-        }
+        // Vehicle specs stay as the values already on the form after load.
+        // Inherited Shift / WD / Drive Type must not show as changes when only pictures were added.
         originalPurchaseData = JSON.parse(JSON.stringify(baseline))
     } catch (e: Throwable) {
         console.log("finalizeEditFormOriginalBaselineFromDom:", e.message)
@@ -9435,9 +9562,7 @@ fun setupRixoDropdowns() {
                     }
                     window.rebuildSupplierDependentDropdowns(auction, rebuildOpts);
                     if (preserveSnap && preserveSnap.stock && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                        var mp = (typeof window.getPolTokensFromRixoMappingForSupplier === 'function')
-                            ? window.getPolTokensFromRixoMappingForSupplier(auction) : null;
-                        window.fetchPolsByStockLocationAndUpdate(auction, preserveSnap.stock, false, mp).catch(function() {});
+                        window.fetchPolsByStockLocationAndUpdate(auction, preserveSnap.stock, false, null).catch(function() {});
                     }
                 } else if (typeof window.autoSelectRelatedFields === 'function') {
                     window.autoSelectRelatedFields(auction, 'auctionHouse', auction);
@@ -9751,6 +9876,37 @@ fun setupRixoDropdowns() {
         
         // Make functions globally available
         window.handleAuctionNameChange = handleAuctionNameChange;
+        // Collapse select+input double-change (same as Quick Purchase). Input-only listeners call this.
+        window.scheduleHandleAuctionNameChange = function(auctionName, fromEdit) {
+            var name = (auctionName || '').trim();
+            if (!name) return;
+            var st = window.__supplierNameChangeDebounce || { handle: null, lastName: '', lastAt: 0 };
+            window.__supplierNameChangeDebounce = st;
+            var now = Date.now();
+            if (name.toLowerCase() === String(st.lastName || '').toLowerCase() && (now - st.lastAt) < 400) {
+                return;
+            }
+            if (st.handle) clearTimeout(st.handle);
+            st.handle = setTimeout(function() {
+                st.handle = null;
+                var id = fromEdit ? 'editAuctionName' : 'auctionName';
+                var latest = name;
+                if (typeof window.getComboboxValue === 'function') {
+                    latest = (window.getComboboxValue(id) || '').trim();
+                }
+                if (!latest) return;
+                var t = Date.now();
+                if (latest.toLowerCase() === String(st.lastName || '').toLowerCase() && (t - st.lastAt) < 400) {
+                    return;
+                }
+                st.lastName = latest;
+                st.lastAt = t;
+                window.__userInitiatedSupplierChange = true;
+                if (typeof window.handleAuctionNameChange === 'function') {
+                    window.handleAuctionNameChange(latest);
+                }
+            }, 50);
+        };
         window.handleTypeOfVehicleChange = handleTypeOfVehicleChange;
         window.handleRixoCompanyChange = handleRixoCompanyChange;
         window.handleEditRixoCompanyChange = handleEditRixoCompanyChange;
@@ -10172,8 +10328,7 @@ fun setupRixoDropdowns() {
                 }
                 // Populate POL dropdown from booking_mappings for current stock location (do not overwrite value)
                 if (purchaseData.stockLocation && purchaseData.auctionHouse && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                    var mp = (typeof window.getPolTokensFromRixoMappingForSupplier === 'function') ? window.getPolTokensFromRixoMappingForSupplier(purchaseData.auctionHouse) : null;
-                    window.fetchPolsByStockLocationAndUpdate(purchaseData.auctionHouse, purchaseData.stockLocation, false, mp).then(function() {
+                    window.fetchPolsByStockLocationAndUpdate(purchaseData.auctionHouse, purchaseData.stockLocation, false, null).then(function() {
                         ensureComboboxOptionExists('editPol', purchaseData.pol);
                         var editPolSelect = document.getElementById('editPol');
                         var editPolInput = document.getElementById('editPolInput');
@@ -11617,22 +11772,15 @@ fun setupAddFormListeners() {
         triggerRecycleFeeAutoFillAdd()
     })
 
-    // Add event listener for auction name change (Supplier Name) - works with combobox
-    document.getElementById("auctionName")?.addEventListener("change", { event: Event ->
-        js("""
-            var supplierName = window.getComboboxValue('auctionName');
-            console.log('🔵 Supplier Name selected:', supplierName);
-            if (window.handleAuctionNameChange) {
-                window.__userInitiatedSupplierChange = true;
-                window.handleAuctionNameChange(supplierName);
-            }
-        """)
-    })
+    // Listen on the text input only: select onchange → syncComboboxInput already dispatches input change.
+    // Listening on both caused duplicate supplier fetches and sequential modal cancel/empty fields.
     document.getElementById("auctionNameInput")?.addEventListener("change", { event: Event ->
         js("""
             var supplierName = window.getComboboxValue('auctionName');
             console.log('🔵 Supplier Name changed:', supplierName);
-            if (window.handleAuctionNameChange) {
+            if (typeof window.scheduleHandleAuctionNameChange === 'function') {
+                window.scheduleHandleAuctionNameChange(supplierName, false);
+            } else if (window.handleAuctionNameChange) {
                 window.__userInitiatedSupplierChange = true;
                 window.handleAuctionNameChange(supplierName);
             }
@@ -13263,9 +13411,8 @@ private fun applySupplierSelectionToForm(selection: dynamic, isEditForm: Boolean
                     releaseSupplierApply();
                 };
                 if (sel.stockLocation && auc && typeof window.fetchPolsByStockLocationAndUpdate === 'function') {
-                    var polHint = sel.pol ? [sel.pol] : [];
                     var seq = window.__supplierMappingSeq || 0;
-                    window.fetchPolsByStockLocationAndUpdate(auc, sel.stockLocation, false, polHint, seq)
+                    window.fetchPolsByStockLocationAndUpdate(auc, sel.stockLocation, false, null, seq)
                         .then(finish)
                         .catch(finish);
                 } else {
@@ -16422,17 +16569,33 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
         return js("Promise.resolve()")
     }
 
+    window.asDynamic().__tempFetchAuctionName = auctionName.trim()
     js("""
-        window.__supplierMappingSeq = (window.__supplierMappingSeq || 0) + 1;
-        if (typeof window.__chassisFieldSelectionDismiss === 'function') window.__chassisFieldSelectionDismiss();
+        (function() {
+            var key = String(window.__tempFetchAuctionName || '').trim().toLowerCase();
+            var inf = window.__supplierMapFetchInFlight;
+            if (inf && inf.name === key && inf.promise) {
+                window.__reuseSupplierMapFetch = inf.promise;
+            } else {
+                window.__reuseSupplierMapFetch = null;
+                window.__supplierMappingSeq = (window.__supplierMappingSeq || 0) + 1;
+                if (typeof window.__chassisFieldSelectionDismiss === 'function') window.__chassisFieldSelectionDismiss();
+            }
+        })();
     """)
+    val reuse = js("window.__reuseSupplierMapFetch")
+    if (js("window.__reuseSupplierMapFetch != null") as Boolean) {
+        console.log("⏭️ Reusing in-flight supplier map fetch for: $auctionName")
+        return reuse
+    }
+
     val requestId = (js("window.__supplierMappingSeq") as? Int) ?: 0
 
     val encoded = js("encodeURIComponent")(auctionName.trim()).unsafeCast<String>()
     val url = apiUrl("rixo/prices/by-auction-house/$encoded")
     console.log("🔵 Fetching supplier map for: $auctionName (isEditForm: $isEditForm)")
 
-    return window.fetch(url)
+    val result = window.fetch(url)
         .then { response ->
             if (!response.ok) {
                 throw Exception("Failed to fetch supplier map: ${response.status}")
@@ -16509,7 +16672,7 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                 } else {
                     val fb = firstBranch.unsafeCast<dynamic>()
                     sel.stockLocation = (fb.stockLocation?.toString() ?: "").trim()
-                    sel.pol = (fb.pol?.toString() ?: "").trim()
+                    sel.pol = ""
                     sel.venueId = (fb.venueId?.toString() ?: "").trim()
                     val rixoOpts = fb.rixoOptions as? Array<*>
                     sel.rixoCompany = (fb.rixoCompany?.toString()?.trim()?.takeIf { it.isNotBlank() }
@@ -16565,11 +16728,38 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                         firstBranch
                     ).unsafeCast<dynamic>()
                 }
-            } else {
+            } else if (isQuickPurchaseTarget || skipModals) {
                 val defaultSel = buildDefaultSelection()
                 enrichSelectionWithVehicleType(defaultSel)
                 window.asDynamic().__tempSupplierDefaultSel = defaultSel
                 js("Promise.resolve(window.__tempSupplierDefaultSel)").unsafeCast<dynamic>()
+            } else {
+                val defaultSel = buildDefaultSelection()
+                enrichSelectionWithVehicleType(defaultSel)
+                window.asDynamic().__tempSupplierDefaultSel = defaultSel
+                js("""
+                    (function() {
+                        var sel = window.__tempSupplierDefaultSel || {};
+                        var stock = String(sel.stockLocation || '').trim();
+                        var preserve = String(sel.pol || '').trim();
+                        var supplier = String(window.__tempMergeAuctionName || '').trim();
+                        if (typeof window.getComboboxValue === 'function') {
+                            preserve = String(window.getComboboxValue('editPol') || window.getComboboxValue('pol') || preserve || '').trim();
+                        }
+                        if (!stock || typeof window.resolvePolFromStockLocationMap !== 'function') {
+                            sel.pol = '';
+                            return Promise.resolve(sel);
+                        }
+                        return window.resolvePolFromStockLocationMap(stock, {
+                            supplier: supplier,
+                            preservePol: preserve,
+                            allowModal: true
+                        }).then(function(pol) {
+                            sel.pol = pol || '';
+                            return sel;
+                        });
+                    })()
+                """).unsafeCast<dynamic>()
             }
 
             val applied = selectionPromise.then { selected: dynamic ->
@@ -16589,7 +16779,7 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                 }
 
                 var stock = (selected?.stockLocation?.toString() ?: firstBranch.unsafeCast<dynamic>().stockLocation?.toString() ?: "").trim()
-                var pol = (selected?.pol?.toString() ?: firstBranch.unsafeCast<dynamic>().pol?.toString() ?: "").trim()
+                var pol = (selected?.pol?.toString() ?: "").trim()
                 var venue = (selected?.venueId?.toString() ?: firstBranch.unsafeCast<dynamic>().venueId?.toString() ?: "").trim()
                 var rixo = (selected?.rixoCompany?.toString() ?: firstBranch.unsafeCast<dynamic>().rixoCompany?.toString() ?: "").trim()
                 var vehicleType = (selected?.supportedVehicleType?.toString() ?: "").trim()
@@ -16700,6 +16890,26 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
             }
             js("Promise.resolve()")
         }
+
+    window.asDynamic().__tempSupplierMapPromise = result
+    js("""
+        (function() {
+            var p = window.__tempSupplierMapPromise;
+            window.__supplierMapFetchInFlight = {
+                name: String(window.__tempFetchAuctionName || '').trim().toLowerCase(),
+                promise: p
+            };
+            var clear = function() {
+                if (window.__supplierMapFetchInFlight && window.__supplierMapFetchInFlight.promise === p) {
+                    window.__supplierMapFetchInFlight = null;
+                }
+            };
+            if (p && typeof p.then === 'function') {
+                p.then(clear, clear);
+            }
+        })();
+    """)
+    return result
 }
 
 // Function to find matching row when user changes a field (Brand, Car Name, Fuel, etc.)
@@ -18383,7 +18593,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label for="editNumberCutNumber1">Number (English)</label>
-                        <input type="number" id="editNumberCutNumber1" placeholder="Enter number" value="${escapeAttr(editNumberCutParts.num1)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="text" id="editNumberCutNumber1" placeholder="Enter number" value="${escapeAttr(editNumberCutParts.num1)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                     <div>
                         <label for="editNumberCutHiraganaInput">Hiragana Character</label>
@@ -18391,7 +18601,7 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     </div>
                     <div>
                         <label for="editNumberCutNumber2">Number (English)</label>
-                        <input type="number" id="editNumberCutNumber2" placeholder="Enter number" value="${escapeAttr(editNumberCutParts.num2)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="text" id="editNumberCutNumber2" placeholder="Enter number" value="${escapeAttr(editNumberCutParts.num2)}" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                     </div>
                 </div>
                 <div style="margin-bottom: 20px;">
@@ -19289,24 +19499,15 @@ fun setupEditFormListeners() {
 
     // Client dropdown removed; using plain Client Name field
     
-    // Add event listener for auction name change - works with combobox
-    document.getElementById("editAuctionName")?.addEventListener("change", { event: Event ->
-        js("""
-            if (window.__editPurchaseHydrating || window.__suppressSupplierModalFlow) return;
-            if (window.resetEditRixoOverridesAfterSupplierChange) window.resetEditRixoOverridesAfterSupplierChange();
-            var supplierName = window.getComboboxValue('editAuctionName');
-            if (window.handleAuctionNameChange) {
-                window.__userInitiatedSupplierChange = true;
-                window.handleAuctionNameChange(supplierName);
-            }
-        """)
-    })
+    // Listen on the text input only (same as Add / Quick Purchase) to avoid duplicate fetches.
     document.getElementById("editAuctionNameInput")?.addEventListener("change", { event: Event ->
         js("""
             if (window.__editPurchaseHydrating || window.__suppressSupplierModalFlow) return;
             if (window.resetEditRixoOverridesAfterSupplierChange) window.resetEditRixoOverridesAfterSupplierChange();
             var supplierName = window.getComboboxValue('editAuctionName');
-            if (window.handleAuctionNameChange) {
+            if (typeof window.scheduleHandleAuctionNameChange === 'function') {
+                window.scheduleHandleAuctionNameChange(supplierName, true);
+            } else if (window.handleAuctionNameChange) {
                 window.__userInitiatedSupplierChange = true;
                 window.handleAuctionNameChange(supplierName);
             }
@@ -21623,19 +21824,36 @@ fun clearCarBookingStates() {
 private const val SESSION_CAR_BOOKING_FORM_JSON = "automan_carBookingFormJson"
 private const val SESSION_CAR_BOOKING_DISPLAYED_JSON = "automan_carBookingDisplayedCarsJson"
 
-/** When native select.value is empty (FAB desync), use selected option text. */
+/** True for empty combobox/FAB labels such as "Select POD" (not a real stored value). */
+fun isBookingSelectPlaceholder(raw: String): Boolean {
+    val t = raw.trim()
+    if (t.isEmpty()) return false
+    val lower = t.lowercase()
+    return lower == "select" || lower.startsWith("select ")
+}
+
+/** Blank placeholder labels and dash sentinels so history cells stay empty. */
+fun blankIfBookingSelectPlaceholder(raw: String): String {
+    val t = raw.trim()
+    if (t.isEmpty() || t == "—" || t == "-" || t == "---") return ""
+    if (isBookingSelectPlaceholder(t)) return ""
+    return t
+}
+
+/** When native select.value is empty (FAB desync), use selected option text — never the placeholder. */
 fun nativeSelectValueOrText(sel: HTMLSelectElement?): String {
     if (sel == null) return ""
     var v = sel.value?.trim().orEmpty()
-    if (v.isNotEmpty()) return v
+    if (v.isNotEmpty()) return blankIfBookingSelectPlaceholder(v)
     val idx = sel.selectedIndex
     if (idx >= 0) {
         val opt = sel.options.item(idx) as? HTMLOptionElement
         v = opt?.value?.trim().orEmpty()
-        if (v.isNotEmpty()) return v
+        if (v.isNotEmpty()) return blankIfBookingSelectPlaceholder(v)
         v = opt?.textContent?.trim().orEmpty()
+        return blankIfBookingSelectPlaceholder(v)
     }
-    return v
+    return ""
 }
 
 /**
@@ -26514,7 +26732,7 @@ fun renderMissingDataForRixoTransport(missingPurchases: List<dynamic>) {
                     // Box 2: Number (English)
                     sb.append("<div>")
                     sb.append("<label style=\"display: block; margin-bottom: 4px; font-size: 12px; font-weight: 500; color: #6b7280;\">Number</label>")
-                    sb.append("<input type=\"number\" id=\"missing_${id}_numberCutNumber1\" placeholder=\"Number\" style=\"width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;\" />")
+                    sb.append("<input type=\"text\" id=\"missing_${id}_numberCutNumber1\" placeholder=\"Number\" style=\"width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;\" />")
                     sb.append("</div>")
                     
                     // Box 3: Hiragana Character
@@ -26576,7 +26794,7 @@ fun renderMissingDataForRixoTransport(missingPurchases: List<dynamic>) {
                     // Box 4: Number (English)
                     sb.append("<div>")
                     sb.append("<label style=\"display: block; margin-bottom: 4px; font-size: 12px; font-weight: 500; color: #6b7280;\">Number</label>")
-                    sb.append("<input type=\"number\" id=\"missing_${id}_numberCutNumber2\" placeholder=\"Number\" style=\"width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;\" />")
+                    sb.append("<input type=\"text\" id=\"missing_${id}_numberCutNumber2\" placeholder=\"Number\" style=\"width: 100%; padding: 6px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;\" />")
                     sb.append("</div>")
                     
                     sb.append("</div>")

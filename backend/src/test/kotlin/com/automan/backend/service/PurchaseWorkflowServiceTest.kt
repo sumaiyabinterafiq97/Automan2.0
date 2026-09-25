@@ -64,6 +64,20 @@ class PurchaseWorkflowServiceTest {
     }
 
     @Test
+    fun statusFromSubmittedFlags_clears_to_purchased_while_computeStatus_keeps_stored() {
+        val p = Purchase(
+            chassis = "X",
+            workflowStatus = WorkflowStatus.RIXO_REQUESTED,
+            rixoRequested = "FALSE",
+            rixoConfirmed = "FALSE",
+            bookingRequested = false,
+            invoiceConfirmed = false,
+        )
+        assertEquals(WorkflowStatus.PURCHASED, service.statusFromSubmittedFlags(p))
+        assertEquals(WorkflowStatus.RIXO_REQUESTED, service.computeStatus(p))
+    }
+
+    @Test
     fun computeStatus_defaults_to_purchased() {
         val p = Purchase(chassis = "X")
         assertEquals(WorkflowStatus.PURCHASED, service.computeStatus(p))

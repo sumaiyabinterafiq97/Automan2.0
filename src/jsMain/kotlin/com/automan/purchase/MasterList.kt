@@ -615,8 +615,8 @@ fun createTallMultilineChipInput(id: String, placeholder: String, rows: Int = 4)
 
 fun ensureSupplierChipJs() {
     js("""
-        if (window.__supplierChipJsVersion !== 4) {
-          window.__supplierChipJsVersion = 4;
+        if (window.__supplierChipJsVersion !== 5) {
+          window.__supplierChipJsVersion = 5;
           window.__supplierChipJsReady = true;
 
           // Notify / In-Transit / Final Destination: chips joined with RS so ';' stays literal text.
@@ -754,59 +754,92 @@ fun ensureSupplierChipJs() {
             }
           }
 
+          function _scmPrefixForChipId(id) {
+            if (id === 'scmCarsPerContainer' || id === 'scmShippingPricePerCar') return 'scm';
+            if (id === 'dupScmCarsPerContainer' || id === 'dupScmShippingPricePerCar') return 'dupScm';
+            return null;
+          }
+          function _ensureScmDraftPreviewWired(prefix) {
+            function wire(inp) {
+              if (!inp || inp.getAttribute('data-scm-draft-wired') === '1') return;
+              inp.setAttribute('data-scm-draft-wired', '1');
+              inp.addEventListener('input', function() { _updateScmCombinedPreview(prefix); });
+            }
+            wire(_getInput(prefix + 'CarsPerContainer'));
+            wire(_getInput(prefix + 'ShippingPricePerCar'));
+          }
+          function _formatScmPreviewPrice(rawP) {
+            if (typeof window._moneySanitize === 'function' && typeof window._moneyFormat === 'function') {
+              return window._moneyFormat(window._moneySanitize(rawP));
+            }
+            return rawP;
+          }
+          function _appendScmPreviewChip(previewChips, prefix, c, rawP, removable) {
+            var p = _formatScmPreviewPrice(rawP);
+            var chip = document.createElement('span');
+            chip.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:#4f46e5; color:white; border-radius:9999px; padding:6px 10px; font-size:12px; font-weight:600; line-height:1;';
+            if (removable) {
+              var x = document.createElement('button');
+              x.type = 'button';
+              x.textContent = '×';
+              x.setAttribute('aria-label', 'Remove');
+              x.style.cssText = 'border:none; background:rgba(255,255,255,0.20); color:white; width:18px; height:18px; border-radius:9999px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; padding:0; line-height:1;';
+              x.addEventListener('click', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                window.supplierChipRemove(prefix + 'CarsPerContainer', c);
+                window.supplierChipRemove(prefix + 'ShippingPricePerCar', rawP);
+              });
+              chip.appendChild(x);
+            }
+            var label = document.createElement('span');
+            label.textContent = c + ' / ' + p;
+            chip.appendChild(label);
+            previewChips.appendChild(chip);
+          }
+          function _scmDraftPairFromInputs(prefix) {
+            var carsInp = _getInput(prefix + 'CarsPerContainer');
+            var priceInp = _getInput(prefix + 'ShippingPricePerCar');
+            var carsVal = carsInp ? (carsInp.value || '').toString().trim() : '';
+            var priceVal = priceInp ? (priceInp.value || '').toString().trim() : '';
+            if (!carsVal || !priceVal) return null;
+            if (!_isValidNumericToken(carsVal) || parseInt(carsVal, 10) <= 0) return null;
+            var priceSan = (typeof window._moneySanitize === 'function') ? window._moneySanitize(priceVal) : priceVal;
+            if (!priceSan) return null;
+            return { cars: carsVal, price: priceSan };
+          }
+          function _tryCommitScmDraftPair(prefix) {
+            prefix = prefix || 'scm';
+            var draft = _scmDraftPairFromInputs(prefix);
+            if (!draft) return false;
+            window.supplierChipAdd(prefix + 'CarsPerContainer', draft.cars);
+            window.supplierChipAdd(prefix + 'ShippingPricePerCar', draft.price);
+            return true;
+          }
+          window._tryCommitScmDraftPair = _tryCommitScmDraftPair;
+
           function _updateScmCombinedPreview(prefix) {
+             _ensureScmDraftPreviewWired(prefix);
              var carsHidden = _getHidden(prefix + 'CarsPerContainer');
              var priceHidden = _getHidden(prefix + 'ShippingPricePerCar');
              var previewChips = document.getElementById(prefix + 'CombinedPreviewChips');
              if (!carsHidden || !priceHidden || !previewChips) return;
-             
+
              var cars = _splitTokens(carsHidden.value);
              var prices = _splitTokens(priceHidden.value);
-             
+             var pairCount = Math.min(cars.length, prices.length);
+             var draft = _scmDraftPairFromInputs(prefix);
+
              previewChips.innerHTML = '';
-             var maxLen = Math.max(cars.length, prices.length);
-             if (maxLen === 0) {
+             if (pairCount === 0 && !draft) {
                  previewChips.innerHTML = '<span style="color:#9ca3af;font-size:13px;font-style:italic;">No tiers added yet</span>';
                  return;
              }
-             for (var i = 0; i < maxLen; i++) {
-                var c = i < cars.length ? cars[i] : '?';
-                var rawP = i < prices.length ? prices[i] : '?';
-                var p = rawP;
-                if (typeof window._moneySanitize === 'function' && typeof window._moneyFormat === 'function' && p !== '?') {
-                   p = window._moneyFormat(window._moneySanitize(p));
-                } else if (p !== '?') {
-                   p = '$' + p;
-                }
-                
-                var chip = document.createElement('span');
-                chip.style.cssText = 'display:inline-flex; align-items:center; gap:6px; background:#4f46e5; color:white; border-radius:9999px; padding:6px 10px; font-size:12px; font-weight:600; line-height:1;';
-                
-                var x = document.createElement('button');
-                x.type = 'button';
-                x.textContent = '×';
-                x.setAttribute('aria-label', 'Remove');
-                x.style.cssText = 'border:none; background:rgba(255,255,255,0.20); color:white; width:18px; height:18px; border-radius:9999px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; padding:0; line-height:1;';
-                
-                (function(rawCar, rawPrice) {
-                    x.addEventListener('click', function(ev) {
-                        ev.preventDefault();
-                        ev.stopPropagation();
-                        if (rawCar !== '?') {
-                            window.supplierChipRemove(prefix + 'CarsPerContainer', rawCar);
-                        }
-                        if (rawPrice !== '?') {
-                            window.supplierChipRemove(prefix + 'ShippingPricePerCar', rawPrice);
-                        }
-                    });
-                })(c, rawP);
-
-                var label = document.createElement('span');
-                label.textContent = c + ' / ' + p;
-
-                chip.appendChild(x);
-                chip.appendChild(label);
-                previewChips.appendChild(chip);
+             for (var i = 0; i < pairCount; i++) {
+                _appendScmPreviewChip(previewChips, prefix, cars[i], prices[i], true);
+             }
+             if (draft) {
+                _appendScmPreviewChip(previewChips, prefix, draft.cars, draft.price, false);
              }
           }
 
@@ -890,6 +923,11 @@ fun ensureSupplierChipJs() {
             window.supplierChipAdd(id, v);
           };
           window.supplierChipAddFromInput = function(id) {
+            var scmPrefix = _scmPrefixForChipId(id);
+            if (scmPrefix) {
+              _tryCommitScmDraftPair(scmPrefix);
+              return;
+            }
             var input = _getInput(id);
             if (!input) return;
             var v = (input.value || '').toString().trim();
