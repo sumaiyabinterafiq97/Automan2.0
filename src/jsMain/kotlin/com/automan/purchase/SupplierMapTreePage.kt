@@ -78,7 +78,7 @@ private var smCardInlineEditStock: String = ""
 private var smCardInlineEditPol: String = ""
 private var smCardInlineEditCurrentLabel: String = ""
 
-/** Venue-card duplicate: new supplier name, same venue, empty stock/company/price. */
+/** Supplier duplicate: new name, copy of every row under the source supplier. */
 private var smVenueDuplicateSupplier: String = ""
 private var smVenueDuplicateVenue: String = ""
 
@@ -1106,16 +1106,91 @@ private fun smSupplierNameTaken(name: String): Boolean {
     return smTreeRowsCache.any { it.supplier.trim().equals(trimmed, ignoreCase = true) }
 }
 
-/** New supplier + copied venue only. No row id, so this does not merge into the source branch. */
-private fun postSmDuplicateSupplierVenue(newName: String, venue: String, onSuccess: () -> Unit) {
+private fun smStockIsPlaceholder(stock: String): Boolean =
+    stock.isBlank() || stock.trim() == "-" || smNormStock(stock) == "(no stock location)"
+
+private fun smCompanyIsPlaceholder(company: String): Boolean =
+    company.isBlank() || company.trim() == "-" || smNormCompany(company) == "(no company)"
+
+/** Insert mode for a copied row. No id, so the source row is not updated. */
+private fun smDuplicateInsertMode(row: SupplierMapTreeRowLite): String = when {
+    smStockIsPlaceholder(row.stock) -> "VENUE"
+    smCompanyIsPlaceholder(row.company) -> "STOCK"
+    row.vType.isNullOrBlank() && row.price.isNullOrBlank() -> "RIXO_COMPANY"
+    else -> "FULL"
+}
+
+/** Plain number for a copied Rixo price. Yen signs and commas are display only. */
+private fun smDuplicatePriceForDb(raw: String): String? {
+    val cleaned = raw.trim()
+        .replace("¥", "")
+        .replace("￥", "")
+        .replace("Â¥", "")
+        .replace(" ", "")
+        .trim()
+    if (cleaned.isEmpty() || smParseMoney(cleaned) == null) return null
+    return smNormalizePriceForDb(cleaned)
+}
+
+private fun smDuplicateRowPayload(newName: String, fallbackVenue: String, row: SupplierMapTreeRowLite): dynamic {
+    val mode = smDuplicateInsertMode(row)
+    val venue = row.venueId?.trim()?.takeIf { it.isNotEmpty() && it != SM_PLACEHOLDER_VENUE } ?: fallbackVenue.trim()
     val obj: dynamic = js("{}")
-    obj.insertMode = "VENUE"
+    obj.insertMode = mode
     obj.auctionName = newName.trim()
-    obj.venueId = venue.trim()
-    obj.rixoCompany = "-"
-    obj.stockLocation = "-"
+    obj.venueId = venue
+    when (mode) {
+        "VENUE" -> {
+            obj.stockLocation = "-"
+            obj.rixoCompany = "-"
+        }
+        "STOCK" -> {
+            obj.stockLocation = row.stock.trim()
+            obj.rixoCompany = "-"
+        }
+        "RIXO_COMPANY" -> {
+            obj.stockLocation = row.stock.trim()
+            obj.rixoCompany = row.company.trim()
+        }
+        else -> {
+            obj.stockLocation = row.stock.trim()
+            obj.rixoCompany = row.company.trim()
+            val vtype = row.vType?.trim().orEmpty()
+            if (vtype.isNotEmpty()) obj.supportedVehicleType = vtype
+            val price = row.price?.trim().orEmpty()
+            val normalized = if (price.isEmpty()) null else smDuplicatePriceForDb(price)
+            if (normalized != null) obj.rixoPrice = normalized
+        }
+    }
+    return obj
+}
+
+/** New supplier name plus a copy of every cached row. No row id, so the source branch is not updated. */
+private fun postSmDuplicateSupplierVenue(newName: String, venue: String, onSuccess: () -> Unit) {
+    val sourceKey = smNormSupplier(smVenueDuplicateSupplier)
+    val sourceRows = smTreeRowsCache.filter { smNormSupplier(it.supplier) == sourceKey }
+    for (row in sourceRows) {
+        if (smRejectIfSemicolon(newName, row.venueId, row.stock, row.company, row.vType, row.price)) return
+        val price = row.price?.trim().orEmpty()
+        if (price.isNotEmpty() && smDuplicatePriceForDb(price) == null) {
+            showMessage("Rixo price must be numeric", "error")
+            return
+        }
+    }
+    val rowJs: dynamic = js("[]")
+    if (sourceRows.isEmpty()) {
+        val obj: dynamic = js("{}")
+        obj.insertMode = "VENUE"
+        obj.auctionName = newName.trim()
+        obj.venueId = venue.trim()
+        obj.rixoCompany = "-"
+        obj.stockLocation = "-"
+        rowJs.push(obj)
+    } else {
+        sourceRows.forEach { row -> rowJs.push(smDuplicateRowPayload(newName, venue, row)) }
+    }
     val payload = js("{}")
-    payload.rows = arrayOf(obj)
+    payload.rows = rowJs
     window.fetch(apiUrl("rixo-mapping/bulk"), js("""{ method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) }"""))
         .then { resp: dynamic ->
             resp.json().then { result: dynamic ->

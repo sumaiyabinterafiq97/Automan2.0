@@ -299,7 +299,13 @@ private fun recentCell(row: dynamic, key: String): String {
         else -> null
     }
     if (v == null || v == js("undefined")) return ""
-    return escapeHtml(v.toString())
+    val raw = v.toString()
+    if (key == "price") {
+        if (raw.isBlank()) return ""
+        val priceValue = parseCurrency(raw)
+        return if (priceValue > 0.0) escapeHtml("¥${formatCurrency(priceValue)}") else ""
+    }
+    return escapeHtml(raw)
 }
 
 private fun renderHomeRecentPurchases(data: dynamic) {
@@ -340,7 +346,7 @@ private fun renderHomeRecentPurchases(data: dynamic) {
                     <tr>
                         <th>Date</th><th>Lot no.</th><th>Chassis</th><th>Car name</th><th>Year</th>
                         <th>Auction house</th><th>Stock location</th><th>Rixo company</th>
-                        <th>Client</th><th>Country</th><th>Price</th>
+                        <th>Client</th><th>Country</th><th>Car Price</th>
                         <th>Rixo requested</th><th>Rixo confirmed</th>
                     </tr>
                 </thead>

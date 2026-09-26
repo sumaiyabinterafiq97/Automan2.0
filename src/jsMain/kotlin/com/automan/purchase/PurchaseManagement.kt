@@ -1034,7 +1034,7 @@ private fun purchaseDateQuickFilterHeaderCellHtml(label: String): String {
         "Sorted newest to oldest (click for oldest first)"
     }
     return """
-    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
+    <th>
         <div style="display:flex; align-items:center; gap:8px;">
             <button type="button" id="purchaseSortBtn_date" title="$sortTooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
                 <span>$label</span><span style="font-size: 14px;">↕</span>
@@ -4382,7 +4382,7 @@ fun displayPurchasesWithPagination() {
                 }
                 val sortBtnId = "purchaseSortBtn_$columnKey"
                 tableHTML.append("""
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
+                    <th>
                         <button id="$sortBtnId" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
                             <span>$label</span><span style="font-size: 14px;">↕</span>
                         </button>
@@ -4390,7 +4390,7 @@ fun displayPurchasesWithPagination() {
                 """)
             } else {
                 tableHTML.append("""
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">$label</th>
+                    <th>$label</th>
                 """)
             }
         }
@@ -4434,8 +4434,8 @@ fun displayPurchasesWithPagination() {
         <div class="purchase-list-table-shell">
         <table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupNarrowActionEqualRest(purchaseColCount, 88)}
             <thead>
-                <tr style="background-color: #f8f9fa;">
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6; width: 88px;"></th>
+                <tr>
+                    <th style="width: 88px;"></th>
     """)
     
     for (columnKey in selectedColumns) {
@@ -4451,7 +4451,7 @@ fun displayPurchasesWithPagination() {
             }
             val sortBtnId = "purchaseSortBtn_$columnKey"
             tableHTML.append("""
-                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">
+                <th>
                     <button id="$sortBtnId" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
                         <span>$label</span><span style="font-size: 14px;">↕</span>
                     </button>
@@ -4459,7 +4459,7 @@ fun displayPurchasesWithPagination() {
             """)
         } else {
             tableHTML.append("""
-                <th style="padding: 12px; text-align: left; border-bottom: 1px solid #dee2e6;">$label</th>
+                <th>$label</th>
             """)
         }
     }
@@ -4477,7 +4477,7 @@ fun displayPurchasesWithPagination() {
         
         tableHTML.append("""
             <tr>
-                <td style="padding: 8px 12px;">
+                <td>
                     ${if (isEditor() && purchaseId > 0L && chassisStr.isNotEmpty()) """
                     <div style="display:inline-flex;align-items:center;gap:8px;">
                         ${purchaseListViewButtonHtml(purchaseId, chassisAttr)}
@@ -4507,7 +4507,7 @@ fun displayPurchasesWithPagination() {
                 else -> escapeHtml(raw)
             }
             val tdClass = if (columnKey == "date") """ class="purchase-list-date-td"""" else ""
-            tableHTML.append("""<td$tdClass style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
+            tableHTML.append("""<td$tdClass>$cellHtml</td>""")
         }
         
         tableHTML.append("""</tr>""")

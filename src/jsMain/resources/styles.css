@@ -515,11 +515,13 @@ select:focus {
     overflow-x: auto;
 }
 
-/* Purchase List Table - Base Styles (grid + chips; details in master map block) */
+/* Purchase List only. Other pages keep the shared .purchase-list-table grid. */
 #purchaseTable table.purchase-list-table {
     width: 100%;
+    border: none;
     border-collapse: collapse;
-    font-size: 16px;
+    background: #fff;
+    font-size: 14px;
 }
 
 #purchaseTable table.purchase-list-table thead th {
@@ -530,9 +532,28 @@ select:focus {
 
 #purchaseTable table.purchase-list-table th,
 #purchaseTable table.purchase-list-table td {
+    padding: 14px 12px;
+    text-align: left;
+    vertical-align: middle;
+    border: none;
+    border-bottom: 1px solid #e8eaed;
+    background-color: #fff;
+    color: #1f2937;
+    font-size: 14px;
     white-space: normal;
     overflow: visible;
     text-overflow: clip;
+}
+
+#purchaseTable table.purchase-list-table thead th {
+    background-color: #f7f8fa;
+    color: #374151;
+    font-weight: 700;
+    font-size: 13px;
+}
+
+#purchaseTable table.purchase-list-table tbody tr:hover td {
+    background-color: #fafafa;
 }
 
 /* Purchase Date: keep text inside the cell; weekday wraps under the year when narrow */
@@ -3624,11 +3645,6 @@ button.invoice-history-pdf-btn:active {
 button.invoice-history-pdf-btn:disabled {
     cursor: wait;
     opacity: 0.6;
-}
-
-#purchaseTable table.purchase-list-table th,
-#purchaseTable table.purchase-list-table td {
-    font-size: 16px;
 }
 
 /* Mobile Styles for Car Brands Page */
@@ -7788,6 +7804,22 @@ input.client-form-readonly:read-only {
 
 .qp-field {
     min-width: 0;
+}
+
+.qp-radio-row {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    min-height: 40px;
+}
+
+.qp-radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+    color: #374151;
+    cursor: pointer;
 }
 
 .qp-field-span {

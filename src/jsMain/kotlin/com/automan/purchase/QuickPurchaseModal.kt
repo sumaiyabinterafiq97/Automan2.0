@@ -57,6 +57,10 @@ fun openQuickPurchaseModal() {
                         ${createPlainTextInput("qpChassisNumber", "Suffix", required = true)}
                     </div>
                     <div class="qp-field">
+                        <label class="qp-label" for="qpBrandInput">Brand</label>
+                        ${createEditableCombobox("qpBrand", "Add Brand")}
+                    </div>
+                    <div class="qp-field">
                         <label class="qp-label" for="qpCarNameInput">Car Name</label>
                         ${createEditableCombobox("qpCarName", "Select Car Name")}
                     </div>
@@ -100,6 +104,28 @@ fun openQuickPurchaseModal() {
                         ${createEditableCombobox("qpFuel", "Select Fuel Type")}
                     </div>
                     <div class="qp-field">
+                        <label class="qp-label" for="qpShiftInput">Shift</label>
+                        ${createEditableCombobox("qpShift", "Select Shift")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label">WD</label>
+                        <div class="qp-radio-row">
+                            <label class="qp-radio"><input type="radio" name="qpWd" value="2WD"> 2WD</label>
+                            <label class="qp-radio"><input type="radio" name="qpWd" value="4WD"> 4WD</label>
+                        </div>
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label">Drive Type</label>
+                        <div class="qp-radio-row">
+                            <label class="qp-radio"><input type="radio" name="qpDriveType" value="LHD"> LHD</label>
+                            <label class="qp-radio"><input type="radio" name="qpDriveType" value="RHD"> RHD</label>
+                        </div>
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpShipmentSizeInput">Vehicle type</label>
+                        ${createEditableCombobox("qpShipmentSize", "Select Vehicle type")}
+                    </div>
+                    <div class="qp-field">
                         <label class="qp-label" for="qpCcInput">CC</label>
                         ${createEditableCombobox("qpCc", "Select CC", showDropdownButton = false, additionalAttrs = """inputmode="numeric" class="plain-int-input"""")}
                     </div>
@@ -108,8 +134,16 @@ fun openQuickPurchaseModal() {
                         ${createEditableCombobox("qpAuctionName", "Add Supplier Name")}
                     </div>
                     <div class="qp-field">
+                        <label class="qp-label" for="qpVenueIdInput">Venue ID</label>
+                        ${createEditableCombobox("qpVenueId", "Select Venue ID")}
+                    </div>
+                    <div class="qp-field">
                         <label class="qp-label" for="qpStockLocationInput">Stock Location</label>
                         ${createEditableCombobox("qpStockLocation", "Select Stock Location")}
+                    </div>
+                    <div class="qp-field">
+                        <label class="qp-label" for="qpPolInput">POL</label>
+                        ${createEditableCombobox("qpPol", "Select POL")}
                     </div>
                     <div class="qp-field">
                         <label class="qp-label" for="qpRixoCompanyInput">Rixo Company</label>
@@ -256,8 +290,8 @@ fun closeQuickPurchaseModal() {
 private fun resetQuickPurchaseModalForm() {
     (document.getElementById("qpAuctionNo") as? HTMLInputElement)?.value = ""
     listOf(
-        "qpChassis", "qpChassisNumber", "qpCarName", "qpAuctionName", "qpStockLocation", "qpRixoCompany",
-        "qpClientName", "qpCountry", "qpGrade", "qpRank", "qpSeat", "qpDoor", "qpColor", "qpFuel", "qpCc",
+        "qpChassis", "qpChassisNumber", "qpBrand", "qpCarName", "qpAuctionName", "qpVenueId", "qpStockLocation", "qpPol", "qpRixoCompany",
+        "qpClientName", "qpCountry", "qpGrade", "qpRank", "qpSeat", "qpDoor", "qpColor", "qpFuel", "qpShift", "qpShipmentSize", "qpCc",
         "qpNumberCutPlace", "qpNumberCutHiragana",
     ).forEach { id ->
         val sel = document.getElementById(id) as? HTMLSelectElement
@@ -278,6 +312,9 @@ private fun resetQuickPurchaseModalForm() {
     (document.getElementById("qpNumberCutFieldsWrap") as? HTMLElement)?.style?.display = "none"
     (document.getElementById("qpOptionsPredefined") as? HTMLInputElement)?.value = ""
     (document.getElementById("qpOptions") as? HTMLInputElement)?.value = ""
+    js("""
+        document.querySelectorAll('#quickPurchaseModalContent input[name="qpWd"], #quickPurchaseModalContent input[name="qpDriveType"]').forEach(function(r) { r.checked = false; });
+    """)
     document.getElementById("quickPurchaseModalContent")?.querySelectorAll(".option-btn")?.asDynamic()?.forEach { btn: dynamic ->
         (btn as? HTMLElement)?.classList?.remove("selected")
     }
@@ -306,8 +343,13 @@ private fun preloadQuickPurchaseDropdowns() {
     loadAllChassisDropdown(isEditForm = false, preserveForm = false, fieldIdOverride = "qpChassis")
     populateComboboxFromApiForField("qpAuctionName", "rixo/dropdowns/auction-names", "▼")
     populateComboboxFromApiForField("qpClientName", "client-map/dropdowns/client-names", "")
+    populateComboboxFromApiForField("qpBrand", "master-menu/car_brands", "Add Brand")
     populateComboboxFromApiForField("qpColor", "master-menu/color", "Select Color")
     populateComboboxFromApiForField("qpFuel", "master-menu/fuel", "Select Fuel")
+    populateComboboxFromApiForField("qpShift", "master-menu/shift", "Select Shift")
+    populateComboboxFromApiForField("qpShipmentSize", "master-menu/type_of_vehicle", "Select Vehicle type")
+    populateComboboxFromApiForField("qpVenueId", "master-menu/venue_id", "Select Venue ID")
+    populateComboboxFromApiForField("qpPol", "master-menu/pol", "Select POL")
     refreshPurchaseClientNameToCountryMap()
     ensureNumberCutPlaceOptionsLoaded {
         repopulateNumberCutPlaceCombobox("qpNumberCutPlace")
@@ -596,6 +638,8 @@ fun applyQuickPurchaseSupplierSelection(selection: dynamic) {
                 }
                 setOne('qpStockLocation', sel.stockLocation);
                 setOne('qpRixoCompany', sel.rixoCompany);
+                setOne('qpVenueId', sel.venueId);
+                setOne('qpPol', sel.pol);
             } finally {
                 window.__suppressRixoAutoSelect = prevSuppress;
             }
@@ -690,8 +734,11 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
     purchaseData.auctionNo = (document.getElementById("qpAuctionNo") as? HTMLInputElement)?.value?.trim() ?: ""
     purchaseData.chassis = chassisForSave
     purchaseData.carName = getComboboxValueSafe("qpCarName")
+    purchaseData.brand = getComboboxValueSafe("qpBrand")
     purchaseData.auctionHouse = getComboboxValueSafe("qpAuctionName")
+    purchaseData.venueId = getComboboxValueSafe("qpVenueId")
     purchaseData.stockLocation = getComboboxValueSafe("qpStockLocation")
+    purchaseData.pol = getComboboxValueSafe("qpPol")
     purchaseData.rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("qpRixoCompany"))
     purchaseData.clientName = getComboboxValueSafe("qpClientName")
     purchaseData.country = getComboboxValueSafe("qpCountry")
@@ -701,6 +748,12 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
     purchaseData.door = getComboboxValueSafe("qpDoor")
     purchaseData.color = getComboboxValueSafe("qpColor")
     purchaseData.fuel = getComboboxValueSafe("qpFuel")
+    purchaseData.shift = getComboboxValueSafe("qpShift")
+    purchaseData.wd = (document.querySelector("#quickPurchaseModalContent input[name=\"qpWd\"]:checked") as? HTMLInputElement)?.value ?: ""
+    purchaseData.driveType = (document.querySelector("#quickPurchaseModalContent input[name=\"qpDriveType\"]:checked") as? HTMLInputElement)?.value ?: ""
+    val vehicleType = getComboboxValueSafe("qpShipmentSize")
+    purchaseData.shipmentSize = vehicleType
+    purchaseData.vehicleType = vehicleType
     val qpCcValue = getComboboxValueSafe("qpCc")
     // Backend expects Int? for cc (same as Add/Edit Purchase).
     purchaseData.cc = if (qpCcValue.isNotEmpty()) {

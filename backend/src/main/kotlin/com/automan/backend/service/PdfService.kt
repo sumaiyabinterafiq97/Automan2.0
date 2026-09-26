@@ -497,14 +497,6 @@ class PdfService {
         )
         topTable.addCell(
             Cell()
-                .add(
-                    Paragraph()
-                        .add(Text("DATE ").setFont(fontBold).setBold())
-                        .add(formatInvoiceDisplayDate(data.shippingDate))
-                        .setFont(font)
-                        .setFontSize(10f)
-                        .setTextAlignment(TextAlignment.RIGHT),
-                )
                 .setBorder(noBorder)
                 .setPadding(0f),
         )

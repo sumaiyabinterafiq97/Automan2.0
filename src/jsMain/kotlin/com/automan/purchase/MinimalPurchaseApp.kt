@@ -1581,26 +1581,35 @@ fun initializeAppSetup() {
 
                 function rowMatchesSelections(row) {
                     if (!activeRows) return true;
+                    if (result.brand && !cellMatchesValue(row.brand || row.carBrand, result.brand)) return false;
                     if (result.carName && !cellMatchesValue(row.carName, result.carName)) return false;
                     if (result.fuel && !cellMatchesValue(row.fuel, result.fuel)) return false;
+                    if (result.wd && !cellMatchesValue(row.wd, result.wd)) return false;
+                    if (result.shift && !cellMatchesValue(row.shift, result.shift)) return false;
                     if (result.grade && !cellMatchesValue(row.grade, result.grade)) return false;
                     if (result.cc && !cellMatchesValue(row.cc, result.cc)) return false;
                     if (result.door && !cellMatchesValue(row.door, result.door)) return false;
                     if (result.seat && !cellMatchesValue(row.seat, result.seat)) return false;
                     if (result.color && !cellMatchesValue(row.color, result.color)) return false;
+                    if (result.driveType && !cellMatchesValue(row.driveType, result.driveType)) return false;
                     if (result.vehicleType && !cellMatchesValue(row.vehicleType, result.vehicleType)) return false;
                     return true;
                 }
 
                 function rawFromRow(row, fieldKey) {
                     switch (fieldKey) {
+                        case 'brands': return row.brand || row.carBrand;
+                        case 'carNames': return row.carName;
                         case 'fuels': return row.fuel;
+                        case 'wds': return row.wd;
+                        case 'shifts': return row.shift;
                         case 'grades': return row.grade;
                         case 'ccs': return row.cc;
                         case 'doors': return row.door;
                         case 'seats': return row.seat;
                         case 'ranks': return row.rank;
                         case 'colors': return row.color;
+                        case 'driveTypes': return row.driveType;
                         case 'vehicleTypes': return row.vehicleType;
                         default: return '';
                     }
@@ -1670,9 +1679,25 @@ fun initializeAppSetup() {
                     });
                 }
 
-                resolveField('Fuel', 'fuels', firstRow && firstRow.fuel)
+                resolveField('Brand', 'brands', firstRow && (firstRow.brand || firstRow.carBrand))
+                .then(function(brand) {
+                    result.brand = brand;
+                    return resolveField('Car Name', 'carNames', firstRow && firstRow.carName);
+                })
+                .then(function(carName) {
+                    result.carName = carName;
+                    return resolveField('Fuel', 'fuels', firstRow && firstRow.fuel);
+                })
                 .then(function(fuel) {
                     result.fuel = fuel;
+                    return resolveField('WD', 'wds', firstRow && firstRow.wd);
+                })
+                .then(function(wd) {
+                    result.wd = wd;
+                    return resolveField('Shift', 'shifts', firstRow && firstRow.shift);
+                })
+                .then(function(shift) {
+                    result.shift = shift;
                     return resolveField('Grade', 'grades', firstRow && firstRow.grade);
                 })
                 .then(function(grade) {
@@ -1697,6 +1722,10 @@ fun initializeAppSetup() {
                 })
                 .then(function(color) {
                     result.color = color;
+                    return resolveField('Drive Type', 'driveTypes', firstRow && firstRow.driveType);
+                })
+                .then(function(driveType) {
+                    result.driveType = driveType;
                     return resolveField('Vehicle Type', 'vehicleTypes', firstRow && firstRow.vehicleType);
                 })
                 .then(function(vehicleType) {
@@ -13002,6 +13031,9 @@ private fun storeQuickPurchaseChassisMappingCache(
     door: String = "",
     cc: String = "",
     vehicleType: String = "",
+    wd: String = "",
+    shift: String = "",
+    driveType: String = "",
 ) {
     val cache = js("{}").unsafeCast<dynamic>()
     cache.brand = brand
@@ -13014,6 +13046,9 @@ private fun storeQuickPurchaseChassisMappingCache(
     cache.door = door
     cache.cc = cc
     cache.vehicleType = vehicleType
+    cache.wd = wd
+    cache.shift = shift
+    cache.driveType = driveType
     cache.recycleFeeRaw = recycleFeeRaw
     cache.carModelYearRaw = carModelYearRaw
     cache.manufactureYearRaw = manufactureYearRaw
@@ -13028,10 +13063,12 @@ internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
     if (resolved != null && resolved != js("undefined")) {
         val pol = (resolved.pol?.toString() ?: "").trim()
         val venue = (resolved.venueId?.toString() ?: "").trim()
-        if (pol.isNotBlank()) purchaseData.pol = pol
-        if (venue.isNotBlank()) purchaseData.venueId = venue
+        val existingPol = (purchaseData.pol?.toString() ?: "").trim()
+        val existingVenue = (purchaseData.venueId?.toString() ?: "").trim()
+        if (existingPol.isBlank() && pol.isNotBlank()) purchaseData.pol = pol
+        if (existingVenue.isBlank() && venue.isNotBlank()) purchaseData.venueId = venue
     }
-    // Vehicle type from Chassis Map (not supplier mapping)
+    // Vehicle type from Chassis Map (not supplier mapping). A filled box wins.
     val chassisVt = (window.asDynamic().__qpChassisVehicleType?.toString() ?: "").trim()
         .ifBlank {
             val cache = window.asDynamic().__qpChassisMappingCache
@@ -13039,14 +13076,26 @@ internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
                 (cache.vehicleType?.toString() ?: "").trim()
             } else ""
         }
-    if (chassisVt.isNotBlank()) {
+    val existingVehicleType = (purchaseData.shipmentSize?.toString() ?: "").trim()
+        .ifBlank { (purchaseData.vehicleType?.toString() ?: "").trim() }
+    if (existingVehicleType.isBlank() && chassisVt.isNotBlank()) {
         purchaseData.shipmentSize = chassisVt
         purchaseData.vehicleType = chassisVt
     }
     val cache = window.asDynamic().__qpChassisMappingCache
     if (cache != null && cache != js("undefined")) {
+        val existingBrand = (purchaseData.brand?.toString() ?: "").trim()
         val brand = (cache.brand?.toString() ?: "").trim()
-        if (brand.isNotBlank()) purchaseData.brand = brand
+        if (existingBrand.isBlank() && brand.isNotBlank()) purchaseData.brand = brand
+        val existingWd = (purchaseData.wd?.toString() ?: "").trim()
+        val wd = (cache.wd?.toString() ?: "").trim()
+        if (existingWd.isBlank() && wd.isNotBlank()) purchaseData.wd = wd
+        val existingShift = (purchaseData.shift?.toString() ?: "").trim()
+        val shift = (cache.shift?.toString() ?: "").trim()
+        if (existingShift.isBlank() && shift.isNotBlank()) purchaseData.shift = shift
+        val existingDrive = (purchaseData.driveType?.toString() ?: "").trim()
+        val driveType = (cache.driveType?.toString() ?: "").trim()
+        if (existingDrive.isBlank() && driveType.isNotBlank()) purchaseData.driveType = driveType
         // UI Fuel (and other specs) win; cache only fills blanks.
         val existingFuel = (purchaseData.fuel?.toString() ?: "").trim()
         val fuel = (cache.fuel?.toString() ?: "").trim()
@@ -15790,6 +15839,48 @@ fun fetchMappingByChassisOnly(
                     updateConditionalComboboxButtonVisibility("qpCc", ccsForDropdown, preferCc)
                 }
 
+                fun populateQpMappedDropdowns(preferBrand: String, preferShift: String, preferVehicleType: String) {
+                    populateChassisMappingWithMasterListAsync(
+                        "qpBrand", "Add Brand", brandsForDropdown, preferBrand, "master-menu/car_brands",
+                    )
+                    populateChassisMappingWithMasterListAsync(
+                        "qpShift", "Select Shift", shiftsForDropdown, preferShift, "master-menu/shift",
+                    )
+                    populateChassisMappingWithMasterListAsync(
+                        "qpShipmentSize", "Select Vehicle type", vehicleTypesForDropdown, preferVehicleType, "master-menu/type_of_vehicle",
+                    )
+                }
+
+                fun applyQpRadio(name: String, value: String) {
+                    val v = firstSemicolonToken(value).trim()
+                    window.asDynamic().__qpRadioName = name
+                    window.asDynamic().__qpRadioVal = v
+                    js("""
+                        (function() {
+                            var name = window.__qpRadioName;
+                            var val = String(window.__qpRadioVal || '').trim().toUpperCase();
+                            if (!name) return;
+                            var radios = document.querySelectorAll('#quickPurchaseModalContent input[name="' + name + '"]');
+                            for (var i = 0; i < radios.length; i++) radios[i].checked = false;
+                            if (!val) return;
+                            var target = val;
+                            if (name === 'qpWd') {
+                                if (val.indexOf('4') >= 0) target = '4WD';
+                                else if (val.indexOf('2') >= 0) target = '2WD';
+                            } else if (name === 'qpDriveType') {
+                                if (val.indexOf('LHD') >= 0) target = 'LHD';
+                                else if (val.indexOf('RHD') >= 0) target = 'RHD';
+                            }
+                            for (var j = 0; j < radios.length; j++) {
+                                if (String(radios[j].value).toUpperCase() === target) {
+                                    radios[j].checked = true;
+                                    return;
+                                }
+                            }
+                        })();
+                    """)
+                }
+
                 fun finishQuickPurchaseChassisAutofill(selectedCarName: String): dynamic {
                     val seqNow = (js("window.__chassisMappingSeq") as? Int) ?: 0
                     if (seqNow != requestId) {
@@ -15803,15 +15894,17 @@ fun fetchMappingByChassisOnly(
                         selectedCarName,
                         "car-brand-mapping/car-names/distinct",
                     )
-                    if (selectedCarName.isNotBlank()) {
+                    if (selectedCarName.isNotBlank() || brand.isNotBlank()) {
                         applyChassisBrandAndCarName(
                             isEditForm = false,
                             brand = brand,
                             carName = selectedCarName,
+                            brandFieldIdOverride = "qpBrand",
                             carNameFieldIdOverride = "qpCarName",
-                            applyBrand = false,
+                            applyBrand = true,
                         )
-                    } else {
+                    }
+                    if (selectedCarName.isBlank()) {
                         js("""
                             (function() {
                                 var sel = document.getElementById('qpCarName');
@@ -15825,13 +15918,15 @@ fun fetchMappingByChassisOnly(
 
                     // Seed dropdowns with mapping tokens (like Add Purchase) before optional disambiguation.
                     populateQpSpecDropdowns(fuel, grade, rank, color, seat, door, cc)
+                    populateQpMappedDropdowns(brand, shift, vehicleType)
+                    applyQpRadio("qpWd", wd)
+                    applyQpRadio("qpDriveType", driveType)
 
                     val selectionPromise: dynamic = run {
                         window.asDynamic().__qpSpecChassis = chassis
                         window.asDynamic().__qpSpecUnique = uniqueValuesObj
                         window.asDynamic().__qpSpecFirstRow = data.firstRow
                         window.asDynamic().__qpSpecAllRows = allRows
-                        window.asDynamic().__qpSpecCarName = selectedCarName
                         js("""
                             (function() {
                                 if (typeof window.resolveQuickPurchaseChassisSpecFields !== 'function') {
@@ -15842,7 +15937,7 @@ fun fetchMappingByChassisOnly(
                                     window.__qpSpecUnique,
                                     window.__qpSpecFirstRow,
                                     window.__qpSpecAllRows,
-                                    window.__qpSpecCarName || ''
+                                    ''
                                 );
                             })()
                         """)
@@ -15854,47 +15949,81 @@ fun fetchMappingByChassisOnly(
                             console.log("⏭️ Stale QP chassis spec selection ignored")
                             return@then js("undefined")
                         }
+                        if (selected == null || selected == js("undefined") || js("selected === null").unsafeCast<Boolean>()) {
+                            console.log("❌ Quick Purchase chassis selection cancelled, skipping field autofills")
+                            endChassisChangePreserve()
+                            return@then js("undefined")
+                        }
+                        var carNameSel = selectedCarName
+                        var brandSel = brand
                         var fuelSel = fuel
+                        var wdSel = wd
+                        var shiftSel = shift
                         var gradeSel = grade
                         var rankSel = rank
                         var colorSel = color
                         var seatSel = seat
                         var doorSel = door
                         var ccSel = cc
+                        var driveTypeSel = driveType
                         var vehicleTypeSel = vehicleType
-                        if (selected != null && selected != js("undefined") && !js("selected === null").unsafeCast<Boolean>()) {
-                            val f = (selected.fuel?.toString() ?: "").trim()
-                            val g = (selected.grade?.toString() ?: "").trim()
-                            val r = (selected.rank?.toString() ?: "").trim()
-                            val c = (selected.color?.toString() ?: "").trim()
-                            val s = (selected.seat?.toString() ?: "").trim()
-                            val d = (selected.door?.toString() ?: "").trim()
-                            val ccV = (selected.cc?.toString() ?: "").trim()
-                            val vt = (selected.vehicleType?.toString() ?: "").trim()
-                            if (f.isNotBlank()) fuelSel = firstSemicolonToken(f)
-                            if (g.isNotBlank()) gradeSel = firstSemicolonToken(g)
-                            if (r.isNotBlank()) rankSel = firstSemicolonToken(r)
-                            if (c.isNotBlank()) colorSel = firstSemicolonToken(c)
-                            if (s.isNotBlank() && s != "0") seatSel = firstSemicolonToken(s)
-                            if (d.isNotBlank() && d != "0") doorSel = firstSemicolonToken(d)
-                            if (ccV.isNotBlank() && ccV != "0") ccSel = firstSemicolonToken(ccV)
-                            if (vt.isNotBlank()) vehicleTypeSel = firstSemicolonToken(vt)
-                            // Refresh option lists then apply chosen values (Cancel → keep seeded prefers).
-                            populateQpSpecDropdowns(fuelSel, gradeSel, rankSel, colorSel, seatSel, doorSel, ccSel)
+                        val chosenCar = (selected.carName?.toString() ?: "").trim()
+                        val chosenBrand = (selected.brand?.toString() ?: "").trim()
+                        val f = (selected.fuel?.toString() ?: "").trim()
+                        val chosenWd = (selected.wd?.toString() ?: "").trim()
+                        val chosenShift = (selected.shift?.toString() ?: "").trim()
+                        val g = (selected.grade?.toString() ?: "").trim()
+                        val r = (selected.rank?.toString() ?: "").trim()
+                        val c = (selected.color?.toString() ?: "").trim()
+                        val s = (selected.seat?.toString() ?: "").trim()
+                        val d = (selected.door?.toString() ?: "").trim()
+                        val ccV = (selected.cc?.toString() ?: "").trim()
+                        val chosenDrive = (selected.driveType?.toString() ?: "").trim()
+                        val vt = (selected.vehicleType?.toString() ?: "").trim()
+                        if (chosenCar.isNotBlank()) carNameSel = firstSemicolonToken(chosenCar)
+                        if (chosenBrand.isNotBlank()) brandSel = firstSemicolonToken(chosenBrand)
+                        if (f.isNotBlank()) fuelSel = firstSemicolonToken(f)
+                        if (chosenWd.isNotBlank()) wdSel = firstSemicolonToken(chosenWd)
+                        if (chosenShift.isNotBlank()) shiftSel = firstSemicolonToken(chosenShift)
+                        if (g.isNotBlank()) gradeSel = firstSemicolonToken(g)
+                        if (r.isNotBlank()) rankSel = firstSemicolonToken(r)
+                        if (c.isNotBlank()) colorSel = firstSemicolonToken(c)
+                        if (s.isNotBlank() && s != "0") seatSel = firstSemicolonToken(s)
+                        if (d.isNotBlank() && d != "0") doorSel = firstSemicolonToken(d)
+                        if (ccV.isNotBlank() && ccV != "0") ccSel = firstSemicolonToken(ccV)
+                        if (chosenDrive.isNotBlank()) driveTypeSel = firstSemicolonToken(chosenDrive)
+                        if (vt.isNotBlank()) vehicleTypeSel = firstSemicolonToken(vt)
+                        populateQpSpecDropdowns(fuelSel, gradeSel, rankSel, colorSel, seatSel, doorSel, ccSel)
+                        populateQpMappedDropdowns(brandSel, shiftSel, vehicleTypeSel)
+                        if (carNameSel.isNotBlank() || brandSel.isNotBlank()) {
+                            applyChassisBrandAndCarName(
+                                isEditForm = false,
+                                brand = brandSel,
+                                carName = carNameSel,
+                                brandFieldIdOverride = "qpBrand",
+                                carNameFieldIdOverride = "qpCarName",
+                                applyBrand = true,
+                            )
                         }
+                        applyQpComboboxValue("qpBrand", brandSel)
+                        applyQpComboboxValue("qpCarName", carNameSel)
                         applyQpComboboxValue("qpFuel", fuelSel)
+                        applyQpComboboxValue("qpShift", shiftSel)
                         applyQpComboboxValue("qpGrade", gradeSel)
                         applyQpComboboxValue("qpRank", rankSel)
                         applyQpComboboxValue("qpColor", colorSel)
                         applyQpComboboxValue("qpSeat", seatSel)
                         applyQpComboboxValue("qpDoor", doorSel)
                         applyQpComboboxValue("qpCc", ccSel)
+                        applyQpComboboxValue("qpShipmentSize", vehicleTypeSel)
+                        applyQpRadio("qpWd", wdSel)
+                        applyQpRadio("qpDriveType", driveTypeSel)
                         window.asDynamic().__qpChassisVehicleType = if (vehicleTypeSel.isNotBlank()) vehicleTypeSel else null
 
                         storeQuickPurchaseChassisMappingCache(
-                            brand, selectedCarName, fuelSel, recycleFeeRaw, carModelYearRaw, manufactureYearRaw, chassisNumberRaw,
+                            brandSel, carNameSel, fuelSel, recycleFeeRaw, carModelYearRaw, manufactureYearRaw, chassisNumberRaw,
                             grade = gradeSel, rank = rankSel, color = colorSel, seat = seatSel, door = doorSel, cc = ccSel,
-                            vehicleType = vehicleTypeSel,
+                            vehicleType = vehicleTypeSel, wd = wdSel, shift = shiftSel, driveType = driveTypeSel,
                         )
                         applyPurchaseChassisNumberFromMapping(
                             isEditForm = false,
@@ -15912,51 +16041,7 @@ fun fetchMappingByChassisOnly(
                     }
                 }
 
-                if (carNameTokensList.size <= 1) {
-                    return@then finishQuickPurchaseChassisAutofill(carNameTokensList.firstOrNull().orEmpty().ifBlank { carName })
-                }
-
-                // Multiple car names: populate options, then ask user to pick (same modal as Add Purchase).
-                populateChassisMappingWithMasterListAsync(
-                    "qpCarName",
-                    "Select Car Name",
-                    carNameTokensList,
-                    "",
-                    "car-brand-mapping/car-names/distinct",
-                )
-                js("""
-                    (function() {
-                        var sel = document.getElementById('qpCarName');
-                        var inp = document.getElementById('qpCarNameInput');
-                        if (sel) sel.value = '';
-                        if (inp) inp.value = '';
-                    })();
-                """)
-
-                window.asDynamic().__qpCarNamePickChassis = chassis
-                window.asDynamic().__qpCarNamePickOptions = carNameTokensList.toTypedArray()
-                return@then js("""
-                    (function() {
-                        var chassisLabel = 'Chassis: ' + (window.__qpCarNamePickChassis || '');
-                        var opts = window.__qpCarNamePickOptions || [];
-                        if (typeof window.showFieldSelectionModal !== 'function') {
-                            return Promise.resolve(opts.length ? opts[0] : null);
-                        }
-                        return window.showFieldSelectionModal(chassisLabel, 'Car Name', opts);
-                    })()
-                """).then { chosen: dynamic ->
-                    val seqNow = (js("window.__chassisMappingSeq") as? Int) ?: 0
-                    if (seqNow != requestId) {
-                        console.log("⏭️ Stale QP car name modal result ignored")
-                        return@then js("undefined")
-                    }
-                    val chosenStr = when {
-                        chosen == null || js("chosen === void 0").unsafeCast<Boolean>() -> ""
-                        js("chosen === null").unsafeCast<Boolean>() -> ""
-                        else -> chosen.toString().trim()
-                    }
-                    finishQuickPurchaseChassisAutofill(chosenStr)
-                }
+                return@then finishQuickPurchaseChassisAutofill(carNameTokensList.firstOrNull().orEmpty().ifBlank { carName })
             }
             
             resetChassisMasterComboIds()
@@ -16654,12 +16739,8 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
             val firstBranch = branches[0]
             val skipModals = purchaseForMerge != null
             window.asDynamic().__tempSupplierBranches = branches
-            val isQuickPurchaseTarget = supplierTarget == "quickPurchase"
-            val needsDisambiguation = !skipModals && if (isQuickPurchaseTarget) {
-                js("window.quickPurchaseNeedsDisambiguation(window.__tempSupplierBranches)").unsafeCast<Boolean>()
-            } else {
+            val needsDisambiguation = !skipModals &&
                 js("window.supplierMappingNeedsDisambiguation(window.__tempSupplierBranches, window.__tempSupplierRows)").unsafeCast<Boolean>()
-            }
 
             fun buildDefaultSelection(): dynamic {
                 val sel = js("({})").unsafeCast<dynamic>()
@@ -16722,20 +16803,12 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
             }
 
             val selectionPromise = if (needsDisambiguation) {
-                if (isQuickPurchaseTarget) {
-                    window.asDynamic().resolveQuickPurchaseSupplierFields(
-                        auctionName,
-                        branches,
-                        firstBranch
-                    ).unsafeCast<dynamic>()
-                } else {
-                    window.asDynamic().resolveSupplierFieldsSequentially(
-                        auctionName,
-                        branches,
-                        firstBranch
-                    ).unsafeCast<dynamic>()
-                }
-            } else if (isQuickPurchaseTarget || skipModals) {
+                window.asDynamic().resolveSupplierFieldsSequentially(
+                    auctionName,
+                    branches,
+                    firstBranch
+                ).unsafeCast<dynamic>()
+            } else if (skipModals) {
                 val defaultSel = buildDefaultSelection()
                 enrichSelectionWithVehicleType(defaultSel)
                 window.asDynamic().__tempSupplierDefaultSel = defaultSel

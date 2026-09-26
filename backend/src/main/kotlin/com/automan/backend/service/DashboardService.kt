@@ -45,6 +45,7 @@ class DashboardService(
     private val invoiceHistoryLineRepository: InvoiceHistoryLineRepository,
     private val purchaseExtendedAttributesService: PurchaseExtendedAttributesService,
     private val purchaseVehicleOverrideService: PurchaseVehicleOverrideService,
+    private val purchaseCostLineService: PurchaseCostLineService,
 ) {
     companion object {
         private val ISO_DATE: DateTimeFormatter = DateTimeFormatter.ISO_LOCAL_DATE
@@ -183,12 +184,13 @@ class DashboardService(
             }
             .sortedWith(compareByDescending<DashboardRecentPurchaseProjection> { it.getId() ?: 0L })
             .take(50)
-        val hydratedById = purchaseRepository.findAllById(matched.mapNotNull { it.getId() })
-            .associate { purchase ->
+        val prepared = purchaseRepository.findAllById(matched.mapNotNull { it.getId() })
+            .map { purchase ->
                 val withLot = purchaseExtendedAttributesService.applyForRead(purchase)
-                val withYear = purchaseVehicleOverrideService.applyForRead(withLot)
-                purchase.id to withYear
+                purchaseVehicleOverrideService.applyForRead(withLot)
             }
+        val hydratedById = purchaseCostLineService.applyForReadBatch(prepared)
+            .associateBy { it.id }
         val rows = matched.map { row ->
             val status = row.getWorkflowStatus() ?: WorkflowStatus.PURCHASED
             val hydrated = row.getId()?.let { hydratedById[it] }
@@ -208,7 +210,7 @@ class DashboardService(
                 rixoCompany = row.getRixoCompany(),
                 client = row.getClientName(),
                 country = row.getCountry(),
-                price = row.getTotalPrice(),
+                price = hydrated?.price,
                 rixoRequested = status != WorkflowStatus.PURCHASED,
                 rixoConfirmed = status in PurchaseWorkflowService.WORKFLOW_RIXO_CONFIRMED_OR_LATER,
             )
