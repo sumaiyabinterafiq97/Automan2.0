@@ -248,7 +248,6 @@ private fun populateCarBrandModalComboboxes() {
     populateEditableComboboxFromMasterMenu("carBrandBrand", "car_brands")
     populateEditableComboboxFromMasterMenu("carBrandFuel", "fuel")
     populateEditableComboboxFromMasterMenu("carBrandShift", "shift")
-    populateEditableComboboxFromMasterMenu("carBrandRank", "rank")
     populateEditableComboboxFromMasterMenu("carBrandColor", "color")
     populateEditableComboboxFromMasterMenu("carBrandGrade", "car_grade")
     populateEditableComboboxFromMasterMenu("carBrandVehicleType", "type_of_vehicle")
@@ -314,7 +313,6 @@ private fun tryPrefillCarBrandModalFromGroupedRow() {
     setChipFieldValue("carBrandCc", cc)
     setChipFieldValue("carBrandSeat", seat)
     setChipFieldValue("carBrandDoor", door)
-    setChipFieldValue("carBrandRank", rankVal)
     setChipFieldValue("carBrandColor", colorVal)
     setChipFieldValue("carBrandDriveType", driveType)
     setChipFieldValue("carBrandVehicleType", vehicleTypeVal)
@@ -1256,7 +1254,10 @@ fun getSelectedCarBrandColumns(): List<String> {
     }
     
     // Filter out "id" column (removed from UI) and auto-adjust if saved columns exceed device limit
-    val filteredColumns = savedColumns.filter { it.isNotBlank() && it != "id" }
+    val filteredColumns = savedColumns.filter { it.isNotBlank() && it != "id" && it != "rank" }
+    if (filteredColumns.isEmpty()) {
+        return defaultColumns
+    }
     val ordered = normalizeCarBrandColumnOrder(filteredColumns)
     return if (ordered.size > maxColumns) {
         defaultColumns
@@ -4276,7 +4277,6 @@ private fun buildCarBrandTableUi(
                 "cc" to "CC",
                 "seat" to "Seat",
                 "door" to "Door",
-                "rank" to "Rank",
                 "color" to "Color",
                 "driveType" to "Drive Type",
                 "vehicleType" to "Vehicle Type",
@@ -4672,7 +4672,6 @@ fun displayCarBrandsAsCards(filteredMappings: List<dynamic>, brandFilter: String
         "cc" to "CC",
         "seat" to "Seat",
         "door" to "Door",
-        "rank" to "Rank",
         "color" to "Color",
         "driveType" to "Drive Type",
         "vehicleType" to "Vehicle Type",
@@ -4897,7 +4896,6 @@ fun showCarBrandColumnFilterModal() {
         "cc" to "CC",
         "seat" to "Seat",
         "door" to "Door",
-        "rank" to "Rank",
         "color" to "Color",
         "driveType" to "Drive Type",
         "vehicleType" to "Vehicle Type",
@@ -5090,10 +5088,6 @@ fun showCarBrandModal(mappingId: Long?, duplicateFromId: Long? = null) {
                             <div style="visibility:hidden;"></div>
                         </div>
                         <div class="car-brand-modal-grid">
-                            <div>
-                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Rank</label>
-                                ${createChipMultiSelectCombobox("carBrandRank", "Select Rank")}
-                            </div>
                             <div>
                                 <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 14px;">Color</label>
                                 ${createChipMultiSelectCombobox("carBrandColor", "Select Color")}
@@ -5546,7 +5540,6 @@ fun loadCarBrandDataForEdit(mappingId: Long, clearChassisForDuplicate: Boolean =
                 setChipFieldValue("carBrandSeat", (data.seat ?: "").toString())
                 setChipFieldValue("carBrandDoor", (data.door ?: "").toString())
                 setChipFieldValue("carBrandGrade", (data.grade ?: "").toString())
-                setChipFieldValue("carBrandRank", (data.rank ?: "").toString())
                 setChipFieldValue("carBrandColor", (data.color ?: "").toString())
                 setChipFieldValue("carBrandDriveType", (data.driveType ?: "").toString())
                 setChipFieldValue("carBrandVehicleType", (data.vehicleType ?: "").toString())
@@ -5663,7 +5656,6 @@ fun performCarBrandSave(mappingId: Long?, replaceExistingValues: Boolean = false
     carBrandData.cc = getChipFieldValue("carBrandCc").takeIf { it.isNotEmpty() } ?: null
     carBrandData.seat = getChipFieldValue("carBrandSeat").takeIf { it.isNotEmpty() } ?: null
     carBrandData.door = getChipFieldValue("carBrandDoor").takeIf { it.isNotEmpty() } ?: null
-    carBrandData.rank = getChipFieldValue("carBrandRank").takeIf { it.isNotEmpty() } ?: null
     carBrandData.color = getChipFieldValue("carBrandColor").takeIf { it.isNotEmpty() } ?: null
     carBrandData.driveType = getChipFieldValue("carBrandDriveType").takeIf { it.isNotEmpty() } ?: null
     carBrandData.vehicleType = getChipFieldValue("carBrandVehicleType").takeIf { it.isNotEmpty() } ?: null

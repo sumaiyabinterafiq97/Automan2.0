@@ -177,6 +177,136 @@ private fun showInvoiceConfirmModal(
     (document.getElementById("invoiceConfirmCancel") as? HTMLElement)?.focus()
 }
 
+/** First real bank account, leaving a value already chosen (including history prefill) alone. */
+private fun selectFirstInvoiceBankAccountIfBlank() {
+    val sel = document.getElementById("invoiceBankAccount") as? HTMLSelectElement ?: return
+    if (sel.value.trim().isNotEmpty()) return
+    for (i in 0 until sel.options.length) {
+        val opt = sel.options.item(i) as? HTMLOptionElement ?: continue
+        if (opt.value.trim().isNotEmpty()) {
+            sel.selectedIndex = i
+            return
+        }
+    }
+}
+
+private var invoicePdfDateModalKeyHandler: ((Event) -> Unit)? = null
+
+private fun invoiceIsoDateOrNull(raw: String): String? {
+    val s = raw.trim()
+    if (!Regex("""^\d{4}-\d{2}-\d{2}$""").matches(s)) return null
+    val parts = s.split("-")
+    val year = parts[0].toIntOrNull() ?: return null
+    val month = parts[1].toIntOrNull() ?: return null
+    val day = parts[2].toIntOrNull() ?: return null
+    if (month !in 1..12 || day !in 1..31 || year < 1900) return null
+    return s
+}
+
+/**
+ * PDF download only. Yes uses the Shipping Date (ETD). No reveals a date field.
+ * Cancel does not download.
+ */
+internal fun showInvoicePdfDateModal(etdIso: String, onChosen: (String) -> Unit) {
+    document.getElementById("invoicePdfDateModal")?.remove()
+    invoicePdfDateModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+    invoicePdfDateModalKeyHandler = null
+    val returnFocus = document.activeElement as? HTMLElement
+    val etd = invoiceIsoDateOrNull(etdIso).orEmpty()
+    val etdLabel = if (etd.isEmpty()) "Shipping date (ETD) is empty." else "Shipping date (ETD): ${isoToMmDdYyyy(etd)}"
+
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = "invoicePdfDateModal"
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10020;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    overlay.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="invoicePdfDateTitle"
+             style="background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,0.28);
+             max-width:440px;width:100%;padding:22px 24px;box-sizing:border-box;">
+            <h3 id="invoicePdfDateTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">Invoice date</h3>
+            <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:8px;">Date this invoice the same as ETD?</div>
+            <div style="font-size:14px;line-height:1.55;color:#0f172a;font-weight:600;margin-bottom:16px;">$etdLabel</div>
+            <div id="invoicePdfDateCustom" style="display:none;margin-bottom:16px;">
+                <label for="invoicePdfDateInput" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Desired date</label>
+                <input type="date" id="invoicePdfDateInput" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;" />
+            </div>
+            <div id="invoicePdfDateError" style="display:none;font-size:13px;color:#b91c1c;margin-bottom:12px;"></div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="invoicePdfDateCancel"
+                    style="padding:9px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;min-height:40px;font-size:14px;color:#374151;">Cancel</button>
+                <button type="button" id="invoicePdfDateNo"
+                    style="padding:9px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;min-height:40px;font-size:14px;font-weight:600;color:#0f172a;">No</button>
+                <button type="button" id="invoicePdfDateYes"
+                    style="padding:9px 16px;border:none;border-radius:8px;background:#15803d;color:#fff;cursor:pointer;font-weight:700;min-height:40px;font-size:14px;">Yes</button>
+                <button type="button" id="invoicePdfDateUse" style="display:none;padding:9px 16px;border:none;border-radius:8px;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:700;min-height:40px;font-size:14px;">Use this date</button>
+            </div>
+        </div>
+    """.trimIndent()
+
+    fun showDateError(message: String) {
+        val err = document.getElementById("invoicePdfDateError") as? HTMLElement
+        if (err != null) {
+            err.textContent = message
+            err.style.display = "block"
+        }
+    }
+
+    fun closeModal() {
+        invoicePdfDateModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+        invoicePdfDateModalKeyHandler = null
+        overlay.remove()
+        returnFocus?.focus()
+    }
+
+    document.body?.appendChild(overlay)
+    document.getElementById("invoicePdfDateCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("invoicePdfDateYes")?.addEventListener("click", { _: Event ->
+        val chosen = invoiceIsoDateOrNull(etd)
+        if (chosen == null) {
+            showDateError("Shipping date (ETD) is empty. Choose No and enter a date, or cancel.")
+            return@addEventListener
+        }
+        closeModal()
+        onChosen(chosen)
+    })
+    document.getElementById("invoicePdfDateNo")?.addEventListener("click", { _: Event ->
+        val custom = document.getElementById("invoicePdfDateCustom") as? HTMLElement
+        if (custom != null) custom.style.display = "block"
+        val useBtn = document.getElementById("invoicePdfDateUse") as? HTMLElement
+        if (useBtn != null) useBtn.style.display = "inline-block"
+        val yesBtn = document.getElementById("invoicePdfDateYes") as? HTMLElement
+        if (yesBtn != null) yesBtn.style.display = "none"
+        val noBtn = document.getElementById("invoicePdfDateNo") as? HTMLElement
+        if (noBtn != null) noBtn.style.display = "none"
+        val err = document.getElementById("invoicePdfDateError") as? HTMLElement
+        if (err != null) err.style.display = "none"
+        (document.getElementById("invoicePdfDateInput") as? HTMLInputElement)?.focus()
+    })
+    document.getElementById("invoicePdfDateUse")?.addEventListener("click", { _: Event ->
+        val typed = (document.getElementById("invoicePdfDateInput") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val chosen = invoiceIsoDateOrNull(typed)
+        if (chosen == null) {
+            showDateError("Enter a valid date.")
+            return@addEventListener
+        }
+        closeModal()
+        onChosen(chosen)
+    })
+    overlay.addEventListener("click", { ev: Event ->
+        if (ev.target === overlay) closeModal()
+    })
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        if (event.asDynamic().key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    invoicePdfDateModalKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    (document.getElementById("invoicePdfDateYes") as? HTMLElement)?.focus()
+}
+
 private fun handleInvoiceSaveFailure(httpStatus: Int, errorText: String) {
     val (userMsg, creditBlocked) = parseInvoiceApiError(errorText)
     if (creditBlocked) {
@@ -423,6 +553,7 @@ SWIFT CODE: SMBCJPJT</option>
     """
 
     bindStrictDateTextMask("invoiceShippingDate")
+    selectFirstInvoiceBankAccountIfBlank()
 
     // Setup event listeners
     setupInvoicePageListeners()
@@ -1715,7 +1846,7 @@ private fun checkInvoiceLedgerClient(clientName: String) {
  * Loads purchases, builds invoice JSON. [mode]: `"save"` → POST `/invoice/save`;
  * `"preview"` / `"pdf"` → POST `/invoice/generate-pdf` (open vs download).
  */
-private fun invoiceBuildPayloadAndRun(mode: String) {
+private fun invoiceBuildPayloadAndRun(mode: String, invoiceDateOverride: String? = null) {
     if (mode == "preview") {
         Logger.debug("[PREVIEW] invoiceBuildPayloadAndRun(preview)")
     } else {
@@ -1780,12 +1911,17 @@ private fun invoiceBuildPayloadAndRun(mode: String) {
     val clientName = clientParts[0].trim()
     val clientAddress = if (clientParts.size > 1) clientParts[1].trim() else null
     
-    // Get current date for invoice date
+    // Save and Preview keep today's date. PDF may pass the date chosen in the ETD dialog.
     val currentDate = js("new Date()").unsafeCast<dynamic>()
     val year = currentDate.getFullYear() as Int
     val month = ((currentDate.getMonth() as Int) + 1).toString().padStart(2, '0')
     val day = (currentDate.getDate() as Int).toString().padStart(2, '0')
-    val invoiceDate = year.toString() + "-" + month + "-" + day
+    val todayIso = year.toString() + "-" + month + "-" + day
+    val invoiceDate = if (mode == "pdf") {
+        invoiceDateOverride?.trim()?.takeIf { invoiceIsoDateOrNull(it) != null } ?: todayIso
+    } else {
+        todayIso
+    }
     
     // Format shipping date (convert from YYYY-MM-DD to DD.MMM.YYYY format)
     val formattedShippingDate = if (invoiceShippingDate.isNotEmpty()) {
@@ -2067,7 +2203,25 @@ fun handleInvoiceSave() {
 }
 
 fun handleInvoicePdfDownload() {
-    invoiceBuildPayloadAndRun("pdf")
+    val currentIds = js("window.currentInvoicePurchaseIds") as? Array<dynamic>
+    if (currentIds == null || currentIds.isEmpty()) {
+        showMessage("No purchases selected. Please select CLIENT and VESSEL first.", "warning")
+        return
+    }
+    val invoiceNumber = (document.getElementById("invoiceNumber") as? HTMLInputElement)?.value?.trim() ?: ""
+    if (invoiceNumber.isEmpty()) {
+        showMessage("Please enter an invoice number", "warning")
+        return
+    }
+    val invoiceClient = (document.getElementById("invoiceClient") as? HTMLSelectElement)?.value?.trim() ?: ""
+    if (invoiceClient.isEmpty()) {
+        showMessage("Please enter a client name", "warning")
+        return
+    }
+    val etd = (document.getElementById("invoiceShippingDate") as? HTMLInputElement)?.value?.trim() ?: ""
+    showInvoicePdfDateModal(etd) { chosen ->
+        invoiceBuildPayloadAndRun("pdf", chosen)
+    }
 }
 
 private fun resolveInvoiceNumberForRecreateDelete(): String {

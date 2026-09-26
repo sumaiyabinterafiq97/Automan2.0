@@ -779,7 +779,7 @@ class InvoiceHistoryService(
      * Regenerates invoice PDF from saved invoice_history (no DB writes, no ledger).
      * Line descriptions are built from matching purchases when available.
      */
-    fun generatePdfForInvoiceNumber(invoiceNumber: String): ByteArray {
+    fun generatePdfForInvoiceNumber(invoiceNumber: String, invoiceDateOverride: LocalDate? = null): ByteArray {
         val inv = invoiceNumber.trim()
         if (inv.isEmpty()) {
             throw IllegalArgumentException("Invoice number is required")
@@ -828,7 +828,7 @@ class InvoiceHistoryService(
 
         val pdf = InvoicePdfRequest(
             invoiceNumber = inv,
-            invoiceDate = LocalDate.now().toString(),
+            invoiceDate = (invoiceDateOverride ?: LocalDate.now()).toString(),
             lcNumber = header.lcNo?.trim()?.takeIf { it.isNotEmpty() },
             clientName = header.clientName?.trim().orEmpty().ifEmpty { "-" },
             clientAddress = null,

@@ -367,42 +367,47 @@ private fun storeAndNavigateInvoiceHistoryShipmentDetails(row: dynamic) {
 
 
 private fun downloadInvoiceHistoryPdf(invoiceNumber: String, btn: HTMLButtonElement?) {
-    if (btn != null) {
-        btn.disabled = true
-        btn.style.opacity = "0.6"
-    }
     val row = invoiceHistoryCachedRows.firstOrNull { r ->
         invoiceHistoryCell(r, "invoiceNumber") == invoiceNumber
     }
     val clientName = if (row != null) invoiceHistoryCell(row, "clientName") else ""
-    MainScope().launch {
-        try {
-            val encoded = (js("encodeURIComponent") as (String) -> String)(invoiceNumber)
-            val response = window.fetch(apiUrl("invoice-history/$encoded/pdf")).await()
-            if (!response.ok) {
-                val errorText = response.text().await()
-                ErrorHandler.showError("Failed to download PDF: ${ErrorHandler.extractErrorMessage(errorText)}")
-                return@launch
-            }
-            val blob = response.blob().await()
-            val url = js("URL.createObjectURL(blob)") as String
+    val etd = if (row != null) invoiceHistoryCell(row, "shippingDate").take(10) else ""
+    showInvoicePdfDateModal(etd) { chosen ->
+        if (btn != null) {
+            btn.disabled = true
+            btn.style.opacity = "0.6"
+        }
+        MainScope().launch {
             try {
-                val a = document.createElement("a") as HTMLAnchorElement
-                a.href = url
-                a.download = buildPdfFilename("Final_Invoice", clientName)
-                document.body?.appendChild(a)
-                a.click()
-                document.body?.removeChild(a)
-                showMessage("PDF downloaded successfully", "success")
+                val encode = js("encodeURIComponent") as (String) -> String
+                val encoded = encode(invoiceNumber)
+                val encodedDate = encode(chosen)
+                val response = window.fetch(apiUrl("invoice-history/$encoded/pdf?invoiceDate=$encodedDate")).await()
+                if (!response.ok) {
+                    val errorText = response.text().await()
+                    ErrorHandler.showError("Failed to download PDF: ${ErrorHandler.extractErrorMessage(errorText)}")
+                    return@launch
+                }
+                val blob = response.blob().await()
+                val url = js("URL.createObjectURL(blob)") as String
+                try {
+                    val a = document.createElement("a") as HTMLAnchorElement
+                    a.href = url
+                    a.download = buildPdfFilename("Final_Invoice", clientName)
+                    document.body?.appendChild(a)
+                    a.click()
+                    document.body?.removeChild(a)
+                    showMessage("PDF downloaded successfully", "success")
+                } finally {
+                    js("URL.revokeObjectURL(url)")
+                }
+            } catch (e: dynamic) {
+                ErrorHandler.showError("Failed to download PDF: ${e.toString()}")
             } finally {
-                js("URL.revokeObjectURL(url)")
-            }
-        } catch (e: dynamic) {
-            ErrorHandler.showError("Failed to download PDF: ${e.toString()}")
-        } finally {
-            if (btn != null) {
-                btn.disabled = false
-                btn.style.opacity = "1"
+                if (btn != null) {
+                    btn.disabled = false
+                    btn.style.opacity = "1"
+                }
             }
         }
     }

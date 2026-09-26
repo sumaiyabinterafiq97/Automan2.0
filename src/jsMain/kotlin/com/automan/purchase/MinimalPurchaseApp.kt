@@ -1463,6 +1463,21 @@ fun initializeAppSetup() {
                             });
                         });
 
+                        if (label === 'Rank') {
+                            window.ensureMasterRankSet().then(function(rankSet) {
+                                var opts = (rankSet && rankSet.length) ? rankSet : distinct;
+                                if (!opts || !opts.length) {
+                                    res(defaultValue || '');
+                                    return;
+                                }
+                                window.showChassisFieldSelectionModal(chassis, label, opts).then(function(chosen) {
+                                    if (chosen === null) rej('CANCELLED');
+                                    else res(chosen);
+                                });
+                            });
+                            return;
+                        }
+
                         if (distinct.length <= 1) {
                             res(distinct.length ? distinct[0] : (defaultValue || ''));
                             return;
@@ -1627,6 +1642,20 @@ fun initializeAppSetup() {
                                 }
                             });
                         });
+                        if (label === 'Rank') {
+                            window.ensureMasterRankSet().then(function(rankSet) {
+                                var opts = (rankSet && rankSet.length) ? rankSet : distinct;
+                                if (!opts || !opts.length) {
+                                    res(defaultValue || '');
+                                    return;
+                                }
+                                window.showChassisFieldSelectionModal(chassis, label, opts).then(function(chosen) {
+                                    if (chosen === null) rej('CANCELLED');
+                                    else res(chosen);
+                                });
+                            });
+                            return;
+                        }
                         if (distinct.length <= 1) {
                             res(distinct.length ? distinct[0] : (defaultValue || ''));
                             return;
@@ -13159,21 +13188,6 @@ private fun flattenSemicolonChoices(values: Iterable<String>): List<String> {
     return out.sorted()
 }
 
-/** True when any chassis mapping field has 2+ distinct options after `;` expansion (matches JS resolveField). */
-private fun chassisMappingNeedsFieldDisambiguation(uniqueValuesObj: dynamic): Boolean {
-    fun tokensForKey(key: String): List<String> {
-        val raw = uniqueValuesObj[key]
-        if (raw == null || raw == js("undefined")) return emptyList()
-        val arr = raw as? Array<*> ?: return emptyList()
-        return arr.map { it.toString() }
-    }
-    val keys = listOf(
-        "brands", "carNames", "fuels", "wds", "shifts", "grades",
-        "ccs", "doors", "seats", "ranks", "colors", "driveTypes", "vehicleTypes",
-    )
-    return keys.any { flattenSemicolonChoices(tokensForKey(it)).size > 1 }
-}
-
 /** Seed edit purchase supplier snapshot before Rixo init so populateDropdownOptions can rebuild comboboxes. */
 private fun seedEditPurchaseRixoSnapshot(purchaseData: dynamic) {
     window.asDynamic().__editPurchaseDataForRixo = purchaseData
@@ -15812,12 +15826,7 @@ fun fetchMappingByChassisOnly(
                     // Seed dropdowns with mapping tokens (like Add Purchase) before optional disambiguation.
                     populateQpSpecDropdowns(fuel, grade, rank, color, seat, door, cc)
 
-                    val needsQpSpecDisambiguation = listOf(
-                        fuelsForDropdown, gradeOptions, ccsForDropdown, doorsForDropdown,
-                        seatOptions, rankOptions, colorOptions, vehicleTypesForDropdown,
-                    ).any { it.size > 1 }
-
-                    val selectionPromise: dynamic = if (needsQpSpecDisambiguation) {
+                    val selectionPromise: dynamic = run {
                         window.asDynamic().__qpSpecChassis = chassis
                         window.asDynamic().__qpSpecUnique = uniqueValuesObj
                         window.asDynamic().__qpSpecFirstRow = data.firstRow
@@ -15837,8 +15846,6 @@ fun fetchMappingByChassisOnly(
                                 );
                             })()
                         """)
-                    } else {
-                        js("Promise.resolve(null)")
                     }
 
                     return selectionPromise.then { selected: dynamic ->
@@ -16060,7 +16067,7 @@ fun fetchMappingByChassisOnly(
             
             // Auto-fill fields with first row values (no need to fetch brand mappings anymore)
             // Set field values directly (chain promise so callers run after this microtask)
-            val needsDisambiguation = purchaseForMerge == null && chassisMappingNeedsFieldDisambiguation(uniqueValuesObj)
+            val needsDisambiguation = purchaseForMerge == null
             val selectionPromise = if (needsDisambiguation) {
                 window.asDynamic().resolveChassisFieldsSequentially(
                     chassis,

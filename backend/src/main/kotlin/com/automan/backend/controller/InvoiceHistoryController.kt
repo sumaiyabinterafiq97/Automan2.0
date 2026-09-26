@@ -92,8 +92,21 @@ class InvoiceHistoryController(
 
     /** Download PDF for a saved invoice (same layout as Create/Recreate Invoice PDF). */
     @GetMapping("/{invoiceNumber}/pdf")
-    fun downloadPdf(@PathVariable invoiceNumber: String): ResponseEntity<ByteArray> {
-        val pdfBytes = invoiceHistoryService.generatePdfForInvoiceNumber(invoiceNumber)
+    fun downloadPdf(
+        @PathVariable invoiceNumber: String,
+        @RequestParam(required = false) invoiceDate: String?,
+    ): ResponseEntity<*> {
+        val override = invoiceDate?.trim()?.takeIf { it.isNotEmpty() }
+        val parsedDate = if (override == null) {
+            null
+        } else {
+            try {
+                java.time.LocalDate.parse(override)
+            } catch (_: java.time.format.DateTimeParseException) {
+                return ResponseEntity.badRequest().body(mapOf("error" to "invoiceDate must be yyyy-MM-dd"))
+            }
+        }
+        val pdfBytes = invoiceHistoryService.generatePdfForInvoiceNumber(invoiceNumber, parsedDate)
         val clientName = invoiceHistoryService.clientNameForInvoiceNumber(invoiceNumber)
         val filename = PdfFilenameUtils.build("Final_Invoice", clientName)
         val headers = HttpHeaders()
