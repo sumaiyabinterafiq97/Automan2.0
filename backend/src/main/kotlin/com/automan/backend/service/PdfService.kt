@@ -9,7 +9,9 @@ import com.itextpdf.kernel.pdf.PdfDocument
 import com.itextpdf.kernel.pdf.PdfWriter
 import com.itextpdf.kernel.geom.PageSize
 import com.itextpdf.layout.Document
+import com.itextpdf.io.image.ImageDataFactory
 import com.itextpdf.layout.element.Cell
+import com.itextpdf.layout.element.Image
 import com.itextpdf.layout.element.LineSeparator
 import com.itextpdf.layout.element.Paragraph
 import com.itextpdf.layout.element.Table
@@ -35,6 +37,24 @@ import java.time.format.DateTimeFormatter
 
 @Service
 class PdfService {
+
+    /** Final-invoice signature. Missing file skips the image and still prints the name line. */
+    private fun invoiceSignatureImage(): Image? {
+        val bytes = javaClass.classLoader.getResourceAsStream("invoice/memon-signature.png")?.use { it.readBytes() }
+        if (bytes == null || bytes.isEmpty()) {
+            Logger.warn("Invoice signature image not found: invoice/memon-signature.png")
+            return null
+        }
+        val data = ImageDataFactory.create(bytes)
+        val heightPt = 22f
+        val widthPt = heightPt * data.width / data.height
+        return Image(data)
+            .setHeight(heightPt)
+            .setWidth(widthPt)
+            .setAutoScale(false)
+            .setHorizontalAlignment(HorizontalAlignment.CENTER)
+            .setMarginBottom(1f)
+    }
 
     private fun getJapaneseFont(): PdfFont {
         return try {
@@ -374,8 +394,13 @@ class PdfService {
         val sigTable = Table(UnitValue.createPercentArray(floatArrayOf(55f, 45f)))
             .setWidth(UnitValue.createPercentValue(100f))
         sigTable.addCell(Cell().setBorder(noBorder).setPadding(0f))
+        val signatureCell = Cell()
+            .setBorder(noBorder)
+            .setPadding(0f)
+            .setPaddingLeft(20f)
+        invoiceSignatureImage()?.let { signatureCell.add(it) }
         sigTable.addCell(
-            Cell()
+            signatureCell
                 .add(rule(0f, 4f))
                 .add(
                     Paragraph("M. Asif Memon")
@@ -390,9 +415,6 @@ class PdfService {
                         .setFontSize(8f)
                         .setTextAlignment(TextAlignment.CENTER),
                 )
-                .setBorder(noBorder)
-                .setPadding(0f)
-                .setPaddingLeft(20f),
         )
         document.add(sigTable)
 
