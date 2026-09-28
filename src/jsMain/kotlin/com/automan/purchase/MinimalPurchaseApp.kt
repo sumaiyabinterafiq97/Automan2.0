@@ -23732,6 +23732,9 @@ FAX: 047-711-0409
                                 <span class="rixo-print-icon">🖨️</span>
                                 PDF
                             </button>
+                            <button type="button" id="emailRixoRequest" class="rixo-email-btn">
+                                Email
+                            </button>
                         </div>
                     </form>
                 </div>
@@ -24774,6 +24777,9 @@ fun setupRixoRequestGeneratorListeners() {
     })
     document.getElementById("printRixoRequest")?.addEventListener("click", { _: Event ->
         generateRixoRequestPdf(persistHistory = false, generatePdf = true, preview = false)
+    })
+    document.getElementById("emailRixoRequest")?.addEventListener("click", { _: Event ->
+        openRixoGeneratorEmailDialog()
     })
     document.getElementById("deleteRixoHistoryFromUpdater")?.addEventListener("click", { _: Event ->
         handleDeleteRixoHistoryFromUpdater()
@@ -26224,6 +26230,175 @@ fun updateSelectAllRixoCheckbox() {
         }
         selectAllCheckbox.checked = checkedCount == rowCheckboxes.length
         selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < rowCheckboxes.length
+    }
+}
+
+private var rixoGeneratorEmailModalKeyHandler: ((Event) -> Unit)? = null
+
+private fun isPlausibleRixoGeneratorEmail(raw: String): Boolean {
+    val to = raw.trim()
+    if (to.length !in 3..254 || to.contains(' ')) return false
+    val at = to.indexOf('@')
+    if (at <= 0 || at != to.lastIndexOf('@')) return false
+    val domain = to.substring(at + 1)
+    return domain.contains('.') && !domain.startsWith('.') && !domain.endsWith('.') && !domain.contains("..")
+}
+
+private fun showRixoGeneratorEmailModal(
+    rixoCompanyLabel: String,
+    buyingDate: String,
+    onSend: (to: String) -> Unit,
+) {
+    document.getElementById("rixoGeneratorEmailModal")?.remove()
+    rixoGeneratorEmailModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+    rixoGeneratorEmailModalKeyHandler = null
+
+    val returnFocus = document.activeElement as? HTMLElement
+    val safeCompany = escapeHtml(rixoCompanyLabel.ifEmpty { "Undefined" })
+    val safeDate = escapeHtml(buyingDate)
+
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = "rixoGeneratorEmailModal"
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10020;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    overlay.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="rixoGeneratorEmailTitle"
+             style="background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,0.28);
+             max-width:440px;width:100%;padding:22px 24px;box-sizing:border-box;">
+            <h3 id="rixoGeneratorEmailTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">Email PDF</h3>
+            <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:14px;">
+                <div>Rixo company: $safeCompany</div>
+                <div>Buying date: $safeDate</div>
+            </div>
+            <label for="rixoGeneratorEmailTo" style="display:block;font-size:13px;font-weight:600;color:#0f172a;margin-bottom:6px;">To</label>
+            <input id="rixoGeneratorEmailTo" type="email" autocomplete="email" placeholder="name@company.com"
+                style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;min-height:40px;" />
+            <div id="rixoGeneratorEmailError" style="min-height:18px;margin:6px 0 12px;font-size:13px;color:#b91c1c;"></div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="rixoGeneratorEmailCancel"
+                    style="padding:9px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;min-height:40px;font-size:14px;color:#374151;">Cancel</button>
+                <button type="button" id="rixoGeneratorEmailSend"
+                    style="padding:9px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,#14b8a6,#0f766e);color:#fff;cursor:pointer;font-weight:700;min-height:40px;font-size:14px;box-shadow:0 2px 10px rgba(15,118,110,0.22);">Send</button>
+            </div>
+        </div>
+    """.trimIndent()
+
+    fun closeModal() {
+        rixoGeneratorEmailModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+        rixoGeneratorEmailModalKeyHandler = null
+        overlay.remove()
+        returnFocus?.focus()
+    }
+
+    document.body?.appendChild(overlay)
+
+    document.getElementById("rixoGeneratorEmailCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("rixoGeneratorEmailSend")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("rixoGeneratorEmailTo") as? HTMLInputElement
+        val to = input?.value?.trim().orEmpty()
+        val errorEl = document.getElementById("rixoGeneratorEmailError")
+        if (!isPlausibleRixoGeneratorEmail(to)) {
+            if (errorEl != null) errorEl.textContent = "Enter a valid email address."
+            input?.focus()
+            return@addEventListener
+        }
+        closeModal()
+        onSend(to)
+    })
+    overlay.addEventListener("click", { ev: Event ->
+        if (ev.target === overlay) closeModal()
+    })
+    val inputEl = document.getElementById("rixoGeneratorEmailTo") as? HTMLInputElement
+    inputEl?.addEventListener("keydown", { ev: Event ->
+        val keyEvent = ev.asDynamic()
+        if (keyEvent.key == "Enter") {
+            ev.preventDefault()
+            (document.getElementById("rixoGeneratorEmailSend") as? HTMLButtonElement)?.click()
+        }
+    })
+
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    rixoGeneratorEmailModalKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    inputEl?.focus()
+}
+
+private fun openRixoGeneratorEmailDialog() {
+    val buyingDate = getRixoBuyingDateValue()
+    val rixoCompanyRaw = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
+    if (buyingDate.isEmpty() || !rixoCompanyComboboxIsSelected(rixoCompanyRaw)) {
+        showMessage("Please select a buying date and Rixo company", "error")
+        return
+    }
+    val selectedIds = rixoSelectedPurchaseIdsForActions()
+    if (selectedIds.isEmpty()) {
+        val emptyMsg =
+            if (isRixoUpdaterEditSession()) "No cars remain on this Rixo request."
+            else "Please select at least one row to generate the PDF"
+        showMessage(emptyMsg, "error")
+        return
+    }
+    val companyLabel = persistableRixoCompanyFromCombobox(rixoCompanyRaw).ifEmpty { "Undefined" }
+    showRixoGeneratorEmailModal(companyLabel, buyingDate) { to ->
+        sendRixoGeneratorPdfEmail(to)
+    }
+}
+
+private fun sendRixoGeneratorPdfEmail(to: String) {
+    val buyingDate = getRixoBuyingDateValue()
+    val rixoCompanyRaw = js("window.getComboboxValue('rixoCompany')") as? String ?: ""
+    val rixoCompany = persistableRixoCompanyFromCombobox(rixoCompanyRaw)
+    val headMessage = (document.getElementById("headMessage") as HTMLTextAreaElement).value
+    val footerMessage = (document.getElementById("footerMessage") as HTMLTextAreaElement).value
+    val extraMessage = (document.getElementById("extraMessage") as HTMLTextAreaElement).value
+    val contactDetails = (document.getElementById("contactDetails") as HTMLTextAreaElement).value
+    val selectedIds = rixoSelectedPurchaseIdsForActions()
+    if (buyingDate.isEmpty() || !rixoCompanyComboboxIsSelected(rixoCompanyRaw) || selectedIds.isEmpty()) {
+        showMessage("Please select a buying date, Rixo company, and at least one car", "error")
+        return
+    }
+
+    val transportData = js("{}")
+    transportData.rixoCompany = rixoCompany
+    transportData.buyingDate = buyingDate
+    transportData.headMessage = headMessage
+    transportData.footerMessage = footerMessage
+    transportData.extraMessage = extraMessage
+    transportData.contactDetails = contactDetails
+
+    val requestBody = js("{}")
+    val jsArray = js("[]")
+    selectedIds.forEach { id -> jsArray.push(id.toInt()) }
+    requestBody.ids = jsArray
+    requestBody.transportData = transportData
+    requestBody.persistHistory = false
+    requestBody.to = to
+
+    val requestInit = js("{}")
+    requestInit.method = "POST"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    requestInit.headers = headers
+    requestInit.body = JSON.stringify(requestBody)
+
+    window.fetch(apiUrl("purchases/rixo-transport-email"), requestInit).then { response ->
+        if (js("!response.ok") as Boolean) {
+            response.text().then { errorText: String ->
+                ErrorHandler.showError(ErrorHandler.extractErrorMessage(errorText))
+            }
+            return@then Unit
+        }
+        showMessage("Email sent", "success")
+        Unit
+    }.catch { error: dynamic ->
+        ErrorHandler.showError("Failed to send email: ${error?.toString() ?: "Unknown error"}")
     }
 }
 

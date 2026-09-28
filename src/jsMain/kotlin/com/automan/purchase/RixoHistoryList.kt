@@ -24,6 +24,7 @@ private var rixoHistoryResizeDebounceHandle: Int? = null
 private var rixoHistorySearchDebounceHandle: Int? = null
 private var rixoHistoryLastCompactLayout: Boolean? = null
 private var rixoHistoryConfirmModalKeyHandler: ((Event) -> Unit)? = null
+private var rixoHistoryEmailModalKeyHandler: ((Event) -> Unit)? = null
 private var rixoHistoryServerMode: Boolean = true
 private var rixoHistoryPageZeroBased: Int = 0
 private var rixoHistoryTotalPages: Int = 1
@@ -198,6 +199,19 @@ fun showRixoHistoryPage() {
             val row = rixoHistoryCachedRows.firstOrNull { r -> rixoHistoryRowIdString(r) == hid }
                 ?: return@addEventListener
             downloadRixoHistoryPdf(row, btn as? HTMLButtonElement)
+        })
+    }
+    if (wrap != null && !wrap.hasAttribute("data-rixo-history-email-delegation")) {
+        wrap.setAttribute("data-rixo-history-email-delegation", "true")
+        wrap.addEventListener("click", { e: Event ->
+            val target = e.target as? Element ?: return@addEventListener
+            val btn = target.closest("button[data-rixo-history-email]") ?: return@addEventListener
+            e.preventDefault()
+            e.stopPropagation()
+            val hid = btn.getAttribute("data-history-id")?.trim() ?: return@addEventListener
+            val row = rixoHistoryCachedRows.firstOrNull { r -> rixoHistoryRowIdString(r) == hid }
+                ?: return@addEventListener
+            openRixoHistoryEmailDialog(row, btn as? HTMLButtonElement)
         })
     }
     if (wrap != null && !wrap.hasAttribute("data-rixo-chassis-confirm-delegation")) {
@@ -512,6 +526,19 @@ private fun rixoHistoryPdfButtonHtml(historyId: String): String {
     </button>"""
 }
 
+private fun rixoHistoryEmailButtonHtml(historyId: String): String {
+    if (historyId.isEmpty()) return ""
+    val safeId = escapeHtml(historyId)
+    return """<button type="button" data-rixo-history-email data-history-id="$safeId"
+        aria-label="Email Rixo transport PDF" title="Email PDF"
+        style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;min-width:36px;min-height:36px;background-color:#0f766e;border:none;border-radius:50%;cursor:pointer;box-shadow:0 2px 4px rgba(15,118,110,0.30);padding:0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M4 6h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" stroke="white" stroke-width="1.8"/>
+            <path d="M4 7l8 6 8-6" stroke="white" stroke-width="1.8" fill="none" stroke-linejoin="round"/>
+        </svg>
+    </button>"""
+}
+
 private const val RIXO_HISTORY_UNDEFINED_COMPANY_VALUE = "__RIXO_COMPANY_UNDEFINED__"
 private const val RIXO_HISTORY_UNDEFINED_COMPANY_LABEL = "Undefined"
 
@@ -696,6 +723,199 @@ private fun downloadRixoHistoryPdf(row: dynamic, btn: HTMLButtonElement?) {
                 btn.disabled = false
                 btn.style.opacity = "1"
             }
+        }
+    }
+}
+
+private fun isPlausibleEmailAddress(raw: String): Boolean {
+    val to = raw.trim()
+    if (to.length !in 3..254 || to.contains(' ')) return false
+    val at = to.indexOf('@')
+    if (at <= 0 || at != to.lastIndexOf('@')) return false
+    val domain = to.substring(at + 1)
+    return domain.contains('.') && !domain.startsWith('.') && !domain.endsWith('.') && !domain.contains("..")
+}
+
+private fun showRixoHistoryEmailModal(
+    rixoCompany: String,
+    buyingDate: String,
+    onSend: (to: String) -> Unit,
+) {
+    document.getElementById("rixoHistoryEmailModal")?.remove()
+    rixoHistoryEmailModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+    rixoHistoryEmailModalKeyHandler = null
+
+    val returnFocus = document.activeElement as? HTMLElement
+    val companyLabel = if (rixoCompany.isEmpty()) "Undefined" else rixoCompany
+    val safeCompany = escapeHtml(companyLabel)
+    val safeDate = escapeHtml(buyingDate)
+
+    val overlay = document.createElement("div") as HTMLElement
+    overlay.id = "rixoHistoryEmailModal"
+    overlay.style.cssText =
+        "position:fixed;inset:0;z-index:10020;display:flex;align-items:center;justify-content:center;" +
+            "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;"
+    overlay.innerHTML = """
+        <div role="dialog" aria-modal="true" aria-labelledby="rixoHistoryEmailTitle"
+             style="background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,0.28);
+             max-width:440px;width:100%;padding:22px 24px;box-sizing:border-box;">
+            <h3 id="rixoHistoryEmailTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">Email PDF</h3>
+            <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:14px;">
+                <div>Rixo company: $safeCompany</div>
+                <div>Buying date: $safeDate</div>
+            </div>
+            <label for="rixoHistoryEmailTo" style="display:block;font-size:13px;font-weight:600;color:#0f172a;margin-bottom:6px;">To</label>
+            <input id="rixoHistoryEmailTo" type="email" autocomplete="email" placeholder="name@company.com"
+                style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;min-height:40px;" />
+            <div id="rixoHistoryEmailError" style="min-height:18px;margin:6px 0 12px;font-size:13px;color:#b91c1c;"></div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
+                <button type="button" id="rixoHistoryEmailCancel"
+                    style="padding:9px 16px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;cursor:pointer;min-height:40px;font-size:14px;color:#374151;">Cancel</button>
+                <button type="button" id="rixoHistoryEmailSend"
+                    style="padding:9px 16px;border:none;border-radius:8px;background:linear-gradient(135deg,#14b8a6,#0f766e);color:#fff;cursor:pointer;font-weight:700;min-height:40px;font-size:14px;box-shadow:0 2px 10px rgba(15,118,110,0.22);">Send</button>
+            </div>
+        </div>
+    """.trimIndent()
+
+    fun closeModal() {
+        rixoHistoryEmailModalKeyHandler?.let { document.removeEventListener("keydown", it) }
+        rixoHistoryEmailModalKeyHandler = null
+        overlay.remove()
+        returnFocus?.focus()
+    }
+
+    document.body?.appendChild(overlay)
+
+    document.getElementById("rixoHistoryEmailCancel")?.addEventListener("click", { _: Event -> closeModal() })
+    document.getElementById("rixoHistoryEmailSend")?.addEventListener("click", { _: Event ->
+        val input = document.getElementById("rixoHistoryEmailTo") as? HTMLInputElement
+        val to = input?.value?.trim().orEmpty()
+        val errorEl = document.getElementById("rixoHistoryEmailError")
+        if (!isPlausibleEmailAddress(to)) {
+            if (errorEl != null) errorEl.textContent = "Enter a valid email address."
+            input?.focus()
+            return@addEventListener
+        }
+        closeModal()
+        onSend(to)
+    })
+    overlay.addEventListener("click", { ev: Event ->
+        if (ev.target === overlay) closeModal()
+    })
+    val inputEl = document.getElementById("rixoHistoryEmailTo") as? HTMLInputElement
+    inputEl?.addEventListener("keydown", { ev: Event ->
+        val keyEvent = ev.asDynamic()
+        if (keyEvent.key == "Enter") {
+            ev.preventDefault()
+            (document.getElementById("rixoHistoryEmailSend") as? HTMLButtonElement)?.click()
+        }
+    })
+
+    val escapeHandler: (Event) -> Unit = { event: Event ->
+        val keyEvent = event.asDynamic()
+        if (keyEvent.key == "Escape") {
+            event.preventDefault()
+            closeModal()
+        }
+    }
+    rixoHistoryEmailModalKeyHandler = escapeHandler
+    document.addEventListener("keydown", escapeHandler)
+    inputEl?.focus()
+}
+
+private fun openRixoHistoryEmailDialog(row: dynamic, btn: HTMLButtonElement?) {
+    val buyingDate = rixoHistoryCell(row, "buyingDate")
+    val rixoCompany = persistableRixoCompanyFromHistory(rixoHistoryCell(row, "rixoCompany"))
+    if (buyingDate.isEmpty()) {
+        showMessage("Buying date is required to generate PDF.", "warning")
+        return
+    }
+    val chassisRaw = rixoHistoryCell(row, "chassis")
+    if (parseRixoHistoryChassisTokens(chassisRaw).isEmpty()) {
+        showMessage("No chassis on this history row to generate PDF.", "warning")
+        return
+    }
+    if (btn != null) {
+        btn.disabled = true
+        btn.style.opacity = "0.6"
+    }
+    MainScope().launch {
+        try {
+            val encChassis = js("encodeURIComponent")(chassisRaw).unsafeCast<String>()
+            val encDate = js("encodeURIComponent")(buyingDate).unsafeCast<String>()
+            val encCompany = js("encodeURIComponent")(rixoCompany).unsafeCast<String>()
+            val forRixoUrl =
+                "purchases/for-rixo?chassis=$encChassis&dateIso=$encDate&rixoCompany=$encCompany&includeNonPending=true"
+            val purchasesResult = ApiClient.get<Array<dynamic>>(forRixoUrl)
+            val scopedPurchases = when (purchasesResult) {
+                is ApiResult.Success -> purchasesResult.data
+                is ApiResult.Error -> {
+                    showMessage("Failed to load purchases: ${purchasesResult.message}", "error")
+                    return@launch
+                }
+            }
+            val selectedIds = resolveRixoHistoryPurchaseIds(row, scopedPurchases)
+            if (selectedIds.isEmpty()) {
+                showMessage(
+                    "No purchases matched this history row (chassis + buying date + Rixo company).",
+                    "warning",
+                )
+                return@launch
+            }
+            val extraMessage = rixoHistoryCell(row, "message")
+            showRixoHistoryEmailModal(rixoCompany, buyingDate) { to ->
+                sendRixoHistoryPdfEmail(selectedIds, rixoCompany, buyingDate, extraMessage, to)
+            }
+        } catch (e: dynamic) {
+            ErrorHandler.showError("Failed to prepare email: ${e.toString()}")
+        } finally {
+            if (btn != null) {
+                btn.disabled = false
+                btn.style.opacity = "1"
+            }
+        }
+    }
+}
+
+private fun sendRixoHistoryPdfEmail(
+    selectedIds: List<Long>,
+    rixoCompany: String,
+    buyingDate: String,
+    extraMessage: String,
+    to: String,
+) {
+    MainScope().launch {
+        try {
+            val transportData = js("{}")
+            transportData.rixoCompany = rixoCompany
+            transportData.buyingDate = buyingDate
+            transportData.headMessage = RIXO_HISTORY_DEFAULT_HEAD_MESSAGE
+            transportData.footerMessage = RIXO_HISTORY_DEFAULT_FOOTER_MESSAGE
+            transportData.extraMessage = extraMessage
+            transportData.contactDetails = RIXO_HISTORY_DEFAULT_CONTACT_DETAILS
+            val requestBody = js("{}")
+            val jsArray = js("[]")
+            selectedIds.forEach { id -> jsArray.push(id.toInt()) }
+            requestBody.ids = jsArray
+            requestBody.transportData = transportData
+            requestBody.persistHistory = false
+            requestBody.to = to
+            val headers = Headers()
+            headers.set("Content-Type", "application/json")
+            val requestInit = RequestInit(
+                method = "POST",
+                headers = headers,
+                body = JSON.stringify(requestBody),
+            )
+            val response = window.fetch(apiUrl("purchases/rixo-transport-email"), requestInit).await()
+            if (!response.ok) {
+                val errorText = response.text().await()
+                ErrorHandler.showError(ErrorHandler.extractErrorMessage(errorText))
+                return@launch
+            }
+            showMessage("Email sent", "success")
+        } catch (e: dynamic) {
+            ErrorHandler.showError("Failed to send email: ${e.toString()}")
         }
     }
 }
@@ -1317,6 +1537,7 @@ private fun renderRixoHistoryTableFromCache() {
                     """<div class="history-table-actions-stack">""" +
                     rixoHistoryEditButtonHtml(hid) +
                     rixoHistoryPdfButtonHtml(hid) +
+                    rixoHistoryEmailButtonHtml(hid) +
                     """</div></td>"""
             )
             html.append(
@@ -1358,6 +1579,7 @@ private fun renderRixoHistoryTableFromCache() {
                     <div class="rixo-card-actions">
                         ${rixoHistoryEditButtonHtml(hid)}
                         ${rixoHistoryPdfButtonHtml(hid)}
+                        ${rixoHistoryEmailButtonHtml(hid)}
                     </div>
                     <div class="rixo-card-select">
                         <input type="checkbox" data-rixo-history-select data-history-id="${escapeHtml(hid)}" $checked

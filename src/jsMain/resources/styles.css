@@ -2248,6 +2248,30 @@ div[id$="_dropdown"] {
     transform: translateY(0);
 }
 
+.rixo-email-btn {
+    flex: 1;
+    min-width: 120px;
+    width: auto;
+    padding: 14px;
+    background: #fff;
+    color: #0f766e;
+    border: 2px solid #0f766e;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.rixo-email-btn:hover {
+    background: #f0fdfa;
+    border-color: #0d9488;
+}
+
 .rixo-print-icon {
     font-size: 18px;
 }
@@ -2624,7 +2648,8 @@ div[id$="_dropdown"] {
     
     .rixo-print-actions .rixo-preview-btn,
     .rixo-print-actions .rixo-save-history-btn,
-    .rixo-print-actions .rixo-print-btn {
+    .rixo-print-actions .rixo-print-btn,
+    .rixo-print-actions .rixo-email-btn {
         flex: 1;
         min-width: 0;
         border-radius: 0;
@@ -2739,7 +2764,8 @@ div[id$="_dropdown"] {
     
     .rixo-print-actions .rixo-preview-btn,
     .rixo-print-actions .rixo-save-history-btn,
-    .rixo-print-actions .rixo-print-btn {
+    .rixo-print-actions .rixo-print-btn,
+    .rixo-print-actions .rixo-email-btn {
         min-height: 44px;
     }
     
@@ -2858,7 +2884,8 @@ div[id$="_dropdown"] {
     
     .rixo-print-actions .rixo-preview-btn,
     .rixo-print-actions .rixo-save-history-btn,
-    .rixo-print-actions .rixo-print-btn {
+    .rixo-print-actions .rixo-print-btn,
+    .rixo-print-actions .rixo-email-btn {
         min-height: 40px;
         padding: 12px 20px;
         font-size: 15px;

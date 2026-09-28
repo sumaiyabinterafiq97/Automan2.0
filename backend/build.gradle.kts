@@ -20,6 +20,7 @@ dependencies {
     implementation("org.flywaydb:flyway-mysql")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springframework.boot:spring-boot-starter-mail")
     implementation("mysql:mysql-connector-java:8.0.33")
     implementation("com.h2database:h2")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")

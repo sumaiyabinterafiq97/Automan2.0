@@ -8,6 +8,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.multiplatform.yml"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-automan_local}"
+ENV_FILE_ARGS=()
+if [ -f "$PROJECT_ROOT/.env" ]; then
+  ENV_FILE_ARGS=(--env-file "$PROJECT_ROOT/.env")
+fi
 
 echo "Building backend image..."
 docker build -t automan20-backend:latest -f "$PROJECT_ROOT/backend/Dockerfile" "$PROJECT_ROOT/backend/"
@@ -21,7 +25,7 @@ docker rm automan_backend_multiplatform 2>/dev/null || true
 
 # Create the container (don't use 'up' - it has a bug with stale container ID)
 echo "Creating backend container..."
-docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" create backend
+docker compose "${ENV_FILE_ARGS[@]}" -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" create backend
 
 # Start by name (avoids Compose's broken start step)
 echo "Starting backend container..."

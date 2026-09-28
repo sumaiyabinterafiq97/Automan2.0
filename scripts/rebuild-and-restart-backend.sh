@@ -14,6 +14,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$PROJECT_ROOT/docker/docker-compose.multiplatform.yml"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-automan_local}"
+ENV_FILE_ARGS=()
+if [ -f "$PROJECT_ROOT/.env" ]; then
+  ENV_FILE_ARGS=(--env-file "$PROJECT_ROOT/.env")
+fi
 BACKEND_DIR="$PROJECT_ROOT/backend"
 
 DOCKERFILE="$BACKEND_DIR/Dockerfile"
@@ -70,6 +74,6 @@ docker stop automan_backend_multiplatform 2>/dev/null || true
 docker rm -f automan_backend_multiplatform 2>/dev/null || true
 # Do not use --no-deps: backend depends on MySQL being healthy. Starting backend alone leaves DB down
 # and causes 502 from nginx plus phpMyAdmin "mysql" host resolution failures.
-docker compose -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate backend
+docker compose "${ENV_FILE_ARGS[@]}" -p "$COMPOSE_PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate backend
 
 echo "✅ Done. Backend should be running on port 8083."

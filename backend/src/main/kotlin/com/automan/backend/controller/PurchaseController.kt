@@ -39,6 +39,7 @@ class PurchaseController(
     private val pdfService: com.automan.backend.service.PdfService,
     private val invoiceHistoryService: com.automan.backend.service.InvoiceHistoryService,
     private val rixoHistoryService: com.automan.backend.service.RixoHistoryService,
+    private val gmailTransportMailService: com.automan.backend.service.GmailTransportMailService,
 ) {
     
     @GetMapping
@@ -977,6 +978,74 @@ class PurchaseController(
         } catch (e: Exception) {
             Logger.error("Controller: Error generating Rixo Transport PDF: ${e.message}", e)
             return ResponseEntity.status(500).build()
+        }
+    }
+
+    /**
+     * Builds the same transport PDF as [/rixo-transport-pdf] and emails it.
+     * Does not persist history or mark purchases requested. Returns 503 until Gmail env is set.
+     */
+    @PostMapping("/rixo-transport-email")
+    fun emailRixoTransportPdf(@RequestBody request: Map<String, Any>): ResponseEntity<Map<String, String>> {
+        try {
+            val to = request["to"]?.toString()?.trim().orEmpty()
+            if (!com.automan.backend.service.GmailTransportMailService.isValidRecipient(to)) {
+                return ResponseEntity.badRequest().body(mapOf("error" to "A valid recipient email is required"))
+            }
+            val selectedIds = parseRixoTransportIds(request["ids"])
+            if (selectedIds.isEmpty()) {
+                return ResponseEntity.badRequest().body(mapOf("error" to "No purchases selected"))
+            }
+            if (!gmailTransportMailService.isConfigured()) {
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .body(mapOf("error" to "Gmail is not configured yet"))
+            }
+            val transportDataRaw = request["transportData"] as? Map<String, Any>
+            val transportData = transportDataRaw?.mapValues { (_, value) ->
+                value?.toString() ?: ""
+            } ?: emptyMap()
+            @Suppress("UNCHECKED_CAST")
+            val purchaseData = transportDataRaw?.get("purchaseData") as? List<Map<String, Any>> ?: emptyList()
+
+            val pdfBytes = try {
+                purchaseService.generateRixoTransportPdf(selectedIds, transportData, purchaseData)
+            } catch (e: Exception) {
+                Logger.error("Controller: Error generating Rixo Transport PDF for email: ${e.message}", e)
+                return ResponseEntity.status(500).body(mapOf("error" to "Failed to generate PDF"))
+            }
+            val dateRaw = transportData["buyingDate"].orEmpty().ifEmpty { transportData["transportDate"].orEmpty() }
+            gmailTransportMailService.sendRixoTransportPdf(
+                to = to,
+                rixoCompany = transportData["rixoCompany"].orEmpty(),
+                buyingDate = dateRaw,
+                headMessage = transportData["headMessage"].orEmpty(),
+                pdfBytes = pdfBytes,
+            )
+            return ResponseEntity.ok(mapOf("message" to "Email sent"))
+        } catch (e: com.automan.backend.service.GmailNotConfiguredException) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(mapOf("error" to "Gmail is not configured yet"))
+        } catch (e: org.springframework.mail.MailAuthenticationException) {
+            Logger.error("Controller: Gmail rejected the Rixo transport login: ${e.message}", e)
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(mapOf("error" to "Gmail rejected the login. Check the Gmail address and app password."))
+        } catch (e: Exception) {
+            Logger.error("Controller: Error emailing Rixo Transport PDF: ${e.message}", e)
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                .body(mapOf("error" to "Failed to send email"))
+        }
+    }
+
+    private fun parseRixoTransportIds(idsRaw: Any?): List<Long> {
+        return when (idsRaw) {
+            is List<*> -> idsRaw.mapNotNull { item ->
+                when (item) {
+                    is Number -> item.toLong()
+                    is String -> item.toLongOrNull()
+                    else -> null
+                }
+            }
+            else -> emptyList()
         }
     }
     
