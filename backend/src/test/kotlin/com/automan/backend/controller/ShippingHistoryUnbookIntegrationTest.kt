@@ -166,6 +166,43 @@ class ShippingHistoryUnbookIntegrationTest {
         assertTrue(shippingHistoryRepository.findById(historySold.id!!).isPresent)
     }
 
+    @Test
+    fun `remove-chassis drops one token and leaves the other chassis booked`() {
+        val removed = purchaseRepository.save(
+            basePurchase("AAA-1").copy(workflowStatus = WorkflowStatus.BOOKING_REQUESTED),
+        )
+        val kept = purchaseRepository.save(
+            basePurchase("BBB-2").copy(workflowStatus = WorkflowStatus.BOOKING_REQUESTED),
+        )
+        val history = shippingHistoryRepository.save(
+            ShippingHistory(
+                bookingId = "B-MULTI-1",
+                vessel = "V1",
+                chassis = "AAA-1;BBB-2",
+                clientName = "client-a",
+                amount = BigDecimal("2000.00"),
+                shipmentDate = LocalDate.of(2026, 1, 10),
+            ),
+        )
+
+        mockMvc.perform(
+            post("/shipping-history/remove-chassis")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """{"chassisToken":"AAA-1","historyId":${history.id},"purchaseId":${removed.id}}""",
+                ),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.deletedRow").value(false))
+            .andExpect(jsonPath("$.remainingChassis").value("BBB-2"))
+            .andExpect(jsonPath("$.unbookedPurchases").value(1))
+
+        val row = shippingHistoryRepository.findById(history.id!!).orElseThrow()
+        assertEquals("BBB-2", row.chassis)
+        assertEquals(WorkflowStatus.RIXO_CONFIRMED, purchaseRepository.findById(removed.id!!).orElseThrow().workflowStatus)
+        assertEquals(WorkflowStatus.BOOKING_REQUESTED, purchaseRepository.findById(kept.id!!).orElseThrow().workflowStatus)
+    }
+
     private fun basePurchase(chassis: String): Purchase = Purchase(
         chassis = chassis,
         carName = "Test Car",

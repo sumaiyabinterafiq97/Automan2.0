@@ -1,11 +1,14 @@
 package com.automan.backend.service
 
+import com.automan.backend.dto.PurchasePageFilterRequest
 import com.automan.backend.model.Purchase
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.util.CarModelYearUtils
 import com.automan.backend.util.Logger
 import org.apache.poi.ss.usermodel.Cell
 import org.apache.poi.ss.usermodel.CellType
+import org.apache.poi.ss.usermodel.Row
+import org.apache.poi.ss.usermodel.Sheet
 import org.apache.poi.xssf.streaming.SXSSFWorkbook
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -29,6 +32,9 @@ private data class PurchaseExportColumnDef(
     val kind: PurchaseExportCellKind,
     val extract: (Purchase) -> Any?,
 )
+
+class NoMatchingPurchasesToExportException :
+    RuntimeException("No matching purchases to export")
 
 @Service
 class PurchaseExportService(
@@ -58,14 +64,8 @@ class PurchaseExportService(
                 val pg = purchaseRepository.findAll(pageable)
                 if (pg.isEmpty) break
 
-                val hydrated = purchaseService.hydratePurchasesForExport(pg.content)
-                for (purchase in hydrated) {
-                    val row = sheet.createRow(rowIndex++)
-                    columns.forEachIndexed { colIdx, col ->
-                        writeCell(row.createCell(colIdx), col.kind, col.extract(purchase))
-                    }
-                    totalRows++
-                }
+                rowIndex = writePurchaseRows(sheet, columns, rowIndex, pg.content)
+                totalRows += pg.numberOfElements
 
                 if (!pg.hasNext()) break
                 page++
@@ -81,6 +81,64 @@ class PurchaseExportService(
             workbook.dispose()
             workbook.close()
         }
+    }
+
+    /**
+     * Excel for purchases matching the same filter as the purchase list.
+     * Throws [NoMatchingPurchasesToExportException] when nothing matches so callers do not fall back to every row.
+     */
+    @Transactional(readOnly = true)
+    fun exportFilteredPurchasesXlsx(request: PurchasePageFilterRequest): ByteArray {
+        val ids = purchaseService.matchingPurchaseIdsForListFilter(request).sortedDescending()
+        if (ids.isEmpty()) throw NoMatchingPurchasesToExportException()
+
+        val started = System.currentTimeMillis()
+        val workbook = SXSSFWorkbook(SXSSF_ROW_WINDOW)
+        try {
+            val sheet = workbook.createSheet("Purchases")
+            val columns = exportColumns()
+            val headerRow = sheet.createRow(0)
+            columns.forEachIndexed { idx, col ->
+                headerRow.createCell(idx).setCellValue(col.header)
+            }
+
+            var rowIndex = 1
+            for (chunk in ids.chunked(EXPORT_PAGE_SIZE)) {
+                val byId = purchaseRepository.findAllById(chunk).associateBy { it.id }
+                val ordered = chunk.mapNotNull { byId[it] }
+                rowIndex = writePurchaseRows(sheet, columns, rowIndex, ordered)
+            }
+
+            Logger.debug(
+                "Purchase XLSX filtered export: %d rows in %d ms",
+                ids.size,
+                System.currentTimeMillis() - started,
+            )
+            return ByteArrayOutputStream().use { out ->
+                workbook.write(out)
+                out.toByteArray()
+            }
+        } finally {
+            workbook.dispose()
+            workbook.close()
+        }
+    }
+
+    private fun writePurchaseRows(
+        sheet: Sheet,
+        columns: List<PurchaseExportColumnDef>,
+        startRow: Int,
+        purchases: List<Purchase>,
+    ): Int {
+        var rowIndex = startRow
+        val hydrated = purchaseService.hydratePurchasesForExport(purchases)
+        for (purchase in hydrated) {
+            val row: Row = sheet.createRow(rowIndex++)
+            columns.forEachIndexed { colIdx, col ->
+                writeCell(row.createCell(colIdx), col.kind, col.extract(purchase))
+            }
+        }
+        return rowIndex
     }
 
     private fun writeCell(cell: Cell, kind: PurchaseExportCellKind, raw: Any?) {
@@ -140,19 +198,16 @@ class PurchaseExportService(
     private fun registrationYear(p: Purchase): String? =
         CarModelYearUtils.extractYearFromCarModelYear(p.carModelYear).trim().ifBlank { null }
 
-    private fun details(p: Purchase): String? =
-        listOfNotNull(str(p) { it.shift }, str(p) { it.color }, str(p) { it.grade })
-            .joinToString(", ")
-            .ifBlank { null }
-
     private fun exportColumns(): List<PurchaseExportColumnDef> = listOf(
         PurchaseExportColumnDef("Date of purchase", PurchaseExportCellKind.STRING) { str(it) { p -> p.date } },
         PurchaseExportColumnDef("Auction no", PurchaseExportCellKind.STRING) { str(it) { p -> p.auctionNo } },
-        PurchaseExportColumnDef("Chassis and suffix", PurchaseExportCellKind.STRING) { it.chassis },
+        PurchaseExportColumnDef("Chassis", PurchaseExportCellKind.STRING) { it.chassis },
         PurchaseExportColumnDef("Registration year", PurchaseExportCellKind.STRING) { registrationYear(it) },
         PurchaseExportColumnDef("Car name", PurchaseExportCellKind.STRING) { str(it) { p -> p.carName } },
         PurchaseExportColumnDef("Supplier name", PurchaseExportCellKind.STRING) { str(it) { p -> p.auctionHouse } },
-        PurchaseExportColumnDef("Details", PurchaseExportCellKind.STRING) { details(it) },
+        PurchaseExportColumnDef("Transmission", PurchaseExportCellKind.STRING) { str(it) { p -> p.shift } },
+        PurchaseExportColumnDef("Color", PurchaseExportCellKind.STRING) { str(it) { p -> p.color } },
+        PurchaseExportColumnDef("Grade", PurchaseExportCellKind.STRING) { str(it) { p -> p.grade } },
         PurchaseExportColumnDef("Car price", PurchaseExportCellKind.NUMERIC) { money(it) { p -> p.price } },
         PurchaseExportColumnDef("ID", PurchaseExportCellKind.INTEGER) { it.id },
         PurchaseExportColumnDef("Purchase Date", PurchaseExportCellKind.STRING) { str(it) { p -> p.date } },

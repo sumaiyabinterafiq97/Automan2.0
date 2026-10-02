@@ -1,0 +1,10 @@
+{
+  "name": "automan-browser-tests",
+  "private": true,
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.1"
+  }
+}

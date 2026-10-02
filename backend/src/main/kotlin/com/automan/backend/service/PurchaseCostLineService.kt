@@ -62,7 +62,24 @@ class PurchaseCostLineService(
 
         fun amountFromPurchase(mapping: CostFieldMapping, purchase: Purchase): BigDecimal? {
             mapping.decimalValue(purchase)?.let { return it }
-            return parseMoneyString(mapping.stringValue(purchase))
+            val raw = mapping.stringValue(purchase)
+            parseMoneyString(raw)?.let { return it }
+            // Edit shows any digit run (extractNumericFromDbValue). A Rixo Price the form
+            // can still display must be written, not treated as blank and deleted.
+            if (mapping.costCode == "RIXO_PRICE") return looseRixoPrice(raw)
+            return null
+        }
+
+        /** Digits the edit Rixo Price field would keep. Blank stays blank so a cleared field can drop the line. */
+        private fun looseRixoPrice(raw: String?): BigDecimal? {
+            if (raw.isNullOrBlank()) return null
+            val digits = raw.replace(Regex("[^0-9.]"), "")
+            if (digits.isEmpty() || digits == ".") return null
+            return try {
+                BigDecimal(digits)
+            } catch (_: NumberFormatException) {
+                null
+            }
         }
 
         private fun formatMoney(amount: BigDecimal): String = amount.stripTrailingZeros().toPlainString()

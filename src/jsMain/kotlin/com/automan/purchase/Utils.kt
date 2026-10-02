@@ -516,6 +516,81 @@ fun htmlTableColgroupNarrowActionEqualRest(totalColumnCount: Int, actionWidthPx:
  * Fixed pixel width per column (with horizontal scroll on narrow viewports).
  * If [widthsPx] is shorter than [totalColumnCount], remaining columns default to [fallbackPx].
  */
+/** Long Purchase List fields share leftover width. Short fields use a header-sized width. */
+private val purchaseListFlexColumnKeys: Set<String> = setOf(
+    "carName",
+    "clientName",
+    "auctionHouse",
+    "stockLocation",
+    "rixoCompany",
+    "country",
+    "consignee",
+    "notes",
+    "options",
+    "vessel",
+    "vesselNo",
+    "repairCompany",
+    "carPictures",
+    "destination",
+)
+
+const val PURCHASE_LIST_ACTION_COL_PX = 80
+
+/** Minimum width for a text column so names stay readable when many short columns are selected. */
+const val PURCHASE_LIST_FLEX_COL_MIN_PX = 120
+
+/**
+ * Pixel width for a compact Purchase List column, sized to the header label and sort icon.
+ * Returns null for text columns that should share the remaining table width.
+ */
+fun purchaseListDataColumnWidthPx(columnKey: String, label: String): Int? {
+    if (columnKey in purchaseListFlexColumnKeys) return null
+    val iconPx = if (columnKey == "date") 36 else 22
+    val width = (label.length * 8 + iconPx + 16).coerceIn(72, 200)
+    return if (columnKey == "chassis") maxOf(width, 128) else width
+}
+
+/** Table min-width: compact columns at their header size, text columns at [PURCHASE_LIST_FLEX_COL_MIN_PX]. */
+fun purchaseListTableMinWidthPx(
+    columnKeys: List<String>,
+    labels: Map<String, String>,
+    includeAction: Boolean,
+): Int {
+    var sum = if (includeAction) PURCHASE_LIST_ACTION_COL_PX else 0
+    var flexCount = 0
+    for (key in columnKeys) {
+        val width = purchaseListDataColumnWidthPx(key, labels[key] ?: key)
+        if (width == null) flexCount++ else sum += width
+    }
+    return sum + flexCount * PURCHASE_LIST_FLEX_COL_MIN_PX
+}
+
+/**
+ * Purchase List only. Action column is fixed; compact columns are header-sized;
+ * text columns are unsized so they share the leftover width under table-layout:fixed.
+ */
+fun htmlTableColgroupPurchaseList(
+    columnKeys: List<String>,
+    labels: Map<String, String>,
+    includeAction: Boolean,
+): String {
+    return buildString {
+        append("<colgroup>")
+        if (includeAction) {
+            append("""<col style="width:${PURCHASE_LIST_ACTION_COL_PX}px">""")
+        }
+        for (key in columnKeys) {
+            val width = purchaseListDataColumnWidthPx(key, labels[key] ?: key)
+            if (width == null) {
+                append("<col>")
+            } else {
+                append("""<col style="width:${width}px">""")
+            }
+        }
+        append("</colgroup>")
+    }
+}
+
 fun htmlTableColgroupFixedWidthsPx(totalColumnCount: Int, widthsPx: List<Int>, fallbackPx: Int = 120): String {
     if (totalColumnCount <= 0) return ""
     return buildString {
@@ -707,8 +782,11 @@ fun getMaxCarBrandMapColumnsForDevice(deviceType: String? = null): Int = 6
 /** Consignee Map & Supplier Map: max 6 data columns (plus actions). */
 fun getMaxConsigneeSupplierMapColumnsForDevice(deviceType: String? = null): Int = 8
 
-/** Purchase List table: max 11 data columns (plus actions). */
-fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int = 11
+/** Purchase List table: 13 data columns on desktop, 11 on mobile and tablet (plus actions). */
+fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int {
+    val device = deviceType ?: getDeviceType()
+    return if (device == "desktop") 13 else 11
+}
 
 /**
  * Get default columns for a specific device type
@@ -791,6 +869,89 @@ fun ensurePurchaseListPinnedColumns(columns: List<String>, maxColumns: Int): Lis
         addAll(rest)
     }
     return merged.take(max)
+}
+
+/**
+ * Keeps Purchase Date and Chassis in the selection without moving columns the user already ordered.
+ * Missing mandatory columns are inserted at the left (date, then chassis).
+ */
+fun ensurePurchaseListMandatoryColumnsPreservingOrder(columns: List<String>, maxColumns: Int): List<String> {
+    val max = maxColumns.coerceAtLeast(2)
+    val result = columns.filter { it.isNotBlank() }.distinct().toMutableList()
+    if (!result.contains("date")) {
+        result.add(0, "date")
+    }
+    if (!result.contains("chassis")) {
+        val dateIndex = result.indexOf("date")
+        result.add(dateIndex + 1, "chassis")
+    }
+    return result.take(max)
+}
+
+/** First click on a new column sorts ascending. Clicking the active column flips direction. */
+fun nextPurchaseSortOrder(activeField: String, clickedField: String, storedOrder: String?): String {
+    if (activeField != clickedField) return "asc"
+    val current = storedOrder ?: "desc"
+    return if (current == "asc") "desc" else "asc"
+}
+
+/**
+ * Checkbox picker order: selected columns first (in display order), then unselected columns by label.
+ * Unselected columns are not part of [selectedOrder].
+ */
+fun purchaseColumnPickerRows(
+    selectedOrder: List<String>,
+    catalog: List<Pair<String, String>>,
+): List<String> {
+    val labels = catalog.toMap()
+    val catalogKeys = catalog.map { it.first }
+    val selected = selectedOrder.filter { it in labels }.distinct()
+    val unselected = catalogKeys
+        .filter { it !in selected }
+        .sortedBy { labels[it].orEmpty().lowercase() }
+    return selected + unselected
+}
+
+/** Append a newly checked column under the selected group. Does not reshuffle columns already selected. */
+fun purchaseColumnOrderAfterCheck(selectedOrder: List<String>, key: String, maxColumns: Int): List<String> {
+    if (key.isBlank() || selectedOrder.contains(key)) return selectedOrder
+    if (selectedOrder.size >= maxColumns) return selectedOrder
+    return selectedOrder + key
+}
+
+/**
+ * Alphabetizes selected column keys by their display labels.
+ * Does not include unselected columns and does not change purchase-row sort state.
+ */
+fun sortSelectedPurchaseColumnsByLabel(
+    selectedOrder: List<String>,
+    labels: Map<String, String>,
+    ascending: Boolean,
+): List<String> {
+    return selectedOrder.sortedWith { a, b ->
+        val left = labels[a] ?: a
+        val right = labels[b] ?: b
+        val compared = left.compareTo(right, ignoreCase = true)
+        if (ascending) compared else -compared
+    }
+}
+
+/** Drop an unchecked column. Purchase Date and Chassis stay selected. */
+fun purchaseColumnOrderAfterUncheck(selectedOrder: List<String>, key: String): List<String> {
+    if (key == "date" || key == "chassis") return selectedOrder
+    return selectedOrder.filter { it != key }
+}
+
+/** Moves one selected column to [toIndex]. Other columns keep their relative order. */
+fun reorderPurchaseListColumn(columns: List<String>, fromKey: String, toIndex: Int): List<String> {
+    if (columns.isEmpty() || !columns.contains(fromKey)) return columns
+    val result = columns.toMutableList()
+    val from = result.indexOf(fromKey)
+    val bounded = toIndex.coerceIn(0, result.lastIndex)
+    if (from == bounded) return columns
+    result.removeAt(from)
+    result.add(bounded, fromKey)
+    return result
 }
 
 /**
@@ -1110,15 +1271,7 @@ fun purchaseTableCellValue(purchase: dynamic, columnKey: String): String {
         "paymentDate" -> (p.paymentDate as? String) ?: field("paymentDate")
         "rixoRequested" -> (p.rixoRequested as? String) ?: field("rixoRequested")
         "rixoConfirmed" -> (p.rixoConfirmed as? String) ?: field("rixoConfirmed")
-        "rixoPrice" -> {
-            val rixoPriceRaw = p.rixoPrice
-            val num = when (rixoPriceRaw) {
-                null -> 0.0
-                is Number -> (rixoPriceRaw as Number).toDouble()
-                else -> parseCurrency(rixoPriceRaw.toString())
-            }
-            if (num > 0.0) "¥" + formatCurrency(num) else "¥0"
-        }
+        "rixoPrice" -> purchaseListRixoPriceCell(p.rixoPrice, p["rixo_price"])
         "notes" -> field("notes")
         "shipmentDate" -> (p.shipmentDate as? String) ?: field("shipmentDate")
         "blNo" -> (p.blNo as? String) ?: field("blNo")
@@ -1880,6 +2033,18 @@ fun parseCurrency(currencyString: String): Double {
     return cleanString.toDoubleOrNull() ?: 0.0
 }
 
+/**
+ * Purchase-list Rixo Price cell. Uses the same digit extraction as the edit form
+ * ([extractNumericFromDbValue]) so a saved amount the edit field can show is not
+ * dropped here. A missing or zero amount stays `¥0`.
+ */
+fun purchaseListRixoPriceCell(rixoPrice: dynamic, rixoPriceSnake: dynamic = null): String {
+    val fromCamel = extractNumericFromDbValue(rixoPrice)
+    val numeric = if (fromCamel.isNotEmpty()) fromCamel else extractNumericFromDbValue(rixoPriceSnake)
+    val num = numeric.toDoubleOrNull() ?: 0.0
+    return if (num > 0.0) "¥" + formatCurrency(num) else "¥0"
+}
+
 // Input validation and formatting
 fun validateAndFormatCurrencyInput(field: HTMLInputElement) {
     val currentValue = field.value
@@ -1909,7 +2074,7 @@ fun showRixoMappingDeleteConfirm(
     overlay.id = "rixoMappingDeleteConfirmOverlay"
     overlay.setAttribute(
         "style",
-        "position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;" +
+        "position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;" +
             "background:rgba(15,23,42,0.45);padding:16px;box-sizing:border-box;",
     )
     overlay.innerHTML = """

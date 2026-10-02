@@ -10,6 +10,7 @@ import com.automan.backend.dto.InvoiceLedgerResult
 import com.automan.backend.dto.PurchasePageFilterRequest
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
+import com.automan.backend.service.NoMatchingPurchasesToExportException
 import com.automan.backend.service.PurchaseExportService
 import com.automan.backend.service.PurchaseService
 import com.automan.backend.service.PurchaseChangeHistoryService
@@ -88,6 +89,38 @@ class PurchaseController(
         } catch (e: Exception) {
             Logger.error("Purchase XLSX export failed: ${e.message}", e)
             ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build()
+        }
+    }
+
+    /**
+     * Excel for the current purchase-list filters. An empty match is an error, not a full export.
+     * Page and size on the body are ignored so the file includes every matching row.
+     */
+    @PostMapping("/export/xlsx")
+    fun exportFilteredPurchasesXlsx(
+        @RequestBody request: PurchasePageFilterRequest,
+    ): ResponseEntity<Any> {
+        return try {
+            val bytes = purchaseExportService.exportFilteredPurchasesXlsx(request)
+            val ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+            ResponseEntity.ok()
+                .header(
+                    "Content-Disposition",
+                    "attachment; filename=\"purchases_export_$ts.xlsx\"",
+                )
+                .contentType(
+                    MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ),
+                )
+                .body(bytes)
+        } catch (e: NoMatchingPurchasesToExportException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "No matching purchases to export")))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf("error" to (e.message ?: "Bad request")))
+        } catch (e: Exception) {
+            Logger.error("Purchase XLSX filtered export failed: ${e.message}", e)
+            ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build<Any>()
         }
     }
 

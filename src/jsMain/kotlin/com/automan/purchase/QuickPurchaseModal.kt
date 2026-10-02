@@ -199,7 +199,7 @@ fun openQuickPurchaseModal() {
                             </div>
                             <div class="qp-field">
                                 <label class="qp-label" for="qpNumberCutNumber1">Number (English)</label>
-                                <input type="number" id="qpNumberCutNumber1" class="qp-input" placeholder="Enter number" autocomplete="off">
+                                <input type="text" id="qpNumberCutNumber1" class="qp-input" placeholder="Enter number" autocomplete="off">
                             </div>
                             <div class="qp-field">
                                 <label class="qp-label" for="qpNumberCutHiraganaInput">Hiragana Character</label>
@@ -207,7 +207,7 @@ fun openQuickPurchaseModal() {
                             </div>
                             <div class="qp-field">
                                 <label class="qp-label" for="qpNumberCutNumber2">Number (English)</label>
-                                <input type="number" id="qpNumberCutNumber2" class="qp-input" placeholder="Enter number" autocomplete="off">
+                                <input type="text" id="qpNumberCutNumber2" class="qp-input" placeholder="Enter number" autocomplete="off">
                             </div>
                         </div>
                         <div class="qp-field">
@@ -350,6 +350,18 @@ private fun preloadQuickPurchaseDropdowns() {
     populateComboboxFromApiForField("qpShipmentSize", "master-menu/type_of_vehicle", "Select Vehicle type")
     populateComboboxFromApiForField("qpVenueId", "master-menu/venue_id", "Select Venue ID")
     populateComboboxFromApiForField("qpPol", "master-menu/pol", "Select POL")
+    js("""
+        ['qpPol', 'qpPolInput'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (!el || el.__qpPolPriceWired) return;
+            el.__qpPolPriceWired = true;
+            el.addEventListener('change', function() {
+                if (typeof window.scheduleQuickPurchaseRixoPriceFromPol === 'function') {
+                    window.scheduleQuickPurchaseRixoPriceFromPol();
+                }
+            });
+        });
+    """)
     refreshPurchaseClientNameToCountryMap()
     ensureNumberCutPlaceOptionsLoaded {
         repopulateNumberCutPlaceCombobox("qpNumberCutPlace")

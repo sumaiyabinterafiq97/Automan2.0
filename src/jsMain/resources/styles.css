@@ -532,7 +532,7 @@ select:focus {
 
 #purchaseTable table.purchase-list-table th,
 #purchaseTable table.purchase-list-table td {
-    padding: 14px 12px;
+    padding: 8px 6px;
     text-align: left;
     vertical-align: middle;
     border: none;
@@ -550,6 +550,16 @@ select:focus {
     color: #374151;
     font-weight: 700;
     font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#purchaseTable table.purchase-list-table td:not(:first-child):not(.purchase-list-date-td) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 0;
 }
 
 #purchaseTable table.purchase-list-table tbody tr:hover td {
@@ -13188,4 +13198,81 @@ input.client-form-readonly:read-only {
     .home-dash-workflow-arrow {
         display: none;
     }
+}
+
+#columnFilterModal #purchaseColumnSortBar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    color: #0f172a;
+}
+
+#columnFilterModal #purchaseColumnSortToggle {
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #0f172a;
+    border-radius: 6px;
+    height: 36px;
+    padding: 0 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+#columnFilterModal #columnCheckboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 16px;
+}
+
+#columnFilterModal .purchase-col-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+#columnFilterModal .purchase-col-row.is-selected {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+#columnFilterModal .purchase-col-row.is-dragging {
+    opacity: 0.55;
+}
+
+#columnFilterModal .purchase-col-name {
+    flex: 1;
+    font-size: 14px;
+    color: #0f172a;
+}
+
+#columnFilterModal .purchase-col-grip {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid #64748b;
+    border-radius: 6px;
+    background: #fff;
+    color: #1e293b;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -1px;
+    cursor: grab;
+    user-select: none;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+#columnFilterModal .purchase-col-grip:hover {
+    background: #e2e8f0;
+    border-color: #334155;
 }

@@ -92,6 +92,19 @@ class PurchaseRixoPriceSyncServiceTest {
     }
 
     @Test
+    fun syncIfPriceChanged_skipsUnparseablePrice() {
+        val before = RixoMapping(
+            rixoCompany = "STYLISH AUTO",
+            auctionName = "JU AICHI",
+            stockLocation = "GLOBAL NAGOYA",
+            rixoPrice = "4000",
+        )
+        val result = service.syncIfPriceChanged(before, before.copy(rixoPrice = "abc"))
+        assertEquals(0, result.updatedCount)
+        verify(purchaseRepository, never()).findByAuctionHouseIgnoreCaseTrim("JU AICHI")
+    }
+
+    @Test
     fun syncIfPriceChanged_skipsWhenPriceUnchanged() {
         val before = RixoMapping(
             rixoCompany = "STYLISH AUTO",

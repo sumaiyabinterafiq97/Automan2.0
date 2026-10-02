@@ -1978,7 +1978,7 @@ fun initializeAppSetup() {
             });
         };
 
-        window.resolveSupplierFieldsSequentially = function(supplier, branches, firstBranch) {
+        window.resolveSupplierFieldsSequentially = function(supplier, branches, firstBranch, allowPolModal) {
             return new Promise(function(resolve) {
                 var result = {};
                 var activeBranches = (branches && Array.isArray(branches)) ? branches.slice() : [];
@@ -2066,7 +2066,7 @@ fun initializeAppSetup() {
                         return window.resolvePolFromStockLocationMap(v, {
                             supplier: supplier,
                             preservePol: preservePol,
-                            allowModal: true
+                            allowModal: allowPolModal === true
                         });
                     }
                     return '';
@@ -16806,7 +16806,8 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                 window.asDynamic().resolveSupplierFieldsSequentially(
                     auctionName,
                     branches,
-                    firstBranch
+                    firstBranch,
+                    isEditForm
                 ).unsafeCast<dynamic>()
             } else if (skipModals) {
                 val defaultSel = buildDefaultSelection()
@@ -16817,6 +16818,7 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                 val defaultSel = buildDefaultSelection()
                 enrichSelectionWithVehicleType(defaultSel)
                 window.asDynamic().__tempSupplierDefaultSel = defaultSel
+                window.asDynamic().__allowPolModal = isEditForm
                 js("""
                     (function() {
                         var sel = window.__tempSupplierDefaultSel || {};
@@ -16833,7 +16835,7 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                         return window.resolvePolFromStockLocationMap(stock, {
                             supplier: supplier,
                             preservePol: preserve,
-                            allowModal: true
+                            allowModal: window.__allowPolModal === true
                         }).then(function(pol) {
                             sel.pol = pol || '';
                             return sel;
@@ -25423,9 +25425,9 @@ private fun rixoInlineNumberCutMarkup(purchase: dynamic): String {
             <div class="rixo-nc-expanded" style="display:none;">
                 <div class="rixo-nc-expanded-grid">
                     <div class="rixo-nc-place-row">$placeComb</div>
-                    <input type="number" id="$n1Id" class="rixo-nc-n1 rixo-inline-control" placeholder="#" value="$escN1">
+                    <input type="text" id="$n1Id" class="rixo-nc-n1 rixo-inline-control" placeholder="#" value="$escN1">
                     <div class="rixo-nc-hira-row">$hiraComb</div>
-                    <input type="number" id="$n2Id" class="rixo-nc-n2 rixo-inline-control" placeholder="#" value="$escN2">
+                    <input type="text" id="$n2Id" class="rixo-nc-n2 rixo-inline-control" placeholder="#" value="$escN2">
                 </div>
             </div>
         </div>
@@ -28775,27 +28777,121 @@ val __exposeAddTxOnce = run {
 // Column Filter Functions
 // showColumnFilterModal moved to PurchaseManagement.kt
 
-fun populateColumnCheckboxes(selectedColumns: Set<String>) {
-    val container = document.getElementById("columnCheckboxes")
-    if (container == null) return
-    
-    val allColumns = purchaseListSelectableColumnLabels().entries.sortedBy { it.value.lowercase() }
+private var purchaseColumnModalOrder: MutableList<String> = mutableListOf()
+private var purchaseColumnDragKey: String? = null
+private var purchaseColumnNameSortNextAscending: Boolean = true
+
+fun beginPurchaseColumnModal(order: List<String>) {
+    purchaseColumnModalOrder = order.toMutableList()
+    purchaseColumnNameSortNextAscending = true
+    renderPurchaseColumnCheckboxes()
+    updatePurchaseColumnNameSortButton()
+}
+
+fun onPurchaseColumnCheckboxChanged(key: String, checked: Boolean) {
+    val maxColumns = getMaxPurchaseListColumnsForDevice()
+    purchaseColumnModalOrder = if (checked) {
+        purchaseColumnOrderAfterCheck(purchaseColumnModalOrder, key, maxColumns).toMutableList()
+    } else {
+        purchaseColumnOrderAfterUncheck(purchaseColumnModalOrder, key).toMutableList()
+    }
+    renderPurchaseColumnCheckboxes()
+    updateColumnSelection()
+}
+
+private fun movePurchaseColumnInModal(fromKey: String, toIndex: Int) {
+    if (!purchaseColumnModalOrder.contains(fromKey)) return
+    val next = reorderPurchaseListColumn(purchaseColumnModalOrder, fromKey, toIndex)
+    if (next == purchaseColumnModalOrder) return
+    purchaseColumnModalOrder = next.toMutableList()
+    renderPurchaseColumnCheckboxes()
+    updateColumnSelection()
+}
+
+private fun renderPurchaseColumnCheckboxes() {
+    val container = document.getElementById("columnCheckboxes") ?: return
+    val catalog = purchaseListSelectableColumnLabels().entries.map { it.key to it.value }
+    val labels = catalog.toMap()
+    val rows = purchaseColumnPickerRows(purchaseColumnModalOrder, catalog)
     val mandatory = purchaseListMandatoryColumnKeys()
-    
-    container.innerHTML = allColumns.map { (key, label) ->
+    val selected = purchaseColumnModalOrder.toSet()
+    container.innerHTML = rows.map { key ->
+        val label = escapeHtml(labels[key] ?: key)
+        val isSelected = selected.contains(key) || mandatory.contains(key)
         val isMandatory = mandatory.contains(key)
-        val isChecked = isMandatory || selectedColumns.contains(key)
         val disabledAttr = if (isMandatory) "disabled" else ""
         val labelSuffix = if (isMandatory) " <span style=\"font-size:12px;color:#6b7280;\">(always on)</span>" else ""
+        val selectedClass = if (isSelected) " is-selected" else ""
+        val grip = if (isSelected) {
+            """<span class="purchase-col-grip" draggable="true" aria-label="Drag $label to change display order" title="Drag to change display order">⋮⋮</span>"""
+        } else {
+            ""
+        }
         """
-        <label style="display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;" 
-               onmouseover="this.style.backgroundColor='#f8f9fa'" onmouseout="this.style.backgroundColor='transparent'">
-            <input type="checkbox" value="$key" ${if (isChecked) "checked" else ""} $disabledAttr
-                   style="transform: scale(1.1);" onchange="updateColumnSelection()">
-            <span style="font-size: 14px;">$label$labelSuffix</span>
+        <label class="purchase-col-row$selectedClass" data-column-key="$key" data-selected="${if (isSelected) "true" else "false"}">
+            <input type="checkbox" value="$key" ${if (isSelected) "checked" else ""} $disabledAttr
+                   onchange="onPurchaseColumnCheckboxChanged(this.value, this.checked)">
+            <span class="purchase-col-name">$label$labelSuffix</span>
+            $grip
         </label>
         """
     }.joinToString("")
+
+    val items = container.querySelectorAll(".purchase-col-row")
+    for (i in 0 until items.length) {
+        val item = items.item(i) as HTMLElement
+        val key = item.getAttribute("data-column-key") ?: continue
+        if (item.getAttribute("data-selected") != "true") continue
+        val grip = item.querySelector(".purchase-col-grip") as? HTMLElement ?: continue
+        grip.addEventListener("dragstart", { ev: Event ->
+            purchaseColumnDragKey = key
+            item.classList.add("is-dragging")
+            ev.stopPropagation()
+            (ev.asDynamic().dataTransfer)?.effectAllowed = "move"
+        })
+        grip.addEventListener("dragend", { _: Event ->
+            item.classList.remove("is-dragging")
+            purchaseColumnDragKey = null
+        })
+        item.addEventListener("dragover", { ev: Event ->
+            if (purchaseColumnDragKey == null) return@addEventListener
+            if (!purchaseColumnModalOrder.contains(key)) return@addEventListener
+            ev.preventDefault()
+            (ev.asDynamic().dataTransfer)?.dropEffect = "move"
+        })
+        item.addEventListener("drop", { ev: Event ->
+            ev.preventDefault()
+            val fromKey = purchaseColumnDragKey ?: return@addEventListener
+            if (!purchaseColumnModalOrder.contains(fromKey) || !purchaseColumnModalOrder.contains(key)) return@addEventListener
+            val toIndex = purchaseColumnModalOrder.indexOf(key)
+            if (toIndex >= 0) movePurchaseColumnInModal(fromKey, toIndex)
+        })
+    }
+}
+
+fun updatePurchaseColumnNameSortButton() {
+    val button = document.getElementById("purchaseColumnSortToggle") as? HTMLButtonElement ?: return
+    button.textContent = if (purchaseColumnNameSortNextAscending) "Sort A-Z ↑" else "Sort Z-A ↓"
+}
+
+fun onPurchaseColumnSortToggle() {
+    val ascending = purchaseColumnNameSortNextAscending
+    purchaseColumnModalOrder = sortSelectedPurchaseColumnsByLabel(
+        purchaseColumnModalOrder,
+        purchaseListColumnLabels(),
+        ascending,
+    ).toMutableList()
+    purchaseColumnNameSortNextAscending = !ascending
+    renderPurchaseColumnCheckboxes()
+    updatePurchaseColumnNameSortButton()
+    updateColumnSelection()
+}
+
+fun populateColumnCheckboxes(selectedColumns: Set<String>) {
+    if (purchaseColumnModalOrder.isEmpty()) {
+        purchaseColumnModalOrder = selectedColumns.toMutableList()
+    }
+    renderPurchaseColumnCheckboxes()
 }
 
 fun updateColumnSelection() {
@@ -28856,24 +28952,33 @@ fun resetToDefaultColumns() {
     saveSelectedColumns(ordered)
     persistPurchaseListViewsToServer()
     populateColumnCheckboxes(ordered.toSet())
+    beginPurchaseColumnModal(ordered)
     updateColumnSelection()
 }
 
 fun applyColumnChanges() {
     val checkboxes = document.querySelectorAll("#columnCheckboxes input[type='checkbox']")
-    val selectedColumns = mutableListOf<String>()
+    val checked = mutableSetOf<String>()
     
     for (i in 0 until checkboxes.length) {
         val checkbox = checkboxes.item(i) as HTMLInputElement
         if (checkbox.checked) {
-            selectedColumns.add(checkbox.value)
+            checked.add(checkbox.value)
         }
+    }
+
+    val selectedColumns = mutableListOf<String>()
+    for (key in purchaseColumnModalOrder) {
+        if (checked.contains(key)) selectedColumns.add(key)
+    }
+    for (key in checked) {
+        if (!selectedColumns.contains(key)) selectedColumns.add(key)
     }
     
     val deviceType = getDeviceType()
     val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
-    val ordered = ensurePurchaseListPinnedColumns(
-        prioritizePurchaseListDateAndChassis(sanitizePurchaseListSelectedColumns(selectedColumns)),
+    val ordered = ensurePurchaseListMandatoryColumnsPreservingOrder(
+        sanitizePurchaseListSelectedColumns(selectedColumns),
         maxColumns,
     )
     
@@ -28970,6 +29075,10 @@ fun setupResponsiveFormSections() {
 fun exposeColumnFilterFunctions() {
     try {
         window.asDynamic().updateColumnSelection = { updateColumnSelection() }
+        window.asDynamic().onPurchaseColumnCheckboxChanged = { key: String, checked: Boolean ->
+            onPurchaseColumnCheckboxChanged(key, checked)
+        }
+        window.asDynamic().onPurchaseColumnSortToggle = { onPurchaseColumnSortToggle() }
     } catch (e: dynamic) {
         console.log("Error exposing column filter functions:", e)
         }

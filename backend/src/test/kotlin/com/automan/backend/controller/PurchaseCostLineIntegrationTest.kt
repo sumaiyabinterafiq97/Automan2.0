@@ -64,6 +64,60 @@ class PurchaseCostLineIntegrationTest {
     }
 
     @Test
+    fun `PUT keeps a displayed Rixo Price instead of deleting the cost line`() {
+        val saved = purchaseRepository.save(basePurchase("RIXO-KEEP-6000"))
+        purchaseCostLineRepository.save(
+            com.automan.backend.model.PurchaseCostLine(
+                purchaseId = saved.id!!,
+                costCode = "RIXO_PRICE",
+                amount = BigDecimal("6000.00"),
+                sortOrder = 14,
+            ),
+        )
+
+        mockMvc.perform(
+            put("/purchases/${saved.id}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"chassis":"RIXO-KEEP-6000","rixoPrice":"¥6000"}"""),
+        ).andExpect(status().isOk)
+
+        val afterFormSave = purchaseCostLineRepository.findByPurchaseIdOrderBySortOrderAsc(saved.id!!)
+            .first { it.costCode == "RIXO_PRICE" }
+        assert(afterFormSave.amount.compareTo(BigDecimal("6000")) == 0)
+
+        mockMvc.perform(
+            put("/purchases/${saved.id}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"chassis":"RIXO-KEEP-6000","rixoPrice":"￥6,000"}"""),
+        ).andExpect(status().isOk)
+
+        mockMvc.perform(get("/purchases/purchase/${saved.id}"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.rixoPrice").value("6000"))
+    }
+
+    @Test
+    fun `GET page and get-by-id include rixoPrice from the RIXO_PRICE cost line`() {
+        val saved = purchaseRepository.save(basePurchase("RIXO-PAGE-6000"))
+        purchaseCostLineRepository.save(
+            com.automan.backend.model.PurchaseCostLine(
+                purchaseId = saved.id!!,
+                costCode = "RIXO_PRICE",
+                amount = BigDecimal("6000.00"),
+                sortOrder = 14,
+            ),
+        )
+
+        mockMvc.perform(get("/purchases/purchase/${saved.id}"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.rixoPrice").value("6000"))
+
+        mockMvc.perform(get("/purchases/page").param("page", "0").param("size", "50"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.content[?(@.chassis == 'RIXO-PAGE-6000')].rixoPrice").value("6000"))
+    }
+
+    @Test
     fun `GET costs-by-chassis returns values from cost lines`() {
         val saved = purchaseRepository.save(
             basePurchase("COST-READ-1").copy(

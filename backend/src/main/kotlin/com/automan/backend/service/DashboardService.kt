@@ -27,6 +27,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
@@ -170,13 +171,12 @@ class DashboardService(
         )
     }
 
-    fun recentPurchases(dayRaw: String): DashboardRecentPurchasesDto {
+    fun recentPurchases(dayRaw: String, dateRaw: String? = null): DashboardRecentPurchasesDto {
         val day = dayRaw.trim().lowercase(Locale.ROOT)
-        val target = when (day) {
-            "today" -> LocalDate.now()
-            "yesterday" -> LocalDate.now().minusDays(1)
-            else -> throw IllegalArgumentException("day must be today or yesterday")
+        if (day != "today" && day != "yesterday") {
+            throw IllegalArgumentException("day must be today or yesterday")
         }
+        val target = resolveRecentPurchaseDate(day, dateRaw)
         val matched = purchaseRepository.findRecentPurchaseCandidates()
             .mapNotNull { row ->
                 val parsed = PurchaseDateParseUtils.parseToLocalDate(row.getDate()?.trim().orEmpty())
@@ -216,6 +216,22 @@ class DashboardService(
             )
         }
         return DashboardRecentPurchasesDto(day = day, rows = rows)
+    }
+
+    /**
+     * Laptop [dateRaw] (yyyy-MM-dd) selects the calendar day. When it is absent, keep the
+     * server clock so callers that only send day=today|yesterday still work.
+     */
+    private fun resolveRecentPurchaseDate(day: String, dateRaw: String?): LocalDate {
+        val trimmed = dateRaw?.trim().orEmpty()
+        if (trimmed.isEmpty()) {
+            return if (day == "yesterday") LocalDate.now().minusDays(1) else LocalDate.now()
+        }
+        return try {
+            LocalDate.parse(trimmed, DateTimeFormatter.ISO_LOCAL_DATE)
+        } catch (_: DateTimeParseException) {
+            throw IllegalArgumentException("date must be yyyy-MM-dd")
+        }
     }
 
     private data class PeriodWindow(

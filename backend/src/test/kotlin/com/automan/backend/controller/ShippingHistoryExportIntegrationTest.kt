@@ -84,9 +84,11 @@ class ShippingHistoryExportIntegrationTest {
         XSSFWorkbook(ByteArrayInputStream(bytes)).use { workbook ->
             val sheet = workbook.getSheetAt(0)
             assertEquals(3, sheet.physicalNumberOfRows) // header + 2 rows
-            assertEquals("ID", sheet.getRow(0).getCell(0).stringCellValue)
-            assertEquals("Chassis", sheet.getRow(0).getCell(11).stringCellValue)
-            val chassisValues = (1..2).map { sheet.getRow(it).getCell(11).stringCellValue }.toSet()
+            val header = sheet.getRow(0)
+            assertEquals("ID", header.getCell(0).stringCellValue)
+            assertEquals("Price Type", header.getCell(11).stringCellValue)
+            assertEquals("Chassis", header.getCell(12).stringCellValue)
+            val chassisValues = (1..2).map { sheet.getRow(it).getCell(12).stringCellValue }.toSet()
             assertTrue(chassisValues.contains("SHP-EXP-001"))
             assertTrue(chassisValues.contains("SHP-EXP-002"))
         }

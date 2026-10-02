@@ -63,6 +63,9 @@ object Validators {
         if (amount.isNullOrBlank()) {
             return ValidationResult(true) // Allow empty amounts
         }
+        if (amount.trim().startsWith("-")) {
+            return ValidationResult(false, "Amount cannot be negative")
+        }
         val numeric = extractNumericFromDbValue(amount)
         if (numeric.isEmpty()) {
             return ValidationResult(false, "Invalid amount format")

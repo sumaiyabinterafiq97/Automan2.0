@@ -1233,6 +1233,15 @@ class PurchaseService(
             return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
         }
         if (from == null && to == null) {
+            if (PurchaseListSortMapping.sortsInMemory(sortField)) {
+                return pagePurchasesInMemory(
+                    applyReadAdapters(purchaseRepository.findAll().toList()),
+                    pageIdx,
+                    size,
+                    sortField,
+                    sortOrder,
+                )
+            }
             val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
             val pg = purchaseRepository.findAll(pageable)
             return PurchasePageResponse(
@@ -1281,6 +1290,10 @@ class PurchaseService(
             return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
         }
         if (from == null && to == null) {
+            if (PurchaseListSortMapping.sortsInMemory(sortField)) {
+                val ids = searchPurchasesIdDate(q, field).mapNotNull { it.getId() }
+                return pagePurchasesByIds(ids, pageIdx, size, sortField, sortOrder)
+            }
             val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
             val pg: Page<Purchase> = searchPurchasesPageEntity(q, field, pageable)
             return PurchasePageResponse(
@@ -1298,12 +1311,10 @@ class PurchaseService(
     }
 
     /**
-     * Unified filtered page: search + date range + advanced filter chips.
-     * DB-column filters narrow by ID queries; Transient fields hydrate candidates then filter in memory.
+     * All purchase ids matching the purchase-list filter (search, date range, and chips).
+     * Same rules as [filterPurchasesPage], without pagination.
      */
-    fun filterPurchasesPage(request: PurchasePageFilterRequest): PurchasePageResponse {
-        val pageIdx = request.page.coerceAtLeast(0)
-        val size = request.size.coerceIn(1, 100)
+    fun matchingPurchaseIdsForListFilter(request: PurchasePageFilterRequest): List<Long> {
         val from = parseIsoLocalDateOrThrow(request.dateFrom, "dateFrom")
         val to = parseIsoLocalDateOrThrow(request.dateTo, "dateTo")
         if (from != null || to != null) validateDateRangeBounds(from, to)
@@ -1316,44 +1327,48 @@ class PurchaseService(
 
         val (dbClauses, transientClauses) = clauses.partition { isDbColumnFilterField(it.field) }
 
-        // 1) Candidate id+date (search-scoped or all)
         val pairs: List<PurchaseIdDateProjection> = if (q.isNotEmpty()) {
             searchPurchasesIdDate(q, searchField)
         } else {
             purchaseRepository.findIdAndDateAll()
         }
 
-        // 2) Date range on labeled purchase.date
         var candidateIds: Set<Long> = if (from != null || to != null) {
             filterIdDatePairsByRange(pairs, from, to).toSet()
         } else {
             pairs.mapNotNull { it.getId() }.toSet()
         }
-        if (candidateIds.isEmpty()) {
-            return emptyPurchasePage(pageIdx, size)
-        }
+        if (candidateIds.isEmpty()) return emptyList()
 
-        // 3) DB-column advanced filters (ID intersection)
         for (clause in dbClauses) {
             candidateIds = applyDbColumnFilter(candidateIds, clause)
-            if (candidateIds.isEmpty()) return emptyPurchasePage(pageIdx, size)
+            if (candidateIds.isEmpty()) return emptyList()
         }
 
-        // 4) Transient filters → hydrate remaining candidates, filter in memory
         if (transientClauses.isNotEmpty()) {
             val hydrated = applyReadAdapters(purchaseRepository.findAllById(candidateIds))
-            val filtered = hydrated.filter { p ->
-                transientClauses.all { clause -> purchaseMatchesAdvancedFilter(p, clause) }
-            }
-            return pagePurchasesInMemory(filtered, pageIdx, size, request.sort, request.order)
+            return hydrated
+                .filter { p -> transientClauses.all { clause -> purchaseMatchesAdvancedFilter(p, clause) } }
+                .mapNotNull { it.id }
         }
+        return candidateIds.toList()
+    }
 
-        // 5) DB-only path: chronological date sort via id+date pairs; other sorts via findByIdIn + Sort
+    /**
+     * Unified filtered page: search + date range + advanced filter chips.
+     * DB-column filters narrow by ID queries; Transient fields hydrate candidates then filter in memory.
+     */
+    fun filterPurchasesPage(request: PurchasePageFilterRequest): PurchasePageResponse {
+        val pageIdx = request.page.coerceAtLeast(0)
+        val size = request.size.coerceIn(1, 100)
+        val ids = matchingPurchaseIdsForListFilter(request)
+        if (ids.isEmpty()) return emptyPurchasePage(pageIdx, size)
         if (isPurchaseDateSortField(request.sort)) {
-            val datePairs = pairs.filter { it.getId() != null && it.getId() in candidateIds }
-            return pagePurchasesByIdDatePairs(datePairs, pageIdx, size, request.order)
+            val idSet = ids.toSet()
+            val pairs = purchaseRepository.findIdAndDateAll().filter { it.getId() in idSet }
+            return pagePurchasesByIdDatePairs(pairs, pageIdx, size, request.order)
         }
-        return pagePurchasesByIds(candidateIds.toList(), pageIdx, size, request.sort, request.order)
+        return pagePurchasesByIds(ids, pageIdx, size, request.sort, request.order)
     }
 
     private fun searchPurchasesPageEntity(q: String, field: String, pageable: PageRequest): Page<Purchase> =
@@ -1520,6 +1535,15 @@ class PurchaseService(
             val pairs = purchaseRepository.findIdAndDateAll().filter { it.getId() in idSet }
             return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
         }
+        if (PurchaseListSortMapping.sortsInMemory(sortField)) {
+            return pagePurchasesInMemory(
+                applyReadAdapters(purchaseRepository.findAllById(matchingIds).toList()),
+                pageIdx,
+                size,
+                sortField,
+                sortOrder,
+            )
+        }
         val pageable = PageRequest.of(pageIdx, size, resolvePurchaseListSort(sortField, sortOrder))
         val pg = purchaseRepository.findByIdIn(matchingIds, pageable)
         return PurchasePageResponse(
@@ -1573,19 +1597,7 @@ class PurchaseService(
         } else {
             Sort.Direction.DESC
         }
-        val prop = when (sortField?.trim()?.lowercase()) {
-            null, "", "id", "date" -> "id"
-            "chassis" -> "chassis"
-            "carname", "car_name" -> "carName"
-            "brand" -> "brand"
-            "clientname", "client_name", "client" -> "clientName"
-            "auctionhouse", "auction_house", "supplier", "suppliername" -> "auctionHouse"
-            "stocklocation", "stock_location" -> "stockLocation"
-            "rixocompany", "rixo_company" -> "rixoCompany"
-            "country" -> "country"
-            "repaircompany", "repair_company" -> "repairCompany"
-            else -> "id"
-        }
+        val prop = PurchaseListSortMapping.jpaProperty(sortField) ?: "id"
         return Sort.by(dir, prop)
     }
 
@@ -1600,6 +1612,17 @@ class PurchaseService(
             val left = a?.trim().orEmpty()
             val right = b?.trim().orEmpty()
             return left.compareTo(right, ignoreCase = true)
+        }
+        fun plainNumber(raw: String?): Double? {
+            val t = raw?.trim()?.replace(",", "").orEmpty()
+            if (!t.matches(Regex("^-?\\d+(\\.\\d+)?$"))) return null
+            return t.toDoubleOrNull()
+        }
+        fun cmpAuctionNo(a: String?, b: String?): Int {
+            val aNum = plainNumber(a)
+            val bNum = plainNumber(b)
+            if (aNum != null && bNum != null) return aNum.compareTo(bNum)
+            return cmp(a, b)
         }
         fun cmpPurchaseDate(a: Purchase, b: Purchase): Int {
             val aDate = PurchaseDateParseUtils.parseToLocalDate(a.date?.trim().orEmpty())
@@ -1626,9 +1649,58 @@ class PurchaseService(
             "rixocompany", "rixo_company" -> purchases.sortedWith { a, b -> cmp(a.rixoCompany, b.rixoCompany) }
             "country" -> purchases.sortedWith { a, b -> cmp(a.country, b.country) }
             "repaircompany", "repair_company" -> purchases.sortedWith { a, b -> cmp(a.repairCompany, b.repairCompany) }
-            else -> purchases.sortedBy { it.id ?: 0L }
+            "auctionno", "auction_no" -> purchases.sortedWith { a, b -> cmpAuctionNo(a.auctionNo, b.auctionNo) }
+            "manufactureyear", "manufacture_year" -> purchases.sortedWith { a, b -> cmp(a.manufactureYear, b.manufactureYear) }
+            "notes" -> purchases.sortedWith { a, b -> cmp(a.notes, b.notes) }
+            else -> {
+                if (PurchaseListSortMapping.sortsInMemory(key)) {
+                    purchases.sortedWith { a, b -> compareInMemoryPurchaseField(a, b, key) }
+                } else {
+                    purchases.sortedBy { it.id ?: 0L }
+                }
+            }
         }
         return if (asc) sorted else sorted.asReversed()
+    }
+
+    private fun compareInMemoryPurchaseField(a: Purchase, b: Purchase, key: String): Int {
+        val norm = key.replace("_", "")
+        val left = purchaseFieldRaw(a, norm)
+        val right = purchaseFieldRaw(b, norm)
+        val numeric = norm in setOf(
+            "price", "auctionfee", "auctionpenaltyfee", "recyclefee", "roadtax", "taxtotal",
+            "rixoprice", "shipmentcharges", "freight", "storagecharges", "misccharges",
+            "inspectionfee", "commission", "repaircharges", "profit", "cc", "seat", "door",
+            "distance", "bookingid",
+        )
+        if (numeric) {
+            val aNum = parseLooseNumber(left)
+            val bNum = parseLooseNumber(right)
+            return when {
+                aNum == null && bNum == null -> 0
+                aNum == null -> 1
+                bNum == null -> -1
+                else -> aNum.compareTo(bNum)
+            }
+        }
+        if (norm in setOf("paymentdate", "shipmentdate", "carmodelyear")) {
+            val aDate = PurchaseDateParseUtils.parseToLocalDate(left)
+            val bDate = PurchaseDateParseUtils.parseToLocalDate(right)
+            return when {
+                aDate == null && bDate == null -> left.compareTo(right, ignoreCase = true)
+                aDate == null -> 1
+                bDate == null -> -1
+                else -> aDate.compareTo(bDate)
+            }
+        }
+        val aBlank = left.isBlank()
+        val bBlank = right.isBlank()
+        return when {
+            aBlank && bBlank -> 0
+            aBlank -> 1
+            bBlank -> -1
+            else -> left.compareTo(right, ignoreCase = true)
+        }
     }
 
     private fun sanitizePurchaseListSearchToken(raw: String): String =
@@ -3091,4 +3163,62 @@ class PurchaseService(
         return map.entries.firstOrNull { it.key.trim().equals(c, ignoreCase = true) }?.value
     }
     
+}
+
+/**
+ * Maps Purchase list UI sort keys to persistent JPA attributes.
+ * [auctionNo] and [notes] are @Transient (stored in extended_attributes JSON) and must never be passed to Sort.by.
+ */
+internal object PurchaseListSortMapping {
+    fun normalize(uiField: String?): String =
+        uiField?.trim()?.lowercase()?.replace("_", "").orEmpty()
+
+    private val jpaProperties: Map<String, String> = mapOf(
+        "id" to "id",
+        "chassis" to "chassis",
+        "carname" to "carName",
+        "brand" to "brand",
+        "clientname" to "clientName",
+        "client" to "clientName",
+        "auctionhouse" to "auctionHouse",
+        "supplier" to "auctionHouse",
+        "suppliername" to "auctionHouse",
+        "stocklocation" to "stockLocation",
+        "rixocompany" to "rixoCompany",
+        "country" to "country",
+        "repaircompany" to "repairCompany",
+        "manufactureyear" to "manufactureYear",
+        "totalprice" to "totalPrice",
+        "pol" to "pol",
+        "pod" to "pod",
+        "destination" to "pod",
+        "consignee" to "consignee",
+        "bookingid" to "bookingId",
+        "local" to "local",
+        "workflowstatus" to "workflowStatus",
+    )
+
+    /** Persistent entity attribute, or null when JPA must not sort on this UI key. */
+    fun jpaProperty(uiField: String?): String? {
+        val key = normalize(uiField)
+        if (key.isEmpty() || key == "date") return null
+        return jpaProperties[key]
+    }
+
+    private val inMemoryKeys: Set<String> = setOf(
+        "auctionno", "notes", "price", "auctionfee", "auctionpenaltyfee", "recyclefee", "roadtax",
+        "taxtotal", "rixoprice", "shipmentcharges", "freight", "storagecharges", "misccharges",
+        "inspectionfee", "commission", "repaircharges", "profit", "cc", "seat", "door", "distance",
+        "carmodelyear", "paymentdate", "shipmentdate", "grade", "rank", "color", "fuel", "shift",
+        "wd", "drivetype", "shipmentsize", "options", "venueid", "numbercut", "blno", "vessel",
+        "vesselno", "bookingrequested", "invoiceconfirmed", "shaken", "negotiate", "rixorequested",
+        "rixoconfirmed",
+    )
+
+    fun sortsInMemory(uiField: String?): Boolean {
+        val key = normalize(uiField)
+        if (key.isEmpty() || key == "date" || key == "id") return false
+        if (jpaProperties.containsKey(key)) return false
+        return key in inMemoryKeys
+    }
 }

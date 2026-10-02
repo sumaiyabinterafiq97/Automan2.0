@@ -147,8 +147,8 @@ private fun applyPurchaseListViewsFromServer(pl: dynamic?) {
             if (list.isNotEmpty()) {
                 val deviceType = getDeviceType()
                 val max = getMaxPurchaseListColumnsForDevice(deviceType)
-                val ordered = ensurePurchaseListPinnedColumns(
-                    prioritizePurchaseListDateAndChassis(sanitizePurchaseListSelectedColumns(list)),
+                val ordered = ensurePurchaseListMandatoryColumnsPreservingOrder(
+                    sanitizePurchaseListSelectedColumns(list),
                     max,
                 )
                 saveSelectedColumns(ordered)
@@ -1026,19 +1026,44 @@ private fun purchaseDateQuickFilterMenuPortalHtml(): String = """
     </div>
 """.trimIndent()
 
-private fun purchaseDateQuickFilterHeaderCellHtml(label: String): String {
-    val sortOrder = purchaseTableSortOrderByField["date"] ?: "desc"
-    val sortTooltip = if (sortOrder == "asc") {
-        "Sorted oldest to newest (click for newest first)"
-    } else {
-        "Sorted newest to oldest (click for oldest first)"
+private fun purchaseSortGlyphAndTitle(field: String): Pair<String, String> {
+    val active = purchaseTableSortField == field
+    if (!active) {
+        return "↕" to "Sort ascending"
     }
+    val order = purchaseTableSortOrderByField[field] ?: "desc"
+    return if (order == "asc") {
+        val title = if (field == "date") {
+            "Sorted oldest first (click for newest first)"
+        } else {
+            "Sorted ascending (click for descending)"
+        }
+        "↑" to title
+    } else {
+        val title = if (field == "date") {
+            "Sorted newest first (click for oldest first)"
+        } else {
+            "Sorted descending (click for ascending)"
+        }
+        "↓" to title
+    }
+}
+
+private fun purchaseSortButtonHtml(field: String, label: String): String {
+    val (glyph, title) = purchaseSortGlyphAndTitle(field)
+    val glyphColor = if (purchaseTableSortField == field) "#111827" else "#9ca3af"
+    return """
+        <button type="button" id="purchaseSortBtn_$field" title="$title" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
+            <span>$label</span><span style="font-size: 14px; color: $glyphColor;">$glyph</span>
+        </button>
+    """.trimIndent()
+}
+
+private fun purchaseDateQuickFilterHeaderCellHtml(label: String): String {
     return """
     <th>
         <div style="display:flex; align-items:center; gap:8px;">
-            <button type="button" id="purchaseSortBtn_date" title="$sortTooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
-                <span>$label</span><span style="font-size: 14px;">↕</span>
-            </button>
+            ${purchaseSortButtonHtml("date", label)}
             <button type="button" id="purchaseDateQuickFilterBtn" title="Filter by purchase date" aria-haspopup="dialog" aria-expanded="false"
                     style="background:none; border:none; cursor:pointer; font-weight:600; color:#111827; padding:0; display:inline-flex; align-items:center; justify-content:center;">
                 📅
@@ -1246,7 +1271,7 @@ private fun setupPurchaseDateQuickFilterMenuPortal() {
 // Global variable to track last device type for auto-adjustment
 var lastDeviceType: String? = getDeviceType()
 
-private fun sortPurchasesInMemory(rows: Array<dynamic>, field: String, order: String): List<dynamic> {
+internal fun sortPurchasesInMemory(rows: Array<dynamic>, field: String, order: String): List<dynamic> {
     val isAsc = order == "asc"
     val list = rows.toList()
     return list.sortedWith { a, b ->
@@ -1283,6 +1308,13 @@ private fun sortPurchasesInMemory(rows: Array<dynamic>, field: String, order: St
                 else -> bBool.compareTo(aBool)
             }
         }
+        if (field == "auctionNo") {
+            val aNum = purchasePlainNumber(purchaseRawFieldValue(a, field))
+            val bNum = purchasePlainNumber(purchaseRawFieldValue(b, field))
+            if (aNum != null && bNum != null) {
+                return@sortedWith if (isAsc) aNum.compareTo(bNum) else bNum.compareTo(aNum)
+            }
+        }
         val aStr = purchaseComparableText(a, field).lowercase()
         val bStr = purchaseComparableText(b, field).lowercase()
         val aBlank = aStr.trim().length == 0
@@ -1317,9 +1349,14 @@ private fun refreshPurchaseRowsFromBase(resetPage: Boolean = true) {
     displayPurchasesWithPagination()
 }
 
-private fun togglePurchaseTableSort(field: String) {
-    val current = purchaseTableSortOrderByField[field] ?: "desc"
-    val next = if (current == "asc") "desc" else "asc"
+private fun purchasePlainNumber(raw: String): Double? {
+    val t = raw.trim().replace(",", "")
+    if (!t.matches(Regex("^-?\\d+(\\.\\d+)?$"))) return null
+    return t.toDoubleOrNull()
+}
+
+fun applyPurchaseTableSort(field: String, order: String) {
+    val next = if (order == "asc") "asc" else "desc"
     purchaseTableSortOrderByField[field] = next
     purchaseTableSortField = field
     persistPurchaseListViewsToServer()
@@ -1328,6 +1365,15 @@ private fun togglePurchaseTableSort(field: String) {
     } else {
         refreshPurchaseRowsFromBase(resetPage = true)
     }
+}
+
+fun togglePurchaseTableSort(field: String) {
+    val next = nextPurchaseSortOrder(
+        purchaseTableSortField,
+        field,
+        purchaseTableSortOrderByField[field],
+    )
+    applyPurchaseTableSort(field, next)
 }
 
 fun navigateToPurchaseList(forceClearFilters: Boolean = false, forceRefresh: Boolean = true) {
@@ -3219,12 +3265,16 @@ fun checkAndAdjustColumnsForDeviceChange() {
         if (savedColumns != null) {
             val max = getMaxPurchaseListColumnsForDevice(currentDeviceType)
             val sanitized = sanitizePurchaseListSelectedColumns(savedColumns)
-            val adjustedColumns = ensurePurchaseListPinnedColumns(
-                prioritizePurchaseListDateAndChassis(
-                    autoAdjustColumnsForDevice(sanitized, currentDeviceType),
-                ),
-                max,
-            )
+            val adjustedColumns = if (sanitized.size > max) {
+                ensurePurchaseListPinnedColumns(
+                    prioritizePurchaseListDateAndChassis(
+                        autoAdjustColumnsForDevice(sanitized, currentDeviceType),
+                    ),
+                    max,
+                )
+            } else {
+                ensurePurchaseListMandatoryColumnsPreservingOrder(sanitized, max)
+            }
             
             // Save adjusted columns if they changed
             if (adjustedColumns != savedColumns) {
@@ -3286,10 +3336,44 @@ fun exportPurchasesToExcel() {
         btn.style.opacity = "0.7"
         btn.textContent = "Exporting…"
     }
+    val searchInput = document.getElementById("purchaseSearchInput") as? HTMLInputElement
+    val q = searchInput?.value?.trim().orEmpty().ifEmpty { purchaseSearchQuery.trim() }
+    val dateActive = purchaseDateFilterActive &&
+        purchaseDateFilterStartIso.isNotEmpty() &&
+        purchaseDateFilterEndIso.isNotEmpty()
+    val filters = purchaseAdvancedFilters.map { f ->
+        val obj = js("{}")
+        obj.field = f.field
+        obj.operator = f.operator
+        obj.value = f.value
+        obj
+    }.toTypedArray()
+    val hasCriteria = q.isNotEmpty() || dateActive || filters.isNotEmpty()
     MainScope().launch {
         try {
             showMessage("Preparing Excel export…", "info")
-            val response = window.fetch(apiUrl("purchases/export/xlsx")).await()
+            val response = if (!hasCriteria) {
+                window.fetch(apiUrl("purchases/export/xlsx")).await()
+            } else {
+                val body = js("{}")
+                if (q.isNotEmpty()) {
+                    body.q = q
+                    body.field = purchaseSearchFieldChoice
+                }
+                if (dateActive) {
+                    body.dateFrom = purchaseDateFilterStartIso
+                    body.dateTo = purchaseDateFilterEndIso
+                }
+                body.filters = filters
+                val headers = Headers()
+                headers.set("Content-Type", "application/json")
+                val requestInit = RequestInit(
+                    method = "POST",
+                    headers = headers,
+                    body = JSON.stringify(body),
+                )
+                window.fetch(apiUrl("purchases/export/xlsx"), requestInit).await()
+            }
             if (!response.ok) {
                 val errorText = response.text().await()
                 ErrorHandler.showError("Export failed: ${ErrorHandler.extractErrorMessage(errorText)}")
@@ -4365,8 +4449,8 @@ fun displayPurchasesWithPagination() {
         val columnLabels = purchaseListColumnLabels()
     
     val tableHTML = StringBuilder()
-        val emptyColCount = selectedColumns.size
-        tableHTML.append("""<div class="purchase-list-table-shell"><table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupEqualWidth(emptyColCount)}""")
+        val emptyMinWidth = purchaseListTableMinWidthPx(selectedColumns, columnLabels, includeAction = false)
+        tableHTML.append("""<div class="purchase-list-table-shell"><table class="purchase-list-table" style="width: 100%; min-width: ${emptyMinWidth}px; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupPurchaseList(selectedColumns, columnLabels, includeAction = false)}""")
         tableHTML.append("<thead><tr>")
         
         for (columnKey in selectedColumns) {
@@ -4374,20 +4458,7 @@ fun displayPurchasesWithPagination() {
             if (columnKey == "date") {
                 tableHTML.append(purchaseDateQuickFilterHeaderCellHtml(label))
             } else if (sortableFields.contains(columnKey)) {
-                val sortOrder = purchaseTableSortOrderByField[columnKey] ?: "desc"
-                val tooltip = if (sortOrder == "asc") {
-                    "Sorted A-Z (click to sort Z-A)"
-                } else {
-                    "Sorted Z-A (click to sort A-Z)"
-                }
-                val sortBtnId = "purchaseSortBtn_$columnKey"
-                tableHTML.append("""
-                    <th>
-                        <button id="$sortBtnId" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
-                            <span>$label</span><span style="font-size: 14px;">↕</span>
-                        </button>
-                    </th>
-                """)
+                tableHTML.append("<th>${purchaseSortButtonHtml(columnKey, label)}</th>")
             } else {
                 tableHTML.append("""
                     <th>$label</th>
@@ -4429,13 +4500,13 @@ fun displayPurchasesWithPagination() {
     val columnLabels = purchaseListColumnLabels()
     
     val tableHTML = StringBuilder()
-    val purchaseColCount = 1 + selectedColumns.size
+    val purchaseMinWidth = purchaseListTableMinWidthPx(selectedColumns, columnLabels, includeAction = true)
     tableHTML.append("""
         <div class="purchase-list-table-shell">
-        <table class="purchase-list-table" style="width: 100%; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupNarrowActionEqualRest(purchaseColCount, 88)}
+        <table class="purchase-list-table" style="width: 100%; min-width: ${purchaseMinWidth}px; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupPurchaseList(selectedColumns, columnLabels, includeAction = true)}
             <thead>
                 <tr>
-                    <th style="width: 88px;"></th>
+                    <th style="width: ${PURCHASE_LIST_ACTION_COL_PX}px;"></th>
     """)
     
     for (columnKey in selectedColumns) {
@@ -4443,20 +4514,7 @@ fun displayPurchasesWithPagination() {
         if (columnKey == "date") {
             tableHTML.append(purchaseDateQuickFilterHeaderCellHtml(label))
         } else if (sortableFields.contains(columnKey)) {
-            val sortOrder = purchaseTableSortOrderByField[columnKey] ?: "desc"
-            val tooltip = if (sortOrder == "asc") {
-                "Sorted A-Z (click to sort Z-A)"
-            } else {
-                "Sorted Z-A (click to sort A-Z)"
-            }
-            val sortBtnId = "purchaseSortBtn_$columnKey"
-            tableHTML.append("""
-                <th>
-                    <button id="$sortBtnId" title="$tooltip" style="background: none; border: none; cursor: pointer; font-weight: 600; color: #111827; padding: 0; display: inline-flex; align-items: center; gap: 6px;">
-                        <span>$label</span><span style="font-size: 14px;">↕</span>
-                    </button>
-                </th>
-            """)
+            tableHTML.append("<th>${purchaseSortButtonHtml(columnKey, label)}</th>")
         } else {
             tableHTML.append("""
                 <th>$label</th>
@@ -4507,7 +4565,8 @@ fun displayPurchasesWithPagination() {
                 else -> escapeHtml(raw)
             }
             val tdClass = if (columnKey == "date") """ class="purchase-list-date-td"""" else ""
-            tableHTML.append("""<td$tdClass>$cellHtml</td>""")
+            val tdTitle = if (raw.isNotEmpty() && columnKey != "date") """ title="${escapeHtml(raw)}"""" else ""
+            tableHTML.append("""<td$tdClass$tdTitle>$cellHtml</td>""")
         }
         
         tableHTML.append("""</tr>""")
@@ -4774,16 +4833,19 @@ fun getSelectedColumns(): List<String> {
     
     // Filter out removed/hidden columns and migrate legacy aliases (sold→invoiceConfirmed, vesselNo→vessel)
     val validColumns = sanitizePurchaseListSelectedColumns(savedColumns)
-    if (validColumns != savedColumns) {
-        safeLocalStorageSet("selectedColumns", JSON.stringify(validColumns.toTypedArray()))
-    }
-    
-    // Auto-adjust if saved columns exceed device limit, then pin date/chassis to the left
     val max = getMaxPurchaseListColumnsForDevice(deviceType)
-    return ensurePurchaseListPinnedColumns(
-        prioritizePurchaseListDateAndChassis(autoAdjustColumnsForDevice(validColumns, deviceType)),
-        max,
-    )
+    val adjustedColumns = if (validColumns.size > max) {
+        ensurePurchaseListPinnedColumns(
+            prioritizePurchaseListDateAndChassis(autoAdjustColumnsForDevice(validColumns, deviceType)),
+            max,
+        )
+    } else {
+        ensurePurchaseListMandatoryColumnsPreservingOrder(validColumns, max)
+    }
+    if (adjustedColumns != savedColumns) {
+        safeLocalStorageSet("selectedColumns", JSON.stringify(adjustedColumns.toTypedArray()))
+    }
+    return adjustedColumns
 }
 
 fun setupColumnSorting() {
@@ -4827,7 +4889,6 @@ fun showColumnFilterModal() {
     }
     
     val selectedColumnsList = getSelectedColumns()
-    val selectedColumns = selectedColumnsList.toSet()
     
     modal.innerHTML = """
         <div role="dialog" aria-modal="true" aria-labelledby="columnFilterTitle"
@@ -4840,7 +4901,11 @@ fun showColumnFilterModal() {
                 <strong>$deviceDisplayName — Maximum $maxColumns columns allowed</strong><br>
                 <span style="color: #666; font-size: 14px;">Purchase Date and Chassis are always on. Selected total: <span id="selectedCount">0</span></span>
             </div>
-            <div id="columnCheckboxes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
+            <div id="purchaseColumnSortBar">
+                <span>Sort selected columns</span>
+                <button type="button" id="purchaseColumnSortToggle" onclick="onPurchaseColumnSortToggle()" title="Sort selected column names. This does not change purchase row order.">Sort A-Z ↑</button>
+            </div>
+            <div id="columnCheckboxes">
                 <!-- Column checkboxes will be populated here -->
             </div>
             <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
@@ -4858,7 +4923,7 @@ fun showColumnFilterModal() {
     }
     
     // Populate column checkboxes (using function from MinimalPurchaseApp.kt)
-    populateColumnCheckboxes(selectedColumns)
+    beginPurchaseColumnModal(selectedColumnsList)
     
     // Update selection count initially (this will set the correct format)
     updateColumnSelection()

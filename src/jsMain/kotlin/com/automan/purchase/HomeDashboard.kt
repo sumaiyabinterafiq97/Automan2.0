@@ -265,12 +265,26 @@ private fun renderHomeDashboard(data: dynamic) {
     loadHomeRecentPurchases()
 }
 
+/** Laptop calendar date (not UTC) as yyyy-MM-dd. [dayOffset] is 0 for today, -1 for yesterday. */
+private fun homeLaptopIsoDate(dayOffset: Int): String {
+    val d = js("new Date()").unsafeCast<dynamic>()
+    d.setDate(d.getDate() + dayOffset)
+    val y = d.getFullYear() as Int
+    val m = (d.getMonth() as Int) + 1
+    val day = d.getDate() as Int
+    return y.toString() + "-" + m.toString().padStart(2, '0') + "-" + day.toString().padStart(2, '0')
+}
+
 private fun loadHomeRecentPurchases() {
     val host = document.getElementById("homeRecentTable") ?: return
-    val day = if (homeRecentDay == "yesterday") "yesterday" else "today"
+    val yesterday = homeRecentDay == "yesterday"
+    val day = if (yesterday) "yesterday" else "today"
+    val date = homeLaptopIsoDate(if (yesterday) -1 else 0)
     host.innerHTML = """<p class="home-dash-empty">Loading purchases…</p>"""
     homeDashboardScope.launch {
-        when (val result = ApiClient.get<dynamic>("dashboard/recent-purchases?day=$day")) {
+        when (val result = ApiClient.get<dynamic>(
+            "dashboard/recent-purchases?day=$day&date=${encodeURIComponent(date)}",
+        )) {
             is ApiResult.Success -> {
                 if (document.getElementById("homeRecentTable") == null) return@launch
                 renderHomeRecentPurchases(result.data)

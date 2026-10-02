@@ -2,8 +2,7 @@ package com.automan.purchase.utils
 
 import com.automan.purchase.escapeHtml
 import com.automan.purchase.extractNumericFromDbValue
-import kotlin.test.Test
-import kotlin.test.assertEquals
+import com.automan.purchase.purchaseListRixoPriceCell
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -16,7 +15,7 @@ class UtilsTest {
     fun testEscapeHtml_Basic() {
         val input = "<script>alert('xss')</script>"
         val result = escapeHtml(input)
-        assertEquals("&lt;script&gt;alert(&#x27;xss&#x27;)&lt;/script&gt;", result)
+        assertEquals("&lt;script&gt;alert(&#x27;xss&#x27;)&lt;&#x2F;script&gt;", result)
     }
     
     @Test
@@ -72,5 +71,25 @@ class UtilsTest {
     fun testExtractNumericFromDbValue_WithDecimal() {
         val result = extractNumericFromDbValue("1000.50")
         assertEquals("1000.50", result)
+    }
+
+    @Test
+    fun testPurchaseListRixoPriceCell_savedAmount() {
+        assertEquals("¥6,000", purchaseListRixoPriceCell("6000"))
+        assertEquals("¥6,000", purchaseListRixoPriceCell("¥6,000"))
+        assertEquals("¥6,000", purchaseListRixoPriceCell("6 000"))
+    }
+
+    @Test
+    fun testPurchaseListRixoPriceCell_snakeCaseFallback() {
+        assertEquals("¥6,000", purchaseListRixoPriceCell(null, "6000"))
+    }
+
+    @Test
+    fun testPurchaseListRixoPriceCell_emptyStaysYenZero() {
+        assertEquals("¥0", purchaseListRixoPriceCell(null))
+        assertEquals("¥0", purchaseListRixoPriceCell(""))
+        assertEquals("¥0", purchaseListRixoPriceCell("0"))
+        assertEquals("¥0", purchaseListRixoPriceCell("0.00"))
     }
 }
