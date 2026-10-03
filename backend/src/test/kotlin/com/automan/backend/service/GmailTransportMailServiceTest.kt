@@ -1,5 +1,6 @@
 package com.automan.backend.service
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -46,6 +47,12 @@ class GmailTransportMailServiceTest {
     fun `whitespace only app password is not configured`() {
         val service = GmailTransportMailService("sender@gmail.com", "   ", "smtp.gmail.com", 587)
         assertFalse(service.isConfigured())
+    }
+
+    @Test
+    fun `blank subject is the company and buying date`() {
+        assertEquals("SHAHBAZ - 2026-07-24", GmailTransportMailService.defaultSubject("SHAHBAZ", "2026-07-24"))
+        assertEquals("Undefined", GmailTransportMailService.defaultSubject("  ", ""))
     }
 
     @Test

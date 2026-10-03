@@ -739,7 +739,8 @@ private fun isPlausibleEmailAddress(raw: String): Boolean {
 private fun showRixoHistoryEmailModal(
     rixoCompany: String,
     buyingDate: String,
-    onSend: (to: String) -> Unit,
+    emailBody: String,
+    onSend: (to: String, subject: String, emailBody: String) -> Unit,
 ) {
     document.getElementById("rixoHistoryEmailModal")?.remove()
     rixoHistoryEmailModalKeyHandler?.let { document.removeEventListener("keydown", it) }
@@ -749,6 +750,9 @@ private fun showRixoHistoryEmailModal(
     val companyLabel = if (rixoCompany.isEmpty()) "Undefined" else rixoCompany
     val safeCompany = escapeHtml(companyLabel)
     val safeDate = escapeHtml(buyingDate)
+    val day = buyingDate.trim()
+    val subjectValue = escapeAttr(if (day.isEmpty()) companyLabel else "$companyLabel - $day")
+    val safeBody = escapeHtml(emailBody)
 
     val overlay = document.createElement("div") as HTMLElement
     overlay.id = "rixoHistoryEmailModal"
@@ -758,7 +762,7 @@ private fun showRixoHistoryEmailModal(
     overlay.innerHTML = """
         <div role="dialog" aria-modal="true" aria-labelledby="rixoHistoryEmailTitle"
              style="background:#fff;border-radius:12px;box-shadow:0 20px 50px rgba(15,23,42,0.28);
-             max-width:440px;width:100%;padding:22px 24px;box-sizing:border-box;">
+             max-width:520px;width:100%;padding:22px 24px;box-sizing:border-box;max-height:90vh;overflow:auto;">
             <h3 id="rixoHistoryEmailTitle" style="margin:0 0 12px;font-size:18px;font-weight:700;color:#0f172a;">Email PDF</h3>
             <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:14px;">
                 <div>Rixo company: $safeCompany</div>
@@ -767,6 +771,12 @@ private fun showRixoHistoryEmailModal(
             <label for="rixoHistoryEmailTo" style="display:block;font-size:13px;font-weight:600;color:#0f172a;margin-bottom:6px;">To</label>
             <input id="rixoHistoryEmailTo" type="email" autocomplete="email" placeholder="name@company.com"
                 style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;min-height:40px;" />
+            <label for="rixoHistoryEmailSubject" style="display:block;font-size:13px;font-weight:600;color:#0f172a;margin:12px 0 6px;">Subject</label>
+            <input id="rixoHistoryEmailSubject" type="text" value="$subjectValue"
+                style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;min-height:40px;" />
+            <label for="rixoHistoryEmailBody" style="display:block;font-size:13px;font-weight:600;color:#0f172a;margin:12px 0 6px;">Message</label>
+            <textarea id="rixoHistoryEmailBody" rows="4"
+                style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;resize:vertical;font-family:inherit;">$safeBody</textarea>
             <div id="rixoHistoryEmailError" style="min-height:18px;margin:6px 0 12px;font-size:13px;color:#b91c1c;"></div>
             <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
                 <button type="button" id="rixoHistoryEmailCancel"
@@ -796,8 +806,10 @@ private fun showRixoHistoryEmailModal(
             input?.focus()
             return@addEventListener
         }
+        val subject = (document.getElementById("rixoHistoryEmailSubject") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val body = (document.getElementById("rixoHistoryEmailBody") as? HTMLTextAreaElement)?.value.orEmpty()
         closeModal()
-        onSend(to)
+        onSend(to, subject, body)
     })
     overlay.addEventListener("click", { ev: Event ->
         if (ev.target === overlay) closeModal()
@@ -863,8 +875,8 @@ private fun openRixoHistoryEmailDialog(row: dynamic, btn: HTMLButtonElement?) {
                 return@launch
             }
             val extraMessage = rixoHistoryCell(row, "message")
-            showRixoHistoryEmailModal(rixoCompany, buyingDate) { to ->
-                sendRixoHistoryPdfEmail(selectedIds, rixoCompany, buyingDate, extraMessage, to)
+            showRixoHistoryEmailModal(rixoCompany, buyingDate, RIXO_HISTORY_DEFAULT_HEAD_MESSAGE) { to, subject, body ->
+                sendRixoHistoryPdfEmail(selectedIds, rixoCompany, buyingDate, extraMessage, to, subject, body)
             }
         } catch (e: dynamic) {
             ErrorHandler.showError("Failed to prepare email: ${e.toString()}")
@@ -883,6 +895,8 @@ private fun sendRixoHistoryPdfEmail(
     buyingDate: String,
     extraMessage: String,
     to: String,
+    emailSubject: String,
+    emailBody: String,
 ) {
     MainScope().launch {
         try {
@@ -900,6 +914,8 @@ private fun sendRixoHistoryPdfEmail(
             requestBody.transportData = transportData
             requestBody.persistHistory = false
             requestBody.to = to
+            requestBody.emailSubject = emailSubject
+            requestBody.emailBody = emailBody
             val headers = Headers()
             headers.set("Content-Type", "application/json")
             val requestInit = RequestInit(

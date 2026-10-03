@@ -129,6 +129,8 @@ class PurchaseDocumentHttpIntegrationTest {
             anyString() ?: "",
             anyString() ?: "",
             anyByteArray(),
+            anyString() ?: "",
+            anyString() ?: "",
         )
 
         mockMvc.perform(
@@ -136,7 +138,7 @@ class PurchaseDocumentHttpIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
-                    {"to":"ops@example.com","ids":[${purchase.id}],"transportData":{"rixoCompany":"SHAHBAZ","buyingDate":"2026-06-15"}}
+                    {"to":"ops@example.com","ids":[${purchase.id}],"emailSubject":"KLC - 2026-09-02","emailBody":"Mail text only","transportData":{"rixoCompany":"SHAHBAZ","buyingDate":"2026-06-15","headMessage":"PDF head stays"}}
                     """.trimIndent(),
                 ),
         )
@@ -148,8 +150,10 @@ class PurchaseDocumentHttpIntegrationTest {
             eq("ops@example.com") ?: "",
             eq("SHAHBAZ") ?: "",
             eq("2026-06-15") ?: "",
-            eq("") ?: "",
+            eq("PDF head stays") ?: "",
             pdf.capture() ?: ByteArray(0),
+            eq("KLC - 2026-09-02") ?: "",
+            eq("Mail text only") ?: "",
         )
         assertPdf(pdf.value)
         assertTrue(pdfText(pdf.value).contains(purchase.chassis))

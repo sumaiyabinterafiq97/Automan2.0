@@ -1053,6 +1053,8 @@ class PurchaseController(
                 buyingDate = dateRaw,
                 headMessage = transportData["headMessage"].orEmpty(),
                 pdfBytes = pdfBytes,
+                emailSubject = request["emailSubject"]?.toString().orEmpty(),
+                emailBody = request["emailBody"]?.toString().orEmpty(),
             )
             return ResponseEntity.ok(mapOf("message" to "Email sent"))
         } catch (e: com.automan.backend.service.GmailNotConfiguredException) {

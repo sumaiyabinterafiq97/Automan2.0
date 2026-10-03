@@ -34,12 +34,14 @@ class GmailTransportMailService(
         buyingDate: String,
         headMessage: String,
         pdfBytes: ByteArray,
+        emailSubject: String = "",
+        emailBody: String = "",
     ) {
         if (!isConfigured()) throw GmailNotConfiguredException()
         val company = rixoCompany.trim().ifEmpty { "Undefined" }
         val date = buyingDate.trim()
-        val subject = listOf("陸送依頼", company, date).filter { it.isNotEmpty() }.joinToString(" ")
-        val body = headMessage.trim().ifEmpty { DEFAULT_HEAD_MESSAGE }
+        val subject = emailSubject.trim().ifEmpty { defaultSubject(company, date) }
+        val body = emailBody.trim().ifEmpty { headMessage.trim() }.ifEmpty { DEFAULT_HEAD_MESSAGE }
         val filename = PdfFilenameUtils.build(
             "RixoTransport",
             company,
@@ -76,6 +78,13 @@ class GmailTransportMailService(
             val to = raw?.trim().orEmpty()
             if (to.length !in 3..254) return false
             return RECIPIENT.matches(to)
+        }
+
+        /** Mail subject when the dialog leaves it blank: company and buying date, without 陸送依頼. */
+        fun defaultSubject(company: String, date: String): String {
+            val name = company.trim().ifEmpty { "Undefined" }
+            val day = date.trim()
+            return if (day.isEmpty()) name else "$name - $day"
         }
     }
 }
