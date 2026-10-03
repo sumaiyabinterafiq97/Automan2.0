@@ -89,11 +89,25 @@ class PurchaseExportIntegrationTest {
                 "Grade",
                 "Car price",
             )
+            val titles = (0 until header.lastCellNum).map { header.getCell(it).stringCellValue }
             leading.forEachIndexed { index, title ->
-                assertEquals(title, header.getCell(index).stringCellValue)
+                assertEquals(title, titles[index])
             }
-            assertEquals("ID", header.getCell(10).stringCellValue)
-            assertEquals("Chassis", header.getCell(12).stringCellValue)
+            assertEquals("ID", titles[10])
+            assertEquals("Registration Date", titles[11])
+            listOf("Chassis", "Color", "Grade").forEach { title ->
+                assertEquals(1, titles.count { it == title }, title)
+            }
+            listOf(
+                "Purchase Date",
+                "Car Name",
+                "Shift",
+                "Auction No",
+                "Supplier Name",
+                "Car Price",
+            ).forEach { title ->
+                assertFalse(titles.contains(title), title)
+            }
         }
     }
 
