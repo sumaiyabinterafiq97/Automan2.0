@@ -518,6 +518,7 @@ select:focus {
 /* Purchase List only. Other pages keep the shared .purchase-list-table grid. */
 #purchaseTable table.purchase-list-table {
     width: 100%;
+    table-layout: auto;
     border: none;
     border-collapse: collapse;
     background: #fff;
@@ -555,11 +556,22 @@ select:focus {
     text-overflow: ellipsis;
 }
 
-#purchaseTable table.purchase-list-table td:not(:first-child):not(.purchase-list-date-td) {
+#purchaseTable table.purchase-list-table td:not(:first-child):not(.purchase-list-date-td):not(.purchase-list-chassis-td) {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 0;
+}
+
+#purchaseTable table.purchase-list-table col.purchase-list-chassis-col,
+#purchaseTable table.purchase-list-table th.purchase-list-chassis-th,
+#purchaseTable table.purchase-list-table td.purchase-list-chassis-td {
+    width: max-content;
+    min-width: max-content;
+    max-width: none;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
 }
 
 #purchaseTable table.purchase-list-table tbody tr:hover td {
@@ -600,8 +612,8 @@ select:focus {
     display: none;
     flex-direction: column;
     gap: 8px;
-    width: 280px;
-    min-width: 280px;
+    width: 360px;
+    min-width: 320px;
     padding: 10px;
     box-sizing: border-box;
     background: #fff;
@@ -609,6 +621,50 @@ select:focus {
     border-radius: 4px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     z-index: 25000;
+}
+
+.purchase-date-quick-filter-menu__stepper {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.purchase-date-quick-filter-menu__stepper-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.purchase-date-quick-filter-menu__stepper-actions #purchaseDateQuickTodayBtn {
+    flex: 1;
+}
+
+.purchase-date-quick-filter-menu__stepper button {
+    min-width: 36px;
+    min-height: 32px;
+    padding: 4px 8px;
+    background: #f8f9fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 650;
+    color: #111827;
+}
+
+.purchase-date-quick-filter-menu__stepper button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.purchase-date-quick-filter-menu__stepper-date {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 650;
+    color: #0f172a;
+    white-space: nowrap;
+    line-height: 1.2;
 }
 
 .purchase-date-quick-filter-menu__quick-row {
@@ -9902,6 +9958,12 @@ input.client-form-readonly:read-only {
     gap: 8px;
 }
 
+.cnf-total-box .cnf-usd-rate-input,
+.cnf-total-box .cnf-usd-total-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .cnf-total-box label,
 .cnf-total-box-label {
     font-weight: 600;
@@ -12689,65 +12751,6 @@ input.client-form-readonly:read-only {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 12px;
-}
-
-.home-dash-recent-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.home-dash-recent-head select {
-    min-height: 36px;
-    border: 1px solid var(--home-dash-border);
-    border-radius: 8px;
-    background: #fff;
-    padding: 0 10px;
-    font-size: 14px;
-    color: #0f172a;
-}
-
-.home-dash-recent-scroll {
-    overflow-x: auto;
-}
-
-.home-dash-recent-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-}
-
-.home-dash-recent-table th,
-.home-dash-recent-table td {
-    padding: 10px 8px;
-    border-bottom: 1px solid var(--home-dash-border);
-    text-align: left;
-    white-space: nowrap;
-}
-
-.home-dash-recent-table th {
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    color: var(--home-dash-muted);
-    font-weight: 700;
-}
-
-.home-dash-recent-check {
-    text-align: center;
-}
-
-.home-dash-recent-more {
-    display: block;
-    width: 100%;
-    margin-top: 12px;
-    min-height: 40px;
-    border: 1px dashed var(--home-dash-border);
-    border-radius: 10px;
-    background: transparent;
-    color: #334155;
-    font-weight: 600;
-    cursor: pointer;
 }
 
 .home-dash-kpi {

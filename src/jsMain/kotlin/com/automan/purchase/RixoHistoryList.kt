@@ -768,9 +768,7 @@ private fun showRixoHistoryEmailModal(
                 <div>Rixo company: $safeCompany</div>
                 <div>Buying date: $safeDate</div>
             </div>
-            <label for="rixoHistoryEmailTo" style="display:block;font-size:13px;font-weight:600;color:#0f172a;margin-bottom:6px;">To</label>
-            <input id="rixoHistoryEmailTo" type="email" autocomplete="email" placeholder="name@company.com"
-                style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;min-height:40px;" />
+            ${rixoEmailToFieldHtml("rixoHistoryEmailTo", "rixoHistoryEmailChoices")}
             <label for="rixoHistoryEmailSubject" style="display:block;font-size:13px;font-weight:600;color:#0f172a;margin:12px 0 6px;">Subject</label>
             <input id="rixoHistoryEmailSubject" type="text" value="$subjectValue"
                 style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;min-height:40px;" />
@@ -795,6 +793,7 @@ private fun showRixoHistoryEmailModal(
     }
 
     document.body?.appendChild(overlay)
+    bindRixoCompanyEmailChoices(rixoCompany, "rixoHistoryEmailTo", "rixoHistoryEmailChoices")
 
     document.getElementById("rixoHistoryEmailCancel")?.addEventListener("click", { _: Event -> closeModal() })
     document.getElementById("rixoHistoryEmailSend")?.addEventListener("click", { _: Event ->
@@ -832,7 +831,6 @@ private fun showRixoHistoryEmailModal(
     }
     rixoHistoryEmailModalKeyHandler = escapeHandler
     document.addEventListener("keydown", escapeHandler)
-    inputEl?.focus()
 }
 
 private fun openRixoHistoryEmailDialog(row: dynamic, btn: HTMLButtonElement?) {

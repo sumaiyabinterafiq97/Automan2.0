@@ -544,10 +544,10 @@ const val PURCHASE_LIST_FLEX_COL_MIN_PX = 120
  * Returns null for text columns that should share the remaining table width.
  */
 fun purchaseListDataColumnWidthPx(columnKey: String, label: String): Int? {
+    if (columnKey == "chassis") return null
     if (columnKey in purchaseListFlexColumnKeys) return null
     val iconPx = if (columnKey == "date") 36 else 22
-    val width = (label.length * 8 + iconPx + 16).coerceIn(72, 200)
-    return if (columnKey == "chassis") maxOf(width, 128) else width
+    return (label.length * 8 + iconPx + 16).coerceIn(72, 200)
 }
 
 /** Table min-width: compact columns at their header size, text columns at [PURCHASE_LIST_FLEX_COL_MIN_PX]. */
@@ -567,7 +567,7 @@ fun purchaseListTableMinWidthPx(
 
 /**
  * Purchase List only. Action column is fixed; compact columns are header-sized;
- * text columns are unsized so they share the leftover width under table-layout:fixed.
+ * text columns are unsized so they share leftover width. Chassis is content-sized.
  */
 fun htmlTableColgroupPurchaseList(
     columnKeys: List<String>,
@@ -580,6 +580,10 @@ fun htmlTableColgroupPurchaseList(
             append("""<col style="width:${PURCHASE_LIST_ACTION_COL_PX}px">""")
         }
         for (key in columnKeys) {
+            if (key == "chassis") {
+                append("""<col class="purchase-list-chassis-col">""")
+                continue
+            }
             val width = purchaseListDataColumnWidthPx(key, labels[key] ?: key)
             if (width == null) {
                 append("<col>")
@@ -793,24 +797,26 @@ fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int {
  * @param deviceType Device type ("mobile", "tablet", or "desktop")
  * @return List of default column keys for the device
  *
- * Default (11): Purchase Date, Chassis (pinned), Auction No, Manufacture Year, Car Name,
- * Supplier Name, Stock Location, Rixo Company, Client Name, Target Country, Notes.
+ * Desktop shows all 13. Phone and tablet keep the first 11 (through Client Name)
+ * via the existing column cap.
  */
 fun getDefaultColumnsForDevice(deviceType: String? = null): List<String> {
-    // Same defaults for all devices; Purchase Date + Chassis are always pinned first by
-    // [ensurePurchaseListPinnedColumns] / [prioritizePurchaseListDateAndChassis].
+    // Same defaults for all devices. Purchase Date and Chassis stay first;
+    // other columns, including Auction No, keep this order.
     return listOf(
         "date",
         "chassis",
         "auctionNo",
-        "manufactureYear",
-        "carName",
+        "grade",
+        "carModelYear",
         "auctionHouse",
         "stockLocation",
         "rixoCompany",
+        "rixoRequested",
+        "rixoConfirmed",
         "clientName",
         "country",
-        "notes",
+        "price",
     )
 }
 
@@ -834,18 +840,15 @@ fun autoAdjustColumnsForDevice(savedColumns: List<String>, deviceType: String? =
 }
 
 /**
- * Purchase list: when "date" and/or "chassis" are selected, keep them near the left
- * (after the row action column). Preferred order: Purchase Date → Auction No (if selected)
- * → Chassis → other columns in their relative order.
+ * Purchase list: when "date" and/or "chassis" are selected, keep them at the left
+ * (after the row action column). Other columns, including Auction No, keep their relative order.
  */
 fun prioritizePurchaseListDateAndChassis(columns: List<String>): List<String> {
     val hasDate = columns.contains("date")
     val hasChassis = columns.contains("chassis")
-    val hasAuctionNo = columns.contains("auctionNo")
-    val rest = columns.filter { it != "date" && it != "chassis" && it != "auctionNo" }
+    val rest = columns.filter { it != "date" && it != "chassis" }
     return buildList {
         if (hasDate) add("date")
-        if (hasAuctionNo) add("auctionNo")
         if (hasChassis) add("chassis")
         addAll(rest)
     }
@@ -855,16 +858,14 @@ fun prioritizePurchaseListDateAndChassis(columns: List<String>): List<String> {
 fun purchaseListMandatoryColumnKeys(): Set<String> = setOf("date", "chassis")
 
 /**
- * Forces Purchase Date and Chassis to be present. When Auction No is selected, it sits between
- * them. Other columns keep [columns] order (excluding pins). Result length capped at [maxColumns].
+ * Forces Purchase Date and Chassis to be present at the left. Other columns, including Auction No,
+ * keep [columns] order. Result length capped at [maxColumns].
  */
 fun ensurePurchaseListPinnedColumns(columns: List<String>, maxColumns: Int): List<String> {
     val max = maxColumns.coerceAtLeast(2)
-    val hasAuctionNo = columns.contains("auctionNo")
-    val rest = columns.filter { it != "date" && it != "chassis" && it != "auctionNo" }
+    val rest = columns.filter { it != "date" && it != "chassis" }
     val merged = buildList {
         add("date")
-        if (hasAuctionNo) add("auctionNo")
         add("chassis")
         addAll(rest)
     }
@@ -1498,6 +1499,26 @@ fun formatWithWeekday(isoDate: String?): String {
     } catch (e: dynamic) {
         return isoDate
     }
+}
+
+/**
+ * Purchase List display for Purchase Date, Payment Date, and Shipment Date.
+ * Example: `2026-09-25(Friday)`. Unparseable text is returned unchanged.
+ * The weekday is taken from the calendar day so a `yyyy-MM-dd` value does not shift.
+ */
+fun formatPurchaseListYmdWeekday(raw: String?): String {
+    val trimmed = raw?.trim().orEmpty()
+    if (trimmed.isEmpty()) return ""
+    val iso = toIsoFromLabel(trimmed)
+    if (!iso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) return trimmed
+    val parts = iso.split("-")
+    val year = parts[0].toIntOrNull() ?: return trimmed
+    val month = parts[1].toIntOrNull() ?: return trimmed
+    val day = parts[2].toIntOrNull() ?: return trimmed
+    if (month !in 1..12 || day !in 1..31) return trimmed
+    val date = Date(year, month - 1, day)
+    val days = arrayOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+    return "$iso(${days[date.getDay()]})"
 }
 
 /**

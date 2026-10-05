@@ -1,8 +1,13 @@
 package com.automan.backend.controller
 
 import com.automan.backend.model.Purchase
+import com.automan.backend.model.PurchaseVehicleOverride
+import com.automan.backend.model.WorkflowStatus
+import com.automan.backend.service.PurchaseService
 import com.automan.backend.repository.PurchaseCostLineRepository
 import com.automan.backend.repository.PurchaseRepository
+import com.automan.backend.repository.PurchaseVehicleOverrideRepository
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -35,9 +40,13 @@ class PurchaseCostLineIntegrationTest {
     @Autowired
     private lateinit var purchaseCostLineRepository: PurchaseCostLineRepository
 
+    @Autowired
+    private lateinit var purchaseVehicleOverrideRepository: PurchaseVehicleOverrideRepository
+
     @BeforeEach
     fun setUp() {
         purchaseCostLineRepository.deleteAll()
+        purchaseVehicleOverrideRepository.deleteAll()
         purchaseRepository.deleteAll()
     }
 
@@ -219,6 +228,119 @@ class PurchaseCostLineIntegrationTest {
         val lines = purchaseCostLineRepository.findByPurchaseIdOrderBySortOrderAsc(saved.id!!)
         assert(lines.count { it.costCode == "PRICE" } == 1)
         assert(lines.first { it.costCode == "PRICE" }.amount.compareTo(BigDecimal("999")) == 0)
+    }
+
+    @Test
+    fun `save-costs stores total C and F USD beside a vehicle spec and a later update keeps both`() {
+        val saved = purchaseRepository.save(basePurchase("USD-CNF-1"))
+        val id = saved.id!!
+        purchaseVehicleOverrideRepository.save(
+            PurchaseVehicleOverride(
+                purchaseId = id,
+                overridesJson = """{"distance":"42000"}""",
+            ),
+        )
+
+        mockMvc.perform(
+            put("/purchases/save-costs")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """{"chassis":"USD-CNF-1","carPrice":100000,"auctionFee":5000,"auctionPenaltyFee":0,
+                    |"rixoPrice":2000,"shippingCharge":3000,"freight":4000,"inspectionFee":500,
+                    |"repairFee":600,"mscCharges":700,"profit":800,"totalCnfPriceUsd":"1234.50","usdRate":"150"}""".trimMargin(),
+                ),
+        )
+            .andExpect(status().isOk)
+
+        val afterSave = purchaseVehicleOverrideRepository.findByPurchaseId(id)!!.overridesJson
+        assert(afterSave.contains("1234.50")) { afterSave }
+        assert(afterSave.contains("42000")) { afterSave }
+        assert(!afterSave.contains("usdRate")) { afterSave }
+
+        mockMvc.perform(get("/purchases/costs-by-chassis/USD-CNF-1"))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.totalCnfPriceUsd").value("1234.50"))
+
+        mockMvc.perform(
+            put("/purchases/$id")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"chassis":"USD-CNF-1","color":"Blue"}"""),
+        )
+            .andExpect(status().isOk)
+
+        val afterUpdate = purchaseVehicleOverrideRepository.findByPurchaseId(id)!!.overridesJson
+        assert(afterUpdate.contains("1234.50")) { afterUpdate }
+        assert(afterUpdate.contains("42000")) { afterUpdate }
+
+        mockMvc.perform(
+            put("/purchases/save-costs")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """{"chassis":"USD-CNF-1","carPrice":100000,"auctionFee":5000,"auctionPenaltyFee":0,
+                    |"rixoPrice":2000,"shippingCharge":3000,"freight":4000,"inspectionFee":500,
+                    |"repairFee":600,"mscCharges":700,"profit":800,"totalCnfPriceUsd":" "}""".trimMargin(),
+                ),
+        )
+            .andExpect(status().isOk)
+
+        val afterClear = purchaseVehicleOverrideRepository.findByPurchaseId(id)!!.overridesJson
+        assert(!afterClear.contains("totalCnfPriceUsd")) { afterClear }
+        assert(afterClear.contains("42000")) { afterClear }
+    }
+
+    @Test
+    fun `booking requested car keeps its Rixo company and still accepts another field`() {
+        val booked = purchaseRepository.save(
+            basePurchase("BOOK-CO-1").copy(
+                rixoCompany = "HIDA",
+                workflowStatus = WorkflowStatus.BOOKING_REQUESTED,
+            ),
+        )
+        val open = purchaseRepository.save(
+            basePurchase("BOOK-CO-2").copy(
+                rixoCompany = "HIDA",
+                workflowStatus = WorkflowStatus.RIXO_REQUESTED,
+            ),
+        )
+
+        mockMvc.perform(
+            put("/purchases/${booked.id}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"rixoCompany":"KLC","rixoPrice":"5000"}"""),
+        )
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error").value(PurchaseService.BOOKING_RIXO_COMPANY_MESSAGE))
+
+        val bookedAfterReject = purchaseRepository.findById(booked.id!!).orElseThrow()
+        assertEquals("HIDA", bookedAfterReject.rixoCompany)
+        assertEquals(WorkflowStatus.BOOKING_REQUESTED, bookedAfterReject.workflowStatus)
+
+        mockMvc.perform(
+            put("/purchases/${booked.id}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"carName":"RAV4"}"""),
+        )
+            .andExpect(status().isOk)
+
+        val bookedAfterOtherField = purchaseRepository.findById(booked.id!!).orElseThrow()
+        assertEquals("HIDA", bookedAfterOtherField.rixoCompany)
+        assertEquals("RAV4", bookedAfterOtherField.carName)
+
+        mockMvc.perform(
+            put("/purchases/${booked.id}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"rixoCompany":"hida"}"""),
+        )
+            .andExpect(status().isOk)
+
+        mockMvc.perform(
+            put("/purchases/${open.id}")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"rixoCompany":"KLC"}"""),
+        )
+            .andExpect(status().isOk)
+
+        assertEquals("KLC", purchaseRepository.findById(open.id!!).orElseThrow().rixoCompany)
     }
 
     private fun basePurchase(chassis: String): Purchase = Purchase(

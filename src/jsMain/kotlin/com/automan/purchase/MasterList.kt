@@ -613,8 +613,8 @@ fun createTallMultilineChipInput(id: String, placeholder: String, rows: Int = 4)
 
 fun ensureSupplierChipJs() {
     js("""
-        if (window.__supplierChipJsVersion !== 5) {
-          window.__supplierChipJsVersion = 5;
+        if (window.__supplierChipJsVersion !== 6) {
+          window.__supplierChipJsVersion = 6;
           window.__supplierChipJsReady = true;
 
           // Notify / In-Transit / Final Destination: chips joined with RS so ';' stays literal text.
@@ -684,6 +684,17 @@ fun ensureSupplierChipJs() {
           }
           function _isValidNumericToken(v) {
             return /^[0-9]+$/.test((v || '').toString().trim());
+          }
+          function _isEmailChipField(id) {
+            return id === 'remEmails';
+          }
+          function _isValidEmailToken(v) {
+            var to = (v || '').toString().trim();
+            if (to.length < 3 || to.length > 254 || to.indexOf(' ') >= 0) return false;
+            var at = to.indexOf('@');
+            if (at <= 0 || at !== to.lastIndexOf('@')) return false;
+            var domain = to.substring(at + 1);
+            return domain.indexOf('.') > 0 && domain.charAt(0) !== '.' && domain.charAt(domain.length - 1) !== '.' && domain.indexOf('..') < 0;
           }
           function _isAllowedToken(id, value) {
             var wrap = document.getElementById(id + 'Wrap');
@@ -878,6 +889,10 @@ fun ensureSupplierChipJs() {
               var invalidNumberInput = _getInput(id);
               if (invalidNumberInput) invalidNumberInput.value = '';
               return;
+            }
+            if (_isEmailChipField(id)) {
+              if (!_isValidEmailToken(v)) return;
+              v = v.toLowerCase();
             }
             if (!_isAllowedToken(id, v)) {
               var invalidInput = _getInput(id);

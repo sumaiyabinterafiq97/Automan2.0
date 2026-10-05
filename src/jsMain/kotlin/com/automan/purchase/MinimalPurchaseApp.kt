@@ -959,6 +959,8 @@ fun initializeAppSetup() {
     window.asDynamic().duplicateMasterShippingCharge = ::duplicateMasterShippingCharge
     window.asDynamic().editMasterStockLocationMap = ::editMasterStockLocationMap
     window.asDynamic().deleteMasterStockLocationMap = ::deleteMasterStockLocationMap
+    window.asDynamic().editMasterRixoEmailMap = ::editMasterRixoEmailMap
+    window.asDynamic().deleteMasterRixoEmailMap = ::deleteMasterRixoEmailMap
     window.asDynamic().addClientTransaction = ::addClientTransaction
     
     // Expose date conversion functions for edit form
@@ -6498,6 +6500,7 @@ fun createApp(root: Element) {
                                 <button id="masterStockLocationMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Stock Location Map</button>
                                 <button id="masterSupplierMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Supplier Map</button>
                                 <button id="masterRixoPriceMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Price Map</button>
+                                <button id="masterRixoEmailMapBtn" class="master-list-item" type="button" style="padding: 10px 15px; background-color: rgba(75, 108, 183, 0.1); color: #bdc3c7; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-align: left; transition: all 0.2s;">Rixo Email Map</button>
                             </div>
                         </div>
                         
@@ -6956,6 +6959,10 @@ fun createApp(root: Element) {
         closeSidebar()
         navigateToApp("/master/rixo-mapping")
     })
+    document.getElementById("masterRixoEmailMapBtn")?.addEventListener("click", { _: Event ->
+        closeSidebar()
+        navigateToApp("/master/rixo-email-map")
+    })
     
     // Load initial data only if we're on the purchase list page
     if (routeEquals("/purchase")) {
@@ -7230,6 +7237,12 @@ fun updateContent(root: Element) {
         }
         routeAtStartsWith(route, "master/supplier-map") -> {
             showSupplierMapTreePage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        routeAtStartsWith(route, "master/rixo-email-map") -> {
+            showRixoEmailMapPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -10165,7 +10178,7 @@ fun setupRixoDropdowns() {
                     editAuctionInput.value = purchaseData.auctionHouse;
                 }
                 if (typeof window.syncComboboxInput === 'function') {
-                    window.syncComboboxInput('editAuctionName');
+                    window.syncComboboxInput('editAuctionName', { suppressCascade: true });
                 }
                 if (typeof window.fetchSupplierMapByAuctionName === 'function') {
                     window.fetchSupplierMapByAuctionName(purchaseData.auctionHouse, true, purchaseData).then(function() {
@@ -13325,7 +13338,7 @@ private fun applySavedPurchaseFieldSnapshot(purchaseForMerge: dynamic) {
                 var inp = document.getElementById(id + 'Input');
                 if (sel) sel.value = v;
                 if (inp) inp.value = v;
-                if (typeof syncComboboxInput === 'function') syncComboboxInput(id);
+                if (typeof syncComboboxInput === 'function') syncComboboxInput(id, { suppressCascade: true });
             })();
         """)
     }
@@ -25767,6 +25780,158 @@ private fun showRixoStructuralChangeReloadModal() {
     })
 }
 
+/** Yen amount in cents, or null when the text is blank or not a number. */
+private fun rixoMoneyToCents(raw: String?): Long? {
+    val cleaned = raw?.replace("¥", "")?.replace(",", "")?.trim().orEmpty()
+    if (cleaned.isEmpty()) return null
+    val negative = cleaned.startsWith("-")
+    val body = cleaned.removePrefix("-").filter { it.isDigit() || it == '.' }
+    if (body.isEmpty() || body == ".") return null
+    val parts = body.split('.')
+    val whole = parts[0].ifEmpty { "0" }.toLongOrNull() ?: return null
+    val frac = if (parts.size > 1) parts[1].padEnd(2, '0').take(2).toLongOrNull() ?: 0L else 0L
+    val cents = whole * 100 + frac
+    return if (negative) -cents else cents
+}
+
+private fun rixoCentsToMoney(cents: Long): String {
+    val negative = cents < 0
+    val abs = if (negative) -cents else cents
+    val whole = abs / 100
+    val frac = abs % 100
+    val body = if (frac == 0L) whole.toString() else "$whole.${frac.toString().padStart(2, '0')}"
+    return if (negative) "-$body" else body
+}
+
+/** Writes a newly mapped Rixo price and the same difference onto the purchase total. */
+private fun applyMappedRixoPriceToInlinePayload(payload: dynamic, purchase: dynamic, chosen: dynamic) {
+    if (chosen == null || chosen == js("undefined")) return
+    val raw = chosen.toString().trim()
+    if (raw.isEmpty() || raw == "null") return
+    val newCents = rixoMoneyToCents(raw) ?: return
+    val oldCents = rixoMoneyToCents(asDynamicRow(purchase).rixoPrice?.toString())
+    if (oldCents != null && oldCents == newCents) return
+    payload.rixoPrice = rixoCentsToMoney(newCents)
+    val totalCents = rixoMoneyToCents(asDynamicRow(purchase).totalPrice?.toString()) ?: return
+    if (oldCents == null) return
+    payload.totalPrice = rixoCentsToMoney(totalCents + (newCents - oldCents))
+}
+
+private fun submitRixoInlinePut(
+    idLong: Long,
+    payload: dynamic,
+    companyChanged: Boolean,
+    newCompany: String,
+    chassisToken: String,
+    skipReloadForCompanyMove: Boolean,
+    needsReloadHint: Boolean,
+) {
+    val init = js("{}")
+    init.method = "PUT"
+    init.headers = js("({ 'Content-Type': 'application/json' })")
+    init.body = js("JSON.stringify")(payload)
+    window.fetch(apiUrl("purchases/$idLong"), init.unsafeCast<RequestInit>()).then { response: dynamic ->
+        if (js("!response.ok") as Boolean) {
+            response.text().then { raw: String ->
+                var message = "Could not save changes. Please try again."
+                try {
+                    val body = JSON.parse<dynamic>(raw)
+                    val fromMessage = body?.message?.toString()?.trim().orEmpty()
+                    val fromError = body?.error?.toString()?.trim().orEmpty()
+                    val picked = fromMessage.ifEmpty { fromError }
+                    if (picked.isNotEmpty()) message = picked
+                } catch (_: Throwable) {
+                }
+                if (message.startsWith("Cannot change Rixo company")) {
+                    rixoInlineEditingId = null
+                    renderRixoRowsPreview(rixoCurrentRows)
+                }
+                showMessage(message, "error")
+            }
+            return@then Unit
+        }
+        response.json().then { updated: dynamic ->
+            val updatedRow = updated.unsafeCast<dynamic>()
+            val newRows = rixoCurrentRows.map { p ->
+                val pid = asDynamicRow(p).id
+                val pLong = when (pid) {
+                    is Number -> pid.toLong()
+                    else -> pid?.toString()?.toLongOrNull()
+                }
+                if (pLong == idLong) updatedRow else p
+            }
+            rixoCurrentRows = newRows
+            rixoInlineEditingId = null
+            if (companyChanged && isRixoUpdaterEditSession() && newCompany.isNotBlank() && chassisToken.isNotBlank()) {
+                moveRixoUpdaterChassisToCompany(idLong, chassisToken, newCompany, skipReloadForCompanyMove, needsReloadHint)
+            } else {
+                renderRixoRowsPreview(rixoCurrentRows)
+                if (needsReloadHint) {
+                    showRixoStructuralChangeReloadModal()
+                } else {
+                    showMessage("Row updated.", "success")
+                }
+            }
+            Unit
+        }
+        Unit
+    }
+}
+
+private fun moveRixoUpdaterChassisToCompany(
+    purchaseId: Long,
+    chassisToken: String,
+    newCompany: String,
+    skipReloadForCompanyMove: Boolean,
+    needsReloadHint: Boolean,
+) {
+    val historyId = rixoUpdaterHistoryId
+    if (historyId == null) {
+        renderRixoRowsPreview(rixoCurrentRows)
+        showMessage("Row updated.", "success")
+        return
+    }
+    MainScope().launch {
+        val tokenJson = JSON.stringify(chassisToken)
+        val companyJson = JSON.stringify(newCompany)
+        val bodyJson = "{\"historyId\":$historyId,\"chassisToken\":$tokenJson,\"rixoCompany\":$companyJson}"
+        val body = JSON.parse<dynamic>(bodyJson)
+        ApiClient.post<dynamic>("rixo-history/move-chassis", body).fold(
+            onSuccess = { data ->
+                val d: dynamic = (data as Any).unsafeCast<dynamic>()
+                val deletedRow = d.deletedRow == true ||
+                    d.deletedRow?.toString()?.lowercase() == "true"
+                rixoCurrentRows = rixoCurrentRows.filter { purchaseIdFromDynamic(it) != purchaseId }
+                if (deletedRow) {
+                    rixoUpdaterHistoryId = null
+                    rixoUpdaterHistoryRowHasBookingRequested = false
+                    showMessage("Car moved to $newCompany. This Rixo request has no cars left.", "success")
+                    navigateToApp("/rixo-history")
+                    return@fold
+                }
+                recomputeRixoUpdaterRowHasBookingRequested()
+                if (rixoCurrentRows.isEmpty()) {
+                    setRixoRowsPreviewEmptyMessage("(No Car is Found)")
+                    document.getElementById("selectedCount")?.textContent = "Cars: 0"
+                } else {
+                    renderRixoRowsPreview(rixoCurrentRows)
+                }
+                showMessage("Car moved to $newCompany.", "success")
+            },
+            onError = { message, statusCode ->
+                renderRixoRowsPreview(rixoCurrentRows)
+                val msg =
+                    if (statusCode == 400 && message.isNotBlank()) message
+                    else "Could not move this car to $newCompany: $message"
+                showMessage(msg, "error")
+                if (!skipReloadForCompanyMove && needsReloadHint) {
+                    showRixoStructuralChangeReloadModal()
+                }
+            },
+        )
+    }
+}
+
 private fun commitRixoInlineRow(tr: HTMLElement, purchase: dynamic) {
     val row = asDynamicRow(purchase as Any?)
     val id = row.id
@@ -25820,37 +25985,52 @@ private fun commitRixoInlineRow(tr: HTMLElement, purchase: dynamic) {
         renderRixoRowsPreview(rixoCurrentRows)
         return
     }
-    val init = js("{}")
-    init.method = "PUT"
-    init.headers = js("({ 'Content-Type': 'application/json' })")
-    init.body = js("JSON.stringify")(payload)
-    window.fetch(apiUrl("purchases/$idLong"), init.unsafeCast<RequestInit>()).then { response: dynamic ->
-        if (js("!response.ok") as Boolean) {
-            showMessage("Could not save changes. Please try again.", "error")
-            return@then Unit
-        }
-        response.json().then { updated: dynamic ->
-            val updatedRow = updated.unsafeCast<dynamic>()
-            val newRows = rixoCurrentRows.map { p ->
-                val pid = asDynamicRow(p).id
-                val pLong = when (pid) {
-                    is Number -> pid.toLong()
-                    else -> pid?.toString()?.toLongOrNull()
-                }
-                if (pLong == idLong) updatedRow else p
-            }
-            rixoCurrentRows = newRows
-            rixoInlineEditingId = null
-            renderRixoRowsPreview(rixoCurrentRows)
-            if (needsReloadHint) {
-                showRixoStructuralChangeReloadModal()
-            } else {
-                showMessage("Row updated.", "success")
-            }
-            Unit
-        }
-        Unit
+    val oldCompany = purchaseValueForRixoCompare(row, "rixoCompany")
+    val newCompany = readRixoControlCompareString("rixoCompany", tr)
+    val companyChanged = oldCompany != newCompany
+    val companyValueChanged = !oldCompany.trim().equals(newCompany.trim(), ignoreCase = true)
+    if (companyValueChanged && purchaseIsBookingRequested(row)) {
+        rixoInlineEditingId = null
+        renderRixoRowsPreview(rixoCurrentRows)
+        showMessage("Cannot change Rixo company: this car is already booking requested.", "error")
+        return
     }
+    val priceManuallyChanged = dataColumns.contains("rixoPrice") &&
+        purchaseValueForRixoCompare(row, "rixoPrice") != readRixoControlCompareString("rixoPrice", tr)
+    val chassisChanged = dataColumns.contains("chassis") &&
+        purchaseValueForRixoCompare(row, "chassis") != readRixoControlCompareString("chassis", tr)
+    val dateChanged = dataColumns.contains("date") &&
+        purchaseValueForRixoCompare(row, "date") != readRixoControlCompareString("date", tr)
+    val skipReloadForCompanyMove = companyChanged && !chassisChanged && !dateChanged
+    val reloadHint = needsReloadHint && !skipReloadForCompanyMove
+    val chassisToken = purchaseChassisFromDynamic(row)
+    if (companyChanged && !priceManuallyChanged && newCompany.isNotBlank()) {
+        val resolver: dynamic = js("window.resolveRixoPriceAfterCompanyChange")
+        if (resolver != null && resolver != js("undefined")) {
+            resolver(row, newCompany).then { chosen: dynamic ->
+                applyMappedRixoPriceToInlinePayload(payload, row, chosen)
+                submitRixoInlinePut(
+                    idLong,
+                    payload,
+                    companyChanged,
+                    newCompany,
+                    chassisToken,
+                    skipReloadForCompanyMove,
+                    reloadHint,
+                )
+            }
+            return
+        }
+    }
+    submitRixoInlinePut(
+        idLong,
+        payload,
+        companyChanged,
+        newCompany,
+        chassisToken,
+        skipReloadForCompanyMove,
+        reloadHint,
+    )
 }
 
 fun restrictRixoInlineMoneyInputs() {
@@ -26278,9 +26458,7 @@ private fun showRixoGeneratorEmailModal(
                 <div>Rixo company: $safeCompany</div>
                 <div>Buying date: $safeDate</div>
             </div>
-            <label for="rixoGeneratorEmailTo" style="display:block;font-size:13px;font-weight:600;color:#0f172a;margin-bottom:6px;">To</label>
-            <input id="rixoGeneratorEmailTo" type="email" autocomplete="email" placeholder="name@company.com"
-                style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;min-height:40px;" />
+            ${rixoEmailToFieldHtml("rixoGeneratorEmailTo", "rixoGeneratorEmailChoices")}
             <label for="rixoGeneratorEmailSubject" style="display:block;font-size:13px;font-weight:600;color:#0f172a;margin:12px 0 6px;">Subject</label>
             <input id="rixoGeneratorEmailSubject" type="text" value="$subjectValue"
                 style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;min-height:40px;" />
@@ -26305,6 +26483,7 @@ private fun showRixoGeneratorEmailModal(
     }
 
     document.body?.appendChild(overlay)
+    bindRixoCompanyEmailChoices(companyLabel, "rixoGeneratorEmailTo", "rixoGeneratorEmailChoices")
 
     document.getElementById("rixoGeneratorEmailCancel")?.addEventListener("click", { _: Event -> closeModal() })
     document.getElementById("rixoGeneratorEmailSend")?.addEventListener("click", { _: Event ->
@@ -26342,7 +26521,6 @@ private fun showRixoGeneratorEmailModal(
     }
     rixoGeneratorEmailModalKeyHandler = escapeHandler
     document.addEventListener("keydown", escapeHandler)
-    inputEl?.focus()
 }
 
 private fun openRixoGeneratorEmailDialog() {
@@ -28966,10 +29144,9 @@ fun resetToDefaultColumns() {
     val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
     val ordered = ensurePurchaseListPinnedColumns(prioritizePurchaseListDateAndChassis(getDefaultColumnsForDevice()), maxColumns)
     saveSelectedColumns(ordered)
-    persistPurchaseListViewsToServer()
-    populateColumnCheckboxes(ordered.toSet())
-    beginPurchaseColumnModal(ordered)
-    updateColumnSelection()
+    persistPurchaseListViewsToServer(immediate = true)
+    displayPurchasesWithPagination()
+    closeColumnFilterModal()
 }
 
 fun applyColumnChanges() {

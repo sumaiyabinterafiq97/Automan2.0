@@ -19,6 +19,7 @@ import com.automan.purchase.sortPurchasesInMemory
 import com.automan.purchase.sortSelectedPurchaseColumnsByLabel
 import com.automan.purchase.formatCarModelYear
 import com.automan.purchase.formatCurrency
+import com.automan.purchase.formatPurchaseListYmdWeekday
 import com.automan.purchase.formatWithWeekday
 import com.automan.purchase.isoToMmDdYyyy
 import com.automan.purchase.normalizeDateForComparison
@@ -51,6 +52,10 @@ class UtilsBusinessTest {
         assertEquals("", formatWithWeekday("  "))
         assertEquals("June 15, 2026(Monday)", formatWithWeekday("June 15, 2026(Monday)"))
         assertEquals("June 15, 2026(Monday)", formatWithWeekday("2026-06-15T12:00:00"))
+        assertEquals("2026-09-25(Friday)", formatPurchaseListYmdWeekday("2026-09-25"))
+        assertEquals("2026-09-25(Friday)", formatPurchaseListYmdWeekday("September 25, 2026(Friday)"))
+        assertEquals("not-a-date", formatPurchaseListYmdWeekday("not-a-date"))
+        assertEquals("", formatPurchaseListYmdWeekday("  "))
 
         assertEquals("06/15/2026", isoToMmDdYyyy("2026-06-15"))
         assertEquals("", isoToMmDdYyyy(null))
@@ -83,7 +88,7 @@ class UtilsBusinessTest {
         assertEquals(listOf("invoiceConfirmed", "vessel"), sanitizePurchaseListSelectedColumns(listOf("sold", "vesselNo", "sold", "nope")))
         assertEquals(listOf("date", "chassis", "brand"), ensurePurchaseListPinnedColumns(listOf("brand"), 6))
         assertEquals(
-            listOf("date", "auctionNo", "chassis"),
+            listOf("date", "chassis", "auctionNo"),
             ensurePurchaseListPinnedColumns(listOf("auctionNo", "brand"), 3),
         )
         val pinned = ensurePurchaseListPinnedColumns(emptyList(), 2)
@@ -239,7 +244,24 @@ class UtilsBusinessTest {
         assertEquals(13, getMaxPurchaseListColumnsForDevice("desktop"))
         assertEquals(11, getMaxPurchaseListColumnsForDevice("tablet"))
         assertEquals(11, getMaxPurchaseListColumnsForDevice("mobile"))
-        assertEquals(11, getDefaultColumnsForDevice("desktop").size)
+        assertEquals(
+            listOf(
+                "date",
+                "chassis",
+                "auctionNo",
+                "grade",
+                "carModelYear",
+                "auctionHouse",
+                "stockLocation",
+                "rixoCompany",
+                "rixoRequested",
+                "rixoConfirmed",
+                "clientName",
+                "country",
+                "price",
+            ),
+            getDefaultColumnsForDevice("desktop"),
+        )
         assertEquals(13, purchaseColumnOrderAfterCheck((1..13).map { "c$it" }, "extra", 13).size)
 
         val labels = purchaseListColumnLabels()

@@ -44,6 +44,8 @@ class PurchaseService(
 ) {
     companion object {
         const val DUPLICATE_CHASSIS_MESSAGE = "the chassis number already exist"
+        const val BOOKING_RIXO_COMPANY_MESSAGE =
+            "Cannot change Rixo company: this car is already booking requested."
     }
 
     /** Links [Purchase.clientId] when [clientName] matches exactly one row in clients (case-insensitive). */
@@ -440,6 +442,7 @@ class PurchaseService(
         if (existingPurchase != null) {
             Logger.debug("🔍 [Service] Found existing purchase: $existingPurchase")
             validateManufactureYear(purchase.manufactureYear)?.let { throw IllegalArgumentException(it) }
+            rejectRixoCompanyChangeWhenBookingRequested(existingPurchase, purchase.rixoCompany)
 
             // Merge the new data with existing data, keeping existing values for null fields
             val updatedPurchase = existingPurchase.copy(
@@ -550,6 +553,18 @@ class PurchaseService(
         return null
     }
     
+    /**
+     * A booking-requested or sold car keeps its Rixo company.
+     * A missing incoming value is not a change. Case-only differences are not a change.
+     */
+    private fun rejectRixoCompanyChangeWhenBookingRequested(existing: Purchase, incomingCompany: String?) {
+        if (!PurchaseWorkflowService.isBookingRequested(existing)) return
+        val next = incomingCompany?.trim() ?: return
+        val current = existing.rixoCompany?.trim().orEmpty()
+        if (next.equals(current, ignoreCase = true)) return
+        throw IllegalArgumentException(BOOKING_RIXO_COMPANY_MESSAGE)
+    }
+
     /** Edit-page status radios. A single-field update must not clear workflow. */
     private fun updateDataHasStatusRadios(updateData: Map<String, Any>): Boolean =
         updateData.containsKey("rixoRequested") &&
@@ -578,6 +593,12 @@ class PurchaseService(
         val existingPurchase = purchaseRepository.findById(id).orElse(null)?.let { applyReadAdapters(it) }
         if (existingPurchase != null) {
             Logger.debug("🔍 [Service] Found existing purchase: $existingPurchase")
+            if (updateData.containsKey("rixoCompany")) {
+                rejectRixoCompanyChangeWhenBookingRequested(
+                    existingPurchase,
+                    updateData["rixoCompany"] as? String,
+                )
+            }
             
             // Create a new Purchase object with updated fields
             val updatedPurchase = existingPurchase.copy(
@@ -2917,7 +2938,9 @@ class PurchaseService(
     @Transactional(readOnly = true)
     fun getCostDetailsByChassis(chassis: String): Map<String, Any>? {
         val purchase = getPurchaseByChassis(chassis) ?: return null
-        return purchaseCostLineService.buildCostsByChassisApiMap(purchase)
+        val costs = purchaseCostLineService.buildCostsByChassisApiMap(purchase).toMutableMap()
+        costs["totalCnfPriceUsd"] = purchaseVehicleOverrideService.readTotalCnfPriceUsd(purchase.id)
+        return costs
     }
     
     @Transactional
@@ -2933,7 +2956,8 @@ class PurchaseService(
         repairFee: Double,
         mscCharges: Double,
         profit: Double,
-        isPackageMode: Boolean = false
+        isPackageMode: Boolean = false,
+        totalCnfPriceUsd: String? = null,
     ) {
         val existingPurchases = purchaseRepository.findByChassis(chassis)
         if (existingPurchases.isNotEmpty()) {
@@ -2959,6 +2983,11 @@ class PurchaseService(
                 persistPurchase(updatedPurchase)
                 finalizePurchaseWrite(updatedPurchase)
             }
+            if (totalCnfPriceUsd != null) {
+                existingPurchases.mapNotNull { it.id }.forEach { purchaseId ->
+                    purchaseVehicleOverrideService.setTotalCnfPriceUsd(purchaseId, totalCnfPriceUsd)
+                }
+            }
             purchaseWorkflowService.recomputeByPurchaseIds(existingPurchases.mapNotNull { it.id })
             Logger.debug("Updated cost details for chassis: $chassis (${existingPurchases.size} purchase(s))")
         } else {
@@ -2977,7 +3006,8 @@ class PurchaseService(
         inspectionFee: Double,
         repairFee: Double,
         mscCharges: Double,
-        profit: Double
+        profit: Double,
+        totalCnfPriceUsd: String? = null,
     ) {
         val existingPurchases = purchaseRepository.findByChassis(chassis)
         if (existingPurchases.isNotEmpty()) {
@@ -2998,6 +3028,11 @@ class PurchaseService(
                 )
                 persistPurchase(updatedPurchase)
                 finalizePurchaseWrite(updatedPurchase)
+            }
+            if (totalCnfPriceUsd != null) {
+                existingPurchases.mapNotNull { it.id }.forEach { purchaseId ->
+                    purchaseVehicleOverrideService.setTotalCnfPriceUsd(purchaseId, totalCnfPriceUsd)
+                }
             }
             purchaseWorkflowService.recomputeByPurchaseIds(existingPurchases.mapNotNull { it.id })
             Logger.debug("Updated FOB cost details for chassis: $chassis (${existingPurchases.size} purchase(s))")

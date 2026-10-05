@@ -183,6 +183,50 @@ class PurchaseVehicleOverrideServiceTest {
     }
 
     @Test
+    fun syncFromPurchase_keeps_totalCnfPriceUsd_when_specs_match_map() {
+        val mapping = CarBrandMapping(
+            id = 1L,
+            carBrand = "TOYOTA",
+            chassis = "USDKEEP",
+            fuel = "GASOLINE",
+        )
+        `when`(mappingRepository.findByChassis("USDKEEP")).thenReturn(listOf(mapping))
+        `when`(overrideRepository.findByPurchaseId(12L)).thenReturn(
+            PurchaseVehicleOverride(
+                purchaseId = 12L,
+                overridesJson = """{"fuel":"GASOLINE","totalCnfPriceUsd":"1234.50"}""",
+            ),
+        )
+
+        service.syncFromPurchase(Purchase(id = 12L, chassis = "USDKEEP", fuel = "GASOLINE"))
+
+        val captor = org.mockito.ArgumentCaptor.forClass(PurchaseVehicleOverride::class.java)
+        verify(overrideRepository).save(captor.capture())
+        verify(overrideRepository, never()).delete(any(PurchaseVehicleOverride::class.java))
+        val savedJson = captor.value.overridesJson
+        assertTrue(savedJson.contains("1234.50"), "expected USD amount preserved, got: $savedJson")
+        assertFalse(savedJson.contains("usdRate"))
+    }
+
+    @Test
+    fun setTotalCnfPriceUsd_removes_only_that_key() {
+        `when`(overrideRepository.findByPurchaseId(13L)).thenReturn(
+            PurchaseVehicleOverride(
+                purchaseId = 13L,
+                overridesJson = """{"distance":"42000","totalCnfPriceUsd":"99.00"}""",
+            ),
+        )
+
+        service.setTotalCnfPriceUsd(13L, "  ")
+
+        val captor = org.mockito.ArgumentCaptor.forClass(PurchaseVehicleOverride::class.java)
+        verify(overrideRepository).save(captor.capture())
+        val savedJson = captor.value.overridesJson
+        assertTrue(savedJson.contains("42000"), "expected distance preserved, got: $savedJson")
+        assertFalse(savedJson.contains("totalCnfPriceUsd"), "expected USD key removed, got: $savedJson")
+    }
+
+    @Test
     fun normalize_ignores_case_and_whitespace() {
         assertTrue(PurchaseVehicleOverrideService.normalize(" Gasoline ") == "gasoline")
         assertFalse(PurchaseVehicleOverrideService.normalize("GASOLINE") == "gasoline ")

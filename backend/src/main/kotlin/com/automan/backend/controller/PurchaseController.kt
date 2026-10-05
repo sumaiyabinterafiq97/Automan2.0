@@ -373,13 +373,14 @@ class PurchaseController(
             val mscCharges = (costData["mscCharges"] as? Number)?.toDouble() ?: 0.0
             val profit = (costData["profit"] as? Number)?.toDouble() ?: 0.0
             val isPackageMode = costData["isPackageMode"] as? Boolean ?: false
+            val totalCnfPriceUsd = totalCnfPriceUsdFromBody(costData)
             
             Logger.debug("Received cost data - isPackageMode: $isPackageMode")
             Logger.debug("Full costData: $costData")
             
             purchaseService.saveCarCostDetails(
                 chassis, carPrice, auctionFee, auctionPenaltyFee, rixoPrice, shippingCharge,
-                freight, inspectionFee, repairFee, mscCharges, profit, isPackageMode
+                freight, inspectionFee, repairFee, mscCharges, profit, isPackageMode, totalCnfPriceUsd
             )
             
             ResponseEntity.ok(mapOf("message" to "Car cost details saved successfully", "chassis" to chassis))
@@ -401,16 +402,23 @@ class PurchaseController(
             val repairFee = (costData["repairFee"] as? Number)?.toDouble() ?: 0.0
             val mscCharges = (costData["mscCharges"] as? Number)?.toDouble() ?: 0.0
             val profit = (costData["profit"] as? Number)?.toDouble() ?: 0.0
+            val totalCnfPriceUsd = totalCnfPriceUsdFromBody(costData)
             
             purchaseService.saveFobCarCostDetails(
                 chassis, carPrice, auctionFee, auctionPenaltyFee, rixoPrice, shippingCharge,
-                inspectionFee, repairFee, mscCharges, profit
+                inspectionFee, repairFee, mscCharges, profit, totalCnfPriceUsd
             )
             
             ResponseEntity.ok(mapOf("message" to "FOB cost details saved successfully", "chassis" to chassis))
         } catch (e: Exception) {
             ResponseEntity.status(500).body(mapOf("error" to "Failed to save FOB cost details: ${e.message}"))
         }
+    }
+
+    /** Present or blank clears the stored USD amount. The conversion rate is never read. */
+    private fun totalCnfPriceUsdFromBody(costData: Map<String, Any>): String {
+        if (!costData.containsKey("totalCnfPriceUsd")) return ""
+        return costData["totalCnfPriceUsd"]?.toString()?.trim().orEmpty()
     }
     
     @GetMapping("/sort")

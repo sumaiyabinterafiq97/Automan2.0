@@ -184,6 +184,9 @@ fun createCnfCarExpandedRowInnerHTML(chassis: String, isFobMode: Boolean = false
 
     val freightFieldHTML = if (isFobMode) "" else field("freight", "Freight (¥)")
     val totalLabel = if (isFobMode) "Total FOB Price (¥)" else "Total C&F Price (¥)"
+    val usdTotalLabel = if (isFobMode) "Total FOB Price (USD)" else "Total C&F Price (USD)"
+    val usdRateId = cnfFieldDomId(chassis, "usdRate")
+    val usdTotalId = cnfFieldDomId(chassis, "totalCnfPriceUsd")
     
     return """
                 <td colspan="7">
@@ -230,6 +233,17 @@ fun createCnfCarExpandedRowInnerHTML(chassis: String, isFobMode: Boolean = false
                                     </button>
                                 </div>
                                 <div class="cnf-expanded-total-value red" data-chassis="$chassis" data-type="expense" aria-live="polite">¥0</div>
+                            </div>
+                            <div class="cnf-total-box">
+                                <label class="cnf-total-box-label" for="$usdRateId">USD Rate</label>
+                                <input type="text" id="$usdRateId" data-field="usdRate" data-chassis="$chassis" value="" placeholder="e.g. 150" inputmode="decimal" class="money-input cnf-usd-rate-input" aria-label="USD Rate" autocomplete="off">
+                            </div>
+                            <div class="cnf-total-box">
+                                <label class="cnf-total-box-label" for="$usdTotalId">$usdTotalLabel</label>
+                                <div class="input-with-prefix">
+                                    <span aria-hidden="true">$</span>
+                                    <input type="text" id="$usdTotalId" data-field="totalCnfPriceUsd" data-chassis="$chassis" value="" placeholder="" inputmode="decimal" class="money-input cnf-usd-total-input" aria-label="$usdTotalLabel" autocomplete="off">
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -351,6 +365,7 @@ private fun mergeSavedCostsIntoCnfPageCar(
     mscCharges: Double,
     profit: Double,
     isFobMode: Boolean,
+    totalCnfPriceUsd: String,
 ) {
     val idx = cnfPageSelectedCars.indexOfFirst { it.chassis?.toString() == chassis }
     if (idx < 0) return
@@ -376,6 +391,7 @@ private fun mergeSavedCostsIntoCnfPageCar(
     p.miscCharges = mscCharges
     p.misc_charges = mscCharges
     p.profit = profit
+    p.totalCnfPriceUsd = totalCnfPriceUsd
 }
 
 fun setCnfRowSavedIndicator(chassis: String, saved: Boolean) {
@@ -571,6 +587,7 @@ fun populateCnfExpandedFields(chassis: String, isFobMode: Boolean) {
         input?.value = cnfMoneyFieldDisplay(value)
     }
     
+    applyCnfUsdTotalField(expandedRow, jsDynamicText(purchase.totalCnfPriceUsd))
     // Update totals; recapture lock target from freshly populated expense (default locked).
     updateCnfExpandedTotals(chassis, isFobMode, changedField = null, recaptureLockTarget = true)
     syncCnfExpenseLockButton(chassis)
@@ -595,6 +612,16 @@ fun setupCnfExpandedFieldListeners(chassis: String, isFobMode: Boolean) {
         ev.preventDefault()
         ev.stopPropagation()
         toggleCnfExpenseLock(chassis, isFobMode)
+    })
+
+    val rateInput = expandedRow.querySelector("input[data-field=\"usdRate\"]") as? HTMLInputElement
+    val usdInput = expandedRow.querySelector("input[data-field=\"totalCnfPriceUsd\"]") as? HTMLInputElement
+    rateInput?.addEventListener("input", { _: Event ->
+        usdInput?.removeAttribute("data-usd-manual")
+        refreshCnfUsdFromRate(chassis)
+    })
+    usdInput?.addEventListener("input", { _: Event ->
+        usdInput.setAttribute("data-usd-manual", "true")
     })
     syncCnfExpenseLockButton(chassis)
 }
@@ -714,6 +741,47 @@ fun updateCnfExpandedTotals(
     val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement
     val mainRow = tbody?.querySelector("tr.cnf-table-row[data-chassis=\"$chassis\"]")
     mainRow?.querySelector(".cnf-total-display")?.textContent = formatYenTotal(totalPrice)
+    refreshCnfUsdFromRate(chassis)
+}
+
+/** Fill Total price (USD) from yen ÷ rate until the user types the USD amount. An empty rate leaves the box unchanged. */
+private fun refreshCnfUsdFromRate(chassis: String) {
+    val expandedRow = cnfDetailRowForChassis(chassis) ?: return
+    val usdInput = expandedRow.querySelector("input[data-field=\"totalCnfPriceUsd\"]") as? HTMLInputElement ?: return
+    if (usdInput.getAttribute("data-usd-manual") == "true") return
+    val rateInput = expandedRow.querySelector("input[data-field=\"usdRate\"]") as? HTMLInputElement ?: return
+    val rate = parseCurrency(rateInput.value)
+    if (rate <= 0.0) return
+    val yenText = expandedRow.querySelector(".cnf-expanded-total-value[data-type=\"total\"]")?.textContent ?: return
+    usdInput.value = formatUsdAmount(parseCurrency(yenText) / rate)
+}
+
+private fun applyCnfUsdTotalField(expandedRow: HTMLElement, savedUsd: String) {
+    val usdInput = expandedRow.querySelector("input[data-field=\"totalCnfPriceUsd\"]") as? HTMLInputElement ?: return
+    val rateInput = expandedRow.querySelector("input[data-field=\"usdRate\"]") as? HTMLInputElement
+    rateInput?.value = ""
+    val trimmed = savedUsd.trim()
+    if (trimmed.isEmpty()) {
+        usdInput.value = ""
+        usdInput.removeAttribute("data-usd-manual")
+    } else {
+        usdInput.value = trimmed
+        usdInput.setAttribute("data-usd-manual", "true")
+    }
+}
+
+private fun jsDynamicText(value: dynamic): String {
+    if (value == null || value == js("undefined")) return ""
+    return value.toString().trim()
+}
+
+private fun formatUsdAmount(amount: Double): String {
+    val cents = kotlin.math.round(amount * 100.0).toLong()
+    val negative = cents < 0
+    val absCents = kotlin.math.abs(cents)
+    val whole = absCents / 100
+    val frac = (absCents % 100).toString().padStart(2, '0')
+    return "${if (negative) "-" else ""}$whole.$frac"
 }
 
 fun saveCnfCarCosts(chassis: String, isFobMode: Boolean) {
@@ -739,6 +807,10 @@ fun saveCnfCarCosts(chassis: String, isFobMode: Boolean) {
     val repairFee = fieldDouble("repairFee")
     val mscCharges = fieldDouble("mscCharges")
     val profit = fieldDouble("profit")
+    val totalCnfPriceUsd = (expandedRow.querySelector("input[data-field=\"totalCnfPriceUsd\"]") as? HTMLInputElement)
+        ?.value
+        ?.trim()
+        .orEmpty()
     
     val url = if (isFobMode) apiUrl("purchases/save-fob-costs") else apiUrl("purchases/save-costs")
     
@@ -756,6 +828,7 @@ fun saveCnfCarCosts(chassis: String, isFobMode: Boolean) {
     if (!isFobMode) {
         bodyObj.freight = freight
     }
+    bodyObj.totalCnfPriceUsd = totalCnfPriceUsd
     
     val requestInit = js("{}")
     requestInit.method = "PUT"
@@ -788,6 +861,7 @@ fun saveCnfCarCosts(chassis: String, isFobMode: Boolean) {
                 mscCharges,
                 profit,
                 isFobMode,
+                totalCnfPriceUsd,
             )
             saveCnfFormStateForChassis(chassis)
             updateCnfMainRowCarPriceCell(chassis, carPrice)
@@ -865,6 +939,7 @@ fun loadCnfCarCostData(car: dynamic, chassis: String, isFobMode: Boolean) {
                     updated.repairCharges = costData.repairFee
                     updated.miscCharges = costData.mscCharges
                     updated.profit = costData.profit
+                    updated.totalCnfPriceUsd = jsDynamicText(costData.totalCnfPriceUsd)
                     val loadedCarPrice = cnfNumericFromPayload(costData.carPrice)
                     updateCnfMainRowCarPriceCell(chassis, loadedCarPrice)
                     val detailRow = cnfDetailRowForChassis(chassis) as? HTMLElement
@@ -872,6 +947,8 @@ fun loadCnfCarCostData(car: dynamic, chassis: String, isFobMode: Boolean) {
                     if (collapsed) {
                         populateCnfExpandedFields(chassis, isFobMode)
                     } else {
+                        val openRow = cnfDetailRowForChassis(chassis)
+                        if (openRow != null) applyCnfUsdTotalField(openRow, jsDynamicText(costData.totalCnfPriceUsd))
                         updateCnfExpandedTotals(chassis, isFobMode)
                     }
                 }

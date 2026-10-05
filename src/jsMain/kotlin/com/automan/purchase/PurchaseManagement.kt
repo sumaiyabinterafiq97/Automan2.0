@@ -784,11 +784,18 @@ private fun purchaseStoredSpecValue(purchase: dynamic, key: String): String {
  * only the value stored on the purchase (blank when inherited). Scoped to the Purchase List
  * table + card view; sorting, the Rixo table, and other consumers keep using the merged value.
  */
+private fun purchaseListCalendarDateColumn(columnKey: String): Boolean =
+    columnKey == "date" || columnKey == "paymentDate" || columnKey == "shipmentDate"
+
 private fun purchaseListCellValue(purchase: dynamic, columnKey: String): String {
     if (columnKey in purchaseListStoredOnlySpecColumns) {
         return purchaseStoredSpecValue(purchase, columnKey)
     }
-    return purchaseTableCellValue(purchase, columnKey)
+    val value = purchaseTableCellValue(purchase, columnKey)
+    if (purchaseListCalendarDateColumn(columnKey)) {
+        return formatPurchaseListYmdWeekday(value)
+    }
+    return value
 }
 
 private fun purchaseComparableDateTs(p: dynamic, field: String): Long? {
@@ -872,6 +879,56 @@ private fun isoLocalOffsetDays(daysOffset: Int): String {
     val m = (d.getMonth() as Int) + 1
     val day = d.getDate() as Int
     return y.toString() + "-" + m.toString().padStart(2, '0') + "-" + day.toString().padStart(2, '0')
+}
+
+/** Shift a yyyy-MM-dd calendar day by [daysOffset] without using UTC midnight. */
+private fun isoShiftLocalDays(iso: String, daysOffset: Int): String {
+    val parts = iso.trim().split("-")
+    if (parts.size != 3) return iso
+    val year = parts[0].toIntOrNull() ?: return iso
+    val month = parts[1].toIntOrNull() ?: return iso
+    val day = parts[2].toIntOrNull() ?: return iso
+    val d = js("new Date()").unsafeCast<dynamic>()
+    d.setFullYear(year, month - 1, day)
+    d.setDate(d.getDate() + daysOffset)
+    val y = d.getFullYear() as Int
+    val m = (d.getMonth() as Int) + 1
+    val shiftedDay = d.getDate() as Int
+    return y.toString() + "-" + m.toString().padStart(2, '0') + "-" + shiftedDay.toString().padStart(2, '0')
+}
+
+/** Single-day filter when one is active; otherwise today, so the first << is yesterday. */
+private fun purchaseDateStepperAnchorIso(): String {
+    val start = purchaseDateFilterStartIso.trim()
+    val end = purchaseDateFilterEndIso.trim()
+    if (purchaseDateFilterActive && start.isNotEmpty() && start == end && isoToLocalDayRangeTimestamps(start) != null) {
+        return start
+    }
+    return isoLocalToday()
+}
+
+private fun refreshPurchaseDateStepperLabel() {
+    val label = document.getElementById("purchaseDateQuickStepperLabel") ?: return
+    val day = purchaseDateStepperAnchorIso()
+    val shown = formatPurchaseListYmdWeekday(day).replace("(", " (")
+    label.textContent = shown
+    val next = document.getElementById("purchaseDateQuickNextBtn") as? HTMLButtonElement
+    val atToday = day >= isoLocalToday()
+    next?.disabled = atToday
+    next?.title = if (atToday) "Already on today" else "Next day"
+}
+
+private fun applyPurchaseDateStepperDay(iso: String) {
+    val today = isoLocalToday()
+    val day = if (iso > today) today else iso
+    syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", day)
+    syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", day)
+    applyPurchaseDateFilterRange(day, day)
+    refreshPurchaseDateStepperLabel()
+    val btn = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
+    if (btn != null && window.asDynamic().__purchaseDateQuickFilterMenuOpen == true) {
+        positionPurchaseDateQuickFilterMenu(btn)
+    }
 }
 
 private fun isoLocalThisMonthStart(): String {
@@ -991,13 +1048,19 @@ private fun restorePurchaseListFilterUi() {
     syncPurchaseDateQuickFilterRangeUiFromState()
 }
 
-private const val PURCHASE_DATE_QUICK_FILTER_MENU_WIDTH_PX = 280.0
+private const val PURCHASE_DATE_QUICK_FILTER_MENU_WIDTH_PX = 360.0
 
 private fun purchaseDateQuickFilterMenuPortalHtml(): String = """
     <div id="purchaseDateQuickFilterMenu" class="purchase-date-quick-filter-menu" style="display: none;" role="dialog" aria-label="Filter by purchase date">
+        <div class="purchase-date-quick-filter-menu__stepper">
+            <div class="purchase-date-quick-filter-menu__stepper-actions">
+                <button type="button" id="purchaseDateQuickPrevBtn" aria-label="Previous day" title="Previous day">&lt;&lt;</button>
+                <button type="button" id="purchaseDateQuickTodayBtn">Today</button>
+                <button type="button" id="purchaseDateQuickNextBtn" aria-label="Next day" title="Next day">&gt;&gt;</button>
+            </div>
+            <span id="purchaseDateQuickStepperLabel" class="purchase-date-quick-filter-menu__stepper-date"></span>
+        </div>
         <div class="purchase-date-quick-filter-menu__quick-row">
-            <button type="button" id="purchaseDateQuickTodayBtn">Today</button>
-            <button type="button" id="purchaseDateQuickYesterdayBtn">Yesterday</button>
             <button type="button" id="purchaseDateQuickLast7Btn">Last 7 days</button>
             <button type="button" id="purchaseDateQuickThisMonthBtn">This month</button>
             <button type="button" id="purchaseDateQuickClearBtn" class="is-muted">Clear</button>
@@ -1152,6 +1215,7 @@ private fun clearPurchaseDateQuickFilterInputs() {
 private fun syncPurchaseDateQuickFilterRangeUiFromState() {
     syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", purchaseDateFilterStartIso)
     syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", purchaseDateFilterEndIso)
+    refreshPurchaseDateStepperLabel()
 }
 
 /**
@@ -1204,19 +1268,16 @@ private fun setupPurchaseDateQuickFilterMenuPortal() {
                 }
                 closeAfterAction()
             }
-            target.id == "purchaseDateQuickTodayBtn" || target.closest("#purchaseDateQuickTodayBtn") != null -> {
-                val today = isoLocalToday()
-                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", today)
-                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", today)
-                applyPurchaseDateFilterRange(today, today)
-                closeAfterAction()
+            target.id == "purchaseDateQuickPrevBtn" || target.closest("#purchaseDateQuickPrevBtn") != null -> {
+                applyPurchaseDateStepperDay(isoShiftLocalDays(purchaseDateStepperAnchorIso(), -1))
             }
-            target.id == "purchaseDateQuickYesterdayBtn" || target.closest("#purchaseDateQuickYesterdayBtn") != null -> {
-                val yesterday = isoLocalOffsetDays(-1)
-                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterFrom", yesterday)
-                syncPurchaseDateQuickFilterFieldFromIso("purchaseDateQuickFilterTo", yesterday)
-                applyPurchaseDateFilterRange(yesterday, yesterday)
-                closeAfterAction()
+            target.id == "purchaseDateQuickTodayBtn" || target.closest("#purchaseDateQuickTodayBtn") != null -> {
+                applyPurchaseDateStepperDay(isoLocalToday())
+            }
+            target.id == "purchaseDateQuickNextBtn" || target.closest("#purchaseDateQuickNextBtn") != null -> {
+                val nextBtn = document.getElementById("purchaseDateQuickNextBtn") as? HTMLButtonElement
+                if (nextBtn?.disabled == true) return@addEventListener
+                applyPurchaseDateStepperDay(isoShiftLocalDays(purchaseDateStepperAnchorIso(), 1))
             }
             target.id == "purchaseDateQuickLast7Btn" || target.closest("#purchaseDateQuickLast7Btn") != null -> {
                 val end = isoLocalToday()
@@ -1265,6 +1326,14 @@ private fun setupPurchaseDateQuickFilterMenuPortal() {
         }
         window.addEventListener("resize", { _: Event -> repositionOpenMenu() })
         window.addEventListener("scroll", { _: Event -> repositionOpenMenu() }, true)
+    }
+
+    if (window.asDynamic().__purchaseDateQuickFilterMenuOpen == true) {
+        val btn = document.getElementById("purchaseDateQuickFilterBtn") as? HTMLElement
+        if (btn != null) {
+            positionPurchaseDateQuickFilterMenu(btn)
+            btn.setAttribute("aria-expanded", "true")
+        }
     }
 }
 
@@ -4450,13 +4519,16 @@ fun displayPurchasesWithPagination() {
     
     val tableHTML = StringBuilder()
         val emptyMinWidth = purchaseListTableMinWidthPx(selectedColumns, columnLabels, includeAction = false)
-        tableHTML.append("""<div class="purchase-list-table-shell"><table class="purchase-list-table" style="width: 100%; min-width: ${emptyMinWidth}px; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupPurchaseList(selectedColumns, columnLabels, includeAction = false)}""")
+        tableHTML.append("""<div class="purchase-list-table-shell"><table class="purchase-list-table" style="width: 100%; min-width: ${emptyMinWidth}px; border-collapse: collapse; table-layout: auto;">${htmlTableColgroupPurchaseList(selectedColumns, columnLabels, includeAction = false)}""")
         tableHTML.append("<thead><tr>")
         
         for (columnKey in selectedColumns) {
             val label = columnLabels[columnKey] ?: columnKey
             if (columnKey == "date") {
                 tableHTML.append(purchaseDateQuickFilterHeaderCellHtml(label))
+            } else if (columnKey == "chassis") {
+                val sort = if (sortableFields.contains(columnKey)) purchaseSortButtonHtml(columnKey, label) else label
+                tableHTML.append("""<th class="purchase-list-chassis-th">$sort</th>""")
             } else if (sortableFields.contains(columnKey)) {
                 tableHTML.append("<th>${purchaseSortButtonHtml(columnKey, label)}</th>")
             } else {
@@ -4503,7 +4575,7 @@ fun displayPurchasesWithPagination() {
     val purchaseMinWidth = purchaseListTableMinWidthPx(selectedColumns, columnLabels, includeAction = true)
     tableHTML.append("""
         <div class="purchase-list-table-shell">
-        <table class="purchase-list-table" style="width: 100%; min-width: ${purchaseMinWidth}px; border-collapse: collapse; table-layout: fixed;">${htmlTableColgroupPurchaseList(selectedColumns, columnLabels, includeAction = true)}
+        <table class="purchase-list-table" style="width: 100%; min-width: ${purchaseMinWidth}px; border-collapse: collapse; table-layout: auto;">${htmlTableColgroupPurchaseList(selectedColumns, columnLabels, includeAction = true)}
             <thead>
                 <tr>
                     <th style="width: ${PURCHASE_LIST_ACTION_COL_PX}px;"></th>
@@ -4513,6 +4585,9 @@ fun displayPurchasesWithPagination() {
         val label = columnLabels[columnKey] ?: columnKey
         if (columnKey == "date") {
             tableHTML.append(purchaseDateQuickFilterHeaderCellHtml(label))
+        } else if (columnKey == "chassis") {
+            val sort = if (sortableFields.contains(columnKey)) purchaseSortButtonHtml(columnKey, label) else label
+            tableHTML.append("""<th class="purchase-list-chassis-th">$sort</th>""")
         } else if (sortableFields.contains(columnKey)) {
             tableHTML.append("<th>${purchaseSortButtonHtml(columnKey, label)}</th>")
         } else {
@@ -4561,11 +4636,15 @@ fun displayPurchasesWithPagination() {
             val raw = cellValue.toString().trim()
             val cellHtml = when {
                 raw.isEmpty() -> ""
-                columnKey == "date" -> purchaseListDateCellHtml(raw)
+                purchaseListCalendarDateColumn(columnKey) -> purchaseListDateCellHtml(raw)
                 else -> escapeHtml(raw)
             }
-            val tdClass = if (columnKey == "date") """ class="purchase-list-date-td"""" else ""
-            val tdTitle = if (raw.isNotEmpty() && columnKey != "date") """ title="${escapeHtml(raw)}"""" else ""
+            val tdClass = when {
+                purchaseListCalendarDateColumn(columnKey) -> """ class="purchase-list-date-td""""
+                columnKey == "chassis" -> """ class="purchase-list-chassis-td""""
+                else -> ""
+            }
+            val tdTitle = if (raw.isNotEmpty() && !purchaseListCalendarDateColumn(columnKey)) """ title="${escapeHtml(raw)}"""" else ""
             tableHTML.append("""<td$tdClass$tdTitle>$cellHtml</td>""")
         }
         
@@ -4687,12 +4766,12 @@ fun displayPurchasesAsCards() {
             val isValueNotEmpty = valueStr.length > 0 && valueStr.trim().length > 0
             
             if (isValueNotEmpty) {
-                val cellDisplay = if (columnKey == "date") {
+                val cellDisplay = if (purchaseListCalendarDateColumn(columnKey)) {
                     purchaseListDateCellHtml(valueStr.trim())
                 } else {
                     escapeHtml(valueStr.trim())
                 }
-                val valueClass = if (columnKey == "date") "card-value purchase-list-date-td" else "card-value"
+                val valueClass = if (purchaseListCalendarDateColumn(columnKey)) "card-value purchase-list-date-td" else "card-value"
                 cardFields.append("""
                     <div class="card-field">
                         <span class="card-label">$label:</span>
@@ -4934,6 +5013,7 @@ fun showColumnFilterModal() {
     })
     document.getElementById("resetColumns")?.addEventListener("click", { _: Event ->
         resetToDefaultColumns()
+        returnFocus?.focus()
     })
     document.getElementById("applyColumns")?.addEventListener("click", { _: Event ->
         applyColumnChanges()

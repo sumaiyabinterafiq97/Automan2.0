@@ -154,18 +154,37 @@ class RixoHistoryController(
     }
 
     /**
+     * Move one chassis off [historyId] onto the same buying date under a new Rixo company.
+     * Company and price are already saved on the purchase. This only splits the history row.
+     */
+    @PostMapping("/move-chassis")
+    fun moveChassis(@RequestBody body: Map<String, Any>): ResponseEntity<Any> {
+        return try {
+            val historyId = parseHistoryId(body["historyId"])
+                ?: return ResponseEntity.badRequest().body(mapOf("error" to "historyId is required"))
+            val chassisToken = (body["chassisToken"] as? String)?.trim().orEmpty()
+            if (chassisToken.isEmpty()) {
+                return ResponseEntity.badRequest().body(mapOf("error" to "chassisToken is required"))
+            }
+            val rixoCompany = (body["rixoCompany"] as? String)?.trim().orEmpty()
+            if (rixoCompany.isEmpty()) {
+                return ResponseEntity.badRequest().body(mapOf("error" to "rixoCompany is required"))
+            }
+            ResponseEntity.ok(rixoHistoryService.moveChassisToCompany(historyId, chassisToken, rixoCompany))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.status(HttpStatus.BAD_REQUEST).body(mapOf("error" to (e.message ?: "Bad request")))
+        }
+    }
+
+    /**
      * Remove one chassis token from a stored history row (`chassis` is `;`-separated segments).
      * Downgrades purchases when the chassis disappears from **all** Rixo history rows.
      */
     @PostMapping("/remove-chassis")
     fun removeChassis(@RequestBody body: Map<String, Any>): ResponseEntity<Any> {
         return try {
-            val historyIdRaw = body["historyId"]
-            val historyId = when (historyIdRaw) {
-                is Number -> historyIdRaw.toLong()
-                is String -> historyIdRaw.toLongOrNull()
-                else -> null
-            } ?: return ResponseEntity.badRequest().body(mapOf("error" to "historyId is required"))
+            val historyId = parseHistoryId(body["historyId"])
+                ?: return ResponseEntity.badRequest().body(mapOf("error" to "historyId is required"))
             val chassisToken = (body["chassisToken"] as? String)?.trim().orEmpty()
             if (chassisToken.isEmpty()) {
                 return ResponseEntity.badRequest().body(mapOf("error" to "chassisToken is required"))
@@ -174,6 +193,12 @@ class RixoHistoryController(
         } catch (e: IllegalArgumentException) {
             ResponseEntity.status(HttpStatus.BAD_REQUEST).body(mapOf("error" to (e.message ?: "Bad request")))
         }
+    }
+
+    private fun parseHistoryId(raw: Any?): Long? = when (raw) {
+        is Number -> raw.toLong()
+        is String -> raw.toLongOrNull()
+        else -> null
     }
 
     private fun parseChassisConfirmItems(raw: Any?): List<Pair<Long, String>> {

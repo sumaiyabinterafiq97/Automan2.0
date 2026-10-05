@@ -4845,7 +4845,7 @@ function __restoreSupplierFormFromMasterSync(snap) {
             }
             aucSel.value = auction;
             if (aucInp) aucInp.value = auction;
-            if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(auctionId);
+            if (typeof window.syncComboboxInput === 'function') window.syncComboboxInput(auctionId, { suppressCascade: true });
         }
         snap.auction = auction;
         if (typeof window.rebuildSupplierDependentDropdowns === 'function') {
@@ -5329,6 +5329,159 @@ window.findRixoPriceFromSupplierSelection = function(sel, auctionName) {
     return null;
 };
 
+/** Distinct Rixo prices for supplier + stock + company when vehicle type is not set. */
+window.listDistinctRixoPricesForSupplierSelection = function(sel, auctionName, options) {
+    sel = sel || {};
+    options = options || {};
+    var matchSel = {
+        stockLocation: sel.stockLocation || sel.stock || '',
+        venueId: sel.venueId || sel.venue || '',
+        pol: sel.pol || '',
+        rixoCompany: sel.rixoCompany || sel.rixo || ''
+    };
+    var found = [];
+    function priceKey(priceRaw) {
+        var numeric = (typeof window.parseRixoPrice === 'function')
+            ? window.parseRixoPrice(priceRaw)
+            : String(priceRaw).replace(/[¥,\s]/g, '').replace(/[^0-9.]/g, '');
+        if (numeric) return String(numeric);
+        return String(priceRaw || '').trim().toLowerCase();
+    }
+    function vehicleLabel(raw) {
+        var tokens = (typeof window.splitSupplierSemicolonTokens === 'function')
+            ? window.splitSupplierSemicolonTokens(raw)
+            : String(raw || '').split(';');
+        for (var i = 0; i < tokens.length; i++) {
+            var token = String(tokens[i] || '').trim();
+            if (token && token !== '-') return token;
+        }
+        return '-';
+    }
+    function add(priceRaw, vtRaw) {
+        if (priceRaw == null || String(priceRaw).trim() === '') return;
+        var key = priceKey(priceRaw);
+        if (!key) return;
+        for (var i = 0; i < found.length; i++) {
+            if (found[i].key === key) return;
+        }
+        found.push({
+            key: key,
+            priceRaw: String(priceRaw).trim(),
+            label: vehicleLabel(vtRaw)
+        });
+    }
+    function consider(row) {
+        if (!row || typeof window.rowMatchesSupplierSelection !== 'function') return;
+        if (!window.rowMatchesSupplierSelection(row, matchSel)) return;
+        add(row.rixoPrice, row.supportedVehicleType || row.shipmentSize || row.typeOfVehicle || '');
+    }
+    var rows = window.__tempSupplierRows;
+    if (rows && Array.isArray(rows)) {
+        for (var i = 0; i < rows.length; i++) consider(rows[i]);
+    }
+    var auction = (auctionName || '').trim();
+    if (!options.rowsOnly && auction && window.rixoPriceMapping) {
+        var normalized = typeof normalizeAuctionNameForMapping === 'function'
+            ? normalizeAuctionNameForMapping(auction) : auction;
+        var keys = Object.keys(window.rixoPriceMapping);
+        var key = keys.find(function(k) { return k.toLowerCase() === normalized.toLowerCase(); }) || normalized;
+        var mappings = window.rixoPriceMapping[key] && window.rixoPriceMapping[key].mappings;
+        if (mappings && mappings.length) {
+            for (var m = 0; m < mappings.length; m++) {
+                var map = mappings[m];
+                consider({
+                    stockLocation: map.stockLocation,
+                    venueId: map.venueId,
+                    pol: map.pol,
+                    rixoCompany: map.rixoCompany,
+                    supportedVehicleType: map.typeOfVehicle || map.shipmentSize,
+                    rixoPrice: map.rixoPrice
+                });
+            }
+        }
+    }
+    return found;
+};
+
+/**
+ * Prices for a new Rixo company on an existing car. Uses live mapping rows only.
+ * Resolves the price string, or null when there is no mapping or the chooser is cancelled.
+ */
+window.resolveRixoPriceAfterCompanyChange = function(purchase, newCompany) {
+    return new Promise(function(resolve) {
+        purchase = purchase || {};
+        var company = String(newCompany || '').trim();
+        var auction = String(purchase.auctionHouse || purchase.auctionName || '').trim();
+        var stock = String(purchase.stockLocation || '').trim();
+        var venue = String(purchase.venueId || '').trim();
+        var vehicleType = String(purchase.shipmentSize || purchase.supportedVehicleType || '').trim();
+        if (!auction || !stock || !company) {
+            resolve(null);
+            return;
+        }
+        var path = 'rixo-mapping/by-auction?auctionName=' + encodeURIComponent(auction);
+        var url = (typeof window.apiUrl === 'function') ? window.apiUrl(path) : ('/api/' + path);
+        window.fetch(url).then(function(resp) {
+            if (!resp || !resp.ok) return null;
+            return resp.json();
+        }).then(function(body) {
+            var rows = (body && body.data && Array.isArray(body.data)) ? body.data : [];
+            var prev = window.__tempSupplierRows;
+            window.__tempSupplierRows = rows;
+            var priceChoices = window.listDistinctRixoPricesForSupplierSelection({
+                stockLocation: stock,
+                venueId: venue,
+                rixoCompany: company
+            }, auction, { rowsOnly: true });
+            window.__tempSupplierRows = prev;
+            var typeWanted = vehicleType && vehicleType !== '-' ? vehicleType.toLowerCase() : '';
+            if (typeWanted) {
+                var typeMatches = [];
+                for (var i = 0; i < priceChoices.length; i++) {
+                    if (String(priceChoices[i].label || '').trim().toLowerCase() === typeWanted) {
+                        typeMatches.push(priceChoices[i]);
+                    }
+                }
+                if (typeMatches.length === 1) {
+                    resolve(typeMatches[0].priceRaw);
+                    return;
+                }
+            }
+            if (priceChoices.length === 1) {
+                resolve(priceChoices[0].priceRaw);
+                return;
+            }
+            if (priceChoices.length < 2 || typeof window.showFieldSelectionModal !== 'function') {
+                resolve(null);
+                return;
+            }
+            var priceByLabel = {};
+            var modalOptions = priceChoices.map(function(item) {
+                var label = item.label || '-';
+                if (Object.prototype.hasOwnProperty.call(priceByLabel, label)) {
+                    label = label + ' ' + (typeof window.formatRixoPriceForModalDisplay === 'function'
+                        ? window.formatRixoPriceForModalDisplay(item.priceRaw)
+                        : item.priceRaw);
+                }
+                priceByLabel[label] = item.priceRaw;
+                var shown = (typeof window.formatRixoPriceForModalDisplay === 'function')
+                    ? window.formatRixoPriceForModalDisplay(item.priceRaw)
+                    : item.priceRaw;
+                return { value: label, price: shown };
+            });
+            window.showFieldSelectionModal('Supplier: ' + auction, 'Rixo Price', modalOptions).then(function(chosen) {
+                if (chosen == null || !Object.prototype.hasOwnProperty.call(priceByLabel, chosen)) {
+                    resolve(null);
+                    return;
+                }
+                resolve(priceByLabel[chosen]);
+            });
+        }).catch(function() {
+            resolve(null);
+        });
+    });
+};
+
 window.applyRixoPriceToInput = function(isEditForm, priceRaw, inputIdOverride) {
     if (!priceRaw) return false;
     var inputId = inputIdOverride || (isEditForm ? 'editRixoPriceInput' : 'rixoPriceInput');
@@ -5404,6 +5557,7 @@ window.autofillRixoPriceFromMapping = function(isEditForm, options) {
         auctionNameId = 'qpAuctionName';
         stockLocationId = 'qpStockLocation';
         rixoCompanyId = 'qpRixoCompany';
+        vehicleTypeId = 'qpShipmentSize';
     }
 
     if (window.__editPurchaseHydrating === true && !options.force) return;
@@ -5423,6 +5577,9 @@ window.autofillRixoPriceFromMapping = function(isEditForm, options) {
     var rixoCompany = (fields.rixoCompany || (window.getComboboxValue ? window.getComboboxValue(rixoCompanyId) : '') || '').toString().trim();
     var vehicleType = (fields.supportedVehicleType || fields.vehicleType ||
         (window.getComboboxValue ? window.getComboboxValue(vehicleTypeId) : '') || '').toString().trim();
+    if (inputIdOverride === 'qpRixoPrice' && !vehicleType) {
+        vehicleType = String(window.__qpChassisVehicleType || '').trim();
+    }
 
     if (!auctionName || !stockLocation || !rixoCompany) return;
 
@@ -5435,6 +5592,50 @@ window.autofillRixoPriceFromMapping = function(isEditForm, options) {
         rixoCompany: rixoCompany,
         supportedVehicleType: vehicleType
     };
+
+    if (typeof window.listDistinctRixoPricesForSupplierSelection === 'function') {
+        var priceChoices = window.listDistinctRixoPricesForSupplierSelection(lookupSel, auctionName);
+        var typeWanted = vehicleType && vehicleType !== '-' ? vehicleType.toLowerCase() : '';
+        if (typeWanted) {
+            var typeMatches = [];
+            for (var pi = 0; pi < priceChoices.length; pi++) {
+                if (String(priceChoices[pi].label || '').trim().toLowerCase() === typeWanted) {
+                    typeMatches.push(priceChoices[pi]);
+                }
+            }
+            if (typeMatches.length === 1) {
+                window.applyRixoPriceToInput(isEditForm, typeMatches[0].priceRaw, inputIdOverride);
+                return;
+            }
+        }
+        if (priceChoices.length > 1) {
+            var formScope = inputIdOverride === 'qpRixoPrice' ? 'qp' : (isEditForm ? 'edit' : 'add');
+            var choiceKey = [auctionName, stockLocation, rixoCompany].join('|').toLowerCase();
+            window.__rixoPriceChoiceByForm = window.__rixoPriceChoiceByForm || {};
+            if (window.__rixoPriceChoiceByForm[formScope] === choiceKey) return;
+            window.__rixoPriceChoiceByForm[formScope] = choiceKey;
+            if (typeof window.showFieldSelectionModal !== 'function') return;
+            var priceByLabel = {};
+            var modalOptions = priceChoices.map(function(item) {
+                var label = item.label || '-';
+                if (Object.prototype.hasOwnProperty.call(priceByLabel, label)) {
+                    label = label + ' ' + (typeof window.formatRixoPriceForModalDisplay === 'function'
+                        ? window.formatRixoPriceForModalDisplay(item.priceRaw)
+                        : item.priceRaw);
+                }
+                priceByLabel[label] = item.priceRaw;
+                var shown = (typeof window.formatRixoPriceForModalDisplay === 'function')
+                    ? window.formatRixoPriceForModalDisplay(item.priceRaw)
+                    : item.priceRaw;
+                return { value: label, price: shown };
+            });
+            window.showFieldSelectionModal('Supplier: ' + auctionName, 'Rixo Price', modalOptions).then(function(chosen) {
+                if (chosen == null || !Object.prototype.hasOwnProperty.call(priceByLabel, chosen)) return;
+                window.applyRixoPriceToInput(isEditForm, priceByLabel[chosen], inputIdOverride);
+            });
+            return;
+        }
+    }
 
     var cached = window.findRixoPriceFromSupplierSelection(lookupSel, auctionName);
     if (cached && window.applyRixoPriceToInput(isEditForm, cached, inputIdOverride)) return;

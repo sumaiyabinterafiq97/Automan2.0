@@ -767,7 +767,7 @@ fun showCarBookingPage() {
                         
                         <!-- POL (editable after stock; not used for list filtering) -->
                         <div class="booking-form-group">
-                            <label id="bookingPolLabel">POL <span class="booking-req" aria-hidden="true">*</span></label>
+                            <label id="bookingPolLabel">POL</label>
                             <div class="booking-fab-field rixo-company-fab-wrap" id="bookingPolFabWrap">
                                 <select id="polPort" class="rixo-company-fab-native-select" tabindex="-1" aria-hidden="true">
                                     <option value="">Select Port of Loading</option>
@@ -1658,10 +1658,6 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
         }
         val polForCalc = (document.getElementById("polPort") as? HTMLSelectElement)?.value?.trim().orEmpty()
             .ifEmpty { bookingDynString(carBookingFormState.polPort) }
-        if (polForCalc.isEmpty()) {
-            showMessage("Please select POL before calculating", "error")
-            return@addEventListener
-        }
 
         val selectedCars = getSelectedCarsFromTable()
         Logger.debug("Selected cars for calculation: ${selectedCars.size}")
@@ -2730,8 +2726,11 @@ fun updateSelectedPurchasesWithBookingData(
         payload["pod"] = destination
         // CONSIGNEE → consignee (name only; no "Country - " prefix — see consigneeNameWithoutCountryPrefix)
         payload["consignee"] = consigneeNameWithoutCountryPrefix(consignee)
-        // POL → purchases.pol (Calculate write-back for Purchase List)
-        payload["pol"] = pol.trim()
+        // POL → purchases.pol only when chosen. A blank value is omitted so a saved port stays.
+        val polTrimmedForWrite = pol.trim()
+        if (polTrimmedForWrite.isNotEmpty()) {
+            payload["pol"] = polTrimmedForWrite
+        }
         // Note: booking_requested is set via the Booking Requested button, not Calculate
         
         Logger.debug("Sending update payload for purchase $purchaseId")

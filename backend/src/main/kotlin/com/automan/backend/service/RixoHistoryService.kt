@@ -617,6 +617,103 @@ class RixoHistoryService(
     }
 
     /**
+     * Moves one chassis from [historyId] onto the history row for the same buying date and [newCompanyRaw].
+     * Creates that row with a blank message when none exists. Does not take the car off Rixo, and does not
+     * delete shipping or invoice history. A Rixo Confirmed car becomes Rixo Requested. Booking-requested cars are refused.
+     */
+    @Transactional
+    fun moveChassisToCompany(historyId: Long, chassisTokenRaw: String, newCompanyRaw: String): Map<String, Any> {
+        val row = rixoHistoryRepository.findById(historyId).orElse(null)
+            ?: throw IllegalArgumentException("Rixo history row not found")
+        val tokenClean = chassisTokenRaw.trim()
+        if (tokenClean.isEmpty()) throw IllegalArgumentException("chassisToken is required")
+        val newCompany = newCompanyRaw.trim()
+        if (newCompany.isEmpty()) throw IllegalArgumentException("rixoCompany is required")
+
+        val expanded = expandTokenSet(setOf(tokenClean.uppercase(Locale.ROOT)))
+        val affectedPurchaseIds = linkedSetOf<Long>()
+        for (token in expanded) {
+            for (p in purchaseRepository.findByChassisToken(token)) {
+                if (PurchaseWorkflowService.isBookingRequested(p)) {
+                    throw IllegalArgumentException(
+                        "Cannot remove: this car is already booking requested.",
+                    )
+                }
+                p.id?.let { affectedPurchaseIds.add(it) }
+            }
+        }
+
+        val (remainingChassis, removed) = removeFirstMatchingChassisOccurrence(row.chassis, tokenClean)
+        if (!removed) throw IllegalArgumentException("Chassis token not found in this history row")
+
+        val deletedSource = remainingChassis.isNullOrBlank()
+        if (deletedSource) {
+            rixoHistoryRepository.deleteById(historyId)
+        } else {
+            rixoHistoryRepository.save(row.copy(chassis = remainingChassis, createdAt = row.createdAt))
+        }
+
+        val existingDest = findHistoryRowForDateAndCompany(row.buyingDate, newCompany, historyId)
+        val destination = if (existingDest != null) {
+            val alreadyThere = tokenClean.uppercase(Locale.ROOT) in parseChassisTokens(existingDest.chassis)
+            val nextChassis = if (alreadyThere) {
+                existingDest.chassis
+            } else {
+                appendChassisToken(existingDest.chassis, tokenClean)
+            }
+            rixoHistoryRepository.save(
+                existingDest.copy(chassis = nextChassis, createdAt = existingDest.createdAt),
+            )
+        } else {
+            rixoHistoryRepository.save(
+                RixoHistory(
+                    buyingDate = row.buyingDate,
+                    rixoCompany = newCompany,
+                    message = null,
+                    chassis = tokenClean,
+                ),
+            )
+        }
+
+        for (id in affectedPurchaseIds) {
+            val purchase = purchaseRepository.findById(id).orElse(null) ?: continue
+            if (purchase.workflowStatus == com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED) {
+                purchaseWorkflowService.setWorkflowStatus(
+                    purchase,
+                    com.automan.backend.model.WorkflowStatus.RIXO_REQUESTED,
+                )
+            }
+        }
+        purchaseWorkflowService.recomputeByPurchaseIds(affectedPurchaseIds)
+
+        return mapOf(
+            "deletedRow" to deletedSource,
+            "destinationHistoryId" to (destination.id ?: 0L),
+            "rixoCompany" to (destination.rixoCompany ?: newCompany),
+        )
+    }
+
+    private fun findHistoryRowForDateAndCompany(
+        buyingDate: LocalDate?,
+        company: String,
+        excludeId: Long,
+    ): RixoHistory? {
+        val want = company.trim().lowercase(Locale.ROOT)
+        return rixoHistoryRepository.findAll()
+            .asSequence()
+            .filter { it.id != null && it.id != excludeId }
+            .filter { it.buyingDate == buyingDate }
+            .filter { it.rixoCompany?.trim()?.lowercase(Locale.ROOT) == want }
+            .maxByOrNull { it.id ?: 0L }
+    }
+
+    private fun appendChassisToken(raw: String?, token: String): String {
+        val base = raw?.trim().orEmpty()
+        if (base.isEmpty()) return token
+        return "$base;$token"
+    }
+
+    /**
      * Removes the first chassis token matching [chassisTokenRaw] from row [historyId] (delimiter: `;`, `,`, newline).
      * If no chassis segments remain, the entire history row is deleted.
      * Purchases mapped to this token are rolled back to “Purchased” when they no longer appear in any row

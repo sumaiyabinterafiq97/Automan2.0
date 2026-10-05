@@ -120,6 +120,7 @@ class UserViewsService(
             if (seen.add(key)) out.add(key)
         }
         val rest = out.filter { it != "date" && it != "chassis" }
-        return (listOf("date", "chassis") + rest).distinct().take(11)
+        // Desktop purchase list allows 13 columns. Phone and tablet still cap at 11 in the browser.
+        return (listOf("date", "chassis") + rest).distinct().take(13)
     }
 }

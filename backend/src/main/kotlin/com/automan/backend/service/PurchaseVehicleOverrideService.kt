@@ -31,6 +31,8 @@ class PurchaseVehicleOverrideService(
     )
 
     companion object {
+        const val TOTAL_CNF_PRICE_USD = "totalCnfPriceUsd"
+
         private val OVERRIDES_TYPE = object : TypeReference<Map<String, String>>() {}
 
         val SPEC_FIELD_MAPPINGS: List<SpecFieldMapping> = listOf(
@@ -135,6 +137,12 @@ class PurchaseVehicleOverrideService(
             }
         }
 
+        val specKeys = SPEC_FIELD_MAPPINGS.mapTo(HashSet()) { it.jsonKey }
+        for ((key, value) in existingOverrides) {
+            if (key in specKeys || value.isBlank()) continue
+            overrides[key] = value
+        }
+
         val now = LocalDateTime.now()
         if (overrides.isEmpty()) {
             if (existing != null) {
@@ -154,6 +162,47 @@ class PurchaseVehicleOverrideService(
                 ),
         )
     }
+
+    /**
+     * Writes or clears [TOTAL_CNF_PRICE_USD] without touching spec keys.
+     * A blank value removes only that key. The USD rate is never stored.
+     */
+    @Transactional
+    fun setTotalCnfPriceUsd(purchaseId: Long, rawValue: String?) {
+        val existing = purchaseVehicleOverrideRepository.findByPurchaseId(purchaseId)
+        val overrides = linkedMapOf<String, String>()
+        existing?.let { overrides.putAll(parseOverrides(it.overridesJson)) }
+        val value = rawValue?.trim().orEmpty()
+        if (value.isEmpty()) {
+            overrides.remove(TOTAL_CNF_PRICE_USD)
+        } else {
+            overrides[TOTAL_CNF_PRICE_USD] = value
+        }
+        val now = LocalDateTime.now()
+        if (overrides.isEmpty()) {
+            if (existing != null) {
+                purchaseVehicleOverrideRepository.delete(existing)
+            }
+            return
+        }
+        val json = objectMapper.writeValueAsString(overrides)
+        purchaseVehicleOverrideRepository.save(
+            existing?.copy(overridesJson = json, updatedAt = now)
+                ?: PurchaseVehicleOverride(
+                    purchaseId = purchaseId,
+                    overridesJson = json,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+        )
+    }
+
+    @Transactional(readOnly = true)
+    fun readTotalCnfPriceUsd(purchaseId: Long?): String =
+        purchaseId?.let { id ->
+            purchaseVehicleOverrideRepository.findByPurchaseId(id)
+                ?.let { parseOverrides(it.overridesJson)[TOTAL_CNF_PRICE_USD] }
+        }.orEmpty()
 
     @Transactional(readOnly = true)
     fun applyForRead(purchase: Purchase): Purchase {

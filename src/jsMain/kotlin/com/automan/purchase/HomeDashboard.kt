@@ -12,7 +12,6 @@ private val homeDashboardScope = MainScope()
 private var homeDashboardPeriod: String = "this_month"
 private var homeDashboardCustomFrom: String = ""
 private var homeDashboardCustomTo: String = ""
-private var homeRecentDay: String = "today"
 
 /** Replaces the Home placeholder with the live operations dashboard. */
 fun showHomeDashboardPage() {
@@ -190,22 +189,6 @@ private fun renderHomeDashboard(data: dynamic) {
             </div>
         </section>
 
-        <section class="home-dash-section" aria-label="Recent car purchases">
-            <div class="home-dash-card">
-                <div class="home-dash-card-head home-dash-recent-head">
-                    <h2 class="home-dash-card-title">Recent Car Purchases</h2>
-                    <select id="homeRecentDay" aria-label="Recent purchases day">
-                        <option value="today">Today</option>
-                        <option value="yesterday">Yesterday</option>
-                    </select>
-                </div>
-                <div id="homeRecentTable" class="home-dash-recent-wrap">
-                    <p class="home-dash-empty">Loading purchases…</p>
-                </div>
-                <button type="button" class="home-dash-recent-more" data-href="/purchase">Show More</button>
-            </div>
-        </section>
-
         <section class="home-dash-section" aria-label="Workflow overview">
             <div class="home-dash-card home-dash-workflow-card">
                 <div class="home-dash-card-head">
@@ -255,119 +238,7 @@ private fun renderHomeDashboard(data: dynamic) {
         </section>
     """.trimIndent()
 
-    val daySelect = document.getElementById("homeRecentDay") as? HTMLSelectElement
-    daySelect?.value = if (homeRecentDay == "yesterday") "yesterday" else "today"
-    daySelect?.addEventListener("change", { _: Event ->
-        homeRecentDay = daySelect.value.ifBlank { "today" }
-        loadHomeRecentPurchases()
-    })
     bindHomeDashboardClicks(body)
-    loadHomeRecentPurchases()
-}
-
-/** Laptop calendar date (not UTC) as yyyy-MM-dd. [dayOffset] is 0 for today, -1 for yesterday. */
-private fun homeLaptopIsoDate(dayOffset: Int): String {
-    val d = js("new Date()").unsafeCast<dynamic>()
-    d.setDate(d.getDate() + dayOffset)
-    val y = d.getFullYear() as Int
-    val m = (d.getMonth() as Int) + 1
-    val day = d.getDate() as Int
-    return y.toString() + "-" + m.toString().padStart(2, '0') + "-" + day.toString().padStart(2, '0')
-}
-
-private fun loadHomeRecentPurchases() {
-    val host = document.getElementById("homeRecentTable") ?: return
-    val yesterday = homeRecentDay == "yesterday"
-    val day = if (yesterday) "yesterday" else "today"
-    val date = homeLaptopIsoDate(if (yesterday) -1 else 0)
-    host.innerHTML = """<p class="home-dash-empty">Loading purchases…</p>"""
-    homeDashboardScope.launch {
-        when (val result = ApiClient.get<dynamic>(
-            "dashboard/recent-purchases?day=$day&date=${encodeURIComponent(date)}",
-        )) {
-            is ApiResult.Success -> {
-                if (document.getElementById("homeRecentTable") == null) return@launch
-                renderHomeRecentPurchases(result.data)
-            }
-            is ApiResult.Error -> {
-                val current = document.getElementById("homeRecentTable") ?: return@launch
-                current.innerHTML = """<p class="home-dash-empty">Could not load purchases: ${escapeHtml(result.message)}</p>"""
-            }
-        }
-    }
-}
-
-private fun recentCell(row: dynamic, key: String): String {
-    val v: dynamic = when (key) {
-        "date" -> row.date
-        "lotNo" -> row.lotNo
-        "chassis" -> row.chassis
-        "carName" -> row.carName
-        "year" -> row.year
-        "auctionHouse" -> row.auctionHouse
-        "stockLocation" -> row.stockLocation
-        "rixoCompany" -> row.rixoCompany
-        "client" -> row.client
-        "country" -> row.country
-        "price" -> row.price
-        else -> null
-    }
-    if (v == null || v == js("undefined")) return ""
-    val raw = v.toString()
-    if (key == "price") {
-        if (raw.isBlank()) return ""
-        val priceValue = parseCurrency(raw)
-        return if (priceValue > 0.0) escapeHtml("¥${formatCurrency(priceValue)}") else ""
-    }
-    return escapeHtml(raw)
-}
-
-private fun renderHomeRecentPurchases(data: dynamic) {
-    val host = document.getElementById("homeRecentTable") ?: return
-    val rows = dynamicList(data?.rows)
-    if (rows.isEmpty()) {
-        val label = if ((data?.day as? String) == "yesterday") "yesterday" else "today"
-        host.innerHTML = """<p class="home-dash-empty">No purchases $label.</p>"""
-        return
-    }
-    fun mark(on: Boolean): String {
-        val checked = if (on) "checked" else ""
-        return """<input type="checkbox" disabled $checked aria-label="${if (on) "Yes" else "No"}" />"""
-    }
-    val body = rows.joinToString("") { row ->
-        val requested = row.rixoRequested == true
-        val confirmed = row.rixoConfirmed == true
-        """<tr>
-            <td>${recentCell(row, "date")}</td>
-            <td>${recentCell(row, "lotNo")}</td>
-            <td>${recentCell(row, "chassis")}</td>
-            <td>${recentCell(row, "carName")}</td>
-            <td>${recentCell(row, "year")}</td>
-            <td>${recentCell(row, "auctionHouse")}</td>
-            <td>${recentCell(row, "stockLocation")}</td>
-            <td>${recentCell(row, "rixoCompany")}</td>
-            <td>${recentCell(row, "client")}</td>
-            <td>${recentCell(row, "country")}</td>
-            <td>${recentCell(row, "price")}</td>
-            <td class="home-dash-recent-check">${mark(requested)}</td>
-            <td class="home-dash-recent-check">${mark(confirmed)}</td>
-        </tr>"""
-    }
-    host.innerHTML = """
-        <div class="home-dash-recent-scroll">
-            <table class="home-dash-recent-table">
-                <thead>
-                    <tr>
-                        <th>Date</th><th>Lot no.</th><th>Chassis</th><th>Car name</th><th>Year</th>
-                        <th>Auction house</th><th>Stock location</th><th>Rixo company</th>
-                        <th>Client</th><th>Country</th><th>Car Price</th>
-                        <th>Rixo requested</th><th>Rixo confirmed</th>
-                    </tr>
-                </thead>
-                <tbody>$body</tbody>
-            </table>
-        </div>
-    """.trimIndent()
 }
 
 private fun dynamicList(raw: dynamic): List<dynamic> {
