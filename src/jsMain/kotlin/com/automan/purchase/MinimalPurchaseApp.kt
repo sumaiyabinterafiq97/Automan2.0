@@ -13456,6 +13456,8 @@ private fun applySupplierSelectionToForm(selection: dynamic, isEditForm: Boolean
             function schedulePriceAutofill() {
                 if (typeof window.scheduleAutofillRixoPriceFromMapping !== 'function') return;
                 window.__rixoPriceUserOverride = false;
+                var priceScope = isEdit ? 'edit' : 'add';
+                if (window.__rixoPriceChoiceByForm) delete window.__rixoPriceChoiceByForm[priceScope];
                 var vtForPrice = readFormVt();
                 window.scheduleAutofillRixoPriceFromMapping(isEdit, {
                     force: userSupplierChange === true,
@@ -16622,6 +16624,8 @@ fun fetchMappingByChassisOnly(
                             if (!vt && typeof window.getComboboxValue === 'function') {
                                 vt = (window.getComboboxValue(isEdit ? 'editShipmentSize' : 'shipmentSize') || '').toString().trim();
                             }
+                            var priceScope = isEdit ? 'edit' : 'add';
+                            if (window.__rixoPriceChoiceByForm) delete window.__rixoPriceChoiceByForm[priceScope];
                             window.scheduleAutofillRixoPriceFromMapping(isEdit, {
                                 force: !isEdit,
                                 delay: 180,
@@ -16951,6 +16955,8 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                                 if (typeof window.getComboboxValue === 'function') {
                                     formVt = (window.getComboboxValue(isEdit ? 'editShipmentSize' : 'shipmentSize') || '').toString().trim();
                                 }
+                                var priceScope = isEdit ? 'edit' : 'add';
+                                if (window.__rixoPriceChoiceByForm) delete window.__rixoPriceChoiceByForm[priceScope];
                                 window.scheduleAutofillRixoPriceFromMapping(isEdit, {
                                     delay: 0,
                                     force: !isEdit,

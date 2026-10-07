@@ -284,6 +284,17 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     fun findByChassisToken(@Param("token") token: String): List<Purchase>
 
     /**
+     * Chassis whose code (text before the first hyphen) equals [prefix].
+     * [prefix] is already lowercased; `%` and `_` are escaped by the caller.
+     */
+    @Query(
+        "SELECT p FROM Purchase p WHERE " +
+            "LOWER(TRIM(COALESCE(p.chassis, ''))) LIKE CONCAT(:prefix, '-%') ESCAPE '\\' " +
+            "ORDER BY p.id ASC"
+    )
+    fun findByChassisCodePrefix(@Param("prefix") prefix: String): List<Purchase>
+
+    /**
      * Lightweight projection for Rixo buying-date dropdown (avoids loading full Purchase rows).
      * Pending Rixo = workflow not yet RIXO_REQUESTED or later (see PurchaseWorkflowService.applyForRead).
      */

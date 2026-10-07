@@ -3220,11 +3220,9 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
             allChassisTokens.addAll(parseShippingHistoryChassisTokens(rowChassisRaw))
         }
 
-        // Prefer fetching by numeric booking ID directly (avoids string vs numeric mismatch).
-        // The shipping_history stores booking_id as a human string (e.g. "HKTG00762300"),
-        // but purchases.booking_id is a Long. Extract any numeric suffix from the booking string.
+        // purchases.booking_id is a number. History booking ids are often words (OSAG54151700).
+        // Only the whole id, when it is a number, is that column.
         val numericBookingId: Long? = bookingId.trim().toLongOrNull()
-            ?: Regex("(\\d{4,})").findAll(bookingId).lastOrNull()?.value?.toLongOrNull()
 
         val purchasesForBooking: List<dynamic> = if (numericBookingId != null) {
             when (val r = ApiClient.get<Array<dynamic>>("purchases/by-booking/$numericBookingId")) {
@@ -3250,22 +3248,21 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
                 seenIds.add(id)
             }
         }
-        if (matched.isEmpty()) {
-            // Fallback: scan all purchases and match by chassis tokens only
-            when (val result = ApiClient.get<Array<dynamic>>("purchases")) {
+        if (matched.isEmpty() && allChassisTokens.isNotEmpty()) {
+            val tokensJs = js("[]").unsafeCast<dynamic>()
+            for (tok in allChassisTokens) {
+                val t = tok.trim()
+                if (t.isNotEmpty()) tokensJs.push(t)
+            }
+            when (val result = ApiClient.post<Array<dynamic>>("purchases/by-chassis-tokens", tokensJs)) {
                 is ApiResult.Success -> {
                     val arr = result.data
-                    for (tok in allChassisTokens) {
-                        for (i in 0 until arr.size) {
-                            val p = arr[i]
-                            val id = js("p.id")?.toString()?.toLongOrNull() ?: continue
-                            if (id in seenIds) continue
-                            val ch = js("p.chassis")?.toString()?.trim() ?: ""
-                            if (!shippingPrefillChassisTokenMatchesPurchase(tok, ch)) continue
-                            matched.add(p)
-                            seenIds.add(id)
-                            break
-                        }
+                    for (i in 0 until arr.size) {
+                        val p = arr[i]
+                        val id = js("p.id")?.toString()?.toLongOrNull() ?: continue
+                        if (id in seenIds) continue
+                        matched.add(p)
+                        seenIds.add(id)
                     }
                 }
                 is ApiResult.Error -> showMessage("Failed to load purchases: ${result.message}", "error")

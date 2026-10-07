@@ -17,6 +17,8 @@ const val RIXO_HISTORY_EDIT_SESSION_KEY = "rixoHistoryEditPayload"
 
 private var rixoHistoryCachedRows: Array<dynamic> = emptyArray()
 private var rixoHistorySortField: String = "buyingDate"
+/** Sort sent to the server. Supplier Name reorders the current page only. */
+private var rixoHistoryServerSortField: String = "buyingDate"
 private var rixoHistorySortOrder: String = "desc"
 private val rixoHistorySelectedIds: MutableSet<String> = mutableSetOf()
 private val rixoHistorySelectedChassis: MutableList<Pair<String, String>> = mutableListOf()
@@ -40,6 +42,7 @@ fun showRixoHistoryPage() {
     val content = document.getElementById("content") ?: return
     rixoHistoryCachedRows = emptyArray()
     rixoHistorySortField = "buyingDate"
+    rixoHistoryServerSortField = "buyingDate"
     rixoHistorySortOrder = "desc"
     rixoHistorySelectedIds.clear()
     rixoHistorySelectedChassis.clear()
@@ -1065,7 +1068,7 @@ private fun loadRixoHistory(page0: Int = rixoHistoryPageZeroBased) {
     rixoHistoryActiveSearchQ = q
     rixoHistoryPageZeroBased = page0.coerceAtLeast(0)
     val size = rixoHistoryItemsPerPage.coerceAtLeast(1)
-    val encSort = js("encodeURIComponent")(rixoHistorySortField).unsafeCast<String>()
+    val encSort = js("encodeURIComponent")(rixoHistoryServerSortField).unsafeCast<String>()
     val encOrder = js("encodeURIComponent")(rixoHistorySortOrder).unsafeCast<String>()
     val sortQs = "&sort=$encSort&order=$encOrder"
     val endpoint = if (q.isNotEmpty()) {
@@ -1104,30 +1107,38 @@ private fun loadRixoHistory(page0: Int = rixoHistoryPageZeroBased) {
 }
 
 private fun rixoHistoryAllSelectableColumnKeys(): List<String> = listOf(
-    "rixoConfirmed", "rixoConfirmedDate", "buyingDate", "rixoCompany", "message", "chassis",
+    "rixoConfirmed", "rixoConfirmedDate", "buyingDate", "rixoCompany", "message", "supplierName", "chassis",
 )
 
 private fun rixoHistoryLockedColumnKeys(): Set<String> = setOf("chassis")
 
 private fun rixoHistoryDefaultColumnKeys(): List<String> = rixoHistoryAllSelectableColumnKeys()
 
-private const val RIXO_HISTORY_MAX_DATA_COLUMNS = 6
-private const val RIXO_HISTORY_COLUMNS_STORAGE_KEY = "selectedRixoHistoryColumns_v1"
+private const val RIXO_HISTORY_MAX_DATA_COLUMNS = 7
+private const val RIXO_HISTORY_COLUMNS_STORAGE_KEY = "selectedRixoHistoryColumns_v2"
+private const val RIXO_HISTORY_COLUMNS_STORAGE_KEY_V1 = "selectedRixoHistoryColumns_v1"
 private var rixoHistoryColumnFilterKeyHandler: ((Event) -> Unit)? = null
+
+private fun readSavedRixoHistoryColumns(storageKey: String): List<String>? {
+    val saved = safeLocalStorageGet(storageKey) ?: return null
+    val allowed = rixoHistoryAllSelectableColumnKeys().toSet()
+    return try {
+        JSON.parse<Array<String>>(saved).toList().filter { it in allowed }.ifEmpty { null }
+    } catch (_: dynamic) {
+        null
+    }
+}
 
 private fun getSelectedRixoHistoryColumns(): List<String> {
     val defaults = rixoHistoryDefaultColumnKeys()
     val locked = rixoHistoryLockedColumnKeys()
-    val allowed = rixoHistoryAllSelectableColumnKeys().toSet()
-    val saved = safeLocalStorageGet(RIXO_HISTORY_COLUMNS_STORAGE_KEY)
-    val savedColumns = if (saved != null) {
-        try {
-            JSON.parse<Array<String>>(saved).toList().filter { it in allowed }
-        } catch (_: dynamic) {
-            null
+    val savedV2 = readSavedRixoHistoryColumns(RIXO_HISTORY_COLUMNS_STORAGE_KEY)
+    val savedColumns = when {
+        savedV2 != null -> savedV2
+        else -> {
+            val savedV1 = readSavedRixoHistoryColumns(RIXO_HISTORY_COLUMNS_STORAGE_KEY_V1)
+            if (savedV1 == null) null else (savedV1 + "supplierName").distinct()
         }
-    } else {
-        null
     }
     val base = if (savedColumns.isNullOrEmpty()) defaults else savedColumns
     val withLocked = (locked.toList() + base).distinct()
@@ -1164,6 +1175,7 @@ private fun rixoHistoryColumnWidthPx(key: String): Int = when (key) {
     "buyingDate" -> 112
     "rixoCompany" -> 132
     "message" -> 180
+    "supplierName" -> 160
     "chassis" -> 152
     else -> 120
 }
@@ -1295,6 +1307,7 @@ private fun rixoHistoryColumnLabel(key: String): String = when (key) {
     "buyingDate" -> "Buying date"
     "rixoCompany" -> "Rixo company"
     "message" -> "Message"
+    "supplierName" -> "Supplier Name"
     "chassis" -> "Chassis"
     else -> key
 }
@@ -1316,6 +1329,16 @@ private fun rixoHistoryFormatConfirmedDateDisplay(iso: String): String {
     return if (idx in 1 until t.length) t.substring(0, idx) else t.take(10)
 }
 
+private fun rixoHistorySupplierNames(row: dynamic): List<String> {
+    val raw = row.supplierNames
+    if (raw == null || raw === js("void 0")) return emptyList()
+    if (js("Array.isArray(raw)") as Boolean) {
+        return (raw as Array<dynamic>).map { it?.toString()?.trim().orEmpty() }.filter { it.isNotEmpty() }
+    }
+    val one = raw.toString().trim()
+    return if (one.isEmpty()) emptyList() else listOf(one)
+}
+
 private fun rixoHistoryCell(row: dynamic, key: String): String {
     val d = row
     val v: dynamic = when (key) {
@@ -1327,6 +1350,9 @@ private fun rixoHistoryCell(row: dynamic, key: String): String {
         "message" -> d.message
         "chassis" -> d.chassis
         else -> null
+    }
+    if (key == "supplierName") {
+        return rixoHistorySupplierNames(d).joinToString(";")
     }
     if (key == "rixoConfirmed") {
         return if (rixoHistoryRixoConfirmedFromRow(d)) "yes" else "no"
@@ -1414,6 +1440,11 @@ private fun toggleRixoHistorySort(field: String) {
         rixoHistorySortField = field
         rixoHistorySortOrder = "desc"
     }
+    if (field == "supplierName") {
+        renderRixoHistoryTableFromCache()
+        return
+    }
+    rixoHistoryServerSortField = field
     if (rixoHistoryServerMode) {
         loadRixoHistory(0)
     } else {
@@ -1488,7 +1519,7 @@ private fun renderRixoHistoryTableFromCache() {
     }
 
     // Enriched date flag only: page-local reorder. rixoConfirmed is ordered by the API across all pages.
-    val pageLocalOnly = rixoHistorySortField == "rixoConfirmedDate"
+    val pageLocalOnly = rixoHistorySortField == "rixoConfirmedDate" || rixoHistorySortField == "supplierName"
     if (!rixoHistoryServerMode || pageLocalOnly) {
         val comparator = Comparator<dynamic> { a, b ->
             compareRixoHistoryRows(a, b, rixoHistorySortField, rixoHistorySortOrder == "asc")
@@ -1568,6 +1599,7 @@ private fun renderRixoHistoryTableFromCache() {
                 val cellHtml = when {
                     raw.isEmpty() -> ""
                     key == "chassis" -> rixoHistoryChassisCellHtml(row, hid)
+                    key == "supplierName" -> formatInvoiceHistoryChassisChipsHtml(raw)
                     else -> formatPurchaseListNeutralChipHtml(raw)
                 }
                 html.append("""<td style="padding: 12px; vertical-align: top;">$cellHtml</td>""")
@@ -1585,6 +1617,7 @@ private fun renderRixoHistoryTableFromCache() {
             val buyingDate = rixoHistoryCell(row, "buyingDate")
             val rixoCompany = rixoHistoryCell(row, "rixoCompany")
             val msg = rixoHistoryCell(row, "message")
+            val suppliers = rixoHistoryCell(row, "supplierName")
             val chassisRaw = rixoHistoryCell(row, "chassis")
             html.append("""<div class="rixo-card">""")
             html.append(
@@ -1615,6 +1648,9 @@ private fun renderRixoHistoryTableFromCache() {
             }
             if (msg.isNotEmpty()) {
                 html.append("""<div class="rixo-kv"><div class="rixo-k">Message</div><div class="rixo-v">${formatPurchaseListNeutralChipHtml(msg)}</div></div>""")
+            }
+            if (suppliers.isNotEmpty()) {
+                html.append("""<div class="rixo-kv"><div class="rixo-k">Supplier Name</div><div class="rixo-v">${formatInvoiceHistoryChassisChipsHtml(suppliers)}</div></div>""")
             }
             if (chassisRaw.isNotEmpty()) {
                 html.append("""<div class="rixo-kv"><div class="rixo-k">Chassis</div><div class="rixo-v">${rixoHistoryChassisCellHtml(row, hid)}</div></div>""")

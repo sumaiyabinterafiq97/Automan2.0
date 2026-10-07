@@ -348,6 +348,12 @@ class PurchaseController(
         val purchases = purchaseService.getPurchasesByBookingId(bookingId)
         return ResponseEntity.ok(purchases)
     }
+
+    /** Shipping-history recreate: purchases for the chassis tokens on that row only. */
+    @PostMapping("/by-chassis-tokens")
+    fun getPurchasesByChassisTokens(@RequestBody tokens: List<String>): ResponseEntity<List<Purchase>> {
+        return ResponseEntity.ok(purchaseService.getPurchasesForShippingChassisTokens(tokens))
+    }
     
     /** Chassis at this POL where `booking_requested` is not true (legacy path: `/unshipped-chassis`). */
     @GetMapping("/unbooked-chassis", "/unshipped-chassis")

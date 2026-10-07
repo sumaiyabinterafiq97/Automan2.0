@@ -22,4 +22,6 @@ data class RixoHistoryRowDto(
     val hasBookingRequested: Boolean = false,
     /** Per-chassis confirm state. [rixoConfirmed] stays true only when every entry is confirmed. */
     val chassisConfirms: List<RixoHistoryChassisConfirmDto> = emptyList(),
+    /** Purchase List supplier (`auctionHouse`) for each matched car, chassis order, distinct. */
+    val supplierNames: List<String> = emptyList(),
 )

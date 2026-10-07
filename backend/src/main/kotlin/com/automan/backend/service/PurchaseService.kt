@@ -326,6 +326,37 @@ class PurchaseService(
     fun getPurchasesByBookingId(bookingId: Long): List<Purchase> {
         return applyReadAdapters(purchaseRepository.findByBookingId(bookingId))
     }
+
+    /**
+     * Shipping-history recreate: only the cars named on that row.
+     * Exact chassis first. A token with no hyphen also matches `TOKEN-…` (first row).
+     */
+    fun getPurchasesForShippingChassisTokens(tokens: List<String>): List<Purchase> {
+        val seen = LinkedHashMap<Long, Purchase>()
+        val cleaned = tokens.map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
+        for (token in cleaned) {
+            val exact = purchaseRepository.findByChassisToken(token)
+            val hits = if (exact.isNotEmpty()) {
+                listOf(exact.minBy { it.id ?: Long.MAX_VALUE })
+            } else if (!token.contains('-')) {
+                purchaseRepository.findByChassisCodePrefix(escapeLikePrefix(token)).take(1)
+            } else {
+                emptyList()
+            }
+            for (purchase in hits) {
+                val id = purchase.id ?: continue
+                if (id !in seen) seen[id] = purchase
+            }
+        }
+        return applyReadAdapters(seen.values.toList())
+    }
+
+    private fun escapeLikePrefix(token: String): String {
+        return token.trim().lowercase()
+            .replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+    }
     
     private fun firstSemicolonToken(raw: String?): String {
         val s = raw?.trim().orEmpty()

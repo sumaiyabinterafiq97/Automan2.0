@@ -7,6 +7,7 @@ import com.automan.backend.model.RixoHistory
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.RixoHistoryRepository
 import com.automan.backend.util.Logger
+import com.automan.backend.util.PurchaseDateParseUtils
 import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -248,6 +249,7 @@ class RixoHistoryService(
                 rixoConfirmedDate = historyRowRixoConfirmedAtIso(matched),
                 hasBookingRequested = matchedPurchasesHaveBookingRequested(matched),
                 chassisConfirms = chassisConfirms,
+                supplierNames = supplierNamesForHistoryRow(e, byNormalizedChassis),
             )
         }
     }
@@ -310,6 +312,46 @@ class RixoHistoryService(
             }
         }
         return found.values.toList()
+    }
+
+    /**
+     * Supplier names for the cars on this history row.
+     * A purchase counts when its chassis, purchase date, and Rixo company match the row,
+     * the same way Email PDF loads cars. Confirm status is not changed.
+     */
+    private fun supplierNamesForHistoryRow(
+        entity: RixoHistory,
+        byNormalizedChassis: Map<String, List<com.automan.backend.model.Purchase>>,
+    ): List<String> {
+        val targetDate = entity.buyingDate
+        val companyFilter = entity.rixoCompany?.trim()
+        val undefinedCompany =
+            companyFilter.isNullOrEmpty() ||
+                companyFilter.equals("__RIXO_COMPANY_UNDEFINED__", ignoreCase = true) ||
+                companyFilter.equals("Undefined", ignoreCase = true)
+        val seen = linkedSetOf<String>()
+        val out = mutableListOf<String>()
+        for (segment in chassisSegmentsInOrder(entity.chassis)) {
+            val matched = matchedPurchasesForChassisToken(segment, byNormalizedChassis).filter { p ->
+                if (targetDate != null) {
+                    val parsed = PurchaseDateParseUtils.parseToLocalDate(p.date?.trim().orEmpty())
+                    if (parsed != targetDate) return@filter false
+                }
+                val raw = p.rixoCompany?.trim().orEmpty()
+                val companyOk = if (undefinedCompany) {
+                    raw.isEmpty()
+                } else {
+                    raw.equals(companyFilter, ignoreCase = true)
+                }
+                companyOk
+            }
+            for (p in matched) {
+                val name = p.auctionHouse?.trim().orEmpty()
+                if (name.isEmpty()) continue
+                if (seen.add(name.lowercase(Locale.ROOT))) out.add(name)
+            }
+        }
+        return out
     }
 
     private fun chassisConfirmForToken(

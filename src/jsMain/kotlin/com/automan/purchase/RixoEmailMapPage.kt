@@ -191,7 +191,7 @@ private fun showRixoEmailMapModal(mappingId: Long?) {
     """.trimIndent()
     document.body?.insertAdjacentHTML("beforeend", modalHtml)
     ensureSupplierChipJs()
-    populateEditableComboboxFromMasterMenu("remCompany", "rixo_company")
+    populateEditableComboboxFromRixoMappingDistinctCompanies("remCompany")
     remEditOriginalCompany = null
     if (isEdit && mappingId != null) {
         val row = remBaseRows.find { remParseId(it.id) == mappingId }

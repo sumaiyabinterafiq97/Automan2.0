@@ -798,7 +798,7 @@ fun getMaxPurchaseListColumnsForDevice(deviceType: String? = null): Int {
  * @return List of default column keys for the device
  *
  * Desktop shows all 13. Phone and tablet keep the first 11 (through Client Name)
- * via the existing column cap.
+ * via the existing column cap. Rixo Confirmed stays available in the column picker.
  */
 fun getDefaultColumnsForDevice(deviceType: String? = null): List<String> {
     // Same defaults for all devices. Purchase Date and Chassis stay first;
@@ -807,13 +807,13 @@ fun getDefaultColumnsForDevice(deviceType: String? = null): List<String> {
         "date",
         "chassis",
         "auctionNo",
+        "carName",
         "grade",
         "carModelYear",
         "auctionHouse",
         "stockLocation",
         "rixoCompany",
         "rixoRequested",
-        "rixoConfirmed",
         "clientName",
         "country",
         "price",

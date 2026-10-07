@@ -351,10 +351,10 @@ private fun preloadQuickPurchaseDropdowns() {
     populateComboboxFromApiForField("qpVenueId", "master-menu/venue_id", "Select Venue ID")
     populateComboboxFromApiForField("qpPol", "master-menu/pol", "Select POL")
     js("""
-        ['qpPol', 'qpPolInput'].forEach(function(id) {
+        ['qpPol', 'qpPolInput', 'qpRixoCompany', 'qpRixoCompanyInput', 'qpStockLocation', 'qpStockLocationInput', 'qpVenueId', 'qpVenueIdInput', 'qpAuctionName', 'qpAuctionNameInput'].forEach(function(id) {
             var el = document.getElementById(id);
-            if (!el || el.__qpPolPriceWired) return;
-            el.__qpPolPriceWired = true;
+            if (!el || el.__qpRixoPriceLookupWired) return;
+            el.__qpRixoPriceLookupWired = true;
             el.addEventListener('change', function() {
                 if (typeof window.scheduleQuickPurchaseRixoPriceFromPol === 'function') {
                     window.scheduleQuickPurchaseRixoPriceFromPol();
@@ -658,6 +658,7 @@ fun applyQuickPurchaseSupplierSelection(selection: dynamic) {
             window.__qpResolvedSupplier = sel;
             if (typeof window.scheduleAutofillRixoPriceFromMapping === 'function') {
                 window.__rixoPriceUserOverride = false;
+                if (window.__rixoPriceChoiceByForm) delete window.__rixoPriceChoiceByForm.qp;
                 var auc = '';
                 if (typeof window.getComboboxValue === 'function') {
                     auc = (window.getComboboxValue('qpAuctionName') || '').toString().trim();

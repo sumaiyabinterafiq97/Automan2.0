@@ -5515,6 +5515,7 @@ window.isRixoPriceInputBlankOrZero = function(isEditForm, inputIdOverride) {
 window.scheduleQuickPurchaseRixoPriceFromPol = function() {
     if (window.__suppressRixoAutoSelect === true) return;
     if (typeof window.scheduleAutofillRixoPriceFromMapping !== 'function') return;
+    if (window.__rixoPriceChoiceByForm) delete window.__rixoPriceChoiceByForm.qp;
     var read = typeof window.getComboboxValue === 'function'
         ? function(id) { return String(window.getComboboxValue(id) || '').trim(); }
         : function() { return ''; };
@@ -5688,6 +5689,8 @@ window.onSupplierMapFieldChanged = function(fieldId) {
     if (window.__suppressRixoAutoSelect === true || window.__editPurchaseHydrating === true) return;
     if (window.__supplierApplyInFlight === true) return;
     var isEdit = String(fieldId || '').indexOf('edit') === 0;
+    var formScope = isEdit ? 'edit' : 'add';
+    if (window.__rixoPriceChoiceByForm) delete window.__rixoPriceChoiceByForm[formScope];
     var auctionId = isEdit ? 'editAuctionName' : 'auctionName';
     var auction = window.getComboboxValue ? window.getComboboxValue(auctionId) : '';
     if (!auction) return;
