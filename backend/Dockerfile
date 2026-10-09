@@ -1,5 +1,5 @@
 # JDK 17 builder image (override via: docker build --build-arg JAVA_BASE_IMAGE=...)
-ARG JAVA_BASE_IMAGE=eclipse-temurin:17-jdk-jammy
+ARG JAVA_BASE_IMAGE=public.ecr.aws/docker/library/eclipse-temurin:17-jdk-jammy
 FROM ${JAVA_BASE_IMAGE}
 
 # Set working directory
