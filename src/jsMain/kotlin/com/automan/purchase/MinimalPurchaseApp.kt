@@ -22041,7 +22041,7 @@ private fun persistDisplayedCarsToSessionStorage() {
     }
 }
 
-private fun mergeDisplayedCarsFromSessionStorageIfNeeded() {
+internal fun mergeDisplayedCarsFromSessionStorageIfNeeded() {
     if (carBookingDisplayedCars.isNotEmpty()) return
     val raw = try {
         window.sessionStorage.getItem(SESSION_CAR_BOOKING_DISPLAYED_JSON)

@@ -15,6 +15,11 @@ interface ShippingHistoryRepository : JpaRepository<ShippingHistory, Long> {
     fun findByChassisIn(chassis: Collection<String>): List<ShippingHistory>
 
     @Query(
+        "SELECT sh FROM ShippingHistory sh WHERE LOWER(TRIM(sh.chassis)) IN :chassisKeys",
+    )
+    fun findByChassisKeyIn(@Param("chassisKeys") chassisKeys: Collection<String>): List<ShippingHistory>
+
+    @Query(
         value = (
             "SELECT h FROM ShippingHistory h WHERE " +
                 "LOWER(COALESCE(h.bookingId,'')) LIKE LOWER(CONCAT('%',:q,'%')) OR " +

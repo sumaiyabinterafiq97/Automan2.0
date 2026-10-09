@@ -2832,19 +2832,16 @@ class PurchaseService(
     }
     
     /**
-     * Distinct stock locations for Booking dropdown: only stocks that still have
-     * bookable cars (Rixo confirmed, booking not requested) in [country].
-     * Matches [getFilteredPurchasesByCountryAndStocks] eligibility — excludes shipped-only stocks.
+     * Distinct stock locations on any purchase for [country].
+     * Used by the Create and Recreate Shipping Schedule dropdown.
      */
     fun getStockLocationsByCountry(country: String): List<String> {
-        val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
         val out = mutableListOf<String>()
         val seen = HashSet<String>()
-        for (p in purchases) {
-            val stock = p.stockLocation?.trim().orEmpty()
+        for (raw in purchaseRepository.findDistinctStockLocationsByCountry(country)) {
+            val stock = raw.trim()
             if (stock.isEmpty() || stock == "-") continue
-            val key = stock.lowercase()
-            if (seen.add(key)) out.add(stock)
+            if (seen.add(stock.lowercase())) out.add(stock)
         }
         return out.sortedBy { it.lowercase() }
     }
@@ -2925,6 +2922,45 @@ class PurchaseService(
         val stock = p.stockLocation?.trim().orEmpty()
         if (stock.isEmpty() || stock == "-") return false
         return stock.lowercase() in stockKeys
+    }
+
+    /**
+     * Purchases for the Recreate “Add New Cars” modal: Rixo confirmed purchases in [country]
+     * whose stock is one of [stockLocations]. Chassis already stored on a different
+     * shipping booking are omitted so Update cannot move that shipment.
+     */
+    @Transactional(readOnly = true)
+    fun getPurchasesForRecreateAdd(country: String, stockLocations: String, bookingId: String?): List<Purchase> {
+        val countryParam = country.trim()
+        val stockKeys = parseStockLocationFilters(stockLocations)
+        if (countryParam.isEmpty() || stockKeys.isEmpty()) return emptyList()
+        val currentBooking = bookingId?.trim()?.lowercase().orEmpty()
+        val matched = purchaseRepository.findByCountryIgnoreCaseTrimmed(countryParam)
+            .filter { purchaseMatchesAnyStock(it, stockKeys) }
+            .filter { PurchaseWorkflowService.isRixoConfirmedForBooking(it) }
+        val chassisKeys = matched.mapNotNull { it.chassis?.trim()?.lowercase()?.takeIf { key -> key.isNotEmpty() } }
+            .distinct()
+        val historyRows = if (chassisKeys.isEmpty()) {
+            emptyList()
+        } else {
+            shippingHistoryRepository.findByChassisKeyIn(chassisKeys)
+        }
+        val blocked = mutableSetOf<String>()
+        for (row in historyRows) {
+            val key = row.chassis.trim().lowercase()
+            if (key.isEmpty()) continue
+            val rowBooking = row.bookingId?.trim()?.lowercase().orEmpty()
+            val sameBooking = currentBooking.isNotEmpty() && rowBooking == currentBooking
+            if (!sameBooking) blocked.add(key)
+        }
+        val seen = HashSet<String>()
+        val kept = mutableListOf<Purchase>()
+        for (purchase in matched.sortedBy { it.id ?: Long.MAX_VALUE }) {
+            val key = purchase.chassis?.trim()?.lowercase().orEmpty()
+            if (key.isEmpty() || key in blocked || !seen.add(key)) continue
+            kept.add(purchase)
+        }
+        return applyReadAdapters(kept.sortedBy { it.chassis?.lowercase() })
     }
 
     @Transactional(readOnly = true)

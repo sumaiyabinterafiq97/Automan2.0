@@ -312,6 +312,20 @@ class PurchaseController(
         return ResponseEntity.ok(purchases)
     }
 
+    /**
+     * Recreate Shipping Schedule “Add New Cars”: purchases for [country] and [stockLocations].
+     * Omits chassis already saved on a different shipping booking.
+     */
+    @GetMapping("/for-recreate-add")
+    fun getPurchasesForRecreateAdd(
+        @RequestParam country: String,
+        @RequestParam stockLocations: String,
+        @RequestParam(required = false) bookingId: String?,
+    ): ResponseEntity<List<Purchase>> {
+        val purchases = purchaseService.getPurchasesForRecreateAdd(country, stockLocations, bookingId)
+        return ResponseEntity.ok(purchases)
+    }
+
     /** Booking UI: unshipped purchases for country whose stock_location is in [stockLocations] (comma/semicolon). */
     @GetMapping("/filtered-purchases-by-stocks")
     fun getFilteredPurchasesByStocks(

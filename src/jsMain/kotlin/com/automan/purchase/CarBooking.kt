@@ -29,6 +29,10 @@ var carBookingShippingRecreateRowIds: MutableList<Long> = mutableListOf()
 /** Uppercase chassis token → shipping_history row id (for remove-chassis). */
 var carBookingShippingRecreateChassisToHistoryId: MutableMap<String, Long> = mutableMapOf()
 
+/** Chassis added from Add New Cars during this recreate visit. Cleared when a new recreate opens. */
+private val bookingRecreateNewlyAddedChassis: MutableSet<String> = mutableSetOf()
+private var bookingAddCarsFetched: Array<dynamic> = emptyArray()
+
 // --- Booking LIST Column Filter (Rixo-style; Booking-scoped state) ---
 /** Fixed UI columns (not in filter): SELECT + view. Data columns max 6 including chassis. */
 private const val BOOKING_MAX_DATA_COLUMNS_INCLUDING_CHASSIS: Int = 6
@@ -263,6 +267,14 @@ private fun appendBookingListRow(purchase: dynamic) {
     } else {
         """<input type="checkbox" class="car-checkbox" data-purchase-id="$purchaseId" data-chassis="$chAttr" aria-label="Select row">"""
     }
+    val newMarkHtml = if (
+        isCarBookingRecreateSession() &&
+        bookingRecreateNewlyAddedChassis.contains(chStr.trim().uppercase())
+    ) {
+        """<span class="booking-row-new" title="Added in this recreate">New</span>"""
+    } else {
+        ""
+    }
     val dataCols = bookingResolvedDataColumns()
     val dataTds = dataCols.joinToString("") { key ->
         val raw = bookingListCellDisplayValue(purchase, key)
@@ -285,6 +297,7 @@ private fun appendBookingListRow(purchase: dynamic) {
         </td>
         <td class="booking-td booking-td-select" data-label="Select">
             $selectCellHtml
+            $newMarkHtml
         </td>
         $dataTds
     """
@@ -694,6 +707,10 @@ fun showCarBookingPage() {
     
     val savedEtdEarly = (carBookingFormState.etdDate as? String)?.trim().orEmpty()
     val isRecreateMode = shippingHistoryEditPrefillRaw != null || isCarBookingRecreateSession()
+    if (shippingHistoryEditPrefillRaw != null || !isRecreateMode) {
+        bookingRecreateNewlyAddedChassis.clear()
+        bookingAddCarsFetched = emptyArray()
+    }
     val bookingActionButtonsHtml = ""
     val listFooterHtml = if (isRecreateMode) {
         """
@@ -973,6 +990,11 @@ fun showCarBookingPage() {
                             </div>
                             <div id="chassisSuggestions" class="booking-chassis-suggestions"></div>
                         </div>
+                        ${if (isRecreateMode) """
+                        <div class="booking-add-cars-row">
+                            <button type="button" id="bookingAddNewCarsBtn" class="booking-add-cars-btn">Add New Cars</button>
+                        </div>
+                        """ else ""}
                         
                         <!-- Car Selection Table -->
                         <div class="booking-table-card is-empty">
@@ -1108,8 +1130,18 @@ fun showCarBookingPage() {
     // Chassis search is a plain input with API suggestions - no dropdown. Skip loadFilteredPurchasesIntoTable when returning from C&F/FOB.
     val skipAutoFilteredLoadForShippingEdit = shippingHistoryEditPrefillRaw != null
     window.setTimeout({
-        if (skipAutoFilteredLoadForShippingEdit) {
-            Logger.debug("Skipping loadFilteredPurchasesIntoTable (shipping history edit prefill)")
+        if (skipAutoFilteredLoadForShippingEdit || isCarBookingRecreateSession()) {
+            if (isCarBookingRecreateSession()) {
+                if (carBookingDisplayedCars.isEmpty()) {
+                    mergeDisplayedCarsFromSessionStorageIfNeeded()
+                }
+                val tbody = document.getElementById("carSelectionTableBody")
+                val painted = tbody?.querySelectorAll("tr[data-chassis]")?.length ?: 0
+                if (carBookingDisplayedCars.isNotEmpty() && painted == 0) {
+                    rebuildBookingListTableFromDisplayedCars()
+                }
+            }
+            Logger.debug("Skipping loadFilteredPurchasesIntoTable (recreate or shipping history edit)")
             return@setTimeout
         }
         val countrySelect = document.getElementById("consigneeCountry") as? HTMLSelectElement
@@ -1366,7 +1398,11 @@ fun setupCarBookingPageListeners() {
     document.getElementById("consigneeCountry")?.addEventListener("change", { event: Event ->
         val selectedCountry = (event.target as HTMLSelectElement).value
         Logger.debug("Country selected: $selectedCountry")
-        currentSelectedCountry = selectedCountry // Update the global variable
+        currentSelectedCountry = selectedCountry
+        if (isCarBookingRecreateSession()) {
+            Logger.debug("Recreate session: keeping stock, POL, and the car list")
+            return@addEventListener
+        }
         
         // Ensure POD is auto-filled for the newly selected country:
         // booking-mapping.js preserves current POD value if present, so clear it first.
@@ -1915,12 +1951,17 @@ fun handleBookingStockLocationsChanged() {
     }
     val country = (document.getElementById("consigneeCountry") as? HTMLSelectElement)?.value?.trim().orEmpty()
         .ifEmpty { currentSelectedCountry.trim() }
+    if (isCarBookingRecreateSession()) {
+        if (stocksCsv.isNotEmpty() && country.isNotEmpty()) {
+            loadPolOptionsForSelectedStocks(country, stocksCsv)
+        }
+        refreshBookingAddCarsModalIfOpen()
+        return
+    }
     if (stocksCsv.isEmpty() || country.isEmpty()) {
         setBookingPolEnabled(false)
         clearPolDropdownNoCountry()
-        if (carBookingDisplayedCars.isEmpty() || !isCarBookingRecreateSession()) {
-            clearBookingListTable()
-        }
+        clearBookingListTable()
         return
     }
     setBookingPolEnabled(true)
@@ -2927,21 +2968,6 @@ private fun parseShippingHistoryChassisTokens(raw: String): List<String> {
     return raw.split(';', ',', '\n', '\r').map { it.trim() }.filter { it.isNotEmpty() }
 }
 
-private fun shippingPrefillChassisTokenMatchesPurchase(token: String, purchaseChassis: String): Boolean {
-    val t = token.trim()
-    val ch = purchaseChassis.trim()
-    if (t.isEmpty() || ch.isEmpty()) return false
-    if (ch.equals(t, ignoreCase = true)) return true
-    val head = ch.substringBefore('-').trim()
-    if (head.equals(t, ignoreCase = true)) return true
-    if (ch.startsWith(t, ignoreCase = true) &&
-        (ch.length == t.length || ch.getOrNull(t.length) == '-')
-    ) {
-        return true
-    }
-    return false
-}
-
 /** Normalized booking id from API purchase (camelCase or snake_case; number or string). */
 private fun readPurchaseBookingIdString(purchase: dynamic): String {
     // Use JS-safe bracket access for plain API JSON objects
@@ -3220,35 +3246,10 @@ private suspend fun applyShippingHistoryEditPrefillFromJson(raw: String) {
             allChassisTokens.addAll(parseShippingHistoryChassisTokens(rowChassisRaw))
         }
 
-        // purchases.booking_id is a number. History booking ids are often words (OSAG54151700).
-        // Only the whole id, when it is a number, is that column.
-        val numericBookingId: Long? = bookingId.trim().toLongOrNull()
-
-        val purchasesForBooking: List<dynamic> = if (numericBookingId != null) {
-            when (val r = ApiClient.get<Array<dynamic>>("purchases/by-booking/$numericBookingId")) {
-                is ApiResult.Success -> r.data.toList()
-                is ApiResult.Error -> emptyList()
-            }
-        } else emptyList()
-
         val matched = mutableListOf<dynamic>()
         val seenIds = mutableSetOf<Long>()
 
-        if (purchasesForBooking.isNotEmpty()) {
-            // Same booking id can include cars not on this shipping_history row — keep only chassis from the payload.
-            for (p in purchasesForBooking) {
-                val id = js("p.id")?.toString()?.toLongOrNull() ?: continue
-                if (id in seenIds) continue
-                val ch = js("p.chassis")?.toString()?.trim() ?: ""
-                val onThisShipment = allChassisTokens.any { tok ->
-                    shippingPrefillChassisTokenMatchesPurchase(tok, ch)
-                }
-                if (!onThisShipment) continue
-                matched.add(p)
-                seenIds.add(id)
-            }
-        }
-        if (matched.isEmpty() && allChassisTokens.isNotEmpty()) {
+        if (allChassisTokens.isNotEmpty()) {
             val tokensJs = js("[]").unsafeCast<dynamic>()
             for (tok in allChassisTokens) {
                 val t = tok.trim()
@@ -3322,6 +3323,170 @@ private fun bookingListRemoveButtonHtml(purchaseId: Long, chassisAttr: String, h
     return """<button type="button" class="booking-row-remove-btn" data-purchase-id="$purchaseId" data-chassis="$chassisAttr" data-history-id="$hid" title="Remove car" aria-label="Remove car">×</button>"""
 }
 
+private fun bookingAddCarsText(purchase: dynamic, columnKey: String): String {
+    val raw = when (columnKey) {
+        "vehicleType" -> {
+            val typed = purchaseTableCellValue(purchase, "shipmentSize").trim()
+            if (typed.isNotEmpty()) typed else purchase.vehicleType?.toString()?.trim().orEmpty()
+        }
+        "carName" -> purchase.carName?.toString()?.trim().orEmpty()
+        else -> purchaseTableCellValue(purchase, columnKey).trim()
+    }
+    return if (raw == "N/A") "" else raw
+}
+
+private fun openBookingAddCarsModal() {
+    if (document.getElementById("bookingAddCarsModal") != null) {
+        refreshBookingAddCarsModalIfOpen()
+        return
+    }
+    val overlay = document.createElement("div") as HTMLDivElement
+    overlay.id = "bookingAddCarsModal"
+    overlay.className = "booking-add-cars-modal"
+    overlay.innerHTML = """
+        <div class="booking-add-cars-dialog" role="dialog" aria-modal="true" aria-labelledby="bookingAddCarsTitle">
+            <div class="booking-add-cars-head">
+                <h3 id="bookingAddCarsTitle">Add New Cars</h3>
+                <button type="button" id="bookingAddCarsClose" class="booking-add-cars-close" aria-label="Close">×</button>
+            </div>
+            <p id="bookingAddCarsNote" class="booking-add-cars-note"></p>
+            <div class="booking-add-cars-scroll">
+                <table class="booking-add-cars-table">
+                    <thead>
+                        <tr>
+                            <th>Action</th>
+                            <th>Chassis</th>
+                            <th>Car Name</th>
+                            <th>Brand</th>
+                            <th>Vehicle type</th>
+                            <th>Color</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bookingAddCarsBody"></tbody>
+                </table>
+            </div>
+        </div>
+    """.trimIndent()
+    document.body?.appendChild(overlay)
+    overlay.querySelector("#bookingAddCarsClose")?.addEventListener("click", { _: Event ->
+        closeBookingAddCarsModal()
+    })
+    overlay.querySelector("#bookingAddCarsBody")?.addEventListener("click", { event: Event ->
+        val target = event.target as? HTMLElement ?: return@addEventListener
+        val btn = target.closest(".booking-add-cars-plus") as? HTMLButtonElement ?: return@addEventListener
+        event.preventDefault()
+        val chassis = btn.getAttribute("data-chassis")?.trim().orEmpty()
+        if (chassis.isNotEmpty()) addBookingCarFromModal(chassis)
+    })
+    loadBookingAddCarsIntoModal()
+}
+
+private fun closeBookingAddCarsModal() {
+    document.getElementById("bookingAddCarsModal")?.remove()
+}
+
+private fun refreshBookingAddCarsModalIfOpen() {
+    if (document.getElementById("bookingAddCarsModal") == null) return
+    loadBookingAddCarsIntoModal()
+}
+
+private fun loadBookingAddCarsIntoModal() {
+    val note = document.getElementById("bookingAddCarsNote")
+    val body = document.getElementById("bookingAddCarsBody") ?: return
+    val country = (document.getElementById("consigneeCountry") as? HTMLSelectElement)?.value?.trim().orEmpty()
+        .ifEmpty { currentSelectedCountry.trim() }
+    val stocks = getBookingSelectedStockLocationsCsv()
+    if (country.isEmpty() || stocks.isEmpty()) {
+        bookingAddCarsFetched = emptyArray()
+        note?.textContent = "Select a stock location to see cars."
+        body.innerHTML = ""
+        return
+    }
+    note?.textContent = "Rixo confirmed cars for the selected country and stock locations that are not already in this list."
+    val bookingId = (document.getElementById("bookingNo") as? HTMLInputElement)?.value?.trim().orEmpty()
+    val encodedCountry = js("encodeURIComponent")(country).unsafeCast<String>()
+    val encodedStocks = js("encodeURIComponent")(stocks).unsafeCast<String>()
+    val encodedBooking = js("encodeURIComponent")(bookingId).unsafeCast<String>()
+    val endpoint =
+        "purchases/for-recreate-add?country=$encodedCountry&stockLocations=$encodedStocks&bookingId=$encodedBooking"
+    body.innerHTML = ""
+    MainScope().launch {
+        when (val result = ApiClient.get<Array<dynamic>>(endpoint)) {
+            is ApiResult.Success -> {
+                if (document.getElementById("bookingAddCarsModal") == null) return@launch
+                bookingAddCarsFetched = result.data
+                paintBookingAddCarsModalRows()
+            }
+            is ApiResult.Error -> {
+                note?.textContent = "Could not load cars."
+            }
+        }
+    }
+}
+
+private fun paintBookingAddCarsModalRows() {
+    val body = document.getElementById("bookingAddCarsBody") ?: return
+    val note = document.getElementById("bookingAddCarsNote")
+    val inList = carBookingDisplayedCars.mapNotNull { car ->
+        car.chassis?.toString()?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
+    }.toSet()
+    val rows = bookingAddCarsFetched.filter { purchase ->
+        val key = purchase.chassis?.toString()?.trim()?.uppercase().orEmpty()
+        key.isNotEmpty() && key !in inList
+    }
+    if (rows.isEmpty()) {
+        body.innerHTML = ""
+        if (getBookingSelectedStockLocationsCsv().isNotEmpty()) {
+            note?.textContent = "No more Rixo confirmed cars for the selected stock locations."
+        }
+        return
+    }
+    note?.textContent = "Rixo confirmed cars for the selected country and stock locations that are not already in this list."
+    body.innerHTML = rows.joinToString("") { purchase ->
+        val chassis = purchase.chassis?.toString()?.trim().orEmpty()
+        val attr = chassis.replace("&", "&amp;").replace("\"", "&quot;")
+        val cells = listOf("chassis", "carName", "brand", "vehicleType", "color").joinToString("") { key ->
+            "<td>${escapeHtml(bookingAddCarsText(purchase, key))}</td>"
+        }
+        """<tr>
+            <td><button type="button" class="booking-add-cars-plus" data-chassis="$attr" aria-label="Add car">+</button></td>
+            $cells
+        </tr>"""
+    }
+}
+
+private fun addBookingCarFromModal(chassis: String) {
+    val purchase = bookingAddCarsFetched.firstOrNull { car ->
+        car.chassis?.toString()?.trim()?.equals(chassis, ignoreCase = true) == true
+    } ?: return
+    val already = carBookingDisplayedCars.any { car ->
+        car.chassis?.toString()?.trim()?.equals(chassis, ignoreCase = true) == true
+    }
+    if (already) {
+        paintBookingAddCarsModalRows()
+        return
+    }
+    val next = carBookingDisplayedCars.toMutableList()
+    next.add(purchase)
+    carBookingDisplayedCars = next.toTypedArray()
+    bookingRecreateNewlyAddedChassis.add(chassis.trim().uppercase())
+    rebuildBookingListTableFromDisplayedCars()
+    paintBookingAddCarsModalRows()
+}
+
+private fun dropNewlyAddedCarFromRecreateList(chassis: String, purchaseId: Long?) {
+    bookingRecreateNewlyAddedChassis.remove(chassis.trim().uppercase())
+    carBookingDisplayedCars = carBookingDisplayedCars.filter { car ->
+        val idMatch = purchaseId != null && purchaseId > 0L && (car.id as? Number)?.toLong() == purchaseId
+        val chMatch = car.chassis?.toString()?.trim()?.equals(chassis, ignoreCase = true) == true
+        !(idMatch || chMatch)
+    }.toTypedArray()
+    rebuildBookingListTableFromDisplayedCars()
+    if (document.getElementById("bookingAddCarsModal") != null) {
+        paintBookingAddCarsModalRows()
+    }
+}
+
 private fun lockBookingRecreateCountryAndPol() {
     listOf("bookingCountryFabTrigger", "bookingPolFabTrigger").forEach { id ->
         (document.getElementById(id) as? HTMLButtonElement)?.let { btn ->
@@ -3330,19 +3495,13 @@ private fun lockBookingRecreateCountryAndPol() {
             btn.asDynamic().style.opacity = "0.7"
         }
     }
-    // Lock stock multi-select chips during recreate
-    listOf("bookingStockLocationsInput", "bookingStockLocationsButton", "bookingStockLocations").forEach { id ->
-        val el = document.getElementById(id) as? HTMLElement ?: return@forEach
-        el.asDynamic().style.pointerEvents = "none"
-        el.asDynamic().style.opacity = "0.7"
-        if (el is HTMLInputElement || el is HTMLSelectElement) {
-            el.setAttribute("disabled", "true")
-        }
-    }
     document.getElementById("manageBookingMappingsBtn")?.asDynamic()?.style?.display = "none"
 }
 
 private fun setupBookingRecreatePageListeners() {
+    document.getElementById("bookingAddNewCarsBtn")?.addEventListener("click", { _: Event ->
+        openBookingAddCarsModal()
+    })
     document.getElementById("deleteShippingHistoryFromRecreate")?.addEventListener("click", { _: Event ->
         handleDeleteShippingHistoryFromRecreate()
     })
@@ -3399,6 +3558,11 @@ private fun performRemoveChassisFromBookingRecreate(btn: HTMLButtonElement) {
     }
     val purchaseId = btn.getAttribute("data-purchase-id")?.toLongOrNull()
     val historyId = btn.getAttribute("data-history-id")?.trim()?.toLongOrNull()
+    val addedKey = chassis.uppercase()
+    if ((historyId == null || historyId <= 0L) && bookingRecreateNewlyAddedChassis.contains(addedKey)) {
+        dropNewlyAddedCarFromRecreateList(chassis, purchaseId)
+        return
+    }
     MainScope().launch {
         val body = js("{}")
         body.chassisToken = chassis
@@ -3414,6 +3578,7 @@ private fun performRemoveChassisFromBookingRecreate(btn: HTMLButtonElement) {
                 val deletedRow = d.deletedRow == true ||
                     d.deletedRow?.toString()?.lowercase() == "true"
                 val key = chassis.uppercase()
+                bookingRecreateNewlyAddedChassis.remove(key)
                 carBookingShippingRecreateChassisToHistoryId.remove(key)
                 carBookingShippingRecreateChassisAmounts.remove(key)
                 if (deletedRow && historyId != null) {
@@ -3547,6 +3712,18 @@ private fun bookingRecreateCarsMergedForSave(): List<dynamic> {
     return byChassis.values.toList()
 }
 
+private fun stockLocationForRecreateSave(car: dynamic): String {
+    val own = (car.stockLocation ?: car.stock_location)?.toString()?.trim().orEmpty()
+    val selected = getBookingSelectedStockLocationsCsv()
+        .split(',')
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && it != "-" }
+    if (selected.isEmpty()) return own
+    if (selected.size == 1) return selected.first()
+    val kept = selected.firstOrNull { it.equals(own, ignoreCase = true) }
+    return kept ?: selected.first()
+}
+
 private suspend fun saveBookingRecreateShippingHistoryFromList() {
     if (carBookingDisplayedCars.isEmpty()) {
         showMessage("No cars in the list.", "error")
@@ -3610,7 +3787,7 @@ private suspend fun saveBookingRecreateShippingHistoryFromList() {
                     row.chassis = chassis
                     val client = extractClientNameFromCar(enriched)
                     if (client.isNotEmpty()) row.clientName = client
-                    val stock = (enriched.stockLocation ?: enriched.stock_location)?.toString()?.trim().orEmpty()
+                    val stock = stockLocationForRecreateSave(enriched)
                     if (stock.isNotEmpty() && stock != "-") row.stockLocation = stock
                     row.amount = total
                     items.push(row)

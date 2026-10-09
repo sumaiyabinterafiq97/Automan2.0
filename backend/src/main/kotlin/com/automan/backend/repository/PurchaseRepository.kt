@@ -174,7 +174,13 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
     fun findDistinctStockLocations(): List<String>
     
-    @Query("SELECT DISTINCT p.stockLocation FROM Purchase p WHERE p.country = :country AND p.stockLocation IS NOT NULL AND p.stockLocation != '' ORDER BY p.stockLocation")
+    @Query(
+        "SELECT DISTINCT TRIM(p.stockLocation) FROM Purchase p " +
+            "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
+            "AND p.stockLocation IS NOT NULL " +
+            "AND TRIM(p.stockLocation) <> '' " +
+            "AND TRIM(p.stockLocation) <> '-'",
+    )
     fun findDistinctStockLocationsByCountry(@Param("country") country: String): List<String>
     
     // For booking-page filtering: booking not requested yet and Rixo confirmed (legacy or workflow).
@@ -187,6 +193,14 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "ORDER BY p.chassis",
     )
     fun findUnshippedPurchasesByCountryForPolFiltering(@Param("country") country: String): List<Purchase>
+
+    /** Every purchase for a country. Used by Recreate “Add New Cars”; does not apply booking eligibility. */
+    @Query(
+        "SELECT p FROM Purchase p " +
+            "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
+            "ORDER BY p.chassis",
+    )
+    fun findByCountryIgnoreCaseTrimmed(@Param("country") country: String): List<Purchase>
 
     // POL by country (from purchases only) - used for booking page POL dropdown
     @Query("SELECT DISTINCT p.pol FROM Purchase p " +
