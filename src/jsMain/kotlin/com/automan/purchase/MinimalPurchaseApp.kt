@@ -2267,7 +2267,6 @@ private fun bootstrapRouting(root: Element) {
     installPopstateListener { updateContent(root) }
     exposeNavigateToAppOnWindow()
     minimalPurchaseScope.launch {
-        prodAutoLoginIfNeeded()
         if (!ensureAppPathOrRedirect()) {
             updateContent(root)
         }
@@ -2275,6 +2274,7 @@ private fun bootstrapRouting(root: Element) {
 }
 
 fun main() {
+    installAuthenticatedFetch()
     Logger.debug("INVOICE PDF BUTTON FIX - CACHE BUST - 1762413057")
     Logger.debug("INVOICE PDF BUTTON - GLOBAL EVENT DELEGATION ACTIVE!")
     Logger.debug("INVOICE PDF - 1762413057 - NEW CODE LOADED!")
@@ -6468,6 +6468,7 @@ fun createApp(root: Element) {
                         
                         <button id="clientTransactionsSidebarBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #2980b9; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left;">Client Transactions</button>
                         <button id="userManagementBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Manage Users</button>
+                        <button id="partyAccessBtn" class="sidebar-btn" type="button" style="padding: 12px 20px; background-color: #1d4ed8; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; text-align: left; display: none;">Party Access</button>
                         
                         <!-- Master List Section (Master Set) -->
                         <div id="masterListSection" style="margin-top: 10px;">
@@ -6675,6 +6676,10 @@ fun createApp(root: Element) {
         // Clear car booking states when navigating to User Management
         clearCarBookingStates()
         showUserManagementPage()
+    })
+    document.getElementById("partyAccessBtn")?.addEventListener("click", { _: Event ->
+        clearCarBookingStates()
+        navigateToApp("/admin/party-access")
     })
     
     // Role request functionality (for non-ADMIN users)
@@ -6964,8 +6969,11 @@ fun createApp(root: Element) {
         navigateToApp("/master/rixo-email-map")
     })
     
-    // Load initial data only if we're on the purchase list page
-    if (routeEquals("/purchase")) {
+    // Purchase data is loaded only for a staff session already on the purchase list.
+    // External roles are redirected to their portal and must not start that request.
+    if (hasAuthToken() && isExternalPortalRole(getUserRole())) {
+        usePortalChrome()
+    } else if (routeEquals("/purchase")) {
         loadPurchases()
     }
 }
@@ -7012,6 +7020,8 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
+        routeAtStartsWith(route, "/portal/client") -> showClientPortal(route)
+        routeAtStartsWith(route, "/portal/consignee") -> showConsigneePortal(route)
         routeAtEquals(route, "/home") -> {
             ensureSidebarPresent()
             showHomePlaceholderPage()
@@ -7138,6 +7148,12 @@ fun updateContent(root: Element) {
         }
         routeAtStartsWith(route, "shipping-history") -> {
             showShippingHistoryPage()
+            ensureSidebarPresent()
+            (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
+            (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
+        }
+        routeAtStartsWith(route, "admin/party-access") -> {
+            showPartyAccessPage()
             ensureSidebarPresent()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
@@ -7387,6 +7403,7 @@ fun updateContent(root: Element) {
             }
         }
     }
+    applyRoleBasedRestrictions()
 }
 // Combined Auth Page (Signup / Signin with slide toggle) and role cards
 fun showAuthPage(signInMode: Boolean = false) {
@@ -7939,7 +7956,11 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
                         if (role != null) safeLocalStorageSet("authUserRole", role)
                         if (nameResp != null) safeLocalStorageSet("authUserName", nameResp)
                         if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
-                        navigateToPurchaseList(forceClearFilters = true)
+                        if (isExternalPortalRole(role)) {
+                            navigateToApp(homeRouteForRole(role), replace = true)
+                        } else {
+                            navigateToPurchaseList(forceClearFilters = true)
+                        }
                         updateUserInfoInSidebar()
                         applyRoleBasedRestrictions()
                     } else {
@@ -7970,26 +7991,6 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
         (document.getElementById("su_pass_upper") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.any { c -> c.isUpperCase() }) }
         (document.getElementById("su_pass_lower") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.any { c -> c.isLowerCase() }) }
         (document.getElementById("su_pass_digit") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.any { c -> c.isDigit() }) }
-    })
-    // Email existence check on blur (optional)
-    document.getElementById("su_email")?.addEventListener("blur", { _: Event ->
-        val email = (document.getElementById("su_email") as? HTMLInputElement)?.value?.trim() ?: ""
-        if (email.isBlank()) return@addEventListener
-        val encodedEmail = js("encodeURIComponent")(email).unsafeCast<String>()
-        window.fetch(apiUrl("auth/check-email?email=$encodedEmail"))
-            .then { it.json() }
-            .then { resp ->
-                val exists = resp.asDynamic().exists as Boolean?
-                val emailErr = document.getElementById("su_email_error") as? HTMLElement
-                if (exists == true && emailErr != null) {
-                    emailErr.style.display = "block"
-                    emailErr.textContent = "This email is already registered."
-                } else if (emailErr != null) {
-                    emailErr.style.display = "none"
-                    emailErr.textContent = ""
-                }
-            }
-            .catch { _ -> Unit }
     })
 }
 
@@ -8068,6 +8069,15 @@ fun setupSidebarListeners() {
         userManagementBtn.addEventListener("click", { _: Event ->
             closeSidebar()
             navigateToApp("/users")
+        })
+    }
+
+    val partyAccessBtn = document.getElementById("partyAccessBtn")
+    if (partyAccessBtn != null && !partyAccessBtn.hasAttribute("data-listener-attached")) {
+        partyAccessBtn.setAttribute("data-listener-attached", "true")
+        partyAccessBtn.addEventListener("click", { _: Event ->
+            closeSidebar()
+            navigateToApp("/admin/party-access")
         })
     }
     
@@ -28370,17 +28380,22 @@ fun loadPendingSignups() {
         }
 }
 
-fun reviewPendingSignup(token: String, action: String) {
-    val encodedToken = js("encodeURIComponent")(token).unsafeCast<String>()
-    val url = apiUrl("auth/verify-signup?token=$encodedToken&action=$action")
-    window.fetch(url)
+fun reviewPendingSignup(id: Long, action: String) {
+    val safeAction = if (action.equals("approve", ignoreCase = true)) "approve" else "reject"
+    val init = js("{}")
+    init.method = "POST"
+    val headers = js("{}")
+    headers["Content-Type"] = "application/json"
+    init.headers = headers
+    // Kotlin/JS Long is an object. A raw JSON number is what the admin review endpoint expects.
+    init.body = """{"id":$id,"action":"$safeAction"}"""
+    window.fetch(apiUrl("auth/signup-review"), init.unsafeCast<org.w3c.fetch.RequestInit>())
         .then { response ->
             response.json().then { data ->
                 val success = data.asDynamic().success as? Boolean
                 val message = data.asDynamic().message as? String ?: ""
                 if (success == true) {
                     showMessage(message, "success")
-                    // Reload pending signups (user will be removed from list)
                     loadPendingSignups()
                 } else {
                     showMessage(message, "error")
@@ -28421,12 +28436,15 @@ fun displayPendingSignups(list: Array<dynamic>) {
         console.log("🔵 [PENDING] Processing item $i")
         val p = list[i]
         console.log("🔵 [PENDING] Item data:", p)
-        val token = (p.verificationToken as? String) ?: ""
+        val id = when (val raw = p.id) {
+            is Number -> raw.toLong()
+            else -> raw?.toString()?.toLongOrNull() ?: 0L
+        }
         val email = (p.email as? String) ?: ""
         val name = (p.name as? String) ?: ""
         val role = (p.role as? String) ?: "VIEWER"
         val createdAt = (p.createdAt as? String) ?: ""
-        console.log("🔵 [PENDING] Parsed: token=$token, email=$email, name=$name, role=$role")
+        console.log("🔵 [PENDING] Parsed: id=$id, email=$email, name=$name, role=$role")
         
         html.append("""
             <div style="background: #fffbeb; border: 2px solid #f59e0b; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -28439,8 +28457,8 @@ fun displayPendingSignups(list: Array<dynamic>) {
                 </div>
                 <div style="color: #9ca3af; font-size: 12px; margin-bottom: 16px;">Requested: $createdAt</div>
                 <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                    <button class="pending-approve-btn" data-token="$token" style="padding: 10px 24px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;">✓ Accept</button>
-                    <button class="pending-reject-btn" data-token="$token" style="padding: 10px 24px; background: #ef4444; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;">✕ Reject</button>
+                    <button class="pending-approve-btn" data-id="$id" style="padding: 10px 24px; background: #10b981; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;">✓ Accept</button>
+                    <button class="pending-reject-btn" data-id="$id" style="padding: 10px 24px; background: #ef4444; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px;">✕ Reject</button>
                 </div>
             </div>
         """)
@@ -28462,16 +28480,18 @@ fun displayPendingSignups(list: Array<dynamic>) {
     for (i in 0 until approveButtons.length) {
         val el = approveButtons.item(i) as HTMLElement
         el.addEventListener("click", { event ->
-            val t = (event.currentTarget as HTMLElement).getAttribute("data-token")
-            if (t != null) reviewPendingSignup(t, "approve")
+            val rawId = (event.currentTarget as HTMLElement).getAttribute("data-id")
+            val id = rawId?.toLongOrNull()
+            if (id != null) reviewPendingSignup(id, "approve")
         })
     }
     val rejectButtons = document.querySelectorAll(".pending-reject-btn")
     for (i in 0 until rejectButtons.length) {
         val el = rejectButtons.item(i) as HTMLElement
         el.addEventListener("click", { event ->
-            val t = (event.currentTarget as HTMLElement).getAttribute("data-token")
-            if (t != null) reviewPendingSignup(t, "reject")
+            val rawId = (event.currentTarget as HTMLElement).getAttribute("data-id")
+            val id = rawId?.toLongOrNull()
+            if (id != null) reviewPendingSignup(id, "reject")
         })
         }
 }

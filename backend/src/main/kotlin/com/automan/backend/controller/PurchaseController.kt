@@ -462,8 +462,8 @@ class PurchaseController(
         } catch (e: Exception) {
             Logger.error("Exception in getCarCostDetails: ${e.message}", e)
             ResponseEntity.status(500).body(mapOf(
-                "error" to (e.message ?: "Unknown error"),
-                "stackTrace" to e.stackTraceToString()
+                "success" to false,
+                "message" to "The request could not be completed.",
             ))
         }
     }

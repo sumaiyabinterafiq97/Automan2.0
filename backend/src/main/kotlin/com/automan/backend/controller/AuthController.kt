@@ -3,14 +3,12 @@ package com.automan.backend.controller
 import com.automan.backend.model.UserRole
 import com.automan.backend.service.AuthService
 import com.automan.backend.service.LoginRequest
-import com.automan.backend.service.SignupRequest
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.http.HttpStatus
 import com.automan.backend.util.Logger
 import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicLong
 import jakarta.servlet.http.HttpServletRequest
 
 @RestController
@@ -26,9 +24,10 @@ class AuthController(
 
     // Security tracking for setup endpoint
     private val startupTime = System.currentTimeMillis()
-    private val setupAttempts = ConcurrentHashMap<String, AtomicLong>()
-    private val maxSetupAttempts = 5L
-    private val setupTimeWindow = 300000L // 5 minutes
+    @org.springframework.beans.factory.annotation.Value("\${app.auth.setup-max-attempts:5}")
+    private var maxSetupAttempts: Long = 5
+    private val setupTimeWindowMs = 300_000L
+    private val setupAttemptTimes = ConcurrentHashMap<String, java.util.concurrent.ConcurrentLinkedQueue<Long>>()
 
     @PostMapping("/signup")
     fun signup(@RequestBody body: SignupDto): ResponseEntity<Map<String, Any>> {
@@ -41,7 +40,13 @@ class AuthController(
                     "message" to "Invalid role. Please select a valid role."
                 ))
             }
-            authService.signupPending(body.email, body.name, body.password, userRole)
+            if (userRole != UserRole.VIEWER) {
+                return ResponseEntity.badRequest().body(mapOf(
+                    "success" to false,
+                    "message" to "Public signup can only request the Viewer role."
+                ))
+            }
+            authService.signupPending(body.email, body.name, body.password, UserRole.VIEWER)
             ResponseEntity.ok(mapOf(
                 "success" to true,
                 "message" to "Registration submitted. You will receive an email once an admin approves your account."
@@ -54,35 +59,35 @@ class AuthController(
         }
     }
 
-    @GetMapping("/check-email")
-    fun checkEmail(@RequestParam email: String): ResponseEntity<Map<String, Any>> {
-        val exists = authService.emailExists(email)
-        return ResponseEntity.ok(mapOf("exists" to exists))
-    }
-
     @GetMapping("/pending-signups")
     fun listPendingSignups(): ResponseEntity<Map<String, Any>> {
         val list = authService.listPendingSignups()
         return ResponseEntity.ok(mapOf("data" to list))
     }
 
+    /** Does not approve or reject. Review is POST /auth/signup-review with an admin session. */
     @GetMapping("/verify-signup")
-    fun verifySignup(
-        @RequestParam token: String,
-        @RequestParam action: String
-    ): ResponseEntity<Map<String, Any>> {
+    fun verifySignup(): ResponseEntity<Map<String, Any>> {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(mapOf(
+            "success" to false,
+            "message" to "Signup review must be submitted from an admin session."
+        ))
+    }
+
+    data class SignupReviewDto(val id: Long, val action: String)
+
+    @PostMapping("/signup-review")
+    fun reviewSignup(@RequestBody body: SignupReviewDto): ResponseEntity<Map<String, Any>> {
         return try {
-            when (action.lowercase()) {
-                "approve" -> authService.approvePending(token)
-                "reject" -> authService.rejectPending(token)
-                else -> return ResponseEntity.badRequest().body(mapOf(
-                    "success" to false,
-                    "message" to "Invalid action. Use approve or reject."
-                ))
-            }
+            authService.reviewPending(body.id, body.action)
+            val approved = body.action.trim().equals("approve", ignoreCase = true)
             ResponseEntity.ok(mapOf(
                 "success" to true,
-                "message" to if (action.lowercase() == "approve") "User approved. They have been notified by email." else "Signup request rejected. The user has been notified."
+                "message" to if (approved) {
+                    "User approved. They have been notified by email."
+                } else {
+                    "Signup request rejected. The user has been notified."
+                }
             ))
         } catch (e: Exception) {
             ResponseEntity.badRequest().body(mapOf(
@@ -90,6 +95,14 @@ class AuthController(
                 "message" to (e.message ?: "Unknown error")
             ))
         }
+    }
+
+    @PostMapping("/logout")
+    fun logout(request: HttpServletRequest): ResponseEntity<Map<String, Any>> {
+        val header = request.getHeader("Authorization")?.trim().orEmpty()
+        val token = if (header.startsWith("Bearer ", ignoreCase = true)) header.substring(7).trim() else ""
+        authService.logout(token)
+        return ResponseEntity.ok(mapOf("success" to true, "message" to "Signed out"))
     }
 
     @PostMapping("/login")
@@ -114,46 +127,37 @@ class AuthController(
         request: HttpServletRequest
     ): ResponseEntity<Map<String, String>> {
         val clientIp = getClientIpAddress(request)
-        
-        // Security checks
-        validateSetupSecurity(clientIp)
-        
-        // Validate password strength
-        validatePasswordStrength(body.password)
-        
-        
-        // Create first ADMIN user
-        authService.signup(
-            SignupRequest(
-                email = body.email,
-                name = body.name,
-                password = body.password,
-                role = UserRole.ADMIN,
-                createdByRole = null // First admin created by system
-            )
-        )
-        
-        logSecurityEvent("SETUP_COMPLETED", clientIp, "Admin created: ${body.email}")
-        
-        return ResponseEntity.ok(mapOf(
-            "message" to "System setup completed successfully",
-            "adminEmail" to body.email
-        ))
+        return try {
+            validateSetupSecurity(clientIp)
+            validatePasswordStrength(body.password)
+            authService.setupInitialAdmin(body.email, body.name, body.password)
+            logSecurityEvent("SETUP_COMPLETED", clientIp, "First admin account created")
+            ResponseEntity.ok(mapOf(
+                "message" to "System setup completed successfully",
+                "adminEmail" to body.email
+            ))
+        } catch (e: IllegalStateException) {
+            val tooMany = e.message?.contains("Too many", ignoreCase = true) == true
+            ResponseEntity.status(if (tooMany) HttpStatus.TOO_MANY_REQUESTS else HttpStatus.CONFLICT).body(mapOf(
+                "message" to (e.message ?: "System setup already completed")
+            ))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf(
+                "message" to (e.message ?: "Invalid setup request")
+            ))
+        }
     }
 
     private fun validateSetupSecurity(clientIp: String) {
-        // Check if system is already initialized (most important check)
-        if (authService.getUserCount() > 0) {
-            logSecurityEvent("SETUP_ATTEMPT_AFTER_INIT", clientIp, "System already initialized")
-            throw IllegalStateException("System setup already completed")
-        }
-        
-        // Check rate limiting (prevent brute force)
-        val attempts = setupAttempts.computeIfAbsent(clientIp) { AtomicLong(0) }
-        if (attempts.incrementAndGet() > maxSetupAttempts) {
+        // The bootstrap row, not this count, decides whether a second Admin can be created.
+        val now = System.currentTimeMillis()
+        val recent = setupAttemptTimes.computeIfAbsent(clientIp) { java.util.concurrent.ConcurrentLinkedQueue() }
+        recent.removeIf { now - it > setupTimeWindowMs }
+        if (recent.size >= maxSetupAttempts) {
             logSecurityEvent("SETUP_ATTEMPT_RATE_LIMITED", clientIp, "Too many attempts")
             throw IllegalStateException("Too many setup attempts. Please try again later.")
         }
+        recent.add(now)
         
         // Log the setup attempt for security monitoring
         logSecurityEvent("SETUP_ATTEMPT", clientIp, "Setup attempt from IP: $clientIp")

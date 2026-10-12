@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { openAdminSession, staffAuthHeaders } from '../staff-api';
 
 const apiBase = 'http://127.0.0.1:8083/api';
 
@@ -20,9 +21,9 @@ test('rejecting one pending signup leaves the other request pending', async ({ p
     password: 'Browser!Test1',
   };
 
+  let auth: { Authorization: string } | undefined;
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    auth = await openAdminSession(request, apiBase, admin);
     await signup(request, rejected);
     await signup(request, waiting);
 
@@ -50,12 +51,13 @@ test('rejecting one pending signup leaves the other request pending', async ({ p
     await expectRejectedLogin(page, rejected);
     await expectRejectedLogin(page, waiting);
   } finally {
-    const users = await request.get(`${apiBase}/users`);
+    if (!auth) return;
+    const users = await request.get(`${apiBase}/users`, { headers: auth });
     if (users.ok()) {
       const list = (await users.json()) as Array<{ id: number; email: string }>;
       for (const email of [rejected.email, waiting.email]) {
         const created = list.find((user) => user.email === email);
-        if (created) await request.delete(`${apiBase}/users/${created.id}`);
+        if (created) await request.delete(`${apiBase}/users/${created.id}`, { headers: auth });
       }
     }
   }

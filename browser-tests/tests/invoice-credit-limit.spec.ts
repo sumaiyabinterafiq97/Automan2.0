@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -17,8 +18,7 @@ test('an invoice over the client credit limit is not saved and does not change t
   const ids = { purchaseId: null as number | null, clientId: null as number | null, stockMapId: null as number | null, chassis };
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     ids.clientId = await createClient(request, `C${bookingNo}`, clientName, 100000);
     ids.stockMapId = await createStock(request, stamp);
     ids.purchaseId = await createPurchase(request, {
@@ -66,8 +66,10 @@ test('an invoice over the client credit limit is not saved and does not change t
 
     await openMenu(page, '#clientTransactionsSidebarBtn');
     await page.locator('#clientSearchInput').fill(clientName);
-    await expect(page.locator('#clientListTable').getByText('¥0', { exact: true })).toBeVisible();
-    await page.locator('#clientListTable').getByText(clientName, { exact: true }).click();
+    const clientList = page.locator('#clientListTable');
+    await expect(clientList.locator('.client-balance')).toHaveCount(1);
+    await expect(clientList.locator('.client-balance')).toHaveText('¥0');
+    await clientList.getByText(clientName, { exact: true }).click();
     await expect(page.locator('#currentBalanceValue')).toHaveText('¥0');
     await expect(page.locator('#clientEventsTable')).toContainText('No ledger entries yet');
     await expect(page.locator('#clientEventsTable')).not.toContainText(invoiceNumber);

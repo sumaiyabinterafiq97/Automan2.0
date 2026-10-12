@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -28,8 +29,7 @@ test('shipped vehicle and its invoice stay visible in history, and the invoice p
   let stockMapId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
 
     const client = await request.post(`${apiBase}/clients`, {
       data: {

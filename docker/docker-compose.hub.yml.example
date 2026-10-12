@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   backend:
-    image: YOUR_DOCKERHUB_USERNAME/automan-backend:latest
+    image: YOUR_DOCKERHUB_USERNAME/automan-backend:${AUTOMAN_IMAGE_TAG:?Set AUTOMAN_IMAGE_TAG to the release commit}
     container_name: automan_backend_prod
     restart: always
     ports:
@@ -14,7 +14,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${RDS_USERNAME}
       SPRING_DATASOURCE_PASSWORD: ${RDS_PASSWORD}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8083/api/purchases"]
+      test: ["CMD", "curl", "-f", "http://localhost:8083/api/actuator/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -23,9 +23,11 @@ services:
       - automan_network
 
   frontend:
-    image: YOUR_DOCKERHUB_USERNAME/automan-frontend:latest
+    image: YOUR_DOCKERHUB_USERNAME/automan-frontend:${AUTOMAN_IMAGE_TAG:?Set AUTOMAN_IMAGE_TAG to the release commit}
     container_name: automan_frontend_prod
     restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
     depends_on:

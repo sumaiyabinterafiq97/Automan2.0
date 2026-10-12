@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -22,8 +23,7 @@ test('saving a booking ships only the selected vehicle', async ({ page, request 
   let stockMapId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     const client = await request.post(`${apiBase}/clients`, {
       data: { clientNumber: `C${bookingNo}`, clientName, creditLimit: 100000000, currency: 'JPY', status: 'ACTIVE' },
     });

@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -18,8 +19,7 @@ test('csv import saves the valid chassis and skips blank or dash chassis', async
   let keptId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     keptId = await createPurchase(request, keptChassis, keptName);
 
     await login(page, admin);
@@ -43,21 +43,22 @@ test('csv import saves the valid chassis and skips blank or dash chassis', async
 
     await expect(page.locator('#message')).toHaveText('Successfully imported 1 purchases!');
     await expect(page.locator('#importModal')).toHaveCount(0);
+
+    await searchPurchases(page, importedChassis);
     await expect(page.locator('#purchaseTable')).toContainText(importedChassis);
     await expect(page.locator('#purchaseTable')).toContainText(importedName);
-    await expect(page.locator('#purchaseTable')).toContainText(keptChassis);
-    await expect(page.locator('#purchaseTable')).toContainText(keptName);
     await expect(page.locator('#purchaseTable')).not.toContainText(blankName);
     await expect(page.locator('#purchaseTable')).not.toContainText(dashName);
 
-    await page.locator('#purchaseSearchInput').fill(blankName);
-    await page.locator('#purchaseSearchInput').press('Enter');
+    await searchPurchases(page, keptChassis);
+    await expect(page.locator('#purchaseTable')).toContainText(keptChassis);
+    await expect(page.locator('#purchaseTable')).toContainText(keptName);
+
+    await searchPurchases(page, blankName);
     await expect(page.locator('#purchaseTable')).toContainText('No matches');
-    await page.locator('#purchaseSearchInput').fill(dashName);
-    await page.locator('#purchaseSearchInput').press('Enter');
+    await searchPurchases(page, dashName);
     await expect(page.locator('#purchaseTable')).toContainText('No matches');
-    await page.locator('#purchaseSearchInput').fill(keptChassis);
-    await page.locator('#purchaseSearchInput').press('Enter');
+    await searchPurchases(page, keptChassis);
     await expect(page.locator('#purchaseTable')).toContainText(keptChassis);
     await expect(page.locator('#purchaseTable')).toContainText(keptName);
   } finally {
@@ -102,4 +103,9 @@ async function login(page: Page, user: { email: string; password: string }) {
   await page.locator('#si_pass').fill(user.password);
   await page.locator('#btn_signin').click();
   await expect(page.locator('#purchaseTable')).toBeVisible();
+}
+
+async function searchPurchases(page: Page, term: string) {
+  await page.locator('#purchaseSearchInput').fill(term);
+  await page.locator('#purchaseSearchInput').press('Enter');
 }

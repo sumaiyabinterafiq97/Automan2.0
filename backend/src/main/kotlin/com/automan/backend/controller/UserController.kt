@@ -3,6 +3,7 @@ package com.automan.backend.controller
 import com.automan.backend.model.User
 import com.automan.backend.model.UserRole
 import com.automan.backend.repository.UserRepository
+import com.automan.backend.security.AuthSessionService
 import com.automan.backend.service.UserViewsDto
 import com.automan.backend.service.UserViewsService
 import org.springframework.http.ResponseEntity
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.*
 class UserController(
     private val userRepository: UserRepository,
     private val userViewsService: UserViewsService,
+    private val authSessionService: AuthSessionService,
 ) {
     private val passwordEncoder = BCryptPasswordEncoder()
 
@@ -102,13 +104,19 @@ class UserController(
         val user = userRepository.findById(id).orElse(null)
             ?: return ResponseEntity.notFound().build()
 
+        val previousRole = user.role
+        val nextRole = body.role?.let { UserRole.valueOf(it.uppercase()) } ?: previousRole
         val updatedUser = user.copy(
             email = body.email?.trim()?.lowercase() ?: user.email,
             name = body.name?.trim() ?: user.name,
-            role = body.role?.let { UserRole.valueOf(it.uppercase()) } ?: user.role
+            role = nextRole
             // views intentionally preserved
         )
         val saved = userRepository.save(updatedUser)
+        // Compare the role captured before save. Saving the copy updates the managed user.
+        if (nextRole != previousRole) {
+            authSessionService.revokeAllForUser(saved.id!!)
+        }
 
         val userDto = UserResponseDto(
             id = saved.id!!,

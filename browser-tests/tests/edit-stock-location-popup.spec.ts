@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -20,8 +21,7 @@ test('opening Edit keeps the saved stock location, and a later supplier change c
   let purchaseId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
 
     mappingIds.push(await addMapping(request, savedSupplier, savedStock, `RIXO${stamp}`, `${savedStock}-V`));
     mappingIds.push(await addMapping(request, savedSupplier, otherSavedStock, `RIXO${stamp}`, `${otherSavedStock}-V`));

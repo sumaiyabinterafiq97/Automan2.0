@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -13,8 +14,7 @@ test('adding a client map row leaves the other client unchanged', async ({ page,
   };
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     const kept = await request.post(`${apiBase}/client-map/mappings`, {
       data: { clientName: keptName, country: 'Japan', consignee: 'Consignee Keep' },
     });

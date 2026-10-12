@@ -8,13 +8,6 @@ FROM nginx:alpine
 # The build output should be in: build/dist/js/productionExecutable/
 COPY build/dist/js/productionExecutable/ /usr/share/nginx/html/
 
-# Local Docker (compose): keep automan-prod-auto-login=false so dev uses the login screen.
-# AWS / locked-down prod image: docker build --build-arg ENABLE_PROD_AUTO_LOGIN=true ...
-ARG ENABLE_PROD_AUTO_LOGIN=false
-RUN if [ "$ENABLE_PROD_AUTO_LOGIN" = "true" ]; then \
-      sed -i 's/name="automan-prod-auto-login" content="false"/name="automan-prod-auto-login" content="true"/' /usr/share/nginx/html/index.html; \
-    fi
-
 # Copy production nginx configuration
 COPY docker/nginx/nginx-prod.conf /etc/nginx/conf.d/default.conf
 

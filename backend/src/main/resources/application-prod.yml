@@ -1,15 +1,16 @@
-# Production overrides: keep existing data safe when deploying new code.
-# Activate with: SPRING_PROFILES_ACTIVE=docker,prod (e.g. in .env.prod on EC2).
+# Production overrides. Activate with SPRING_PROFILES_ACTIVE=docker,prod.
+# The docker profile alone uses ddl-auto update and Flyway baseline 37. This profile
+# must be last so it replaces those settings.
 #
-# - ddl-auto: validate = Hibernate will NOT alter the database (no new columns,
-#   no drops). If your new code expects schema changes, run migrations manually
-#   first. This prevents accidental data loss from entity changes.
-# - sql.init.mode: never = Spring will NOT run schema.sql/data.sql on startup.
-#   We do not use these files, but setting "never" avoids any future mistake.
+# Hibernate validates the schema and does not add or drop columns.
+# Flyway still applies pending migrations when flyway_schema_history exists.
+# baseline-on-migrate and baseline-version 1 apply only when that history table is
+# absent. Confirm the table already ends at V84 before the first start of a release
+# that contains V85–V91. A missing history table would baseline at 1 and replay
+# older scripts, including deletes and column drops.
+# sql.init.mode never: schema.sql and data.sql do not run.
 spring:
   flyway:
-    # Existing RDS already has schema/data: first deploy baseline at V1 so this script is not re-run.
-    # Fresh empty DB: no baseline; Flyway runs V1__init_multiplatform.sql.
     baseline-on-migrate: true
     baseline-version: 1
   jpa:
@@ -18,3 +19,8 @@ spring:
   sql:
     init:
       mode: never
+
+management:
+  endpoint:
+    health:
+      show-details: never

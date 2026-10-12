@@ -46,6 +46,18 @@ fun documentTitleForRoute(route: String): String {
         routeAtEquals(r, "/login") -> "Sign In"
         routeAtEquals(r, "/signup") -> "Sign Up"
         routeAtEquals(r, "/home") -> "Home"
+        routeAtEquals(r, "/portal/client") -> "Client portal"
+        routeAtStartsWith(r, "/portal/client/cars") -> "Purchased cars"
+        routeAtStartsWith(r, "/portal/client/shipments") -> "Shipments"
+        routeAtStartsWith(r, "/portal/client/invoices") -> "Invoices"
+        routeAtStartsWith(r, "/portal/client/transactions") -> "Transactions"
+        routeAtStartsWith(r, "/portal/client") -> "Client portal"
+        routeAtEquals(r, "/portal/consignee") -> "Consignee portal"
+        routeAtStartsWith(r, "/portal/consignee/ongoing") -> "Ongoing shipments"
+        routeAtStartsWith(r, "/portal/consignee/not-shipped") -> "Not yet shipped"
+        routeAtStartsWith(r, "/portal/consignee/shipped") -> "Shipped cars"
+        routeAtStartsWith(r, "/portal/consignee/history") -> "Shipment history"
+        routeAtStartsWith(r, "/portal/consignee") -> "Consignee portal"
         routeAtStartsWith(r, "/add") -> "Add Purchase"
         routeAtStartsWith(r, "/edit/") -> {
             val chassis = chassisFromEditRoute(r)?.trim().orEmpty()

@@ -2,6 +2,7 @@ package com.automan.backend.model
 
 import jakarta.persistence.*
 import java.time.LocalDateTime
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 
 @Entity
@@ -38,6 +39,11 @@ data class Client(
     @Enumerated(EnumType.STRING)
     @Column(name = "status")
     val status: ClientStatus = ClientStatus.ACTIVE,
+
+    /** Staff assignment. Ignored on the general client API so editors cannot set it. */
+    @JsonIgnore
+    @Column(name = "consignee_id")
+    val consigneeId: Long? = null,
     
     @Column(name = "created_at")
     val createdAt: LocalDateTime = LocalDateTime.now(),

@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -26,8 +27,7 @@ test('login, book a purchase, ship it, and confirm an invoice', async ({ page, r
   let stockMapId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
 
     const client = await request.post(`${apiBase}/clients`, {
       data: {

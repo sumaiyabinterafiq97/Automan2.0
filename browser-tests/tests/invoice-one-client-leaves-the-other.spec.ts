@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -28,8 +29,7 @@ test('invoicing one client charges only that client and leaves the other client 
   let stockMapId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     invoicedClientId = await createClient(request, `C${bookingA}`, invoicedClient, 0);
     otherClientId = await createClient(request, `D${bookingB}`, otherClient, 80);
     const stockMap = await request.post(`${apiBase}/stock-location-map/mappings/add`, {

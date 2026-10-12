@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -14,8 +15,7 @@ test('login, create a purchase, find it in the list, and reopen it by chassis', 
     password: 'Browser!Test1',
   };
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
 
     const mapping = await request.post(`${apiBase}/car-brand-mapping/mappings`, {
       data: { chassis: chassisCode, carBrand: 'Browser' },

@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -13,8 +14,7 @@ test('wrong password is rejected, then login, logout, and a protected route retu
     password: 'Browser!Test1',
   };
 
-  const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-  expect(setup.ok(), await setup.text()).toBeTruthy();
+  const auth = await openAdminSession(request, apiBase, admin);
 
   await page.goto('/login');
   await expect(page.locator('#si_email')).toBeVisible();

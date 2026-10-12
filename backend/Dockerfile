@@ -33,7 +33,8 @@ RUN ls -la build/libs/ && cp build/libs/automan-backend-1.0-SNAPSHOT.jar app.jar
 EXPOSE 8083
 
 # Set environment variables (non-sensitive defaults - will be overridden by docker-compose)
-ENV SPRING_PROFILES_ACTIVE=docker
+# Profile docker,prod validates schema. Local Compose overrides this with docker.
+ENV SPRING_PROFILES_ACTIVE=docker,prod
 # Note: Database credentials should be provided via docker-compose environment variables, not hardcoded here
 
 # Health check — actuator (no auth); avoids false failures if /purchases behavior changes

@@ -205,6 +205,8 @@ class InvoiceHistoryService(
                         fieldLike("vessel"),
                         fieldLike("pol"),
                         fieldLike("pod"),
+                        fieldLike("lcNo"),
+                        fieldLike("priceType"),
                     ),
                 )
             }

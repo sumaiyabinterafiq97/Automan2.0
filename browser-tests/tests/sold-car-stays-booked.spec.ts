@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -22,8 +23,7 @@ test('an invoiced car stays on its booking and cannot be removed', async ({ page
   let stockMapId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     const client = await request.post(`${apiBase}/clients`, {
       data: { clientNumber: `C${bookingNo}`, clientName, creditLimit: 100000000, currency: 'JPY', status: 'ACTIVE' },
     });
@@ -99,8 +99,9 @@ test('an invoiced car stays on its booking and cannot be removed', async ({ page
     await openMenu(page, '#shipmentStatusBtn', '#shipmentHeader');
     await expect(page.getByRole('heading', { name: 'Shipping History' })).toBeVisible();
     await page.locator('#shippingHistorySearchInput').fill(bookingNo);
-    await expect(page.locator('#shippingHistoryTable')).toContainText(bookingNo);
-    await page.locator('button[aria-label="Edit shipping schedule"]').click();
+    const shippingRow = page.locator('#shippingHistoryTable tr', { hasText: bookingNo });
+    await expect(shippingRow).toHaveCount(1);
+    await shippingRow.getByRole('button', { name: 'Edit shipping schedule' }).click();
     await expect(page.getByRole('heading', { name: 'RECREATE SHIPPING SCHEDULE' })).toBeVisible();
     const bookingCars = page.locator('#carSelectionTableBody');
     await expect(bookingCars).toContainText(chassis);
@@ -116,6 +117,8 @@ test('an invoiced car stays on its booking and cannot be removed', async ({ page
     await expect(page.locator('#shippingHistoryTable')).toContainText(chassis);
 
     await openMenu(page, '#purchaseListBtn');
+    await page.locator('#purchaseSearchInput').fill(chassis);
+    await page.locator('#purchaseSearchInput').press('Enter');
     await expect(page.locator('#purchaseTable')).toContainText(chassis);
     await page.locator(`.edit-btn[aria-label="Edit"][data-chassis="${chassis}"]`).click();
     await expect(page).toHaveURL(new RegExp(`/edit/${chassis}$`));

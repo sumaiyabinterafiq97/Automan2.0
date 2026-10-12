@@ -207,14 +207,65 @@ fun ensureAppPathOrRedirect(): Boolean {
 
     val token = hasAuthToken()
     if (token && isAuthRoute()) {
-        navigateToApp("/purchase", replace = true)
+        navigateToApp(homeRouteForRole(getUserRole()), replace = true)
         return true
     }
     if (!token && !isAuthRoute()) {
         navigateToApp("/login", replace = true)
         return true
     }
+    if (token) {
+        val portalRedirect = portalGuardRedirect(getUserRole(), route)
+        if (portalRedirect != null && !routeAtEquals(route, portalRedirect)) {
+            navigateToApp(portalRedirect, replace = true)
+            return true
+        }
+    }
+    if (token && isViewerBlockedRoute(route)) {
+        navigateToApp("/purchase", replace = true)
+        return true
+    }
     return false
+}
+
+/** Staff home stays the purchase list. External roles never land there. */
+fun homeRouteForRole(role: String?): String = when (role?.trim()?.uppercase()) {
+    "CLIENT" -> "/portal/client"
+    "CONSIGNEE" -> "/portal/consignee"
+    else -> "/purchase"
+}
+
+fun isExternalPortalRole(role: String?): Boolean {
+    val normalized = role?.trim()?.uppercase()
+    return normalized == "CLIENT" || normalized == "CONSIGNEE"
+}
+
+fun isOwnPortalRoute(role: String?, route: String): Boolean {
+    val normalized = route.trim().trimEnd('/')
+    return when (role?.trim()?.uppercase()) {
+        "CLIENT" -> routeAtStartsWith(normalized, "/portal/client")
+        "CONSIGNEE" -> routeAtStartsWith(normalized, "/portal/consignee")
+        else -> false
+    }
+}
+
+fun isAnyPortalRoute(route: String): Boolean {
+    val normalized = route.trim().trimEnd('/')
+    return routeAtStartsWith(normalized, "/portal/client") || routeAtStartsWith(normalized, "/portal/consignee")
+}
+
+/**
+ * Where to send an authenticated user who is outside their shell.
+ * Null means the current route is allowed. The backend still enforces every API call.
+ */
+fun portalGuardRedirect(role: String?, route: String): String? {
+    val normalized = route.trim().trimEnd('/')
+    if (isExternalPortalRole(role)) {
+        if (normalized.isEmpty() || !isOwnPortalRoute(role, normalized)) return homeRouteForRole(role)
+        return null
+    }
+    if (normalized.isNotEmpty() && isAnyPortalRoute(normalized)) return "/purchase"
+    return null
 }
 
 fun exposeNavigateToAppOnWindow() {

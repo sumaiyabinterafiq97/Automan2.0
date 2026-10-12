@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -20,8 +21,7 @@ test('purchase validation rejects missing and duplicate chassis, then accepts a 
   };
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
 
     const mapping = await request.post(`${apiBase}/car-brand-mapping/mappings`, {
       data: { chassis: chassisCode, carBrand: 'Browser' },
@@ -48,9 +48,10 @@ test('purchase validation rejects missing and duplicate chassis, then accepts a 
 
     await page.getByRole('button', { name: 'Open menu' }).click();
     await page.locator('#purchaseListBtn').click();
-    await expect(page.locator('#purchaseSearchInput')).toHaveValue('');
+    await page.locator('#purchaseSearchInput').fill(fullChassis);
+    await page.locator('#purchaseSearchInput').press('Enter');
     await expect(page.locator('#purchaseTable')).toContainText('No matches');
-    await expect(page.locator('#purchaseTable')).not.toContainText(chassisCode);
+    await expect(page.locator('#purchaseTable')).not.toContainText(fullChassis);
 
     await openNewPurchase(page, chassisCode);
     await page.locator('#chassisCodeInput').fill(chassisCode);
@@ -58,6 +59,8 @@ test('purchase validation rejects missing and duplicate chassis, then accepts a 
     await page.locator('#carNameInput').fill(carName);
     await savePurchase(page);
     await dismissSaved(page);
+    await page.locator('#purchaseSearchInput').fill(fullChassis);
+    await page.locator('#purchaseSearchInput').press('Enter');
     await expect(page.locator('#purchaseTable')).toContainText(fullChassis);
 
     await openNewPurchase(page, chassisCode);
@@ -75,6 +78,8 @@ test('purchase validation rejects missing and duplicate chassis, then accepts a 
 
     await page.getByRole('button', { name: 'Open menu' }).click();
     await page.locator('#purchaseListBtn').click();
+    await page.locator('#purchaseSearchInput').fill(fullChassis);
+    await page.locator('#purchaseSearchInput').press('Enter');
     await expect(page.locator('#purchaseTable tbody tr', { hasText: fullChassis })).toHaveCount(1);
 
     await openNewPurchase(page, chassisCode);
@@ -83,6 +88,8 @@ test('purchase validation rejects missing and duplicate chassis, then accepts a 
     await page.locator('#carNameInput').fill(carName);
     await savePurchase(page);
     await dismissSaved(page);
+    await page.locator('#purchaseSearchInput').fill(recoveredChassis);
+    await page.locator('#purchaseSearchInput').press('Enter');
     await expect(page.locator('#purchaseTable')).toContainText(recoveredChassis);
 
     await page.locator(`.edit-btn[aria-label="Edit"][data-chassis="${recoveredChassis}"]`).click();

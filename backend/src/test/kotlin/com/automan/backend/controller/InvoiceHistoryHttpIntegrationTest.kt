@@ -61,7 +61,7 @@ class InvoiceHistoryHttpIntegrationTest {
     fun pageAndSearchReturnTheRequestedInvoiceAndNotAnother() {
         val client = "P0InvClient${token()}"
         val otherClient = "P0InvOther${token()}"
-        val number = saveInvoice(client, "P0Vessel${token()}")
+        val number = saveInvoice(client, "P0Vessel${token()}", "LC-${token()}")
         val other = saveInvoice(otherClient, "P0Vessel${token()}")
 
         val page = mockMvc.perform(
@@ -89,6 +89,18 @@ class InvoiceHistoryHttpIntegrationTest {
             .andExpect(jsonPath("$.content[0].invoiceNumber").value(number))
             .andReturn().response.contentAsString
         assertFalse(search.contains(other))
+
+        val exactLc = requireNotNull(invoiceHistoryRepository.findByInvoiceNumber(number).get().lcNo)
+        mockMvc.perform(
+            get("/invoice-history/page-search")
+                .param("q", exactLc)
+                .param("page", "0")
+                .param("size", "20"),
+        )
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.totalElements").value(1))
+            .andExpect(jsonPath("$.content[0].invoiceNumber").value(number))
+            .andExpect(jsonPath("$.content[0].lcNo").value(exactLc))
 
         mockMvc.perform(get("/invoice-history/filter-options"))
             .andExpect(status().isOk)
@@ -136,7 +148,7 @@ class InvoiceHistoryHttpIntegrationTest {
             }
     }
 
-    private fun saveInvoice(client: String, vessel: String): String {
+    private fun saveInvoice(client: String, vessel: String, lcNo: String? = null): String {
         val number = "P0INV-${token()}"
         invoiceNumbers.add(number)
         val header = invoiceHistoryRepository.save(
@@ -147,6 +159,7 @@ class InvoiceHistoryHttpIntegrationTest {
                 shippingDate = LocalDate.of(2026, 6, 15),
                 pol = "YOKOHAMA",
                 pod = "CHATTOGRAM",
+                lcNo = lcNo,
                 priceType = "C&F",
             ),
         )

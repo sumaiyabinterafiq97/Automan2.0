@@ -1,12 +1,16 @@
 package com.automan.backend.service
 
+import com.automan.backend.model.AuthBootstrap
 import com.automan.backend.model.PendingSignup
 import com.automan.backend.model.PendingSignupStatus
 import com.automan.backend.model.User
 import com.automan.backend.model.UserRole
+import com.automan.backend.repository.AuthBootstrapRepository
 import com.automan.backend.repository.PendingSignupRepository
 import com.automan.backend.repository.UserRepository
+import com.automan.backend.security.AuthSessionService
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -22,8 +26,10 @@ data class AuthResponse(val id: Long, val email: String, val name: String, val r
 @Service
 class AuthService(
     private val userRepository: UserRepository,
+    private val authBootstrapRepository: AuthBootstrapRepository,
     private val pendingSignupRepository: PendingSignupRepository,
     private val emailService: EmailService,
+    private val authSessionService: AuthSessionService,
     @Value("\${app.mail.validate-mx:true}") private val validateMx: Boolean
 ) {
     private val encoder = BCryptPasswordEncoder()
@@ -142,9 +148,57 @@ class AuthService(
                     "name" to p.name,
                     "role" to p.role.name,
                     "createdAt" to p.createdAt?.toString(),
-                    "verificationToken" to p.verificationToken
                 )
             }
+    }
+
+    @Transactional
+    fun reviewPending(id: Long, action: String) {
+        when (action.lowercase()) {
+            "approve" -> approvePendingById(id)
+            "reject" -> rejectPendingById(id)
+            else -> throw IllegalArgumentException("Invalid action. Use approve or reject.")
+        }
+    }
+
+    private fun approvePendingById(id: Long) {
+        val pending = pendingSignupRepository.findById(id).orElse(null)
+            ?: throw IllegalArgumentException("Invalid or expired verification link")
+        approvePending(pending.verificationToken)
+    }
+
+    private fun rejectPendingById(id: Long) {
+        val pending = pendingSignupRepository.findById(id).orElse(null)
+            ?: throw IllegalArgumentException("Invalid or expired verification link")
+        rejectPending(pending.verificationToken)
+    }
+
+    /**
+     * Claims the singleton bootstrap row, then creates the first Admin in the same transaction.
+     * A second concurrent insert hits the primary key and creates no user.
+     * An installation that already has users is rejected and the claim is rolled back with that rejection.
+     */
+    @Transactional
+    fun setupInitialAdmin(email: String, name: String, password: String): AuthResponse {
+        try {
+            authBootstrapRepository.saveAndFlush(
+                AuthBootstrap(id = 1, createdAt = AuthSessionService.utcNow()),
+            )
+        } catch (_: DataIntegrityViolationException) {
+            throw IllegalStateException("System setup already completed")
+        }
+        if (userRepository.count() > 0) {
+            throw IllegalStateException("System setup already completed")
+        }
+        return signup(
+            SignupRequest(
+                email = email,
+                name = name,
+                password = password,
+                role = UserRole.ADMIN,
+                createdByRole = null,
+            ),
+        )
     }
 
     @Transactional
@@ -160,7 +214,7 @@ class AuthService(
             role = req.role
         )
         val saved = userRepository.save(user)
-        val token = generateMockToken(saved)
+        val token = authSessionService.createSession(saved)
         return AuthResponse(saved.id!!, saved.email, saved.name, saved.role, token)
     }
 
@@ -176,23 +230,20 @@ class AuthService(
         }
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     fun login(req: LoginRequest): AuthResponse {
         val user = userRepository.findByEmail(req.email.trim().lowercase())
             ?: throw IllegalArgumentException("Invalid credentials")
         if (!encoder.matches(req.password, user.passwordHash)) {
             throw IllegalArgumentException("Invalid credentials")
         }
-        val token = generateMockToken(user)
+        val token = authSessionService.createSession(user)
         return AuthResponse(user.id!!, user.email, user.name, user.role, token)
     }
 
-    fun getUserCount(): Long = userRepository.count()
-
-    private fun generateMockToken(user: User): String {
-        val randomComponent = UUID.randomUUID().toString().replace("-", "").substring(0, 16)
-        val timestamp = System.currentTimeMillis()
-        val userId = user.id ?: 0L
-        return "tok_${userId}_${timestamp}_$randomComponent"
+    fun logout(rawToken: String?) {
+        authSessionService.revoke(rawToken)
     }
+
+    fun getUserCount(): Long = userRepository.count()
 }

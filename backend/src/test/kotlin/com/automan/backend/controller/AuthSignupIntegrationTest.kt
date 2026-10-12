@@ -2,6 +2,7 @@ package com.automan.backend.controller
 
 import com.automan.backend.model.PendingSignupStatus
 import com.automan.backend.model.UserRole
+import com.automan.backend.repository.AuthBootstrapRepository
 import com.automan.backend.repository.PendingSignupRepository
 import com.automan.backend.repository.UserRepository
 import org.hamcrest.Matchers.not
@@ -28,6 +29,9 @@ import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.LocalDateTime
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Login, public signup, approval, and first-admin setup.
@@ -41,6 +45,7 @@ class AuthSignupIntegrationTest {
 
     @Autowired private lateinit var mockMvc: MockMvc
     @Autowired private lateinit var userRepository: UserRepository
+    @Autowired private lateinit var authBootstrapRepository: AuthBootstrapRepository
     @Autowired private lateinit var pendingSignupRepository: PendingSignupRepository
     @Autowired private lateinit var transactionManager: PlatformTransactionManager
 
@@ -164,9 +169,8 @@ class AuthSignupIntegrationTest {
     fun approvePendingSignupCreatesOneUserWithSameRoleWhoCanLogin() {
         val email = track("approve-ok")
         signup(email, role = "VIEWER", name = "Approved User").andExpect(status().isOk)
-        val token = pendingToken(email)
 
-        verify(token, "approve")
+        review(pendingId(email), "approve")
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.success").value(true))
 
@@ -175,7 +179,7 @@ class AuthSignupIntegrationTest {
         assertNotNull(user)
         assertEquals(UserRole.VIEWER, user!!.role)
         assertEquals("Approved User", user.name)
-        assertNull(pendingSignupRepository.findByVerificationToken(token))
+        assertEquals(0, pendingCount(email))
 
         mockMvc.perform(login(email, "Password1"))
             .andExpect(status().isOk)
@@ -188,10 +192,10 @@ class AuthSignupIntegrationTest {
     fun secondApprovalDoesNotCreateAnotherUser() {
         val email = track("approve-twice")
         signup(email).andExpect(status().isOk)
-        val token = pendingToken(email)
+        val id = pendingId(email)
 
-        verify(token, "approve").andExpect(status().isOk)
-        verify(token, "approve").andExpect(status().isBadRequest)
+        review(id, "approve").andExpect(status().isOk)
+        review(id, "approve").andExpect(status().isBadRequest)
 
         assertEquals(1, userCount(email))
     }
@@ -204,7 +208,7 @@ class AuthSignupIntegrationTest {
         assertNotNull(pending)
         pendingSignupRepository.save(pending!!.copy(expiresAt = LocalDateTime.now().minusHours(1)))
 
-        verify(pending.verificationToken, "approve").andExpect(status().isBadRequest)
+        review(pending.id!!, "approve").andExpect(status().isBadRequest)
         assertEquals(0, userCount(email))
     }
 
@@ -212,14 +216,13 @@ class AuthSignupIntegrationTest {
     fun rejectPendingSignupCreatesNoUserAndRemovesPending() {
         val email = track("reject")
         signup(email).andExpect(status().isOk)
-        val token = pendingToken(email)
+        val id = pendingId(email)
 
-        verify(token, "reject")
+        review(id, "reject")
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.success").value(true))
 
         assertEquals(0, userCount(email))
-        assertNull(pendingSignupRepository.findByVerificationToken(token))
         assertEquals(0, pendingCount(email))
     }
 
@@ -227,7 +230,7 @@ class AuthSignupIntegrationTest {
     fun rejectedEmailCanSignUpAgain() {
         val email = track("reject-again")
         signup(email).andExpect(status().isOk)
-        verify(pendingToken(email), "reject").andExpect(status().isOk)
+        review(pendingId(email), "reject").andExpect(status().isOk)
 
         signup(email)
             .andExpect(status().isOk)
@@ -238,7 +241,26 @@ class AuthSignupIntegrationTest {
     }
 
     @Test
+    fun publicSignupCannotRequestAdminOrEditor() {
+        val adminEmail = track("role-admin")
+        signup(adminEmail, role = "ADMIN")
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.message").value("Public signup can only request the Viewer role."))
+        assertEquals(0, pendingCount(adminEmail))
+        assertEquals(0, userCount(adminEmail))
+
+        val editorEmail = track("role-editor")
+        signup(editorEmail, role = "EDITOR")
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.message").value("Public signup can only request the Viewer role."))
+        assertEquals(0, pendingCount(editorEmail))
+        assertEquals(0, userCount(editorEmail))
+    }
+
+    @Test
     fun emptyUserTableSetupCreatesExactlyOneAdmin() {
+        userRepository.findByEmail(TestStaffAuth.EMAIL)?.let { userRepository.delete(it) }
+        authBootstrapRepository.deleteAll()
         assertEquals(0L, userRepository.count(), "auth test database should start empty")
         val email = track("setup-first")
 
@@ -256,6 +278,43 @@ class AuthSignupIntegrationTest {
     }
 
     @Test
+    fun concurrentSetupCreatesOnlyOneAdmin() {
+        userRepository.findByEmail(TestStaffAuth.EMAIL)?.let { userRepository.delete(it) }
+        authBootstrapRepository.deleteAll()
+        assertEquals(0L, userRepository.count())
+        val ready = CountDownLatch(1)
+        val done = CountDownLatch(6)
+        val statuses = java.util.Collections.synchronizedList(mutableListOf<Int>())
+        val pool = Executors.newFixedThreadPool(6)
+        repeat(6) { index ->
+            val email = "race-$index-${UUID.randomUUID().toString().take(8)}@automan.test"
+            emails.add(email)
+            pool.submit {
+                try {
+                    ready.await(5, TimeUnit.SECONDS)
+                    val status = mockMvc.perform(
+                        post("/auth/setup")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""{"email":"$email","name":"Race Admin","password":"Password1"}"""),
+                    ).andReturn().response.status
+                    statuses.add(status)
+                } finally {
+                    done.countDown()
+                }
+            }
+        }
+        ready.countDown()
+        assertTrue(done.await(30, TimeUnit.SECONDS))
+        pool.shutdown()
+        assertEquals(1, statuses.count { it == 200 }, "statuses=$statuses")
+        assertEquals(6, statuses.size)
+        assertTrue(statuses.all { it == 200 || it == 409 }, "statuses=$statuses")
+        assertEquals(1L, userRepository.count())
+        assertEquals(UserRole.ADMIN, userRepository.findAll().single().role)
+        assertEquals(1L, authBootstrapRepository.count())
+    }
+
+    @Test
     fun setupAfterUserExistsDoesNotCreateAnotherUser() {
         val existing = track("setup-existing")
         createUser(existing, role = "EDITOR").andExpect(status().isOk)
@@ -267,7 +326,7 @@ class AuthSignupIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""{"email":"$attempted","name":"Second Admin","password":"Password1"}"""),
         )
-            .andExpect(status().isInternalServerError)
+            .andExpect(status().isConflict)
             .andExpect(jsonPath("$.message").value("System setup already completed"))
 
         assertEquals(before, userRepository.count())
@@ -317,10 +376,10 @@ class AuthSignupIntegrationTest {
 
     private fun pendingCount(email: String) = pendingSignupRepository.findAll().count { it.email == email }
 
-    private fun pendingToken(email: String): String {
+    private fun pendingId(email: String): Long {
         val pending = pendingSignupRepository.findByEmailAndStatus(email, PendingSignupStatus.PENDING)
         assertNotNull(pending)
-        return pending!!.verificationToken
+        return pending!!.id!!
     }
 
     private fun createUser(
@@ -350,11 +409,11 @@ class AuthSignupIntegrationTest {
             .contentType(MediaType.APPLICATION_JSON)
             .content("""{"email":"$email","password":"$password"}""")
 
-    private fun verify(token: String, action: String) =
+    private fun review(id: Long, action: String) =
         mockMvc.perform(
-            get("/auth/verify-signup")
-                .param("token", token)
-                .param("action", action),
+            post("/auth/signup-review")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""{"id":$id,"action":"$action"}"""),
         )
 
     companion object {

@@ -79,10 +79,9 @@ class RixoImportController(
             e.printStackTrace()
             ResponseEntity.status(500).body(mapOf(
                 "success" to false,
-                "message" to "Failed to fetch prices: ${e.message}",
+                "message" to "Failed to fetch prices.",
                 "data" to emptyList<Any>(),
                 "count" to 0,
-                "error" to (e.stackTraceToString())
             ))
         }
     }

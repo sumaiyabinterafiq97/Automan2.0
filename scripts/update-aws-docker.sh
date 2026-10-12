@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Build linux/amd64 images and push to Docker Hub for AWS EC2 (Step 10 in AWS-FREE-TIER-DEPLOYMENT-GUIDE.md).
 # Does NOT touch RDS data — only replaces container images.
+# This script pushes :latest. The portal release uses docs/portal-release-checklist.md,
+# which tags the release commit and does not push.
+# The frontend image does not enable automatic login.
 #
 # Usage:
 #   ./scripts/update-aws-docker.sh              # backend + frontend
@@ -68,7 +71,6 @@ if [ "$BUILD_FRONTEND" = "1" ]; then
   (cd "$PROJECT_ROOT" && ./gradlew jsBrowserProductionWebpack --no-daemon -q)
   echo "🐳 Building frontend image..."
   docker build --platform "$PLATFORM" \
-    --build-arg ENABLE_PROD_AUTO_LOGIN=true \
     -t "$DOCKERHUB_USERNAME/automan-frontend:latest" \
     -f "$PROJECT_ROOT/docker/Dockerfile.frontend.prod" \
     "$PROJECT_ROOT"
@@ -107,6 +109,6 @@ echo "  sudo docker compose --env-file docker/.env -f docker/docker-compose.hub.
 echo "  sudo docker compose --env-file docker/.env -f docker/docker-compose.hub.yml up -d"
 echo "  sudo docker compose -f docker/docker-compose.hub.yml logs --tail=80 backend"
 echo ""
-echo "Verify: curl -s http://localhost:8083/api/purchases | head"
+echo "Verify: curl -fsS http://localhost:8083/api/actuator/health"
 echo "Do NOT re-run database/*.sql on RDS — Flyway applies new migrations on backend start."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

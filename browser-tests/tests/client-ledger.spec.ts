@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -22,8 +23,7 @@ test('client ledger search opens that client, and a payment updates only that ba
   let otherId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     targetId = await createClient(request, target.number, target.name, 0);
     otherId = await createClient(request, other.number, other.name, 80);
 

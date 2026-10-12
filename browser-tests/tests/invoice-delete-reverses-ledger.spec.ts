@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -24,8 +25,7 @@ test('deleting an invoice removes it, reverses that client ledger, and leaves an
   };
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     ids.clientId = await createClient(request, `C${bookingNo}`, clientName, 0);
     ids.otherClientId = await createClient(request, `D${bookingNo}`, otherName, 80);
     ids.stockMapId = await createStock(request, stamp);

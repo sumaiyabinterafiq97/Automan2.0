@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { openAdminSession } from '../staff-api';
 
 const apiBase = 'http://127.0.0.1:8083/api';
 
@@ -17,9 +18,8 @@ test('deleting one user removes only that account and leaves the admin able to l
   let removedId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
-    const created = await request.post(`${apiBase}/users`, { data: { ...removed, role: 'EDITOR' } });
+    const auth = await openAdminSession(request, apiBase, admin);
+    const created = await request.post(`${apiBase}/users`, { data: { ...removed, role: 'EDITOR' }, headers: auth });
     expect(created.ok(), await created.text()).toBeTruthy();
     removedId = Number((await created.json()).id);
 

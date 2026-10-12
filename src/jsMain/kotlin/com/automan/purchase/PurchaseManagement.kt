@@ -1826,6 +1826,10 @@ private fun setupPurchaseListCompactResizeListener() {
 }
 
 fun showPurchaseList(forceClearFilters: Boolean = false) {
+    if (isExternalPortalRole(getUserRole())) {
+        navigateToApp(homeRouteForRole(getUserRole()), replace = true)
+        return
+    }
     val preserveFilters = !forceClearFilters && preservePurchaseListFiltersOnNextShow
     preservePurchaseListFiltersOnNextShow = false
     if (preserveFilters) {
@@ -5051,6 +5055,7 @@ fun updateRixoButtonVisibility() {
 // applyRoleBasedRestrictions moved to AuthSetup.kt
 
 fun ensureSidebarPresent() {
+    restoreStaffChrome()
     // Ensure sidebar exists (created in createApp)
     val sidebar = document.getElementById("sidebar")
     if (sidebar == null) {

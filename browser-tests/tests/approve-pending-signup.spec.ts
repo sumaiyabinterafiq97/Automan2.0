@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { openAdminSession, staffAuthHeaders } from '../staff-api';
 
 const apiBase = 'http://127.0.0.1:8083/api';
 
@@ -20,9 +21,9 @@ test('approving one pending signup lets only that user log in', async ({ page, r
     password: 'Browser!Test1',
   };
 
+  let auth: { Authorization: string } | undefined;
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    auth = await openAdminSession(request, apiBase, admin);
     await signup(request, approved);
     await signup(request, waiting);
 
@@ -64,11 +65,12 @@ test('approving one pending signup lets only that user log in', async ({ page, r
     await page.getByRole('button', { name: 'Open menu' }).click();
     await expect(page.getByText('Role: VIEWER')).toBeVisible();
   } finally {
-    const users = await request.get(`${apiBase}/users`);
+    if (!auth) return;
+    const users = await request.get(`${apiBase}/users`, { headers: auth });
     if (users.ok()) {
       const list = (await users.json()) as Array<{ id: number; email: string }>;
       const created = list.find((user) => user.email === approved.email);
-      if (created) await request.delete(`${apiBase}/users/${created.id}`);
+      if (created) await request.delete(`${apiBase}/users/${created.id}`, { headers: auth });
     }
   }
 });

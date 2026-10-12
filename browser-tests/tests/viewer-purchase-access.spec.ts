@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { openAdminSession } from '../staff-api';
 
 const apiBase = 'http://127.0.0.1:8083/api';
 
@@ -17,15 +18,16 @@ test('a viewer can see the purchase list but is not offered New+ or Edit', async
   };
   let purchaseId: number | null = null;
   let viewerId: number | null = null;
+  let auth: { Authorization: string } | undefined;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
-    const createdViewer = await request.post(`${apiBase}/users`, { data: { ...viewer, role: 'VIEWER' } });
+    auth = await openAdminSession(request, apiBase, admin);
+    const createdViewer = await request.post(`${apiBase}/users`, { data: { ...viewer, role: 'VIEWER' }, headers: auth });
     expect(createdViewer.ok(), await createdViewer.text()).toBeTruthy();
     viewerId = Number((await createdViewer.json()).id);
 
     const purchase = await request.post(`${apiBase}/purchases`, {
+      headers: auth,
       data: {
         date: '09/30/2026',
         chassis,
@@ -41,11 +43,22 @@ test('a viewer can see the purchase list but is not offered New+ or Edit', async
     await expect(page.locator('#purchaseTable')).toContainText(chassis);
     await page.getByRole('button', { name: 'Open menu' }).click();
     await expect(page.locator('#newBtn')).toBeHidden();
+    await expect(page.locator('#quickPurchaseBtn')).toBeHidden();
+    await page.locator('#shipmentHeader').click();
+    await expect(page.locator('#carBookingBtn')).toBeHidden();
+    await expect(page.locator('#shipmentStatusBtn')).toBeVisible();
+    await page.locator('#invoiceNavHeader').click();
+    await expect(page.locator('#anInvoiceBtn')).toBeHidden();
+    await expect(page.locator('#invoiceHistorySidebarBtn')).toBeVisible();
+    await page.goto('/booking');
+    await expect(page).toHaveURL(/\/purchase$/);
+    await page.goto('/invoice');
+    await expect(page).toHaveURL(/\/purchase$/);
     await expect(page.getByText('Role: VIEWER')).toBeVisible();
     await expect(page.locator(`.edit-btn[aria-label="Edit"][data-chassis="${chassis}"]`)).toHaveCount(0);
   } finally {
-    if (purchaseId != null) await request.delete(`${apiBase}/purchases/${purchaseId}`);
-    if (viewerId != null) await request.delete(`${apiBase}/users/${viewerId}`);
+    if (auth && purchaseId != null) await request.delete(`${apiBase}/purchases/${purchaseId}`, { headers: auth });
+    if (auth && viewerId != null) await request.delete(`${apiBase}/users/${viewerId}`, { headers: auth });
   }
 });
 

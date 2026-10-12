@@ -34,6 +34,11 @@ spring:
       max-request-size: 10MB
 server:
   port: ${PORT:8083}
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    include-exception: false
   servlet:
     context-path: /api
 

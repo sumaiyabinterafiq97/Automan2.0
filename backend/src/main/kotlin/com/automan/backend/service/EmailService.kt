@@ -23,6 +23,7 @@ class EmailService(
     @Value("\${app.mail.from:Automan <onboarding@resend.dev>}")
     private lateinit var fromAddress: String
 
+    @Suppress("unused")
     @Value("\${app.verification-base-url:http://localhost:8083/api}")
     private lateinit var verificationBaseUrl: String
 
@@ -31,28 +32,28 @@ class EmailService(
 
     private val resendUrl = "https://api.resend.com/emails"
 
+    /** [token] stays in the database. The email only links to the admin review page. */
+    @Suppress("UNUSED_PARAMETER")
     fun sendSignupVerificationToAdmin(userEmail: String, userName: String, role: String, token: String) {
         if (resendApiKey.isBlank()) {
             Logger.warn("[EMAIL] Resend API key not set (RESEND_API_KEY) - no verification email sent to admin for $userEmail")
             return
         }
         try {
-            val approveUrl = "$verificationBaseUrl/auth/verify-signup?token=$token&action=approve"
-            val rejectUrl = "$verificationBaseUrl/auth/verify-signup?token=$token&action=reject"
+            val reviewUrl = frontendUrl.trimEnd('/') + "/pending-signups"
             val text = """
                 A new user has requested access.
                 Email: $userEmail
                 Name: $userName
                 Role: $role
 
-                Approve: $approveUrl
-                Reject: $rejectUrl
+                Sign in as an administrator and review the request:
+                $reviewUrl
             """.trimIndent()
             val html = """
                 <p>A new user has requested access.</p>
                 <p><strong>Email:</strong> $userEmail<br><strong>Name:</strong> $userName<br><strong>Role:</strong> $role</p>
-                <p><a href="$approveUrl" style="display:inline-block;padding:10px 20px;background:#28a745;color:white;text-decoration:none;border-radius:6px;margin-right:8px;">Approve</a>
-                <a href="$rejectUrl" style="display:inline-block;padding:10px 20px;background:#dc3545;color:white;text-decoration:none;border-radius:6px;">Reject</a></p>
+                <p><a href="$reviewUrl" style="display:inline-block;padding:10px 20px;background:#1d4ed8;color:white;text-decoration:none;border-radius:6px;">Review pending signups</a></p>
             """.trimIndent()
             sendViaResend(
                 to = listOf(adminEmail),

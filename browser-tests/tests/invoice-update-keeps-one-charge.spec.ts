@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -19,8 +20,7 @@ test('updating an invoice keeps one history row and does not charge the client a
   const ids = { purchaseId: null as number | null, clientId: null as number | null, stockMapId: null as number | null };
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     ids.clientId = await createClient(request, `C${bookingNo}`, clientName, 0);
     ids.stockMapId = await createStock(request, stamp);
     ids.purchaseId = await createPurchase(request, chassis, clientName, stockOf(stamp));

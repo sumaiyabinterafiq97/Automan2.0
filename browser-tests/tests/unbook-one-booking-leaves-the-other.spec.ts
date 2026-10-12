@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -23,8 +24,7 @@ test('removing one booking unbooks only that vehicle and leaves the other bookin
   let stockMapId: number | null = null;
 
   try {
-    const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-    expect(setup.ok(), await setup.text()).toBeTruthy();
+    const auth = await openAdminSession(request, apiBase, admin);
     clientId = await createClient(request, `C${removedBooking}`, clientName);
     const stockMap = await request.post(`${apiBase}/stock-location-map/mappings/add`, {
       data: { stockLocation, pol },
@@ -50,9 +50,10 @@ test('removing one booking unbooks only that vehicle and leaves the other bookin
     await openMenu(page, '#shipmentStatusBtn', '#shipmentHeader');
     await expect(page.getByRole('heading', { name: 'Shipping History' })).toBeVisible();
     await page.locator('#shippingHistorySearchInput').fill(removedBooking);
-    await expect(page.locator('#shippingHistoryTable')).toContainText(removedBooking);
+    const removedRow = page.locator('#shippingHistoryTable tr', { hasText: removedBooking });
+    await expect(removedRow).toHaveCount(1);
     await expect(page.locator('#shippingHistoryTable')).not.toContainText(keptBooking);
-    await page.locator('button[aria-label="Edit shipping schedule"]').click();
+    await removedRow.getByRole('button', { name: 'Edit shipping schedule' }).click();
     await expect(page.getByRole('heading', { name: 'RECREATE SHIPPING SCHEDULE' })).toBeVisible();
     const bookingCars = page.locator('#carSelectionTableBody');
     await expect(bookingCars).toContainText(removedChassis);

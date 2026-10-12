@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -7,8 +8,6 @@ const admin = {
   name: 'Integrity Admin',
   password: 'Browser!Test1',
 };
-let adminReady = false;
-
 test('deleting a purchase from the edit screen removes it from the list and search', async ({ page, request }) => {
   const stamp = uniqueStamp();
   const chassisCode = code('DL', stamp);
@@ -133,10 +132,8 @@ function code(prefix: string, stamp: string) {
 }
 
 async function ensureAdmin(request: APIRequestContext) {
-  if (adminReady) return;
-  const setup = await request.post(`${apiBase}/auth/setup`, { data: admin });
-  expect(setup.ok(), await setup.text()).toBeTruthy();
-  adminReady = true;
+  // Each test receives its own request context, so the bearer has to be attached again.
+  await openAdminSession(request, apiBase, admin);
 }
 
 async function prepareChassis(request: APIRequestContext, chassisCode: string) {

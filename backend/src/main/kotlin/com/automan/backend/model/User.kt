@@ -9,9 +9,11 @@ import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import jakarta.persistence.PrePersist
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.time.LocalDateTime
 
-enum class UserRole { VIEWER, EDITOR, ADMIN }
+enum class UserRole { VIEWER, EDITOR, ADMIN, CLIENT, CONSIGNEE }
 
 @Entity
 @Table(name = "users")
@@ -30,7 +32,8 @@ data class User(
     val passwordHash: String,
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(nullable = false, length = 16, columnDefinition = "VARCHAR(16) NOT NULL DEFAULT 'VIEWER'")
     val role: UserRole = UserRole.VIEWER,
 
     /** JSON blob for UI prefs (e.g. Purchase List sort + columns). Nullable = defaults. */

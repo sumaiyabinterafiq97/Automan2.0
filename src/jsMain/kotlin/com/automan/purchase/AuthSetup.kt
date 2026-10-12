@@ -4,85 +4,106 @@ import kotlinx.browser.document
 import kotlinx.browser.window
 import org.w3c.dom.*
 import org.w3c.dom.events.Event
+import org.w3c.fetch.RequestInit
 
 /**
- * Production-only auto-login driven by `<meta name="automan-prod-auto-login" content="true">` in index.html.
- * Local/dev builds ship `false` so users still use the login screen.
- * Optional build-arg ENABLE_PROD_AUTO_LOGIN=true on Dockerfile.frontend.prod for AWS images.
- *
- * Credentials default to seeded admin (`admin@automan.com`); password via optional meta override.
+ * Adds the staff session bearer token to same-app `/api/` fetches, including calls that do not use [ApiClient].
+ * Presigned storage URLs and other third-party hosts are left unchanged.
+ * A 401 clears the local session and returns to login. A 403 is left for the page to show.
  */
-fun isProdAutoLoginEnabled(): Boolean {
-    val meta = document.querySelector("meta[name=\"automan-prod-auto-login\"]") as? HTMLMetaElement
-    return meta?.getAttribute("content")?.trim()?.equals("true", ignoreCase = true) == true
-}
-
-fun prodAutoLoginEmail(): String {
-    val meta = document.querySelector("meta[name=\"automan-prod-auto-login-email\"]") as? HTMLMetaElement
-    return meta?.getAttribute("content")?.trim()?.takeIf { it.isNotEmpty() } ?: "admin@automan.com"
-}
-
-fun prodAutoLoginPassword(): String {
-    val meta = document.querySelector("meta[name=\"automan-prod-auto-login-password\"]") as? HTMLMetaElement
-    val raw = meta?.getAttribute("content")?.trim()
-    return raw?.takeIf { it.isNotEmpty() } ?: "Automan!Ship26Tokyo"
-}
-
-/**
- * Calls POST /api/auth/login when no token exists and prod auto-login meta is enabled.
- */
-suspend fun prodAutoLoginIfNeeded() {
-    val existing = safeLocalStorageGet("authToken")
-    if (!existing.isNullOrBlank()) return
-    if (!isProdAutoLoginEnabled()) return
-    val email = prodAutoLoginEmail()
-    val password = prodAutoLoginPassword()
-    val body = js("{}")
-    body.email = email
-    body.password = password
-    when (val r = ApiClient.post<dynamic>("auth/login", body)) {
-        is ApiResult.Success -> {
-            val d = (r.data as Any).unsafeCast<dynamic>()
-            val token = d.token as? String
-            val role = d.role as? String
-            val nameResp = d.name as? String
-            val userId = d.id as? Number
-            if (token.isNullOrBlank()) {
-                Logger.warn("Prod auto-login: login response had no token")
-                return
+fun installAuthenticatedFetch() {
+    if (window.asDynamic().__automanFetchInstalled == true) return
+    window.asDynamic().__automanFetchInstalled = true
+    js(
+        """
+        (function () {
+          var original = window.fetch.bind(window);
+          window.fetch = function (input, init) {
+            var url = '';
+            if (typeof input === 'string') url = input;
+            else if (input && typeof input.url === 'string') url = input.url;
+            function automanApi(raw) {
+              try {
+                var parsed = new URL(raw, window.location.href);
+                var path = parsed.pathname || '';
+                if (path !== '/api' && path.indexOf('/api/') !== 0) return false;
+                if (parsed.origin === window.location.origin) return true;
+                var host = parsed.hostname;
+                return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === window.location.hostname;
+              } catch (e) { return false; }
             }
-            safeLocalStorageSet("authToken", token)
-            if (!role.isNullOrBlank()) safeLocalStorageSet("authUserRole", role)
-            if (!nameResp.isNullOrBlank()) safeLocalStorageSet("authUserName", nameResp)
-            if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
-            Logger.debug("Prod auto-login succeeded for ${email}")
-            applyRoleBasedRestrictions()
-            updateUserInfoInSidebar()
-            if (currentRoute().isEmpty() || isAuthRoute()) {
-                navigateToApp("/purchase")
-            }
-        }
-        is ApiResult.Error -> {
-            Logger.warn("Prod auto-login failed (${r.statusCode}): ${r.message}")
-        }
-    }
+            if (!automanApi(url)) return original(input, init);
+            var next = init ? Object.assign({}, init) : {};
+            var headers = new Headers(next.headers || {});
+            var token = '';
+            try { token = window.localStorage.getItem('authToken') || ''; } catch (e) { token = ''; }
+            if (token && !headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
+            next.headers = headers;
+            return original(input, next).then(function (response) {
+              var skipRedirect = url.indexOf('/auth/login') >= 0 || url.indexOf('/auth/signup') >= 0 || url.indexOf('/auth/logout') >= 0 || url.indexOf('/auth/setup') >= 0;
+              if (response.status === 403) {
+                var now = Date.now();
+                if (!window.__automan403At || now - window.__automan403At > 2000) {
+                  window.__automan403At = now;
+                  var note = document.getElementById('automan-permission-note');
+                  if (!note) {
+                    note = document.createElement('div');
+                    note.id = 'automan-permission-note';
+                    note.setAttribute('role', 'alert');
+                    note.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:20000;background:#7f1d1d;color:#fff;padding:12px 16px;border-radius:8px;font:14px sans-serif;max-width:90%;box-shadow:0 8px 24px rgba(0,0,0,.2);';
+                    if (document.body) document.body.appendChild(note);
+                  }
+                  if (note) note.textContent = 'You do not have permission to perform this action.';
+                  clearTimeout(window.__automan403Timer);
+                  window.__automan403Timer = setTimeout(function () {
+                    var current = document.getElementById('automan-permission-note');
+                    if (current && current.parentNode) current.parentNode.removeChild(current);
+                  }, 4000);
+                }
+              }
+              if (response.status === 401 && !skipRedirect) {
+                try {
+                  window.localStorage.removeItem('authToken');
+                  window.localStorage.removeItem('authUserRole');
+                  window.localStorage.removeItem('authUserName');
+                  window.localStorage.removeItem('authUserId');
+                } catch (e) {}
+                var onLogin = window.location.pathname.indexOf('/login') >= 0;
+                if (!onLogin && typeof window.navigateToApp === 'function') window.navigateToApp('/login');
+              }
+              return response;
+            });
+          };
+        })();
+        """
+    )
 }
 
 // Authentication Functions (sign in / sign up only; no setup page)
 
 fun logout() {
-    // Clear authentication data
-    safeLocalStorageRemove("authToken")
-    safeLocalStorageRemove("authUserRole")
-    safeLocalStorageRemove("authUserName")
-    safeLocalStorageRemove("authUserId")
-    clearPurchaseListViewsSessionCache()
-    
-    // Close sidebar
-    closeSidebar()
-    
-    // Redirect to login page
-    navigateToApp("/login")
+    val hadToken = !safeLocalStorageGet("authToken").isNullOrBlank()
+    var finished = false
+    fun finishLogout() {
+        if (finished) return
+        finished = true
+        safeLocalStorageRemove("authToken")
+        safeLocalStorageRemove("authUserRole")
+        safeLocalStorageRemove("authUserName")
+        safeLocalStorageRemove("authUserId")
+        clearPurchaseListViewsSessionCache()
+        closeSidebar()
+        navigateToApp("/login")
+    }
+    if (!hadToken) {
+        finishLogout()
+        return
+    }
+    val init = js("{}").unsafeCast<RequestInit>()
+    init.method = "POST"
+    val promise = window.fetch(apiUrl("auth/logout"), init).asDynamic()
+    promise.then({ _: dynamic -> finishLogout() })
+    promise.catch({ _: dynamic -> finishLogout() })
 }
 
 fun updateUserInfoInSidebar() {
@@ -102,6 +123,24 @@ fun getUserRole(): String {
 }
 
 fun isViewer(): Boolean = getUserRole() == "VIEWER"
+
+/** UI-only. Booking, invoice creation, and other staff writes stay blocked on the server. */
+fun isViewerBlockedRoute(route: String): Boolean {
+    if (!isViewer()) return false
+    return routeAtStartsWith(route, "/add")
+        || routeAtStartsWith(route, "/edit")
+        || routeAtStartsWith(route, "/booking")
+        || routeAtStartsWith(route, "/recalculate-booking")
+        || routeAtStartsWith(route, "/invoice")
+        || routeAtStartsWith(route, "/recreate-invoice")
+        || routeAtStartsWith(route, "/rixo-generator")
+        || routeAtStartsWith(route, "/rixo-updater")
+        || routeAtStartsWith(route, "/rixo-transport")
+        || routeAtStartsWith(route, "/users")
+        || routeAtStartsWith(route, "/admin/party-access")
+        || routeAtStartsWith(route, "/pending-signups")
+        || routeAtStartsWith(route, "/role-request")
+}
 fun isEditor(): Boolean = getUserRole() == "EDITOR" || getUserRole() == "ADMIN"
 fun isAdmin(): Boolean = getUserRole() == "ADMIN"
 
@@ -112,6 +151,7 @@ fun applyRoleBasedRestrictions() {
     val newBtn = document.getElementById("newBtn") as HTMLElement?
     val importBtn = document.getElementById("importBtn") as HTMLElement?
     val userManagementBtn = document.getElementById("userManagementBtn") as HTMLElement?
+    val partyAccessBtn = document.getElementById("partyAccessBtn") as HTMLElement?
     val roleRequestBtn = document.getElementById("roleRequestBtn") as HTMLElement?
     val rixoTransportBtn = document.getElementById("rixoTransportBtn") as HTMLElement?
     val clientAccountsQuickBtn = document.getElementById("clientAccountsQuickBtn") as HTMLElement?
@@ -120,11 +160,46 @@ fun applyRoleBasedRestrictions() {
     newBtn?.style?.display = if (isEditor()) "block" else "none"
     importBtn?.style?.display = if (isEditor()) "block" else "none"
     userManagementBtn?.style?.display = if (isAdmin()) "block" else "none"
-    roleRequestBtn?.style?.display = if (!isAdmin()) "block" else "none" // Show for non-admin users
+    partyAccessBtn?.style?.display = if (isAdmin()) "block" else "none"
+    roleRequestBtn?.style?.display = if (isEditor() && !isAdmin()) "block" else "none"
     rixoTransportBtn?.style?.display = "none"
     clientAccountsQuickBtn?.style?.display = if (isAdmin()) "block" else "none"
     // inline-flex matches .purchase-quick-add-btn; hide for VIEWER (same create gate as New Purchase)
     purchaseListQuickAddBtn?.style?.display = if (isEditor()) "inline-flex" else "none"
+    document.body?.classList?.toggle("automan-viewer", isViewer())
+    if (document.getElementById("automan-viewer-style") == null && isViewer()) {
+        val style = document.createElement("style") as HTMLStyleElement
+        style.id = "automan-viewer-style"
+        style.textContent = """
+            body.automan-viewer #newBtn,
+            body.automan-viewer #importBtn,
+            body.automan-viewer #quickPurchaseBtn,
+            body.automan-viewer #rixoRequestBtn,
+            body.automan-viewer #carBookingBtn,
+            body.automan-viewer #anInvoiceBtn,
+            body.automan-viewer #addMasterSetBtn,
+            body.automan-viewer #roleRequestBtn,
+            body.automan-viewer #userManagementBtn,
+            body.automan-viewer #partyAccessBtn,
+            body.automan-viewer .edit-btn,
+            body.automan-viewer .card-edit-btn,
+            body.automan-viewer .scm-edit-btn,
+            body.automan-viewer .pol-edit-btn,
+            body.automan-viewer .rixo-tree-leaf-edit-btn,
+            body.automan-viewer .rixo-tree-leaf-delete-btn,
+            body.automan-viewer .rixo-tree-inline-add-outer,
+            body.automan-viewer [data-sm-inline-add],
+            body.automan-viewer [data-rpm-inline-add],
+            body.automan-viewer button[aria-label="Edit"],
+            body.automan-viewer button[aria-label="Delete"],
+            body.automan-viewer button[id^="add"][id$="Btn"],
+            body.automan-viewer button[id^="save"][id$="Btn"],
+            body.automan-viewer button[id^="delete"][id$="Btn"] {
+                display: none !important;
+            }
+        """.trimIndent()
+        document.head?.appendChild(style)
+    }
     
     // Update sidebar button visibility
     updateSidebarForRole()
@@ -137,18 +212,34 @@ fun updateSidebarForRole() {
     val importBtn = document.getElementById("importBtn") as HTMLElement?
     val rixoRequestBtn = document.getElementById("rixoRequestBtn") as HTMLElement?
     
+    val quickPurchaseBtn = document.getElementById("quickPurchaseBtn") as HTMLElement?
+    val carBookingBtn = document.getElementById("carBookingBtn") as HTMLElement?
+    val anInvoiceBtn = document.getElementById("anInvoiceBtn") as HTMLElement?
+    val addMasterSetBtn = document.getElementById("addMasterSetBtn") as HTMLElement?
     if (isViewer()) {
         newBtn?.style?.display = "none"
         importBtn?.style?.display = "none"
         rixoRequestBtn?.style?.display = "none"
+        quickPurchaseBtn?.style?.display = "none"
+        carBookingBtn?.style?.display = "none"
+        anInvoiceBtn?.style?.display = "none"
+        addMasterSetBtn?.style?.display = "none"
     } else if (isEditor()) {
         newBtn?.style?.display = "block"
         importBtn?.style?.display = "block"
         rixoRequestBtn?.style?.display = "block"
+        quickPurchaseBtn?.style?.display = "block"
+        carBookingBtn?.style?.display = "block"
+        anInvoiceBtn?.style?.display = "block"
+        addMasterSetBtn?.style?.display = "block"
     } else if (isAdmin()) {
         newBtn?.style?.display = "block"
         importBtn?.style?.display = "block"
         rixoRequestBtn?.style?.display = "block"
+        quickPurchaseBtn?.style?.display = "block"
+        carBookingBtn?.style?.display = "block"
+        anInvoiceBtn?.style?.display = "block"
+        addMasterSetBtn?.style?.display = "block"
     }
 }
 

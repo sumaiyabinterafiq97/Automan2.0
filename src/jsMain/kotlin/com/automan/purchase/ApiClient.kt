@@ -31,6 +31,10 @@ object ApiClient {
             
             val headers = js("{}")
             headers["Content-Type"] = "application/json"
+            val token = safeLocalStorageGet("authToken")
+            if (!token.isNullOrBlank()) {
+                headers["Authorization"] = "Bearer $token"
+            }
             requestInit.headers = headers
             
             if (body != null) {

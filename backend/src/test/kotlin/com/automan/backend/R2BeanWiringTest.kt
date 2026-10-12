@@ -19,6 +19,7 @@ import software.amazon.awssdk.services.s3.S3Client
         "R2_BUCKET_NAME=test-bucket",
         "R2_ENDPOINT=https://test-account.r2.cloudflarestorage.com",
         "spring.flyway.enabled=false",
+        "spring.jpa.hibernate.ddl-auto=none",
     ],
 )
 class R2BeanWiringTest {

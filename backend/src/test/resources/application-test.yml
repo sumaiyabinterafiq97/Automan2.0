@@ -5,6 +5,11 @@ automan:
     r2:
       enabled: false
 
+app:
+  auth:
+    # Production stays at 5 per 5 minutes. Tests issue many setup calls from one address.
+    setup-max-attempts: 1000
+
 spring:
   flyway:
     enabled: false

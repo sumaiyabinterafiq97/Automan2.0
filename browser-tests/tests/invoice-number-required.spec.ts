@@ -1,3 +1,4 @@
+import { openAdminSession } from '../staff-api';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
 const apiBase = 'http://127.0.0.1:8083/api';
@@ -75,8 +76,7 @@ function uniqueFixture(prefix: string): Fixture {
 }
 
 async function seedBookedPurchase(request: APIRequestContext, fixture: Fixture): Promise<Ids> {
-  const setup = await request.post(`${apiBase}/auth/setup`, { data: fixture.admin });
-  expect(setup.ok(), await setup.text()).toBeTruthy();
+  const auth = await openAdminSession(request, apiBase, fixture.admin);
   const client = await request.post(`${apiBase}/clients`, {
     data: {
       clientNumber: `C${fixture.bookingNo}`,
