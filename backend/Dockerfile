@@ -36,9 +36,9 @@ EXPOSE 8083
 ENV SPRING_PROFILES_ACTIVE=docker
 # Note: Database credentials should be provided via docker-compose environment variables, not hardcoded here
 
-# Health check — actuator (no auth); avoids false failures if /purchases behavior changes
+# Health check — actuator (no auth); honor dynamic PORT on hosted platforms.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-  CMD curl -f http://localhost:8083/api/actuator/health || exit 1
+  CMD curl -f "http://localhost:${PORT:-8083}/api/actuator/health" || exit 1
 
 # Run the application with strict memory limits for Railway's 500MB container limit
 CMD ["java", "-Xmx300m", "-Xss512k", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
