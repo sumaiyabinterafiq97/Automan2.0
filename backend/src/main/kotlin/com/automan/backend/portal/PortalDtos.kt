@@ -88,6 +88,49 @@ data class PortalMediaUrlDto(
     val url: String,
 )
 
+/** One in-scope purchase for the client purchase list. [purchase] uses the staff purchase field names. */
+data class PortalPurchaseListItemDto(
+    val mediaId: Long? = null,
+    val purchase: Map<String, Any?>,
+)
+
+/** Same purchase fields as the edit screen, plus image ids the client may view. */
+data class PortalPurchaseDetailDto(
+    val purchase: Map<String, Any?>,
+    val mediaIds: List<Long>,
+)
+
+data class PortalLedgerEventDto(
+    val id: Long,
+    val eventDate: String,
+    val eventType: String,
+    val eventDescription: String? = null,
+    val billNumber: String? = null,
+    val invoiceNumber: String? = null,
+    val transactionPrice: Double? = null,
+    val paymentReceived: Double? = null,
+    val runningBalance: Double,
+)
+
+data class PortalLedgerDto(
+    val clientName: String,
+    val clientNumber: String,
+    val status: String,
+    val currency: String,
+    val creditLimit: Double? = null,
+    val alertThreshold: Double? = null,
+    val currentBalance: Double,
+    val availableCredit: Double? = null,
+    val events: List<PortalLedgerEventDto>,
+)
+
+data class PortalPurchaseHistoryDto(
+    val changedAt: String,
+    val fieldName: String,
+    val oldValue: String? = null,
+    val newValue: String? = null,
+)
+
 /**
  * Resolved on every portal request from the session user, role, and current database rows.
  * Party ids are never taken from the bearer token or from request parameters.
@@ -96,4 +139,6 @@ data class PortalScope(
     val active: Boolean,
     val clientIds: List<Long>,
     val me: PortalMeDto,
+    /** Set for an active consignee. Purchases with this consignee text are included without reassigning clients. */
+    val consigneeLegalName: String? = null,
 )

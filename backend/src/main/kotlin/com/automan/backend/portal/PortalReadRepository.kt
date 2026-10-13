@@ -7,7 +7,9 @@ import java.time.LocalDateTime
 
 /**
  * Portal reads select only the columns the DTOs need.
- * Purchases are scoped by client_id. Shipping and invoice rows are reached through that purchase's chassis
+ * Purchases are scoped by client_id. An active consignee also sees purchases whose consignee text
+ * matches that consignee's legal name. That match does not change client assignments.
+ * Shipping and invoice rows are reached through that purchase's chassis
  * only when the trimmed chassis belongs to exactly one purchase. A blank or shared chassis is omitted.
  * shipping_history.booking_id is a string and purchases.booking_id is a number, so those columns are not joined.
  * client_name and consignee text on shipping and invoice rows are not selected and are not authorization keys.
@@ -26,7 +28,7 @@ class PortalReadRepository(
         val year: String?,
         val stockLocation: String?,
         val country: String?,
-        val clientId: Long,
+        val clientId: Long?,
         val bookingId: Long?,
         val pol: String?,
         val pod: String?,
@@ -43,7 +45,7 @@ class PortalReadRepository(
         val cyCutDate: LocalDate?,
         val eta: LocalDate?,
         val chassis: String,
-        val clientId: Long,
+        val clientId: Long?,
     )
 
     data class InvoiceRow(
@@ -101,46 +103,55 @@ class PortalReadRepository(
         }
     }
 
-    fun purchaseInScope(purchaseId: Long, clientIds: Collection<Long>): Boolean {
-        if (clientIds.isEmpty()) return false
-        val count = em.createQuery(
-            "SELECT COUNT(p.id) FROM Purchase p WHERE p.id = :purchaseId AND p.clientId IN :ids",
-        )
-            .setParameter("purchaseId", purchaseId)
-            .setParameter("ids", clientIds)
-            .singleResult as Number
-        return count.toLong() > 0
+    data class PurchaseScope(
+        val clientIds: List<Long> = emptyList(),
+        val consigneeName: String = "",
+    ) {
+        fun isOpen(): Boolean = clientIds.isNotEmpty() || consigneeName.isNotBlank()
     }
 
-    fun dashboard(clientIds: Collection<Long>): DashboardCounts {
-        if (clientIds.isEmpty()) return DashboardCounts(0, 0, 0)
-        val cells = cells(
-            em.createQuery(
-                """
-                SELECT COUNT(p.id),
-                       SUM(CASE WHEN $UNAMBIGUOUS_CHASSIS AND (SELECT COUNT(s.id) FROM ShippingHistory s WHERE TRIM(s.chassis) = TRIM(p.chassis)) > 0 THEN 1 ELSE 0 END),
-                       SUM(CASE WHEN $UNAMBIGUOUS_CHASSIS AND (SELECT COUNT(l.id) FROM InvoiceHistoryLine l WHERE TRIM(l.chassis) = TRIM(p.chassis)) > 0 THEN 1 ELSE 0 END)
-                FROM Purchase p
-                WHERE p.clientId IN :ids
-                """.trimIndent(),
-            ).setParameter("ids", clientIds).singleResult,
+    fun purchaseInScope(purchaseId: Long, scope: PurchaseScope): Boolean {
+        if (!scope.isOpen()) return false
+        val (predicate, params) = purchasePredicate(scope)
+        val count = em.createQuery(
+            "SELECT COUNT(p.id) FROM Purchase p WHERE p.id = :purchaseId AND ($predicate)",
         )
+        params.forEach { (name, value) -> count.setParameter(name, value) }
+        count.setParameter("purchaseId", purchaseId)
+        return (count.singleResult as Number).toLong() > 0
+    }
+
+    fun dashboard(scope: PurchaseScope): DashboardCounts {
+        if (!scope.isOpen()) return DashboardCounts(0, 0, 0)
+        val (predicate, params) = purchasePredicate(scope)
+        val created = em.createQuery(
+            """
+            SELECT COUNT(p.id),
+                   SUM(CASE WHEN $UNAMBIGUOUS_CHASSIS AND (SELECT COUNT(s.id) FROM ShippingHistory s WHERE TRIM(s.chassis) = TRIM(p.chassis)) > 0 THEN 1 ELSE 0 END),
+                   SUM(CASE WHEN $UNAMBIGUOUS_CHASSIS AND (SELECT COUNT(l.id) FROM InvoiceHistoryLine l WHERE TRIM(l.chassis) = TRIM(p.chassis)) > 0 THEN 1 ELSE 0 END)
+            FROM Purchase p
+            WHERE $predicate
+            """.trimIndent(),
+        )
+        params.forEach { (name, value) -> created.setParameter(name, value) }
+        val cells = cells(created.singleResult)
         return DashboardCounts(number(cells[0]), number(cells[1]), number(cells[2]))
     }
 
-    fun cars(clientIds: Collection<Long>, chassisContains: String): List<CarRow> {
-        if (clientIds.isEmpty()) return emptyList()
+    fun cars(scope: PurchaseScope, chassisContains: String): List<CarRow> {
+        if (!scope.isOpen()) return emptyList()
+        val (predicate, params) = purchasePredicate(scope)
         return query(
             """
             SELECT p.id, p.chassis, p.carName, p.manufactureYear, p.stockLocation, p.country,
                    p.clientId, p.bookingId, p.pol, p.pod,
                    (SELECT COUNT(s.id) FROM ShippingHistory s WHERE $UNAMBIGUOUS_CHASSIS AND TRIM(s.chassis) = TRIM(p.chassis))
             FROM Purchase p
-            WHERE p.clientId IN :ids
+            WHERE $predicate
               AND (:chassis = '' OR LOWER(p.chassis) LIKE LOWER(CONCAT('%', :chassis, '%')))
             ORDER BY p.chassis ASC, p.id ASC
             """.trimIndent(),
-            mapOf("ids" to clientIds, "chassis" to chassisContains),
+            params + ("chassis" to chassisContains),
         ).map { row ->
             val cells = cells(row)
             CarRow(
@@ -150,7 +161,7 @@ class PortalReadRepository(
                 year = cells[3] as String?,
                 stockLocation = cells[4] as String?,
                 country = cells[5] as String?,
-                clientId = (cells[6] as Number).toLong(),
+                clientId = (cells[6] as Number?)?.toLong(),
                 bookingId = (cells[7] as Number?)?.toLong(),
                 pol = cells[8] as String?,
                 pod = cells[9] as String?,
@@ -159,18 +170,19 @@ class PortalReadRepository(
         }
     }
 
-    fun shipments(clientIds: Collection<Long>): List<ShipRow> {
-        if (clientIds.isEmpty()) return emptyList()
+    fun shipments(scope: PurchaseScope): List<ShipRow> {
+        if (!scope.isOpen()) return emptyList()
+        val (predicate, params) = purchasePredicate(scope)
         return query(
             """
             SELECT s.id, s.bookingId, s.vessel, s.pol, s.pod, s.shipmentDate, s.cyCutDate, s.eta, s.chassis, p.clientId
             FROM ShippingHistory s, Purchase p
-            WHERE p.clientId IN :ids
+            WHERE $predicate
               AND $UNAMBIGUOUS_CHASSIS
               AND TRIM(p.chassis) = TRIM(s.chassis)
             ORDER BY s.id ASC
             """.trimIndent(),
-            mapOf("ids" to clientIds),
+            params,
         ).map { row ->
             val cells = cells(row)
             ShipRow(
@@ -183,24 +195,25 @@ class PortalReadRepository(
                 cyCutDate = cells[6] as LocalDate?,
                 eta = cells[7] as LocalDate?,
                 chassis = cells[8] as String,
-                clientId = (cells[9] as Number).toLong(),
+                clientId = (cells[9] as Number?)?.toLong(),
             )
         }
     }
 
-    fun invoices(clientIds: Collection<Long>): List<InvoiceRow> {
-        if (clientIds.isEmpty()) return emptyList()
+    fun invoices(scope: PurchaseScope): List<InvoiceRow> {
+        if (!scope.isOpen()) return emptyList()
+        val (predicate, params) = purchasePredicate(scope)
         return query(
             """
             SELECT h.id, h.invoiceNumber, h.createdAt, h.vessel, h.priceType, l.chassis
             FROM InvoiceHistory h, InvoiceHistoryLine l, Purchase p
             WHERE l.invoiceHistoryId = h.id
-              AND p.clientId IN :ids
+              AND $predicate
               AND $UNAMBIGUOUS_CHASSIS
               AND TRIM(p.chassis) = TRIM(l.chassis)
             ORDER BY h.createdAt DESC, h.id DESC, l.sortOrder ASC
             """.trimIndent(),
-            mapOf("ids" to clientIds),
+            params,
         ).map { row ->
             val cells = cells(row)
             InvoiceRow(
@@ -240,6 +253,22 @@ class PortalReadRepository(
          */
         const val UNAMBIGUOUS_CHASSIS =
             "TRIM(p.chassis) <> '' AND (SELECT COUNT(other.id) FROM Purchase other WHERE TRIM(other.chassis) = TRIM(p.chassis)) = 1"
+    }
+
+    private fun purchasePredicate(scope: PurchaseScope): Pair<String, Map<String, Any>> {
+        val clauses = mutableListOf<String>()
+        val params = mutableMapOf<String, Any>()
+        if (scope.clientIds.isNotEmpty()) {
+            clauses += "p.clientId IN :ids"
+            params["ids"] = scope.clientIds
+        }
+        val name = scope.consigneeName.trim()
+        if (name.isNotEmpty()) {
+            clauses += "LOWER(TRIM(COALESCE(p.consignee, ''))) = LOWER(:consigneeName)"
+            params["consigneeName"] = name
+        }
+        if (clauses.isEmpty()) return "1 = 0" to emptyMap()
+        return "(${clauses.joinToString(" OR ")})" to params
     }
 
     private fun query(jpql: String, params: Map<String, Any>): List<*> {

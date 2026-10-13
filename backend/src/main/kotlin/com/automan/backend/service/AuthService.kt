@@ -30,6 +30,7 @@ class AuthService(
     private val pendingSignupRepository: PendingSignupRepository,
     private val emailService: EmailService,
     private val authSessionService: AuthSessionService,
+    private val portalSignupService: PortalSignupService,
     @Value("\${app.mail.validate-mx:true}") private val validateMx: Boolean
 ) {
     private val encoder = BCryptPasswordEncoder()
@@ -96,6 +97,37 @@ class AuthService(
         )
         pendingSignupRepository.save(pending)
         emailService.sendSignupVerificationToAdmin(normalizedEmail, name.trim(), role.name, token)
+    }
+
+    /**
+     * Creates a client or consignee account immediately when [name] matches an existing record.
+     * Returns a session. Does not create a pending signup or send an approval email.
+     */
+    @Transactional
+    fun signupPortal(email: String, name: String, password: String, role: UserRole): AuthResponse {
+        if (role != UserRole.CLIENT && role != UserRole.CONSIGNEE) {
+            throw IllegalArgumentException("Public signup can only request the Viewer role.")
+        }
+        val normalizedEmail = email.trim().lowercase()
+        val partyName = name.trim()
+        if (emailExists(normalizedEmail)) {
+            throw IllegalArgumentException("This email is already registered.")
+        }
+        if (validateMx && !emailDomainExists(normalizedEmail)) {
+            throw IllegalArgumentException("The email does not exist.")
+        }
+        validatePasswordStrength(password)
+        val saved = userRepository.save(
+            User(
+                email = normalizedEmail,
+                name = partyName,
+                passwordHash = encoder.encode(password),
+                role = role,
+            ),
+        )
+        portalSignupService.linkMatchedParty(saved, partyName, role)
+        val token = authSessionService.createSessionJoined(saved)
+        return AuthResponse(saved.id!!, saved.email, saved.name, saved.role, token)
     }
 
     /** Approve pending signup: create user, mark pending approved, email user. */

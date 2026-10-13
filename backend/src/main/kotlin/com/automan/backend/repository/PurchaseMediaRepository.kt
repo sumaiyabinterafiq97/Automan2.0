@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.JpaRepository
 interface PurchaseMediaRepository : JpaRepository<PurchaseMedia, Long> {
     fun findByPurchaseIdAndDeletedAtIsNullOrderBySortOrderAscIdAsc(purchaseId: Long): List<PurchaseMedia>
 
+    fun findByPurchaseIdInAndDeletedAtIsNullOrderBySortOrderAscIdAsc(purchaseIds: Collection<Long>): List<PurchaseMedia>
+
     fun countByPurchaseIdAndDeletedAtIsNull(purchaseId: Long): Long
 
     fun findByIdAndPurchaseIdAndDeletedAtIsNull(id: Long, purchaseId: Long): PurchaseMedia?

@@ -1,6 +1,12 @@
 package com.automan.backend.portal
 
+import com.automan.backend.model.Purchase
+import com.automan.backend.repository.PurchaseMediaRepository
+import com.automan.backend.repository.PurchaseRepository
+import com.automan.backend.service.PurchaseChangeHistoryService
 import com.automan.backend.service.PurchaseMediaService
+import com.automan.backend.service.PurchaseService
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -38,6 +44,11 @@ import java.time.ZoneOffset
 class PortalQueryService(
     private val reads: PortalReadRepository,
     private val media: PurchaseMediaService,
+    private val purchases: PurchaseService,
+    private val purchaseRepository: PurchaseRepository,
+    private val purchaseMediaRepository: PurchaseMediaRepository,
+    private val changeHistory: PurchaseChangeHistoryService,
+    private val objectMapper: ObjectMapper,
 ) {
     private val clock: Clock = Clock.systemUTC()
     @Transactional(readOnly = true)
@@ -62,12 +73,12 @@ class PortalQueryService(
 
     @Transactional(readOnly = true)
     fun clientShipments(scope: PortalScope): List<ClientShipmentDto> =
-        groupShipments(reads.shipments(ids(scope))).map { it.toClient() }
+        groupShipments(reads.shipments(purchaseScope(scope))).map { it.toClient() }
 
     @Transactional(readOnly = true)
     fun consigneeOngoing(scope: PortalScope): List<ConsigneeShipmentDto> {
         val names = names(scope)
-        val fromShipping = groupShipments(reads.shipments(ids(scope)).filter { it.eta == null || !it.eta.isBefore(today()) })
+        val fromShipping = groupShipments(reads.shipments(purchaseScope(scope)).filter { it.eta == null || !it.eta.isBefore(today()) })
         val booked = groupBooked(scopedCars(scope, "").filter { !it.shipped && it.bookingId != null })
         return (booked + fromShipping).map { it.toConsignee(names) }
     }
@@ -76,14 +87,14 @@ class PortalQueryService(
     fun consigneeHistory(scope: PortalScope): List<ConsigneeShipmentDto> {
         val names = names(scope)
         val today = today()
-        return groupShipments(reads.shipments(ids(scope)).filter { it.eta != null && it.eta.isBefore(today) })
+        return groupShipments(reads.shipments(purchaseScope(scope)).filter { it.eta != null && it.eta.isBefore(today) })
             .map { it.toConsignee(names) }
     }
 
     @Transactional(readOnly = true)
     fun invoices(scope: PortalScope): List<PortalInvoiceDto> {
         val grouped = linkedMapOf<Long, MutableList<PortalReadRepository.InvoiceRow>>()
-        reads.invoices(ids(scope)).forEach { row ->
+        reads.invoices(purchaseScope(scope)).forEach { row ->
             grouped.getOrPut(row.invoiceId) { mutableListOf() }.add(row)
         }
         return grouped.values.map { rows ->
@@ -109,21 +120,29 @@ class PortalQueryService(
 
     @Transactional(readOnly = true)
     fun mediaUrl(scope: PortalScope, purchaseId: Long, mediaId: Long): PortalMediaUrlDto {
-        if (!reads.purchaseInScope(purchaseId, ids(scope))) {
+        if (!reads.purchaseInScope(purchaseId, purchaseScope(scope))) {
             throw ResponseStatusException(HttpStatus.NOT_FOUND, NOT_FOUND)
         }
         return PortalMediaUrlDto(media.presignedUrl(purchaseId, mediaId))
     }
 
     private fun counts(scope: PortalScope): PortalReadRepository.DashboardCounts =
-        reads.dashboard(ids(scope))
+        reads.dashboard(purchaseScope(scope))
 
     private fun ids(scope: PortalScope): List<Long> = if (scope.active) scope.clientIds else emptyList()
+
+    private fun purchaseScope(scope: PortalScope): PortalReadRepository.PurchaseScope {
+        if (!scope.active) return PortalReadRepository.PurchaseScope()
+        return PortalReadRepository.PurchaseScope(
+            clientIds = scope.clientIds,
+            consigneeName = scope.consigneeLegalName.orEmpty(),
+        )
+    }
 
     private fun names(scope: PortalScope): Map<Long, String> = reads.clientNames(ids(scope))
 
     private fun scopedCars(scope: PortalScope, chassisQuery: String?): List<PortalReadRepository.CarRow> =
-        reads.cars(ids(scope), chassisFilter(chassisQuery))
+        reads.cars(purchaseScope(scope), chassisFilter(chassisQuery))
 
     private fun today(): LocalDate = LocalDate.now(clock.withZone(ZoneOffset.UTC))
 
@@ -158,7 +177,7 @@ class PortalQueryService(
                 cyCutDate = group.firstNotNullOfOrNull { it.cyCutDate }?.toString(),
                 eta = group.firstNotNullOfOrNull { it.eta }?.toString(),
                 chassis = group.map { it.chassis.trim() }.filter { it.isNotEmpty() }.distinct().sorted(),
-                clientIds = group.map { it.clientId }.distinct(),
+                clientIds = group.mapNotNull { it.clientId }.distinct(),
             )
         }
     }
@@ -179,7 +198,7 @@ class PortalQueryService(
                 cyCutDate = null,
                 eta = null,
                 chassis = group.map { it.chassis.trim() }.filter { it.isNotEmpty() }.distinct().sorted(),
-                clientIds = group.map { it.clientId }.distinct(),
+                clientIds = group.mapNotNull { it.clientId }.distinct(),
             )
         }
     }
@@ -205,6 +224,76 @@ class PortalQueryService(
         chassis = chassis,
     )
 
+    @Transactional(readOnly = true)
+    fun clientPurchaseList(scope: PortalScope): List<PortalPurchaseListItemDto> {
+        if (!scope.active || scope.clientIds.isEmpty()) return emptyList()
+        val rows = purchases.hydratePurchasesForExport(
+            scope.clientIds.flatMap { purchaseRepository.findByClientId(it) },
+        ).sortedWith(compareBy({ it.chassis }, { it.id }))
+        val thumbs = firstImageIds(rows.mapNotNull { it.id })
+        return rows.map { row ->
+            PortalPurchaseListItemDto(
+                mediaId = row.id?.let { thumbs[it] },
+                purchase = portalPurchaseMap(row),
+            )
+        }
+    }
+
+    @Transactional(readOnly = true)
+    fun clientPurchase(scope: PortalScope, purchaseId: Long): PortalPurchaseDetailDto {
+        requireInScope(scope, purchaseId)
+        val row = purchases.getPurchaseById(purchaseId)
+            ?: throw ResponseStatusException(HttpStatus.NOT_FOUND, NOT_FOUND)
+        val images = purchaseMediaRepository
+            .findByPurchaseIdAndDeletedAtIsNullOrderBySortOrderAscIdAsc(purchaseId)
+            .filter { it.contentType.startsWith("image/") }
+            .mapNotNull { it.id }
+        return PortalPurchaseDetailDto(portalPurchaseMap(row), images)
+    }
+
+    @Transactional(readOnly = true)
+    fun clientPurchaseHistory(scope: PortalScope, purchaseId: Long): List<PortalPurchaseHistoryDto> {
+        requireInScope(scope, purchaseId)
+        return changeHistory.listForSinglePurchase(purchaseId).map {
+            PortalPurchaseHistoryDto(
+                changedAt = it.changedAt,
+                fieldName = it.fieldName,
+                oldValue = it.oldValue,
+                newValue = it.newValue,
+            )
+        }
+    }
+
+    private fun requireInScope(scope: PortalScope, purchaseId: Long) {
+        if (!reads.purchaseInScope(purchaseId, purchaseScope(scope))) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, NOT_FOUND)
+        }
+    }
+
+    private fun firstImageIds(purchaseIds: Collection<Long>): Map<Long, Long> {
+        if (purchaseIds.isEmpty()) return emptyMap()
+        val first = linkedMapOf<Long, Long>()
+        purchaseMediaRepository
+            .findByPurchaseIdInAndDeletedAtIsNullOrderBySortOrderAscIdAsc(purchaseIds)
+            .forEach { row ->
+                val id = row.id ?: return@forEach
+                if (row.contentType.startsWith("image/") && row.purchaseId !in first) {
+                    first[row.purchaseId] = id
+                }
+            }
+        return first
+    }
+
+    private fun portalPurchaseMap(row: Purchase): Map<String, Any?> {
+        val raw = objectMapper.convertValue(row, Map::class.java)
+        val out = linkedMapOf<String, Any?>()
+        PURCHASE_KEYS.forEach { key ->
+            if (raw.containsKey(key)) out[key] = raw[key]
+        }
+        out["id"] = row.id
+        return out
+    }
+
     private fun ShipmentGroup.toConsignee(names: Map<Long, String>) = ConsigneeShipmentDto(
         bookingId = bookingId,
         vessel = vessel,
@@ -219,5 +308,17 @@ class PortalQueryService(
 
     companion object {
         const val NOT_FOUND = "Not found"
+
+        /** Staff purchase-list and edit-screen fields. File keys and audit actors are not included. */
+        private val PURCHASE_KEYS = listOf(
+            "id", "date", "chassis", "carModelYear", "manufactureYear", "brand", "carName", "shipmentSize",
+            "grade", "rank", "color", "fuel", "seat", "door", "distance", "options", "cc", "shift", "wd",
+            "driveType", "auctionNo", "auctionHouse", "stockLocation", "pol", "pod", "rixoCompany", "venueId",
+            "clientName", "consignee", "country", "price", "auctionFee", "auctionPenaltyFee", "recycleFee",
+            "roadTax", "taxTotal", "totalPrice", "paymentDate", "rixoRequested", "rixoConfirmed", "rixoPrice",
+            "notes", "shipmentDate", "blNo", "vessel", "bookingRequested", "invoiceConfirmed", "shipmentCharges",
+            "freight", "storageCharges", "miscCharges", "inspectionFee", "commission", "numberCut", "shaken",
+            "negotiate", "local", "repairCompany", "repairCharges", "profit", "bookingId",
+        )
     }
 }

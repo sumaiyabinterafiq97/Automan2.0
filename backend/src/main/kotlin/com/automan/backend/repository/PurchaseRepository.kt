@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional
 
 @Repository
 interface PurchaseRepository : JpaRepository<Purchase, Long> {
+
+    fun findByClientId(clientId: Long): List<Purchase>
     
     @Query("SELECT p FROM Purchase p WHERE " +
            "LOWER(p.date) LIKE LOWER(CONCAT('%', :searchTerm, '%')) OR " +

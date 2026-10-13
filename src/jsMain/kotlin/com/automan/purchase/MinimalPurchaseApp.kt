@@ -7462,6 +7462,8 @@ fun showAuthPage(signInMode: Boolean = false) {
                             <div class="input-container">
                                 <select id="su_role" name="role" class="form-input" aria-describedby="su_role_hint">
                                     <option value="VIEWER" selected>Viewer</option>
+                                    <option value="CLIENT">Client</option>
+                                    <option value="CONSIGNEE">Consignee</option>
                                 </select>
                                 <span class="input-icon" aria-hidden="true">👤</span>
                             </div>
@@ -7759,6 +7761,16 @@ fun showAuthPage(signInMode: Boolean = false) {
     """
     setupAuthHandlers(signInMode)
 }
+private fun updateSignupRoleHint() {
+    val role = (document.getElementById("su_role") as? HTMLSelectElement)?.value?.trim()?.uppercase().orEmpty()
+    val hint = document.getElementById("su_role_hint") ?: return
+    hint.textContent = when (role) {
+        "CLIENT" -> "Your name must match a client name already stored on a purchase. You can sign in immediately."
+        "CONSIGNEE" -> "Your name must match a consignee name on the consignee map. You can sign in immediately."
+        else -> "New accounts start as Viewer. An admin can change your role after approval."
+    }
+}
+
 fun applyRoleBasedSignupRestrictions(currentUserRole: String) {
     val sgRoles = document.getElementsByClassName("sg-role")
     val siRoles = document.getElementsByClassName("si-role")
@@ -7885,30 +7897,52 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
     setModeSignin(initialSignInMode)
     restoreRememberedEmail()
 
-    // Guest public signup is locked to VIEWER (select only offers that option).
     applyRoleBasedSignupRestrictions("GUEST")
+    updateSignupRoleHint()
+    document.getElementById("su_role")?.addEventListener("change", { _: Event -> updateSignupRoleHint() })
 
     fun doSignup() {
         clearSignupMessages()
         val email = (document.getElementById("su_email") as HTMLInputElement).value.trim()
         val name = (document.getElementById("su_name") as HTMLInputElement).value.trim()
         val pass = (document.getElementById("su_pass") as HTMLInputElement).value
-        val role = "VIEWER"
-        (document.getElementById("su_role") as? HTMLSelectElement)?.value = role
+        val role = (document.getElementById("su_role") as? HTMLSelectElement)?.value?.trim().orEmpty().ifBlank { "VIEWER" }
         if (email.isBlank() || name.isBlank() || pass.isBlank()) {
             showSignupMessage("Please fill in all fields", true)
             return
         }
         val remember = (document.getElementById("rememberMe") as? HTMLInputElement)?.checked == true
         persistRememberedEmail(email, remember)
-        val body = js("({method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email:email,name:name,password:pass,role:role})})")
+        val payload: dynamic = js("({})")
+        payload.email = email
+        payload.name = name
+        payload.password = pass
+        payload.role = role
+        val body: dynamic = js("({method:'POST', headers:{'Content-Type':'application/json'}})")
+        body.body = js("JSON").stringify(payload)
         (document.getElementById("btn_signup") as? HTMLButtonElement)?.disabled = true
         window.fetch(apiUrl("auth/signup"), body)
             .then { it.json() }
             .then { resp ->
                 (document.getElementById("btn_signup") as? HTMLButtonElement)?.disabled = false
                 val success = resp.asDynamic().success as Boolean?
-                if (success == true) {
+                val token = resp.asDynamic().token as String?
+                if (success == true && !token.isNullOrBlank()) {
+                    val roleResp = resp.asDynamic().role as String?
+                    val nameResp = resp.asDynamic().name as String?
+                    val userId = resp.asDynamic().id as Number?
+                    safeLocalStorageSet("authToken", token)
+                    if (roleResp != null) safeLocalStorageSet("authUserRole", roleResp)
+                    if (nameResp != null) safeLocalStorageSet("authUserName", nameResp)
+                    if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
+                    if (isExternalPortalRole(roleResp)) {
+                        navigateToApp(homeRouteForRole(roleResp), replace = true)
+                    } else {
+                        navigateToPurchaseList(forceClearFilters = true)
+                    }
+                    updateUserInfoInSidebar()
+                    applyRoleBasedRestrictions()
+                } else if (success == true) {
                     val message = resp.asDynamic().message as String? ?: "Registration submitted. You will receive an email once an admin approves your account."
                     showSignupMessage(message, false)
                 } else {

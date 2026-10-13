@@ -23,7 +23,16 @@ class AuthSessionService(
     private val random = SecureRandom()
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    fun createSession(user: User, ttlHours: Long = sessionTtlHours): String {
+    fun createSession(user: User, ttlHours: Long = sessionTtlHours): String = insertSession(user, ttlHours)
+
+    /**
+     * Writes the session in the caller's transaction.
+     * Portal signup uses this so the insert does not wait on the new user row's foreign key.
+     */
+    @Transactional(propagation = Propagation.REQUIRED)
+    fun createSessionJoined(user: User, ttlHours: Long = sessionTtlHours): String = insertSession(user, ttlHours)
+
+    private fun insertSession(user: User, ttlHours: Long): String {
         val userId = user.id ?: throw IllegalStateException("Cannot open a session for an unsaved user")
         val rawToken = newToken()
         val now = utcNow()

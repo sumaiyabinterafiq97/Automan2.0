@@ -26,6 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -39,6 +40,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -486,6 +488,113 @@ class PortalApiIntegrationTest {
         assertEquals(beforeA.get("invoicedCount").asInt(), afterA.get("invoicedCount").asInt())
         assertTrue(get("/portal/client/shipments", fixture.tokenA).contains("SOON-VESSEL"))
         assertTrue(get("/portal/client/invoices", fixture.tokenA).contains(fixture.invoiceNumber))
+    }
+
+    @Test
+    fun clientPurchaseListShowsOwnCarsAndRefusesAnotherPurchase() {
+        val fixture = seed()
+        val list = objectMapper.readTree(get("/portal/client/cars/list", fixture.tokenA))
+        assertTrue(list.toString().contains(fixture.chassisShip))
+        assertFalse(list.toString().contains(fixture.chassisB))
+        val own = list.first { it.get("purchase").get("chassis").asText() == fixture.chassisShip }
+        assertEquals("99999", own.get("purchase").get("totalPrice").asText())
+        assertEquals(fixture.purchaseShip, own.get("purchase").get("id").asLong())
+
+        val detail = objectMapper.readTree(get("/portal/client/cars/${fixture.purchaseShip}", fixture.tokenA))
+        assertEquals(fixture.chassisShip, detail.get("purchase").get("chassis").asText())
+        assertFalse(detail.toString().contains("fileKey"))
+
+        val missing = mockMvc.perform(
+            get("/portal/client/cars/${fixture.purchaseB}").header("Authorization", "Bearer ${fixture.tokenA}"),
+        ).andExpect(status().isNotFound).andReturn().response.contentAsString
+        assertTrue(missing.contains("Not found"))
+        assertFalse(missing.contains(fixture.chassisB))
+
+        mockMvc.perform(
+            get("/portal/client/cars/${fixture.purchaseB}/history").header("Authorization", "Bearer ${fixture.tokenA}"),
+        ).andExpect(status().isNotFound)
+
+        mockMvc.perform(
+            post("/purchases")
+                .header("Authorization", "Bearer ${fixture.tokenA}")
+                .contentType(JSON)
+                .content("{}"),
+        ).andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun clientLedgerShowsOwnRowsAndSavesOwnCreditLimit() {
+        val fixture = seed()
+        val ledger = objectMapper.readTree(get("/portal/client/ledger", fixture.tokenA))
+        assertEquals("Portal Client A", ledger.get("clientName").asText())
+        assertEquals(444444.0, ledger.get("creditLimit").asDouble())
+        assertEquals(333333.0, ledger.get("currentBalance").asDouble())
+        assertEquals(777777.0, ledger.get("availableCredit").asDouble())
+        assertTrue(ledger.get("events").toString().contains("BILL-A"))
+        assertFalse(ledger.get("events").toString().contains("BILL-B"))
+        assertFalse(ledger.get("events").toString().contains("Other ledger"))
+
+        val old = objectMapper.readTree(get("/portal/client/transactions", fixture.tokenA))
+        assertEquals("PAYMENT_RECEIVED", old[0].get("type").asText())
+        assertFalse(old[0].has("runningBalance"))
+        assertFalse(old[0].has("billNumber"))
+
+        mockMvc.perform(
+            put("/portal/client/credit-limit")
+                .header("Authorization", "Bearer ${fixture.tokenA}")
+                .contentType(JSON)
+                .content("""{"creditLimit":1200,"clientName":"Hijack","currentBalance":1}"""),
+        ).andExpect(status().isBadRequest)
+
+        mockMvc.perform(
+            put("/portal/client/credit-limit")
+                .header("Authorization", "Bearer ${fixture.tokenA}")
+                .contentType(JSON)
+                .content("""{"creditLimit":1200}"""),
+        ).andExpect(status().isOk)
+
+        val saved = clientRepository.findById(fixture.clientA).get()
+        assertEquals(1200.0, saved.creditLimit)
+        assertEquals(1080.0, saved.alertThreshold)
+        assertEquals(333333.0, saved.currentBalance)
+        assertEquals("Portal Client A", saved.clientName)
+
+        mockMvc.perform(
+            put("/clients/${fixture.clientA}")
+                .header("Authorization", "Bearer ${fixture.tokenA}")
+                .contentType(JSON)
+                .content("""{"creditLimit":9}"""),
+        ).andExpect(status().isForbidden)
+
+        mockMvc.perform(
+            put("/portal/client/credit-limit")
+                .header("Authorization", "Bearer ${fixture.tokenB}")
+                .contentType(JSON)
+                .content("""{"creditLimit":50}"""),
+        ).andExpect(status().isOk)
+        assertEquals(1200.0, clientRepository.findById(fixture.clientA).get().creditLimit)
+        assertEquals(50.0, clientRepository.findById(fixture.clientB).get().creditLimit)
+
+        mockMvc.perform(
+            put("/portal/client/credit-limit")
+                .header("Authorization", "Bearer ${fixture.tokenA}")
+                .contentType(JSON)
+                .content("""{"creditLimit":null}"""),
+        ).andExpect(status().isOk)
+        val cleared = clientRepository.findById(fixture.clientA).get()
+        assertNull(cleared.creditLimit)
+        assertNull(cleared.alertThreshold)
+        assertEquals(333333.0, cleared.currentBalance)
+
+        val csv = get("/portal/client/ledger/export", fixture.tokenA)
+        assertTrue(csv.contains("BILL-A"))
+        assertFalse(csv.contains("BILL-B"))
+
+        val pdf = mockMvc.perform(
+            get("/portal/client/ledger/statement-pdf").header("Authorization", "Bearer ${fixture.tokenA}"),
+        ).andExpect(status().isOk).andReturn().response.contentAsByteArray
+        assertTrue(pdf.size > 4)
+        assertEquals('%'.code.toByte(), pdf[0])
     }
 
     @Test

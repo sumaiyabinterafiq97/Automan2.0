@@ -3,6 +3,7 @@ package com.automan.backend.controller
 import com.automan.backend.model.UserRole
 import com.automan.backend.service.AuthService
 import com.automan.backend.service.LoginRequest
+import org.springframework.dao.DataAccessException
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import org.springframework.http.HttpStatus
@@ -40,6 +41,17 @@ class AuthController(
                     "message" to "Invalid role. Please select a valid role."
                 ))
             }
+            if (userRole == UserRole.CLIENT || userRole == UserRole.CONSIGNEE) {
+                val auth = authService.signupPortal(body.email, body.name, body.password, userRole)
+                return ResponseEntity.ok(mapOf(
+                    "success" to true,
+                    "id" to auth.id,
+                    "email" to auth.email,
+                    "name" to auth.name,
+                    "role" to auth.role.name,
+                    "token" to auth.token,
+                ))
+            }
             if (userRole != UserRole.VIEWER) {
                 return ResponseEntity.badRequest().body(mapOf(
                     "success" to false,
@@ -50,6 +62,16 @@ class AuthController(
             ResponseEntity.ok(mapOf(
                 "success" to true,
                 "message" to "Registration submitted. You will receive an email once an admin approves your account."
+            ))
+        } catch (e: IllegalArgumentException) {
+            ResponseEntity.badRequest().body(mapOf(
+                "success" to false,
+                "message" to (e.message ?: "Signup failed")
+            ))
+        } catch (_: DataAccessException) {
+            ResponseEntity.badRequest().body(mapOf(
+                "success" to false,
+                "message" to "Could not complete signup. Please try again."
             ))
         } catch (e: Exception) {
             ResponseEntity.badRequest().body(mapOf(

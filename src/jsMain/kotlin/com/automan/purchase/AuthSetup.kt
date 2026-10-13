@@ -68,8 +68,9 @@ fun installAuthenticatedFetch() {
                   window.localStorage.removeItem('authUserName');
                   window.localStorage.removeItem('authUserId');
                 } catch (e) {}
-                var onLogin = window.location.pathname.indexOf('/login') >= 0;
-                if (!onLogin && typeof window.navigateToApp === 'function') window.navigateToApp('/login');
+                var path = window.location.pathname || '';
+                var onAuthPage = path.indexOf('/login') >= 0 || path.indexOf('/signup') >= 0;
+                if (!onAuthPage && typeof window.navigateToApp === 'function') window.navigateToApp('/login');
               }
               return response;
             });
@@ -160,7 +161,8 @@ fun applyRoleBasedRestrictions() {
     newBtn?.style?.display = if (isEditor()) "block" else "none"
     importBtn?.style?.display = if (isEditor()) "block" else "none"
     userManagementBtn?.style?.display = if (isAdmin()) "block" else "none"
-    partyAccessBtn?.style?.display = if (isAdmin()) "block" else "none"
+    // Hidden for now. The page remains at /admin/party-access.
+    partyAccessBtn?.style?.display = "none"
     roleRequestBtn?.style?.display = if (isEditor() && !isAdmin()) "block" else "none"
     rixoTransportBtn?.style?.display = "none"
     clientAccountsQuickBtn?.style?.display = if (isAdmin()) "block" else "none"

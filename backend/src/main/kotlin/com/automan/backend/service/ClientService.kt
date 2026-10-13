@@ -246,6 +246,22 @@ class ClientService(
         
         return clientRepository.save(updatedClient)
     }
+
+    /** Changes only the credit limit and its 90% alert. Name, balance, currency, and status stay as they are. */
+    @Transactional
+    fun updateCreditLimit(id: Long, creditLimit: Double?): Client? {
+        val existingClient = clientRepository.findById(id).orElse(null) ?: return null
+        if (creditLimit != null && (creditLimit < 0.0 || creditLimit.isNaN())) {
+            throw IllegalArgumentException("Credit limit must be a number ≥ 0.")
+        }
+        return clientRepository.save(
+            existingClient.copy(
+                creditLimit = creditLimit,
+                alertThreshold = creditLimit?.times(0.9),
+                updatedAt = LocalDateTime.now(),
+            ),
+        )
+    }
     
     @Transactional
     fun deleteClient(id: Long): Boolean {

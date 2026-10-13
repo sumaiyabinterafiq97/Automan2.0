@@ -66,6 +66,7 @@ class PortalAccess(
             active = true,
             clientIds = reads.clientIdsForConsignee(consigneeId).distinct().sorted(),
             me = PortalMeDto(linked = true, active = true, legalName = identity.legalName),
+            consigneeLegalName = identity.legalName,
         )
     }
 

@@ -56,8 +56,8 @@ test('an admin assigns a consignee and links a portal user, and an editor is ref
   await page.locator('#btn_signin').click();
   await expect(page.locator('#purchaseTable')).toBeVisible();
   await page.getByRole('button', { name: 'Open menu' }).click();
-  await expect(page.locator('#partyAccessBtn')).toBeVisible();
-  await page.locator('#partyAccessBtn').click();
+  await expect(page.locator('#partyAccessBtn')).toBeHidden();
+  await page.goto('/admin/party-access');
   await expect(page.locator('h2')).toHaveText('Party access');
   await expect(page.locator('#partyConsigneeName')).toBeVisible();
 
