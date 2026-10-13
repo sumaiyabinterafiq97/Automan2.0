@@ -55,6 +55,9 @@ interface ShippingHistoryRepository : JpaRepository<ShippingHistory, Long> {
     )
     fun findDistinctClientNamesForInvoice(): List<String>
 
+    @Query("SELECT sh.chassis, sh.consignee, sh.clientName FROM ShippingHistory sh WHERE sh.clientName IS NOT NULL AND TRIM(sh.clientName) <> ''")
+    fun findConsigneeClientNames(): List<Array<Any?>>
+
     @Query(
         "SELECT DISTINCT sh.vessel FROM ShippingHistory sh WHERE " +
             "TRIM(COALESCE(sh.clientName, '')) = TRIM(:clientName) AND " +

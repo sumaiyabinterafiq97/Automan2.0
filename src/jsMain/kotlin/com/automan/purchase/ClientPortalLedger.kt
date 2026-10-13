@@ -30,9 +30,6 @@ private fun drawPortalLedger(generation: Int) {
     document.getElementById("portalLedgerExportBtn")?.addEventListener("click", { _: Event ->
         exportPortalLedger()
     })
-    document.getElementById("portalCreditLimitBtn")?.addEventListener("click", { _: Event ->
-        openPortalCreditLimit(generation)
-    })
     eachPortalLedgerElement("#portalClientLedger button[data-ledger-sort]") { button ->
         button.addEventListener("click", { _: Event ->
             val field = button.getAttribute("data-ledger-sort") ?: return@addEventListener
@@ -51,7 +48,6 @@ private fun portalLedgerHtml(account: dynamic): String {
     val limit = portalLedgerNumber(account.creditLimit)
     val limitText = limit?.let { "¥${it.toLong()}" } ?: "—"
     val availableText = if (limit == null) "—" else portalLedgerBalanceText(limit + balance)
-    val limitLabel = if (limit != null) "Edit credit limit" else "Set credit limit"
     val events = portalLedgerSorted(jsArray(account.events))
     val ledger = if (events.isEmpty()) {
         """<div class="portal-state" role="status">No ledger entries yet. Invoices post automatically when confirmed in Invoice.</div>"""
@@ -104,9 +100,6 @@ private fun portalLedgerHtml(account: dynamic): String {
                             <div><dt>Credit limit</dt><dd>${escapeHtml(limitText)}</dd></div>
                             <div><dt>Available credit</dt><dd>${escapeHtml(availableText)}</dd></div>
                         </dl>
-                        <div style="margin-top:14px;">
-                            <button id="portalCreditLimitBtn" type="button" class="portal-ledger-btn portal-ledger-btn--quiet">$limitLabel</button>
-                        </div>
                     </div>
                     <div class="portal-ledger-balance">
                         <strong class="$balanceClass">${escapeHtml(portalLedgerBalanceText(balance))}</strong>
@@ -180,110 +173,6 @@ private fun portalLedgerSorted(events: List<dynamic>): List<dynamic> {
         }
         if (asc) compared else -compared
     }
-}
-
-private fun openPortalCreditLimit(generation: Int) {
-    val account = portalLedger ?: return
-    val name = escapeHtml(jsText(account.clientName).ifBlank { "—" })
-    val balance = portalLedgerNumber(account.currentBalance) ?: 0.0
-    val limit = portalLedgerNumber(account.creditLimit)
-    val threshold = when {
-        limit != null && portalLedgerNumber(account.alertThreshold) != null -> portalLedgerPlain(portalLedgerNumber(account.alertThreshold)!!)
-        limit != null -> portalLedgerPlain(limit * 0.9)
-        else -> ""
-    }
-    val title = if (limit != null) "Edit credit limit" else "Set credit limit"
-    document.getElementById("portalCreditLimitModal")?.remove()
-    val modal = document.createElement("div")
-    modal.id = "portalCreditLimitModal"
-    modal.className = "client-modal"
-    modal.innerHTML = """
-        <div class="client-modal-content">
-            <div class="client-modal-header">
-                <h2>$title</h2>
-                <button type="button" id="portalCreditLimitClose" class="client-modal-close">&times;</button>
-            </div>
-            <p class="client-ledger-hint" style="margin:0 0 12px;">Client: <strong>$name</strong></p>
-            <form id="portalCreditLimitForm" class="client-form">
-                <div class="client-form-row">
-                    <div class="client-form-field">
-                        <label class="client-form-label">Current balance</label>
-                        <div class="client-form-readonly">${escapeHtml(portalLedgerBalanceText(balance))}</div>
-                    </div>
-                    <div class="client-form-field">
-                        <label class="client-form-label">Available credit (now)</label>
-                        <div id="portalCreditAvailable" class="client-form-readonly">${escapeHtml(if (limit == null) "— (set a limit)" else portalLedgerBalanceText(limit + balance))}</div>
-                    </div>
-                </div>
-                <div class="client-form-row">
-                    <div class="client-form-field">
-                        <label for="portalCreditLimitInput" class="client-form-label">Credit limit (¥)</label>
-                        <input type="number" id="portalCreditLimitInput" step="1" min="0" class="client-form-input" placeholder="e.g. 50000000" value="${escapeHtml(limit?.let { portalLedgerPlain(it) } ?: "")}">
-                        <div class="client-form-hint">Leave blank to remove credit limit.</div>
-                    </div>
-                    <div class="client-form-field">
-                        <label for="portalAlertThreshold" class="client-form-label">Alert threshold (90% of limit)</label>
-                        <input type="text" id="portalAlertThreshold" readonly class="client-form-input client-form-readonly" tabindex="-1" value="${escapeHtml(threshold)}">
-                        <div class="client-form-hint">Calculated automatically from credit limit.</div>
-                    </div>
-                </div>
-                <div class="client-modal-actions">
-                    <button type="button" id="portalCreditLimitCancel" class="client-btn client-btn-secondary">Cancel</button>
-                    <button type="submit" class="client-btn client-btn-primary">Save credit limit</button>
-                </div>
-            </form>
-        </div>
-    """.trimIndent()
-    document.body?.appendChild(modal)
-    val close = { _: Event -> modal.remove() }
-    document.getElementById("portalCreditLimitClose")?.addEventListener("click", close)
-    document.getElementById("portalCreditLimitCancel")?.addEventListener("click", close)
-    modal.addEventListener("click", { event: Event ->
-        if (event.target == modal) modal.remove()
-    })
-    document.getElementById("portalCreditLimitInput")?.addEventListener("input", { _: Event ->
-        val raw = (document.getElementById("portalCreditLimitInput") as? HTMLInputElement)?.value?.trim().orEmpty()
-        val next = raw.toDoubleOrNull()
-        document.getElementById("portalAlertThreshold")?.let { field ->
-            (field as? HTMLInputElement)?.value = if (next != null && next >= 0.0) portalLedgerPlain(next * 0.9) else ""
-        }
-        document.getElementById("portalCreditAvailable")?.textContent = if (next != null && next >= 0.0) {
-            portalLedgerBalanceText(next + balance)
-        } else {
-            "— (no limit set)"
-        }
-    })
-    document.getElementById("portalCreditLimitForm")?.addEventListener("submit", { event: Event ->
-        event.preventDefault()
-        val raw = (document.getElementById("portalCreditLimitInput") as? HTMLInputElement)?.value?.trim().orEmpty()
-        val payload = js("({})")
-        if (raw.isEmpty()) {
-            payload["creditLimit"] = null
-        } else {
-            val value = raw.toDoubleOrNull()
-            if (value == null || value < 0.0) {
-                showMessage("Credit limit must be a number ≥ 0.", "error")
-                return@addEventListener
-            }
-            payload["creditLimit"] = value
-        }
-        val submit = document.querySelector("#portalCreditLimitForm button[type='submit']") as? org.w3c.dom.HTMLButtonElement
-        submit?.disabled = true
-        launchPortal {
-            when (val result = ApiClient.request<dynamic>("portal/client/credit-limit", "PUT", payload)) {
-                is ApiResult.Error -> showMessage(result.message, "error")
-                is ApiResult.Success -> {
-                    showMessage("Credit limit updated for ${jsText(account.clientName)}.", "success")
-                    modal.remove()
-                    if (generation == currentPortalGeneration()) {
-                        portalLedger = result.data
-                        drawPortalLedger(generation)
-                    }
-                }
-            }
-            submit?.disabled = false
-        }
-    })
 }
 
 private fun openPortalStatementPdf() {
@@ -396,9 +285,6 @@ private fun portalLedgerNumber(value: dynamic): Double? {
         else -> value.toString().trim().toDoubleOrNull()
     }
 }
-
-private fun portalLedgerPlain(value: Double): String =
-    if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
 
 private fun portalLedgerBalanceText(balance: Double): String = when {
     balance < 0 -> "−¥${kotlin.math.abs(balance).toLong()}"

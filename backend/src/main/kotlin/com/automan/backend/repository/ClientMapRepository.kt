@@ -12,6 +12,9 @@ import org.springframework.stereotype.Repository
 interface ClientMapRepository : JpaRepository<ClientMap, Long> {
     fun findByClientNameIgnoreCase(clientName: String): ClientMap?
 
+    @Query("SELECT c FROM ClientMap c WHERE LOWER(TRIM(c.clientName)) IN :names")
+    fun findByClientNamesIgnoreCase(@Param("names") names: Collection<String>): List<ClientMap>
+
     @Query("SELECT DISTINCT c.clientName FROM ClientMap c ORDER BY c.clientName ASC")
     fun findDistinctClientNamesOrdered(): List<String>
 

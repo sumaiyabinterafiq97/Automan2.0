@@ -38,6 +38,18 @@ data class PortalCarDto(
     val stockLocation: String? = null,
     val country: String? = null,
     val shipped: Boolean,
+    val clientName: String? = null,
+)
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class PortalClientMapDto(
+    val clientName: String,
+    val country: String? = null,
+    val pod: String? = null,
+    val address: String? = null,
+    val bankInfo: String? = null,
+    val consignee: String? = null,
+    val debitLimit: String? = null,
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)

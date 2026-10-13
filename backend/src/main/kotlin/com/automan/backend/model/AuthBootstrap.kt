@@ -14,7 +14,7 @@ import java.time.LocalDateTime
 @Table(name = "auth_bootstrap")
 data class AuthBootstrap(
     @Id
-    val id: Short = 1,
+    val id: Byte = 1.toByte(),
     @Column(name = "created_at", nullable = false)
     val createdAt: LocalDateTime,
 )

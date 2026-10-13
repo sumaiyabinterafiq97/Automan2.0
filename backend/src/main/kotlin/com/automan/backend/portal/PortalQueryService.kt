@@ -1,8 +1,10 @@
 package com.automan.backend.portal
 
 import com.automan.backend.model.Purchase
+import com.automan.backend.repository.ClientMapRepository
 import com.automan.backend.repository.PurchaseMediaRepository
 import com.automan.backend.repository.PurchaseRepository
+import com.automan.backend.repository.ShippingHistoryRepository
 import com.automan.backend.service.PurchaseChangeHistoryService
 import com.automan.backend.service.PurchaseMediaService
 import com.automan.backend.service.PurchaseService
@@ -46,6 +48,8 @@ class PortalQueryService(
     private val media: PurchaseMediaService,
     private val purchases: PurchaseService,
     private val purchaseRepository: PurchaseRepository,
+    private val clientMaps: ClientMapRepository,
+    private val shippingHistories: ShippingHistoryRepository,
     private val purchaseMediaRepository: PurchaseMediaRepository,
     private val changeHistory: PurchaseChangeHistoryService,
     private val objectMapper: ObjectMapper,
@@ -60,16 +64,78 @@ class PortalQueryService(
     @Transactional(readOnly = true)
     fun consigneeDashboard(scope: PortalScope): ConsigneeDashboardDto {
         val counts = counts(scope)
-        val clients = if (scope.active) scope.clientIds.size.toLong() else 0L
+        val clients = consigneeClientMap(scope).map { it.clientName.trim().lowercase() }.distinct().size.toLong()
         return ConsigneeDashboardDto(counts.purchased, counts.shipped, counts.invoiced, clients)
     }
 
     @Transactional(readOnly = true)
-    fun cars(scope: PortalScope, chassisQuery: String?, shipped: Boolean?): List<PortalCarDto> {
+    fun cars(
+        scope: PortalScope,
+        chassisQuery: String?,
+        shipped: Boolean?,
+        unbookedOnly: Boolean = false,
+    ): List<PortalCarDto> {
         return scopedCars(scope, chassisQuery)
             .filter { shipped == null || it.shipped == shipped }
+            .filter { !unbookedOnly || it.bookingId == null }
             .map { it.toDto() }
     }
+
+    @Transactional(readOnly = true)
+    fun consigneeShipped(scope: PortalScope, chassisQuery: String?): List<PortalCarDto> {
+        val rows = scopedCars(scope, chassisQuery).filter { it.shipped }
+        val names = reads.clientNames(rows.mapNotNull { it.clientId }.distinct())
+        return rows.map { row ->
+            row.toDto().copy(clientName = row.clientId?.let { names[it] })
+        }
+    }
+
+    @Transactional(readOnly = true)
+    fun consigneeClientMap(scope: PortalScope): List<PortalClientMapDto> {
+        if (!scope.active) return emptyList()
+        val wanted = scope.consigneeLegalName?.trim()?.lowercase().orEmpty()
+        if (wanted.isEmpty()) return emptyList()
+        val allowed = scopedCars(scope, "")
+            .map { it.chassis.trim().lowercase() }
+            .filter { it.isNotEmpty() }
+            .toSet()
+        val names = linkedMapOf<String, String>()
+        shippingHistories.findConsigneeClientNames().forEach { pair ->
+            val chassis = (pair[0] as String?)?.trim()?.lowercase().orEmpty()
+            val clientName = (pair[2] as String?)?.trim().orEmpty()
+            if (chassis.isEmpty() || clientName.isEmpty() || chassis !in allowed) return@forEach
+            if (consigneeTokens(pair[1] as String?).none { it.lowercase() == wanted }) return@forEach
+            names.putIfAbsent(clientName.lowercase(), clientName)
+        }
+        if (names.isEmpty()) return emptyList()
+        val maps = clientMaps.findByClientNamesIgnoreCase(names.keys).groupBy { it.clientName.trim().lowercase() }
+        return names.toSortedMap().flatMap { (key, display) ->
+            val rows = maps[key].orEmpty().sortedBy { it.id }
+            if (rows.isEmpty()) {
+                listOf(PortalClientMapDto(clientName = display))
+            } else {
+                rows.map { row ->
+                    PortalClientMapDto(
+                        clientName = row.clientName,
+                        country = row.country,
+                        pod = row.pod,
+                        address = row.address,
+                        bankInfo = row.bankInfo,
+                        consignee = row.consignee,
+                        debitLimit = row.debitLimit?.stripTrailingZeros()?.toPlainString(),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun consigneeTokens(raw: String?): List<String> =
+        raw?.replace("\r\n", "\n")
+            ?.replace('\r', '\n')
+            ?.split(Regex("[,;\\n]+"))
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            .orEmpty()
 
     @Transactional(readOnly = true)
     fun clientShipments(scope: PortalScope): List<ClientShipmentDto> =

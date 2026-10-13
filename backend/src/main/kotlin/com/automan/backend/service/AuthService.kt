@@ -214,7 +214,7 @@ class AuthService(
     fun setupInitialAdmin(email: String, name: String, password: String): AuthResponse {
         try {
             authBootstrapRepository.saveAndFlush(
-                AuthBootstrap(id = 1, createdAt = AuthSessionService.utcNow()),
+                AuthBootstrap(id = 1.toByte(), createdAt = AuthSessionService.utcNow()),
             )
         } catch (_: DataIntegrityViolationException) {
             throw IllegalStateException("System setup already completed")

@@ -55,6 +55,10 @@ class AppRouterTest {
         assertFalse(isOwnPortalRoute("CLIENT", "/portal/clientele"))
         assertFalse(isOwnPortalRoute("CONSIGNEE", "/portal/client/me"))
         assertTrue(isOwnPortalRoute("CONSIGNEE", "/portal/consignee/history"))
+        assertTrue(isOwnPortalRoute("CONSIGNEE", "/portal/consignee/not-shipped"))
+        assertTrue(isOwnPortalRoute("CONSIGNEE", "/portal/consignee/ongoing"))
+        assertNull(portalGuardRedirect("CONSIGNEE", "/portal/consignee/history"))
+        assertNull(portalGuardRedirect("CONSIGNEE", "/portal/consignee/not-shipped"))
 
         assertEquals("/portal/client", portalGuardRedirect("CLIENT", "/purchase"))
         assertEquals("/portal/client", portalGuardRedirect("CLIENT", "/booking"))

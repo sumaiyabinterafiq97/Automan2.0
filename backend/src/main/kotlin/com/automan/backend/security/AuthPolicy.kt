@@ -7,7 +7,7 @@ import com.automan.backend.model.UserRole
  *
  * ADMIN, EDITOR, and VIEWER keep their current permissions.
  * CLIENT and CONSIGNEE are external roles. They are denied on every staff route.
- * CLIENT may GET /portal/client and its child paths only, and may PUT /portal/client/credit-limit.
+ * CLIENT may GET /portal/client and its child paths only. Credit-limit changes stay on the staff client screen.
  * CONSIGNEE may GET /portal/consignee and its child paths only.
  * Staff roles are denied on /portal. A path such as /portal/clientele does not match the client portal.
  * Any role outside the staff set is denied as well, so a new role cannot inherit Editor access.
@@ -90,7 +90,6 @@ object AuthPolicy {
         if (role !in staffRoles) {
             if (m == "POST" && p == "/auth/logout") return true
             if (m == "GET" && role == UserRole.CLIENT && isClientPortal(p)) return true
-            if (m == "PUT" && role == UserRole.CLIENT && p == "/portal/client/credit-limit") return true
             if (m == "GET" && role == UserRole.CONSIGNEE && isConsigneePortal(p)) return true
             return false
         }

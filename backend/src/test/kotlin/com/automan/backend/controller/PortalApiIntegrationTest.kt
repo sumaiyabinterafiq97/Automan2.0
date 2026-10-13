@@ -1,6 +1,7 @@
 package com.automan.backend.controller
 
 import com.automan.backend.model.Client
+import com.automan.backend.model.ClientMap
 import com.automan.backend.model.Consignee
 import com.automan.backend.model.Event
 import com.automan.backend.model.EventType
@@ -11,6 +12,7 @@ import com.automan.backend.model.PurchaseMedia
 import com.automan.backend.model.ShippingHistory
 import com.automan.backend.model.UserPartyLink
 import com.automan.backend.repository.ClientConsigneeAssignmentRepository
+import com.automan.backend.repository.ClientMapRepository
 import com.automan.backend.repository.ClientRepository
 import com.automan.backend.repository.ConsigneeRepository
 import com.automan.backend.repository.EventRepository
@@ -66,6 +68,7 @@ class PortalApiIntegrationTest {
     @Autowired private lateinit var invoiceHistoryLineRepository: InvoiceHistoryLineRepository
     @Autowired private lateinit var eventRepository: EventRepository
     @Autowired private lateinit var purchaseMediaRepository: PurchaseMediaRepository
+    @Autowired private lateinit var clientMapRepository: ClientMapRepository
 
     private val emails = mutableListOf<String>()
     private val clientIds = mutableListOf<Long>()
@@ -76,10 +79,12 @@ class PortalApiIntegrationTest {
     private val lineIds = mutableListOf<Long>()
     private val eventIds = mutableListOf<Long>()
     private val mediaIds = mutableListOf<Long>()
+    private val clientMapIds = mutableListOf<Long>()
 
     @AfterEach
     fun cleanup() {
         mediaIds.forEach { purchaseMediaRepository.deleteById(it) }
+        clientMapIds.forEach { clientMapRepository.deleteById(it) }
         eventIds.forEach { eventRepository.deleteById(it) }
         lineIds.forEach { invoiceHistoryLineRepository.deleteById(it) }
         invoiceIds.forEach { invoiceHistoryRepository.deleteById(it) }
@@ -106,6 +111,7 @@ class PortalApiIntegrationTest {
         lineIds.clear()
         eventIds.clear()
         mediaIds.clear()
+        clientMapIds.clear()
     }
 
     @Test
@@ -275,19 +281,89 @@ class PortalApiIntegrationTest {
         assertEquals(3, dashboard.get("purchasedCount").asInt())
         assertEquals(2, dashboard.get("shippedCount").asInt())
         assertEquals(1, dashboard.get("invoicedCount").asInt())
-        assertEquals(1, dashboard.get("clientCount").asInt())
+        assertEquals(0, dashboard.get("clientCount").asInt())
         assertOnlyKeys(dashboard.toString(), CONSIGNEE_DASHBOARD_KEYS)
 
         val shipped = get("/portal/consignee/cars/shipped", fixture.tokenAlpha)
         assertEquals(listOf(fixture.chassisOld, fixture.chassisShip), textValues(objectMapper.readTree(shipped), "chassis"))
+        assertTrue(shipped.contains("Portal Client A"))
         assertFalse(shipped.contains(fixture.chassisB))
         assertFalse(shipped.contains(fixture.chassisUnassigned))
         assertOnlyKeys(shipped, CAR_KEYS)
+
+        val mappedName = "Mapped ${fixture.alphaName}"
+        val otherName = "Other ${fixture.alphaName}"
+        val sharedName = "Shared ${fixture.alphaName}"
+        val unmappedName = "Unmapped ${fixture.alphaName}"
+        clientMapIds.add(clientMapRepository.save(ClientMap(
+            clientName = mappedName,
+            country = "PAKISTAN",
+            pod = "KARACHI-PAKISTAN",
+            address = "mapped-address",
+            bankInfo = "BANK OF TEST",
+            consignee = fixture.alphaName,
+            debitLimit = BigDecimal("40000"),
+        )).id!!)
+        clientMapIds.add(clientMapRepository.save(ClientMap(
+            clientName = otherName,
+            consignee = "SOMEONE ELSE",
+        )).id!!)
+        clientMapIds.add(clientMapRepository.save(ClientMap(
+            clientName = sharedName,
+            consignee = "SOMEONE ELSE, ${fixture.alphaName}",
+        )).id!!)
+        val mappedChassis = "CL-MAP-${fixture.alphaId}"
+        val unmappedChassis = "CL-BARE-${fixture.alphaId}"
+        val past = LocalDate.now(ZoneOffset.UTC).minusDays(3)
+        purchase(mappedChassis, fixture.clientA, null)
+        purchase(unmappedChassis, fixture.clientA, null)
+        shippingIds.add(shippingHistoryRepository.save(ShippingHistory(
+            chassis = mappedChassis,
+            clientName = mappedName,
+            consignee = fixture.alphaName,
+            eta = past,
+        )).id!!)
+        shippingIds.add(shippingHistoryRepository.save(ShippingHistory(
+            chassis = unmappedChassis,
+            clientName = unmappedName,
+            consignee = "Prefix, ${fixture.alphaName}",
+            eta = past,
+        )).id!!)
+        shippingIds.add(shippingHistoryRepository.save(ShippingHistory(
+            chassis = fixture.chassisUnassigned,
+            clientName = otherName,
+            consignee = fixture.alphaName,
+            eta = past,
+        )).id!!)
+        shippingIds.add(shippingHistoryRepository.save(ShippingHistory(
+            chassis = "CL-OTHER-${fixture.alphaId}",
+            clientName = sharedName,
+            consignee = fixture.alphaName,
+            eta = past,
+        )).id!!)
+        val maps = objectMapper.readTree(get("/portal/consignee/clients", fixture.tokenAlpha))
+        assertEquals(listOf(mappedName, unmappedName), textValues(maps, "clientName"))
+        assertTrue(maps.toString().contains("BANK OF TEST"))
+        assertTrue(maps.toString().contains("40000"))
+        assertFalse(maps.toString().contains(otherName))
+        assertFalse(maps.toString().contains(sharedName))
+        assertFalse(maps.toString().contains("777.50"))
+        assertFalse(maps.toString().contains("totalPrice"))
+        assertFalse(maps.toString().contains("creditLimit"))
+        assertEquals("[]", get("/portal/consignee/clients", fixture.tokenBeta))
+        assertEquals(2, objectMapper.readTree(get("/portal/consignee/dashboard", fixture.tokenAlpha)).get("clientCount").asInt())
 
         val notShipped = get("/portal/consignee/cars/not-shipped?q=${fixture.chassisB}", fixture.tokenAlpha)
         assertEquals("[]", notShipped)
         val yard = objectMapper.readTree(get("/portal/consignee/cars/not-shipped", fixture.tokenAlpha))
         assertEquals(listOf(fixture.chassisYard), textValues(yard, "chassis"))
+        assertFalse(yard.toString().contains("clientName"))
+        val looseChassis = "A-LOOSE-${fixture.clientA}"
+        purchase(looseChassis, fixture.clientA, null)
+        val unbooked = objectMapper.readTree(get("/portal/consignee/cars/not-shipped?booking=none", fixture.tokenAlpha))
+        assertEquals(listOf(looseChassis), textValues(unbooked, "chassis"))
+        val stillWaiting = textValues(objectMapper.readTree(get("/portal/consignee/cars/not-shipped", fixture.tokenAlpha)), "chassis")
+        assertEquals(listOf(looseChassis, fixture.chassisYard), stillWaiting)
 
         val ongoing = get("/portal/consignee/shipments/ongoing", fixture.tokenAlpha)
         val ongoingTree = objectMapper.readTree(ongoing)
@@ -339,6 +415,7 @@ class PortalApiIntegrationTest {
         assertEquals(true, inactiveMe.get("linked").asBoolean())
         assertEquals(false, inactiveMe.get("active").asBoolean())
         assertEquals("[]", get("/portal/consignee/cars/shipped", fixture.tokenBeta))
+        assertEquals("[]", get("/portal/consignee/clients", fixture.tokenBeta))
         assertEquals(0, objectMapper.readTree(get("/portal/consignee/dashboard", fixture.tokenBeta)).get("purchasedCount").asInt())
         assertFalse(get("/portal/consignee/me", fixture.tokenBeta).contains(fixture.chassisShip))
         for (path in consigneeDataPaths()) {
@@ -413,7 +490,7 @@ class PortalApiIntegrationTest {
         assertFalse(ongoing.contains("Portal Client B"))
         assertFalse(ongoing.contains(fixture.chassisB))
         assertFalse(shipped.contains(fixture.chassisUnassigned))
-        assertEquals(2, objectMapper.readTree(get("/portal/consignee/dashboard", fixture.tokenAlpha)).get("clientCount").asInt())
+        assertEquals(0, objectMapper.readTree(get("/portal/consignee/dashboard", fixture.tokenAlpha)).get("clientCount").asInt())
 
         val client = clientRepository.findById(fixture.clientA).get()
         clientRepository.save(client.copy(consigneeId = null))
@@ -523,7 +600,7 @@ class PortalApiIntegrationTest {
     }
 
     @Test
-    fun clientLedgerShowsOwnRowsAndSavesOwnCreditLimit() {
+    fun clientLedgerShowsOwnRowsAndCannotChangeCreditLimit() {
         val fixture = seed()
         val ledger = objectMapper.readTree(get("/portal/client/ledger", fixture.tokenA))
         assertEquals("Portal Client A", ledger.get("clientName").asText())
@@ -544,18 +621,17 @@ class PortalApiIntegrationTest {
                 .header("Authorization", "Bearer ${fixture.tokenA}")
                 .contentType(JSON)
                 .content("""{"creditLimit":1200,"clientName":"Hijack","currentBalance":1}"""),
-        ).andExpect(status().isBadRequest)
+        ).andExpect(status().isForbidden)
 
         mockMvc.perform(
             put("/portal/client/credit-limit")
                 .header("Authorization", "Bearer ${fixture.tokenA}")
                 .contentType(JSON)
                 .content("""{"creditLimit":1200}"""),
-        ).andExpect(status().isOk)
+        ).andExpect(status().isForbidden)
 
         val saved = clientRepository.findById(fixture.clientA).get()
-        assertEquals(1200.0, saved.creditLimit)
-        assertEquals(1080.0, saved.alertThreshold)
+        assertEquals(444444.0, saved.creditLimit)
         assertEquals(333333.0, saved.currentBalance)
         assertEquals("Portal Client A", saved.clientName)
 
@@ -571,20 +647,19 @@ class PortalApiIntegrationTest {
                 .header("Authorization", "Bearer ${fixture.tokenB}")
                 .contentType(JSON)
                 .content("""{"creditLimit":50}"""),
-        ).andExpect(status().isOk)
-        assertEquals(1200.0, clientRepository.findById(fixture.clientA).get().creditLimit)
-        assertEquals(50.0, clientRepository.findById(fixture.clientB).get().creditLimit)
+        ).andExpect(status().isForbidden)
+        assertEquals(444444.0, clientRepository.findById(fixture.clientA).get().creditLimit)
+        assertEquals(444444.0, clientRepository.findById(fixture.clientB).get().creditLimit)
 
         mockMvc.perform(
             put("/portal/client/credit-limit")
                 .header("Authorization", "Bearer ${fixture.tokenA}")
                 .contentType(JSON)
                 .content("""{"creditLimit":null}"""),
-        ).andExpect(status().isOk)
-        val cleared = clientRepository.findById(fixture.clientA).get()
-        assertNull(cleared.creditLimit)
-        assertNull(cleared.alertThreshold)
-        assertEquals(333333.0, cleared.currentBalance)
+        ).andExpect(status().isForbidden)
+        val unchanged = clientRepository.findById(fixture.clientA).get()
+        assertEquals(444444.0, unchanged.creditLimit)
+        assertEquals(333333.0, unchanged.currentBalance)
 
         val csv = get("/portal/client/ledger/export", fixture.tokenA)
         assertTrue(csv.contains("BILL-A"))
@@ -899,6 +974,7 @@ class PortalApiIntegrationTest {
         "/portal/consignee/cars/shipped",
         "/portal/consignee/shipments/history",
         "/portal/consignee/cars/$purchaseId/media/$mediaId/url",
+        "/portal/consignee/clients",
     )
 
     private data class Fixture(
@@ -926,7 +1002,7 @@ class PortalApiIntegrationTest {
 
     companion object {
         private val JSON = MediaType.APPLICATION_JSON
-        private val CAR_KEYS = setOf("purchaseId", "chassis", "carName", "year", "stockLocation", "country", "shipped")
+        private val CAR_KEYS = setOf("purchaseId", "chassis", "carName", "year", "stockLocation", "country", "shipped", "clientName")
         private val SHIPMENT_KEYS = setOf("bookingId", "vessel", "pol", "pod", "shipmentDate", "cyCutDate", "eta", "chassis")
         private val CONSIGNEE_SHIPMENT_KEYS = SHIPMENT_KEYS + "clientNames"
         private val INVOICE_KEYS = setOf("invoiceNumber", "date", "vessel", "chassis", "priceType")

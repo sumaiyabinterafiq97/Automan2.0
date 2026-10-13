@@ -20,7 +20,25 @@ class PortalViewTest {
         assertTrue(cars.contains("ABC-1"))
         assertTrue(cars.contains("Shipped"))
         assertFalse(cars.contains("purchaseId"))
+        assertFalse(cars.contains(">Client<"))
         assertNoFinancialMarkup(cars)
+
+        val shipped = portalCarsTableHtml(
+            listOf(PortalCarRow("ABC-1", "Aqua", "2020", "Nagoya", "Japan", true, "Portal Client A")),
+            "No shipped cars.",
+            includeClient = true,
+        )
+        assertTrue(shipped.contains(">Client<"))
+        assertTrue(shipped.contains("Portal Client A"))
+
+        val clients = portalClientMapTableHtml(
+            listOf(PortalClientMapRow("klkml", "PAKISTAN", "KARACHI-PAKISTAN", "addr", "BANK", "OVERSEAS", "40000")),
+        )
+        assertTrue(clients.contains("Client Name"))
+        assertTrue(clients.contains("Debit Limit"))
+        assertTrue(clients.contains("klkml"))
+        assertFalse(clients.contains("Add New"))
+        assertFalse(clients.lowercase().contains("delivered"))
 
         val empty = portalCarsTableHtml(emptyList(), "No purchased cars yet.")
         assertTrue(empty.contains("data-portal-state=\"empty\""))
@@ -41,6 +59,23 @@ class PortalViewTest {
         assertFalse(shipments.contains("delivered"))
         assertNoFinancialMarkup(shipments)
 
+        val combined = portalShipmentsTableHtml(
+            listOf(
+                PortalShipmentRow("", "", "", "", "", "", "", listOf("WAIT-1"), recordLabel = "Not booked"),
+                PortalShipmentRow("32", "", "NAGOYA", "KARACHI", "", "", "", listOf("ACA21"), recordLabel = "Booked, not yet shipped"),
+            ),
+            "No ongoing shipments.",
+            includeClients = false,
+        )
+        assertTrue(combined.contains("Not booked"))
+        assertTrue(combined.contains("Booked, not yet shipped"))
+        assertFalse(combined.contains("Shipment row"))
+        assertFalse(combined.contains("Shipment history"))
+        assertFalse(combined.contains(">Client<"))
+        assertTrue(combined.indexOf("Not booked") < combined.indexOf("Booked, not yet shipped"))
+        assertFalse(combined.lowercase().contains("delivered"))
+        assertNoFinancialMarkup(combined)
+
         val invoices = portalInvoicesTableHtml(
             listOf(PortalInvoiceRow("INV-1", "2026-03-01", "", listOf("ABC-1"), "C&amp;F")),
         )
@@ -58,6 +93,14 @@ class PortalViewTest {
         assertFalse(transactions.contains("¥1,250.50"))
         assertFalse(transactions.contains("Mizuho"))
         assertNoFinancialMarkup(transactions)
+
+        val nav = consigneeNav("ongoing")
+        assertTrue(nav.contains("Ongoing shipments"))
+        assertTrue(nav.contains("Shipped cars"))
+        assertTrue(nav.contains("Clients"))
+        assertTrue(nav.contains("Dashboard"))
+        assertFalse(nav.contains("Not yet shipped"))
+        assertFalse(nav.contains("Shipment history"))
     }
 
     private fun assertNoFinancialMarkup(html: String) {

@@ -18,6 +18,7 @@ data class PortalCarRow(
     val stockLocation: String,
     val country: String,
     val shipped: Boolean,
+    val clientName: String = "",
 )
 
 data class PortalShipmentRow(
@@ -30,6 +31,17 @@ data class PortalShipmentRow(
     val eta: String,
     val chassis: List<String>,
     val clientNames: List<String> = emptyList(),
+    val recordLabel: String? = null,
+)
+
+data class PortalClientMapRow(
+    val clientName: String,
+    val country: String,
+    val pod: String,
+    val address: String,
+    val bankInfo: String,
+    val consignee: String,
+    val debitLimit: String,
 )
 
 data class PortalInvoiceRow(
@@ -131,20 +143,9 @@ private suspend fun loadClientPage(generation: Int, page: String, route: String)
 private suspend fun loadConsigneePage(generation: Int, page: String) {
     try {
         when (page) {
-            "ongoing" -> renderConsigneeShipments(
-                generation,
-                fetchPortal("portal/consignee/shipments/ongoing"),
-                "No ongoing shipments.",
-                "",
-            )
-            "not-shipped" -> renderPortalCars(generation, fetchPortal("portal/consignee/cars/not-shipped${portalQuerySuffix(portalQuery())}"), portalQuery(), "No cars are waiting to ship.", "not-shipped")
+            "ongoing" -> renderConsigneeOngoing(generation)
             "shipped" -> renderPortalCars(generation, fetchPortal("portal/consignee/cars/shipped${portalQuerySuffix(portalQuery())}"), portalQuery(), "No shipped cars.", "shipped")
-            "history" -> renderConsigneeShipments(
-                generation,
-                fetchPortal("portal/consignee/shipments/history"),
-                "No shipment history.",
-                "",
-            )
+            "clients" -> renderConsigneeClients(generation, fetchPortal("portal/consignee/clients"))
             else -> renderConsigneeDashboard(generation, fetchPortal("portal/consignee/dashboard"))
         }
     } catch (e: dynamic) {
@@ -172,9 +173,10 @@ private fun clientPortalPage(route: String): String = when {
 
 private fun consigneePortalPage(route: String): String = when {
     routeAtStartsWith(route, "/portal/consignee/ongoing") -> "ongoing"
-    routeAtStartsWith(route, "/portal/consignee/not-shipped") -> "not-shipped"
+    routeAtStartsWith(route, "/portal/consignee/not-shipped") -> "ongoing"
     routeAtStartsWith(route, "/portal/consignee/shipped") -> "shipped"
-    routeAtStartsWith(route, "/portal/consignee/history") -> "history"
+    routeAtStartsWith(route, "/portal/consignee/clients") -> "clients"
+    routeAtStartsWith(route, "/portal/consignee/history") -> "ongoing"
     else -> "dashboard"
 }
 
@@ -189,13 +191,12 @@ private fun clientNav(page: String): String = portalNav(
     if (page == "car") "cars" else page,
 )
 
-private fun consigneeNav(page: String): String = portalNav(
+internal fun consigneeNav(page: String): String = portalNav(
     listOf(
         PortalNavItem("dashboard", "Dashboard", "/portal/consignee"),
         PortalNavItem("ongoing", "Ongoing shipments", "/portal/consignee/ongoing"),
-        PortalNavItem("not-shipped", "Not yet shipped", "/portal/consignee/not-shipped"),
         PortalNavItem("shipped", "Shipped cars", "/portal/consignee/shipped"),
-        PortalNavItem("history", "Shipment history", "/portal/consignee/history"),
+        PortalNavItem("clients", "Clients", "/portal/consignee/clients"),
     ),
     page,
 )
@@ -417,6 +418,7 @@ private fun mountPortalShell(role: String, title: String, navHtml: String): Int 
                 .portal-page[data-portal-role='consignee'] .portal-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 1.3; white-space: nowrap; background: #e2e8f0; color: #475569; }
                 .portal-page[data-portal-role='consignee'] .portal-pill--booked { background: #fef3c7; color: #92400e; }
                 .portal-page[data-portal-role='consignee'] .portal-pill--shipment { background: #dbeafe; color: #1e40af; }
+                .portal-page[data-portal-role='consignee'] .portal-pill--history { background: #e0e7ff; color: #3730a3; }
                 @media (max-width: 1100px) {
                     .portal-page[data-portal-role='consignee'] .portal-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
                 }
@@ -596,9 +598,10 @@ private fun renderPortalCars(generation: Int, result: ApiResult<dynamic>, query:
             stockLocation = jsText(item.stockLocation),
             country = jsText(item.country),
             shipped = item.shipped == true,
+            clientName = jsText(item.clientName),
         )
     }
-    setPortalBody(generation, portalCarSearchHtml(query) + portalCarsTableHtml(rows, emptyMessage))
+    setPortalBody(generation, portalCarSearchHtml(query) + portalCarsTableHtml(rows, emptyMessage, includeClient = pageKey == "shipped"))
     val form = document.getElementById("portalCarSearch")
     form?.addEventListener("submit", { event: Event ->
         event.preventDefault()
@@ -621,10 +624,12 @@ private fun renderPortalCars(generation: Int, result: ApiResult<dynamic>, query:
     })
 }
 
-fun portalCarsTableHtml(rows: List<PortalCarRow>, emptyMessage: String): String {
+fun portalCarsTableHtml(rows: List<PortalCarRow>, emptyMessage: String, includeClient: Boolean = false): String {
     if (rows.isEmpty()) return """<section class="portal-state" data-portal-state="empty"><p>${escapeHtml(emptyMessage)}</p></section>"""
+    val clientHeader = if (includeClient) "<th>Client</th>" else ""
     val body = rows.joinToString("") { row ->
         val status = if (row.shipped) """<span class="portal-badge shipped">Shipped</span>""" else """<span class="portal-badge">Not shipped</span>"""
+        val clientCell = if (includeClient) """<td data-label="Client">${portalText(row.clientName)}</td>""" else ""
         """
             <tr>
                 <td data-label="Chassis"><span class="portal-id">${portalText(row.chassis)}</span></td>
@@ -632,6 +637,7 @@ fun portalCarsTableHtml(rows: List<PortalCarRow>, emptyMessage: String): String 
                 <td data-label="Year"><span class="portal-nowrap">${portalText(row.year)}</span></td>
                 <td data-label="Stock location">${portalText(row.stockLocation)}</td>
                 <td data-label="Country">${portalText(row.country)}</td>
+                $clientCell
                 <td data-label="Status">$status</td>
             </tr>
         """.trimIndent()
@@ -639,12 +645,59 @@ fun portalCarsTableHtml(rows: List<PortalCarRow>, emptyMessage: String): String 
     return """
         <div class="portal-table-wrap">
             <table class="portal-table portal-table--cars">
-                <thead><tr><th>Chassis</th><th>Car</th><th>Year</th><th>Stock location</th><th>Country</th><th>Status</th></tr></thead>
+                <thead><tr><th>Chassis</th><th>Car</th><th>Year</th><th>Stock location</th><th>Country</th>$clientHeader<th>Status</th></tr></thead>
                 <tbody>$body</tbody>
             </table>
         </div>
     """.trimIndent()
 }
+
+private fun renderConsigneeClients(generation: Int, result: ApiResult<dynamic>) {
+    if (generation != portalGeneration) return
+    val data = result.asDynamicOrNull() ?: return renderPortalFailure(generation, result.errorMessage(), result.errorStatus())
+    val rows = jsArray(data).map { item ->
+        PortalClientMapRow(
+            clientName = jsText(item.clientName),
+            country = jsText(item.country),
+            pod = jsText(item.pod),
+            address = jsText(item.address),
+            bankInfo = jsText(item.bankInfo),
+            consignee = jsText(item.consignee),
+            debitLimit = jsText(item.debitLimit),
+        )
+    }
+    setPortalBody(generation, portalClientMapTableHtml(rows))
+}
+
+internal fun portalClientMapTableHtml(rows: List<PortalClientMapRow>): String {
+    if (rows.isEmpty()) {
+        return """<section class="portal-state" data-portal-state="empty"><p>No clients are mapped to this consignee.</p></section>"""
+    }
+    val body = rows.joinToString("") { row ->
+        """
+            <tr>
+                <td data-label="Client Name">${portalMapCell(row.clientName, formatClientMapValueChipHtml(row.clientName))}</td>
+                <td data-label="Country">${portalMapCell(row.country, formatClientMapValueChipHtml(row.country))}</td>
+                <td data-label="POD">${portalMapCell(row.pod, formatClientMapValueChipHtml(row.pod))}</td>
+                <td data-label="Address">${portalMapCell(row.address, formatClientMapValueChipHtml(row.address))}</td>
+                <td data-label="Bank Info">${portalMapCell(row.bankInfo, formatClientMapBankInfoCellHtml(row.bankInfo))}</td>
+                <td data-label="Consignee">${portalMapCell(row.consignee, formatClientMapConsigneeChipCellHtml(row.consignee))}</td>
+                <td data-label="Debit Limit">${portalMapCell(row.debitLimit, formatClientMapDebitLimitCellHtml(row.debitLimit))}</td>
+            </tr>
+        """.trimIndent()
+    }
+    return """
+        <div class="portal-table-wrap">
+            <table class="portal-table portal-table--clients">
+                <thead><tr><th>Client Name</th><th>Country</th><th>POD</th><th>Address</th><th>Bank Info</th><th>Consignee</th><th>Debit Limit</th></tr></thead>
+                <tbody>$body</tbody>
+            </table>
+        </div>
+    """.trimIndent()
+}
+
+private fun portalMapCell(raw: String, formatted: String): String =
+    if (raw.isBlank() || formatted.isBlank()) portalText(raw) else formatted
 
 private fun portalCarSearchHtml(query: String) = """
     <form id="portalCarSearch" class="portal-search">
@@ -670,8 +723,67 @@ private fun renderClientShipments(generation: Int, result: ApiResult<dynamic>) {
     )
 }
 
-private fun renderConsigneeShipments(generation: Int, result: ApiResult<dynamic>, emptyMessage: String, note: String) {
-    renderShipmentTable(generation, result, includeClients = true, emptyMessage = emptyMessage, note = note)
+private suspend fun renderConsigneeOngoing(generation: Int) {
+    val ongoing = fetchPortal("portal/consignee/shipments/ongoing")
+    val ongoingData = ongoing.asDynamicOrNull() ?: return renderPortalFailure(generation, ongoing.errorMessage(), ongoing.errorStatus())
+    val unbooked = fetchPortal("portal/consignee/cars/not-shipped?booking=none")
+    val unbookedData = unbooked.asDynamicOrNull() ?: return renderPortalFailure(generation, unbooked.errorMessage(), unbooked.errorStatus())
+    if (generation != portalGeneration) return
+    val booked = parseShipmentRows(ongoingData, "Booked, not yet shipped").filter { shipmentLooksBooked(it) }
+    val rows = parseUnbookedRows(unbookedData) + booked
+    val query = portalQuery()
+    val shown = if (query.isEmpty()) rows else rows.filter { shipmentMatchesChassis(it, query) }
+    val emptyMessage = if (query.isNotEmpty()) "No cars match that chassis." else "No ongoing shipments."
+    setPortalBody(generation, portalCarSearchHtml(query) + portalShipmentsTableHtml(shown, emptyMessage, includeClients = false))
+    document.getElementById("portalCarSearch")?.addEventListener("submit", { event: Event ->
+        event.preventDefault()
+        val value = (document.getElementById("portalCarQuery") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val encoded = js("encodeURIComponent")(value).unsafeCast<String>()
+        navigateToApp(if (value.isEmpty()) "/portal/consignee/ongoing?q=" else "/portal/consignee/ongoing?q=$encoded")
+    })
+    document.getElementById("portalCarSearchClear")?.addEventListener("click", { _: Event ->
+        navigateToApp("/portal/consignee/ongoing?q=")
+    })
+}
+
+private fun parseShipmentRows(data: dynamic, recordLabel: String?): List<PortalShipmentRow> =
+    jsArray(data).map { item ->
+        PortalShipmentRow(
+            bookingId = jsText(item.bookingId),
+            vessel = jsText(item.vessel),
+            pol = jsText(item.pol),
+            pod = jsText(item.pod),
+            shipmentDate = jsText(item.shipmentDate),
+            cyCutDate = jsText(item.cyCutDate),
+            eta = jsText(item.eta),
+            chassis = jsStringList(item.chassis),
+            clientNames = jsStringList(item.clientNames),
+            recordLabel = recordLabel,
+        )
+    }
+
+private fun parseUnbookedRows(data: dynamic): List<PortalShipmentRow> =
+    jsArray(data).map { item ->
+        val chassis = jsText(item.chassis).trim()
+        PortalShipmentRow(
+            bookingId = "",
+            vessel = "",
+            pol = "",
+            pod = "",
+            shipmentDate = "",
+            cyCutDate = "",
+            eta = "",
+            chassis = if (chassis.isEmpty()) emptyList() else listOf(chassis),
+            recordLabel = "Not booked",
+        )
+    }
+
+private fun shipmentLooksBooked(row: PortalShipmentRow): Boolean =
+    row.vessel.isBlank() && row.shipmentDate.isBlank() && row.eta.isBlank() && row.cyCutDate.isBlank()
+
+private fun shipmentMatchesChassis(row: PortalShipmentRow, query: String): Boolean {
+    val needle = query.lowercase()
+    return row.chassis.any { it.lowercase().contains(needle) }
 }
 
 private fun renderShipmentTable(
@@ -705,9 +817,14 @@ fun portalShipmentsTableHtml(rows: List<PortalShipmentRow>, emptyMessage: String
     val clientHeader = if (includeClients) "<th>Client</th>" else ""
     val body = rows.joinToString("") { row ->
         val clients = if (!includeClients) "" else "<td>${portalText(row.clientNames.joinToString(", "))}</td>"
-        val booked = row.vessel.isBlank() && row.shipmentDate.isBlank() && row.eta.isBlank() && row.cyCutDate.isBlank()
-        val kind = if (booked) "Booked, not yet shipped" else "Shipment row"
-        val kindClass = if (booked) "portal-pill--booked" else "portal-pill--shipment"
+        val kind = row.recordLabel?.takeIf { it.isNotBlank() }
+            ?: if (shipmentLooksBooked(row)) "Booked, not yet shipped" else "Shipment row"
+        val kindClass = when (kind) {
+            "Booked, not yet shipped" -> "portal-pill--booked"
+            "Shipment history" -> "portal-pill--history"
+            "Shipment row" -> "portal-pill--shipment"
+            else -> ""
+        }
         """
             <tr>
                 <td><span class="portal-nowrap">${portalText(row.bookingId)}</span></td>

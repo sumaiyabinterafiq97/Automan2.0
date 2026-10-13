@@ -33,13 +33,17 @@ class PortalConsigneeController(
     fun notShipped(
         request: HttpServletRequest,
         @RequestParam(required = false) q: String?,
-    ) = portal.cars(scope(request), q, false)
+        @RequestParam(required = false) booking: String?,
+    ) = portal.cars(scope(request), q, false, booking?.equals("none", ignoreCase = true) == true)
 
     @GetMapping("/cars/shipped")
     fun shipped(
         request: HttpServletRequest,
         @RequestParam(required = false) q: String?,
-    ) = portal.cars(scope(request), q, true)
+    ) = portal.consigneeShipped(scope(request), q)
+
+    @GetMapping("/clients")
+    fun clients(request: HttpServletRequest) = portal.consigneeClientMap(scope(request))
 
     @GetMapping("/shipments/history")
     fun history(request: HttpServletRequest) = portal.consigneeHistory(scope(request))

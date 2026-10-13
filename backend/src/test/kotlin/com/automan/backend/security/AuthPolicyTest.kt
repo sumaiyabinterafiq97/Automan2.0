@@ -102,7 +102,7 @@ class AuthPolicyTest {
         assertFalse(AuthPolicy.isAllowed("GET", "/portal/consignee/me", 9, UserRole.CLIENT))
         assertFalse(AuthPolicy.isAllowed("GET", "/portal/client/me", 9, UserRole.CONSIGNEE))
         assertFalse(AuthPolicy.isAllowed("POST", "/portal/client/me", 9, UserRole.CLIENT))
-        assertTrue(AuthPolicy.isAllowed("PUT", "/portal/client/credit-limit", 9, UserRole.CLIENT))
+        assertFalse(AuthPolicy.isAllowed("PUT", "/portal/client/credit-limit", 9, UserRole.CLIENT))
         assertFalse(AuthPolicy.isAllowed("PUT", "/portal/client/ledger", 9, UserRole.CLIENT))
         assertFalse(AuthPolicy.isAllowed("PUT", "/clients/6", 9, UserRole.CLIENT))
         assertFalse(AuthPolicy.isAllowed("PUT", "/portal/client/credit-limit", 9, UserRole.CONSIGNEE))
