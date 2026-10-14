@@ -291,11 +291,22 @@ class PortalQueryService(
     )
 
     @Transactional(readOnly = true)
+    fun consigneePurchaseList(scope: PortalScope): List<PortalPurchaseListItemDto> {
+        if (!scope.active) return emptyList()
+        val ids = scopedCars(scope, "").map { it.purchaseId }.distinct()
+        if (ids.isEmpty()) return emptyList()
+        return purchaseListItems(purchaseRepository.findAllById(ids).toList())
+    }
+
+    @Transactional(readOnly = true)
     fun clientPurchaseList(scope: PortalScope): List<PortalPurchaseListItemDto> {
         if (!scope.active || scope.clientIds.isEmpty()) return emptyList()
-        val rows = purchases.hydratePurchasesForExport(
-            scope.clientIds.flatMap { purchaseRepository.findByClientId(it) },
-        ).sortedWith(compareBy({ it.chassis }, { it.id }))
+        return purchaseListItems(scope.clientIds.flatMap { purchaseRepository.findByClientId(it) })
+    }
+
+    private fun purchaseListItems(purchasesToShow: List<Purchase>): List<PortalPurchaseListItemDto> {
+        val rows = purchases.hydratePurchasesForExport(purchasesToShow)
+            .sortedWith(compareBy({ it.chassis }, { it.id }))
         val thumbs = firstImageIds(rows.mapNotNull { it.id })
         return rows.map { row ->
             PortalPurchaseListItemDto(

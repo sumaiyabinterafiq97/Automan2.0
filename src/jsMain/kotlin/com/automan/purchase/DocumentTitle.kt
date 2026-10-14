@@ -53,6 +53,8 @@ fun documentTitleForRoute(route: String): String {
         routeAtStartsWith(r, "/portal/client/transactions") -> "Transactions"
         routeAtStartsWith(r, "/portal/client") -> "Client portal"
         routeAtEquals(r, "/portal/consignee") -> "Consignee portal"
+        routeAtStartsWith(r, "/portal/consignee/purchased") -> "Purchased cars"
+        routeAtStartsWith(r, "/portal/consignee/invoices") -> "Invoices"
         routeAtStartsWith(r, "/portal/consignee/ongoing") -> "Ongoing shipments"
         routeAtStartsWith(r, "/portal/consignee/not-shipped") -> "Ongoing shipments"
         routeAtStartsWith(r, "/portal/consignee/shipped") -> "Shipped cars"

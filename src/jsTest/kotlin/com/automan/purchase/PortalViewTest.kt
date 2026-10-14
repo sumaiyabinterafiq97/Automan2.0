@@ -53,7 +53,8 @@ class PortalViewTest {
             includeClients = true,
         )
         assertTrue(shipments.contains("Booked, not yet shipped"))
-        assertTrue(shipments.contains("Shipment row"))
+        assertTrue(shipments.contains("Shipped"))
+        assertFalse(shipments.contains("Shipment row"))
         assertTrue(shipments.contains("Not recorded"))
         assertTrue(shipments.contains("Portal Client A"))
         assertFalse(shipments.contains("delivered"))
@@ -98,6 +99,8 @@ class PortalViewTest {
         assertTrue(nav.contains("Ongoing shipments"))
         assertTrue(nav.contains("Shipped cars"))
         assertTrue(nav.contains("Clients"))
+        assertTrue(nav.contains("Purchased cars"))
+        assertTrue(nav.contains("Invoices"))
         assertTrue(nav.contains("Dashboard"))
         assertFalse(nav.contains("Not yet shipped"))
         assertFalse(nav.contains("Shipment history"))

@@ -36,6 +36,18 @@ class PortalConsigneeController(
         @RequestParam(required = false) booking: String?,
     ) = portal.cars(scope(request), q, false, booking?.equals("none", ignoreCase = true) == true)
 
+    @GetMapping("/purchases")
+    fun purchases(request: HttpServletRequest) = portal.consigneePurchaseList(scope(request))
+
+    @GetMapping("/purchases/{purchaseId}")
+    fun purchase(
+        request: HttpServletRequest,
+        @PathVariable purchaseId: Long,
+    ) = portal.clientPurchase(scope(request), purchaseId)
+
+    @GetMapping("/invoices")
+    fun invoices(request: HttpServletRequest) = portal.invoices(scope(request))
+
     @GetMapping("/cars/shipped")
     fun shipped(
         request: HttpServletRequest,

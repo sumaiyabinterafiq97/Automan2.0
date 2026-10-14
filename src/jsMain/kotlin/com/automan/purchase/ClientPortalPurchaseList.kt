@@ -6,18 +6,64 @@ import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.events.Event
 
-private const val PORTAL_PURCHASE_COLUMNS_KEY = "portalClientPurchaseColumns"
 private const val PORTAL_PURCHASE_PAGE_SIZE = 20
 private const val PORTAL_DATA_COLUMN_MAX = 7
 
+private class PortalPurchaseRoutes(
+    val columnsKey: String,
+    val listPath: String,
+    val detailApi: (Long) -> String,
+    val detailRoute: (Long) -> String,
+    val backRoute: String,
+    val mediaPath: (Long, String) -> String,
+)
+
+private val clientPurchaseRoutes = PortalPurchaseRoutes(
+    columnsKey = "portalClientPurchaseColumns",
+    listPath = "portal/client/cars/list",
+    detailApi = { id -> "portal/client/cars/$id" },
+    detailRoute = { id -> "/portal/client/cars/$id" },
+    backRoute = "/portal/client/cars",
+    mediaPath = { purchaseId, mediaId -> "portal/client/cars/$purchaseId/media/$mediaId/url" },
+)
+
+private val consigneePurchaseRoutes = PortalPurchaseRoutes(
+    columnsKey = "portalConsigneePurchaseColumns",
+    listPath = "portal/consignee/purchases",
+    detailApi = { id -> "portal/consignee/purchases/$id" },
+    detailRoute = { id -> "/portal/consignee/purchased/$id" },
+    backRoute = "/portal/consignee/purchased",
+    mediaPath = { purchaseId, mediaId -> "portal/consignee/cars/$purchaseId/media/$mediaId/url" },
+)
+
+private var portalPurchaseRoutes = clientPurchaseRoutes
 private var portalPurchaseItems: List<dynamic> = emptyList()
 private var portalPurchaseQuery: String = ""
 private var portalPurchaseSortField: String = "date"
 private var portalPurchaseSortOrder: String = "desc"
 private var portalPurchasePage: Int = 1
 
+private fun usePortalPurchaseRoutes(routes: PortalPurchaseRoutes) {
+    if (portalPurchaseRoutes.columnsKey != routes.columnsKey) {
+        portalPurchaseQuery = ""
+        portalPurchasePage = 1
+        portalPurchaseSortField = "date"
+        portalPurchaseSortOrder = "desc"
+    }
+    portalPurchaseRoutes = routes
+}
+
 internal suspend fun renderClientPurchaseList(generation: Int) {
-    when (val result = ApiClient.request<dynamic>("portal/client/cars/list")) {
+    renderPortalPurchaseList(generation, clientPurchaseRoutes)
+}
+
+internal suspend fun renderConsigneePurchaseList(generation: Int) {
+    renderPortalPurchaseList(generation, consigneePurchaseRoutes)
+}
+
+private suspend fun renderPortalPurchaseList(generation: Int, routes: PortalPurchaseRoutes) {
+    usePortalPurchaseRoutes(routes)
+    when (val result = ApiClient.request<dynamic>(routes.listPath)) {
         is ApiResult.Error -> renderPortalFailure(generation, result.message, result.statusCode)
         is ApiResult.Success -> {
             portalPurchaseItems = jsArray(result.data)
@@ -27,7 +73,16 @@ internal suspend fun renderClientPurchaseList(generation: Int) {
 }
 
 internal suspend fun renderClientPurchaseDetail(generation: Int, purchaseId: Long) {
-    val detail = ApiClient.request<dynamic>("portal/client/cars/$purchaseId")
+    renderPortalPurchaseDetail(generation, purchaseId, clientPurchaseRoutes)
+}
+
+internal suspend fun renderConsigneePurchaseDetail(generation: Int, purchaseId: Long) {
+    renderPortalPurchaseDetail(generation, purchaseId, consigneePurchaseRoutes)
+}
+
+private suspend fun renderPortalPurchaseDetail(generation: Int, purchaseId: Long, routes: PortalPurchaseRoutes) {
+    usePortalPurchaseRoutes(routes)
+    val detail = ApiClient.request<dynamic>(routes.detailApi(purchaseId))
     if (detail is ApiResult.Error) {
         renderPortalFailure(generation, detail.message, detail.statusCode)
         return
@@ -36,7 +91,7 @@ internal suspend fun renderClientPurchaseDetail(generation: Int, purchaseId: Lon
     val mediaIds = jsArray((detail as ApiResult.Success).data.mediaIds).mapNotNull { (it as? Number)?.toLong() }
     setPortalBody(generation, clientPurchaseDetailHtml(purchase, mediaIds))
     document.getElementById("portalPurchaseBack")?.addEventListener("click", { _: Event ->
-        navigateToApp("/portal/client/cars")
+        navigateToApp(routes.backRoute)
     })
     loadPortalThumbs(generation)
 }
@@ -88,7 +143,7 @@ private fun bindClientPurchaseList(generation: Int, columns: List<String>) {
         button.addEventListener("click", { event: Event ->
             event.preventDefault()
             val id = button.getAttribute("data-id")?.toLongOrNull() ?: return@addEventListener
-            navigateToApp("/portal/client/cars/$id")
+            navigateToApp(portalPurchaseRoutes.detailRoute(id))
         })
     }
     document.getElementById("portalPurchasePrev")?.addEventListener("click", { _: Event ->
@@ -223,7 +278,7 @@ private fun portalClientDefaultColumns(): List<String> =
     getDefaultColumnsForDevice().take(PORTAL_DATA_COLUMN_MAX)
 
 private fun portalClientSelectedColumns(): List<String> {
-    val saved = window.localStorage.getItem(PORTAL_PURCHASE_COLUMNS_KEY)
+    val saved = window.localStorage.getItem(portalPurchaseRoutes.columnsKey)
     val parsed = if (saved.isNullOrBlank()) {
         emptyList()
     } else {
@@ -274,7 +329,7 @@ private fun openPortalColumnModal(generation: Int, selected: List<String>) {
             if (input.checked) chosen.add(input.value)
         }
         val next = if (chosen.isEmpty()) portalClientDefaultColumns() else chosen.take(PORTAL_DATA_COLUMN_MAX)
-        window.localStorage.setItem(PORTAL_PURCHASE_COLUMNS_KEY, JSON.stringify(next.toTypedArray()))
+        window.localStorage.setItem(portalPurchaseRoutes.columnsKey, JSON.stringify(next.toTypedArray()))
         modal.remove()
         portalPurchasePage = 1
         drawClientPurchaseList(generation)
@@ -316,7 +371,7 @@ private fun loadPortalThumbs(generation: Int) {
             }
         })
         launchPortal {
-            when (val result = ApiClient.request<dynamic>("portal/client/cars/$purchaseId/media/$mediaId/url")) {
+            when (val result = ApiClient.request<dynamic>(portalPurchaseRoutes.mediaPath(purchaseId.toLong(), mediaId))) {
                 is ApiResult.Success -> {
                     if (generation != currentPortalGeneration()) return@launchPortal
                     val url = jsText(result.data.url)

@@ -291,6 +291,24 @@ class PortalApiIntegrationTest {
         assertFalse(shipped.contains(fixture.chassisUnassigned))
         assertOnlyKeys(shipped, CAR_KEYS)
 
+        val purchases = get("/portal/consignee/purchases", fixture.tokenAlpha)
+        assertTrue(purchases.contains(fixture.chassisShip))
+        assertTrue(purchases.contains(fixture.chassisYard))
+        assertFalse(purchases.contains(fixture.chassisB))
+        assertFalse(purchases.contains(fixture.chassisUnassigned))
+        assertFalse(purchases.contains("SECRET-BANK"))
+        val ownPurchase = get("/portal/consignee/purchases/${fixture.purchaseShip}", fixture.tokenAlpha)
+        assertTrue(ownPurchase.contains(fixture.chassisShip))
+        mockMvc.perform(
+            get("/portal/consignee/purchases/${fixture.purchaseB}").header("Authorization", "Bearer ${fixture.tokenAlpha}"),
+        ).andExpect(status().isNotFound)
+        val invoices = get("/portal/consignee/invoices", fixture.tokenAlpha)
+        assertTrue(invoices.contains(fixture.invoiceNumber))
+        assertTrue(invoices.contains(fixture.chassisShip))
+        assertFalse(invoices.contains(fixture.chassisB))
+        assertFalse(invoices.contains("SECRET-BANK"))
+        assertFalse(invoices.contains("88888"))
+
         val mappedName = "Mapped ${fixture.alphaName}"
         val otherName = "Other ${fixture.alphaName}"
         val sharedName = "Shared ${fixture.alphaName}"
@@ -396,6 +414,8 @@ class PortalApiIntegrationTest {
 
         val afterAlpha = get("/portal/consignee/cars/shipped", fixture.tokenAlpha)
         assertEquals("[]", afterAlpha)
+        assertFalse(get("/portal/consignee/purchases", fixture.tokenAlpha).contains(fixture.chassisShip))
+        assertFalse(get("/portal/consignee/invoices", fixture.tokenAlpha).contains(fixture.invoiceNumber))
         assertEquals(0, objectMapper.readTree(get("/portal/consignee/dashboard", fixture.tokenAlpha)).get("clientCount").asInt())
         val afterBeta = get("/portal/consignee/cars/shipped", fixture.tokenBeta)
         assertTrue(afterBeta.contains(fixture.chassisShip))
@@ -957,6 +977,7 @@ class PortalApiIntegrationTest {
         "/portal/consignee/cars/not-shipped",
         "/portal/consignee/cars/shipped",
         "/portal/consignee/shipments/history",
+        "/portal/consignee/invoices",
     )
 
     private fun portalPaths(purchaseId: Long, mediaId: Long) = listOf(
@@ -975,6 +996,9 @@ class PortalApiIntegrationTest {
         "/portal/consignee/shipments/history",
         "/portal/consignee/cars/$purchaseId/media/$mediaId/url",
         "/portal/consignee/clients",
+        "/portal/consignee/purchases",
+        "/portal/consignee/purchases/$purchaseId",
+        "/portal/consignee/invoices",
     )
 
     private data class Fixture(

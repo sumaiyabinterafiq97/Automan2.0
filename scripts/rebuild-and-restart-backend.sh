@@ -34,6 +34,22 @@ print_docker_hub_help() {
   echo "     ./scripts/rebuild-and-restart-backend.sh --prebuilt"
 }
 
+print_build_failure() {
+  local log_file="$1"
+  if grep -Eq "registry-1\\.docker\\.io|no such host" "$log_file"; then
+    print_docker_hub_help
+  elif grep -Eq "services\\.gradle\\.org|Downloading from https://services\\.gradle\\.org" "$log_file"; then
+    echo ""
+    echo "❌ The image build timed out downloading Gradle inside Docker."
+    echo "   The JDK image was already available. Gradle on this machine is already cached."
+    echo "   Rebuild from that JAR instead:"
+    echo "     ./scripts/rebuild-and-restart-backend.sh --prebuilt"
+  else
+    echo ""
+    echo "❌ Docker build failed. See the build output above."
+  fi
+}
+
 USE_PREBUILT=0
 if [ "${1:-}" = "--prebuilt" ]; then
   USE_PREBUILT=1
@@ -54,18 +70,21 @@ if [ "$USE_PREBUILT" = "1" ]; then
   fi
 fi
 
+BUILD_LOG="$(mktemp)"
 docker build \
   --build-arg "JAVA_BASE_IMAGE=$JAVA_BASE_IMAGE" \
   -t automan20-backend:latest \
   -f "$DOCKERFILE" \
-  "$BACKEND_DIR/"
-BUILD_EXIT=$?
+  "$BACKEND_DIR/" 2>&1 | tee "$BUILD_LOG"
+BUILD_EXIT="${PIPESTATUS[0]}"
 set -e
 
 if [ "$BUILD_EXIT" -ne 0 ]; then
-  print_docker_hub_help
+  print_build_failure "$BUILD_LOG"
+  rm -f "$BUILD_LOG"
   exit "$BUILD_EXIT"
 fi
+rm -f "$BUILD_LOG"
 
 echo "🔄 Restarting backend..."
 cd "$PROJECT_ROOT"

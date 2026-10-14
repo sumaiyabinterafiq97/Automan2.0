@@ -119,7 +119,7 @@ fun showConsigneePortal(route: String) {
                     return@launch
                 }
                 renderPortalAccount(generation, jsText(account.legalName))
-                loadConsigneePage(generation, page)
+                loadConsigneePage(generation, page, route)
             }
         }
     }
@@ -140,11 +140,14 @@ private suspend fun loadClientPage(generation: Int, page: String, route: String)
     }
 }
 
-private suspend fun loadConsigneePage(generation: Int, page: String) {
+private suspend fun loadConsigneePage(generation: Int, page: String, route: String) {
     try {
         when (page) {
             "ongoing" -> renderConsigneeOngoing(generation)
             "shipped" -> renderPortalCars(generation, fetchPortal("portal/consignee/cars/shipped${portalQuerySuffix(portalQuery())}"), portalQuery(), "No shipped cars.", "shipped")
+            "purchased" -> renderConsigneePurchaseList(generation)
+            "purchase" -> renderConsigneePurchaseDetail(generation, consigneePurchaseDetailId(route) ?: return)
+            "invoices" -> renderClientInvoices(generation, fetchPortal("portal/consignee/invoices"))
             "clients" -> renderConsigneeClients(generation, fetchPortal("portal/consignee/clients"))
             else -> renderConsigneeDashboard(generation, fetchPortal("portal/consignee/dashboard"))
         }
@@ -171,10 +174,22 @@ private fun clientPortalPage(route: String): String = when {
     else -> "dashboard"
 }
 
+private fun consigneePurchaseDetailId(route: String): Long? {
+    val path = route.substringBefore('?')
+    val marker = "/portal/consignee/purchased/"
+    val at = path.indexOf(marker)
+    if (at < 0) return null
+    val rest = path.substring(at + marker.length).trim('/').substringBefore('/')
+    return rest.toLongOrNull()
+}
+
 private fun consigneePortalPage(route: String): String = when {
+    consigneePurchaseDetailId(route) != null -> "purchase"
     routeAtStartsWith(route, "/portal/consignee/ongoing") -> "ongoing"
     routeAtStartsWith(route, "/portal/consignee/not-shipped") -> "ongoing"
     routeAtStartsWith(route, "/portal/consignee/shipped") -> "shipped"
+    routeAtStartsWith(route, "/portal/consignee/purchased") -> "purchased"
+    routeAtStartsWith(route, "/portal/consignee/invoices") -> "invoices"
     routeAtStartsWith(route, "/portal/consignee/clients") -> "clients"
     routeAtStartsWith(route, "/portal/consignee/history") -> "ongoing"
     else -> "dashboard"
@@ -196,9 +211,11 @@ internal fun consigneeNav(page: String): String = portalNav(
         PortalNavItem("dashboard", "Dashboard", "/portal/consignee"),
         PortalNavItem("ongoing", "Ongoing shipments", "/portal/consignee/ongoing"),
         PortalNavItem("shipped", "Shipped cars", "/portal/consignee/shipped"),
+        PortalNavItem("purchased", "Purchased cars", "/portal/consignee/purchased"),
+        PortalNavItem("invoices", "Invoices", "/portal/consignee/invoices"),
         PortalNavItem("clients", "Clients", "/portal/consignee/clients"),
     ),
-    page,
+    if (page == "purchase") "purchased" else page,
 )
 
 private data class PortalNavItem(val id: String, val label: String, val route: String)
@@ -537,16 +554,21 @@ private fun renderConsigneeDashboard(generation: Int, result: ApiResult<dynamic>
             jsCount(data.clientCount),
         ),
     )
-    val shipped = document.querySelectorAll("#portalBody .portal-card").item(1) as? HTMLElement
-    if (shipped != null) {
-        val button = document.createElement("button")
-        button.className = "portal-card portal-card-link"
-        button.setAttribute("type", "button")
-        button.setAttribute("data-portal-route", "/portal/consignee/shipped")
-        button.innerHTML = shipped.innerHTML
-        shipped.replaceWith(button)
-        button.addEventListener("click", { _: Event -> navigateToApp("/portal/consignee/shipped") })
-    }
+    val cards = document.querySelectorAll("#portalBody .portal-card")
+    linkConsigneeDashboardCard(cards.item(0) as? HTMLElement, "/portal/consignee/purchased")
+    linkConsigneeDashboardCard(cards.item(1) as? HTMLElement, "/portal/consignee/shipped")
+    linkConsigneeDashboardCard(cards.item(2) as? HTMLElement, "/portal/consignee/invoices")
+}
+
+private fun linkConsigneeDashboardCard(card: HTMLElement?, route: String) {
+    if (card == null) return
+    val button = document.createElement("button")
+    button.className = "portal-card portal-card-link"
+    button.setAttribute("type", "button")
+    button.setAttribute("data-portal-route", route)
+    button.innerHTML = card.innerHTML
+    card.replaceWith(button)
+    button.addEventListener("click", { _: Event -> navigateToApp(route) })
 }
 
 fun portalDashboardHtml(
@@ -818,11 +840,11 @@ fun portalShipmentsTableHtml(rows: List<PortalShipmentRow>, emptyMessage: String
     val body = rows.joinToString("") { row ->
         val clients = if (!includeClients) "" else "<td>${portalText(row.clientNames.joinToString(", "))}</td>"
         val kind = row.recordLabel?.takeIf { it.isNotBlank() }
-            ?: if (shipmentLooksBooked(row)) "Booked, not yet shipped" else "Shipment row"
+            ?: if (shipmentLooksBooked(row)) "Booked, not yet shipped" else "Shipped"
         val kindClass = when (kind) {
             "Booked, not yet shipped" -> "portal-pill--booked"
             "Shipment history" -> "portal-pill--history"
-            "Shipment row" -> "portal-pill--shipment"
+            "Shipped", "Shipment row" -> "portal-pill--shipment"
             else -> ""
         }
         """
