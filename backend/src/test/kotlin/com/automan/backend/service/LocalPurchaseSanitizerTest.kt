@@ -32,7 +32,6 @@ class LocalPurchaseSanitizerTest {
             local = true,
             rixoCompany = "SHAHBAZ",
             stockLocation = "GLOBAL KAWASAKI",
-            pol = "YOKOHAMA",
             country = "PAKISTAN",
             bookingId = 322L,
             rixoRequested = "TRUE",
@@ -54,7 +53,6 @@ class LocalPurchaseSanitizerTest {
         assertEquals("10000", result.rixoPrice)
         assertEquals("TRUE", result.rixoRequested)
         assertEquals("TRUE", result.rixoConfirmed)
-        assertNull(result.pol)
         assertEquals("PAKISTAN", result.country)
         assertNull(result.bookingId)
         assertFalse(result.bookingRequested)

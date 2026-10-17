@@ -983,7 +983,6 @@ fun purchaseListColumnLabels(): Map<String, String> {
         "auctionNo" to "Auction No",
         "auctionHouse" to "Supplier Name",
         "stockLocation" to "Stock Location",
-        "pol" to "POL",
         "pod" to "POD",
         "rixoCompany" to "Rixo Company",
         "venueId" to "Venue ID",
@@ -1131,7 +1130,7 @@ fun formatPurchaseChangeHistoryDateTime(isoLocalDateTime: String): String {
  * Sold list column: legacy [sold] may be absent after DB migration; UI maps Sold to [invoiceConfirmed].
  * Uses TRUE/FALSE to match other status chips (e.g. Rixo columns).
  */
-private fun purchaseSoldOrInvoiceConfirmedCell(p: dynamic): String {
+internal fun purchaseSoldOrInvoiceConfirmedCell(p: dynamic): String {
     fun tri(raw: dynamic): String {
         if (raw == null || raw == js("undefined")) return ""
         return when (raw) {
@@ -1224,7 +1223,6 @@ fun purchaseTableCellValue(purchase: dynamic, columnKey: String): String {
         "wd" -> field("wd")
         "driveType" -> field("driveType")
         "auctionNo" -> field("auctionNo")
-        "pol" -> field("pol")
         "venueId" -> field("venueId")
         "shipmentSize" -> field("shipmentSize")
         "consignee" -> field("consignee")
@@ -1389,7 +1387,6 @@ fun purchaseInlineEditSeed(purchase: dynamic, columnKey: String): String {
         "clientName" -> field("clientName")
         "rixoCompany" -> field("rixoCompany")
         "auctionNo" -> field("auctionNo")
-        "pol" -> field("pol")
         "venueId" -> field("venueId")
         "shipmentSize" -> field("shipmentSize")
         "consignee" -> field("consignee")

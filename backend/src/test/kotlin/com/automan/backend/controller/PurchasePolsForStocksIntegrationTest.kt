@@ -48,7 +48,6 @@ class PurchasePolsForStocksIntegrationTest {
                 chassis = "GK-YOK-1",
                 country = "SOUTH AFRICA (DURBAN)",
                 stockLocation = "GLOBAL KAWASAKI",
-                pol = "YOKOHAMA",
                 workflowStatus = WorkflowStatus.RIXO_CONFIRMED,
             ),
         )

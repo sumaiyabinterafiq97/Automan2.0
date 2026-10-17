@@ -2610,6 +2610,8 @@ window.resolvePolFromStockLocationMap = function(stockLocation, options) {
 
 // When stock location changes: pass supplier combobox id ('stockLocation' | 'editStockLocation').
 window.fetchPolsAfterStockChange = function(stockFieldId) {
+    // Purchase forms no longer store POL. Create Shipping fills POL from Stock Location Map.
+    return;
     if (typeof window.isSupplierMapProgrammaticUpdate === 'function' && window.isSupplierMapProgrammaticUpdate()) return;
     if (window.__supplierApplyInFlight === true) return;
     if (!stockFieldId) return;

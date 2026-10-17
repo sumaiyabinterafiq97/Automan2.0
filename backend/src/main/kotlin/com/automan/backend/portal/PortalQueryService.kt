@@ -31,7 +31,8 @@ import java.time.ZoneOffset
  *   The invoice date is the date portion of invoice_history.created_at. There is no invoice_date column.
  * BOOKED_ONGOING: an in-scope purchase with booking_id set and no shipping_history row. Grouped by that numeric booking id
  *   rendered as a decimal string. Vessel and shipment dates are omitted because V52 removed them from purchases.
- *   POL and POD are still purchase columns and are included when present. They are not authorization keys.
+ *   POD is still a purchase column and is included when present. POL is not stored on purchases; it stays on shipping history.
+ *   They are not authorization keys.
  *   A booking-requested workflow with a null booking_id stays on the not-shipped car list and is not an ongoing shipment.
  * ETA_HISTORY: a scoped shipping_history row whose eta is before today's UTC date.
  * ETA_ONGOING: a scoped shipping_history row whose eta is null or on or after today's UTC date.
@@ -258,7 +259,7 @@ class PortalQueryService(
             ShipmentGroup(
                 bookingId = bookingId.toString(),
                 vessel = null,
-                pol = group.firstNotNullOfOrNull { it.pol },
+                pol = null,
                 pod = group.firstNotNullOfOrNull { it.pod },
                 shipmentDate = null,
                 cyCutDate = null,

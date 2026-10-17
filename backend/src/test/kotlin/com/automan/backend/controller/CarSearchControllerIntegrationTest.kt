@@ -231,7 +231,6 @@ class CarSearchControllerIntegrationTest {
             rixoPrice = "0.00",
             shipmentDate = LocalDate.now().toString(),
             vessel = "VESSEL001",
-            pol = polPortStockLocation,
             stockLocation = polPortStockLocation,
             shipmentCharges = "1000.00",
             freight = "800.00",

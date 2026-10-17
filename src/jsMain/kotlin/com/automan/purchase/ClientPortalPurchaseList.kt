@@ -531,7 +531,6 @@ private fun portalReadonlySections(): List<Pair<String, List<Pair<String, String
         "country" to "Country",
     ),
     "Shipment Information" to listOf(
-        "pol" to "POL",
         "pod" to "POD",
         "shipmentDate" to "Shipment Date",
         "blNo" to "B/L No.",

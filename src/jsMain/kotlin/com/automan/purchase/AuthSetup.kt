@@ -9,7 +9,7 @@ import org.w3c.fetch.RequestInit
 /**
  * Adds the staff session bearer token to same-app `/api/` fetches, including calls that do not use [ApiClient].
  * Presigned storage URLs and other third-party hosts are left unchanged.
- * A 401 clears the local session and returns to login. A 403 is left for the page to show.
+ * A 401 is returned to the caller and does not clear the saved login. A 403 is left for the page to show.
  */
 fun installAuthenticatedFetch() {
     if (window.asDynamic().__automanFetchInstalled == true) return
@@ -40,7 +40,6 @@ fun installAuthenticatedFetch() {
             if (token && !headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
             next.headers = headers;
             return original(input, next).then(function (response) {
-              var skipRedirect = url.indexOf('/auth/login') >= 0 || url.indexOf('/auth/signup') >= 0 || url.indexOf('/auth/logout') >= 0 || url.indexOf('/auth/setup') >= 0;
               if (response.status === 403) {
                 var now = Date.now();
                 if (!window.__automan403At || now - window.__automan403At > 2000) {
@@ -60,17 +59,6 @@ fun installAuthenticatedFetch() {
                     if (current && current.parentNode) current.parentNode.removeChild(current);
                   }, 4000);
                 }
-              }
-              if (response.status === 401 && !skipRedirect) {
-                try {
-                  window.localStorage.removeItem('authToken');
-                  window.localStorage.removeItem('authUserRole');
-                  window.localStorage.removeItem('authUserName');
-                  window.localStorage.removeItem('authUserId');
-                } catch (e) {}
-                var path = window.location.pathname || '';
-                var onAuthPage = path.indexOf('/login') >= 0 || path.indexOf('/signup') >= 0;
-                if (!onAuthPage && typeof window.navigateToApp === 'function') window.navigateToApp('/login');
               }
               return response;
             });
@@ -157,6 +145,7 @@ fun applyRoleBasedRestrictions() {
     val rixoTransportBtn = document.getElementById("rixoTransportBtn") as HTMLElement?
     val clientAccountsQuickBtn = document.getElementById("clientAccountsQuickBtn") as HTMLElement?
     val purchaseListQuickAddBtn = document.getElementById("purchaseListQuickAddBtn") as HTMLElement?
+    val purchaseBulkEditBtn = document.getElementById("purchaseBulkEditBtn") as HTMLElement?
     
     newBtn?.style?.display = if (isEditor()) "block" else "none"
     importBtn?.style?.display = if (isEditor()) "block" else "none"
@@ -168,6 +157,7 @@ fun applyRoleBasedRestrictions() {
     clientAccountsQuickBtn?.style?.display = if (isAdmin()) "block" else "none"
     // inline-flex matches .purchase-quick-add-btn; hide for VIEWER (same create gate as New Purchase)
     purchaseListQuickAddBtn?.style?.display = if (isEditor()) "inline-flex" else "none"
+    purchaseBulkEditBtn?.style?.display = if (isEditor()) "inline-flex" else "none"
     document.body?.classList?.toggle("automan-viewer", isViewer())
     if (document.getElementById("automan-viewer-style") == null && isViewer()) {
         val style = document.createElement("style") as HTMLStyleElement
@@ -176,6 +166,7 @@ fun applyRoleBasedRestrictions() {
             body.automan-viewer #newBtn,
             body.automan-viewer #importBtn,
             body.automan-viewer #quickPurchaseBtn,
+            body.automan-viewer #purchaseBulkEditBtn,
             body.automan-viewer #rixoRequestBtn,
             body.automan-viewer #carBookingBtn,
             body.automan-viewer #anInvoiceBtn,

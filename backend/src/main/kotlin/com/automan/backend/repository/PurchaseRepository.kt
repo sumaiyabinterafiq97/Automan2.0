@@ -204,13 +204,16 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     )
     fun findByCountryIgnoreCaseTrimmed(@Param("country") country: String): List<Purchase>
 
-    // POL by country (from purchases only) - used for booking page POL dropdown
-    @Query("SELECT DISTINCT p.pol FROM Purchase p " +
-           "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
-           "AND p.pol IS NOT NULL AND p.pol != '' " +
-           "ORDER BY p.pol")
-    fun findDistinctPolByCountry(@Param("country") country: String): List<String>
-    
+    /** Bookable purchases (Rixo confirmed, booking not requested, not local). POL comes from Stock Location Map. */
+    @Query(
+        "SELECT p FROM Purchase p " +
+            "WHERE ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
+            "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
+            "AND ${PurchaseWorkflowService.JPQL_NOT_LOCAL} " +
+            "ORDER BY p.chassis",
+    )
+    fun findUnshippedEligibleForBooking(): List<Purchase>
+
     // Rixo company (from purchases only)
     @Query("SELECT DISTINCT p.rixoCompany FROM Purchase p WHERE p.rixoCompany IS NOT NULL AND p.rixoCompany != '' ORDER BY p.rixoCompany")
     fun findDistinctRixoCompanies(): List<String>
@@ -232,47 +235,6 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
         nativeQuery = true,
     )
     fun findDistinctVenueIds(): List<String>
-    
-    // Filtered chassis: booking not requested and Rixo confirmed (native query for raw table).
-    @Query(
-        value = "SELECT DISTINCT p.chassis FROM purchases p " +
-            "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
-            "AND LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
-            "AND p.chassis IS NOT NULL AND p.chassis != '' " +
-            "AND ${PurchaseWorkflowService.SQL_BOOKING_NOT_REQUESTED} " +
-            "AND ${PurchaseWorkflowService.SQL_RIXO_CONFIRMED_ELIGIBILITY} " +
-            "AND ${PurchaseWorkflowService.SQL_NOT_LOCAL} " +
-            "ORDER BY p.chassis",
-        nativeQuery = true,
-    )
-    fun findFilteredChassis(@Param("country") country: String, @Param("polPort") polPort: String): List<String>
-
-    @Query(
-        "SELECT p FROM Purchase p " +
-            "WHERE LOWER(TRIM(p.country)) = LOWER(TRIM(:country)) " +
-            "AND LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
-            "AND ${PurchaseWorkflowService.JPQL_BOOKING_NOT_REQUESTED} " +
-            "AND ${PurchaseWorkflowService.JPQL_RIXO_CONFIRMED_ELIGIBILITY} " +
-            "AND ${PurchaseWorkflowService.JPQL_NOT_LOCAL} " +
-            "ORDER BY p.chassis",
-    )
-    fun findFilteredPurchasesByCountryAndPol(
-        @Param("country") country: String,
-        @Param("polPort") polPort: String,
-    ): List<Purchase>
-
-    // Chassis by POL where booking not requested and Rixo confirmed
-    @Query(
-        value = "SELECT DISTINCT p.chassis FROM purchases p " +
-            "WHERE LOWER(TRIM(p.pol)) = LOWER(TRIM(:polPort)) " +
-            "AND ${PurchaseWorkflowService.SQL_BOOKING_NOT_REQUESTED} " +
-            "AND ${PurchaseWorkflowService.SQL_RIXO_CONFIRMED_ELIGIBILITY} " +
-            "AND ${PurchaseWorkflowService.SQL_NOT_LOCAL} " +
-            "AND p.chassis IS NOT NULL AND p.chassis != '' " +
-            "ORDER BY p.chassis",
-        nativeQuery = true,
-    )
-    fun findUnshippedChassisByPolPort(@Param("polPort") polPort: String): List<String>
     
     // Invoice filtering: consignee candidates (vessel/date matched post read-adapter in PurchaseService)
     @Query(
@@ -378,9 +340,6 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
 
     @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.stockLocation,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
     fun findIdsStockLocationContains(@Param("q") q: String): List<Long>
-
-    @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.pol,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
-    fun findIdsPolContains(@Param("q") q: String): List<Long>
 
     @Query("SELECT p.id FROM Purchase p WHERE LOWER(COALESCE(p.pod,'')) LIKE LOWER(CONCAT('%', :q, '%'))")
     fun findIdsPodContains(@Param("q") q: String): List<Long>

@@ -224,7 +224,6 @@ class PurchaseExportService(
         PurchaseExportColumnDef("WD", PurchaseExportCellKind.STRING) { str(it) { p -> p.wd } },
         PurchaseExportColumnDef("Drive Type", PurchaseExportCellKind.STRING) { str(it) { p -> p.driveType } },
         PurchaseExportColumnDef("Stock Location", PurchaseExportCellKind.STRING) { str(it) { p -> p.stockLocation } },
-        PurchaseExportColumnDef("POL", PurchaseExportCellKind.STRING) { str(it) { p -> p.pol } },
         PurchaseExportColumnDef("POD", PurchaseExportCellKind.STRING) { str(it) { p -> p.pod } },
         PurchaseExportColumnDef("Rixo Company", PurchaseExportCellKind.STRING) { str(it) { p -> p.rixoCompany } },
         PurchaseExportColumnDef("Client Name", PurchaseExportCellKind.STRING) { str(it) { p -> p.clientName } },

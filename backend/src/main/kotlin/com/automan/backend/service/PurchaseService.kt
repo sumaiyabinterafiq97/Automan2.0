@@ -103,20 +103,12 @@ class PurchaseService(
             purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)),
         )
 
-    /** POL from Stock Location Map when the purchase POL is blank (exactly one token). */
-    private fun polFromStockLocation(stockLocation: String?): String? {
-        val s = stockLocation?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        return stockLocationMapService.polsForSelectedStocks(s).singleOrNull()
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() && it != "---" }
+    /** Stock Location Map POL tokens for a purchase stock name. */
+    private fun polsForPurchaseStock(stockLocation: String?): List<String> {
+        val s = stockLocation?.trim()?.takeIf { it.isNotEmpty() && it != "-" } ?: return emptyList()
+        return stockLocationMapService.polsForSelectedStocks(s)
     }
 
-    private fun effectivePol(pol: String?, stockLocation: String?): String? {
-        val rawPol = pol?.trim().orEmpty()
-        if (rawPol.isNotBlank()) return rawPol
-        return polFromStockLocation(stockLocation)
-    }
-    
     /**
      * Validates Production Date (carModelYear): YYYY-MM with month 00–12; year in 1900–2100.
      * Format should be YYYY-MM (e.g., "2013-12"). Year must be exactly 4 digits in project range.
@@ -499,7 +491,6 @@ class PurchaseService(
                 auctionNo = purchase.auctionNo ?: existingPurchase.auctionNo,
                 auctionHouse = purchase.auctionHouse ?: existingPurchase.auctionHouse,
                 stockLocation = purchase.stockLocation ?: existingPurchase.stockLocation,
-                pol = purchase.pol ?: existingPurchase.pol,
                 pod = purchase.pod ?: existingPurchase.pod,
                 rixoCompany = purchase.rixoCompany ?: existingPurchase.rixoCompany,
                 clientName = purchase.clientName ?: existingPurchase.clientName,
@@ -677,7 +668,6 @@ class PurchaseService(
                     ?: (updateData["auctionName"] as? String)
                     ?: existingPurchase.auctionHouse,
                 stockLocation = updateData["stockLocation"] as? String ?: existingPurchase.stockLocation,
-                pol = updateData["pol"] as? String ?: existingPurchase.pol,
                 pod = run {
                     val hasPod = updateData.containsKey("pod")
                     val hasDest = updateData.containsKey("destination")
@@ -822,6 +812,25 @@ class PurchaseService(
                 },
                 repairCompany = updateData["repairCompany"] as? String ?: existingPurchase.repairCompany,
                 repairCharges = updateData["repairCharges"] as? String ?: existingPurchase.repairCharges,
+                profit = run {
+                    if (!updateData.containsKey("profit")) {
+                        existingPurchase.profit
+                    } else {
+                        PurchaseCostLineService.parseMoneyString(updateData["profit"]?.toString())
+                    }
+                },
+                isPackageMode = run {
+                    if (!updateData.containsKey("isPackageMode")) {
+                        existingPurchase.isPackageMode
+                    } else {
+                        when (val raw = updateData["isPackageMode"]) {
+                            is Boolean -> raw
+                            is String -> raw.equals("true", ignoreCase = true) || raw == "1"
+                            is Number -> raw.toInt() != 0
+                            else -> existingPurchase.isPackageMode
+                        }
+                    }
+                },
                 carPictures = run {
                     // Frontend may send camelCase or snake_case. Accept both.
                     val carPicturesData = updateData["carPictures"] ?: updateData["car_pictures"]
@@ -1020,26 +1029,17 @@ class PurchaseService(
     }
     
     @Transactional
-    fun markPurchasesAsBookingRequested(purchaseIds: List<Long>, pol: String? = null): List<Purchase> {
+    fun markPurchasesAsBookingRequested(purchaseIds: List<Long>): List<Purchase> {
         Logger.log("Marking ${purchaseIds.size} purchases as booking_requested: $purchaseIds")
-        val polWrite = pol?.trim()?.takeIf { it.isNotEmpty() && it != "---" }?.take(255)
         val updatedPurchases = mutableListOf<Purchase>()
         
         for (id in purchaseIds) {
             val existingPurchase = purchaseRepository.findById(id).orElse(null)
             if (existingPurchase != null) {
-                val updatedPurchase = if (polWrite != null) {
-                    existingPurchase.copy(
-                        bookingRequested = true,
-                        pol = polWrite,
-                        updatedAt = java.time.LocalDateTime.now(),
-                    )
-                } else {
-                    existingPurchase.copy(
-                        bookingRequested = true,
-                        updatedAt = java.time.LocalDateTime.now(),
-                    )
-                }
+                val updatedPurchase = existingPurchase.copy(
+                    bookingRequested = true,
+                    updatedAt = java.time.LocalDateTime.now(),
+                )
                 val savedPurchase = persistPurchase(updatedPurchase)
                 updatedPurchases.add(savedPurchase)
                 Logger.debug("Marked purchase $id as booking_requested")
@@ -1766,7 +1766,7 @@ class PurchaseService(
         when (normalizeFilterFieldKey(field)) {
             "chassis", "brand", "carname",
             "auctionhouse", "supplier", "suppliername",
-            "stocklocation", "pol", "pod", "destination",
+            "stocklocation", "pod", "destination",
             "rixocompany", "clientname", "client",
             "consignee", "country", "totalprice",
             "repaircompany", "bookingid", "manufactureyear",
@@ -1798,7 +1798,6 @@ class PurchaseService(
             "auctionhouse", "supplier", "suppliername" ->
                 purchaseRepository.findIdsAuctionHouseContains(value).toSet()
             "stocklocation" -> purchaseRepository.findIdsStockLocationContains(value).toSet()
-            "pol" -> purchaseRepository.findIdsPolContains(value).toSet()
             "pod", "destination" -> purchaseRepository.findIdsPodContains(value).toSet()
             "rixocompany" -> purchaseRepository.findIdsRixoCompanyContains(value).toSet()
             "clientname", "client" -> purchaseRepository.findIdsClientNameContains(value).toSet()
@@ -1924,7 +1923,6 @@ class PurchaseService(
             "auctionno" -> p.auctionNo.orEmpty()
             "auctionhouse", "supplier", "suppliername" -> p.auctionHouse.orEmpty()
             "stocklocation" -> p.stockLocation.orEmpty()
-            "pol" -> p.pol.orEmpty()
             "pod", "destination" -> p.pod.orEmpty()
             "rixocompany" -> p.rixoCompany.orEmpty()
             "clientname", "client" -> p.clientName.orEmpty()
@@ -2427,7 +2425,6 @@ class PurchaseService(
                 "SUPPLIER"
             )?.take(255) ?: "",
             stockLocation = getColumnValue(values, columnMapping, "STOCK LOCATION")?.take(255) ?: "",
-            pol = getColumnValue(values, columnMapping, "POL")?.take(255) ?: null,
             rixoCompany = getColumnValue(values, columnMapping, "RIXO COMPANY")?.take(255) ?: "",
             clientName = getColumnValue(values, columnMapping, "CLIENT NAME")?.take(255) ?: "",
             // Your UI calls this column "Target Country", but the DB column is `country`.
@@ -2643,7 +2640,6 @@ class PurchaseService(
                     
                     updatedPurchase = when (field) {
                         "rixoCompany" -> updatedPurchase.copy(rixoCompany = value)
-                        "pol" -> updatedPurchase.copy(pol = value)
                         "rixoRequested" -> updatedPurchase.copy(rixoRequested = value)
                         "rixoConfirmed" -> updatedPurchase.copy(rixoConfirmed = value)
                         "rixoPrice" -> updatedPurchase.copy(rixoPrice = value)
@@ -2710,7 +2706,6 @@ class PurchaseService(
                         carName = formData["carName"] as? String ?: purchase.carName,
                         clientName = formData["clientName"] as? String ?: purchase.clientName,
                         stockLocation = formData["stockLocation"] as? String ?: purchase.stockLocation,
-                        pol = formData["pol"] as? String ?: purchase.pol,
                         venueId = formData["venueId"] as? String ?: purchase.venueId,
                         numberCut = formData["numberCut"] as? String ?: purchase.numberCut
                     )
@@ -2847,18 +2842,17 @@ class PurchaseService(
     }
     
     /**
-     * Distinct POL values for purchases eligible for booking (Rixo confirmed, booking not requested) in [country],
-     * in **first-seen order** (table order is by chassis), so the first entry matches the first qualifying row — not alphabetical.
+     * Distinct Stock Location Map POL tokens for bookable purchases in [country].
+     * First-seen order follows chassis order, then each stock's map ports.
      */
     fun getPolByCountry(country: String): List<String> {
         val purchases = purchaseRepository.findUnshippedPurchasesByCountryForPolFiltering(country)
         val out = mutableListOf<String>()
         val seen = HashSet<String>()
         for (p in purchases) {
-            val pol = effectivePol(p.pol, p.stockLocation)?.trim() ?: continue
-            if (pol.isEmpty()) continue
-            val key = pol.lowercase()
-            if (seen.add(key)) out.add(pol)
+            for (pol in polsForPurchaseStock(p.stockLocation)) {
+                if (seen.add(pol.lowercase())) out.add(pol)
+            }
         }
         return out
     }
@@ -2884,8 +2878,8 @@ class PurchaseService(
         return purchases
             .asSequence()
             .mapNotNull { p ->
-                val resolved = effectivePol(p.pol, p.stockLocation)
-                if (resolved != null && resolved.equals(desiredPol, ignoreCase = true)) p.chassis else null
+                val matches = polsForPurchaseStock(p.stockLocation).any { it.equals(desiredPol, ignoreCase = true) }
+                if (matches) p.chassis else null
             }
             .filter { !it.isNullOrBlank() }
             .distinct()
@@ -2902,7 +2896,7 @@ class PurchaseService(
         return applyReadAdapters(
             purchases
                 .filter { p ->
-                    effectivePol(p.pol, p.stockLocation)?.equals(desiredPol, ignoreCase = true) == true
+                    polsForPurchaseStock(p.stockLocation).any { it.equals(desiredPol, ignoreCase = true) }
                 }
                 .sortedBy { it.chassis },
         )
@@ -2999,7 +2993,15 @@ class PurchaseService(
     }
     
     fun getChassisWithoutBookingRequestByPol(polPort: String): List<String> {
-        return purchaseRepository.findUnshippedChassisByPolPort(polPort)
+        val desiredPol = polPort.trim()
+        if (desiredPol.isBlank()) return emptyList()
+        return purchaseRepository.findUnshippedEligibleForBooking()
+            .asSequence()
+            .filter { p -> polsForPurchaseStock(p.stockLocation).any { it.equals(desiredPol, ignoreCase = true) } }
+            .mapNotNull { it.chassis?.trim()?.takeIf { c -> c.isNotEmpty() } }
+            .distinct()
+            .sorted()
+            .toList()
     }
 
     @Transactional(readOnly = true)

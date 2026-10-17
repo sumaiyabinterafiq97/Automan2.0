@@ -1311,7 +1311,6 @@ private fun proceedCarBookingCalculateToCnf(
         vessel = vessel,
         destination = podPort,
         consignee = consignee,
-        pol = polTrimmed,
         onComplete = {
             Logger.debug("All purchases updated with booking data and booking_id")
 
@@ -2711,7 +2710,6 @@ fun updateSelectedPurchasesWithBookingData(
     vessel: String,
     destination: String,
     consignee: String,
-    pol: String,
     onComplete: () -> Unit
 ) {
     if (purchaseIds.isEmpty()) {
@@ -2727,7 +2725,6 @@ fun updateSelectedPurchasesWithBookingData(
     console.log("   VESSEL → vessel: $vessel")
     console.log("   POD → pod column: $destination")
     console.log("   CONSIGNEE → consignee: $consignee")
-    console.log("   POL → pol: $pol")
     
     var completedUpdates = 0
     val totalUpdates = purchaseIds.size
@@ -2767,15 +2764,11 @@ fun updateSelectedPurchasesWithBookingData(
         payload["pod"] = destination
         // CONSIGNEE → consignee (name only; no "Country - " prefix — see consigneeNameWithoutCountryPrefix)
         payload["consignee"] = consigneeNameWithoutCountryPrefix(consignee)
-        // POL → purchases.pol only when chosen. A blank value is omitted so a saved port stays.
-        val polTrimmedForWrite = pol.trim()
-        if (polTrimmedForWrite.isNotEmpty()) {
-            payload["pol"] = polTrimmedForWrite
-        }
+        // POL stays on the shipping schedule. Purchases no longer store a port.
         // Note: booking_requested is set via the Booking Requested button, not Calculate
         
         Logger.debug("Sending update payload for purchase $purchaseId")
-        Logger.debug("Payload contents: bookingId=$bookingIdLong, shipmentDate=$etd, vessel=$vessel, pod=$destination, pol=$pol")
+        Logger.debug("Payload contents: bookingId=$bookingIdLong, shipmentDate=$etd, vessel=$vessel, pod=$destination")
         console.log("📦 Update payload for purchase $purchaseId:", JSON.stringify(payload))
         
         val req = js("({})")

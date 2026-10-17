@@ -30,7 +30,6 @@ class PortalReadRepository(
         val country: String?,
         val clientId: Long?,
         val bookingId: Long?,
-        val pol: String?,
         val pod: String?,
         val shipped: Boolean,
     )
@@ -144,7 +143,7 @@ class PortalReadRepository(
         return query(
             """
             SELECT p.id, p.chassis, p.carName, p.manufactureYear, p.stockLocation, p.country,
-                   p.clientId, p.bookingId, p.pol, p.pod,
+                   p.clientId, p.bookingId, p.pod,
                    (SELECT COUNT(s.id) FROM ShippingHistory s WHERE $UNAMBIGUOUS_CHASSIS AND TRIM(s.chassis) = TRIM(p.chassis))
             FROM Purchase p
             WHERE $predicate
@@ -163,9 +162,8 @@ class PortalReadRepository(
                 country = cells[5] as String?,
                 clientId = (cells[6] as Number?)?.toLong(),
                 bookingId = (cells[7] as Number?)?.toLong(),
-                pol = cells[8] as String?,
-                pod = cells[9] as String?,
-                shipped = number(cells[10]) > 0,
+                pod = cells[8] as String?,
+                shipped = number(cells[9]) > 0,
             )
         }
     }

@@ -142,10 +142,6 @@ fun openQuickPurchaseModal() {
                         ${createEditableCombobox("qpStockLocation", "Select Stock Location")}
                     </div>
                     <div class="qp-field">
-                        <label class="qp-label" for="qpPolInput">POL</label>
-                        ${createEditableCombobox("qpPol", "Select POL")}
-                    </div>
-                    <div class="qp-field">
                         <label class="qp-label" for="qpRixoCompanyInput">Rixo Company</label>
                         ${createEditableCombobox("qpRixoCompany", "Select Rixo Company")}
                     </div>
@@ -176,6 +172,14 @@ fun openQuickPurchaseModal() {
                                 <input type="checkbox" id="qpNegotiate">
                                 NEGOTIATE
                             </label>
+                        </div>
+                    </div>
+                    <div class="qp-field qp-field-span">
+                        <label class="qp-label" for="qpRecycleFee">Recycle Fees</label>
+                        <div class="currency-input qp-currency">
+                            <span class="qp-currency-symbol" aria-hidden="true">¥</span>
+                            <input type="text" inputmode="decimal" id="qpRecycleFee" class="money-input qp-input" placeholder="0"
+                                   autocomplete="off" onfocus="this.select();">
                         </div>
                     </div>
                 </div>
@@ -290,7 +294,7 @@ fun closeQuickPurchaseModal() {
 private fun resetQuickPurchaseModalForm() {
     (document.getElementById("qpAuctionNo") as? HTMLInputElement)?.value = ""
     listOf(
-        "qpChassis", "qpChassisNumber", "qpBrand", "qpCarName", "qpAuctionName", "qpVenueId", "qpStockLocation", "qpPol", "qpRixoCompany",
+        "qpChassis", "qpChassisNumber", "qpBrand", "qpCarName", "qpAuctionName", "qpVenueId", "qpStockLocation", "qpRixoCompany",
         "qpClientName", "qpCountry", "qpGrade", "qpRank", "qpSeat", "qpDoor", "qpColor", "qpFuel", "qpShift", "qpShipmentSize", "qpCc",
         "qpNumberCutPlace", "qpNumberCutHiragana",
     ).forEach { id ->
@@ -300,6 +304,7 @@ private fun resetQuickPurchaseModalForm() {
         inp?.value = ""
     }
     (document.getElementById("qpPrice") as? HTMLInputElement)?.value = ""
+    (document.getElementById("qpRecycleFee") as? HTMLInputElement)?.value = ""
     (document.getElementById("qpRixoPrice") as? HTMLInputElement)?.value = ""
     (document.getElementById("qpDistance") as? HTMLInputElement)?.value = ""
     (document.getElementById("qpNotes") as? HTMLTextAreaElement)?.value = ""
@@ -349,9 +354,8 @@ private fun preloadQuickPurchaseDropdowns() {
     populateComboboxFromApiForField("qpShift", "master-menu/shift", "Select Shift")
     populateComboboxFromApiForField("qpShipmentSize", "master-menu/type_of_vehicle", "Select Vehicle type")
     populateComboboxFromApiForField("qpVenueId", "master-menu/venue_id", "Select Venue ID")
-    populateComboboxFromApiForField("qpPol", "master-menu/pol", "Select POL")
     js("""
-        ['qpPol', 'qpPolInput', 'qpRixoCompany', 'qpRixoCompanyInput', 'qpStockLocation', 'qpStockLocationInput', 'qpVenueId', 'qpVenueIdInput', 'qpAuctionName', 'qpAuctionNameInput'].forEach(function(id) {
+        ['qpRixoCompany', 'qpRixoCompanyInput', 'qpStockLocation', 'qpStockLocationInput', 'qpVenueId', 'qpVenueIdInput', 'qpAuctionName', 'qpAuctionNameInput'].forEach(function(id) {
             var el = document.getElementById(id);
             if (!el || el.__qpRixoPriceLookupWired) return;
             el.__qpRixoPriceLookupWired = true;
@@ -651,7 +655,6 @@ fun applyQuickPurchaseSupplierSelection(selection: dynamic) {
                 setOne('qpStockLocation', sel.stockLocation);
                 setOne('qpRixoCompany', sel.rixoCompany);
                 setOne('qpVenueId', sel.venueId);
-                setOne('qpPol', sel.pol);
             } finally {
                 window.__suppressRixoAutoSelect = prevSuppress;
             }
@@ -751,7 +754,6 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
     purchaseData.auctionHouse = getComboboxValueSafe("qpAuctionName")
     purchaseData.venueId = getComboboxValueSafe("qpVenueId")
     purchaseData.stockLocation = getComboboxValueSafe("qpStockLocation")
-    purchaseData.pol = getComboboxValueSafe("qpPol")
     purchaseData.rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("qpRixoCompany"))
     purchaseData.clientName = getComboboxValueSafe("qpClientName")
     purchaseData.country = getComboboxValueSafe("qpCountry")
@@ -783,6 +785,8 @@ fun saveQuickPurchase(saveAndMore: Boolean) {
     if (optionsJoined.isNotBlank()) purchaseData.options = optionsJoined
     val priceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpPrice') : ''").unsafeCast<String>().trim()
     purchaseData.price = if (priceValue.isNotBlank()) "¥$priceValue" else ""
+    val recycleFeeValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpRecycleFee') : ''").unsafeCast<String>().trim()
+    purchaseData.recycleFee = if (recycleFeeValue.isNotBlank()) "¥$recycleFeeValue" else ""
     val rixoPriceValue = js("window.getMoneyRawValue ? window.getMoneyRawValue('qpRixoPrice') : ''").unsafeCast<String>().trim()
     purchaseData.rixoPrice = if (rixoPriceValue.isNotBlank()) "¥$rixoPriceValue" else ""
     purchaseData.negotiate = (document.getElementById("qpNegotiate") as? HTMLInputElement)?.checked ?: false

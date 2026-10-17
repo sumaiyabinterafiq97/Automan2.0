@@ -586,8 +586,7 @@ class PurchaseController(
         }
         
         Logger.debug("[Controller] Marking ${purchaseIds.size} purchases as booking_requested")
-        val pol = (request["pol"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
-        val updatedPurchases = purchaseService.markPurchasesAsBookingRequested(purchaseIds, pol)
+        val updatedPurchases = purchaseService.markPurchasesAsBookingRequested(purchaseIds)
         
         return ResponseEntity.ok(mapOf(
             "success" to true,

@@ -124,7 +124,6 @@ class PurchaseChangeHistoryService(
         add("auctionNo", str(before.auctionNo), str(after.auctionNo))
         add("auctionHouse", str(before.auctionHouse), str(after.auctionHouse))
         add("stockLocation", str(before.stockLocation), str(after.stockLocation))
-        add("pol", str(before.pol), str(after.pol))
         add("pod", str(before.pod), str(after.pod))
         add("rixoCompany", str(before.rixoCompany), str(after.rixoCompany))
         add("clientName", str(before.clientName), str(after.clientName))
@@ -161,6 +160,8 @@ class PurchaseChangeHistoryService(
         addBool("local", before.local, after.local)
         add("repairCompany", str(before.repairCompany), str(after.repairCompany))
         add("repairCharges", str(before.repairCharges), str(after.repairCharges))
+        add("profit", str(before.profit?.toPlainString()), str(after.profit?.toPlainString()))
+        addBool("isPackageMode", before.isPackageMode, after.isPackageMode)
         add("bookingId", normLong(before.bookingId), normLong(after.bookingId))
         run {
             if (onlyFields != null && "carPictures" !in onlyFields) return@run
@@ -265,6 +266,7 @@ class PurchaseChangeHistoryService(
             "inspectionFee",
             "commission",
             "repairCharges",
+            "profit",
         )
 
         /** Map confirm-modal field keys to persisted purchase / history field names. */

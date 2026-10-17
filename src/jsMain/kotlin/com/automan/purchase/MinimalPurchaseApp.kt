@@ -2060,21 +2060,7 @@ fun initializeAppSetup() {
                 })
                 .then(function(v) {
                     result.stockLocation = v;
-                    var preservePol = '';
-                    if (typeof window.getComboboxValue === 'function') {
-                        preservePol = String(window.getComboboxValue('editPol') || window.getComboboxValue('pol') || '').trim();
-                    }
-                    if (typeof window.resolvePolFromStockLocationMap === 'function') {
-                        return window.resolvePolFromStockLocationMap(v, {
-                            supplier: supplier,
-                            preservePol: preservePol,
-                            allowModal: allowPolModal === true
-                        });
-                    }
-                    return '';
-                })
-                .then(function(v) {
-                    result.pol = v;
+                    result.pol = '';
                     return resolveField('Rixo Company', function(b) {
                         var opts = [];
                         if (b.rixoOptions && b.rixoOptions.length) {
@@ -4999,6 +4985,8 @@ fun setupEditableComboboxHandlers() {
                     optionDiv.style.lineHeight = '1.5';
                     optionDiv.style.transition = 'background-color 0.15s ease';
                     optionDiv.textContent = opt.text || opt.value;
+                    var optionFullText = (opt.text || opt.value || '').trim();
+                    if (optionFullText) optionDiv.title = optionFullText;
                     
                     // Check if this is the selected value (never highlight See More; case-insensitive for Brand and master fields)
                     var isSelected = optionMatchesSelected(opt);
@@ -9201,10 +9189,6 @@ fun createAddFormHTML(): String {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="shipment">
                     <div>
-                        <label for="polInput">POL</label>
-                        ${createEditableCombobox("pol", "Select POL")}
-                    </div>
-                    <div>
                         <label for="shipmentDateText">Shipment Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
@@ -9245,6 +9229,13 @@ fun createAddFormHTML(): String {
                     <div>
                         <label for="podInput">POD</label>
                         ${createEditableCombobox("pod", "Select POD")}
+                    </div>
+                    <div>
+                        <label for="freight">Freight</label>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="text" inputmode="decimal" id="freight" class="money-input" placeholder="0">
+                        </div>
                     </div>
                 </div>
 
@@ -9306,13 +9297,6 @@ fun createAddFormHTML(): String {
                                    style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;">
                     </div>
                 </div>
-                    <div>
-                        <label for="freight">Freight</label>
-                        <div class="currency-input">
-                            <span class="currency-symbol">¥</span>
-                            <input type="text" inputmode="decimal" id="freight" class="money-input" placeholder="0">
-                        </div>
-                    </div>
                     <div>
                         <label for="storageCharges">Storage Fees</label>
                         <div class="currency-input">
@@ -11651,7 +11635,6 @@ private fun setPurchaseRadioGroupLocked(groupName: String, locked: Boolean) {
 
 fun applyLocalPurchaseFieldLock(isEdit: Boolean, locked: Boolean) {
     val countryId = if (isEdit) "editCountry" else "country"
-    val polId = if (isEdit) "editPol" else "pol"
     val consigneeId = if (isEdit) "editConsignee" else "consignee"
     val podId = if (isEdit) "editPod" else "pod"
     val shipmentDateId = if (isEdit) "editShipmentDate" else "shipmentDateText"
@@ -11668,7 +11651,7 @@ fun applyLocalPurchaseFieldLock(isEdit: Boolean, locked: Boolean) {
     val brName = if (isEdit) "editStatusBookingRequested" else "statusBookingRequested"
 
     // Rixo Information (company, stock location, price) stays editable when LOCAL is checked.
-    listOf(countryId, polId, consigneeId, podId).forEach { setPurchaseComboboxLocked(it, locked) }
+    listOf(countryId, consigneeId, podId).forEach { setPurchaseComboboxLocked(it, locked) }
     listOf(
         shipmentDateId, blNoId, bookingId, vesselId,
         shipmentChargesId, freightId, inspectionFeeId,
@@ -11684,7 +11667,6 @@ private fun applyLocalFlagAndNullLockedFields(purchaseData: dynamic, isEdit: Boo
     purchaseData.local = isLocal
     if (!isLocal) return
     purchaseData.bookingRequested = false
-    purchaseData.pol = null
     purchaseData.pod = null
     purchaseData.destination = null
     purchaseData.consignee = null
@@ -13004,7 +12986,9 @@ private fun lookupRecycleFeeForCarModelYear(chassisPrefix: String, carModelYearB
             val fee = (data.fee ?: "").toString().trim()
             if (fee.isBlank()) return@then Unit
             rfInput.value = fee
-            if (isEditForm) {
+            if (recycleInputId == "qpRecycleFee") {
+                // Quick Purchase has no running total. Leave the Add/Edit page behind the modal alone.
+            } else if (isEditForm) {
                 calculateEditTotalCostBeforeTax()
                 calculateEditTotalCostAfterTax()
             } else {
@@ -13118,11 +13102,8 @@ private fun storeQuickPurchaseChassisMappingCache(
 internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
     val resolved = window.asDynamic().__qpResolvedSupplier
     if (resolved != null && resolved != js("undefined")) {
-        val pol = (resolved.pol?.toString() ?: "").trim()
         val venue = (resolved.venueId?.toString() ?: "").trim()
-        val existingPol = (purchaseData.pol?.toString() ?: "").trim()
         val existingVenue = (purchaseData.venueId?.toString() ?: "").trim()
-        if (existingPol.isBlank() && pol.isNotBlank()) purchaseData.pol = pol
         if (existingVenue.isBlank() && venue.isNotBlank()) purchaseData.venueId = venue
     }
     // Vehicle type from Chassis Map (not supplier mapping). A filled box wins.
@@ -13191,8 +13172,9 @@ internal fun enrichQuickPurchasePayload(purchaseData: dynamic): dynamic {
             purchaseData.carModelYear = carModelIso
         }
         // Manufacture Year is resolved in finalizeQuickPurchasePayload via range API + typed suffix.
+        val existingFee = (purchaseData.recycleFee?.toString() ?: "").trim()
         val feeDigits = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
-        if (feeDigits.isNotBlank()) purchaseData.recycleFee = "¥$feeDigits"
+        if (existingFee.isBlank() && feeDigits.isNotBlank()) purchaseData.recycleFee = "¥$feeDigits"
         // Quick Purchase may still append mapping chassis number via qpChassisNumber UI; cache kept for brand/fuel/etc.
     }
     return purchaseData
@@ -13422,13 +13404,9 @@ private fun applySavedPurchaseFieldSnapshot(purchaseForMerge: dynamic) {
     setEditCombobox("editAuctionName", pdStr(pd.auctionHouse))
     setEditCombobox("editStockLocation", firstSemicolonToken(pdStr(pd.stockLocation)))
     val derived = window.asDynamic().__rixoDerivedSupplierFields
-    val polVal = firstSemicolonToken(pdStr(pd.pol)).ifBlank {
-        (derived?.pol as? String)?.trim() ?: ""
-    }
     val venueVal = firstSemicolonToken(pdStr(pd.venueId)).ifBlank {
         (derived?.venueId as? String)?.trim() ?: ""
     }
-    if (polVal.isNotBlank()) setEditCombobox("editPol", polVal)
     if (venueVal.isNotBlank()) setEditCombobox("editVenueId", venueVal)
     setEditCombobox("editRixoCompany", firstSemicolonToken(pdStr(pd.rixoCompany)))
     val savedRixoPrice = extractNumericFromDbValue(pd.rixoPrice)
@@ -13522,7 +13500,6 @@ private fun applySupplierSelectionToForm(selection: dynamic, isEditForm: Boolean
                 try {
                     setPair('venueId', 'editVenueId', sel.venueId);
                     setPair('stockLocation', 'editStockLocation', sel.stockLocation);
-                    setPair('pol', 'editPol', sel.pol);
                     setPair('rixoCompany', 'editRixoCompany', sel.rixoCompany);
                     // Do not set Vehicle type from supplier mapping — chassis map owns that field
                 } finally {
@@ -16095,6 +16072,14 @@ fun fetchMappingByChassisOnly(
                         if (regIso.isNotBlank() && readCarModelYearInput("qpCarModelYear").isBlank()) {
                             writeCarModelYearInput("qpCarModelYear", regIso)
                         }
+                        val qpRecycleDigits = digitsDotOnlyFromMappingMoney(recycleFeeRaw)
+                        val qpRecycleInput = document.getElementById("qpRecycleFee") as? HTMLInputElement
+                        if (qpRecycleDigits.isNotBlank()) {
+                            qpRecycleInput?.value = qpRecycleDigits
+                        } else {
+                            qpRecycleInput?.value = ""
+                            lookupRecycleFeeForCarModelYear(chassisCode, "qpCarModelYear", "qpRecycleFee", isEditForm = false)
+                        }
                         endChassisChangePreserve()
                         js("undefined")
                     }
@@ -16879,30 +16864,7 @@ fun fetchSupplierMapByAuctionName(auctionName: String, isEditForm: Boolean, purc
                 val defaultSel = buildDefaultSelection()
                 enrichSelectionWithVehicleType(defaultSel)
                 window.asDynamic().__tempSupplierDefaultSel = defaultSel
-                window.asDynamic().__allowPolModal = isEditForm
-                js("""
-                    (function() {
-                        var sel = window.__tempSupplierDefaultSel || {};
-                        var stock = String(sel.stockLocation || '').trim();
-                        var preserve = String(sel.pol || '').trim();
-                        var supplier = String(window.__tempMergeAuctionName || '').trim();
-                        if (typeof window.getComboboxValue === 'function') {
-                            preserve = String(window.getComboboxValue('editPol') || window.getComboboxValue('pol') || preserve || '').trim();
-                        }
-                        if (!stock || typeof window.resolvePolFromStockLocationMap !== 'function') {
-                            sel.pol = '';
-                            return Promise.resolve(sel);
-                        }
-                        return window.resolvePolFromStockLocationMap(stock, {
-                            supplier: supplier,
-                            preservePol: preserve,
-                            allowModal: window.__allowPolModal === true
-                        }).then(function(pol) {
-                            sel.pol = pol || '';
-                            return sel;
-                        });
-                    })()
-                """).unsafeCast<dynamic>()
+                js("Promise.resolve(window.__tempSupplierDefaultSel)").unsafeCast<dynamic>()
             }
 
             val applied = selectionPromise.then { selected: dynamic ->
@@ -18337,7 +18299,6 @@ fun proceedWithNewPurchaseSave(chassis: String, saveButton: HTMLButtonElement?, 
     // Supplier Information
     purchaseData.auctionHouse = js("getComboboxValue('auctionName')").unsafeCast<String>()
     purchaseData.stockLocation = js("getComboboxValue('stockLocation')").unsafeCast<String>()
-    purchaseData.pol = js("getComboboxValue('pol')").unsafeCast<String>()
     purchaseData.venueId = js("getComboboxValue('venueId')").unsafeCast<String>()
     purchaseData.shipmentSize = js("getComboboxValue('shipmentSize')").unsafeCast<String>()
     
@@ -19009,10 +18970,6 @@ fun showEditFormWithData(purchaseData: dynamic) {
                 <div class="form-section-header-wrap" style="cursor: pointer; display: block;" onclick="window.toggleFormSection('shipment')"><h3 class="form-section-header" data-section="shipment">Shipment Information</h3></div>
                 <div class="form-section-content form-grid-2col" data-section="shipment">
                     <div>
-                        <label for="editPolInput">POL</label>
-                        ${createEditableCombobox("editPol", "Select POL", initialValue = purchaseData.pol?.toString() ?: "")}
-                    </div>
-                    <div>
                         <label for="editShipmentDate">Shipment Date</label>
                         <div style="position:relative; width:100%;">
                             <div style="display:flex; gap:8px; align-items:center; width:100%; box-sizing:border-box;">
@@ -19055,6 +19012,13 @@ fun showEditFormWithData(purchaseData: dynamic) {
                     <div>
                         <label for="editPodInput">POD</label>
                         ${createEditableCombobox("editPod", "Select POD", initialValue = editPodDisp)}
+                    </div>
+                    <div>
+                        <label for="editFreight">Freight</label>
+                        <div class="currency-input">
+                            <span class="currency-symbol">¥</span>
+                            <input type="text" inputmode="decimal" id="editFreight" class="money-input" value="${extractNumericFromDbValue(purchaseData.freight)}" placeholder="0">
+                        </div>
                     </div>
                 </div>
 
@@ -19118,13 +19082,6 @@ fun showEditFormWithData(purchaseData: dynamic) {
                                    style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
                     </div>
                 </div>
-                    <div>
-                        <label for="editFreight">Freight</label>
-                        <div class="currency-input">
-                            <span class="currency-symbol">¥</span>
-                            <input type="text" inputmode="decimal" id="editFreight" class="money-input" value="${extractNumericFromDbValue(purchaseData.freight)}" placeholder="0">
-                        </div>
-                    </div>
                     <div>
                         <label for="editStorageCharges">Storage Fees</label>
                         <div class="currency-input">
@@ -20343,7 +20300,6 @@ fun collectCurrentEditFormData(): dynamic {
     val auctionNo = (document.getElementById("editAuctionNo") as? HTMLInputElement)?.value ?: ""
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
-    val pol = getComboboxValueSafe("editPol")
     val rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
     val clientName = getComboboxValueSafe("editClientName")
     val country = getComboboxValueSafe("editCountry")
@@ -20440,7 +20396,6 @@ fun collectCurrentEditFormData(): dynamic {
     purchaseData.auctionNo = auctionNo
     purchaseData.auctionHouse = auctionName
     purchaseData.stockLocation = stockLocation
-    purchaseData.pol = pol
     purchaseData.rixoCompany = rixoCompany
     purchaseData.clientName = clientName
     purchaseData.country = country
@@ -20544,7 +20499,7 @@ fun comparePurchaseDataChanges(original: dynamic, current: dynamic): Map<String,
     val fieldsToCompare = listOf(
         "date", "chassis", "carModelYear", "manufactureYear", "brand", "carName", "shipmentSize",
         "grade", "rank", "color", "fuel", "seat", "door", "distance", "options", "cc",
-        "shift", "wd", "driveType", "auctionNo", "auctionHouse", "stockLocation", "pol",
+        "shift", "wd", "driveType", "auctionNo", "auctionHouse", "stockLocation",
         "rixoCompany", "clientName", "country", "consignee", "pod", "venueId", "price", "auctionFee", "auctionPenaltyFee", "recycleFee",
         "roadTax", "taxTotal", "totalPrice", "paymentDate", "rixoRequested", "rixoConfirmed",
         "rixoPrice", "shipmentDate", "blNo", "vessel", "destination", "shipmentCharges",
@@ -20754,7 +20709,6 @@ private fun wireEditRixoUserOverrideListeners() {
         document.getElementById("${fieldId}Input")?.addEventListener("blur", { markJs() })
     }
     attach("editStockLocation") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editStockLocation')") }
-    attach("editPol") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editPol')") }
     attach("editVenueId") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editVenueId')") }
     attach("editRixoCompany") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editRixoCompany')") }
     attach("editShipmentSize") { js("if (window.markEditRixoFieldUserOverride) window.markEditRixoFieldUserOverride('editShipmentSize')") }
@@ -20866,7 +20820,6 @@ fun handleEditPurchase() {
     val cc = getComboboxValueSafe("editCc")
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
-    val pol = getComboboxValueSafe("editPol")
     val venueId = getComboboxValueSafe("editVenueId")
     val rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
     val vehicleType = readEditVehicleTypeFromDom()
@@ -21019,7 +20972,6 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
     val valVehicleType = readEditVehicleTypeFromDom()
     val valRixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
     val valStockLocation = getComboboxValueSafe("editStockLocation")
-    val valPol = getComboboxValueSafe("editPol")
     val valClientName = getComboboxValueSafe("editClientName")
     val valTargetCountry = getComboboxValueSafe("editCountry")
     val valRepairCompany = getComboboxValueSafe("editRepairCompany")
@@ -21035,7 +20987,7 @@ fun proceedWithEditPurchase(id: Long, chassis: String) {
         vehicleType = valVehicleType,
         rixoCompany = valRixoCompany,
         stockLocation = valStockLocation,
-        pol = valPol,
+        pol = "",
         clientName = valClientName,
         targetCountry = valTargetCountry,
         repairCompany = valRepairCompany,
@@ -21084,7 +21036,6 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     val auctionNo = (document.getElementById("editAuctionNo") as? HTMLInputElement)?.value ?: ""
     val auctionName = getComboboxValueSafe("editAuctionName")
     val stockLocation = getComboboxValueSafe("editStockLocation")
-    val pol = getComboboxValueSafe("editPol")
     val rixoCompany = persistableRixoCompanyFromCombobox(getComboboxValueSafe("editRixoCompany"))
     val clientName = getComboboxValueSafe("editClientName")
     val country = getComboboxValueSafe("editCountry")
@@ -21175,7 +21126,6 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     purchaseData.auctionNo = auctionNo
     purchaseData.auctionHouse = auctionName
     purchaseData.stockLocation = stockLocation
-    purchaseData.pol = pol
     purchaseData.rixoCompany = rixoCompany
     purchaseData.clientName = clientName
     purchaseData.country = country
@@ -29200,6 +29150,7 @@ fun saveSelectedColumns(columns: List<String>) {
 }
 
 fun resetToDefaultColumns() {
+    if (!purchaseBulkEditAllowLeave()) return
     val deviceType = getDeviceType()
     val maxColumns = getMaxPurchaseListColumnsForDevice(deviceType)
     val ordered = ensurePurchaseListPinnedColumns(prioritizePurchaseListDateAndChassis(getDefaultColumnsForDevice()), maxColumns)
@@ -29210,6 +29161,7 @@ fun resetToDefaultColumns() {
 }
 
 fun applyColumnChanges() {
+    if (!purchaseBulkEditAllowLeave()) return
     val checkboxes = document.querySelectorAll("#columnCheckboxes input[type='checkbox']")
     val checked = mutableSetOf<String>()
     

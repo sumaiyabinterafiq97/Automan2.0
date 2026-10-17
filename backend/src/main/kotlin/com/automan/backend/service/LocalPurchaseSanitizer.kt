@@ -13,7 +13,6 @@ class LocalPurchaseSanitizer {
     fun apply(purchase: Purchase): Purchase {
         if (!purchase.local) return purchase
         return purchase.copy(
-            pol = null,
             pod = null,
             bookingId = null,
             bookingRequested = false,

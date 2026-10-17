@@ -1741,7 +1741,6 @@ private fun postBookingRequestedThen(
     purchaseIds: List<Long>,
     onDone: () -> Unit,
     onFailed: (String) -> Unit,
-    pol: String? = null,
 ) {
     if (purchaseIds.isEmpty()) {
         onDone()
@@ -1753,10 +1752,6 @@ private fun postBookingRequestedThen(
         idsArr.push(id.toDouble())
     }
     payload.purchaseIds = idsArr
-    val polWrite = pol?.trim().orEmpty()
-    if (polWrite.isNotEmpty()) {
-        payload.pol = polWrite
-    }
     val req = js("{}")
     req.method = "POST"
     val headers = js("{}")
@@ -1877,7 +1872,6 @@ fun saveShippingHistoryAndBooking() {
                         } else {
                             postBookingRequestedThen(
                                 purchaseIds = idsToMark,
-                                pol = bd.pol?.toString()?.trim().orEmpty(),
                                 onDone = {
                                     showSuccessModal(
                                         "Saved",

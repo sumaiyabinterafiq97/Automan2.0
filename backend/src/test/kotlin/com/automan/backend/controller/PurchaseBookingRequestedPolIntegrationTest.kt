@@ -35,11 +35,10 @@ class PurchaseBookingRequestedPolIntegrationTest {
     }
 
     @Test
-    fun `POST booking-requested with pol updates POL and status`() {
+    fun `POST booking-requested marks status and ignores a POL payload`() {
         val saved = purchaseRepository.save(
             Purchase(
                 chassis = "BR-POL-1",
-                pol = "YOKOHAMA",
                 workflowStatus = WorkflowStatus.RIXO_CONFIRMED,
             ),
         )
@@ -54,15 +53,13 @@ class PurchaseBookingRequestedPolIntegrationTest {
 
         val updated = purchaseRepository.findById(saved.id!!).orElseThrow()
         assertEquals(WorkflowStatus.BOOKING_REQUESTED, updated.workflowStatus)
-        assertEquals("Kawasaki", updated.pol)
     }
 
     @Test
-    fun `POST booking-requested without pol leaves POL unchanged`() {
+    fun `POST booking-requested without pol still marks status`() {
         val saved = purchaseRepository.save(
             Purchase(
                 chassis = "BR-POL-2",
-                pol = "YOKOHAMA",
                 workflowStatus = WorkflowStatus.RIXO_CONFIRMED,
             ),
         )
@@ -76,6 +73,5 @@ class PurchaseBookingRequestedPolIntegrationTest {
 
         val updated = purchaseRepository.findById(saved.id!!).orElseThrow()
         assertEquals(WorkflowStatus.BOOKING_REQUESTED, updated.workflowStatus)
-        assertEquals("YOKOHAMA", updated.pol)
     }
 }

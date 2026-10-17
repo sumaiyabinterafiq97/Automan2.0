@@ -49,7 +49,6 @@ class PurchaseRixoPriceSyncServiceTest {
             stockLocation = "GLOBAL NAGOYA",
             rixoCompany = "STYLISH AUTO",
             venueId = "95518",
-            pol = "NAGOYA",
             rixoPrice = "4000",
         )
         val missStock = hit.copy(stockLocation = "GLOBAL KAWASAKI")
@@ -66,7 +65,6 @@ class PurchaseRixoPriceSyncServiceTest {
             stockLocation = "GLOBAL NAGOYA",
             rixoCompany = "STYLISH AUTO",
             venueId = "95518",
-            pol = "NAGOYA",
             rixoPrice = "4000",
             totalPrice = "104000",
         )

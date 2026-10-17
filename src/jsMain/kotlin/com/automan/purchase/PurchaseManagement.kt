@@ -238,7 +238,7 @@ private val purchaseColumnCategories: Map<String, List<String>> = linkedMapOf(
     "🏷️ Identification" to listOf("chassis", "blNo", "bookingId", "vessel", "venueId", "clientId", "auctionNo"),
     "🚗 Vehicle Info" to listOf("brand", "carName", "color", "grade", "rank", "cc", "seat", "door", "fuel", "shift"),
     "📦 Vehicle Specs" to listOf("shipmentSize", "driveType", "wd", "options", "distance", "carPictures", "shaken", "numberCut"),
-    "💼 Client & Logistics" to listOf("clientName", "consignee", "auctionHouse", "stockLocation", "pol", "country", "destination", "rixoCompany"),
+    "💼 Client & Logistics" to listOf("clientName", "consignee", "auctionHouse", "stockLocation", "country", "destination", "rixoCompany"),
     "💰 Pricing" to listOf("price", "totalPrice", "auctionFee", "auctionPenaltyFee", "recycleFee", "roadTax", "taxTotal", "rixoPrice", "profit"),
     "📊 Shipment & Status" to listOf("shipmentCharges", "freight", "storageCharges", "miscCharges", "inspectionFee", "commission", "repairCharges", "bookingRequested", "invoiceConfirmed", "rixoRequested", "rixoConfirmed")
 )
@@ -353,7 +353,6 @@ private fun purchaseSetEndpointForField(field: String): String? = when (field) {
     "fuel" -> "master-menu/fuel"
     "shift" -> "master-menu/shift"
     "country" -> "master-menu/country"
-    "pol" -> "master-menu/pol"
     "venueId" -> "master-menu/venue_id"
     "stockLocation" -> "master-menu/stock_location"
     else -> null
@@ -988,6 +987,7 @@ private fun filterPurchasesByPurchaseDateRange(rows: Array<dynamic>, startIso: S
 }
 
 private fun applyPurchaseDateFilterRange(startIso: String, endIso: String, resetPage: Boolean = true) {
+    if (!purchaseBulkEditAllowLeave()) return
     if (isoToLocalDayRangeTimestamps(startIso) == null || isoToLocalDayRangeTimestamps(endIso) == null) return
 
     purchaseDateFilterStartIso = startIso
@@ -1001,6 +1001,7 @@ private fun applyPurchaseDateFilterRange(startIso: String, endIso: String, reset
 }
 
 private fun clearPurchaseDateFilter() {
+    if (!purchaseBulkEditAllowLeave()) return
     if (!purchaseDateFilterActive && purchaseDateFilterStartIso.isEmpty() && purchaseDateFilterEndIso.isEmpty()) {
         clearPurchaseDateQuickFilterInputs()
         return
@@ -1399,6 +1400,7 @@ internal fun sortPurchasesInMemory(rows: Array<dynamic>, field: String, order: S
 }
 
 private fun refreshPurchaseRowsFromBase(resetPage: Boolean = true) {
+    if (!purchaseBulkEditAllowLeave()) return
     if (purchaseSearchServerMode) return
     var rows = applyPurchaseAdvancedFilters(purchaseBaseRows)
     rows = applyPurchaseTextSearch(rows)
@@ -1425,6 +1427,7 @@ private fun purchasePlainNumber(raw: String): Double? {
 }
 
 fun applyPurchaseTableSort(field: String, order: String) {
+    if (!purchaseBulkEditAllowLeave()) return
     val next = if (order == "asc") "asc" else "desc"
     purchaseTableSortOrderByField[field] = next
     purchaseTableSortField = field
@@ -1492,7 +1495,7 @@ fun setupPurchaseEditDelegationOnTable() {
     })
 }
 
-private fun findPurchaseInListById(id: Long): dynamic? {
+internal fun findPurchaseInListById(id: Long): dynamic? {
     if (id <= 0L) return null
     for (p in allPurchases) {
         val pid = (p.id as? Number)?.toLong() ?: continue
@@ -1774,6 +1777,7 @@ fun consumeEditPurchaseFallbackId(): Long? {
 }
 
 private fun handlePurchaseEditButtonClick(btn: HTMLElement) {
+    if (!purchaseBulkEditAllowLeave()) return
     val chassis = btn.getAttribute("data-chassis")?.trim().orEmpty()
     val idStr = btn.getAttribute("data-id")?.trim().orEmpty()
     val id = idStr.toLongOrNull()
@@ -1826,6 +1830,7 @@ private fun setupPurchaseListCompactResizeListener() {
 }
 
 fun showPurchaseList(forceClearFilters: Boolean = false) {
+    if (!purchaseBulkEditAllowLeave()) return
     if (isExternalPortalRole(getUserRole())) {
         navigateToApp(homeRouteForRole(getUserRole()), replace = true)
         return
@@ -1859,6 +1864,31 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
             .purchase-list-actions{grid-area:actions;display:flex;justify-content:flex-end;align-items:center;gap:10px;flex-wrap:wrap;}
             .purchase-quick-add-btn{padding:8px 16px;background-color:#0d9488;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap;}
             .purchase-quick-add-btn:hover{background-color:#0f766e;}
+            .purchase-bulk-edit-btn{padding:8px 16px;background:#fff;color:#0f766e;border:1px solid #0d9488;border-radius:4px;cursor:pointer;font-size:14px;font-weight:600;min-height:40px;white-space:nowrap;}
+            .purchase-bulk-edit-btn:hover{background:#f0fdfa;}
+            .purchase-bulk-edit-btn.is-save{background:#b45309;color:#fff;border-color:#b45309;}
+            .purchase-bulk-edit-btn.is-save:hover{background:#92400e;}
+            .purchase-bulk-input{width:100%;min-width:72px;box-sizing:border-box;padding:4px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:13px;font-family:inherit;background:#fff;}
+            textarea.purchase-bulk-input{min-height:48px;resize:vertical;}
+            .purchase-bulk-combo input.purchase-bulk-input{padding:4px 28px 4px 6px !important;min-height:32px;}
+            .purchase-bulk-combo [id$="Button"]{width:28px !important;font-size:12px !important;}
+            .purchase-bulk-date{display:flex;align-items:center;gap:4px;position:relative;}
+            .purchase-bulk-date .purchase-bulk-input{flex:1;min-width:0;}
+            .purchase-bulk-date .purchase-form-calendar-btn{min-width:32px;min-height:32px;padding:4px 6px;}
+            .purchase-bulk-summary-overlay{position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:12000;display:flex;align-items:center;justify-content:center;padding:24px;}
+            .purchase-bulk-summary{background:#fff;border-radius:12px;max-width:880px;width:100%;max-height:80vh;display:flex;flex-direction:column;padding:20px;box-shadow:0 20px 40px rgba(0,0,0,0.18);}
+            .purchase-bulk-summary h2{margin:0 0 12px;font-size:18px;color:#0f172a;}
+            .purchase-bulk-summary-error{margin:0 0 12px;color:#b91c1c;background:#fef2f2;border-radius:8px;padding:8px 10px;}
+            .purchase-bulk-note{margin:0 0 8px;color:#92400e;font-size:13px;}
+            .purchase-bulk-summary-table-wrap{overflow:auto;border:1px solid #e5e7eb;border-radius:8px;}
+            .purchase-bulk-summary table{width:100%;border-collapse:collapse;font-size:13px;}
+            .purchase-bulk-summary th,.purchase-bulk-summary td{text-align:left;padding:8px 10px;border-bottom:1px solid #eef2f7;vertical-align:top;}
+            .purchase-bulk-summary th{background:#f8fafc;position:sticky;top:0;}
+            .purchase-bulk-summary-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;}
+            .purchase-bulk-summary-actions button{min-height:40px;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;}
+            #purchaseBulkSummaryCancel{background:#fff;border:1px solid #cbd5e1;color:#0f172a;}
+            #purchaseBulkSummaryConfirm{background:#b45309;border:1px solid #b45309;color:#fff;}
+            #purchaseBulkSummaryConfirm:disabled{opacity:0.7;cursor:not-allowed;}
             .purchase-export-btn{padding:8px 16px;background-color:#198754;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;display:inline-flex;align-items:center;gap:6px;min-height:40px;white-space:nowrap;}
             .purchase-export-btn:disabled{opacity:0.7;cursor:not-allowed;}
             .purchase-column-filter-btn,.purchase-adv-filter-btn{
@@ -1925,6 +1955,7 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
                             <path d="M4 6h16M7 12h10M10 18h4" stroke="#6b7280" stroke-width="2" stroke-linecap="round"/>
                         </svg>
                     </button>
+                    <button type="button" id="purchaseBulkEditBtn" class="purchase-bulk-edit-btn" title="Edit the rows and columns on this page" aria-label="Bulk Edit">Bulk Edit</button>
                     <button type="button" id="purchaseListQuickAddBtn" class="purchase-quick-add-btn" title="Add Quick Purchase" aria-label="Add Quick Purchase">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.25" stroke-linecap="round"/>
@@ -1972,6 +2003,10 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
         exportPurchasesToExcel()
     })
 
+    document.getElementById("purchaseBulkEditBtn")?.addEventListener("click", { _: Event ->
+        onPurchaseBulkEditButtonClick()
+    })
+
     document.getElementById("purchaseListQuickAddBtn")?.addEventListener("click", { _: Event ->
         openQuickPurchaseModal()
     })
@@ -1983,6 +2018,7 @@ fun showPurchaseList(forceClearFilters: Boolean = false) {
     
     // Apply role-based restrictions
     applyRoleBasedRestrictions()
+    syncPurchaseBulkEditButton()
     
     // Ensure sidebar and hamburger button are present
     ensureSidebarPresent()
@@ -3666,6 +3702,7 @@ fun loadPurchases() {
  */
 fun loadPurchasesListPage(page0: Int) {
     if (!routeEquals("/purchase")) return
+    if (!purchaseBulkEditAllowLeave()) return
     val input = document.getElementById("purchaseSearchInput") as? HTMLInputElement
     val qFromInput = input?.value?.trim().orEmpty()
     val q = qFromInput.ifEmpty { purchaseSearchQuery.trim() }
@@ -4343,6 +4380,7 @@ private fun schedulePurchaseSearchDebounced() {
 }
 
 private fun runPurchaseSearchFromInput() {
+    if (!purchaseBulkEditAllowLeave()) return
     val input = document.getElementById("purchaseSearchInput") as? HTMLInputElement
     val raw = input?.value?.trim() ?: ""
     purchaseSearchQuery = raw
@@ -4481,7 +4519,7 @@ fun displayPurchases(purchases: dynamic) {
     }
 }
 
-private data class PurchaseListViewSlice(
+internal data class PurchaseListViewSlice(
     val totalPages: Int,
     val displayFrom: Int,
     val displayTo: Int,
@@ -4489,7 +4527,7 @@ private data class PurchaseListViewSlice(
     val rows: Array<dynamic>,
 )
 
-private fun computePurchaseListViewSlice(): PurchaseListViewSlice {
+internal fun computePurchaseListViewSlice(): PurchaseListViewSlice {
     if (purchaseSearchServerMode) {
         val total = purchaseSearchServerTotal.toInt().coerceAtLeast(0)
         val tp = kotlin.math.max(1, purchaseSearchServerTotalPages)
@@ -4506,6 +4544,7 @@ private fun computePurchaseListViewSlice(): PurchaseListViewSlice {
 
 fun displayPurchasesWithPagination() {
     if (!routeEquals("/purchase")) return
+    capturePurchaseBulkDraftsFromDom()
     val table = document.getElementById("purchaseTable") ?: return
     purchaseListLastCompactLayout = purchaseListIsCompactLayout()
 
@@ -4648,8 +4687,8 @@ fun displayPurchasesWithPagination() {
                 columnKey == "chassis" -> """ class="purchase-list-chassis-td""""
                 else -> ""
             }
-            val tdTitle = if (raw.isNotEmpty() && !purchaseListCalendarDateColumn(columnKey)) """ title="${escapeHtml(raw)}"""" else ""
-            tableHTML.append("""<td$tdClass$tdTitle>$cellHtml</td>""")
+            val tdTitle = if (raw.isNotEmpty() && !purchaseListCalendarDateColumn(columnKey) && !purchaseBulkEditIsActive()) """ title="${escapeHtml(raw)}"""" else ""
+            tableHTML.append("""<td$tdClass$tdTitle>${purchaseBulkEditCellHtml(purchase, columnKey, cellHtml)}</td>""")
         }
         
         tableHTML.append("""</tr>""")
@@ -4688,6 +4727,7 @@ fun displayPurchasesWithPagination() {
     
     table.innerHTML = tableHTML.toString()
     setupPurchaseEditDelegationOnTable()
+    bindPurchaseBulkEditors()
     
     // Purchase Date quick filter trigger lives in the header; menu is portaled on document.body.
     setupPurchaseDateQuickFilterMenuPortal()
@@ -4768,8 +4808,9 @@ fun displayPurchasesAsCards() {
             // Convert to string and check if not blank (safe for JS strings)
             val valueStr = value.toString()
             val isValueNotEmpty = valueStr.length > 0 && valueStr.trim().length > 0
-            
-            if (isValueNotEmpty) {
+            val showField = isValueNotEmpty || purchaseBulkEditIsActive()
+
+            if (showField) {
                 val cellDisplay = if (purchaseListCalendarDateColumn(columnKey)) {
                     purchaseListDateCellHtml(valueStr.trim())
                 } else {
@@ -4779,7 +4820,7 @@ fun displayPurchasesAsCards() {
                 cardFields.append("""
                     <div class="card-field">
                         <span class="card-label">$label:</span>
-                        <div class="$valueClass">$cellDisplay</div>
+                        <div class="$valueClass">${purchaseBulkEditCellHtml(purchase, columnKey, cellDisplay)}</div>
                     </div>
                 """)
             }
@@ -4840,6 +4881,7 @@ fun displayPurchasesAsCards() {
     
     table.innerHTML = cardsHTML.toString()
     setupPurchaseEditDelegationOnTable()
+    bindPurchaseBulkEditors()
     
     // Setup pagination event listeners
     document.getElementById("prevPageBtn")?.addEventListener("click", { _: Event ->

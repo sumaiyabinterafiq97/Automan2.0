@@ -28,7 +28,7 @@ class UserViewsService(
         private val KNOWN_COLUMN_KEYS = setOf(
             "date", "chassis", "carModelYear", "manufactureYear", "brand", "carName", "shipmentSize",
             "grade", "rank", "color", "fuel", "seat", "door", "distance", "options", "cc", "shift", "wd",
-            "driveType", "auctionNo", "auctionHouse", "stockLocation", "pol", "pod", "rixoCompany",
+            "driveType", "auctionNo", "auctionHouse", "stockLocation", "pod", "rixoCompany",
             "venueId", "clientName", "consignee", "clientId", "country", "price", "auctionFee",
             "auctionPenaltyFee", "recycleFee", "roadTax", "taxTotal", "totalPrice", "paymentDate",
             "rixoRequested", "rixoConfirmed", "rixoPrice", "notes", "shipmentDate", "blNo", "vessel",

@@ -387,7 +387,8 @@ class PortalApiIntegrationTest {
         val ongoingTree = objectMapper.readTree(ongoing)
         assertEquals(setOf("42", "SHIP-1"), textValues(ongoingTree, "bookingId").toSet())
         assertTrue(ongoing.contains("Portal Client A"))
-        assertTrue(ongoing.contains("NAGOYA"))
+        assertTrue(ongoing.contains("CHITTAGONG"))
+        assertTrue(ongoing.contains("YOKOHAMA"))
         assertFalse(ongoing.contains("HIST-VESSEL"))
         assertFalse(ongoing.contains(fixture.chassisB))
         assertOnlyKeys(ongoing, CONSIGNEE_SHIPMENT_KEYS)
@@ -731,7 +732,7 @@ class PortalApiIntegrationTest {
         val chassisC = "C-YARD-$stamp"
         val today = LocalDate.now(ZoneOffset.UTC)
         val ship = purchase(chassisShip, clientA, 9L, shippedPrice = true)
-        val yard = purchase(chassisYard, clientA, 42L, pol = "NAGOYA", pod = "CHITTAGONG")
+        val yard = purchase(chassisYard, clientA, 42L, pod = "CHITTAGONG")
         purchase(chassisOld, clientA, 7L, shippedPrice = true)
         val purchaseB = purchase(chassisB, clientB, 100L, shippedPrice = true)
         purchase(chassisC, clientC, null)
@@ -785,7 +786,6 @@ class PortalApiIntegrationTest {
         chassis: String,
         clientId: Long,
         bookingId: Long?,
-        pol: String? = null,
         pod: String? = null,
         shippedPrice: Boolean = false,
     ): Long {
@@ -798,7 +798,6 @@ class PortalApiIntegrationTest {
                 country = "Japan",
                 clientId = clientId,
                 bookingId = bookingId,
-                pol = pol,
                 pod = pod,
                 clientName = "BAIT-PURCHASE-CLIENT",
                 consignee = "BAIT-PURCHASE-CONSIGNEE",
