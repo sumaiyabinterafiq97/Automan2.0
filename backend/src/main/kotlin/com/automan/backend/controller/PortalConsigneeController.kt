@@ -6,7 +6,11 @@ import com.automan.backend.portal.PortalScope
 import com.automan.backend.security.AuthContext
 import com.automan.backend.security.AuthPolicy
 import jakarta.servlet.http.HttpServletRequest
+import com.automan.backend.util.PdfFilenameUtils
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.http.MediaType
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
@@ -59,6 +63,27 @@ class PortalConsigneeController(
 
     @GetMapping("/shipments/history")
     fun history(request: HttpServletRequest) = portal.consigneeHistory(scope(request))
+
+    @GetMapping("/shipping-history")
+    fun shippingHistory(request: HttpServletRequest) = portal.consigneeShippingHistory(scope(request))
+
+    @GetMapping("/shipping-history/pdf")
+    fun shippingHistoryPdf(
+        request: HttpServletRequest,
+        @RequestParam bookingId: String,
+    ): ResponseEntity<ByteArray> {
+        val pdfBytes = portal.consigneeShippingPdf(scope(request), bookingId)
+        val headers = HttpHeaders()
+        headers.contentType = MediaType.APPLICATION_PDF
+        headers.set(
+            HttpHeaders.CONTENT_DISPOSITION,
+            PdfFilenameUtils.contentDisposition(
+                PdfFilenameUtils.build("ShippingSchedule", bookingId.trim().ifBlank { "unknown" }, null),
+            ),
+        )
+        headers.contentLength = pdfBytes.size.toLong()
+        return ResponseEntity.ok().headers(headers).body(pdfBytes)
+    }
 
     @GetMapping("/cars/{purchaseId}/media/{mediaId}/url")
     fun mediaUrl(

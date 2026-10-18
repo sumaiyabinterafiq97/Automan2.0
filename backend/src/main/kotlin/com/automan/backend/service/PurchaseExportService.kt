@@ -192,6 +192,11 @@ class PurchaseExportService(
     private fun str(p: Purchase, getter: (Purchase) -> String?): String? =
         getter(p)?.trim()?.ifBlank { null }
 
+    private fun purchaseDateWithoutWeekday(p: Purchase): String? {
+        val text = str(p) { it.date } ?: return null
+        return text.replace(Regex("\\s*\\([A-Za-z]+\\)\\s*$"), "").trim().ifBlank { null }
+    }
+
     private fun money(p: Purchase, getter: (Purchase) -> String?): Double? =
         str(p, getter)?.let { parseMoney(it) }
 
@@ -199,7 +204,7 @@ class PurchaseExportService(
         CarModelYearUtils.extractYearFromCarModelYear(p.carModelYear).trim().ifBlank { null }
 
     private fun exportColumns(): List<PurchaseExportColumnDef> = listOf(
-        PurchaseExportColumnDef("Date of purchase", PurchaseExportCellKind.STRING) { str(it) { p -> p.date } },
+        PurchaseExportColumnDef("Date of purchase", PurchaseExportCellKind.STRING) { purchaseDateWithoutWeekday(it) },
         PurchaseExportColumnDef("Auction no", PurchaseExportCellKind.STRING) { str(it) { p -> p.auctionNo } },
         PurchaseExportColumnDef("Chassis", PurchaseExportCellKind.STRING) { it.chassis },
         PurchaseExportColumnDef("Registration year", PurchaseExportCellKind.STRING) { registrationYear(it) },

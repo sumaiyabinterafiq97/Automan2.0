@@ -9,8 +9,8 @@ import org.w3c.fetch.RequestInit
 /**
  * Adds the staff session bearer token to same-app `/api/` fetches, including calls that do not use [ApiClient].
  * Presigned storage URLs and other third-party hosts are left unchanged.
- * A 401 whose message is "Authentication required" clears the saved login once and opens Sign In.
- * Any other 401 is returned to the caller. A 403 is left for the page to show.
+ * A 401 is returned to the caller and does not clear the saved login. Sign In opens only from [logout].
+ * A 403 is left for the page to show.
  */
 fun installAuthenticatedFetch() {
     if (window.asDynamic().__automanFetchInstalled == true) return
@@ -41,7 +41,6 @@ fun installAuthenticatedFetch() {
             if (token && !headers.has('Authorization')) headers.set('Authorization', 'Bearer ' + token);
             next.headers = headers;
             return original(input, next).then(function (response) {
-              if (response.ok) window.__automanAuthRedirecting = false;
               if (response.status === 403) {
                 var now = Date.now();
                 if (!window.__automan403At || now - window.__automan403At > 2000) {
@@ -60,24 +59,6 @@ fun installAuthenticatedFetch() {
                     var current = document.getElementById('automan-permission-note');
                     if (current && current.parentNode) current.parentNode.removeChild(current);
                   }, 4000);
-                }
-              }
-              if (response.status === 401 && !window.__automanAuthRedirecting) {
-                var pagePath = window.location.pathname || '';
-                var onAuthPage = pagePath.indexOf('/login') >= 0 || pagePath.indexOf('/signup') >= 0;
-                if (!onAuthPage) {
-                  response.clone().json().then(function (body) {
-                    var message = body && body.message ? String(body.message) : '';
-                    if (message !== 'Authentication required' || window.__automanAuthRedirecting) return;
-                    window.__automanAuthRedirecting = true;
-                    try {
-                      window.localStorage.removeItem('authToken');
-                      window.localStorage.removeItem('authUserRole');
-                      window.localStorage.removeItem('authUserName');
-                      window.localStorage.removeItem('authUserId');
-                    } catch (e) {}
-                    if (typeof window.navigateToApp === 'function') window.navigateToApp('/login');
-                  }).catch(function () {});
                 }
               }
               return response;
@@ -266,7 +247,6 @@ fun showUserManagementPage() {
                     <h2>User Management</h2>
                     <div class="user-action-buttons">
                         <button type="button" id="addUserBtn" class="user-btn user-btn-primary">Add New User</button>
-                        <button type="button" id="pendingRequestBtn" class="user-btn user-btn-warning">Pending Request</button>
                     </div>
                 </div>
                 
@@ -284,9 +264,6 @@ fun showUserManagementPage() {
     // Add event listeners
     document.getElementById("addUserBtn")?.addEventListener("click", { _: Event ->
         showAddUserForm()
-    })
-    document.getElementById("pendingRequestBtn")?.addEventListener("click", { _: Event ->
-        navigateToApp("/pending-signups")
     })
     loadUsers()
 }

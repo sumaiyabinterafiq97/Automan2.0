@@ -96,14 +96,14 @@ class PortalViewTest {
         assertNoFinancialMarkup(transactions)
 
         val nav = consigneeNav("ongoing")
-        assertTrue(nav.contains("Ongoing shipments"))
-        assertTrue(nav.contains("Shipped cars"))
+        assertTrue(nav.contains("Shipping History"))
         assertTrue(nav.contains("Clients"))
-        assertTrue(nav.contains("Purchased cars"))
-        assertTrue(nav.contains("Invoices"))
         assertTrue(nav.contains("Dashboard"))
+        assertFalse(nav.contains("Ongoing shipments"))
+        assertFalse(nav.contains("Shipped cars"))
+        assertFalse(nav.contains("Purchased cars"))
+        assertFalse(nav.contains("Invoices"))
         assertFalse(nav.contains("Not yet shipped"))
-        assertFalse(nav.contains("Shipment history"))
     }
 
     private fun assertNoFinancialMarkup(html: String) {

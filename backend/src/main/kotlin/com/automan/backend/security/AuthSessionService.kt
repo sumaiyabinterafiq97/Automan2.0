@@ -4,7 +4,6 @@ import com.automan.backend.model.AuthSession
 import com.automan.backend.model.User
 import com.automan.backend.repository.AuthSessionRepository
 import com.automan.backend.repository.UserRepository
-import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -18,21 +17,20 @@ import java.util.Base64
 class AuthSessionService(
     private val authSessionRepository: AuthSessionRepository,
     private val userRepository: UserRepository,
-    @Value("\${app.auth.session-ttl-hours:168}") private val sessionTtlHours: Long,
 ) {
     private val random = SecureRandom()
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    fun createSession(user: User, ttlHours: Long = sessionTtlHours): String = insertSession(user, ttlHours)
+    fun createSession(user: User): String = insertSession(user)
 
     /**
      * Writes the session in the caller's transaction.
      * Portal signup uses this so the insert does not wait on the new user row's foreign key.
      */
     @Transactional(propagation = Propagation.REQUIRED)
-    fun createSessionJoined(user: User, ttlHours: Long = sessionTtlHours): String = insertSession(user, ttlHours)
+    fun createSessionJoined(user: User): String = insertSession(user)
 
-    private fun insertSession(user: User, ttlHours: Long): String {
+    private fun insertSession(user: User): String {
         val userId = user.id ?: throw IllegalStateException("Cannot open a session for an unsaved user")
         val rawToken = newToken()
         val now = utcNow()
@@ -41,7 +39,8 @@ class AuthSessionService(
                 tokenHash = sha256Hex(rawToken),
                 userId = userId,
                 createdAt = now,
-                expiresAt = now.plusHours(ttlHours.coerceAtLeast(1)),
+                // The column is required. A past value does not end the login; Log out sets revoked_at.
+                expiresAt = now.plusYears(100),
             )
         )
         return rawToken
@@ -53,8 +52,6 @@ class AuthSessionService(
         if (token.length !in 20..200) return null
         val session = authSessionRepository.findByTokenHash(sha256Hex(token)) ?: return null
         if (session.revokedAt != null) return null
-        // Absolute expiry is checked on every protected request. There is no idle timeout.
-        if (!session.expiresAt.isAfter(utcNow())) return null
         val user = userRepository.findById(session.userId).orElse(null) ?: return null
         val sessionId = session.id ?: return null
         val userId = user.id ?: return null

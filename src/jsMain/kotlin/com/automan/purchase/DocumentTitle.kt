@@ -44,7 +44,7 @@ fun documentTitleForRoute(route: String): String {
     val page = when {
         r.isEmpty() || routeAtEquals(r, "/purchase") -> "Purchase List"
         routeAtEquals(r, "/login") -> "Sign In"
-        routeAtEquals(r, "/signup") -> "Sign Up"
+        routeAtEquals(r, "/signup") -> "Sign In"
         routeAtEquals(r, "/home") -> "Home"
         routeAtEquals(r, "/portal/client") -> "Client portal"
         routeAtStartsWith(r, "/portal/client/cars") -> "Purchased cars"
@@ -53,14 +53,8 @@ fun documentTitleForRoute(route: String): String {
         routeAtStartsWith(r, "/portal/client/transactions") -> "Transactions"
         routeAtStartsWith(r, "/portal/client") -> "Client portal"
         routeAtEquals(r, "/portal/consignee") -> "Consignee portal"
-        routeAtStartsWith(r, "/portal/consignee/purchased") -> "Purchased cars"
-        routeAtStartsWith(r, "/portal/consignee/invoices") -> "Invoices"
-        routeAtStartsWith(r, "/portal/consignee/ongoing") -> "Ongoing shipments"
-        routeAtStartsWith(r, "/portal/consignee/not-shipped") -> "Ongoing shipments"
-        routeAtStartsWith(r, "/portal/consignee/shipped") -> "Shipped cars"
         routeAtStartsWith(r, "/portal/consignee/clients") -> "Clients"
-        routeAtStartsWith(r, "/portal/consignee/history") -> "Ongoing shipments"
-        routeAtStartsWith(r, "/portal/consignee") -> "Consignee portal"
+        routeAtStartsWith(r, "/portal/consignee") -> "Shipping History"
         routeAtStartsWith(r, "/add") -> "Add Purchase"
         routeAtStartsWith(r, "/edit/") -> {
             val chassis = chassisFromEditRoute(r)?.trim().orEmpty()
@@ -80,7 +74,7 @@ fun documentTitleForRoute(route: String): String {
         routeAtStartsWith(r, "/booking") -> "Booking"
         routeAtStartsWith(r, "/shipping-history") -> "Shipping History"
         routeAtStartsWith(r, "/users/edit/") -> "Edit User"
-        routeAtStartsWith(r, "/pending-signups") -> "Pending Signups"
+        routeAtStartsWith(r, "/pending-signups") -> "Users"
         routeAtStartsWith(r, "/role-request") -> "Role Request"
         routeAtStartsWith(r, "/users/add") -> "Add User"
         routeAtStartsWith(r, "/users") -> "Users"

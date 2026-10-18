@@ -5,6 +5,7 @@ import kotlinx.browser.window
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import org.w3c.dom.HTMLElement
+import org.w3c.dom.Window
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.events.Event
 
@@ -119,7 +120,7 @@ fun showConsigneePortal(route: String) {
                     return@launch
                 }
                 renderPortalAccount(generation, jsText(account.legalName))
-                loadConsigneePage(generation, page, route)
+                loadConsigneePage(generation, page)
             }
         }
     }
@@ -140,14 +141,10 @@ private suspend fun loadClientPage(generation: Int, page: String, route: String)
     }
 }
 
-private suspend fun loadConsigneePage(generation: Int, page: String, route: String) {
+private suspend fun loadConsigneePage(generation: Int, page: String) {
     try {
         when (page) {
-            "ongoing" -> renderConsigneeOngoing(generation)
-            "shipped" -> renderPortalCars(generation, fetchPortal("portal/consignee/cars/shipped${portalQuerySuffix(portalQuery())}"), portalQuery(), "No shipped cars.", "shipped")
-            "purchased" -> renderConsigneePurchaseList(generation)
-            "purchase" -> renderConsigneePurchaseDetail(generation, consigneePurchaseDetailId(route) ?: return)
-            "invoices" -> renderClientInvoices(generation, fetchPortal("portal/consignee/invoices"))
+            "ongoing" -> renderConsigneeShippingHistory(generation)
             "clients" -> renderConsigneeClients(generation, fetchPortal("portal/consignee/clients"))
             else -> renderConsigneeDashboard(generation, fetchPortal("portal/consignee/dashboard"))
         }
@@ -174,25 +171,10 @@ private fun clientPortalPage(route: String): String = when {
     else -> "dashboard"
 }
 
-private fun consigneePurchaseDetailId(route: String): Long? {
-    val path = route.substringBefore('?')
-    val marker = "/portal/consignee/purchased/"
-    val at = path.indexOf(marker)
-    if (at < 0) return null
-    val rest = path.substring(at + marker.length).trim('/').substringBefore('/')
-    return rest.toLongOrNull()
-}
-
 private fun consigneePortalPage(route: String): String = when {
-    consigneePurchaseDetailId(route) != null -> "purchase"
-    routeAtStartsWith(route, "/portal/consignee/ongoing") -> "ongoing"
-    routeAtStartsWith(route, "/portal/consignee/not-shipped") -> "ongoing"
-    routeAtStartsWith(route, "/portal/consignee/shipped") -> "shipped"
-    routeAtStartsWith(route, "/portal/consignee/purchased") -> "purchased"
-    routeAtStartsWith(route, "/portal/consignee/invoices") -> "invoices"
     routeAtStartsWith(route, "/portal/consignee/clients") -> "clients"
-    routeAtStartsWith(route, "/portal/consignee/history") -> "ongoing"
-    else -> "dashboard"
+    routeAtEquals(route, "/portal/consignee") -> "dashboard"
+    else -> "ongoing"
 }
 
 private fun clientNav(page: String): String = portalNav(
@@ -209,13 +191,10 @@ private fun clientNav(page: String): String = portalNav(
 internal fun consigneeNav(page: String): String = portalNav(
     listOf(
         PortalNavItem("dashboard", "Dashboard", "/portal/consignee"),
-        PortalNavItem("ongoing", "Ongoing shipments", "/portal/consignee/ongoing"),
-        PortalNavItem("shipped", "Shipped cars", "/portal/consignee/shipped"),
-        PortalNavItem("purchased", "Purchased cars", "/portal/consignee/purchased"),
-        PortalNavItem("invoices", "Invoices", "/portal/consignee/invoices"),
+        PortalNavItem("ongoing", "Shipping History", "/portal/consignee/ongoing"),
         PortalNavItem("clients", "Clients", "/portal/consignee/clients"),
     ),
-    if (page == "purchase") "purchased" else page,
+    page,
 )
 
 private data class PortalNavItem(val id: String, val label: String, val route: String)
@@ -252,6 +231,9 @@ private fun mountPortalShell(role: String, title: String, navHtml: String): Int 
                 .portal-search input { flex: 1; min-width: 0; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; }
                 .portal-table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; }
                 .portal-table { width: 100%; border-collapse: collapse; min-width: 720px; }
+                .portal-pdf-btn { background: #2c3e50; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; font-weight: 600; }
+                .portal-pdf-btn:disabled { opacity: .6; cursor: default; }
+                .portal-table--history { min-width: 980px; }
                 .portal-table th, .portal-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
                 .portal-table th { background: #f8fafc; color: #475569; font-size: 12px; letter-spacing: .03em; text-transform: uppercase; }
                 .portal-missing { color: #64748b; }
@@ -507,8 +489,12 @@ private fun renderPortalInactive(generation: Int, message: String) {
 }
 
 internal fun renderPortalFailure(generation: Int, message: String, statusCode: Int) {
-    if (statusCode == 401) return
-    renderState(generation, "error", "Could not load this page", message.ifBlank { "The request failed." })
+    val text = message.ifBlank { "The request failed." }
+    if (statusCode == 401) {
+        renderState(generation, "error", "Authentication required", text)
+        return
+    }
+    renderState(generation, "error", "Could not load this page", text)
 }
 
 private fun renderState(generation: Int, state: String, title: String, message: String) {
@@ -554,22 +540,10 @@ private fun renderConsigneeDashboard(generation: Int, result: ApiResult<dynamic>
             jsCount(data.clientCount),
         ),
     )
-    val cards = document.querySelectorAll("#portalBody .portal-card")
-    linkConsigneeDashboardCard(cards.item(0) as? HTMLElement, "/portal/consignee/purchased")
-    linkConsigneeDashboardCard(cards.item(1) as? HTMLElement, "/portal/consignee/shipped")
-    linkConsigneeDashboardCard(cards.item(2) as? HTMLElement, "/portal/consignee/invoices")
 }
 
-private fun linkConsigneeDashboardCard(card: HTMLElement?, route: String) {
-    if (card == null) return
-    val button = document.createElement("button")
-    button.className = "portal-card portal-card-link"
-    button.setAttribute("type", "button")
-    button.setAttribute("data-portal-route", route)
-    button.innerHTML = card.innerHTML
-    card.replaceWith(button)
-    button.addEventListener("click", { _: Event -> navigateToApp(route) })
-}
+private fun portalCard(label: String, value: String) =
+    """<article class="portal-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>"""
 
 fun portalDashboardHtml(
     purchased: Int,
@@ -598,9 +572,6 @@ fun portalDashboardHtml(
         </section>
     """.trimIndent()
 }
-
-private fun portalCard(label: String, value: String) =
-    """<article class="portal-card"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>"""
 
 private fun portalLinkCard(label: String, value: String, route: String) =
     """<button type="button" class="portal-card portal-card-link" data-portal-route="$route"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></button>"""
@@ -745,18 +716,37 @@ private fun renderClientShipments(generation: Int, result: ApiResult<dynamic>) {
     )
 }
 
-private suspend fun renderConsigneeOngoing(generation: Int) {
-    val ongoing = fetchPortal("portal/consignee/shipments/ongoing")
-    val ongoingData = ongoing.asDynamicOrNull() ?: return renderPortalFailure(generation, ongoing.errorMessage(), ongoing.errorStatus())
-    val unbooked = fetchPortal("portal/consignee/cars/not-shipped?booking=none")
-    val unbookedData = unbooked.asDynamicOrNull() ?: return renderPortalFailure(generation, unbooked.errorMessage(), unbooked.errorStatus())
+private data class ConsigneeHistoryRow(
+    val bookingId: String,
+    val consignee: String,
+    val shipmentDate: String,
+    val pol: String,
+    val stockLocations: List<String>,
+    val chassis: List<String>,
+    val clientNames: List<String>,
+    val units: String,
+)
+
+private suspend fun renderConsigneeShippingHistory(generation: Int) {
+    val result = fetchPortal("portal/consignee/shipping-history")
+    val data = result.asDynamicOrNull() ?: return renderPortalFailure(generation, result.errorMessage(), result.errorStatus())
     if (generation != portalGeneration) return
-    val booked = parseShipmentRows(ongoingData, "Booked, not yet shipped").filter { shipmentLooksBooked(it) }
-    val rows = parseUnbookedRows(unbookedData) + booked
+    val rows = jsArray(data).map { item ->
+        ConsigneeHistoryRow(
+            bookingId = jsText(item.bookingId),
+            consignee = jsText(item.consignee),
+            shipmentDate = jsText(item.shipmentDate),
+            pol = jsText(item.pol),
+            stockLocations = jsStringList(item.stockLocations),
+            chassis = jsStringList(item.chassis),
+            clientNames = jsStringList(item.clientNames),
+            units = jsText(item.units),
+        )
+    }
     val query = portalQuery()
-    val shown = if (query.isEmpty()) rows else rows.filter { shipmentMatchesChassis(it, query) }
-    val emptyMessage = if (query.isNotEmpty()) "No cars match that chassis." else "No ongoing shipments."
-    setPortalBody(generation, portalCarSearchHtml(query) + portalShipmentsTableHtml(shown, emptyMessage, includeClients = false))
+    val shown = if (query.isEmpty()) rows else rows.filter { consigneeHistoryMatches(it, query) }
+    val emptyMessage = if (query.isNotEmpty()) "No shipments match that search." else "No shipping history yet."
+    setPortalBody(generation, portalCarSearchHtml(query) + consigneeHistoryTableHtml(shown, emptyMessage))
     document.getElementById("portalCarSearch")?.addEventListener("submit", { event: Event ->
         event.preventDefault()
         val value = (document.getElementById("portalCarQuery") as? HTMLInputElement)?.value?.trim().orEmpty()
@@ -766,6 +756,112 @@ private suspend fun renderConsigneeOngoing(generation: Int) {
     document.getElementById("portalCarSearchClear")?.addEventListener("click", { _: Event ->
         navigateToApp("/portal/consignee/ongoing?q=")
     })
+    val buttons = document.querySelectorAll(".portal-pdf-btn")
+    val buttonCount = buttons.length as Int
+    for (index in 0 until buttonCount) {
+        val button = buttons.item(index) as? HTMLElement ?: continue
+        button.addEventListener("click", { _: Event ->
+            val bookingId = button.getAttribute("data-booking-id").orEmpty()
+            if (bookingId.isBlank()) return@addEventListener
+            val preview = window.open("", "_blank")
+            if (preview == null) {
+                showMessage("Could not open the shipping PDF.", "error")
+                return@addEventListener
+            }
+            downloadConsigneeShippingPdf(bookingId, button, preview)
+        })
+    }
+}
+
+private fun consigneeHistoryMatches(row: ConsigneeHistoryRow, query: String): Boolean {
+    val needle = query.lowercase()
+    return row.bookingId.lowercase().contains(needle) ||
+        row.consignee.lowercase().contains(needle) ||
+        row.pol.lowercase().contains(needle) ||
+        row.stockLocations.any { it.lowercase().contains(needle) } ||
+        row.chassis.any { it.lowercase().contains(needle) } ||
+        row.clientNames.any { it.lowercase().contains(needle) }
+}
+
+private fun consigneeHistoryTableHtml(rows: List<ConsigneeHistoryRow>, emptyMessage: String): String {
+    if (rows.isEmpty()) return """<section class="portal-state" data-portal-state="empty"><p>${escapeHtml(emptyMessage)}</p></section>"""
+    val body = rows.joinToString("") { row ->
+        val pdf = if (row.bookingId.isBlank() || row.bookingId == "—") {
+            ""
+        } else {
+            """<button type="button" class="portal-pdf-btn" data-booking-id="${escapeHtml(row.bookingId)}">PDF</button>"""
+        }
+        """
+            <tr>
+                <td>$pdf</td>
+                <td><span class="portal-nowrap">${portalText(row.bookingId)}</span></td>
+                <td>${portalText(row.consignee)}</td>
+                <td><span class="portal-nowrap">${portalText(row.shipmentDate)}</span></td>
+                <td><span class="portal-nowrap">${portalText(row.pol)}</span></td>
+                <td>${portalLines(row.stockLocations)}</td>
+                <td>${portalLines(row.chassis)}</td>
+                <td>${portalLines(row.clientNames)}</td>
+                <td><span class="portal-nowrap">${portalText(row.units)}</span></td>
+            </tr>
+        """.trimIndent()
+    }
+    return """
+        <div class="portal-table-wrap">
+            <table class="portal-table portal-table--history">
+                <thead>
+                    <tr>
+                        <th>PDF</th>
+                        <th>Booking ID</th>
+                        <th>Consignee</th>
+                        <th>Shipment date</th>
+                        <th>POL</th>
+                        <th>Stock location</th>
+                        <th>Chassis</th>
+                        <th>Client name</th>
+                        <th>Units</th>
+                    </tr>
+                </thead>
+                <tbody>$body</tbody>
+            </table>
+        </div>
+    """.trimIndent()
+}
+
+private fun portalLines(values: List<String>): String {
+    val shown = values.map { it.trim() }.filter { it.isNotEmpty() }
+    if (shown.isEmpty()) return portalText("")
+    return shown.joinToString("<br>") { escapeHtml(it) }
+}
+
+private fun downloadConsigneeShippingPdf(bookingId: String, button: HTMLElement, preview: Window) {
+    val encoded = js("encodeURIComponent")(bookingId).unsafeCast<String>()
+    button.asDynamic().disabled = true
+    window.fetch(apiUrl("portal/consignee/shipping-history/pdf?bookingId=$encoded"))
+        .then { response: dynamic ->
+            val ok = js("!!response.ok") as Boolean
+            if (!ok) {
+                preview.close()
+                button.asDynamic().disabled = false
+                showMessage("Could not open the shipping PDF.", "error")
+                js("undefined")
+            } else response.blob().then { blob: dynamic ->
+                val url = js("URL.createObjectURL(blob)") as String
+                preview.location.href = url
+                window.setTimeout({
+                    try {
+                        js("URL.revokeObjectURL(url)")
+                    } catch (_: dynamic) {
+                    }
+                }, 120000)
+                button.asDynamic().disabled = false
+                js("undefined")
+            }
+        }
+        .catch {
+            preview.close()
+            button.asDynamic().disabled = false
+            showMessage("Could not open the shipping PDF.", "error")
+        }
 }
 
 private fun parseShipmentRows(data: dynamic, recordLabel: String?): List<PortalShipmentRow> =

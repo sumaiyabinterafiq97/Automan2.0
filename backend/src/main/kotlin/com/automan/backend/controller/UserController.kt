@@ -77,6 +77,7 @@ class UserController(
 
     @PostMapping
     fun createUser(@RequestBody body: CreateUserDto): ResponseEntity<UserResponseDto> {
+        val role = creatableRole(body.role) ?: return ResponseEntity.badRequest().build()
         if (userRepository.existsByEmail(body.email)) {
             return ResponseEntity.badRequest().build()
         }
@@ -85,7 +86,7 @@ class UserController(
             email = body.email.trim().lowercase(),
             name = body.name.trim(),
             passwordHash = passwordEncoder.encode(body.password),
-            role = UserRole.valueOf(body.role.uppercase())
+            role = role
         )
         val saved = userRepository.save(user)
 
@@ -105,7 +106,8 @@ class UserController(
             ?: return ResponseEntity.notFound().build()
 
         val previousRole = user.role
-        val nextRole = body.role?.let { UserRole.valueOf(it.uppercase()) } ?: previousRole
+        val requestedRole = body.role?.let { creatableRole(it) ?: return ResponseEntity.badRequest().build() }
+        val nextRole = requestedRole ?: previousRole
         val updatedUser = user.copy(
             email = body.email?.trim()?.lowercase() ?: user.email,
             name = body.name?.trim() ?: user.name,
@@ -135,5 +137,16 @@ class UserController(
         }
         userRepository.deleteById(id)
         return ResponseEntity.ok().build()
+    }
+
+    private fun creatableRole(raw: String): UserRole? {
+        val role = try {
+            UserRole.valueOf(raw.trim().uppercase())
+        } catch (_: IllegalArgumentException) {
+            return null
+        }
+        return role.takeIf {
+            it == UserRole.ADMIN || it == UserRole.EDITOR || it == UserRole.CLIENT || it == UserRole.CONSIGNEE
+        }
     }
 }

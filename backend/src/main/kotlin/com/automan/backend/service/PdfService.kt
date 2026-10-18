@@ -6,11 +6,13 @@ import com.automan.backend.dto.InvoicePdfRequest
 import com.automan.backend.dto.ShippingSchedulePdfData
 import com.automan.backend.dto.UnpaidAgingReportDto
 import com.itextpdf.kernel.pdf.PdfDocument
+import com.itextpdf.kernel.pdf.PdfReader
 import com.itextpdf.kernel.pdf.PdfWriter
 import com.itextpdf.kernel.geom.PageSize
 import com.itextpdf.layout.Document
 import com.itextpdf.io.image.ImageDataFactory
 import com.itextpdf.layout.element.Cell
+import com.itextpdf.layout.element.Div
 import com.itextpdf.layout.element.Image
 import com.itextpdf.layout.element.LineSeparator
 import com.itextpdf.layout.element.Paragraph
@@ -27,6 +29,7 @@ import com.itextpdf.kernel.font.PdfFontFactory
 import com.itextpdf.kernel.pdf.canvas.draw.SolidLine
 import com.automan.backend.util.CarModelYearUtils
 import com.automan.backend.util.Logger
+import java.io.ByteArrayInputStream
 import java.io.InputStream
 import org.springframework.stereotype.Service
 import java.io.ByteArrayOutputStream
@@ -116,6 +119,15 @@ class PdfService {
      * confirm-and-download, and Invoice History re-download.
      */
     fun generateInvoicePdf(request: InvoicePdfRequest): ByteArray {
+        val singleTable = renderFinalInvoicePdf(request, splitTail = false)
+        if (pdfPageCount(singleTable) <= 1) return singleTable
+        return renderFinalInvoicePdf(request, splitTail = true)
+    }
+
+    private fun pdfPageCount(bytes: ByteArray): Int =
+        PdfDocument(PdfReader(ByteArrayInputStream(bytes))).use { it.numberOfPages }
+
+    private fun renderFinalInvoicePdf(request: InvoicePdfRequest, splitTail: Boolean): ByteArray {
         val outputStream = ByteArrayOutputStream()
         val pdfWriter = PdfWriter(outputStream)
         val pdfDocument = PdfDocument(pdfWriter)
@@ -259,10 +271,6 @@ class PdfService {
         document.add(metaTable)
 
         // --- Line items: # | DESCRIPTION | AMOUNT ---
-        val table = Table(UnitValue.createPercentArray(floatArrayOf(8f, 67f, 25f)))
-            .setWidth(UnitValue.createPercentValue(100f))
-            .setMarginTop(4f)
-
         fun headerCell(text: String, align: TextAlignment = TextAlignment.CENTER): Cell =
             Cell()
                 .add(
@@ -275,10 +283,6 @@ class PdfService {
                 .setPadding(5f)
                 .setBorder(thinBorder)
 
-        table.addHeaderCell(headerCell("#"))
-        table.addHeaderCell(headerCell("DESCRIPTION", TextAlignment.LEFT))
-        table.addHeaderCell(headerCell("AMOUNT", TextAlignment.RIGHT))
-
         fun descriptionParagraph(item: com.automan.backend.dto.InvoiceItem): Paragraph {
             return Paragraph(item.description)
                 .setFont(font)
@@ -287,8 +291,19 @@ class PdfService {
                 .setFixedLeading(11f)
         }
 
-        request.items.forEach { item ->
-            table.addCell(
+        fun newItemTable(): Table =
+            Table(UnitValue.createPercentArray(floatArrayOf(8f, 67f, 25f)))
+                .setWidth(UnitValue.createPercentValue(100f))
+                .setMarginTop(4f)
+
+        fun addItemHeaders(target: Table) {
+            target.addHeaderCell(headerCell("#"))
+            target.addHeaderCell(headerCell("DESCRIPTION", TextAlignment.LEFT))
+            target.addHeaderCell(headerCell("AMOUNT", TextAlignment.RIGHT))
+        }
+
+        fun addItemRow(target: Table, item: com.automan.backend.dto.InvoiceItem) {
+            target.addCell(
                 Cell()
                     .add(
                         Paragraph(item.unit.toString())
@@ -300,13 +315,13 @@ class PdfService {
                     .setPadding(4f)
                     .setBorder(thinBorder),
             )
-            table.addCell(
+            target.addCell(
                 Cell()
                     .add(descriptionParagraph(item))
                     .setPadding(4f)
                     .setBorder(thinBorder),
             )
-            table.addCell(
+            target.addCell(
                 Cell()
                     .add(
                         Paragraph(item.amount)
@@ -319,9 +334,27 @@ class PdfService {
                     .setBorder(thinBorder),
             )
         }
-        document.add(table)
 
-        // Grand total row-style line
+        val tailCount = if (splitTail && request.items.size > 2) 2 else 0
+        val headItems = if (tailCount == 0) request.items else request.items.dropLast(tailCount)
+        val tailItems = if (tailCount == 0) emptyList() else request.items.takeLast(tailCount)
+        if (headItems.isNotEmpty()) {
+            val table = newItemTable()
+            addItemHeaders(table)
+            headItems.forEach { addItemRow(table, it) }
+            document.add(table)
+        }
+
+        // One table when the invoice fits. When it does not, the last cars stay with the signature.
+        val closing = Div()
+        if (splitTail) closing.setKeepTogether(true)
+        if (tailItems.isNotEmpty()) {
+            val tailTable = newItemTable()
+            addItemHeaders(tailTable)
+            tailItems.forEach { addItemRow(tailTable, it) }
+            closing.add(tailTable)
+        }
+
         val totalTable = Table(UnitValue.createPercentArray(floatArrayOf(75f, 25f)))
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginTop(0f)
@@ -349,18 +382,17 @@ class PdfService {
                 .setBorder(thinBorder)
                 .setBackgroundColor(headerBg),
         )
-        document.add(totalTable)
+        closing.add(totalTable)
 
-        // Banking
         request.bankAccount?.trim()?.takeIf { it.isNotEmpty() }?.let { bank ->
-            document.add(
+            closing.add(
                 Paragraph("BANKING DETAILS")
                     .setFont(fontLatin)
                     .setFontSize(10f)
                     .setMarginTop(14f)
                     .setMarginBottom(4f),
             )
-            document.add(
+            closing.add(
                 Paragraph(bank)
                     .setFont(fontLatin)
                     .setFontSize(8f)
@@ -369,9 +401,8 @@ class PdfService {
             )
         }
 
-        // Optional form message
         request.message?.trim()?.takeIf { it.isNotEmpty() }?.let { msg ->
-            document.add(
+            closing.add(
                 Paragraph(msg)
                     .setFont(font)
                     .setFontSize(8f)
@@ -381,14 +412,13 @@ class PdfService {
             )
         }
 
-        // Confirmation + signature
-        document.add(
+        closing.add(
             Paragraph("We, Memon Co., Ltd, hereby confirm your purchasing of goods.")
                 .setFont(fontLatin)
                 .setFontSize(9f)
                 .setFixedLeading(12f)
                 .setMarginTop(14f)
-                .setMarginBottom(28f),
+                .setMarginBottom(8f),
         )
 
         val sigTable = Table(UnitValue.createPercentArray(floatArrayOf(55f, 45f)))
@@ -416,7 +446,8 @@ class PdfService {
                         .setTextAlignment(TextAlignment.CENTER),
                 )
         )
-        document.add(sigTable)
+        closing.add(sigTable)
+        document.add(closing)
 
         document.close()
         return outputStream.toByteArray()
@@ -426,7 +457,10 @@ class PdfService {
      * Booking / shipping-schedule PDF in MEMON client layout (Verdana).
      * Used by both C&F and FOB shipping-schedule endpoints.
      */
-    fun generateShippingScheduleInvoicePdf(data: ShippingSchedulePdfData): ByteArray {
+    fun generateShippingScheduleInvoicePdf(
+        data: ShippingSchedulePdfData,
+        includePrices: Boolean = true,
+    ): ByteArray {
         val outputStream = ByteArrayOutputStream()
         val pdfWriter = PdfWriter(outputStream)
         val pdfDocument = PdfDocument(pdfWriter)
@@ -627,15 +661,24 @@ class PdfService {
         )
         document.add(rule(3f, 6f))
 
-        // Refined columns: No | Maker | Model | Chassis | Year | Amount
-        val table = Table(UnitValue.createPercentArray(floatArrayOf(6f, 14f, 20f, 26f, 12f, 22f)))
+        // Staff invoices keep AMOUNT JPY and GRAND TOTAL. The consignee copy leaves both out.
+        val table = if (includePrices) {
+            Table(UnitValue.createPercentArray(floatArrayOf(6f, 14f, 20f, 26f, 12f, 22f)))
+        } else {
+            Table(UnitValue.createPercentArray(floatArrayOf(8f, 18f, 24f, 34f, 16f)))
+        }
             .setWidth(UnitValue.createPercentValue(100f))
             .setMarginTop(2f)
 
-        listOf("", "MAKER", "MODEL", "CHASIS NO.", "YEAR", "AMOUNT JPY").forEachIndexed { index, label ->
-            val align = when (index) {
-                0 -> TextAlignment.CENTER
-                5 -> TextAlignment.RIGHT
+        val headers = if (includePrices) {
+            listOf("", "MAKER", "MODEL", "CHASIS NO.", "YEAR", "AMOUNT JPY")
+        } else {
+            listOf("", "MAKER", "MODEL", "CHASIS NO.", "YEAR")
+        }
+        headers.forEachIndexed { index, label ->
+            val align = when {
+                index == 0 -> TextAlignment.CENTER
+                includePrices && index == 5 -> TextAlignment.RIGHT
                 else -> TextAlignment.LEFT
             }
             table.addHeaderCell(itemCell(label, align, bold = true, top = true, bottom = true))
@@ -649,45 +692,56 @@ class PdfService {
                 ?: "-"
             val chassis = car.chassisNumber.trim().ifEmpty { "-" }
             val year = car.year.trim().ifEmpty { "-" }
-            val amountRaw = car.cnfPrice.trim().ifEmpty { "¥0" }
-            val amountYen = parseYenAmountToLong(amountRaw)
-            grandTotal += amountYen
-            val amount = formatInvoiceYenAmount(amountYen)
 
             table.addCell(itemCell(car.no.toString(), TextAlignment.CENTER))
             table.addCell(itemCell(maker))
             table.addCell(itemCell(model))
             table.addCell(itemCell(chassis))
             table.addCell(itemCell(year, TextAlignment.CENTER))
-            table.addCell(itemCell(amount, TextAlignment.RIGHT))
+            if (includePrices) {
+                val amountRaw = car.cnfPrice.trim().ifEmpty { "¥0" }
+                val amountYen = parseYenAmountToLong(amountRaw)
+                grandTotal += amountYen
+                table.addCell(itemCell(formatInvoiceYenAmount(amountYen), TextAlignment.RIGHT))
+            }
         }
         document.add(table)
 
         val units = data.carList.size
         val unitsLabel = if (units == 1) "1 UNIT" else "$units UNITS"
-        val grandFormatted = "¥${"%,d".format(grandTotal)}"
         document.add(rule(4f, 4f))
-        val footer = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f)))
-            .setWidth(UnitValue.createPercentValue(100f))
-        footer.addCell(
-            Cell()
-                .add(Paragraph(unitsLabel).setFont(fontBold).setBold().setFontSize(11f))
-                .setBorder(noBorder)
-                .setPadding(2f),
-        )
-        footer.addCell(
-            Cell()
-                .add(
-                    Paragraph("GRAND TOTAL $grandFormatted")
-                        .setFont(fontBold)
-                        .setBold()
-                        .setFontSize(11f)
-                        .setTextAlignment(TextAlignment.RIGHT),
-                )
-                .setBorder(noBorder)
-                .setPadding(2f),
-        )
-        document.add(footer)
+        if (includePrices) {
+            val grandFormatted = "¥${"%,d".format(grandTotal)}"
+            val footer = Table(UnitValue.createPercentArray(floatArrayOf(50f, 50f)))
+                .setWidth(UnitValue.createPercentValue(100f))
+            footer.addCell(
+                Cell()
+                    .add(Paragraph(unitsLabel).setFont(fontBold).setBold().setFontSize(11f))
+                    .setBorder(noBorder)
+                    .setPadding(2f),
+            )
+            footer.addCell(
+                Cell()
+                    .add(
+                        Paragraph("GRAND TOTAL $grandFormatted")
+                            .setFont(fontBold)
+                            .setBold()
+                            .setFontSize(11f)
+                            .setTextAlignment(TextAlignment.RIGHT),
+                    )
+                    .setBorder(noBorder)
+                    .setPadding(2f),
+            )
+            document.add(footer)
+        } else {
+            document.add(
+                Paragraph(unitsLabel)
+                    .setFont(fontBold)
+                    .setBold()
+                    .setFontSize(11f)
+                    .setMarginBottom(0f),
+            )
+        }
         document.add(rule(4f, 10f))
 
         val cargoNoteLines = data.inTransitClause?.trim()?.takeIf { it.isNotEmpty() }

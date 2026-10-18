@@ -180,6 +180,29 @@ class PurchaseExportIntegrationTest {
     }
 
     @Test
+    fun `export date of purchase omits the weekday`() {
+        savePurchase(chassis = "DATE-PLAIN", date = "October 14, 2026(Wednesday)")
+
+        val bytes = exportGet()
+        XSSFWorkbook(ByteArrayInputStream(bytes)).use { workbook ->
+            val sheet = workbook.getSheetAt(0)
+            val header = sheet.getRow(0)
+            var dateCol = -1
+            var chassisCol = -1
+            for (i in 0 until header.lastCellNum) {
+                when (header.getCell(i)?.stringCellValue) {
+                    "Date of purchase" -> dateCol = i
+                    "Chassis" -> chassisCol = i
+                }
+            }
+            assertTrue(dateCol >= 0)
+            val row = (1..sheet.lastRowNum).map { sheet.getRow(it) }
+                .first { it.getCell(chassisCol)?.stringCellValue == "DATE-PLAIN" }
+            assertEquals("October 14, 2026", row.getCell(dateCol).stringCellValue)
+        }
+    }
+
+    @Test
     fun `POST search uses chassis prefix semantics`() {
         savePurchase(chassis = "AAHH40-12345")
         savePurchase(chassis = "OTHER-999")

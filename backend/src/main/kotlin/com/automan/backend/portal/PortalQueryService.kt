@@ -5,6 +5,8 @@ import com.automan.backend.repository.ClientMapRepository
 import com.automan.backend.repository.PurchaseMediaRepository
 import com.automan.backend.repository.PurchaseRepository
 import com.automan.backend.repository.ShippingHistoryRepository
+import com.automan.backend.dto.ShippingSchedulePdfRequest
+import com.automan.backend.service.PdfService
 import com.automan.backend.service.PurchaseChangeHistoryService
 import com.automan.backend.service.PurchaseMediaService
 import com.automan.backend.service.PurchaseService
@@ -54,6 +56,7 @@ class PortalQueryService(
     private val purchaseMediaRepository: PurchaseMediaRepository,
     private val changeHistory: PurchaseChangeHistoryService,
     private val objectMapper: ObjectMapper,
+    private val pdfService: PdfService,
 ) {
     private val clock: Clock = Clock.systemUTC()
     @Transactional(readOnly = true)
@@ -156,6 +159,72 @@ class PortalQueryService(
         val today = today()
         return groupShipments(reads.shipments(purchaseScope(scope)).filter { it.eta != null && it.eta.isBefore(today) })
             .map { it.toConsignee(names) }
+    }
+
+    @Transactional(readOnly = true)
+    fun consigneeShippingHistory(scope: PortalScope): List<ConsigneeShippingHistoryDto> {
+        val groups = linkedMapOf<String, MutableList<PortalReadRepository.HistoryLine>>()
+        reads.shippingHistoryLines(purchaseScope(scope))
+            .sortedBy { it.id }
+            .forEach { line ->
+                val key = line.bookingId?.trim().orEmpty().ifEmpty { "—" }
+                groups.getOrPut(key) { mutableListOf() }.add(line)
+            }
+        return groups.map { (bookingId, lines) ->
+            val chassis = lines.map { it.chassis.trim() }.filter { it.isNotEmpty() }.distinct()
+            ConsigneeShippingHistoryDto(
+                bookingId = bookingId,
+                consignee = lines.firstNotNullOfOrNull { it.consignee?.trim()?.takeIf { name -> name.isNotEmpty() } }
+                    ?: scope.consigneeLegalName.orEmpty(),
+                shipmentDate = lines.firstNotNullOfOrNull { it.shipmentDate }?.toString(),
+                pol = lines.firstNotNullOfOrNull { it.pol?.trim()?.takeIf { value -> value.isNotEmpty() } },
+                stockLocations = lines.mapNotNull { it.stockLocation?.trim()?.takeIf { value -> value.isNotEmpty() } }.distinct().sorted(),
+                chassis = chassis.sorted(),
+                clientNames = lines.mapNotNull { it.clientName?.trim()?.takeIf { value -> value.isNotEmpty() } }.distinct().sorted(),
+                units = if (chassis.isNotEmpty()) chassis.size else lines.size,
+            )
+        }
+    }
+
+    @Transactional(readOnly = true)
+    fun consigneeShippingPdf(scope: PortalScope, bookingId: String): ByteArray {
+        val key = bookingId.trim()
+        if (key.isEmpty() || key == "—") {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, NOT_FOUND)
+        }
+        val lines = reads.shippingHistoryLines(purchaseScope(scope))
+            .filter { it.bookingId?.trim().orEmpty() == key }
+            .sortedBy { it.id }
+        if (lines.isEmpty()) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, NOT_FOUND)
+        }
+        fun first(pick: (PortalReadRepository.HistoryLine) -> String?): String =
+            lines.firstNotNullOfOrNull { pick(it)?.trim()?.takeIf { value -> value.isNotEmpty() } }.orEmpty()
+        val chassis = lines.map { it.chassis.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (chassis.isEmpty()) {
+            throw ResponseStatusException(HttpStatus.NOT_FOUND, NOT_FOUND)
+        }
+        val priceType = first { it.priceType }
+        val request = ShippingSchedulePdfRequest(
+            bookingNo = key,
+            vesselName = first { it.vessel },
+            pol = first { it.pol },
+            pod = first { it.pod },
+            shippingDate = lines.firstNotNullOfOrNull { it.shipmentDate }?.toString().orEmpty(),
+            consigneeName = first { it.consignee }.ifEmpty { scope.consigneeLegalName.orEmpty() },
+            consigneeAddress = "",
+            consigneeCountry = first { it.country }.ifEmpty { null },
+            chassisNumbers = chassis,
+            calculationMode = if (priceType.contains("FOB", ignoreCase = true)) "FOB" else "C&F",
+            carrier = first { it.carrier }.ifEmpty { null },
+            cyCutDate = lines.firstNotNullOfOrNull { it.cyCutDate }?.toString(),
+            eta = lines.firstNotNullOfOrNull { it.eta }?.toString(),
+            finalDestination = first { it.finalDestination }.ifEmpty { null },
+            notifyParty = first { it.notifyParty }.ifEmpty { null },
+            inTransitClause = first { it.inTransitClause }.ifEmpty { null },
+        )
+        val data = purchases.getShippingSchedulePdfData(request)
+        return pdfService.generateShippingScheduleInvoicePdf(data, includePrices = false)
     }
 
     @Transactional(readOnly = true)

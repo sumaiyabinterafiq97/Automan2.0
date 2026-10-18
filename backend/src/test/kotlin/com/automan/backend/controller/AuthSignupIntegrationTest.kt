@@ -2,6 +2,7 @@ package com.automan.backend.controller
 
 import com.automan.backend.model.BookingMapping
 import com.automan.backend.model.Client
+import com.automan.backend.model.PendingSignup
 import com.automan.backend.model.PendingSignupStatus
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.UserRole
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
@@ -102,14 +104,14 @@ class AuthSignupIntegrationTest {
     @Test
     fun validLoginReturnsIdentityAndToken() {
         val email = track("login-ok")
-        createUser(email, "VIEWER", "Password1", "Ada Login").andExpect(status().isOk)
+        createUser(email, "EDITOR", "Password1", "Ada Login").andExpect(status().isOk)
 
         mockMvc.perform(login(email, "Password1"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.id").exists())
             .andExpect(jsonPath("$.email").value(email))
             .andExpect(jsonPath("$.name").value("Ada Login"))
-            .andExpect(jsonPath("$.role").value("VIEWER"))
+            .andExpect(jsonPath("$.role").value("EDITOR"))
             .andExpect(jsonPath("$.token").value(not("")))
     }
 
@@ -138,7 +140,7 @@ class AuthSignupIntegrationTest {
     @Test
     fun pendingSignupCannotLogin() {
         val email = track("login-pending")
-        signup(email).andExpect(status().isOk)
+        insertPending(email)
 
         mockMvc.perform(login(email, "Password1"))
             .andExpect(status().isBadRequest)
@@ -149,17 +151,16 @@ class AuthSignupIntegrationTest {
     }
 
     @Test
-    fun validSignupCreatesPendingRowAndNoUserOrToken() {
+    fun viewerSignupDoesNotCreateAUserOrPendingRow() {
         val email = track("signup-ok")
 
-        signup(email, name = "New Person")
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.success").value(true))
+        signup(email, role = "VIEWER", name = "New Person")
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
             .andExpect(jsonPath("$.token").doesNotExist())
 
         assertNull(userRepository.findByEmail(email))
-        assertEquals(1, pendingCount(email))
-        assertEquals(PendingSignupStatus.PENDING, pendingSignupRepository.findByEmailAndStatus(email, PendingSignupStatus.PENDING)?.status)
+        assertEquals(0, pendingCount(email))
     }
 
     @Test
@@ -167,9 +168,9 @@ class AuthSignupIntegrationTest {
         val email = track("signup-dup-user")
         createUser(email).andExpect(status().isOk)
 
-        signup(email)
+        signup(email, role = "CLIENT")
             .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value("This email is already registered."))
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
         assertEquals(1, userCount(email))
         assertEquals(0, pendingCount(email))
     }
@@ -177,11 +178,11 @@ class AuthSignupIntegrationTest {
     @Test
     fun duplicatePendingEmailIsRejected() {
         val email = track("signup-dup-pending")
-        signup(email).andExpect(status().isOk)
+        insertPending(email)
 
-        signup(email)
+        signup(email, role = "VIEWER")
             .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value("This email is already registered."))
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
         assertEquals(0, userCount(email))
         assertEquals(1, pendingCount(email))
     }
@@ -190,11 +191,9 @@ class AuthSignupIntegrationTest {
     fun weakPasswordIsRejected() {
         val email = track("signup-weak")
 
-        signup(email, password = "password")
+        signup(email, password = "password", role = "CLIENT")
             .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value(
-                "Please use a strong password (at least 8 characters, including uppercase, lowercase, and a number)."
-            ))
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
         assertNull(userRepository.findByEmail(email))
         assertEquals(0, pendingCount(email))
     }
@@ -202,7 +201,7 @@ class AuthSignupIntegrationTest {
     @Test
     fun approvePendingSignupCreatesOneUserWithSameRoleWhoCanLogin() {
         val email = track("approve-ok")
-        signup(email, role = "VIEWER", name = "Approved User").andExpect(status().isOk)
+        insertPending(email, name = "Approved User")
 
         review(pendingId(email), "approve")
             .andExpect(status().isOk)
@@ -211,21 +210,21 @@ class AuthSignupIntegrationTest {
         assertEquals(1, userCount(email))
         val user = userRepository.findByEmail(email)
         assertNotNull(user)
-        assertEquals(UserRole.VIEWER, user!!.role)
+        assertEquals(UserRole.EDITOR, user!!.role)
         assertEquals("Approved User", user.name)
         assertEquals(0, pendingCount(email))
 
         mockMvc.perform(login(email, "Password1"))
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.email").value(email))
-            .andExpect(jsonPath("$.role").value("VIEWER"))
+            .andExpect(jsonPath("$.role").value("EDITOR"))
             .andExpect(jsonPath("$.token").value(not("")))
     }
 
     @Test
     fun secondApprovalDoesNotCreateAnotherUser() {
         val email = track("approve-twice")
-        signup(email).andExpect(status().isOk)
+        insertPending(email)
         val id = pendingId(email)
 
         review(id, "approve").andExpect(status().isOk)
@@ -237,7 +236,7 @@ class AuthSignupIntegrationTest {
     @Test
     fun expiredVerificationTokenDoesNotCreateUser() {
         val email = track("approve-expired")
-        signup(email).andExpect(status().isOk)
+        insertPending(email)
         val pending = pendingSignupRepository.findByEmailAndStatus(email, PendingSignupStatus.PENDING)
         assertNotNull(pending)
         pendingSignupRepository.save(pending!!.copy(expiresAt = LocalDateTime.now().minusHours(1)))
@@ -249,7 +248,7 @@ class AuthSignupIntegrationTest {
     @Test
     fun rejectPendingSignupCreatesNoUserAndRemovesPending() {
         val email = track("reject")
-        signup(email).andExpect(status().isOk)
+        insertPending(email)
         val id = pendingId(email)
 
         review(id, "reject")
@@ -263,13 +262,10 @@ class AuthSignupIntegrationTest {
     @Test
     fun rejectedEmailCanSignUpAgain() {
         val email = track("reject-again")
-        signup(email).andExpect(status().isOk)
+        insertPending(email)
         review(pendingId(email), "reject").andExpect(status().isOk)
 
-        signup(email)
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.success").value(true))
-            .andExpect(jsonPath("$.token").doesNotExist())
+        insertPending(email)
         assertEquals(0, userCount(email))
         assertEquals(1, pendingCount(email))
     }
@@ -279,16 +275,29 @@ class AuthSignupIntegrationTest {
         val adminEmail = track("role-admin")
         signup(adminEmail, role = "ADMIN")
             .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value("Public signup can only request the Viewer role."))
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
         assertEquals(0, pendingCount(adminEmail))
         assertEquals(0, userCount(adminEmail))
 
         val editorEmail = track("role-editor")
         signup(editorEmail, role = "EDITOR")
             .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value("Public signup can only request the Viewer role."))
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
         assertEquals(0, pendingCount(editorEmail))
         assertEquals(0, userCount(editorEmail))
+
+        val viewerEmail = track("role-viewer")
+        signup(viewerEmail, role = "VIEWER")
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
+        assertEquals(0, pendingCount(viewerEmail))
+        assertEquals(0, userCount(viewerEmail))
+
+        insertPending(viewerEmail, role = UserRole.VIEWER)
+        review(pendingId(viewerEmail), "approve")
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.message").value("Viewer accounts cannot be created."))
+        assertEquals(0, userCount(viewerEmail))
     }
 
     @Test
@@ -296,7 +305,7 @@ class AuthSignupIntegrationTest {
         val email = track("client-missing")
         signup(email, role = "CLIENT", name = "No Such Client")
             .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value("No client with that name was found."))
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
             .andExpect(jsonPath("$.token").doesNotExist())
         assertEquals(0, userCount(email))
         assertEquals(0, pendingCount(email))
@@ -307,7 +316,7 @@ class AuthSignupIntegrationTest {
         val email = track("consignee-missing")
         signup(email, role = "CONSIGNEE", name = "No Such Consignee")
             .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value("No consignee with that name was found."))
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
             .andExpect(jsonPath("$.token").doesNotExist())
         assertEquals(0, userCount(email))
         assertEquals(0, pendingCount(email))
@@ -326,29 +335,13 @@ class AuthSignupIntegrationTest {
         val held = savePurchase(heldChassis, clientName = matchedName, clientId = otherClient)
         val email = track("client-match")
 
-        val body = signup(email, role = "CLIENT", name = matchedName.lowercase())
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.success").value(true))
-            .andExpect(jsonPath("$.role").value("CLIENT"))
-            .andExpect(jsonPath("$.token").value(not("")))
-            .andReturn().response.contentAsString
-        val token = tokenOf(body)
-        val createdClientId = purchaseRepository.findById(purchaseIds.first()).orElseThrow().clientId
-        assertNotNull(createdClientId)
-        clientIds.add(createdClientId!!)
+        signup(email, role = "CLIENT", name = matchedName.lowercase())
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
+            .andExpect(jsonPath("$.token").doesNotExist())
+        assertEquals(0, userCount(email))
+        assertNull(purchaseRepository.findById(purchaseIds.first()).orElseThrow().clientId)
         assertEquals(otherClient, purchaseRepository.findById(held).orElseThrow().clientId)
-
-        portalGet("/portal/client/dashboard", token)
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.purchasedCount").value(1))
-        val cars = portalGet("/portal/client/cars", token)
-            .andExpect(status().isOk)
-            .andReturn().response.contentAsString
-        assertTrue(cars.contains(matchedChassis))
-        assertFalse(cars.contains(otherChassis))
-        assertFalse(cars.contains(heldChassis))
-        portalGet("/portal/consignee/dashboard", token).andExpect(status().isForbidden)
-        portalGet("/purchases", token).andExpect(status().isForbidden)
     }
 
     @Test
@@ -363,21 +356,12 @@ class AuthSignupIntegrationTest {
         savePurchase(otherChassis, clientName = "Keep Client $stamp", clientId = client, consignee = "Other Consignee $stamp")
         val email = track("consignee-match")
 
-        val body = signup(email, role = "CONSIGNEE", name = "  $matchedName  ")
-            .andExpect(status().isOk)
-            .andExpect(jsonPath("$.role").value("CONSIGNEE"))
-            .andExpect(jsonPath("$.token").value(not("")))
-            .andReturn().response.contentAsString
-        consigneeIds.add(consigneeRepository.findAll().single { it.legalName.equals(matchedName, ignoreCase = true) }.id!!)
+        signup(email, role = "CONSIGNEE", name = "  $matchedName  ")
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
+            .andExpect(jsonPath("$.token").doesNotExist())
+        assertEquals(0, userCount(email))
         assertNull(clientRepository.findById(client).orElseThrow().consigneeId)
-
-        val cars = portalGet("/portal/consignee/cars/not-shipped", tokenOf(body))
-            .andExpect(status().isOk)
-            .andReturn().response.contentAsString
-        assertTrue(cars.contains(matchedChassis))
-        assertFalse(cars.contains(otherChassis))
-        portalGet("/portal/client/dashboard", tokenOf(body)).andExpect(status().isForbidden)
-        portalGet("/purchases", tokenOf(body)).andExpect(status().isForbidden)
     }
 
     @Test
@@ -391,8 +375,43 @@ class AuthSignupIntegrationTest {
 
         signup(email, role = "CLIENT", name = name)
             .andExpect(status().isBadRequest)
-            .andExpect(jsonPath("$.message").value("More than one client uses that name. Ask an administrator to link this account."))
+            .andExpect(jsonPath("$.message").value("Accounts are created by an administrator."))
         assertEquals(0, userCount(email))
+    }
+
+    @Test
+    fun adminCanCreateAdminEditorClientAndConsigneeWithoutAPortalLink() {
+        for (role in listOf("ADMIN", "EDITOR", "CLIENT", "CONSIGNEE")) {
+            val email = track("created-${role.lowercase()}")
+            createUser(email, role = role, name = "Created $role")
+                .andExpect(status().isOk)
+                .andExpect(jsonPath("$.role").value(role))
+            val created = userRepository.findByEmail(email)
+            assertNotNull(created)
+            assertEquals(0, linkRepository.findByUserIdOrderByIdDesc(created!!.id!!).size)
+        }
+        val viewer = track("created-viewer")
+        createUser(viewer, role = "VIEWER").andExpect(status().isBadRequest)
+        assertEquals(0, userCount(viewer))
+    }
+
+    @Test
+    fun editorClientAndConsigneeCannotCreateAUser() {
+        for (role in listOf("EDITOR", "CLIENT", "CONSIGNEE")) {
+            val maker = track("maker-${role.lowercase()}")
+            createUser(maker, role = role, name = "Maker $role").andExpect(status().isOk)
+            val token = tokenOf(
+                mockMvc.perform(login(maker, "Password1")).andExpect(status().isOk).andReturn().response.contentAsString,
+            )
+            val target = track("blocked-${role.lowercase()}")
+            mockMvc.perform(
+                post("/users")
+                    .header("Authorization", "Bearer $token")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("""{"email":"$target","name":"Blocked","password":"Password1","role":"EDITOR"}"""),
+            ).andExpect(status().isForbidden)
+            assertEquals(0, userCount(target))
+        }
     }
 
     @Test
@@ -514,6 +533,19 @@ class AuthSignupIntegrationTest {
 
     private fun pendingCount(email: String) = pendingSignupRepository.findAll().count { it.email == email }
 
+    private fun insertPending(email: String, name: String = "P0 User", role: UserRole = UserRole.EDITOR) {
+        pendingSignupRepository.save(
+            PendingSignup(
+                email = email,
+                name = name,
+                passwordHash = BCryptPasswordEncoder().encode("Password1"),
+                role = role,
+                verificationToken = UUID.randomUUID().toString().replace("-", ""),
+                expiresAt = LocalDateTime.now().plusHours(48),
+            )
+        )
+    }
+
     private fun pendingId(email: String): Long {
         val pending = pendingSignupRepository.findByEmailAndStatus(email, PendingSignupStatus.PENDING)
         assertNotNull(pending)
@@ -522,7 +554,7 @@ class AuthSignupIntegrationTest {
 
     private fun createUser(
         email: String,
-        role: String = "VIEWER",
+        role: String = "EDITOR",
         password: String = "Password1",
         name: String = "P0 User",
     ) = mockMvc.perform(
@@ -534,7 +566,7 @@ class AuthSignupIntegrationTest {
     private fun signup(
         email: String,
         password: String = "Password1",
-        role: String = "VIEWER",
+        role: String = "EDITOR",
         name: String = "P0 User",
     ) = mockMvc.perform(
         post("/auth/signup")

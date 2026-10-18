@@ -47,6 +47,27 @@ class PortalReadRepository(
         val clientId: Long?,
     )
 
+    data class HistoryLine(
+        val id: Long,
+        val bookingId: String?,
+        val consignee: String?,
+        val shipmentDate: LocalDate?,
+        val pol: String?,
+        val stockLocation: String?,
+        val chassis: String,
+        val clientName: String?,
+        val vessel: String?,
+        val pod: String?,
+        val carrier: String?,
+        val cyCutDate: LocalDate?,
+        val eta: LocalDate?,
+        val finalDestination: String?,
+        val notifyParty: String?,
+        val inTransitClause: String?,
+        val priceType: String?,
+        val country: String?,
+    )
+
     data class InvoiceRow(
         val invoiceId: Long,
         val invoiceNumber: String,
@@ -194,6 +215,46 @@ class PortalReadRepository(
                 eta = cells[7] as LocalDate?,
                 chassis = cells[8] as String,
                 clientId = (cells[9] as Number?)?.toLong(),
+            )
+        }
+    }
+
+    fun shippingHistoryLines(scope: PurchaseScope): List<HistoryLine> {
+        if (!scope.isOpen()) return emptyList()
+        val (predicate, params) = purchasePredicate(scope)
+        return query(
+            """
+            SELECT s.id, s.bookingId, s.consignee, s.shipmentDate, s.pol, s.stockLocation, s.chassis, s.clientName,
+                   s.vessel, s.pod, s.carrier, s.cyCutDate, s.eta, s.finalDestination, s.notifyParty,
+                   s.inTransitClause, s.priceType, s.country
+            FROM ShippingHistory s, Purchase p
+            WHERE $predicate
+              AND $UNAMBIGUOUS_CHASSIS
+              AND TRIM(p.chassis) = TRIM(s.chassis)
+            ORDER BY s.id ASC
+            """.trimIndent(),
+            params,
+        ).map { row ->
+            val cells = cells(row)
+            HistoryLine(
+                id = (cells[0] as Number).toLong(),
+                bookingId = cells[1] as String?,
+                consignee = cells[2] as String?,
+                shipmentDate = cells[3] as LocalDate?,
+                pol = cells[4] as String?,
+                stockLocation = cells[5] as String?,
+                chassis = cells[6] as String,
+                clientName = cells[7] as String?,
+                vessel = cells[8] as String?,
+                pod = cells[9] as String?,
+                carrier = cells[10] as String?,
+                cyCutDate = cells[11] as LocalDate?,
+                eta = cells[12] as LocalDate?,
+                finalDestination = cells[13] as String?,
+                notifyParty = cells[14] as String?,
+                inTransitClause = cells[15] as String?,
+                priceType = cells[16] as String?,
+                country = cells[17] as String?,
             )
         }
     }

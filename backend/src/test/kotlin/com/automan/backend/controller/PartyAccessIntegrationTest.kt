@@ -1,6 +1,8 @@
 package com.automan.backend.controller
 
 import com.automan.backend.model.Client
+import com.automan.backend.model.User
+import com.automan.backend.model.UserRole
 import com.automan.backend.repository.AuthSessionRepository
 import com.automan.backend.repository.ClientConsigneeAssignmentRepository
 import com.automan.backend.repository.ClientRepository
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
@@ -272,7 +275,7 @@ class PartyAccessIntegrationTest {
         mockMvc.perform(
             post("/auth/signup").contentType(JSON)
                 .content("""{"email":"$email","name":"Signup","password":"Password1","role":"VIEWER"}"""),
-        ).andExpect(status().isOk)
+        ).andExpect(status().isBadRequest)
         assertEquals(beforeLinks, linkRepository.count())
         assertEquals(beforeAssignments, assignmentRepository.count())
     }
@@ -297,6 +300,17 @@ class PartyAccessIntegrationTest {
     private fun user(label: String, role: String): String {
         val email = "party-$label-${UUID.randomUUID()}@automan.test"
         emails.add(email)
+        if (role.equals("VIEWER", ignoreCase = true)) {
+            userRepository.save(
+                User(
+                    email = email,
+                    name = label,
+                    passwordHash = BCryptPasswordEncoder().encode("Password1"),
+                    role = UserRole.VIEWER,
+                )
+            )
+            return email
+        }
         mockMvc.perform(
             post("/users").contentType(JSON).content("""{"email":"$email","name":"$label","password":"Password1","role":"$role"}"""),
         ).andExpect(status().isOk)

@@ -106,7 +106,7 @@ class AuthService(
     @Transactional
     fun signupPortal(email: String, name: String, password: String, role: UserRole): AuthResponse {
         if (role != UserRole.CLIENT && role != UserRole.CONSIGNEE) {
-            throw IllegalArgumentException("Public signup can only request the Viewer role.")
+            throw IllegalArgumentException("Sign up is for a client or consignee.")
         }
         val normalizedEmail = email.trim().lowercase()
         val partyName = name.trim()
@@ -140,6 +140,9 @@ class AuthService(
         }
         if (pending.expiresAt != null && pending.expiresAt.isBefore(LocalDateTime.now())) {
             throw IllegalArgumentException("This verification link has expired")
+        }
+        if (pending.role == UserRole.VIEWER) {
+            throw IllegalArgumentException("Viewer accounts cannot be created.")
         }
         if (userRepository.existsByEmail(pending.email)) {
             pending.status = PendingSignupStatus.REJECTED
@@ -251,11 +254,13 @@ class AuthService(
     }
 
     private fun validateRoleCreation(creatorRole: UserRole?, requestedRole: UserRole) {
+        if (requestedRole == UserRole.VIEWER) {
+            throw IllegalArgumentException("Viewer accounts cannot be created.")
+        }
         if (creatorRole == null) return
         val allowedRoles = when (creatorRole) {
-            UserRole.ADMIN -> listOf(UserRole.VIEWER, UserRole.EDITOR, UserRole.ADMIN)
-            UserRole.EDITOR -> listOf(UserRole.VIEWER, UserRole.EDITOR)
-            else -> listOf(UserRole.VIEWER)
+            UserRole.ADMIN -> listOf(UserRole.ADMIN, UserRole.EDITOR, UserRole.CLIENT, UserRole.CONSIGNEE)
+            else -> emptyList()
         }
         if (requestedRole !in allowedRoles) {
             throw IllegalArgumentException("Insufficient permissions to create user with role: $requestedRole")

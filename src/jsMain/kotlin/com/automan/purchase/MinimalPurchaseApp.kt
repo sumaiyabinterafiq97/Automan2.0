@@ -6147,6 +6147,7 @@ private fun fetchMasterSetFields(onSuccess: (List<String>) -> Unit) {
 }
 
 private fun renderMasterSetSidebarButtons() {
+    if (isExternalPortalRole(getUserRole())) return
     val container = document.getElementById("masterSetDynamicButtons") ?: return
     fetchMasterSetFields { fields ->
         val items = fields
@@ -6998,13 +6999,13 @@ fun updateContent(root: Element) {
     when {
         routeAtEquals(route, "/login") -> {
             removeHamburgerMenu()
-            showAuthPage(signInMode = true)
+            showAuthPage()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         routeAtEquals(route, "/signup") -> {
             removeHamburgerMenu()
-            showAuthPage(signInMode = false)
+            showAuthPage()
             (document.getElementById("rixoBtn") as HTMLElement?)?.style?.display = "none"
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
@@ -7160,7 +7161,7 @@ fun updateContent(root: Element) {
             (document.getElementById("rixoTransportBtn") as HTMLElement?)?.style?.display = "none"
         }
         routeAtStartsWith(route, "pending-signups") -> {
-            showPendingSignupsPage()
+            showUserManagementPage()
             ensureSidebarPresent() // Call after content is set
             // Hide sorting bar on pending signups page
             // Hide PDF buttons on pending signups page
@@ -7394,7 +7395,7 @@ fun updateContent(root: Element) {
     applyRoleBasedRestrictions()
 }
 // Combined Auth Page (Signup / Signin with slide toggle) and role cards
-fun showAuthPage(signInMode: Boolean = false) {
+fun showAuthPage() {
     val content = document.getElementById("content")!!
     content.innerHTML = """
         <div class="auth-container">
@@ -7410,73 +7411,7 @@ fun showAuthPage(signInMode: Boolean = false) {
                     </div>
                 </div>
 
-                <!-- Signup Panel -->
-                <div id="signupPanel" class="auth-panel" style="display:block;">
-                    <form id="signupForm" class="panel-content" novalidate>
-                        <div class="form-group">
-                            <label class="form-label" for="su_email">Email</label>
-                            <div class="input-container">
-                                <input id="su_email" name="email" type="email" autocomplete="email" required
-                                       placeholder="Enter your email" class="form-input" aria-describedby="su_email_error"/>
-                                <span class="input-icon" aria-hidden="true">✉️</span>
-                            </div>
-                            <span id="su_email_error" class="auth-field-error" style="display:none;" role="alert"></span>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="su_name">Your Name</label>
-                            <div class="input-container">
-                                <input id="su_name" name="name" type="text" autocomplete="name" required
-                                       placeholder="Enter your name" class="form-input"/>
-                                <span class="input-icon" aria-hidden="true">👤</span>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="su_pass">Password</label>
-                            <div class="input-container">
-                                <input id="su_pass" name="password" type="password" autocomplete="new-password" required
-                                       placeholder="Enter your password" class="form-input"
-                                       aria-describedby="su_pass_strength"/>
-                                <span class="input-icon" aria-hidden="true">🔒</span>
-                            </div>
-                            <div id="su_pass_strength" class="auth-password-hints">
-                                <span id="su_pass_len" class="hint">At least 8 characters</span>
-                                <span id="su_pass_upper" class="hint">One uppercase letter</span>
-                                <span id="su_pass_lower" class="hint">One lowercase letter</span>
-                                <span id="su_pass_digit" class="hint">One number</span>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="su_role">Role</label>
-                            <div class="input-container">
-                                <select id="su_role" name="role" class="form-input" aria-describedby="su_role_hint">
-                                    <option value="VIEWER" selected>Viewer</option>
-                                    <option value="CLIENT">Client</option>
-                                    <option value="CONSIGNEE">Consignee</option>
-                                </select>
-                                <span class="input-icon" aria-hidden="true">👤</span>
-                            </div>
-                            <p id="su_role_hint" class="auth-role-hint">New accounts start as Viewer. An admin can change your role after approval.</p>
-                        </div>
-
-                        <div class="form-options">
-                            <label class="checkbox-container" for="rememberMe">
-                                <input type="checkbox" id="rememberMe" name="rememberEmail">
-                                <span class="checkmark" aria-hidden="true"></span>
-                                Remember email
-                            </label>
-                        </div>
-
-                        <div id="signupMessage" class="auth-message" style="display:none;" role="status"></div>
-                        <button type="submit" id="btn_signup" class="auth-button">Sign Up</button>
-                        <div class="auth-switch">
-                            <span>Already have an account? </span>
-                            <button type="button" id="toggleToSignin" class="switch-link">Sign In</button>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- Signin Panel -->
-                <div id="signinPanel" class="auth-panel" style="display:none;">
+                <div id="signinPanel" class="auth-panel" style="display:block;">
                     <form id="signinForm" class="panel-content" novalidate>
                         <div class="form-group">
                             <label class="form-label" for="si_email">Email</label>
@@ -7505,11 +7440,6 @@ fun showAuthPage(signInMode: Boolean = false) {
 
                         <div id="signinMessage" class="auth-message" style="display:none;" role="status"></div>
                         <button type="submit" id="btn_signin" class="auth-button">Sign In</button>
-
-                        <div class="auth-switch">
-                            <span>Don't have an account? </span>
-                            <button type="button" id="toggleToSignup" class="switch-link">Sign Up</button>
-                        </div>
                     </form>
                 </div>
             </div>
@@ -7747,67 +7677,11 @@ fun showAuthPage(signInMode: Boolean = false) {
             }
             </style>
     """
-    setupAuthHandlers(signInMode)
+    setupAuthHandlers()
 }
-private fun updateSignupRoleHint() {
-    val role = (document.getElementById("su_role") as? HTMLSelectElement)?.value?.trim()?.uppercase().orEmpty()
-    val hint = document.getElementById("su_role_hint") ?: return
-    hint.textContent = when (role) {
-        "CLIENT" -> "Your name must match a client name already stored on a purchase. You can sign in immediately."
-        "CONSIGNEE" -> "Your name must match a consignee name on the consignee map. You can sign in immediately."
-        else -> "New accounts start as Viewer. An admin can change your role after approval."
-    }
-}
-
-fun applyRoleBasedSignupRestrictions(currentUserRole: String) {
-    val sgRoles = document.getElementsByClassName("sg-role")
-    val siRoles = document.getElementsByClassName("si-role")
-    
-    // After system initialization, only allow VIEWER signup for regular users
-    // Only ADMINs can create other roles through user management
-    val allowedSignupRoles = when (currentUserRole) {
-        "ADMIN" -> listOf("VIEWER", "EDITOR", "ADMIN") // Admin can create any role (through user management)
-        else -> listOf("VIEWER") // All other users can only signup as VIEWER
-    }
-    
-    // For SIGNIN, always show all roles so users can sign in with their actual role
-    val allowedSigninRoles = listOf("VIEWER", "EDITOR", "ADMIN")
-    
-    // Apply restrictions to SIGNUP role cards only
-    for (i in 0 until sgRoles.length) {
-        val el = sgRoles.item(i) as HTMLElement
-        val role = el.getAttribute("data-role") ?: ""
-        if (role !in allowedSignupRoles) {
-            el.style.display = "none"
-        } else {
-            el.style.display = "block"
-        }
-    }
-    
-    // Show ALL roles for SIGNIN (no restrictions)
-    for (i in 0 until siRoles.length) {
-        val el = siRoles.item(i) as HTMLElement
-        val role = el.getAttribute("data-role") ?: ""
-        if (role !in allowedSigninRoles) {
-            el.style.display = "none"
-        } else {
-            el.style.display = "block"
-        }
-    }
-    
-    // Set default role to VIEWER for signup (only available role for non-admins)
-    document.querySelector(".sg-role[data-role='VIEWER']")?.classList?.add("active")
-    
-    // Set default role to VIEWER for signin (but all roles are visible)
-    document.querySelector(".si-role[data-role='VIEWER']")?.classList?.add("active")
-}
-private fun setupAuthHandlers(initialSignInMode: Boolean) {
+private fun setupAuthHandlers() {
     val rememberEmailKey = "authRememberEmail"
-    val signupPanel = document.getElementById("signupPanel") as HTMLElement
-    val signinPanel = document.getElementById("signinPanel") as HTMLElement
     val titleEl = document.getElementById("authModalTitle") as HTMLElement
-    val toSignin = document.getElementById("toggleToSignin") as HTMLButtonElement
-    val toSignup = document.getElementById("toggleToSignup") as HTMLButtonElement
 
     fun showAuthMessage(elementId: String, text: String, isError: Boolean) {
         val el = document.getElementById(elementId) as? HTMLElement ?: return
@@ -7819,23 +7693,8 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
         el.style.border = if (isError) "1px solid rgba(252, 165, 165, 0.45)" else "1px solid rgba(134, 239, 172, 0.4)"
     }
 
-    fun showSignupMessage(text: String, isError: Boolean) =
-        showAuthMessage("signupMessage", text, isError)
-
     fun showSigninMessage(text: String, isError: Boolean) =
         showAuthMessage("signinMessage", text, isError)
-
-    fun clearSignupMessages() {
-        (document.getElementById("signupMessage") as? HTMLElement)?.let {
-            it.style.display = "none"
-            it.textContent = ""
-            it.removeAttribute("data-auth-msg")
-        }
-        (document.getElementById("su_email_error") as? HTMLElement)?.let {
-            it.style.display = "none"
-            it.textContent = ""
-        }
-    }
 
     fun clearSigninMessages() {
         (document.getElementById("signinMessage") as? HTMLElement)?.let {
@@ -7852,10 +7711,6 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
             it.value = saved
             (document.getElementById("rememberMeSignin") as? HTMLInputElement)?.checked = true
         }
-        (document.getElementById("su_email") as? HTMLInputElement)?.let {
-            it.value = saved
-            (document.getElementById("rememberMe") as? HTMLInputElement)?.checked = true
-        }
     }
 
     fun persistRememberedEmail(email: String, remember: Boolean) {
@@ -7866,91 +7721,9 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
         }
     }
 
-    fun setModeSignin(signin: Boolean) {
-        if (signin) {
-            signupPanel.style.display = "none"
-            signinPanel.style.display = "block"
-            titleEl.textContent = "Sign In"
-            clearSigninMessages()
-        } else {
-            signupPanel.style.display = "block"
-            signinPanel.style.display = "none"
-            titleEl.textContent = "Sign Up"
-            clearSignupMessages()
-        }
-    }
-    toSignin.addEventListener("click", { _: Event -> navigateToApp("/login") })
-    toSignup.addEventListener("click", { _: Event -> navigateToApp("/signup") })
-
-    setModeSignin(initialSignInMode)
+    titleEl.textContent = "Sign In"
+    clearSigninMessages()
     restoreRememberedEmail()
-
-    applyRoleBasedSignupRestrictions("GUEST")
-    updateSignupRoleHint()
-    document.getElementById("su_role")?.addEventListener("change", { _: Event -> updateSignupRoleHint() })
-
-    fun doSignup() {
-        clearSignupMessages()
-        val email = (document.getElementById("su_email") as HTMLInputElement).value.trim()
-        val name = (document.getElementById("su_name") as HTMLInputElement).value.trim()
-        val pass = (document.getElementById("su_pass") as HTMLInputElement).value
-        val role = (document.getElementById("su_role") as? HTMLSelectElement)?.value?.trim().orEmpty().ifBlank { "VIEWER" }
-        if (email.isBlank() || name.isBlank() || pass.isBlank()) {
-            showSignupMessage("Please fill in all fields", true)
-            return
-        }
-        val remember = (document.getElementById("rememberMe") as? HTMLInputElement)?.checked == true
-        persistRememberedEmail(email, remember)
-        val payload: dynamic = js("({})")
-        payload.email = email
-        payload.name = name
-        payload.password = pass
-        payload.role = role
-        val body: dynamic = js("({method:'POST', headers:{'Content-Type':'application/json'}})")
-        body.body = js("JSON").stringify(payload)
-        (document.getElementById("btn_signup") as? HTMLButtonElement)?.disabled = true
-        window.fetch(apiUrl("auth/signup"), body)
-            .then { it.json() }
-            .then { resp ->
-                (document.getElementById("btn_signup") as? HTMLButtonElement)?.disabled = false
-                val success = resp.asDynamic().success as Boolean?
-                val token = resp.asDynamic().token as String?
-                if (success == true && !token.isNullOrBlank()) {
-                    val roleResp = resp.asDynamic().role as String?
-                    val nameResp = resp.asDynamic().name as String?
-                    val userId = resp.asDynamic().id as Number?
-                    safeLocalStorageSet("authToken", token)
-                    if (roleResp != null) safeLocalStorageSet("authUserRole", roleResp)
-                    if (nameResp != null) safeLocalStorageSet("authUserName", nameResp)
-                    if (userId != null) safeLocalStorageSet("authUserId", userId.toString())
-                    if (isExternalPortalRole(roleResp)) {
-                        navigateToApp(homeRouteForRole(roleResp), replace = true)
-                    } else {
-                        navigateToPurchaseList(forceClearFilters = true)
-                    }
-                    updateUserInfoInSidebar()
-                    applyRoleBasedRestrictions()
-                } else if (success == true) {
-                    val message = resp.asDynamic().message as String? ?: "Registration submitted. You will receive an email once an admin approves your account."
-                    showSignupMessage(message, false)
-                } else {
-                    val message = resp.asDynamic().message as String? ?: "Signup failed"
-                    showSignupMessage(message, true)
-                    val emailErr = document.getElementById("su_email_error") as? HTMLElement
-                    if (message.contains("already registered", ignoreCase = true)) {
-                        emailErr?.let { it.style.display = "block"; it.textContent = "This email is already registered." }
-                    } else if (message.contains("email does not exist", ignoreCase = true) || message.contains("does not exist", ignoreCase = true)) {
-                        emailErr?.let { it.style.display = "block"; it.textContent = "The email does not exist." }
-                    } else {
-                        emailErr?.let { it.style.display = "none"; it.textContent = "" }
-                    }
-                }
-            }
-            .catch { _ ->
-                (document.getElementById("btn_signup") as? HTMLButtonElement)?.disabled = false
-                showSignupMessage("Network error during signup", true)
-            }
-    }
 
     fun doSignin() {
         clearSigninMessages()
@@ -7997,22 +7770,9 @@ private fun setupAuthHandlers(initialSignInMode: Boolean) {
             }
     }
 
-    (document.getElementById("signupForm") as? HTMLFormElement)?.addEventListener("submit", { e: Event ->
-        e.preventDefault()
-        doSignup()
-    })
     (document.getElementById("signinForm") as? HTMLFormElement)?.addEventListener("submit", { e: Event ->
         e.preventDefault()
         doSignin()
-    })
-
-    // Password strength (real-time)
-    document.getElementById("su_pass")?.addEventListener("input", { _: Event ->
-        val pass = (document.getElementById("su_pass") as? HTMLInputElement)?.value ?: ""
-        (document.getElementById("su_pass_len") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.length >= 8) }
-        (document.getElementById("su_pass_upper") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.any { c -> c.isUpperCase() }) }
-        (document.getElementById("su_pass_lower") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.any { c -> c.isLowerCase() }) }
-        (document.getElementById("su_pass_digit") as? HTMLElement)?.let { it.classList.toggle("hint-ok", pass.any { c -> c.isDigit() }) }
     })
 }
 
@@ -8431,6 +8191,8 @@ private fun getRoleColor(role: String): String {
     return when (role) {
         "ADMIN" -> "#dc3545"
         "EDITOR" -> "#28a745"
+        "CLIENT" -> "#2563eb"
+        "CONSIGNEE" -> "#0f766e"
         "VIEWER" -> "#6c757d"
         else -> "#6c757d"
     }
@@ -8469,9 +8231,10 @@ fun showAddUserForm() {
                         <label for="userRole" class="user-form-label">Role *</label>
                         <select id="userRole" required class="user-form-select">
                         <option value="">Select a role</option>
-                        <option value="VIEWER">Viewer - Can view data only</option>
                         <option value="EDITOR">Editor - Can view and edit data</option>
                         <option value="ADMIN">Admin - Full access including user management</option>
+                        <option value="CLIENT">Client - Can sign in to the client portal</option>
+                        <option value="CONSIGNEE">Consignee - Can sign in to the consignee portal</option>
                     </select>
                         <div id="roleError" class="user-form-error"></div>
                 </div>
@@ -8583,9 +8346,10 @@ private fun displayEditUserForm(user: dynamic) {
             <div class="user-form-field">
                 <label for="editUserRole" class="user-form-label">Role *</label>
                 <select id="editUserRole" required class="user-form-select">
-                    <option value="VIEWER" ${if (user.role == "VIEWER") "selected" else ""}>Viewer - Can view data only</option>
                     <option value="EDITOR" ${if (user.role == "EDITOR") "selected" else ""}>Editor - Can view and edit data</option>
                     <option value="ADMIN" ${if (user.role == "ADMIN") "selected" else ""}>Admin - Full access including user management</option>
+                    <option value="CLIENT" ${if (user.role == "CLIENT") "selected" else ""}>Client - Can sign in to the client portal</option>
+                    <option value="CONSIGNEE" ${if (user.role == "CONSIGNEE") "selected" else ""}>Consignee - Can sign in to the consignee portal</option>
                 </select>
                 <div id="editRoleError" class="user-form-error"></div>
             </div>

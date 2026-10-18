@@ -10,7 +10,9 @@ import com.automan.backend.model.InvoiceHistoryLine
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.PurchaseMedia
 import com.automan.backend.model.ShippingHistory
+import com.automan.backend.model.User
 import com.automan.backend.model.UserPartyLink
+import com.automan.backend.model.UserRole
 import com.automan.backend.repository.ClientConsigneeAssignmentRepository
 import com.automan.backend.repository.ClientMapRepository
 import com.automan.backend.repository.ClientRepository
@@ -896,6 +898,17 @@ class PortalApiIntegrationTest {
     private fun user(label: String, role: String): String {
         val email = "portal-$label-${UUID.randomUUID()}@automan.test"
         emails.add(email)
+        if (role.equals("VIEWER", ignoreCase = true)) {
+            userRepository.save(
+                User(
+                    email = email,
+                    name = label,
+                    passwordHash = org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().encode("Password1"),
+                    role = UserRole.VIEWER,
+                )
+            )
+            return email
+        }
         mockMvc.perform(
             post("/users").contentType(JSON)
                 .content("""{"email":"$email","name":"$label","password":"Password1","role":"$role"}"""),

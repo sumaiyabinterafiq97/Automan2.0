@@ -1518,6 +1518,26 @@ fun formatPurchaseListYmdWeekday(raw: String?): String {
     return "$iso(${days[date.getDay()]})"
 }
 
+/** Purchase List Purchase Date. Example: `October 14, 2026`. No weekday. */
+fun formatPurchaseListMonthDayYear(raw: String?): String {
+    val trimmed = raw?.trim().orEmpty()
+    if (trimmed.isEmpty()) return ""
+    val iso = toIsoFromLabel(trimmed)
+    if (!iso.matches(Regex("^\\d{4}-\\d{2}-\\d{2}$"))) {
+        return trimmed.replace(Regex("\\s*\\([A-Za-z]+\\)\\s*$"), "").trim()
+    }
+    val parts = iso.split("-")
+    val year = parts[0].toIntOrNull() ?: return trimmed
+    val month = parts[1].toIntOrNull() ?: return trimmed
+    val day = parts[2].toIntOrNull() ?: return trimmed
+    if (month !in 1..12 || day !in 1..31) return trimmed
+    val months = arrayOf(
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+    )
+    return "${months[month - 1]} $day, $year"
+}
+
 /**
  * Purchase List date cell HTML: date/year on the first line when possible; weekday
  * `(Saturday)` wraps as a unit underneath when the column is too narrow — never overflows the cell.

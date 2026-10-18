@@ -65,6 +65,18 @@ data class ClientShipmentDto(
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
+data class ConsigneeShippingHistoryDto(
+    val bookingId: String,
+    val consignee: String,
+    val shipmentDate: String? = null,
+    val pol: String? = null,
+    val stockLocations: List<String>,
+    val chassis: List<String>,
+    val clientNames: List<String>,
+    val units: Int,
+)
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class ConsigneeShipmentDto(
     val bookingId: String? = null,
     val vessel: String? = null,

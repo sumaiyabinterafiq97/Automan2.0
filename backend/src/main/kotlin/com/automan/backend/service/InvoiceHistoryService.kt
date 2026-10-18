@@ -835,7 +835,7 @@ class InvoiceHistoryService(
             clientName = header.clientName?.trim().orEmpty().ifEmpty { "-" },
             clientAddress = null,
             vessel = header.vessel?.trim().orEmpty().ifEmpty { "-" },
-            shippingDate = formatShippingDateForPdf(header.shippingDate),
+            shippingDate = formatShippingDateForPdf(invoiceDateOverride ?: header.shippingDate),
             from = header.pol?.trim().orEmpty().ifEmpty { "-" },
             to = header.pod?.trim().orEmpty().ifEmpty { "-" },
             priceType = header.priceType?.trim()?.takeIf { it.isNotEmpty() } ?: "C&F",

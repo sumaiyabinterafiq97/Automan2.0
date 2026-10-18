@@ -228,8 +228,18 @@ internal fun showInvoicePdfDateModal(etdIso: String, onChosen: (String) -> Unit)
             <div style="font-size:14px;line-height:1.55;color:#334155;margin-bottom:8px;">Date this invoice the same as ETD?</div>
             <div style="font-size:14px;line-height:1.55;color:#0f172a;font-weight:600;margin-bottom:16px;">$etdLabel</div>
             <div id="invoicePdfDateCustom" style="display:none;margin-bottom:16px;">
-                <label for="invoicePdfDateInput" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Desired date</label>
-                <input type="date" id="invoicePdfDateInput" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;" />
+                <label for="invoicePdfDateText" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:6px;">Desired date</label>
+                <div style="position:relative;width:100%;">
+                    <div style="display:flex;gap:8px;align-items:center;width:100%;box-sizing:border-box;">
+                        <input type="text" id="invoicePdfDateText" maxlength="10" inputmode="numeric" autocomplete="off"
+                               placeholder="MM/DD/YYYY"
+                               style="flex:1;min-width:0;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+                        <button type="button" id="invoicePdfDateCalendarBtn" class="purchase-form-calendar-btn"
+                                title="Open calendar" aria-label="Open calendar">${purchaseFormCalendarIconSvg()}</button>
+                    </div>
+                    <input type="date" id="invoicePdfDate" tabindex="-1" aria-hidden="true"
+                           style="position:absolute;left:0;top:0;width:0;height:0;opacity:0;border:none;padding:0;margin:0;overflow:hidden;" />
+                </div>
             </div>
             <div id="invoicePdfDateError" style="display:none;font-size:13px;color:#b91c1c;margin-bottom:12px;"></div>
             <div style="display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;">
@@ -281,10 +291,11 @@ internal fun showInvoicePdfDateModal(etdIso: String, onChosen: (String) -> Unit)
         if (noBtn != null) noBtn.style.display = "none"
         val err = document.getElementById("invoicePdfDateError") as? HTMLElement
         if (err != null) err.style.display = "none"
-        (document.getElementById("invoicePdfDateInput") as? HTMLInputElement)?.focus()
+        bindStrictDateTextMask("invoicePdfDate")
+        (document.getElementById("invoicePdfDateText") as? HTMLInputElement)?.focus()
     })
     document.getElementById("invoicePdfDateUse")?.addEventListener("click", { _: Event ->
-        val typed = (document.getElementById("invoicePdfDateInput") as? HTMLInputElement)?.value?.trim().orEmpty()
+        val typed = (document.getElementById("invoicePdfDate") as? HTMLInputElement)?.value?.trim().orEmpty()
         val chosen = invoiceIsoDateOrNull(typed)
         if (chosen == null) {
             showDateError("Enter a valid date.")
@@ -2220,6 +2231,12 @@ fun handleInvoicePdfDownload() {
     }
     val etd = (document.getElementById("invoiceShippingDate") as? HTMLInputElement)?.value?.trim() ?: ""
     showInvoicePdfDateModal(etd) { chosen ->
+        val hid = document.getElementById("invoiceShippingDate") as? HTMLInputElement
+        if (hid != null) {
+            hid.value = chosen
+            val txt = document.getElementById("invoiceShippingDateText") as? HTMLInputElement
+            if (txt != null) txt.value = isoToMmDdYyyy(chosen)
+        }
         invoiceBuildPayloadAndRun("pdf", chosen)
     }
 }

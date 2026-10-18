@@ -791,6 +791,9 @@ private fun purchaseListCellValue(purchase: dynamic, columnKey: String): String 
         return purchaseStoredSpecValue(purchase, columnKey)
     }
     val value = purchaseTableCellValue(purchase, columnKey)
+    if (columnKey == "date") {
+        return formatPurchaseListMonthDayYear(value)
+    }
     if (purchaseListCalendarDateColumn(columnKey)) {
         return formatPurchaseListYmdWeekday(value)
     }

@@ -36,7 +36,7 @@ class PortalSignupService(
         when (role) {
             UserRole.CLIENT -> linkClient(userId, name)
             UserRole.CONSIGNEE -> linkConsignee(userId, name)
-            else -> throw IllegalArgumentException("Public signup can only request the Viewer role.")
+            else -> throw IllegalArgumentException("Sign up is for a client or consignee.")
         }
     }
 
