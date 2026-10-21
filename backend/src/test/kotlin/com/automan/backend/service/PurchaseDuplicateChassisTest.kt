@@ -29,6 +29,7 @@ class PurchaseDuplicateChassisTest {
         localPurchaseSanitizer = LocalPurchaseSanitizer(),
         clientRepository = mock(ClientRepository::class.java),
         stockLocationMapService = mock(StockLocationMapService::class.java),
+        purchaseChassisHistorySyncService = mock(PurchaseChassisHistorySyncService::class.java),
     )
 
     @Test

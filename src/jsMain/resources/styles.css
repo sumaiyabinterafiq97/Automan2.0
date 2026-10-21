@@ -9856,6 +9856,110 @@ input.client-form-readonly:read-only {
     }
 }
 
+/* Purchase bulk edit summary + chassis history sync modals (all routes) */
+.purchase-bulk-summary-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 12000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.purchase-bulk-summary {
+    background: #fff;
+    border-radius: 12px;
+    max-width: 880px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.18);
+}
+.purchase-bulk-summary h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
+    color: #0f172a;
+}
+.purchase-bulk-summary-error {
+    margin: 0 0 12px;
+    color: #b91c1c;
+    background: #fef2f2;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+.purchase-bulk-note {
+    margin: 0 0 8px;
+    color: #92400e;
+    font-size: 13px;
+}
+.purchase-bulk-summary-table-wrap {
+    overflow: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+.purchase-bulk-summary table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.purchase-bulk-summary th,
+.purchase-bulk-summary td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid #eef2f7;
+    vertical-align: top;
+}
+.purchase-bulk-summary th {
+    background: #f8fafc;
+    position: sticky;
+    top: 0;
+}
+.purchase-bulk-summary-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 16px;
+}
+.purchase-bulk-summary-actions button {
+    min-height: 40px;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+}
+#purchaseBulkSummaryCancel,
+#purchaseChassisSyncCancel {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    color: #0f172a;
+}
+#purchaseBulkSummaryConfirm {
+    background: #b45309;
+    border: 1px solid #b45309;
+    color: #fff;
+}
+#purchaseBulkSummaryConfirm:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+#purchaseChassisSyncNo {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    color: #0f172a;
+}
+#purchaseChassisSyncYes {
+    background: #2563eb;
+    border: 1px solid #2563eb;
+    color: #fff;
+}
+#purchaseChassisSyncYes:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
 /* ============================================
    C&F / FOB Calculation - Table-Based UI
    ============================================ */

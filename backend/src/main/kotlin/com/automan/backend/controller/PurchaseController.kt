@@ -7,6 +7,7 @@ import com.automan.backend.dto.PurchaseChangeHistorySingleRowDto
 import com.automan.backend.dto.CreateTransactionRequest
 import com.automan.backend.dto.InvoiceConfirmAndDownloadRequest
 import com.automan.backend.dto.InvoiceLedgerResult
+import com.automan.backend.dto.PurchaseChassisHistorySyncPreviewRequest
 import com.automan.backend.dto.PurchasePageFilterRequest
 import com.automan.backend.model.Purchase
 import com.automan.backend.model.ImportResponse
@@ -534,6 +535,20 @@ class PurchaseController(
     }
     
     
+    @PostMapping("/{id}/chassis-history-sync/preview")
+    fun previewChassisHistorySync(
+        @PathVariable id: Long,
+        @RequestBody body: PurchaseChassisHistorySyncPreviewRequest,
+    ): ResponseEntity<Any> {
+        val newChassis = body.newChassis?.trim().orEmpty()
+        if (newChassis.isEmpty()) {
+            return ResponseEntity.badRequest().body(mapOf("error" to "newChassis is required"))
+        }
+        val preview = purchaseService.previewChassisHistorySync(id, newChassis)
+            ?: return ResponseEntity.status(404).body(mapOf("error" to "Purchase with ID $id not found"))
+        return ResponseEntity.ok(preview)
+    }
+
     @PutMapping("/{id}")
     fun updatePurchase(@PathVariable id: Long, @RequestBody updateData: Map<String, Any>): ResponseEntity<Any> {
         Logger.debug("[Controller] Updating purchase ID: $id")

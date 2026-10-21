@@ -64,6 +64,19 @@ private val purchaseBulkLocalLockedFields = setOf(
     "shipmentCharges", "freight", "inspectionFee",
 )
 
+/** Only these purchase-list columns get inline editors in bulk mode. */
+private val purchaseBulkEditableFields = setOf(
+    "auctionFee",
+    "roadTax",
+    "auctionPenaltyFee",
+    "inspectionFee",
+    "shipmentCharges",
+    "freight",
+    "rixoPrice",
+    "stockLocation",
+    "rixoCompany",
+)
+
 private class PurchaseBulkChange(
     val purchaseId: Long,
     val chassis: String,
@@ -123,12 +136,12 @@ fun syncPurchaseBulkEditButton() {
     if (purchaseBulkEditMode) {
         btn.textContent = "Bulk Save"
         btn.classList.add("is-save")
-        btn.title = "Review and save bulk edits"
+        btn.title = "Review and save fee, Rixo Price, stock location, and Rixo Company edits on this page"
         btn.setAttribute("aria-label", "Bulk Save")
     } else {
         btn.textContent = "Bulk Edit"
         btn.classList.remove("is-save")
-        btn.title = "Edit the rows and columns on this page"
+        btn.title = "Edit fees, Rixo Price, stock location, and Rixo Company on this page"
         btn.setAttribute("aria-label", "Bulk Edit")
     }
 }
@@ -149,6 +162,7 @@ fun purchaseBulkEditCellHtml(purchase: dynamic, columnKey: String, displayHtml: 
     if (!purchaseBulkEditMode) return displayHtml
     val purchaseId = (purchase.id as? Number)?.toLong() ?: 0L
     if (purchaseId <= 0L) return displayHtml
+    if (columnKey !in purchaseBulkEditableFields) return displayHtml
     if (purchaseBulkRowIsLocal(purchase) && columnKey in purchaseBulkLocalLockedFields) return displayHtml
     val seed = purchaseBulkDrafts["$purchaseId|$columnKey"] ?: purchaseBulkEditorSeed(purchase, columnKey)
     val idAttr = purchaseId.toString()
@@ -369,6 +383,7 @@ private fun collectPurchaseBulkChanges(): List<PurchaseBulkChange> {
         val localLocked = purchaseBulkRowIsLocal(purchase)
         var turningLocalOn = false
         for (columnKey in columns) {
+            if (columnKey !in purchaseBulkEditableFields) continue
             if (localLocked && columnKey in purchaseBulkLocalLockedFields) continue
             val editor = purchaseBulkDrafts["$purchaseId|$columnKey"] ?: continue
             val change = purchaseBulkChangeOrNull(purchase, purchaseId, chassis, columnKey, editor) ?: continue

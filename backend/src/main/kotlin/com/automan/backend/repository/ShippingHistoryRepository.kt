@@ -86,4 +86,9 @@ interface ShippingHistoryRepository : JpaRepository<ShippingHistory, Long> {
         @Param("from") from: java.time.LocalDate,
         @Param("to") to: java.time.LocalDate,
     ): List<java.time.LocalDate>
+
+    @Query(
+        "SELECT sh FROM ShippingHistory sh WHERE LOWER(COALESCE(sh.chassis, '')) LIKE LOWER(CONCAT('%', :token, '%'))",
+    )
+    fun findChassisContaining(@Param("token") token: String): List<ShippingHistory>
 }

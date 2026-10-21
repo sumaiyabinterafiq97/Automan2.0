@@ -41,6 +41,7 @@ class PurchaseService(
     private val localPurchaseSanitizer: LocalPurchaseSanitizer,
     private val clientRepository: ClientRepository,
     private val stockLocationMapService: StockLocationMapService,
+    private val purchaseChassisHistorySyncService: PurchaseChassisHistorySyncService,
 ) {
     companion object {
         const val DUPLICATE_CHASSIS_MESSAGE = "the chassis number already exist"
@@ -62,9 +63,17 @@ class PurchaseService(
      * overrides even when they equal the car_brand_mapping baseline. This freezes form specs onto
      * the purchase so Edit/Summary show saved values instead of only map defaults.
      */
-    private fun finalizePurchaseWrite(purchase: Purchase, snapshotSpecs: Boolean = false): Purchase {
+    private fun finalizePurchaseWrite(
+        purchase: Purchase,
+        snapshotSpecs: Boolean = false,
+        skipWorkflowWrite: Boolean = false,
+    ): Purchase {
         val sanitized = localPurchaseSanitizer.apply(purchase)
-        val withWorkflow = purchaseWorkflowService.applyWorkflowWrite(sanitized)
+        val withWorkflow = if (skipWorkflowWrite) {
+            sanitized
+        } else {
+            purchaseWorkflowService.applyWorkflowWrite(sanitized)
+        }
         purchaseCostLineService.syncFromPurchase(withWorkflow)
         purchaseVehicleOverrideService.syncFromPurchase(withWorkflow, snapshotSpecs = snapshotSpecs)
         // Shipping fields are @Transient on Purchase; sync before extended-attributes JPA save.
@@ -594,8 +603,42 @@ class PurchaseService(
             (updateData.containsKey("bookingRequested") || updateData.containsKey("booking_requested")) &&
             (updateData.containsKey("invoiceConfirmed") || updateData.containsKey("invoice_confirmed"))
 
+    private fun auditTouchesWorkflow(auditChangedFields: Set<String>?): Boolean {
+        if (auditChangedFields == null) return true
+        val workflowKeys = setOf(
+            "rixoRequested",
+            "rixoConfirmed",
+            "bookingRequested",
+            "booking_requested",
+            "invoiceConfirmed",
+            "invoice_confirmed",
+            "sold",
+        )
+        return auditChangedFields.any { it in workflowKeys }
+    }
+
+    fun previewChassisHistorySync(purchaseId: Long, newChassis: String): com.automan.backend.dto.PurchaseChassisHistorySyncPreviewDto? {
+        val existing = purchaseRepository.findById(purchaseId).orElse(null)?.let { applyReadAdapters(it) }
+            ?: return null
+        return purchaseChassisHistorySyncService.preview(purchaseId, newChassis, existing)
+    }
+
+    private fun syncHistoryChassisFlag(updateData: Map<String, Any>): Pair<Boolean, Map<String, Any>> {
+        if (!updateData.containsKey("syncHistoryChassis")) return false to updateData
+        val mutable = updateData.toMutableMap()
+        val raw = mutable.remove("syncHistoryChassis")
+        val flag = when (raw) {
+            is Boolean -> raw
+            is String -> raw.equals("true", ignoreCase = true) || raw == "1"
+            is Number -> raw.toInt() != 0
+            else -> false
+        }
+        return flag to mutable
+    }
+
     @Transactional
-    fun updatePurchasePartial(id: Long, updateData: Map<String, Any>): Purchase? {
+    fun updatePurchasePartial(id: Long, rawUpdateData: Map<String, Any>): Purchase? {
+        val (syncHistoryChassis, updateData) = syncHistoryChassisFlag(rawUpdateData)
         Logger.debug("🔍 [Service] Updating purchase ID: $id with partial data")
         Logger.debug("🔍 [Service] Update data received: $updateData")
         val auditChangedFields = PurchaseChangeHistoryService.extractAuditChangedFields(updateData)
@@ -621,6 +664,7 @@ class PurchaseService(
                     updateData["rixoCompany"] as? String,
                 )
             }
+            val oldChassisForSync = existingPurchase.chassis?.trim().orEmpty()
             
             // Create a new Purchase object with updated fields
             val updatedPurchase = existingPurchase.copy(
@@ -960,7 +1004,9 @@ class PurchaseService(
             } else {
                 updatedPurchase.copy(id = id)
             }
-            val purchaseToSave = if (updateDataHasStatusRadios(updateData)) {
+            val applyWorkflowFromSubmittedFlags =
+                auditTouchesWorkflow(auditChangedFields) && updateDataHasStatusRadios(updateData)
+            val purchaseToSave = if (applyWorkflowFromSubmittedFlags) {
                 val nextStatus = purchaseWorkflowService.statusFromSubmittedFlags(purchaseWithId)
                 val now = java.time.LocalDateTime.now()
                 purchaseWithId.copy(
@@ -972,7 +1018,10 @@ class PurchaseService(
                     },
                 )
             } else {
-                purchaseWithId
+                purchaseWithId.copy(
+                    workflowStatus = existingPurchase.workflowStatus,
+                    workflowStatusUpdatedAt = existingPurchase.workflowStatusUpdatedAt,
+                )
             }
             
             Logger.debug("Entity ID before save: ${purchaseToSave.id}")
@@ -996,7 +1045,21 @@ class PurchaseService(
                 Logger.debug("Verified: Saved bookingId matches intended value")
             }
 
-            purchaseWorkflowService.recomputeByPurchaseId(id)
+            if (applyWorkflowFromSubmittedFlags) {
+                purchaseWorkflowService.recomputeByPurchaseId(id)
+            }
+            val newChassisForSync = purchaseToSave.chassis?.trim().orEmpty()
+            val chassisChanged = oldChassisForSync.isNotEmpty() &&
+                newChassisForSync.isNotEmpty() &&
+                !oldChassisForSync.equals(newChassisForSync, ignoreCase = true)
+            if (chassisChanged && syncHistoryChassis) {
+                purchaseChassisHistorySyncService.apply(
+                    purchaseId = id,
+                    oldChassisRaw = oldChassisForSync,
+                    newChassisRaw = newChassisForSync,
+                    purchaseBeforeEdit = existingPurchase,
+                )
+            }
             val refreshed = purchaseRepository.findById(id).orElse(purchaseToSave)
             return finalizePurchaseWrite(
                 purchaseToSave.copy(
@@ -1011,6 +1074,7 @@ class PurchaseService(
                 ),
                 // Edit/Update: snapshot mapping-inherited specs onto the purchase so they persist.
                 snapshotSpecs = true,
+                skipWorkflowWrite = !applyWorkflowFromSubmittedFlags,
             )
         } else {
             Logger.error("Purchase with ID $id not found")

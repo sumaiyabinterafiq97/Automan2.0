@@ -26,4 +26,9 @@ interface RixoHistoryRepository : JpaRepository<RixoHistory, Long> {
             ),
     )
     fun searchKeyFields(@Param("q") q: String, pageable: Pageable): Page<RixoHistory>
+
+    @Query(
+        "SELECT h FROM RixoHistory h WHERE LOWER(COALESCE(h.chassis, '')) LIKE LOWER(CONCAT('%', :token, '%'))",
+    )
+    fun findChassisContaining(@Param("token") token: String): List<RixoHistory>
 }

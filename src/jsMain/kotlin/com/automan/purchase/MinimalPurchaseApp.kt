@@ -20458,7 +20458,7 @@ fun createEditConfirmationModal(changes: Map<String, Pair<String, String>>): Str
     """
 }
 
-private fun clearRixoAutoSelectSuppress() {
+fun clearRixoAutoSelectSuppress() {
     js("window.__suppressRixoAutoSelect = false")
 }
 
@@ -20959,8 +20959,17 @@ fun actuallyProceedWithEditPurchase(id: Long, chassis: String) {
     console.log("🔍 DEBUG: vehicleType = $vehicleTypeValue")
     console.log("🔍 DEBUG: shipmentSize = ${purchaseData.shipmentSize}")
     
-    // Submit the purchase update
-    submitEditPurchase(id, purchaseData)
+    val oldChassis = originalPurchaseData?.chassis?.toString()?.trim().orEmpty()
+    val auditFields = pendingEditAuditChangedFields
+    runEditPurchaseSaveWithChassisHistorySync(
+        purchaseId = id,
+        oldChassis = oldChassis,
+        newChassis = chassis.trim(),
+        purchaseData = purchaseData,
+        auditChangedFields = auditFields,
+        onSubmit = { payload -> submitEditPurchase(id, payload) },
+        onCancel = { clearRixoAutoSelectSuppress() },
+    )
 }
 
 // Submit edit purchase request

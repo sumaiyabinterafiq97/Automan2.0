@@ -44,4 +44,10 @@ interface InvoiceHistoryLineRepository : JpaRepository<InvoiceHistoryLine, Long>
 
     /** Batch load lines for dashboard sales-by-client aggregation. */
     fun findByInvoiceHistoryIdIn(invoiceHistoryIds: Collection<Long>): List<InvoiceHistoryLine>
+
+    @Query(
+        "SELECT l FROM InvoiceHistoryLine l WHERE " +
+            "LOWER(TRIM(COALESCE(l.chassis, ''))) = LOWER(TRIM(COALESCE(:chassis, '')))",
+    )
+    fun findByNormalizedChassis(@Param("chassis") chassis: String): List<InvoiceHistoryLine>
 }
