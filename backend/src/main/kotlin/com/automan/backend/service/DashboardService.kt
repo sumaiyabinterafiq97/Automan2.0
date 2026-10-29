@@ -12,9 +12,11 @@ import com.automan.backend.dto.DashboardQuickActionDto
 import com.automan.backend.dto.DashboardResponse
 import com.automan.backend.dto.DashboardTablesDto
 import com.automan.backend.dto.DashboardWorkflowStageDto
+import com.automan.backend.model.InvoiceHistoryLine
 import com.automan.backend.model.WorkflowStatus
 import com.automan.backend.repository.DashboardPurchaseRowProjection
 import com.automan.backend.repository.DashboardRecentPurchaseProjection
+import com.automan.backend.repository.InvoiceHistoryDashboardHeaderProjection
 import com.automan.backend.repository.InvoiceHistoryLineRepository
 import com.automan.backend.repository.InvoiceHistoryRepository
 import com.automan.backend.repository.PurchaseRepository
@@ -151,6 +153,7 @@ class DashboardService(
 
         // Pipeline snapshot (all open stages) — not date-filtered so ops see live backlog.
         val pipeline = rows
+        val invoicePeriods = InvoicePeriodLoader()
 
         return DashboardResponse(
             period = DashboardPeriodDto(
@@ -162,9 +165,9 @@ class DashboardService(
                 label = if (period.key == "current_fy") currentFiscalYearLabel(today) else null,
             ),
             generatedAt = LocalDateTime.now().toString(),
-            kpis = buildKpis(current, previous, pipeline, period),
+            kpis = buildKpis(current, previous, pipeline, period, invoicePeriods),
             workflow = buildWorkflow(pipeline),
-            charts = buildCharts(current, pipeline, today, period),
+            charts = buildCharts(current, pipeline, today, period, invoicePeriods),
             tables = buildTables(current, pipeline),
             alerts = buildAlerts(pipeline),
             quickActions = QUICK_ACTIONS,
@@ -177,13 +180,7 @@ class DashboardService(
             throw IllegalArgumentException("day must be today or yesterday")
         }
         val target = resolveRecentPurchaseDate(day, dateRaw)
-        val matched = purchaseRepository.findRecentPurchaseCandidates()
-            .mapNotNull { row ->
-                val parsed = PurchaseDateParseUtils.parseToLocalDate(row.getDate()?.trim().orEmpty())
-                if (parsed != target) null else row
-            }
-            .sortedWith(compareByDescending<DashboardRecentPurchaseProjection> { it.getId() ?: 0L })
-            .take(50)
+        val matched = recentPurchaseProjectionsForDate(target)
         val prepared = purchaseRepository.findAllById(matched.mapNotNull { it.getId() })
             .map { purchase ->
                 val withLot = purchaseExtendedAttributesService.applyForRead(purchase)
@@ -219,6 +216,29 @@ class DashboardService(
     }
 
     /**
+     * Recent-purchases table for one calendar day: SQL date candidates, then [PurchaseDateParseUtils] equality,
+     * newest 50 by id (same rules as the former full-catalog [PurchaseRepository.findRecentPurchaseCandidates] scan).
+     */
+    private fun recentPurchaseProjectionsForDate(target: LocalDate): List<DashboardRecentPurchaseProjection> {
+        val pairs = purchaseRepository.findIdAndDateRixoDateCandidates(
+            target.toString(),
+            PurchaseDateParseUtils.sqlLabelDateCandidatePattern(target),
+        )
+        val topIds = pairs.asSequence()
+            .filter { pair ->
+                PurchaseDateParseUtils.parseToLocalDate(pair.getDate()?.trim().orEmpty()) == target
+            }
+            .sortedByDescending { it.getId() ?: 0L }
+            .take(50)
+            .mapNotNull { it.getId() }
+            .toList()
+        if (topIds.isEmpty()) return emptyList()
+        val order = topIds.withIndex().associate { it.value to it.index }
+        return purchaseRepository.findRecentPurchaseProjectionsByIdIn(topIds)
+            .sortedBy { order[it.getId()] ?: Int.MAX_VALUE }
+    }
+
+    /**
      * Laptop [dateRaw] (yyyy-MM-dd) selects the calendar day. When it is absent, keep the
      * server clock so callers that only send day=today|yesterday still work.
      */
@@ -241,6 +261,21 @@ class DashboardService(
         val previousFrom: LocalDate,
         val previousTo: LocalDate,
     )
+
+    private data class InvoicePeriodSnapshot(
+        val headers: List<InvoiceHistoryDashboardHeaderProjection>,
+        val lines: List<InvoiceHistoryLine>,
+    )
+
+    /** Per-request cache: current period is used for revenue KPI and sales-by-client. */
+    private inner class InvoicePeriodLoader {
+        private val cache = mutableMapOf<Pair<LocalDate, LocalDate>, InvoicePeriodSnapshot>()
+
+        fun snapshot(period: PeriodWindow): InvoicePeriodSnapshot {
+            val key = period.from to period.to
+            return cache.getOrPut(key) { loadInvoicePeriodSnapshot(period) }
+        }
+    }
 
     private data class ParsedRow(
         val id: Long?,
@@ -360,6 +395,7 @@ class DashboardService(
         previous: List<ParsedRow>,
         pipeline: List<ParsedRow>,
         period: PeriodWindow,
+        invoicePeriods: InvoicePeriodLoader,
     ): List<DashboardKpiDto> {
         val carsBought = current.size.toDouble()
         val prevCarsBought = previous.size.toDouble()
@@ -384,7 +420,7 @@ class DashboardService(
                 it.status == WorkflowStatus.RIXO_CONFIRMED
         }.toDouble()
 
-        val avgMonthlyRevenue = averageMonthlyInvoiceRevenue(period)
+        val avgMonthlyRevenue = averageMonthlyInvoiceRevenue(period, invoicePeriods)
         val prevAvgMonthlyRevenue = averageMonthlyInvoiceRevenue(
             PeriodWindow(
                 key = "previous",
@@ -393,6 +429,7 @@ class DashboardService(
                 previousFrom = period.previousFrom,
                 previousTo = period.previousTo,
             ),
+            invoicePeriods,
         )
 
         val rixoPending = pipeline.count { it.status == WorkflowStatus.RIXO_REQUESTED }.toDouble()
@@ -436,8 +473,8 @@ class DashboardService(
         }
 
     /** Invoice line totals in period ÷ number of calendar months spanned by the period. */
-    private fun averageMonthlyInvoiceRevenue(period: PeriodWindow): Double {
-        val total = invoiceLineTotalForPeriod(period)
+    private fun averageMonthlyInvoiceRevenue(period: PeriodWindow, invoicePeriods: InvoicePeriodLoader): Double {
+        val total = invoiceLineTotalForPeriod(period, invoicePeriods)
         val months = monthsSpanned(period.from, period.to).coerceAtLeast(1)
         return total / months
     }
@@ -445,30 +482,30 @@ class DashboardService(
     private fun monthsSpanned(from: LocalDate, to: LocalDate): Int =
         (ChronoUnit.MONTHS.between(YearMonth.from(from), YearMonth.from(to)).toInt() + 1).coerceAtLeast(1)
 
-    private fun invoiceLineTotalForPeriod(period: PeriodWindow): Double {
+    private fun invoiceLineTotalForPeriod(period: PeriodWindow, invoicePeriods: InvoicePeriodLoader): Double =
+        invoicePeriods.snapshot(period).lines.sumOf { parseMoney(it.lineAmount) }
+
+    private fun loadInvoicePeriodSnapshot(period: PeriodWindow): InvoicePeriodSnapshot {
         val headers = try {
-            invoiceHistoryRepository.findAll()
+            invoiceHistoryRepository.findDashboardHeadersInPeriod(
+                period.from,
+                period.to,
+                period.from.atStartOfDay(),
+                period.to.plusDays(1).atStartOfDay(),
+            )
         } catch (_: Exception) {
-            return 0.0
+            emptyList()
         }
-        val ids = headers.mapNotNull { h ->
-            val id = h.id ?: return@mapNotNull null
-            if (!invoiceInPeriod(h.shippingDate, h.createdAt?.toLocalDate(), period)) return@mapNotNull null
-            id
+        val ids = headers.mapNotNull { it.getId() }
+        if (ids.isEmpty()) {
+            return InvoicePeriodSnapshot(headers, emptyList())
         }
-        if (ids.isEmpty()) return 0.0
         val lines = try {
             invoiceHistoryLineRepository.findByInvoiceHistoryIdIn(ids)
         } catch (_: Exception) {
-            return 0.0
+            emptyList()
         }
-        return lines.sumOf { parseMoney(it.lineAmount) }
-    }
-
-    private fun invoiceInPeriod(shipping: LocalDate?, created: LocalDate?, period: PeriodWindow): Boolean {
-        val shippingIn = shipping != null && !shipping.isBefore(period.from) && !shipping.isAfter(period.to)
-        val createdIn = created != null && !created.isBefore(period.from) && !created.isAfter(period.to)
-        return shippingIn || createdIn
+        return InvoicePeriodSnapshot(headers, lines)
     }
 
     private fun kpi(
@@ -520,6 +557,7 @@ class DashboardService(
         pipeline: List<ParsedRow>,
         today: LocalDate,
         period: PeriodWindow,
+        invoicePeriods: InvoicePeriodLoader,
     ): DashboardChartsDto {
         val monthsBack = 11
         val monthKeys = (monthsBack downTo 0).map { YearMonth.from(today).minusMonths(it.toLong()) }
@@ -589,7 +627,7 @@ class DashboardService(
             countryDistribution = countryDistribution,
             monthlyRevenue = monthlyRevenue,
             shippingTrend = shippingTrend,
-            salesByClient = buildSalesByClient(period),
+            salesByClient = buildSalesByClient(period, invoicePeriods),
         )
     }
 
@@ -600,25 +638,18 @@ class DashboardService(
      * (matches Invoice History rows users recently saved, even if shipping date is older).
      * Top 5 + Others; zero-amount clients omitted.
      */
-    private fun buildSalesByClient(period: PeriodWindow): List<DashboardNamedValueDto> {
-        val headers = try {
-            invoiceHistoryRepository.findAll()
-        } catch (_: Exception) {
-            return emptyList()
-        }
-        val inPeriod = headers.mapNotNull { h ->
-            val id = h.id ?: return@mapNotNull null
-            if (!invoiceInPeriod(h.shippingDate, h.createdAt?.toLocalDate(), period)) return@mapNotNull null
-            id to (h.clientName?.trim()?.takeIf { it.isNotEmpty() } ?: "Unknown")
-        }
-        if (inPeriod.isEmpty()) return emptyList()
+    private fun buildSalesByClient(
+        period: PeriodWindow,
+        invoicePeriods: InvoicePeriodLoader,
+    ): List<DashboardNamedValueDto> {
+        val snapshot = invoicePeriods.snapshot(period)
+        if (snapshot.headers.isEmpty()) return emptyList()
 
-        val idToClient = inPeriod.toMap()
-        val lines = try {
-            invoiceHistoryLineRepository.findByInvoiceHistoryIdIn(idToClient.keys)
-        } catch (_: Exception) {
-            return emptyList()
-        }
+        val idToClient = snapshot.headers.mapNotNull { h ->
+            val id = h.getId() ?: return@mapNotNull null
+            id to (h.getClientName()?.trim()?.takeIf { it.isNotEmpty() } ?: "Unknown")
+        }.toMap()
+        val lines = snapshot.lines
 
         val totals = mutableMapOf<String, Double>()
         for (line in lines) {

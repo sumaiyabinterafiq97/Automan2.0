@@ -29,6 +29,7 @@ import java.time.temporal.ChronoUnit
 @Service
 class PurchaseService(
     private val purchaseRepository: PurchaseRepository,
+    private val purchaseChassisLookupService: PurchaseChassisLookupService,
     private val pdfService: PdfService,
     private val bookingMappingRepository: BookingMappingRepository,
     private val shippingHistoryRepository: ShippingHistoryRepository,
@@ -42,6 +43,7 @@ class PurchaseService(
     private val clientRepository: ClientRepository,
     private val stockLocationMapService: StockLocationMapService,
     private val purchaseChassisHistorySyncService: PurchaseChassisHistorySyncService,
+    private val purchaseDateRangeCandidateQuery: PurchaseDateRangeCandidateQuery,
 ) {
     companion object {
         const val DUPLICATE_CHASSIS_MESSAGE = "the chassis number already exist"
@@ -96,7 +98,7 @@ class PurchaseService(
     private fun applyReadAdapters(purchases: List<Purchase>): List<Purchase> {
         if (purchases.isEmpty()) return purchases
         val withExtended = purchases.map { purchaseExtendedAttributesService.applyForRead(it) }
-        val withVehicle = withExtended.map { purchaseVehicleOverrideService.applyForRead(it) }
+        val withVehicle = purchaseVehicleOverrideService.applyForReadBatch(withExtended)
         val withShipping = shippingSnapshotService.applyForReadBatch(withVehicle)
         val withWorkflow = withShipping.map { purchaseWorkflowService.applyForRead(it) }
         return purchaseCostLineService.applyForReadBatch(withWorkflow)
@@ -104,12 +106,12 @@ class PurchaseService(
 
     private fun persistPurchase(purchase: Purchase): Purchase =
         purchaseRepository.save(
-            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)),
+            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)).withNormalizedChassisKey(),
         )
 
     private fun persistPurchaseAndFlush(purchase: Purchase): Purchase =
         purchaseRepository.saveAndFlush(
-            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)),
+            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)).withNormalizedChassisKey(),
         )
 
     /** Stock Location Map POL tokens for a purchase stock name. */
@@ -234,26 +236,26 @@ class PurchaseService(
 
         val base: List<Purchase> = when {
             chassisTokens.isNotEmpty() -> {
-                chassisTokens
-                    .flatMap { token -> purchaseRepository.findByChassisToken(token) }
-                    .distinctBy { it.id }
+                purchaseChassisLookupService.findByExactTokens(chassisTokens).distinctBy { it.id }
             }
             targetDate != null -> {
                 // Match ISO or weekday labels (e.g. "June 29, 2026 (Monday)") via parse,
                 // same equality as getDistinctPurchaseDatesIso / Purchase List date filters.
-                // ISO LIKE alone misses labeled dates and empties Rixo company + cars.
-                val matchingIds = filterIdDatePairsByRange(
-                    purchaseRepository.findIdAndDateAll(),
-                    targetDate,
-                    targetDate,
+                val datePairs = purchaseRepository.findIdAndDateRixoDateCandidates(
+                    targetDate.toString(),
+                    rixoDateLabelCandidatePattern(targetDate),
                 )
+                val matchingIds = filterIdDatePairsByRange(datePairs, targetDate, targetDate)
                 if (matchingIds.isEmpty()) {
                     emptyList()
                 } else {
                     purchaseRepository.findAllById(matchingIds).toList()
                 }
             }
-            else -> purchaseRepository.findAll()
+            else -> {
+                // API requires dateIso and/or chassis; direct callers without filters still load all rows.
+                purchaseRepository.findAll()
+            }
         }
 
         val candidates = base.asSequence().filter { p ->
@@ -288,6 +290,13 @@ class PurchaseService(
 
         return applyReadAdapters(candidates)
     }
+
+    /**
+     * Loose LIKE pattern for English month/day/year labels (see [PurchaseDateParseUtils]).
+     * SQL prefilter only; exact calendar match is still enforced in Kotlin.
+     */
+    internal fun rixoDateLabelCandidatePattern(targetDate: java.time.LocalDate): String =
+        PurchaseDateParseUtils.sqlLabelDateCandidatePattern(targetDate)
 
     private fun parseRixoChassisTokens(raw: String?): Set<String> {
         if (raw.isNullOrBlank()) return emptySet()
@@ -333,30 +342,7 @@ class PurchaseService(
      * Exact chassis first. A token with no hyphen also matches `TOKEN-…` (first row).
      */
     fun getPurchasesForShippingChassisTokens(tokens: List<String>): List<Purchase> {
-        val seen = LinkedHashMap<Long, Purchase>()
-        val cleaned = tokens.map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
-        for (token in cleaned) {
-            val exact = purchaseRepository.findByChassisToken(token)
-            val hits = if (exact.isNotEmpty()) {
-                listOf(exact.minBy { it.id ?: Long.MAX_VALUE })
-            } else if (!token.contains('-')) {
-                purchaseRepository.findByChassisCodePrefix(escapeLikePrefix(token)).take(1)
-            } else {
-                emptyList()
-            }
-            for (purchase in hits) {
-                val id = purchase.id ?: continue
-                if (id !in seen) seen[id] = purchase
-            }
-        }
-        return applyReadAdapters(seen.values.toList())
-    }
-
-    private fun escapeLikePrefix(token: String): String {
-        return token.trim().lowercase()
-            .replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
+        return applyReadAdapters(purchaseChassisLookupService.resolveShippingChassisTokens(tokens))
     }
     
     private fun firstSemicolonToken(raw: String?): String {
@@ -389,7 +375,7 @@ class PurchaseService(
         // Only enforce uniqueness for full chassis (code-number). Code-only is allowed to repeat.
         if (!isFullChassisIdentity(c)) return null
 
-        val candidates = purchaseRepository.findByChassisIgnoreCaseTrim(c)
+        val candidates = purchaseChassisLookupService.findByExactToken(c)
         return candidates.firstOrNull { row ->
             excludeId == null || row.id != excludeId
         }
@@ -1128,13 +1114,10 @@ class PurchaseService(
     fun findSoldChassisTokens(chassisValues: List<String>): List<String> {
         if (chassisValues.isEmpty()) return emptyList()
         val sold = linkedSetOf<String>()
-        for (raw in chassisValues) {
-            val token = raw.trim()
-            if (token.isEmpty()) continue
-            for (p in purchaseRepository.findByChassisToken(token)) {
-                if (p.workflowStatus == com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED) {
-                    sold.add(p.chassis.trim().ifEmpty { token })
-                }
+        val tokens = chassisValues.map { it.trim() }.filter { it.isNotEmpty() }
+        for (p in purchaseChassisLookupService.findByExactTokens(tokens)) {
+            if (p.workflowStatus == com.automan.backend.model.WorkflowStatus.INVOICE_CONFIRMED) {
+                sold.add(p.chassis.trim().ifEmpty { p.chassis })
             }
         }
         return sold.toList()
@@ -1150,19 +1133,16 @@ class PurchaseService(
         if (chassisValues.isEmpty()) return 0
         var count = 0
         val seenIds = mutableSetOf<Long>()
-        for (raw in chassisValues) {
-            val token = raw.trim()
-            if (token.isEmpty()) continue
-            for (p in purchaseRepository.findByChassisToken(token)) {
-                val id = p.id ?: continue
-                if (!seenIds.add(id)) continue
-                if (p.workflowStatus != com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED) continue
-                purchaseWorkflowService.setWorkflowStatus(
-                    p,
-                    com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED,
-                )
-                count++
-            }
+        val tokens = chassisValues.map { it.trim() }.filter { it.isNotEmpty() }
+        for (p in purchaseChassisLookupService.findByExactTokens(tokens)) {
+            val id = p.id ?: continue
+            if (!seenIds.add(id)) continue
+            if (p.workflowStatus != com.automan.backend.model.WorkflowStatus.BOOKING_REQUESTED) continue
+            purchaseWorkflowService.setWorkflowStatus(
+                p,
+                com.automan.backend.model.WorkflowStatus.RIXO_CONFIRMED,
+            )
+            count++
         }
         Logger.log("Unset booking_requested for $count purchase(s) across ${chassisValues.size} chassis values")
         return count
@@ -1344,7 +1324,7 @@ class PurchaseService(
                 purchaseRepository.findIdAndDateAll()
             } else {
                 validateDateRangeBounds(from, to)
-                filterIdDatePairsAsPairs(purchaseRepository.findIdAndDateAll(), from, to)
+                idDatePairsForInclusiveDateRange(from!!, to!!)
             }
             return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
         }
@@ -1369,7 +1349,7 @@ class PurchaseService(
             )
         }
         validateDateRangeBounds(from, to)
-        val matchingIds = filterIdDatePairsByRange(purchaseRepository.findIdAndDateAll(), from, to)
+        val matchingIds = idDatePairsForInclusiveDateRange(from!!, to!!).mapNotNull { it.getId() }
         return pagePurchasesByIds(matchingIds, pageIdx, size, sortField, sortOrder)
     }
 
@@ -1443,20 +1423,30 @@ class PurchaseService(
 
         val (dbClauses, transientClauses) = clauses.partition { isDbColumnFilterField(it.field) }
 
-        val pairs: List<PurchaseIdDateProjection> = if (q.isNotEmpty()) {
-            searchPurchasesIdDate(q, searchField)
-        } else {
-            purchaseRepository.findIdAndDateAll()
-        }
-
-        var candidateIds: Set<Long> = if (from != null || to != null) {
-            filterIdDatePairsByRange(pairs, from, to).toSet()
-        } else {
-            pairs.mapNotNull { it.getId() }.toSet()
+        var seededDbClauseIndex: Int? = null
+        var candidateIds: Set<Long> = when {
+            q.isNotEmpty() -> {
+                val pairs = searchPurchasesIdDate(q, searchField)
+                if (from != null || to != null) {
+                    filterIdDatePairsByRange(pairs, from, to).toSet()
+                } else {
+                    pairs.mapNotNull { it.getId() }.toSet()
+                }
+            }
+            from != null || to != null -> {
+                validateDateRangeBounds(from, to)
+                idDatePairsForInclusiveDateRange(from!!, to!!).mapNotNull { it.getId() }.toSet()
+            }
+            else -> {
+                val seed = seedListFilterCandidateIds(dbClauses)
+                seededDbClauseIndex = seed.skipDbClauseIndex
+                seed.candidateIds
+            }
         }
         if (candidateIds.isEmpty()) return emptyList()
 
-        for (clause in dbClauses) {
+        for ((index, clause) in dbClauses.withIndex()) {
+            if (index == seededDbClauseIndex) continue
             candidateIds = applyDbColumnFilter(candidateIds, clause)
             if (candidateIds.isEmpty()) return emptyList()
         }
@@ -1480,8 +1470,7 @@ class PurchaseService(
         val ids = matchingPurchaseIdsForListFilter(request)
         if (ids.isEmpty()) return emptyPurchasePage(pageIdx, size)
         if (isPurchaseDateSortField(request.sort)) {
-            val idSet = ids.toSet()
-            val pairs = purchaseRepository.findIdAndDateAll().filter { it.getId() in idSet }
+            val pairs = idDatePairsForPurchaseIds(ids)
             return pagePurchasesByIdDatePairs(pairs, pageIdx, size, request.order)
         }
         return pagePurchasesByIds(ids, pageIdx, size, request.sort, request.order)
@@ -1545,6 +1534,35 @@ class PurchaseService(
             }
         }
     }
+
+    private fun idDatePairsForPurchaseIds(ids: Collection<Long>): List<PurchaseIdDateProjection> {
+        if (ids.isEmpty()) return emptyList()
+        return purchaseRepository.findIdAndDateByIdIn(ids)
+    }
+
+    private fun parseDayForDateChip(value: String): LocalDate? =
+        parseIsoLocalDateOrNull(value) ?: PurchaseDateParseUtils.parseToLocalDate(value)
+
+    private fun purchaseIdsMatchingCalendarDay(day: LocalDate): Set<Long> {
+        val pairs = purchaseRepository.findIdAndDateRixoDateCandidates(
+            day.toString(),
+            PurchaseDateParseUtils.sqlLabelDateCandidatePattern(day),
+        )
+        return filterIdDatePairsByRange(pairs, day, day).toSet()
+    }
+
+    /**
+     * Inclusive [from, to] purchase id+date pairs: one bounded SQL candidate query
+     * ([PurchaseDateRangeCandidateQuery]) then [PurchaseDateParseUtils] range filter.
+     */
+    private fun idDatePairsForInclusiveDateRange(from: LocalDate, to: LocalDate): List<PurchaseIdDateProjection> {
+        val candidates = purchaseDateRangeCandidateQuery.findIdDateCandidates(from, to)
+        return filterIdDatePairsAsPairs(candidates, from, to)
+    }
+
+    /** Test hook: same as [idDatePairsForInclusiveDateRange]. */
+    internal fun idDatePairsMatchingInclusiveDateRange(from: LocalDate, to: LocalDate): List<PurchaseIdDateProjection> =
+        idDatePairsForInclusiveDateRange(from, to)
 
     private fun filterIdDatePairsByRange(
         pairs: List<PurchaseIdDateProjection>,
@@ -1647,8 +1665,7 @@ class PurchaseService(
         if (matchingIds.isEmpty()) return emptyPurchasePage(pageIdx, size)
         // Safety net: if any caller still passes sort=date with bare ids, chronologically re-order.
         if (isPurchaseDateSortField(sortField)) {
-            val idSet = matchingIds.toSet()
-            val pairs = purchaseRepository.findIdAndDateAll().filter { it.getId() in idSet }
+            val pairs = idDatePairsForPurchaseIds(matchingIds)
             return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
         }
         if (PurchaseListSortMapping.sortsInMemory(sortField)) {
@@ -1840,22 +1857,39 @@ class PurchaseService(
             else -> false
         }
 
-    private fun applyDbColumnFilter(candidateIds: Set<Long>, clause: PurchasePageFilterClause): Set<Long> {
-        if (candidateIds.isEmpty()) return candidateIds
+    private data class ListFilterSeed(val candidateIds: Set<Long>, val skipDbClauseIndex: Int?)
+
+    /**
+     * Initial candidate IDs when there is no search text or request-level date range.
+     * Valid date chip (first date clause in filter list) wins; else first DB clause; else full catalog.
+     */
+    private fun seedListFilterCandidateIds(dbClauses: List<PurchasePageFilterClause>): ListFilterSeed {
+        if (dbClauses.isEmpty()) {
+            return ListFilterSeed(purchaseRepository.findAllPurchaseIds().toSet(), null)
+        }
+        val firstDateIndex = dbClauses.indexOfFirst { normalizeFilterFieldKey(it.field) == "date" }
+        if (firstDateIndex >= 0) {
+            val day = parseDayForDateChip(dbClauses[firstDateIndex].value)
+            if (day != null) {
+                return ListFilterSeed(
+                    purchaseIdsMatchingCalendarDay(day),
+                    firstDateIndex,
+                )
+            }
+        }
+        return ListFilterSeed(matchingIdsForDbFilterClause(dbClauses.first()), 0)
+    }
+
+    /** IDs matching a single DB-column filter clause (no intersection with an existing candidate set). */
+    private fun matchingIdsForDbFilterClause(clause: PurchasePageFilterClause): Set<Long> {
         val key = normalizeFilterFieldKey(clause.field)
         val value = clause.value.trim()
-        if (value.isEmpty()) return candidateIds
-
+        if (value.isEmpty()) return emptySet()
         if (key == "date") {
-            val day = parseIsoLocalDateOrNull(value)
-                ?: PurchaseDateParseUtils.parseToLocalDate(value)
-                ?: return emptySet()
-            val pairs = purchaseRepository.findIdAndDateAll()
-            val dayIds = filterIdDatePairsByRange(pairs, day, day).toSet()
-            return candidateIds.intersect(dayIds)
+            val day = parseDayForDateChip(value) ?: return emptySet()
+            return purchaseIdsMatchingCalendarDay(day)
         }
-
-        val matchingIds: Set<Long> = when (key) {
+        return when (key) {
             "chassis" -> purchaseRepository.findIdsChassisContains(value).toSet()
             "brand" -> purchaseRepository.findIdsBrandContains(value).toSet()
             "carname" -> purchaseRepository.findIdsCarNameContains(value).toSet()
@@ -1874,10 +1908,20 @@ class PurchaseService(
             "workflowstatus" -> purchaseRepository.findIdsWorkflowStatusContains(value).toSet()
             else -> {
                 Logger.warn("Ignoring unsupported DB filter field: ${clause.field}")
-                return candidateIds
+                emptySet()
             }
         }
-        return candidateIds.intersect(matchingIds)
+    }
+
+    private fun applyDbColumnFilter(candidateIds: Set<Long>, clause: PurchasePageFilterClause): Set<Long> {
+        if (candidateIds.isEmpty()) return candidateIds
+        val value = clause.value.trim()
+        if (value.isEmpty()) return candidateIds
+        if (!isDbColumnFilterField(clause.field)) {
+            Logger.warn("Ignoring unsupported DB filter field: ${clause.field}")
+            return candidateIds
+        }
+        return candidateIds.intersect(matchingIdsForDbFilterClause(clause))
     }
 
     private val moneyFilterFields: Set<String> = setOf(

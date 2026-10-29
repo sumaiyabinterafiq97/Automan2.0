@@ -15,15 +15,7 @@ class RixoHistoryRowConfirmedStrictTest {
 
     private fun service(purchaseRepository: PurchaseRepository): RixoHistoryService {
         val rixoRepo = mock(RixoHistoryRepository::class.java)
-        val shippingHistoryService = mock(ShippingHistoryService::class.java)
-        val invoiceHistoryService = mock(InvoiceHistoryService::class.java)
-        return RixoHistoryService(
-            rixoRepo,
-            purchaseRepository,
-            PurchaseWorkflowService(purchaseRepository),
-            shippingHistoryService,
-            invoiceHistoryService,
-        )
+        return rixoHistoryService(rixoRepo, purchaseRepository)
     }
 
     @Test
@@ -36,7 +28,7 @@ class RixoHistoryRowConfirmedStrictTest {
     @Test
     fun `segment with no matching purchase is not confirmed`() {
         val pr = mock(PurchaseRepository::class.java)
-        `when`(pr.findByChassisToken("GHOST")).thenReturn(emptyList())
+        stubChassisPurchases(pr, emptyList())
         val row = RixoHistory(id = 1L, chassis = "GHOST")
         assertFalse(service(pr).computeHistoryRowRixoConfirmedStrict(row))
     }
@@ -45,7 +37,7 @@ class RixoHistoryRowConfirmedStrictTest {
     fun `single segment all matched purchases true is confirmed`() {
         val pr = mock(PurchaseRepository::class.java)
         val p = Purchase(id = 10L, chassis = "ZZE124", rixoConfirmed = "TRUE")
-        `when`(pr.findByChassisToken("ZZE124")).thenReturn(listOf(p))
+        stubChassisPurchases(pr, listOf(p))
         `when`(pr.findById(10L)).thenReturn(Optional.of(p))
         val row = RixoHistory(id = 1L, chassis = "ZZE124")
         assertTrue(service(pr).computeHistoryRowRixoConfirmedStrict(row))
@@ -55,7 +47,7 @@ class RixoHistoryRowConfirmedStrictTest {
     fun `single segment matched purchase not true is not confirmed`() {
         val pr = mock(PurchaseRepository::class.java)
         val p = Purchase(id = 10L, chassis = "ZZE124", rixoConfirmed = "FALSE")
-        `when`(pr.findByChassisToken("ZZE124")).thenReturn(listOf(p))
+        stubChassisPurchases(pr, listOf(p))
         `when`(pr.findById(10L)).thenReturn(Optional.of(p))
         val row = RixoHistory(id = 1L, chassis = "ZZE124")
         assertFalse(service(pr).computeHistoryRowRixoConfirmedStrict(row))
@@ -65,9 +57,7 @@ class RixoHistoryRowConfirmedStrictTest {
     fun `two segments require every segment to match`() {
         val pr = mock(PurchaseRepository::class.java)
         val p1 = Purchase(id = 1L, chassis = "A-1", rixoConfirmed = "TRUE")
-        `when`(pr.findByChassisToken("A-1")).thenReturn(listOf(p1))
-        `when`(pr.findByChassisToken("A")).thenReturn(listOf(p1))
-        `when`(pr.findByChassisToken("MISS")).thenReturn(emptyList())
+        stubChassisPurchases(pr, listOf(p1))
         `when`(pr.findById(1L)).thenReturn(Optional.of(p1))
         val row = RixoHistory(id = 1L, chassis = "A-1;MISS")
         assertFalse(service(pr).computeHistoryRowRixoConfirmedStrict(row))
@@ -78,8 +68,7 @@ class RixoHistoryRowConfirmedStrictTest {
         val pr = mock(PurchaseRepository::class.java)
         val p1 = Purchase(id = 1L, chassis = "X", rixoConfirmed = "TRUE")
         val p2 = Purchase(id = 2L, chassis = "Y", rixoConfirmed = "FALSE")
-        `when`(pr.findByChassisToken("X")).thenReturn(listOf(p1))
-        `when`(pr.findByChassisToken("Y")).thenReturn(listOf(p2))
+        stubChassisPurchases(pr, listOf(p1, p2))
         `when`(pr.findById(1L)).thenReturn(Optional.of(p1))
         `when`(pr.findById(2L)).thenReturn(Optional.of(p2))
         val row = RixoHistory(id = 1L, chassis = "X;Y")

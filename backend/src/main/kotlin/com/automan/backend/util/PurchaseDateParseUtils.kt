@@ -1,8 +1,10 @@
 package com.automan.backend.util
 
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import java.time.format.TextStyle
 import java.util.Locale
 
 /**
@@ -36,5 +38,33 @@ object PurchaseDateParseUtils {
                 null
             }
         }
+    }
+
+    /**
+     * Loose SQL LIKE pattern for English month/day/year labels (e.g. `June%29%2026`).
+     * Used as a DB prefilter only; [parseToLocalDate] remains authoritative.
+     */
+    fun sqlLabelDateCandidatePattern(targetDate: LocalDate): String {
+        val month = targetDate.month.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+        return "$month%${targetDate.dayOfMonth}%${targetDate.year}"
+    }
+
+    /** Loose month+year LIKE fragment for range prefilters (e.g. `%June%2026%`). */
+    fun sqlLabelMonthYearLikePattern(yearMonth: YearMonth): String {
+        val month = yearMonth.month.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
+        return "%$month%${yearMonth.year}%"
+    }
+
+    /** Inclusive calendar months touched by [from]..[to]. */
+    fun yearMonthsInInclusiveRange(from: LocalDate, to: LocalDate): List<YearMonth> {
+        val start = YearMonth.from(from)
+        val end = YearMonth.from(to)
+        val out = mutableListOf<YearMonth>()
+        var ym = start
+        while (!ym.isAfter(end)) {
+            out.add(ym)
+            ym = ym.plusMonths(1)
+        }
+        return out
     }
 }

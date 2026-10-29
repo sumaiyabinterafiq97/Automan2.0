@@ -20,6 +20,7 @@ import java.time.LocalDateTime
 class PurchaseVehicleOverrideService(
     private val purchaseVehicleOverrideRepository: PurchaseVehicleOverrideRepository,
     private val carBrandMappingRepository: CarBrandMappingRepository,
+    private val chassisBatchQuerySupport: ChassisBatchQuerySupport,
     private val objectMapper: ObjectMapper,
 ) {
     data class SpecFieldMapping(
@@ -84,8 +85,11 @@ class PurchaseVehicleOverrideService(
         if (candidates.isEmpty()) {
             candidates = carBrandMappingRepository.findBestPrefixMatchForChassis(chassis)
         }
-        if (candidates.isEmpty()) return null
+        return pickBaselineCandidate(purchase, candidates)
+    }
 
+    private fun pickBaselineCandidate(purchase: Purchase, candidates: List<CarBrandMapping>): CarBrandMapping? {
+        if (candidates.isEmpty()) return null
         purchase.brand?.trim()?.takeIf { it.isNotEmpty() }?.let { brand ->
             candidates.firstOrNull { it.carBrand.equals(brand, ignoreCase = true) }?.let { return it }
         }
@@ -205,19 +209,67 @@ class PurchaseVehicleOverrideService(
         }.orEmpty()
 
     @Transactional(readOnly = true)
-    fun applyForRead(purchase: Purchase): Purchase {
-        var merged = applyMapBaselineForRead(purchase)
+    fun applyForRead(purchase: Purchase): Purchase =
+        applyForReadWithCached(
+            purchase,
+            purchase.id?.let { purchaseVehicleOverrideRepository.findByPurchaseId(it) },
+            emptyMap(),
+        )
+
+    @Transactional(readOnly = true)
+    fun applyForReadBatch(purchases: List<Purchase>): List<Purchase> {
+        if (purchases.isEmpty()) return purchases
+        val ids = purchases.mapNotNull { it.id }
+        val overridesByPurchaseId = if (ids.isEmpty()) {
+            emptyMap()
+        } else {
+            purchaseVehicleOverrideRepository.findByPurchaseIdIn(ids).associateBy { it.purchaseId }
+        }
+        val chassisList = purchases.map { it.chassis.trim() }.filter { it.isNotEmpty() }.distinct()
+        val exactMappingsByChassis = if (chassisList.isEmpty()) {
+            emptyMap()
+        } else {
+            carBrandMappingRepository.findByChassisIn(chassisList).groupBy { it.chassis }
+        }
+        val prefixMissChassis = purchases.map { it.chassis.trim() }.filter { chassis ->
+            chassis.isNotEmpty() && exactMappingsByChassis[chassis].isNullOrEmpty()
+        }.distinct()
+        val prefixPool = if (prefixMissChassis.isEmpty()) {
+            emptyList()
+        } else {
+            chassisBatchQuerySupport.findMappingPrefixCandidatesForFullChassis(prefixMissChassis)
+        }
+        val prefixCandidatesByFullChassis = prefixCandidatesByFullChassis(prefixMissChassis, prefixPool)
+        return purchases.map { purchase ->
+            applyForReadWithCached(
+                purchase,
+                purchase.id?.let { overridesByPurchaseId[it] },
+                exactMappingsByChassis,
+                prefixCandidatesByFullChassis,
+            )
+        }
+    }
+
+    private fun applyForReadWithCached(
+        purchase: Purchase,
+        stored: PurchaseVehicleOverride?,
+        exactMappingsByChassis: Map<String?, List<CarBrandMapping>>,
+        prefixCandidatesByFullChassis: Map<String, List<CarBrandMapping>> = emptyMap(),
+    ): Purchase {
+        var merged = applyMapBaselineForReadCached(
+            purchase,
+            exactMappingsByChassis,
+            prefixCandidatesByFullChassis,
+        )
         val purchaseId = purchase.id ?: return merged
-        val stored = purchaseVehicleOverrideRepository.findByPurchaseId(purchaseId) ?: return merged
-        val overrides = parseOverrides(stored.overridesJson)
+        val row = stored ?: return merged
+        val overrides = parseOverrides(row.overridesJson)
         if (overrides.isEmpty()) return merged
 
         for (mapping in SPEC_FIELD_MAPPINGS) {
             val overrideValue = overrides[mapping.jsonKey] ?: continue
             merged = mapping.apply(merged, overrideValue.trim().ifBlank { null })
         }
-        // Expose explicitly-stored specs (deviations from baseline) so consumers can
-        // distinguish them from baseline-inferred values. Null/absent when they came from mapping.
         val specKeys = SPEC_FIELD_MAPPINGS.mapTo(HashSet()) { it.jsonKey }
         val explicitSpecs = overrides
             .filterKeys { it in specKeys }
@@ -232,8 +284,19 @@ class PurchaseVehicleOverrideService(
     }
 
     /** Fills empty spec fields from [car_brand_mapping] baseline (lowest read priority). */
-    private fun applyMapBaselineForRead(purchase: Purchase): Purchase {
-        val baseline = resolveMapBaseline(purchase) ?: return purchase
+    private fun applyMapBaselineForRead(purchase: Purchase): Purchase =
+        applyMapBaselineForReadCached(purchase, emptyMap())
+
+    private fun applyMapBaselineForReadCached(
+        purchase: Purchase,
+        exactMappingsByChassis: Map<String?, List<CarBrandMapping>>,
+        prefixCandidatesByFullChassis: Map<String, List<CarBrandMapping>> = emptyMap(),
+    ): Purchase {
+        val baseline = resolveMapBaselineCached(
+            purchase,
+            exactMappingsByChassis,
+            prefixCandidatesByFullChassis,
+        ) ?: return purchase
         var merged = purchase
         for (mapping in SPEC_FIELD_MAPPINGS) {
             val current = mapping.purchaseValue(merged)?.trim().orEmpty()
@@ -243,6 +306,44 @@ class PurchaseVehicleOverrideService(
         }
         return merged
     }
+
+    private fun resolveMapBaselineCached(
+        purchase: Purchase,
+        exactMappingsByChassis: Map<String?, List<CarBrandMapping>>,
+        prefixCandidatesByFullChassis: Map<String, List<CarBrandMapping>> = emptyMap(),
+    ): CarBrandMapping? {
+        val chassis = purchase.chassis.trim()
+        if (chassis.isEmpty()) return null
+        var candidates = exactMappingsByChassis[chassis].orEmpty()
+        if (candidates.isEmpty()) {
+            candidates = prefixCandidatesByFullChassis[chassis]
+                ?: carBrandMappingRepository.findBestPrefixMatchForChassis(chassis)
+        }
+        return pickBaselineCandidate(purchase, candidates)
+    }
+
+    internal fun prefixCandidatesByFullChassis(
+        fullChassisList: Collection<String>,
+        mappingPool: List<CarBrandMapping>,
+    ): Map<String, List<CarBrandMapping>> {
+        val distinct = fullChassisList.map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (distinct.isEmpty()) return emptyMap()
+        return distinct.associateWith { full -> orderedPrefixCandidatesForFullChassis(full, mappingPool) }
+    }
+
+    private fun orderedPrefixCandidatesForFullChassis(
+        fullChassis: String,
+        mappingPool: List<CarBrandMapping>,
+    ): List<CarBrandMapping> =
+        mappingPool.filter { mapping ->
+            val prefix = mapping.chassis?.trim() ?: return@filter false
+            prefix.isNotEmpty() &&
+                fullChassis.length >= prefix.length &&
+                fullChassis.regionMatches(0, prefix, 0, prefix.length, ignoreCase = true)
+        }.sortedWith(
+            compareByDescending<CarBrandMapping> { it.chassis?.length ?: 0 }
+                .thenByDescending { it.id ?: 0L },
+        )
 
     private fun parseOverrides(json: String): Map<String, String> =
         try {

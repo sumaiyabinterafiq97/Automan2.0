@@ -5,4 +5,6 @@ import org.springframework.data.jpa.repository.JpaRepository
 
 interface PurchaseVehicleOverrideRepository : JpaRepository<PurchaseVehicleOverride, Long> {
     fun findByPurchaseId(purchaseId: Long): PurchaseVehicleOverride?
+
+    fun findByPurchaseIdIn(purchaseIds: Collection<Long>): List<PurchaseVehicleOverride>
 }

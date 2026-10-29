@@ -15,8 +15,10 @@ import org.mockito.Mockito.`when`
 class PurchaseDuplicateChassisTest {
 
     private val purchaseRepository = mock(PurchaseRepository::class.java)
+    private val purchaseChassisLookupService = purchaseChassisLookup(purchaseRepository)
     private val service = PurchaseService(
         purchaseRepository = purchaseRepository,
+        purchaseChassisLookupService = purchaseChassisLookupService,
         pdfService = mock(PdfService::class.java),
         bookingMappingRepository = mock(BookingMappingRepository::class.java),
         shippingHistoryRepository = mock(ShippingHistoryRepository::class.java),
@@ -30,12 +32,13 @@ class PurchaseDuplicateChassisTest {
         clientRepository = mock(ClientRepository::class.java),
         stockLocationMapService = mock(StockLocationMapService::class.java),
         purchaseChassisHistorySyncService = mock(PurchaseChassisHistorySyncService::class.java),
+        purchaseDateRangeCandidateQuery = mock(PurchaseDateRangeCandidateQuery::class.java),
     )
 
     @Test
     fun findDuplicatePurchase_returnsMatchWhenFullChassisExists() {
         val existing = Purchase(id = 10L, chassis = "NZE141-1234567", auctionHouse = "USS")
-        `when`(purchaseRepository.findByChassisIgnoreCaseTrim("NZE141-1234567")).thenReturn(listOf(existing))
+        `when`(purchaseRepository.findByChassisKey("nze141-1234567")).thenReturn(listOf(existing))
 
         val duplicate = service.findDuplicatePurchase("NZE141-1234567", excludeId = null)
 
@@ -58,7 +61,7 @@ class PurchaseDuplicateChassisTest {
 
     @Test
     fun findDuplicatePurchase_differentNumberIsNotDuplicate() {
-        `when`(purchaseRepository.findByChassisIgnoreCaseTrim("NZE141-5678")).thenReturn(emptyList())
+        `when`(purchaseRepository.findByChassisKey("nze141-5678")).thenReturn(emptyList())
 
         val duplicate = service.findDuplicatePurchase("NZE141-5678", excludeId = null)
 
@@ -68,7 +71,7 @@ class PurchaseDuplicateChassisTest {
     @Test
     fun findDuplicatePurchase_trimsChassisBeforeLookup() {
         val existing = Purchase(id = 11L, chassis = "NZE141-1234567")
-        `when`(purchaseRepository.findByChassisIgnoreCaseTrim("NZE141-1234567")).thenReturn(listOf(existing))
+        `when`(purchaseRepository.findByChassisKey("nze141-1234567")).thenReturn(listOf(existing))
 
         val duplicate = service.findDuplicatePurchase("  NZE141-1234567  ", excludeId = null)
 
@@ -78,7 +81,7 @@ class PurchaseDuplicateChassisTest {
     @Test
     fun findDuplicatePurchase_excludesCurrentPurchaseOnUpdate() {
         val existing = Purchase(id = 12L, chassis = "NZE141-1234567")
-        `when`(purchaseRepository.findByChassisIgnoreCaseTrim("NZE141-1234567")).thenReturn(listOf(existing))
+        `when`(purchaseRepository.findByChassisKey("nze141-1234567")).thenReturn(listOf(existing))
 
         val duplicate = service.findDuplicatePurchase("NZE141-1234567", excludeId = 12L)
 
@@ -89,7 +92,7 @@ class PurchaseDuplicateChassisTest {
     fun findDuplicatePurchase_returnsOtherRowWhenUpdatingToExistingChassis() {
         val self = Purchase(id = 12L, chassis = "NZE141-OLD")
         val other = Purchase(id = 99L, chassis = "NZE141-1234567")
-        `when`(purchaseRepository.findByChassisIgnoreCaseTrim("NZE141-1234567")).thenReturn(listOf(other, self))
+        `when`(purchaseRepository.findByChassisKey("nze141-1234567")).thenReturn(listOf(other, self))
 
         val duplicate = service.findDuplicatePurchase("NZE141-1234567", excludeId = 12L)
 
@@ -106,7 +109,7 @@ class PurchaseDuplicateChassisTest {
     @Test
     fun createPurchase_rejectsDuplicateFullChassis() {
         val existing = Purchase(id = 20L, chassis = "NZE141-1234567")
-        `when`(purchaseRepository.findByChassisIgnoreCaseTrim("NZE141-1234567")).thenReturn(listOf(existing))
+        `when`(purchaseRepository.findByChassisKey("nze141-1234567")).thenReturn(listOf(existing))
 
         val error = assertThrows(IllegalArgumentException::class.java) {
             service.createPurchase(Purchase(chassis = "NZE141-1234567"))
@@ -118,7 +121,7 @@ class PurchaseDuplicateChassisTest {
     @Test
     fun createPurchase_allowsCodeOnlyEvenIfLookupWouldMatch() {
         // Code-only must short-circuit before repository lookup; stub would fail if called incorrectly.
-        `when`(purchaseRepository.findByChassisIgnoreCaseTrim("AAHH45")).thenReturn(
+        `when`(purchaseRepository.findByChassisKey("aahh45")).thenReturn(
             listOf(Purchase(id = 21L, chassis = "AAHH45")),
         )
 

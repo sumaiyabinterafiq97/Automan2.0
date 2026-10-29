@@ -1,0 +1,25 @@
+# Disposable MySQL + JDBC statement inspector (ChassisQueryCountMysqlIntegrationTest only).
+# Does not replace application-test.yml / H2 integration tests.
+automan:
+  media:
+    r2:
+      enabled: false
+
+app:
+  auth:
+    setup-max-attempts: 1000
+
+spring:
+  flyway:
+    enabled: true
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        session_factory:
+          statement_inspector: com.automan.backend.testsupport.ChassisSqlStatementInspector

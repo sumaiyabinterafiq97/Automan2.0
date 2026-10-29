@@ -10,7 +10,10 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.mockito.Mockito.never
+import org.mockito.Mockito.verify
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.mock.mockito.SpyBean
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
@@ -32,7 +35,7 @@ class PurchaseForRixoIntegrationTest {
     @Autowired
     private lateinit var mockMvc: MockMvc
 
-    @Autowired
+    @SpyBean
     private lateinit var purchaseRepository: PurchaseRepository
 
     @Autowired
@@ -174,6 +177,24 @@ class PurchaseForRixoIntegrationTest {
         )
         assertTrue(dates.contains("2026-07-10"), "pending date should be included: $dates")
         assertFalse(dates.contains("2026-07-04"), "fully requested date must be excluded: $dates")
+    }
+
+    @Test
+    fun `GET for-rixo uses date candidate query not full id-date scan`() {
+        purchaseRepository.save(
+            Purchase(
+                chassis = "CAND-001",
+                date = "June 29, 2026 (Monday)",
+                rixoCompany = "KLC",
+                workflowStatus = WorkflowStatus.PURCHASED,
+            ),
+        )
+
+        mockMvc.perform(get("/purchases/for-rixo").param("dateIso", "2026-06-29"))
+            .andExpect(status().isOk)
+
+        verify(purchaseRepository, never()).findIdAndDateAll()
+        verify(purchaseRepository).findIdAndDateRixoDateCandidates("2026-06-29", "June%29%2026")
     }
 
     @Test

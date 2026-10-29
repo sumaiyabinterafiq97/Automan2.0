@@ -59,6 +59,11 @@ interface CarBrandMappingRepository : JpaRepository<CarBrandMapping, Long> {
     // Order by: 1) non-null fuel first, 2) non-null carName first, 3) highest ID (most recent) first
     @Query("SELECT c FROM CarBrandMapping c WHERE c.chassis = :chassis ORDER BY CASE WHEN c.fuel IS NOT NULL THEN 0 ELSE 1 END, CASE WHEN c.carName IS NOT NULL THEN 0 ELSE 1 END, c.id DESC")
     fun findByChassis(@Param("chassis") chassis: String): List<CarBrandMapping>
+
+    @Query(
+        "SELECT c FROM CarBrandMapping c WHERE c.chassis IN :chassisList ORDER BY c.id DESC",
+    )
+    fun findByChassisIn(@Param("chassisList") chassisList: Collection<String>): List<CarBrandMapping>
     
     // Get all distinct chassis from entire table (for chassis dropdown initialization)
     @Query("SELECT DISTINCT c.chassis FROM CarBrandMapping c WHERE c.chassis IS NOT NULL AND c.chassis != '' ORDER BY c.chassis")

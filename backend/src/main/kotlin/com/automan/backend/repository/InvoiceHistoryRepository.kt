@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
+import java.time.LocalDate
+import java.time.LocalDateTime
 import java.util.Optional
 
 interface InvoiceHistoryRepository : JpaRepository<InvoiceHistory, Long>, JpaSpecificationExecutor<InvoiceHistory> {
@@ -50,4 +52,34 @@ interface InvoiceHistoryRepository : JpaRepository<InvoiceHistory, Long>, JpaSpe
             "WHERE h.bookingNo IS NOT NULL AND TRIM(h.bookingNo) <> '' ORDER BY TRIM(h.bookingNo)",
     )
     fun findDistinctBookingNumbers(): List<String>
+
+    /**
+     * Invoice headers for Home dashboard revenue KPIs and sales-by-client chart.
+     * Period rule: shipping_date in [from, to] (inclusive) OR created_at calendar day in [from, to].
+     */
+    @Query(
+        """
+        SELECT h.id AS id, h.shippingDate AS shippingDate, h.createdAt AS createdAt, h.clientName AS clientName
+        FROM InvoiceHistory h WHERE
+        (
+            h.shippingDate IS NOT NULL AND h.shippingDate >= :from AND h.shippingDate <= :to
+        ) OR (
+            h.createdAt >= :createdFrom AND h.createdAt < :createdToExclusive
+        )
+        """,
+    )
+    fun findDashboardHeadersInPeriod(
+        @Param("from") from: LocalDate,
+        @Param("to") to: LocalDate,
+        @Param("createdFrom") createdFrom: LocalDateTime,
+        @Param("createdToExclusive") createdToExclusive: LocalDateTime,
+    ): List<InvoiceHistoryDashboardHeaderProjection>
+}
+
+/** Fields required for dashboard invoice aggregations (avoids loading full invoice_history rows). */
+interface InvoiceHistoryDashboardHeaderProjection {
+    fun getId(): Long?
+    fun getShippingDate(): LocalDate?
+    fun getCreatedAt(): LocalDateTime?
+    fun getClientName(): String?
 }

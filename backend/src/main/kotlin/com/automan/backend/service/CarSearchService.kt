@@ -54,24 +54,18 @@ class CarSearchService(
     }
     
     @Transactional(readOnly = true)
-    fun getUnshippedCarsCount(): Long {
-        return purchaseRepository.findUnshippedCars().size.toLong()
-    }
-    
+    fun getUnshippedCarsCount(): Long = purchaseRepository.countUnshippedCars()
+
     @Transactional(readOnly = true)
-    fun getUnshippedCarsCountByCountry(country: String): Long {
-        return purchaseRepository.findUnshippedCarsByCountry(country).size.toLong()
-    }
-    
+    fun getUnshippedCarsCountByCountry(country: String): Long =
+        purchaseRepository.countUnshippedCarsByCountry(country)
+
     @Transactional(readOnly = true)
-    fun getUnshippedCarsCountByPolPort(polPort: String): Long {
-        return purchaseRepository.findUnshippedCarsByPolPort(polPort).size.toLong()
-    }
-    
+    fun getUnshippedCarsCountByPolPort(polPort: String): Long =
+        purchaseRepository.countUnshippedCarsByPolPort(polPort)
+
     @Transactional(readOnly = true)
-    fun getBookingCarCount(bookingId: Long): Long {
-        return purchaseRepository.findByBookingId(bookingId).size.toLong()
-    }
+    fun getBookingCarCount(bookingId: Long): Long = purchaseRepository.countByBookingId(bookingId)
     
     private fun mapToCarInfo(purchase: Purchase): CarInfo {
         return CarInfo(

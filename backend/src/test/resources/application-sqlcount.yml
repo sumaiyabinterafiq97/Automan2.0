@@ -1,0 +1,7 @@
+# Layer on @ActiveProfiles("test") for measured SQL statement counts (H2 integration).
+spring:
+  jpa:
+    properties:
+      hibernate:
+        session_factory:
+          statement_inspector: com.automan.backend.testsupport.ChassisSqlStatementInspector

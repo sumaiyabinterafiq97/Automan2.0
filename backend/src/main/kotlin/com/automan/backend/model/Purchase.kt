@@ -1,5 +1,6 @@
 package com.automan.backend.model
 
+import com.automan.backend.util.ChassisKeyNormalizer
 import jakarta.persistence.*
 import java.time.LocalDateTime
 import com.fasterxml.jackson.annotation.JsonAlias
@@ -22,6 +23,10 @@ data class Purchase(
     
     @Column(name = "chassis", nullable = false)
     val chassis: String,
+
+    /** Indexed lookup key: LOWER(TRIM(chassis)). Maintained on write; backfilled in V93. */
+    @Column(name = "chassis_key", nullable = false, length = 100)
+    var chassisKey: String = "",
     
     /** Phase 5 drop 1: canonical on purchase_vehicle_overrides + car_brand_mapping. */
     @Transient
@@ -271,4 +276,10 @@ data class Purchase(
     
     @Column(name = "updated_at")
     val updatedAt: LocalDateTime = LocalDateTime.now()
-)
+) {
+    @PrePersist
+    @PreUpdate
+    fun maintainChassisKey() {
+        chassisKey = ChassisKeyNormalizer.normalize(chassis)
+    }
+}

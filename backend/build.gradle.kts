@@ -67,7 +67,12 @@ java {
 tasks.withType<Test> {
     useJUnitPlatform()
     // Mockito inline mock-maker + newer JDKs (e.g. Java 24 preview): Byte Buddy experimental mode
-    jvmArgs("-Dnet.bytebuddy.experimental=true")
+    // Full suite loads many Spring contexts; default heap can OOM during late context refresh (see RixoTransportPdfServiceTest).
+    jvmArgs(
+        "-Dnet.bytebuddy.experimental=true",
+        "-Xms512m",
+        "-Xmx2048m",
+    )
 }
 
 // Performance optimizations

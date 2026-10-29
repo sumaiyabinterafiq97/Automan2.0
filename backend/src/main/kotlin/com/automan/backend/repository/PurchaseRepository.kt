@@ -120,8 +120,19 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     // Method to find purchases by chassis (can return multiple since chassis is no longer unique)
     fun findByChassis(chassis: String): List<Purchase>
 
+    @Query("SELECT p FROM Purchase p WHERE p.chassisKey = :key")
+    fun findByChassisKey(@Param("key") key: String): List<Purchase>
+
+    @Query("SELECT p FROM Purchase p WHERE p.chassisKey IN :keys")
+    fun findByChassisKeyIn(@Param("keys") keys: Collection<String>): List<Purchase>
+
     @Query(
-        "SELECT p FROM Purchase p WHERE LOWER(TRIM(p.chassis)) = LOWER(TRIM(:chassis))",
+        "SELECT p FROM Purchase p WHERE p.chassisKey LIKE CONCAT(:prefix, '-%') ESCAPE '\\' ORDER BY p.id ASC",
+    )
+    fun findByChassisKeyPrefix(@Param("prefix") prefix: String): List<Purchase>
+
+    @Query(
+        "SELECT p FROM Purchase p WHERE p.chassisKey = LOWER(TRIM(:chassis))",
     )
     fun findByChassisIgnoreCaseTrim(@Param("chassis") chassis: String): List<Purchase>
     
@@ -145,6 +156,18 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     
     @Query("SELECT p FROM Purchase p WHERE p.bookingId IS NULL AND LOWER(p.chassis) LIKE LOWER(CONCAT('%', :chassis, '%'))")
     fun findUnshippedCarsByChassisContaining(@Param("chassis") chassis: String): List<Purchase>
+
+    @Query("SELECT COUNT(p) FROM Purchase p WHERE p.bookingId IS NULL")
+    fun countUnshippedCars(): Long
+
+    @Query("SELECT COUNT(p) FROM Purchase p WHERE p.bookingId IS NULL AND p.country = :country")
+    fun countUnshippedCarsByCountry(@Param("country") country: String): Long
+
+    @Query("SELECT COUNT(p) FROM Purchase p WHERE p.bookingId IS NULL AND p.stockLocation = :polPort")
+    fun countUnshippedCarsByPolPort(@Param("polPort") polPort: String): Long
+
+    @Query("SELECT COUNT(p) FROM Purchase p WHERE p.bookingId = :bookingId")
+    fun countByBookingId(@Param("bookingId") bookingId: Long): Long
     
     @Modifying
     @Transactional
@@ -254,11 +277,8 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     )
     fun findInvoiceFilterCandidatesByClientName(@Param("clientName") clientName: String?): List<Purchase>
 
-    /** Match a history chassis token to purchases: exact chassis match only. */
-    @Query(
-        "SELECT p FROM Purchase p WHERE " +
-            "LOWER(TRIM(COALESCE(p.chassis, ''))) = LOWER(TRIM(:token))"
-    )
+    /** Match a history chassis token to purchases: exact chassis match only (indexed via chassis_key). */
+    @Query("SELECT p FROM Purchase p WHERE p.chassisKey = LOWER(TRIM(:token))")
     fun findByChassisToken(@Param("token") token: String): List<Purchase>
 
     /**
@@ -266,9 +286,7 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
      * [prefix] is already lowercased; `%` and `_` are escaped by the caller.
      */
     @Query(
-        "SELECT p FROM Purchase p WHERE " +
-            "LOWER(TRIM(COALESCE(p.chassis, ''))) LIKE CONCAT(:prefix, '-%') ESCAPE '\\' " +
-            "ORDER BY p.id ASC"
+        "SELECT p FROM Purchase p WHERE p.chassisKey LIKE CONCAT(:prefix, '-%') ESCAPE '\\' ORDER BY p.id ASC",
     )
     fun findByChassisCodePrefix(@Param("prefix") prefix: String): List<Purchase>
 
@@ -282,9 +300,35 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
     )
     fun findDateAndWorkflowPairs(): List<PurchaseDateWorkflowProjection>
 
+    /** All purchase primary keys (id-only; use when dates are not needed). */
+    @Query("SELECT p.id FROM Purchase p")
+    fun findAllPurchaseIds(): List<Long>
+
     /** Lightweight id+date for purchase-list date filtering (parse labels in service). */
     @Query("SELECT p.id AS id, p.date AS date FROM Purchase p")
     fun findIdAndDateAll(): List<PurchaseIdDateProjection>
+
+    @Query("SELECT p.id AS id, p.date AS date FROM Purchase p WHERE p.id IN :ids")
+    fun findIdAndDateByIdIn(@Param("ids") ids: Collection<Long>): List<PurchaseIdDateProjection>
+
+    /**
+     * Superset of purchases that may match a Rixo generator [LocalDate] after [PurchaseDateParseUtils] parsing.
+     * Final equality is applied in [com.automan.backend.service.PurchaseService.filterIdDatePairsByRange].
+     */
+    @Query(
+        """
+        SELECT p.id AS id, p.date AS date FROM Purchase p WHERE
+        p.date IS NOT NULL AND TRIM(p.date) <> '' AND (
+            p.date = :isoDate OR
+            p.date LIKE CONCAT(:isoDate, '%') OR
+            LOWER(p.date) LIKE LOWER(CONCAT('%', :labelPattern, '%'))
+        )
+        """,
+    )
+    fun findIdAndDateRixoDateCandidates(
+        @Param("isoDate") isoDate: String,
+        @Param("labelPattern") labelPattern: String,
+    ): List<PurchaseIdDateProjection>
 
     @Query(
         """
@@ -403,6 +447,15 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
             "p.workflowStatus AS workflowStatus FROM Purchase p",
     )
     fun findRecentPurchaseCandidates(): List<DashboardRecentPurchaseProjection>
+
+    @Query(
+        "SELECT p.id AS id, p.date AS date, p.chassis AS chassis, p.carName AS carName, " +
+            "p.manufactureYear AS manufactureYear, p.auctionHouse AS auctionHouse, " +
+            "p.stockLocation AS stockLocation, p.rixoCompany AS rixoCompany, " +
+            "p.clientName AS clientName, p.country AS country, p.totalPrice AS totalPrice, " +
+            "p.workflowStatus AS workflowStatus FROM Purchase p WHERE p.id IN :ids",
+    )
+    fun findRecentPurchaseProjectionsByIdIn(@Param("ids") ids: Collection<Long>): List<DashboardRecentPurchaseProjection>
 
     @Query(
         "SELECT LOWER(TRIM(p.stockLocation)), COUNT(p.id) FROM Purchase p " +

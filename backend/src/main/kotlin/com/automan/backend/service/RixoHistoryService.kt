@@ -22,9 +22,11 @@ import java.util.Locale
 class RixoHistoryService(
     private val rixoHistoryRepository: RixoHistoryRepository,
     private val purchaseRepository: PurchaseRepository,
+    private val purchaseChassisLookupService: PurchaseChassisLookupService,
     private val purchaseWorkflowService: PurchaseWorkflowService,
     private val shippingHistoryService: ShippingHistoryService,
     private val invoiceHistoryService: InvoiceHistoryService,
+    private val rixoHistoryOverlapCandidateQuery: RixoHistoryOverlapCandidateQuery,
 ) {
     data class RixoConfirmResult(
         val selectedRows: Int,
@@ -58,32 +60,30 @@ class RixoHistoryService(
         return tokens
     }
 
-    private fun expandedTokensFromAllHistoryRows(): Set<String> {
+    private fun expandedTokensFromAllHistoryRows(): Set<String> =
+        expandedTokensFromChassisValues(rixoHistoryRepository.findAllChassisValues())
+
+    private fun expandedTokensFromChassisValues(chassisValues: Collection<String?>): Set<String> {
         val tokenSet = linkedSetOf<String>()
-        for (row in rixoHistoryRepository.findAll()) {
-            for (t in parseChassisTokens(row.chassis)) {
+        for (raw in chassisValues) {
+            for (t in parseChassisTokens(raw)) {
                 tokenSet.add(t)
             }
         }
         return tokenSet
     }
 
-    private fun purchaseIdsForExpandedTokens(tokens: Set<String>): Set<Long> {
-        val ids = linkedSetOf<Long>()
-        for (token in tokens) {
-            for (p in purchaseRepository.findByChassisToken(token)) {
-                p.id?.let { ids.add(it) }
-            }
-        }
-        return ids
-    }
+    private fun purchaseIdsForExpandedTokens(tokens: Set<String>): Set<Long> =
+        purchaseChassisLookupService.findByExactTokens(tokens).mapNotNull { it.id }.toSet()
 
     /**
      * Clears [Purchase.rixoConfirmed] when the chassis no longer appears in any Rixo history row
      * (same token rules as confirm). Returns purchase ids whose `rixo_confirmed` was written.
      */
-    fun syncRixoConfirmedWithAllHistory(): Set<Long> {
-        val shouldConfirm = purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows())
+    fun syncRixoConfirmedWithAllHistory(): Set<Long> =
+        syncRixoConfirmedWithAllHistory(purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows()))
+
+    fun syncRixoConfirmedWithAllHistory(shouldConfirm: Set<Long>): Set<Long> {
         val candidates = purchaseRepository.findPurchasesWhereRixoConfirmedPositive()
         val changed = mutableSetOf<Long>()
         for (p in candidates) {
@@ -102,8 +102,8 @@ class RixoHistoryService(
      */
     private fun findExistingRowForChassisOverlap(newTokens: Set<String>): RixoHistory? {
         if (newTokens.isEmpty()) return null
-        val all = rixoHistoryRepository.findAll()
-        return all.filter { row ->
+        val candidates = rixoHistoryOverlapCandidateQuery.findCandidates(newTokens)
+        return candidates.filter { row ->
             val rowTokens = parseChassisTokens(row.chassis)
             rowTokens.any { it in newTokens }
         }.maxByOrNull { it.id ?: 0L }
@@ -214,7 +214,7 @@ class RixoHistoryService(
 
     /**
      * Builds purchase index from ONLY purchases matching chassis tokens on [rows]
-     * (via [PurchaseRepository.findByChassisToken] per unique token — not findAll).
+     * (batched chassis_key lookup for all tokens on [rows] — not findAll).
      */
     private fun enrichRows(rows: List<RixoHistory>): List<RixoHistoryRowDto> {
         if (rows.isEmpty()) return emptyList()
@@ -224,14 +224,7 @@ class RixoHistoryService(
             tokens.addAll(parseChassisTokens(row.chassis))
         }
 
-        val byNormalizedChassis = mutableMapOf<String, MutableList<com.automan.backend.model.Purchase>>()
-        for (token in tokens) {
-            for (p in purchaseRepository.findByChassisToken(token)) {
-                val key = p.chassis?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.ROOT) ?: continue
-                val list = byNormalizedChassis.getOrPut(key) { mutableListOf() }
-                if (list.none { it.id == p.id }) list.add(p)
-            }
-        }
+        val byNormalizedChassis = purchaseChassisLookupService.buildEnrichmentIndex(tokens)
 
         return rows.map { e ->
             val matched = matchedPurchasesForHistoryRow(e, byNormalizedChassis)
@@ -281,22 +274,27 @@ class RixoHistoryService(
         return allMatched.values.toList()
     }
 
-    /** All purchase ids matched by any chassis segment on this history row; empty if any segment matches nothing. */
-    private fun matchedPurchaseIdsForRixoHistoryRow(entity: RixoHistory): Set<Long> {
-        val segmentTokens = parseChassisTokens(entity.chassis)
-        if (segmentTokens.isEmpty()) return emptySet()
-        val allMatchedPurchaseIds = linkedSetOf<Long>()
-        for (segment in segmentTokens) {
-            val foundIds = linkedSetOf<Long>()
-            for (expanded in expandTokenSet(setOf(segment))) {
-                for (p in purchaseRepository.findByChassisToken(expanded)) {
-                    p.id?.let { foundIds.add(it) }
-                }
-            }
-            if (foundIds.isEmpty()) return emptySet()
-            allMatchedPurchaseIds.addAll(foundIds)
+    private fun tokensFromHistoryRows(rows: Collection<RixoHistory>): Set<String> {
+        val tokens = linkedSetOf<String>()
+        for (row in rows) {
+            tokens.addAll(parseChassisTokens(row.chassis))
         }
-        return allMatchedPurchaseIds
+        return tokens
+    }
+
+    private fun buildEnrichmentIndexForHistoryRows(rows: Collection<RixoHistory>): Map<String, MutableList<com.automan.backend.model.Purchase>> {
+        if (rows.isEmpty()) return emptyMap()
+        return purchaseChassisLookupService.buildEnrichmentIndex(tokensFromHistoryRows(rows))
+    }
+
+    /** All purchase ids matched by any chassis segment on this history row; empty if any segment matches nothing. */
+    private fun matchedPurchaseIdsForRixoHistoryRow(
+        entity: RixoHistory,
+        byNormalizedChassis: Map<String, List<com.automan.backend.model.Purchase>>? = null,
+    ): Set<Long> {
+        val index = byNormalizedChassis
+            ?: purchaseChassisLookupService.buildEnrichmentIndex(parseChassisTokens(entity.chassis))
+        return matchedPurchasesForHistoryRow(entity, index).mapNotNull { it.id }.toSet()
     }
 
     private fun matchedPurchasesForChassisToken(
@@ -400,41 +398,36 @@ class RixoHistoryService(
      * Kept for unit tests / single-row callers; list path uses the batched in-memory equivalent.
      */
     internal fun computeHistoryRowRixoConfirmedStrict(entity: RixoHistory): Boolean {
-        val allMatchedPurchaseIds = matchedPurchaseIdsForRixoHistoryRow(entity)
-        if (allMatchedPurchaseIds.isEmpty()) return false
-
-        for (purchaseId in allMatchedPurchaseIds) {
-            val p = purchaseRepository.findById(purchaseId).orElse(null) ?: return false
-            if (!PurchaseWorkflowService.isRixoConfirmedForBooking(p)) return false
-        }
-        return true
+        val index = purchaseChassisLookupService.buildEnrichmentIndex(parseChassisTokens(entity.chassis))
+        return isHistoryRowRixoConfirmedStrict(matchedPurchasesForHistoryRow(entity, index))
     }
 
     /**
      * True when at least one purchase matched for any chassis segment on this row has [Purchase.bookingRequested].
      */
     internal fun historyRowHasAnyMatchedPurchaseBookingRequested(entity: RixoHistory): Boolean {
-        val purchaseIds = matchedPurchaseIdsForRixoHistoryRow(entity)
-        if (purchaseIds.isEmpty()) return false
-        for (purchaseId in purchaseIds) {
-            val p = purchaseRepository.findById(purchaseId).orElse(null) ?: continue
-            if (PurchaseWorkflowService.isBookingRequested(p)) return true
-        }
-        return false
+        val index = purchaseChassisLookupService.buildEnrichmentIndex(parseChassisTokens(entity.chassis))
+        val matched = matchedPurchasesForHistoryRow(entity, index)
+        return matched.isNotEmpty() && matched.any { PurchaseWorkflowService.isBookingRequested(it) }
     }
 
     /** ISO-8601 local date-time of the latest [Purchase.updatedAt] among matched Rixo-confirmed purchases, or null. */
     private fun computeHistoryRowRixoConfirmedAtIso(entity: RixoHistory): String? {
-        if (!computeHistoryRowRixoConfirmedStrict(entity)) return null
-        val allMatchedPurchaseIds = matchedPurchaseIdsForRixoHistoryRow(entity)
-        var maxTs: LocalDateTime? = null
-        for (purchaseId in allMatchedPurchaseIds) {
-            val p = purchaseRepository.findById(purchaseId).orElse(null) ?: continue
-            if (!PurchaseWorkflowService.isRixoConfirmedForBooking(p)) continue
-            val u = p.updatedAt
-            if (maxTs == null || u.isAfter(maxTs)) maxTs = u
-        }
-        return maxTs?.toString()
+        val index = purchaseChassisLookupService.buildEnrichmentIndex(parseChassisTokens(entity.chassis))
+        val matched = matchedPurchasesForHistoryRow(entity, index)
+        if (!isHistoryRowRixoConfirmedStrict(matched)) return null
+        return historyRowRixoConfirmedAtIso(matched)
+    }
+
+    /**
+     * Chassis segments for [selectedIds] in list order; missing ids and blank chassis omitted (same as per-id [PurchaseRepository.findById]).
+     */
+    private fun joinChassisFromSelectedPurchaseIds(selectedIds: List<Long>): String {
+        if (selectedIds.isEmpty()) return ""
+        val byId = purchaseRepository.findAllById(selectedIds.distinct()).associateBy { it.id }
+        return selectedIds.mapNotNull { id ->
+            byId[id]?.chassis?.trim()?.takeIf { it.isNotEmpty() }
+        }.joinToString(";")
     }
 
     /**
@@ -457,9 +450,7 @@ class RixoHistoryService(
         val rixoCompany = transportData["rixoCompany"]?.trim()?.takeIf { it.isNotEmpty() }
         val message = transportData["extraMessage"]?.trim()?.takeIf { it.isNotEmpty() }
 
-        val chassisJoined = selectedIds.mapNotNull { id ->
-            purchaseRepository.findById(id).orElse(null)?.chassis?.trim()?.takeIf { it.isNotEmpty() }
-        }.joinToString(";")
+        val chassisJoined = joinChassisFromSelectedPurchaseIds(selectedIds)
         val tChassis = System.nanoTime()
 
         val newTokens = chassisJoined.split(';')
@@ -496,7 +487,8 @@ class RixoHistoryService(
         val clearedIds = if (removedTokens.isEmpty()) {
             emptySet()
         } else {
-            syncRixoConfirmedWithAllHistory()
+            val stillCover = purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows())
+            syncRixoConfirmedWithAllHistory(stillCover)
         }
         val tSync = System.nanoTime()
 
@@ -543,12 +535,9 @@ class RixoHistoryService(
         val expandedTokens = expandTokenSet(tokenSet)
 
         val purchaseById = linkedMapOf<Long, com.automan.backend.model.Purchase>()
-        for (token in expandedTokens) {
-            val found = purchaseRepository.findByChassisToken(token)
-            for (p in found) {
-                val id = p.id ?: continue
-                purchaseById[id] = p
-            }
+        for (p in purchaseChassisLookupService.findByExactTokens(expandedTokens)) {
+            val id = p.id ?: continue
+            purchaseById[id] = p
         }
 
         var updated = 0
@@ -581,11 +570,9 @@ class RixoHistoryService(
             throw IllegalArgumentException("Chassis is not on this Rixo history row")
         }
         val purchases = linkedMapOf<Long, com.automan.backend.model.Purchase>()
-        for (token in expandTokenSet(setOf(tokenKey))) {
-            for (p in purchaseRepository.findByChassisToken(token)) {
-                val id = p.id ?: continue
-                purchases[id] = p
-            }
+        for (p in purchaseChassisLookupService.findByExactTokens(expandTokenSet(setOf(tokenKey)))) {
+            val id = p.id ?: continue
+            purchases[id] = p
         }
         if (purchases.isEmpty()) {
             throw IllegalArgumentException("No purchase matches this chassis")
@@ -627,8 +614,9 @@ class RixoHistoryService(
         val tokens = expandTokenSet(parseChassisTokens(row.chassis))
         val affectedPurchaseIds = purchaseIdsForExpandedTokens(tokens)
         rixoHistoryRepository.deleteById(id)
-        val clearedIds = syncRixoConfirmedWithAllHistory()
-        resetPurchasedWorkflowWhenNotCovered(affectedPurchaseIds)
+        val stillCover = purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows())
+        val clearedIds = syncRixoConfirmedWithAllHistory(stillCover)
+        resetPurchasedWorkflowWhenNotCovered(affectedPurchaseIds, stillCover)
         cascadeDeleteShippingAndInvoiceHistoryFullyCovered(parseChassisTokens(row.chassis))
         purchaseWorkflowService.recomputeByPurchaseIds(affectedPurchaseIds + clearedIds)
         return true
@@ -643,16 +631,19 @@ class RixoHistoryService(
     fun deleteHistoryRows(historyIds: List<Long>): Int {
         val rows = rixoHistoryRepository.findAllById(historyIds.distinct())
         if (rows.isEmpty()) return 0
+        val enrichmentIndex = buildEnrichmentIndexForHistoryRows(rows)
         val affectedPurchaseIds = linkedSetOf<Long>()
         for (row in rows) {
-            val tokens = expandTokenSet(parseChassisTokens(row.chassis))
-            affectedPurchaseIds.addAll(purchaseIdsForExpandedTokens(tokens))
+            affectedPurchaseIds.addAll(
+                matchedPurchaseIdsForRixoHistoryRow(row, enrichmentIndex),
+            )
         }
         val idsToDelete = rows.mapNotNull { it.id }
         val chassisCoverFromDeletedRows = rows.flatMap { parseChassisTokens(it.chassis) }.distinct()
         rixoHistoryRepository.deleteAllById(idsToDelete)
-        val clearedIds = syncRixoConfirmedWithAllHistory()
-        resetPurchasedWorkflowWhenNotCovered(affectedPurchaseIds)
+        val stillCover = purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows())
+        val clearedIds = syncRixoConfirmedWithAllHistory(stillCover)
+        resetPurchasedWorkflowWhenNotCovered(affectedPurchaseIds, stillCover)
         cascadeDeleteShippingAndInvoiceHistoryFullyCovered(chassisCoverFromDeletedRows)
         purchaseWorkflowService.recomputeByPurchaseIds(affectedPurchaseIds + clearedIds)
         return idsToDelete.size
@@ -674,15 +665,13 @@ class RixoHistoryService(
 
         val expanded = expandTokenSet(setOf(tokenClean.uppercase(Locale.ROOT)))
         val affectedPurchaseIds = linkedSetOf<Long>()
-        for (token in expanded) {
-            for (p in purchaseRepository.findByChassisToken(token)) {
-                if (PurchaseWorkflowService.isBookingRequested(p)) {
-                    throw IllegalArgumentException(
-                        "Cannot remove: this car is already booking requested.",
-                    )
-                }
-                p.id?.let { affectedPurchaseIds.add(it) }
+        for (p in purchaseChassisLookupService.findByExactTokens(expanded)) {
+            if (PurchaseWorkflowService.isBookingRequested(p)) {
+                throw IllegalArgumentException(
+                    "Cannot remove: this car is already booking requested.",
+                )
             }
+            p.id?.let { affectedPurchaseIds.add(it) }
         }
 
         val (remainingChassis, removed) = removeFirstMatchingChassisOccurrence(row.chassis, tokenClean)
@@ -741,12 +730,9 @@ class RixoHistoryService(
         excludeId: Long,
     ): RixoHistory? {
         val want = company.trim().lowercase(Locale.ROOT)
-        return rixoHistoryRepository.findAll()
-            .asSequence()
-            .filter { it.id != null && it.id != excludeId }
-            .filter { it.buyingDate == buyingDate }
-            .filter { it.rixoCompany?.trim()?.lowercase(Locale.ROOT) == want }
-            .maxByOrNull { it.id ?: 0L }
+        return rixoHistoryRepository
+            .findByBuyingDateAndCompanyNormalizedExcludingIdOrderByIdDesc(buyingDate, want, excludeId)
+            .firstOrNull()
     }
 
     private fun appendChassisToken(raw: String?, token: String): String {
@@ -770,15 +756,13 @@ class RixoHistoryService(
 
         val expandedRemoved = expandTokenSet(setOf(tokenClean.uppercase(Locale.ROOT)))
         val affectedPurchaseIds = linkedSetOf<Long>()
-        for (token in expandedRemoved) {
-            for (p in purchaseRepository.findByChassisToken(token)) {
-                if (PurchaseWorkflowService.isBookingRequested(p)) {
-                    throw IllegalArgumentException(
-                        "Cannot remove: this car is already booking requested.",
-                    )
-                }
-                p.id?.let { affectedPurchaseIds.add(it) }
+        for (p in purchaseChassisLookupService.findByExactTokens(expandedRemoved)) {
+            if (PurchaseWorkflowService.isBookingRequested(p)) {
+                throw IllegalArgumentException(
+                    "Cannot remove: this car is already booking requested.",
+                )
             }
+            p.id?.let { affectedPurchaseIds.add(it) }
         }
 
         val (newChassis, removed) = removeFirstMatchingChassisOccurrence(row.chassis, tokenClean)
@@ -789,8 +773,9 @@ class RixoHistoryService(
             else -> rixoHistoryRepository.save(row.copy(chassis = newChassis, createdAt = row.createdAt))
         }
 
-        val clearedIds = syncRixoConfirmedWithAllHistory()
-        resetPurchasedWorkflowWhenNotCovered(affectedPurchaseIds)
+        val stillCover = purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows())
+        val clearedIds = syncRixoConfirmedWithAllHistory(stillCover)
+        resetPurchasedWorkflowWhenNotCovered(affectedPurchaseIds, stillCover)
         cascadeDeleteShippingAndInvoiceHistoryFullyCovered(expandedRemoved)
         purchaseWorkflowService.recomputeByPurchaseIds(affectedPurchaseIds + clearedIds)
 
@@ -815,10 +800,13 @@ class RixoHistoryService(
      * When chassis no longer appears in any Rixo history row, roll purchases back to “Purchased”:
      * clear Rixo flags and downstream booking / invoice confirmation.
      */
-    private fun resetPurchasedWorkflowWhenNotCovered(candidatePurchaseIds: Set<Long>) {
-        val stillCover = purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows())
+    private fun resetPurchasedWorkflowWhenNotCovered(
+        candidatePurchaseIds: Set<Long>,
+        stillCover: Set<Long>? = null,
+    ) {
+        val cover = stillCover ?: purchaseIdsForExpandedTokens(expandedTokensFromAllHistoryRows())
         for (id in candidatePurchaseIds) {
-            if (id !in stillCover) {
+            if (id !in cover) {
                 val p = purchaseRepository.findById(id).orElse(null) ?: continue
                 purchaseWorkflowService.setWorkflowStatus(p, com.automan.backend.model.WorkflowStatus.PURCHASED)
             }

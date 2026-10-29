@@ -27,16 +27,10 @@ class RixoHistoryServiceSyncTest {
         val workflowService = PurchaseWorkflowService(purchaseRepository)
         val shippingHistoryService = mock(ShippingHistoryService::class.java)
         val invoiceHistoryService = mock(InvoiceHistoryService::class.java)
-        val service = RixoHistoryService(
-            rixoHistoryRepository,
-            purchaseRepository,
-            workflowService,
-            shippingHistoryService,
-            invoiceHistoryService,
-        )
+        val service = rixoHistoryService(rixoHistoryRepository, purchaseRepository, workflowService)
 
         val purchase = Purchase(id = 10L, chassis = "AA-111", workflowStatus = WorkflowStatus.RIXO_CONFIRMED)
-        `when`(rixoHistoryRepository.findAll()).thenReturn(emptyList())
+        `when`(rixoHistoryRepository.findAllChassisValues()).thenReturn(emptyList())
         `when`(purchaseRepository.findPurchasesWhereRixoConfirmedPositive()).thenReturn(listOf(purchase))
         `when`(purchaseRepository.save(org.mockito.ArgumentMatchers.any(Purchase::class.java)))
             .thenAnswer { it.arguments[0] as Purchase }
@@ -56,27 +50,18 @@ class RixoHistoryServiceSyncTest {
         val workflowService = PurchaseWorkflowService(purchaseRepository)
         val shippingHistoryService = mock(ShippingHistoryService::class.java)
         val invoiceHistoryService = mock(InvoiceHistoryService::class.java)
-        val service = RixoHistoryService(
-            rixoHistoryRepository,
-            purchaseRepository,
-            workflowService,
-            shippingHistoryService,
-            invoiceHistoryService,
-        )
+        val service = rixoHistoryService(rixoHistoryRepository, purchaseRepository, workflowService)
 
         val row = RixoHistory(id = 1L, chassis = "ABC-999")
         `when`(rixoHistoryRepository.findById(1L)).thenReturn(Optional.of(row))
-        `when`(rixoHistoryRepository.findAll()).thenReturn(emptyList())
+        `when`(rixoHistoryRepository.findAllChassisValues()).thenReturn(emptyList())
 
         val p = Purchase(
             id = 10L,
             chassis = "ABC-999",
             workflowStatus = WorkflowStatus.RIXO_CONFIRMED,
         )
-        `when`(purchaseRepository.findByChassisToken(anyString())).thenAnswer { inv ->
-            val token = inv.getArgument<String>(0)
-            if (token == "ABC-999" || token == "ABC") listOf(p) else emptyList()
-        }
+        stubChassisPurchases(purchaseRepository, listOf(p))
         `when`(purchaseRepository.findById(10L)).thenReturn(Optional.of(p))
         `when`(purchaseRepository.findPurchasesWhereRixoConfirmedPositive()).thenReturn(listOf(p))
         `when`(purchaseRepository.save(org.mockito.ArgumentMatchers.any(Purchase::class.java)))
@@ -99,22 +84,13 @@ class RixoHistoryServiceSyncTest {
         val workflowService = PurchaseWorkflowService(purchaseRepository)
         val shippingHistoryService = mock(ShippingHistoryService::class.java)
         val invoiceHistoryService = mock(InvoiceHistoryService::class.java)
-        val service = RixoHistoryService(
-            rixoHistoryRepository,
-            purchaseRepository,
-            workflowService,
-            shippingHistoryService,
-            invoiceHistoryService,
-        )
+        val service = rixoHistoryService(rixoHistoryRepository, purchaseRepository, workflowService)
 
         val row = RixoHistory(id = 1L, chassis = "ABC-999")
         `when`(rixoHistoryRepository.findById(1L)).thenReturn(Optional.of(row))
 
         val p = Purchase(id = 10L, chassis = "ABC-999", workflowStatus = WorkflowStatus.BOOKING_REQUESTED)
-        `when`(purchaseRepository.findByChassisToken(anyString())).thenAnswer { inv ->
-            val token = inv.getArgument<String>(0)
-            if (token == "ABC-999" || token == "ABC") listOf(p) else emptyList()
-        }
+        stubChassisPurchases(purchaseRepository, listOf(p))
         `when`(purchaseRepository.findById(10L)).thenReturn(Optional.of(p))
 
         assertThrows(IllegalArgumentException::class.java) {
@@ -129,22 +105,13 @@ class RixoHistoryServiceSyncTest {
         val workflowService = PurchaseWorkflowService(purchaseRepository)
         val shippingHistoryService = mock(ShippingHistoryService::class.java)
         val invoiceHistoryService = mock(InvoiceHistoryService::class.java)
-        val service = RixoHistoryService(
-            rixoHistoryRepository,
-            purchaseRepository,
-            workflowService,
-            shippingHistoryService,
-            invoiceHistoryService,
-        )
+        val service = rixoHistoryService(rixoHistoryRepository, purchaseRepository, workflowService)
 
         val row = RixoHistory(id = 1L, chassis = "ABC-999;OTHER")
         `when`(rixoHistoryRepository.findById(1L)).thenReturn(Optional.of(row))
 
         val p = Purchase(id = 10L, chassis = "ABC-999", workflowStatus = WorkflowStatus.BOOKING_REQUESTED)
-        `when`(purchaseRepository.findByChassisToken(anyString())).thenAnswer { inv ->
-            val token = inv.getArgument<String>(0)
-            if (token == "ABC-999" || token == "ABC") listOf(p) else emptyList()
-        }
+        stubChassisPurchases(purchaseRepository, listOf(p))
 
         assertThrows(IllegalArgumentException::class.java) {
             service.removeChassisTokenFromHistoryRow(1L, "ABC-999")

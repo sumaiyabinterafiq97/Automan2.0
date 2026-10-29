@@ -45,4 +45,12 @@ class PurchaseDateParseUtilsTest {
         assertNotNull(july)
         assertTrue(june!! < july!!)
     }
+
+    @Test
+    fun sqlLabelDateCandidatePattern_englishMonthDayYear() {
+        assertEquals(
+            "June%15%2026",
+            PurchaseDateParseUtils.sqlLabelDateCandidatePattern(LocalDate.of(2026, 6, 15)),
+        )
+    }
 }

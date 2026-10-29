@@ -20,8 +20,14 @@ class PurchaseVehicleOverrideServiceTest {
 
     private val overrideRepository = mock(PurchaseVehicleOverrideRepository::class.java)
     private val mappingRepository = mock(CarBrandMappingRepository::class.java)
+    private val batchQueries = mock(ChassisBatchQuerySupport::class.java)
     private val objectMapper = ObjectMapper()
-    private val service = PurchaseVehicleOverrideService(overrideRepository, mappingRepository, objectMapper)
+    private val service = PurchaseVehicleOverrideService(
+        overrideRepository,
+        mappingRepository,
+        batchQueries,
+        objectMapper,
+    )
 
     @Test
     fun syncFromPurchase_stores_fuel_delta_vs_map_baseline() {

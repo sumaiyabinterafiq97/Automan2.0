@@ -21,15 +21,7 @@ class RixoHistoryListAllRowsBatchTest {
     private fun service(
         rixoRepo: RixoHistoryRepository,
         purchaseRepo: PurchaseRepository,
-    ): RixoHistoryService {
-        return RixoHistoryService(
-            rixoRepo,
-            purchaseRepo,
-            PurchaseWorkflowService(purchaseRepo),
-            mock(ShippingHistoryService::class.java),
-            mock(InvoiceHistoryService::class.java),
-        )
-    }
+    ): RixoHistoryService = rixoHistoryService(rixoRepo, purchaseRepo)
 
     @Test
     fun `listAllRows computes confirmed booking and date from one purchases load`() {
@@ -42,8 +34,7 @@ class RixoHistoryListAllRowsBatchTest {
         val row = RixoHistory(id = 10L, chassis = "X-1;Y-2", rixoCompany = "Y'S")
 
         `when`(rixoRepo.findAll(sort)).thenReturn(listOf(row))
-        `when`(purchaseRepo.findByChassisToken("X-1")).thenReturn(listOf(p1))
-        `when`(purchaseRepo.findByChassisToken("Y-2")).thenReturn(listOf(p2))
+        stubChassisPurchases(purchaseRepo, listOf(p1, p2))
 
         val dto = service(rixoRepo, purchaseRepo).listAllRows().single()
         assertTrue(dto.rixoConfirmed)
@@ -60,8 +51,7 @@ class RixoHistoryListAllRowsBatchTest {
         val row = RixoHistory(id = 10L, chassis = "X;MISS")
 
         `when`(rixoRepo.findAll(sort)).thenReturn(listOf(row))
-        `when`(purchaseRepo.findByChassisToken("X")).thenReturn(listOf(p1))
-        `when`(purchaseRepo.findByChassisToken("MISS")).thenReturn(emptyList())
+        stubChassisPurchases(purchaseRepo, listOf(p1))
 
         val dto = service(rixoRepo, purchaseRepo).listAllRows().single()
         assertFalse(dto.rixoConfirmed)
