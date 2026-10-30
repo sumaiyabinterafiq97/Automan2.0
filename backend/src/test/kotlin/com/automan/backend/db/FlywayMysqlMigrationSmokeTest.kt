@@ -37,11 +37,11 @@ class FlywayMysqlMigrationSmokeTest {
 
     @Test
     @Timeout(value = 8, unit = TimeUnit.MINUTES)
-    fun cleanMysqlMigratesToV93AndExposesCoreTables() {
+    fun cleanMysqlMigratesToV94AndExposesCoreTables() {
         val url = startMysql()
         val flyway = flyway(url)
         val result = flyway.migrate()
-        assertMigratedTo(flyway, result.migrationsExecuted, "93")
+        assertMigratedTo(flyway, result.migrationsExecuted, "94")
 
         DriverManager.getConnection(url, "root", PASSWORD).use { connection ->
             val tables = tableNames(connection)
@@ -84,7 +84,7 @@ class FlywayMysqlMigrationSmokeTest {
         val migrated = flyway(url)
         val migratedResult = migrated.migrate()
         assertTrue(migratedResult.migrationsExecuted >= 5)
-        assertMigratedTo(migrated, migratedResult.migrationsExecuted, "93")
+        assertMigratedTo(migrated, migratedResult.migrationsExecuted, "94")
 
         DriverManager.getConnection(url, "root", PASSWORD).use { connection ->
             assertEquals("varchar(16)", columnType(connection, "users", "role"))

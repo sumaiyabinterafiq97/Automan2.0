@@ -200,7 +200,7 @@ class ChassisQueryCountMysqlIntegrationTest {
                 ).use { rs ->
                     rs.next()
                     val v = rs.getString(1)
-                    assertTrue(v == "93", "expected Flyway V93, got $v")
+                    assertTrue(v == "94", "expected Flyway V94, got $v")
                 }
             }
         }

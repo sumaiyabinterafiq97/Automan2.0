@@ -2,6 +2,7 @@ package com.automan.backend.service
 
 import com.automan.backend.model.Purchase
 import com.automan.backend.repository.PurchaseRepository
+import com.automan.backend.util.AuctionHouseNormalizer
 import com.automan.backend.util.ChassisKeyNormalizer
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -116,4 +117,9 @@ class PurchaseChassisLookupService(
 fun Purchase.withNormalizedChassisKey(): Purchase {
     val key = ChassisKeyNormalizer.normalize(chassis)
     return if (chassisKey == key) this else copy(chassisKey = key)
+}
+
+fun Purchase.withNormalizedAuctionHouseNorm(): Purchase {
+    val norm = AuctionHouseNormalizer.normalize(auctionHouse)
+    return if (auctionHouseNorm == norm) this else copy(auctionHouseNorm = norm)
 }

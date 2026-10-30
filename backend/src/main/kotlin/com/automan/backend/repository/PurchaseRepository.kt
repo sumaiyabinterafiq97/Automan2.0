@@ -116,6 +116,9 @@ interface PurchaseRepository : JpaRepository<Purchase, Long> {
         "SELECT p FROM Purchase p WHERE UPPER(TRIM(COALESCE(p.auctionHouse,''))) = UPPER(TRIM(:auctionHouse))",
     )
     fun findByAuctionHouseIgnoreCaseTrim(@Param("auctionHouse") auctionHouse: String): List<Purchase>
+
+    @Query("SELECT p FROM Purchase p WHERE p.auctionHouseNorm = :norm")
+    fun findByAuctionHouseNorm(@Param("norm") norm: String): List<Purchase>
     
     // Method to find purchases by chassis (can return multiple since chassis is no longer unique)
     fun findByChassis(chassis: String): List<Purchase>

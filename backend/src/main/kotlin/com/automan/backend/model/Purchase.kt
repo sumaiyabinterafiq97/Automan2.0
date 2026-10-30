@@ -1,6 +1,8 @@
 package com.automan.backend.model
 
+import com.automan.backend.util.AuctionHouseNormalizer
 import com.automan.backend.util.ChassisKeyNormalizer
+import com.fasterxml.jackson.annotation.JsonIgnore
 import jakarta.persistence.*
 import java.time.LocalDateTime
 import com.fasterxml.jackson.annotation.JsonAlias
@@ -118,6 +120,11 @@ data class Purchase(
     @Column(name = "auction_house")
     @com.fasterxml.jackson.annotation.JsonAlias("auctionName")
     val auctionHouse: String? = null,
+
+    /** Indexed lookup key: UPPER(TRIM(COALESCE(auction_house,''))). Maintained on write; backfilled in V94. */
+    @field:JsonIgnore
+    @Column(name = "auction_house_norm", length = 100)
+    var auctionHouseNorm: String? = null,
     
     @Column(name = "stock_location")
     val stockLocation: String? = null,
@@ -281,5 +288,6 @@ data class Purchase(
     @PreUpdate
     fun maintainChassisKey() {
         chassisKey = ChassisKeyNormalizer.normalize(chassis)
+        auctionHouseNorm = AuctionHouseNormalizer.normalize(auctionHouse)
     }
 }

@@ -106,12 +106,16 @@ class PurchaseService(
 
     private fun persistPurchase(purchase: Purchase): Purchase =
         purchaseRepository.save(
-            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)).withNormalizedChassisKey(),
+            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase))
+                .withNormalizedChassisKey()
+                .withNormalizedAuctionHouseNorm(),
         )
 
     private fun persistPurchaseAndFlush(purchase: Purchase): Purchase =
         purchaseRepository.saveAndFlush(
-            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase)).withNormalizedChassisKey(),
+            purchaseWorkflowService.applyWorkflowWrite(localPurchaseSanitizer.apply(purchase))
+                .withNormalizedChassisKey()
+                .withNormalizedAuctionHouseNorm(),
         )
 
     /** Stock Location Map POL tokens for a purchase stock name. */
