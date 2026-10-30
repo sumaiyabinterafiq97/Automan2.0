@@ -22200,10 +22200,14 @@ fun restoreCarBookingState() {
             carrierSelectEl.value = restoredCarrier
         }
     }
-    // Restore chassis search input value (plain input, no dropdown)
+    // Restore chassis search: Create mode uses search as list filter (cleared on restore); Recreate keeps saved value.
     val chassisValue = bookingDynString(carBookingFormState.chassisSelect)
-    if (chassisInputEl != null && chassisValue != null && chassisValue != "" && chassisValue.trim() != "") {
-        chassisInputEl.value = chassisValue
+    if (isCarBookingRecreateSession()) {
+        if (chassisInputEl != null && chassisValue.isNotEmpty()) {
+            chassisInputEl.value = chassisValue
+        }
+    } else {
+        resetBookingListChassisFilterForRestore()
     }
     
     console.log("🔍 Form fields restored - Country: ${carBookingFormState.consigneeCountry}, POL: ${carBookingFormState.polPort}")
@@ -22314,6 +22318,7 @@ fun restoreSelectedRows() {
         }
     }
     
+    syncBookingListCheckedChassisFromChassisList(carBookingSelectedRows)
     updateBookingSelectAllCheckbox()
 
     js("window.__bookingRestoreInProgress = false")
@@ -29121,6 +29126,7 @@ fun generateShippingSchedulePdf() {
         console.log("📋 Reading booking details from booking page form...")
         storeBookingDetailsForPdf()
         } else {
+        syncGlobalSelectedCarsForPdfFromCnfOrder()
         // On C&F/FOB page - use already stored values (stored when Calculate button was clicked)
         console.log("📋 Using stored booking details from booking page...")
         console.log("📋 Stored booking details:", globalBookingDetails)
@@ -29246,6 +29252,7 @@ fun generateShippingSchedulePdfPreview() {
         console.log("📋 Reading booking details from booking page form...")
         storeBookingDetailsForPdf()
             } else {
+        syncGlobalSelectedCarsForPdfFromCnfOrder()
         // On C&F/FOB page - use already stored values (stored when Calculate button was clicked)
         console.log("📋 Using stored booking details from booking page...")
         console.log("📋 Stored booking details:", globalBookingDetails)
@@ -29387,6 +29394,10 @@ fun generateShippingSchedulePdfPreview() {
 
 // Show chassis suggestions dropdown (used by booking chassis search - input is chassisSearchInput, add via addCarToBookingTable)
 fun showChassisSuggestions(suggestions: Array<String>) {
+    if (!isCarBookingRecreateSession()) {
+        hideChassisSuggestions()
+        return
+    }
     val suggestionsDiv = document.getElementById("chassisSuggestions") as? HTMLElement
     if (suggestionsDiv == null) return
     
@@ -29405,11 +29416,18 @@ fun showChassisSuggestions(suggestions: Array<String>) {
             val chassisInput = document.getElementById("chassisSearchInput") as? HTMLInputElement
             chassisInput?.value = chassis
             hideChassisSuggestions()
-            val addCar = js("window.addCarToBookingTable")
-            if (addCar != null && js("typeof addCar === 'function'") as Boolean) {
-                (addCar as (String) -> Unit)(chassis)
+            if (!isCarBookingRecreateSession()) {
+                val applyFilter = js("window.applyBookingListChassisFilterFromInput")
+                if (applyFilter != null && js("typeof applyFilter === 'function'") as Boolean) {
+                    (applyFilter as () -> Unit)()
+                }
             } else {
-                searchCarsByChassis(chassis)
+                val addCar = js("window.addCarToBookingTable")
+                if (addCar != null && js("typeof addCar === 'function'") as Boolean) {
+                    (addCar as (String) -> Unit)(chassis)
+                } else {
+                    searchCarsByChassis(chassis)
+                }
             }
         })
         suggestionItem.addEventListener("mouseenter", { _: Event ->

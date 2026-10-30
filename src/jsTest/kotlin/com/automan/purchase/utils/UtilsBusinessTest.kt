@@ -15,6 +15,7 @@ import com.automan.purchase.purchaseColumnOrderAfterCheck
 import com.automan.purchase.purchaseColumnOrderAfterUncheck
 import com.automan.purchase.purchaseColumnPickerRows
 import com.automan.purchase.reorderPurchaseListColumn
+import com.automan.purchase.reorderListByKey
 import com.automan.purchase.sortPurchasesInMemory
 import com.automan.purchase.sortSelectedPurchaseColumnsByLabel
 import com.automan.purchase.formatCarModelYear
@@ -117,6 +118,13 @@ class UtilsBusinessTest {
         )
         val eleven = (1..12).map { "extra$it" }
         assertEquals(11, ensurePurchaseListMandatoryColumnsPreservingOrder(eleven, 11).size)
+    }
+
+    @Test
+    fun reorderListByKeyMovesOneItemToTargetIndex() {
+        val keys = listOf("A", "B", "C")
+        assertEquals(listOf("B", "A", "C"), reorderListByKey(keys, "A", 1))
+        assertEquals(listOf("B", "C", "A"), reorderListByKey(keys, "A", 2))
     }
 
     @Test

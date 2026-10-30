@@ -31,6 +31,10 @@ private data class CnfExpenseLockState(
 
 private val cnfExpenseLockByChassis = mutableMapOf<String, CnfExpenseLockState>()
 
+private var cnfRowDragChassis: String? = null
+
+private fun cnfChassisNorm(ch: String): String = ch.trim().uppercase()
+
 private fun cnfExpenseLockState(chassis: String): CnfExpenseLockState =
     cnfExpenseLockByChassis.getOrPut(chassis) { CnfExpenseLockState() }
 
@@ -118,6 +122,7 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false, isRecreateCalculation: 
                     <table id="cnfCarsTable" class="cnf-cars-table">
                         <thead>
                             <tr>
+                                <th class="cnf-th-grip" scope="col" style="width: 32px; text-align: center;"><span class="visually-hidden">Order</span></th>
                                 <th class="cnf-th-icon" scope="col" style="width: 30px; text-align: center;"><span class="visually-hidden">Expand</span><span aria-hidden="true">▼</span></th>
                                 <th class="cnf-th-icon" scope="col" style="width: 36px; text-align: center;" title="Saved"><span class="visually-hidden">Saved</span><span aria-hidden="true">●</span></th>
                                 <th scope="col" style="width: 160px;">Chassis</th>
@@ -166,7 +171,7 @@ fun createCnfCalculationHTML(isFobMode: Boolean = false, isRecreateCalculation: 
     """
 }
 
-/** Inner HTML for expanded detail row: single &lt;td colspan="7"&gt; only (parent &lt;tr&gt; is created in JS). */
+/** Inner HTML for expanded detail row: single &lt;td colspan="8"&gt; only (parent &lt;tr&gt; is created in JS). */
 fun createCnfCarExpandedRowInnerHTML(chassis: String, isFobMode: Boolean = false): String {
     fun field(field: String, label: String, extraClass: String = ""): String {
         val id = cnfFieldDomId(chassis, field)
@@ -189,7 +194,7 @@ fun createCnfCarExpandedRowInnerHTML(chassis: String, isFobMode: Boolean = false
     val usdTotalId = cnfFieldDomId(chassis, "totalCnfPriceUsd")
     
     return """
-                <td colspan="7">
+                <td colspan="8">
                 <div class="cnf-expanded-content">
                     <!-- Cost Fields Grid -->
                     <div class="cnf-expanded-grid">
@@ -455,6 +460,7 @@ fun renderCnfCarsTable(cars: List<dynamic>, isFobMode: Boolean = false) {
         mainRow.className = "cnf-table-row"
         
         mainRow.innerHTML = """
+            <td class="cnf-td-grip"><span class="cnf-row-grip" draggable="true" aria-label="Drag to reorder row" title="Drag to reorder">⋮⋮</span></td>
             <td class="cnf-td-expand"><button type="button" class="cnf-expand-btn" data-chassis="$chassis" aria-expanded="false" aria-label="Expand cost details for $chassis">▼</button></td>
             <td class="cnf-td-saved"><span class="cnf-row-saved-indicator" data-chassis="$chassis" role="img" aria-label="Not saved" title="Saved to purchases"></span></td>
             <td class="cnf-td-chassis">$chassis</td>
@@ -487,8 +493,144 @@ fun renderCnfCarsTable(cars: List<dynamic>, isFobMode: Boolean = false) {
         // Load cost data for this car
         loadCnfCarCostData(car, chassis, isFobMode)
     }
+
+    setupCnfTableRowDragDrop()
     
     console.log("✅ Rendered ${cars.size} cars in table")
+}
+
+private fun cnfMainRowChassisOrderFromDom(): List<String> {
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return emptyList()
+    val mains = tbody.querySelectorAll("tr.cnf-table-row")
+    val out = mutableListOf<String>()
+    for (i in 0 until mains.length) {
+        val row = mains.item(i) as? HTMLElement ?: continue
+        val ch = row.getAttribute("data-chassis")?.trim().orEmpty()
+        if (ch.isNotEmpty()) out.add(ch)
+    }
+    return out
+}
+
+private fun cnfDetailRowForChassisEl(tbody: HTMLTableSectionElement, chassis: String): HTMLTableRowElement? {
+    val rows = tbody.querySelectorAll("tr.cnf-detail-row")
+    for (i in 0 until rows.length) {
+        val row = rows.item(i) as? HTMLTableRowElement ?: continue
+        val ch = row.getAttribute("data-chassis")?.trim().orEmpty()
+        if (ch.equals(chassis, ignoreCase = true)) return row
+    }
+    return null
+}
+
+private fun cnfMainRowForChassisEl(tbody: HTMLTableSectionElement, chassis: String): HTMLTableRowElement? {
+    val rows = tbody.querySelectorAll("tr.cnf-table-row")
+    for (i in 0 until rows.length) {
+        val row = rows.item(i) as? HTMLTableRowElement ?: continue
+        val ch = row.getAttribute("data-chassis")?.trim().orEmpty()
+        if (ch.equals(chassis, ignoreCase = true)) return row
+    }
+    return null
+}
+
+private fun reorderCnfTableDomByChassisOrder(orderedChassis: List<String>) {
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return
+    for (ch in orderedChassis) {
+        val main = cnfMainRowForChassisEl(tbody, ch) ?: continue
+        val detail = cnfDetailRowForChassisEl(tbody, ch)
+        tbody.appendChild(main)
+        if (detail != null) tbody.appendChild(detail)
+    }
+}
+
+fun syncCnfPageSelectedCarsOrderFromDom() {
+    val order = cnfMainRowChassisOrderFromDom()
+    if (order.isEmpty()) return
+    val used = mutableSetOf<String>()
+    val out = mutableListOf<dynamic>()
+    for (ch in order) {
+        val car = cnfPageSelectedCars.firstOrNull {
+            it.chassis?.toString()?.trim().orEmpty().equals(ch, ignoreCase = true)
+        } ?: continue
+        val key = cnfChassisNorm(ch)
+        if (used.add(key)) out.add(car)
+    }
+    for (car in cnfPageSelectedCars) {
+        val ch = car.chassis?.toString()?.trim().orEmpty()
+        if (ch.isEmpty()) continue
+        if (!used.contains(cnfChassisNorm(ch))) out.add(car)
+    }
+    cnfPageSelectedCars = out
+}
+
+fun syncGlobalSelectedCarsForPdfFromCnfOrder() {
+    if (cnfPageSelectedCars.isEmpty()) return
+    syncCnfPageSelectedCarsOrderFromDom()
+    val out = mutableListOf<dynamic>()
+    for (car in cnfPageSelectedCars) {
+        val ch = car.chassis?.toString()?.trim().orEmpty()
+        if (ch.isEmpty()) continue
+        val fromPdf = globalSelectedCarsForPdf.firstOrNull {
+            it.chassis?.toString()?.trim().orEmpty().equals(ch, ignoreCase = true)
+        }
+        out.add(fromPdf ?: car)
+    }
+    for (car in globalSelectedCarsForPdf) {
+        val ch = car.chassis?.toString()?.trim().orEmpty()
+        if (ch.isEmpty()) continue
+        if (out.none { it.chassis?.toString()?.trim().orEmpty().equals(ch, ignoreCase = true) }) {
+            out.add(car)
+        }
+    }
+    globalSelectedCarsForPdf = out
+}
+
+private fun moveCnfRowInOrder(fromChassis: String, toChassis: String) {
+    if (fromChassis.equals(toChassis, ignoreCase = true)) return
+    val order = cnfMainRowChassisOrderFromDom()
+    if (order.isEmpty()) return
+    val fromKey = order.firstOrNull { it.equals(fromChassis, ignoreCase = true) } ?: return
+    val toIndex = order.indexOfFirst { it.equals(toChassis, ignoreCase = true) }
+    if (toIndex < 0) return
+    val newOrder = reorderListByKey(order, fromKey, toIndex)
+    reorderCnfTableDomByChassisOrder(newOrder)
+    syncCnfPageSelectedCarsOrderFromDom()
+    syncGlobalSelectedCarsForPdfFromCnfOrder()
+}
+
+private fun setupCnfTableRowDragDrop() {
+    val tbody = document.getElementById("cnfCarsTableBody") as? HTMLTableSectionElement ?: return
+    val mains = tbody.querySelectorAll("tr.cnf-table-row")
+    for (i in 0 until mains.length) {
+        val mainRow = mains.item(i) as? HTMLTableRowElement ?: continue
+        val chassis = mainRow.getAttribute("data-chassis")?.trim().orEmpty()
+        if (chassis.isEmpty()) continue
+        if (mainRow.getAttribute("data-cnf-dnd-bound") == "true") continue
+        mainRow.setAttribute("data-cnf-dnd-bound", "true")
+
+        val grip = mainRow.querySelector(".cnf-row-grip") as? HTMLElement
+        grip?.addEventListener("dragstart", { ev: Event ->
+            cnfRowDragChassis = chassis
+            mainRow.classList.add("cnf-table-row--dragging")
+            ev.stopPropagation()
+            (ev.asDynamic().dataTransfer)?.effectAllowed = "move"
+        })
+        grip?.addEventListener("dragend", { _: Event ->
+            mainRow.classList.remove("cnf-table-row--dragging")
+            cnfRowDragChassis = null
+        })
+
+        mainRow.addEventListener("dragover", { ev: Event ->
+            if (cnfRowDragChassis == null) return@addEventListener
+            ev.preventDefault()
+            (ev.asDynamic().dataTransfer)?.dropEffect = "move"
+        })
+        mainRow.addEventListener("drop", { ev: Event ->
+            ev.preventDefault()
+            val from = cnfRowDragChassis ?: return@addEventListener
+            moveCnfRowInOrder(from, chassis)
+            cnfRowDragChassis = null
+            mainRow.classList.remove("cnf-table-row--dragging")
+        })
+    }
 }
 
 private fun setCnfExpandBtnState(btn: HTMLButtonElement?, expanded: Boolean, chassis: String? = null) {

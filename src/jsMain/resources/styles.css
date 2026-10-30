@@ -10016,6 +10016,41 @@ input.client-form-readonly:read-only {
     border-right: none;
 }
 
+.cnf-td-grip {
+    text-align: center;
+    width: 32px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.cnf-row-grip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    user-select: none;
+    color: #9ca3af;
+    font-size: 14px;
+    letter-spacing: -2px;
+    line-height: 1;
+    padding: 4px 2px;
+    border-radius: 4px;
+}
+
+.cnf-row-grip:hover {
+    color: #4b5563;
+    background: #f3f4f6;
+}
+
+.cnf-row-grip:active {
+    cursor: grabbing;
+}
+
+.cnf-table-row--dragging {
+    opacity: 0.85;
+    background-color: #eff6ff !important;
+}
+
 /* C&F table: per-row “saved” indicator (light green when costs persisted) */
 .cnf-row-saved-indicator {
     display: inline-flex;
@@ -11350,13 +11385,14 @@ input.client-form-readonly:read-only {
         flex-shrink: 0;
     }
 
-    .cnf-cars-table tr.cnf-table-row td:nth-child(1)::before { content: "Expand"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(2)::before { content: "Saved"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(3)::before { content: "Chassis"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(4)::before { content: "Car Name"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(5)::before { content: "Car Price"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(6)::before { content: "Total"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(7)::before { content: "Save"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(1)::before { content: "Order"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(2)::before { content: "Expand"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(3)::before { content: "Saved"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(4)::before { content: "Chassis"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(5)::before { content: "Car Name"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(6)::before { content: "Car Price"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(7)::before { content: "Total"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(8)::before { content: "Save"; }
 
     .cnf-cars-table tr.cnf-detail-row {
         display: none;

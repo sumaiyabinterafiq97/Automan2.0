@@ -46,6 +46,95 @@ private var bookingSelectedDataColumns: MutableList<String> = mutableListOf()
 private var bookingListSortField: String = "chassis"
 private var bookingListSortOrder: String = "asc"
 
+/** Create booking: client-side chassis filter on loaded list (render only). */
+private var bookingListChassisFilterQuery: String = ""
+private val bookingListCheckedChassis: MutableSet<String> = mutableSetOf()
+
+private fun bookingChassisKey(chassis: String): String = chassis.trim().uppercase()
+
+private fun bookingChassisToken(purchase: dynamic): String =
+    purchase.chassis?.toString()?.trim().orEmpty()
+
+internal fun purchaseMatchesBookingListChassisFilter(purchase: dynamic, query: String): Boolean {
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return true
+    return bookingChassisToken(purchase).lowercase().contains(q)
+}
+
+private fun bookingListCarsForRender(): Array<dynamic> {
+    if (isCarBookingRecreateSession()) return carBookingDisplayedCars
+    val q = bookingListChassisFilterQuery.trim()
+    if (q.isEmpty()) return carBookingDisplayedCars
+    return carBookingDisplayedCars.filter { purchaseMatchesBookingListChassisFilter(it, q) }.toTypedArray()
+}
+
+private fun resetBookingListChassisFilterState(clearInput: Boolean = true) {
+    bookingListChassisFilterQuery = ""
+    if (clearInput) {
+        (document.getElementById("chassisSearchInput") as? HTMLInputElement)?.value = ""
+        document.getElementById("chassisSearchClearBtn")?.classList?.add("is-hidden")
+    }
+    hideChassisSuggestions()
+}
+
+fun applyBookingListChassisFilterFromInput() {
+    if (isCarBookingRecreateSession()) return
+    val input = document.getElementById("chassisSearchInput") as? HTMLInputElement
+    bookingListChassisFilterQuery = input?.value?.trim().orEmpty()
+    syncBookingListChassisSearchClearVisibility()
+    if (carBookingDisplayedCars.isEmpty() && bookingListChassisFilterQuery.isNotEmpty()) {
+        showMessage("Select country and stock location first", "info")
+        return
+    }
+    hideChassisSuggestions()
+    rebuildBookingListTableFromDisplayedCars()
+}
+
+fun clearBookingListChassisFilter() {
+    if (isCarBookingRecreateSession()) return
+    resetBookingListChassisFilterState(clearInput = true)
+    rebuildBookingListTableFromDisplayedCars()
+}
+
+/** Back from C&F: clear list filter without requiring a loaded table. */
+fun resetBookingListChassisFilterForRestore() {
+    if (isCarBookingRecreateSession()) return
+    resetBookingListChassisFilterState(clearInput = true)
+}
+
+fun syncBookingListCheckedChassisFromChassisList(chassisList: Array<String>) {
+    if (isCarBookingRecreateSession()) return
+    bookingListCheckedChassis.clear()
+    for (ch in chassisList) {
+        if (ch.isNotBlank()) bookingListCheckedChassis.add(bookingChassisKey(ch))
+    }
+}
+
+private fun syncBookingListChassisSearchClearVisibility() {
+    val input = document.getElementById("chassisSearchInput") as? HTMLInputElement
+    val clearBtn = document.getElementById("chassisSearchClearBtn") as? HTMLElement ?: return
+    val hasQuery = (input?.value?.trim().orEmpty()).isNotEmpty()
+    if (hasQuery) clearBtn.classList.remove("is-hidden") else clearBtn.classList.add("is-hidden")
+}
+
+private fun syncBookingListCheckboxToSet(checkbox: HTMLInputElement) {
+    if (isCarBookingRecreateSession()) return
+    val ch = checkbox.getAttribute("data-chassis")?.trim().orEmpty()
+    if (ch.isEmpty()) return
+    val key = bookingChassisKey(ch)
+    if (checkbox.checked) bookingListCheckedChassis.add(key) else bookingListCheckedChassis.remove(key)
+}
+
+private fun bookingSelectAllVisibleCheckboxes(isChecked: Boolean) {
+    val tableBody = document.getElementById("carSelectionTableBody") ?: return
+    val checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
+    for (i in 0 until checkboxes.length) {
+        val checkbox = checkboxes.item(i) as? HTMLInputElement ?: continue
+        checkbox.checked = isChecked
+        syncBookingListCheckboxToSet(checkbox)
+    }
+}
+
 private fun bookingColumnStorageKey(): String = "bookingSelectedColumns"
 
 private fun bookingAvailableDataColumns(): List<String> =
@@ -168,15 +257,10 @@ private fun paintBookingListTableHeader(forceRecreateMode: Boolean? = null) {
         document.getElementById("selectAllCars")?.addEventListener("change", { event: Event ->
             val target = event.target as? HTMLInputElement
             val isChecked = target?.checked ?: false
-            val tableBody = document.getElementById("carSelectionTableBody")
-            if (tableBody != null) {
-                val checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
-                for (i in 0 until checkboxes.length) {
-                    (checkboxes.item(i) as? HTMLInputElement)?.checked = isChecked
-                }
-            }
+            bookingSelectAllVisibleCheckboxes(isChecked)
             target?.indeterminate = false
             updateBookingCarsSelectedCount()
+            updateBookingSelectAllCheckbox()
         })
     }
     val sortBtns = theadRow.querySelectorAll("button[data-booking-sort]")
@@ -208,12 +292,14 @@ private fun toggleBookingListSort(field: String) {
         bookingListSortField = field
         bookingListSortOrder = "asc"
     }
-    val checked = bookingListCheckedChassisSet()
     applyBookingListCurrentSort()
-    rebuildBookingListTableFromDisplayedCars(checked)
+    rebuildBookingListTableFromDisplayedCars()
 }
 
 private fun bookingListCheckedChassisSet(): Set<String> {
+    if (!isCarBookingRecreateSession()) {
+        return bookingListCheckedChassis.toSet()
+    }
     val out = mutableSetOf<String>()
     val tableBody = document.getElementById("carSelectionTableBody") ?: return out
     val checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
@@ -229,11 +315,16 @@ private fun bookingListCheckedChassisSet(): Set<String> {
 
 /** Full rebuild of LIST from [carBookingDisplayedCars] (used after Column Filter Apply). */
 private fun rebuildBookingListTableFromDisplayedCars(restoreCheckedChassis: Set<String>? = null) {
-    val checked = restoreCheckedChassis ?: bookingListCheckedChassisSet()
+    if (restoreCheckedChassis != null && !isCarBookingRecreateSession()) {
+        bookingListCheckedChassis.clear()
+        restoreCheckedChassis.forEach { ch ->
+            if (ch.isNotBlank()) bookingListCheckedChassis.add(bookingChassisKey(ch))
+        }
+    }
     paintBookingListTableHeader()
     val tbody = document.getElementById("carSelectionTableBody") as? HTMLElement ?: return
     tbody.innerHTML = ""
-    val cars = carBookingDisplayedCars
+    val cars = bookingListCarsForRender()
     for (i in cars.indices) {
         appendBookingListRow(cars[i])
     }
@@ -242,7 +333,9 @@ private fun rebuildBookingListTableFromDisplayedCars(restoreCheckedChassis: Set<
         for (i in 0 until checkboxes.length) {
             val cb = checkboxes.item(i) as? HTMLInputElement ?: continue
             val ch = cb.getAttribute("data-chassis")?.trim().orEmpty()
-            if (ch.isNotEmpty() && checked.contains(ch)) cb.checked = true
+            if (ch.isNotEmpty() && bookingListCheckedChassis.contains(bookingChassisKey(ch))) {
+                cb.checked = true
+            }
         }
     }
     updateBookingCarsSelectedCount()
@@ -985,7 +1078,7 @@ fun showCarBookingPage() {
                                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
                                 </span>
                                 <input type="text" id="chassisSearchInput" class="booking-chassis-search-input" role="searchbox" autocomplete="off" inputmode="search"
-                                       placeholder="Type to search chassis from purchases…" aria-label="Search chassis from purchases">
+                                       placeholder="${if (isRecreateMode) "Type to search chassis from purchases…" else "Search chassis in list…"}" aria-label="Search chassis">
                                 <button type="button" id="chassisSearchClearBtn" class="booking-chassis-search-clear is-hidden" title="Clear search" aria-label="Clear chassis search">×</button>
                             </div>
                             <div id="chassisSuggestions" class="booking-chassis-suggestions"></div>
@@ -1000,7 +1093,7 @@ fun showCarBookingPage() {
                         <div class="booking-table-card is-empty">
                             <div id="bookingListEmpty" class="booking-list-empty" role="status">
                                 <p class="booking-list-empty-title">No cars in the list yet</p>
-                                <p class="booking-list-empty-hint">Choose country and stock location, then search a chassis — or wait for matching purchases to load.</p>
+                                <p class="booking-list-empty-hint">${if (isRecreateMode) "Choose country and stock location, then search a chassis — or wait for matching purchases to load." else "Choose country and stock location to load cars, then use Search chassis to narrow the list."}</p>
                             </div>
                             <table class="booking-chassis-table">
                                 <thead>
@@ -1351,23 +1444,17 @@ fun setupCarBookingPageListeners() {
     document.getElementById("selectAllCars")?.addEventListener("change", { event: Event ->
         val target = event.target as? HTMLInputElement
         val isChecked = target?.checked ?: false
-        
-        val tableBody = document.getElementById("carSelectionTableBody")
-        if (tableBody != null) {
-            val checkboxes = tableBody.querySelectorAll("input[type='checkbox']")
-            for (i in 0 until checkboxes.length) {
-                val checkbox = checkboxes.item(i) as? HTMLInputElement
-                checkbox?.checked = isChecked
-            }
-            Logger.debug("${if (isChecked) "Selected" else "Deselected"} all ${checkboxes.length} cars")
-        }
+        bookingSelectAllVisibleCheckboxes(isChecked)
+        Logger.debug("${if (isChecked) "Selected" else "Deselected"} all visible cars in list")
         target?.indeterminate = false
         updateBookingCarsSelectedCount()
+        updateBookingSelectAllCheckbox()
     })
 
     document.getElementById("carSelectionTableBody")?.addEventListener("change", { event: Event ->
         val target = event.target as? HTMLInputElement ?: return@addEventListener
         if (target.type != "checkbox" || !target.classList.contains("car-checkbox")) return@addEventListener
+        syncBookingListCheckboxToSet(target)
         updateBookingCarsSelectedCount()
         updateBookingSelectAllCheckbox()
     })
@@ -1604,14 +1691,12 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
         Logger.debug("Saved existing POD value to state: $currentPodValue")
     }
     
-    // Chassis search: plain input - show suggestions from purchase table search, add car on Enter or suggestion click
+    // Chassis search: Create = filter loaded list; Recreate = API suggestions + add car
     window.asDynamic().addCarToBookingTable = ::addCarToBookingTable
+    window.asDynamic().applyBookingListChassisFilterFromInput = ::applyBookingListChassisFilterFromInput
     var chassisSearchDebounceTimer: dynamic = 0
     fun syncChassisSearchClearVisibility() {
-        val input = document.getElementById("chassisSearchInput") as? HTMLInputElement
-        val clearBtn = document.getElementById("chassisSearchClearBtn") as? HTMLElement ?: return
-        val hasQuery = (input?.value?.trim().orEmpty()).isNotEmpty()
-        if (hasQuery) clearBtn.classList.remove("is-hidden") else clearBtn.classList.add("is-hidden")
+        syncBookingListChassisSearchClearVisibility()
     }
     document.getElementById("chassisSearchInput")?.addEventListener("input", { event: Event ->
         val input = event.target as? HTMLInputElement ?: return@addEventListener
@@ -1619,15 +1704,23 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
         val q = input.value.trim()
         window.clearTimeout(chassisSearchDebounceTimer)
         chassisSearchDebounceTimer = window.setTimeout({
-            fetchChassisSuggestionsForBooking(q)
+            if (isCarBookingRecreateSession()) {
+                fetchChassisSuggestionsForBooking(q)
+            } else {
+                applyBookingListChassisFilterFromInput()
+            }
         }, 250)
     })
     document.getElementById("chassisSearchClearBtn")?.addEventListener("click", { _: Event ->
-        val input = document.getElementById("chassisSearchInput") as? HTMLInputElement
-        input?.value = ""
-        syncChassisSearchClearVisibility()
-        hideChassisSuggestions()
-        input?.focus()
+        if (isCarBookingRecreateSession()) {
+            val input = document.getElementById("chassisSearchInput") as? HTMLInputElement
+            input?.value = ""
+            syncChassisSearchClearVisibility()
+            hideChassisSuggestions()
+            input?.focus()
+        } else {
+            clearBookingListChassisFilter()
+        }
     })
     document.getElementById("chassisSearchInput")?.addEventListener("keydown", { event: Event ->
         val keyEvent = event.asDynamic()
@@ -1637,7 +1730,11 @@ fun attachPodChangeListener(podPortEl: HTMLElement) {
             if (chassis.isNotEmpty()) {
                 keyEvent.preventDefault()
                 hideChassisSuggestions()
-                addCarToBookingTable(chassis)
+                if (isCarBookingRecreateSession()) {
+                    addCarToBookingTable(chassis)
+                } else {
+                    applyBookingListChassisFilterFromInput()
+                }
             }
         }
     })
@@ -2227,6 +2324,8 @@ fun loadFilteredPurchasesIntoTable() {
 
 fun clearBookingListTable() {
     carBookingDisplayedCars = emptyArray()
+    bookingListCheckedChassis.clear()
+    resetBookingListChassisFilterState(clearInput = true)
     val tbody = document.getElementById("carSelectionTableBody")
     tbody?.innerHTML = ""
     Logger.debug("Cleared booking list table")
@@ -2237,11 +2336,31 @@ fun clearBookingListTable() {
 
 private fun updateBookingListEmptyState() {
     val emptyEl = document.getElementById("bookingListEmpty") as? HTMLElement ?: return
-    val hasCars = carBookingDisplayedCars.isNotEmpty()
-    emptyEl.hidden = hasCars
-    emptyEl.setAttribute("aria-hidden", if (hasCars) "true" else "false")
     val tableCard = document.querySelector(".booking-table-card") as? HTMLElement
-    tableCard?.classList?.toggle("is-empty", !hasCars)
+    val baseEmpty = carBookingDisplayedCars.isEmpty()
+    val filterActive = !isCarBookingRecreateSession() && bookingListChassisFilterQuery.trim().isNotEmpty()
+    val renderCount = bookingListCarsForRender().size
+    val noMatch = filterActive && !baseEmpty && renderCount == 0
+
+    if (baseEmpty) {
+        emptyEl.hidden = false
+        emptyEl.setAttribute("aria-hidden", "false")
+        (emptyEl.querySelector(".booking-list-empty-title") as? HTMLElement)?.textContent = "No cars in the list yet"
+        tableCard?.classList?.add("is-empty")
+        return
+    }
+    if (noMatch) {
+        emptyEl.hidden = false
+        emptyEl.setAttribute("aria-hidden", "false")
+        (emptyEl.querySelector(".booking-list-empty-title") as? HTMLElement)?.textContent = "No matching chassis"
+        (emptyEl.querySelector(".booking-list-empty-hint") as? HTMLElement)?.textContent =
+            "Try a different search or clear the search box to see all cars."
+        tableCard?.classList?.remove("is-empty")
+        return
+    }
+    emptyEl.hidden = true
+    emptyEl.setAttribute("aria-hidden", "true")
+    tableCard?.classList?.toggle("is-empty", false)
 }
 
 fun updateBookingCarsSelectedCount() {
@@ -2249,19 +2368,7 @@ fun updateBookingCarsSelectedCount() {
     val selectedCount = if (isCarBookingRecreateSession()) {
         document.getElementById("carSelectionTableBody")?.querySelectorAll("tr")?.length ?: 0
     } else {
-        val tableBody = document.getElementById("carSelectionTableBody")
-        var checkboxes = tableBody?.querySelectorAll("input[type='checkbox'].car-checkbox")
-        if (checkboxes == null || checkboxes.length == 0) {
-            checkboxes = tableBody?.querySelectorAll("input[type='checkbox']")
-        }
-        var checked = 0
-        if (checkboxes != null) {
-            for (i in 0 until checkboxes.length) {
-                val checkbox = checkboxes.item(i) as? HTMLInputElement
-                if (checkbox?.checked == true) checked++
-            }
-        }
-        checked
+        bookingListCheckedChassis.size
     }
     countEl.textContent = if (selectedCount == 1) "1 car selected" else "$selectedCount cars selected"
     if (selectedCount == 0) {
@@ -2519,9 +2626,8 @@ fun displayPurchasesAsCarsAPPEND(purchases: dynamic) {
     console.log("💾 Accumulated displayed cars for state persistence:", carBookingDisplayedCars.size)
 
     // Keep table order aligned with active column sort (client-only; no DB round-trip).
-    val checked = bookingListCheckedChassisSet()
     applyBookingListCurrentSort()
-    rebuildBookingListTableFromDisplayedCars(checked)
+    rebuildBookingListTableFromDisplayedCars()
     console.log("✅ Refreshed booking list with", carBookingDisplayedCars.size, "cars (sorted)")
 }
 
@@ -2608,8 +2714,28 @@ fun showCalculateFreightPage() {
 
 fun getSelectedCarsFromTable(): List<dynamic> {
     val selectedCars = mutableListOf<dynamic>()
+    if (!isCarBookingRecreateSession()) {
+        for (car in carBookingDisplayedCars) {
+            val token = bookingChassisToken(car)
+            if (token.isEmpty() || !bookingListCheckedChassis.contains(bookingChassisKey(token))) continue
+            val carObject = js("{}")
+            carObject.chassis = car.chassis?.toString() ?: token
+            carObject.name = car.carName?.toString() ?: ""
+            carObject.year = carModelYearToYearOnly(car.carModelYear?.toString())
+            carObject.price = car.price ?: 0
+            val id = (car.id as? Number)?.toLong()
+            if (id != null && id > 0L) {
+                carObject.id = id
+                carObject.purchaseId = id
+            }
+            val sl = (car.stockLocation ?: car.stock_location)?.toString()?.trim().orEmpty()
+            if (sl.isNotEmpty()) carObject.stockLocation = sl
+            selectedCars.add(carObject)
+        }
+        return selectedCars
+    }
     val tableBody = document.getElementById("carSelectionTableBody") ?: return selectedCars
-    val recreateAllRows = isCarBookingRecreateSession()
+    val recreateAllRows = true
     val rows = tableBody.querySelectorAll("tr[data-chassis], tr[data-purchase-id]")
 
     for (i in 0 until rows.length) {
@@ -2677,27 +2803,10 @@ fun getSelectedPurchaseIds(): List<Long> {
         return selectedIds
     }
 
-    val checkboxes = tableBody.querySelectorAll("input[type='checkbox'].car-checkbox")
-    for (i in 0 until checkboxes.length) {
-        val checkbox = checkboxes.item(i) as? HTMLInputElement ?: continue
-        if (!checkbox.checked) continue
-        var purchaseId = checkbox.getAttribute("data-purchase-id")?.toLongOrNull()
-        if (purchaseId == null || purchaseId == 0L) {
-            val row = checkbox.closest("tr") as? HTMLElement
-            purchaseId = row?.getAttribute("data-purchase-id")?.toLongOrNull()
-        }
-        if (purchaseId == null || purchaseId == 0L) {
-            val chassis = checkbox.getAttribute("data-chassis")?.trim()
-                ?: (checkbox.closest("tr") as? HTMLElement)?.getAttribute("data-chassis")?.trim()
-            if (!chassis.isNullOrEmpty()) {
-                for (car in carBookingDisplayedCars) {
-                    if (car.chassis?.toString()?.trim().equals(chassis, ignoreCase = true)) {
-                        purchaseId = (car.id as? Number)?.toLong()
-                        break
-                    }
-                }
-            }
-        }
+    for (car in carBookingDisplayedCars) {
+        val token = bookingChassisToken(car)
+        if (token.isEmpty() || !bookingListCheckedChassis.contains(bookingChassisKey(token))) continue
+        val purchaseId = (car.id as? Number)?.toLong()
         if (purchaseId != null && purchaseId > 0L) selectedIds.add(purchaseId)
     }
     return selectedIds

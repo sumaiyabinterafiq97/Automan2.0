@@ -955,6 +955,10 @@ fun reorderPurchaseListColumn(columns: List<String>, fromKey: String, toIndex: I
     return result
 }
 
+/** Moves one list item (identified by [fromKey]) to [toIndex]. Same semantics as [reorderPurchaseListColumn]. */
+fun reorderListByKey(keys: List<String>, fromKey: String, toIndex: Int): List<String> =
+    reorderPurchaseListColumn(keys, fromKey, toIndex)
+
 /**
  * All purchase list column keys and display labels (matches [com.automan.backend.model.Purchase] / `purchases` table).
  * Used by column filter modal and table/card headers.
