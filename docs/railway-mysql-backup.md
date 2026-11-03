@@ -1,5 +1,7 @@
 # Railway MySQL backup (first 3 months)
 
+For the Oct 2026 Railway security incident (credential rotation), see [railway-security-incident-response.md](railway-security-incident-response.md).
+
 Railway offers **two** backup approaches. Use **both** for production safety.
 
 ## Option A — Railway native backups (in-dashboard)

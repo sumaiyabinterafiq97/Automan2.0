@@ -1327,8 +1327,7 @@ class PurchaseService(
             val pairs = if (from == null && to == null) {
                 purchaseRepository.findIdAndDateAll()
             } else {
-                validateDateRangeBounds(from, to)
-                idDatePairsForInclusiveDateRange(from!!, to!!)
+                idDatePairsForListDateFilter(from, to)
             }
             return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
         }
@@ -1352,8 +1351,7 @@ class PurchaseService(
                 size = pg.size,
             )
         }
-        validateDateRangeBounds(from, to)
-        val matchingIds = idDatePairsForInclusiveDateRange(from!!, to!!).mapNotNull { it.getId() }
+        val matchingIds = idDatePairsForListDateFilter(from, to).mapNotNull { it.getId() }
         return pagePurchasesByIds(matchingIds, pageIdx, size, sortField, sortOrder)
     }
 
@@ -1384,7 +1382,6 @@ class PurchaseService(
             val pairs = if (from == null && to == null) {
                 searchPurchasesIdDate(q, field)
             } else {
-                validateDateRangeBounds(from, to)
                 filterIdDatePairsAsPairs(searchPurchasesIdDate(q, field), from, to)
             }
             return pagePurchasesByIdDatePairs(pairs, pageIdx, size, sortOrder)
@@ -1404,7 +1401,6 @@ class PurchaseService(
                 size = pg.size,
             )
         }
-        validateDateRangeBounds(from, to)
         val pairs = searchPurchasesIdDate(q, field)
         val matchingIds = filterIdDatePairsByRange(pairs, from, to)
         return pagePurchasesByIds(matchingIds, pageIdx, size, sortField, sortOrder)
@@ -1423,7 +1419,7 @@ class PurchaseService(
         val searchField = request.field?.trim()?.lowercase().orEmpty().ifEmpty { "all" }
         val clauses = request.filters
             .map { it.copy(field = it.field.trim(), operator = it.operator.trim().ifEmpty { "contains" }, value = it.value.trim()) }
-            .filter { it.field.isNotEmpty() && it.value.isNotEmpty() }
+            .filter { it.field.isNotEmpty() && clauseValues(it).isNotEmpty() }
 
         val (dbClauses, transientClauses) = clauses.partition { isDbColumnFilterField(it.field) }
 
@@ -1438,8 +1434,7 @@ class PurchaseService(
                 }
             }
             from != null || to != null -> {
-                validateDateRangeBounds(from, to)
-                idDatePairsForInclusiveDateRange(from!!, to!!).mapNotNull { it.getId() }.toSet()
+                idDatePairsForListDateFilter(from, to).mapNotNull { it.getId() }.toSet()
             }
             else -> {
                 val seed = seedListFilterCandidateIds(dbClauses)
@@ -1562,6 +1557,17 @@ class PurchaseService(
     private fun idDatePairsForInclusiveDateRange(from: LocalDate, to: LocalDate): List<PurchaseIdDateProjection> {
         val candidates = purchaseDateRangeCandidateQuery.findIdDateCandidates(from, to)
         return filterIdDatePairsAsPairs(candidates, from, to)
+    }
+
+    /** Inclusive date filter; bounded candidate SQL when both bounds present, else full id+date scan. */
+    private fun idDatePairsForListDateFilter(from: LocalDate?, to: LocalDate?): List<PurchaseIdDateProjection> {
+        if (from == null && to == null) return emptyList()
+        validateDateRangeBounds(from, to)
+        return if (from != null && to != null) {
+            idDatePairsForInclusiveDateRange(from, to)
+        } else {
+            filterIdDatePairsAsPairs(purchaseRepository.findIdAndDateAll(), from, to)
+        }
     }
 
     /** Test hook: same as [idDatePairsForInclusiveDateRange]. */
@@ -1846,6 +1852,11 @@ class PurchaseService(
     private fun normalizeFilterFieldKey(raw: String): String =
         raw.trim().lowercase().replace("_", "")
 
+    /** OR values within one filter chip; falls back to [PurchasePageFilterClause.value]. */
+    private fun clauseValues(clause: PurchasePageFilterClause): List<String> =
+        clause.values.map { it.trim() }.filter { it.isNotEmpty() }
+            .ifEmpty { listOf(clause.value.trim()).filter { it.isNotEmpty() } }
+
     /** Persistable `@Column` fields safe for JPQL contains narrowing. */
     private fun isDbColumnFilterField(field: String): Boolean =
         when (normalizeFilterFieldKey(field)) {
@@ -1873,10 +1884,10 @@ class PurchaseService(
         }
         val firstDateIndex = dbClauses.indexOfFirst { normalizeFilterFieldKey(it.field) == "date" }
         if (firstDateIndex >= 0) {
-            val day = parseDayForDateChip(dbClauses[firstDateIndex].value)
-            if (day != null) {
+            val days = clauseValues(dbClauses[firstDateIndex]).mapNotNull { parseDayForDateChip(it) }
+            if (days.isNotEmpty()) {
                 return ListFilterSeed(
-                    purchaseIdsMatchingCalendarDay(day),
+                    days.flatMap { purchaseIdsMatchingCalendarDay(it) }.toSet(),
                     firstDateIndex,
                 )
             }
@@ -1884,43 +1895,48 @@ class PurchaseService(
         return ListFilterSeed(matchingIdsForDbFilterClause(dbClauses.first()), 0)
     }
 
-    /** IDs matching a single DB-column filter clause (no intersection with an existing candidate set). */
-    private fun matchingIdsForDbFilterClause(clause: PurchasePageFilterClause): Set<Long> {
-        val key = normalizeFilterFieldKey(clause.field)
-        val value = clause.value.trim()
-        if (value.isEmpty()) return emptySet()
+    private fun matchingIdsForDbFilterValue(field: String, value: String): Set<Long> {
+        val key = normalizeFilterFieldKey(field)
+        val v = value.trim()
+        if (v.isEmpty()) return emptySet()
         if (key == "date") {
-            val day = parseDayForDateChip(value) ?: return emptySet()
+            val day = parseDayForDateChip(v) ?: return emptySet()
             return purchaseIdsMatchingCalendarDay(day)
         }
         return when (key) {
-            "chassis" -> purchaseRepository.findIdsChassisContains(value).toSet()
-            "brand" -> purchaseRepository.findIdsBrandContains(value).toSet()
-            "carname" -> purchaseRepository.findIdsCarNameContains(value).toSet()
+            "chassis" -> purchaseRepository.findIdsChassisContains(v).toSet()
+            "brand" -> purchaseRepository.findIdsBrandContains(v).toSet()
+            "carname" -> purchaseRepository.findIdsCarNameContains(v).toSet()
             "auctionhouse", "supplier", "suppliername" ->
-                purchaseRepository.findIdsAuctionHouseContains(value).toSet()
-            "stocklocation" -> purchaseRepository.findIdsStockLocationContains(value).toSet()
-            "pod", "destination" -> purchaseRepository.findIdsPodContains(value).toSet()
-            "rixocompany" -> purchaseRepository.findIdsRixoCompanyContains(value).toSet()
-            "clientname", "client" -> purchaseRepository.findIdsClientNameContains(value).toSet()
-            "consignee" -> purchaseRepository.findIdsConsigneeContains(value).toSet()
-            "country" -> purchaseRepository.findIdsCountryContains(value).toSet()
-            "totalprice" -> purchaseRepository.findIdsTotalPriceContains(value).toSet()
-            "repaircompany" -> purchaseRepository.findIdsRepairCompanyContains(value).toSet()
-            "manufactureyear" -> purchaseRepository.findIdsManufactureYearContains(value).toSet()
-            "bookingid" -> purchaseRepository.findIdsBookingIdContains(value).toSet()
-            "workflowstatus" -> purchaseRepository.findIdsWorkflowStatusContains(value).toSet()
+                purchaseRepository.findIdsAuctionHouseContains(v).toSet()
+            "stocklocation" -> purchaseRepository.findIdsStockLocationContains(v).toSet()
+            "pod", "destination" -> purchaseRepository.findIdsPodContains(v).toSet()
+            "rixocompany" -> purchaseRepository.findIdsRixoCompanyContains(v).toSet()
+            "clientname", "client" -> purchaseRepository.findIdsClientNameContains(v).toSet()
+            "consignee" -> purchaseRepository.findIdsConsigneeContains(v).toSet()
+            "country" -> purchaseRepository.findIdsCountryContains(v).toSet()
+            "totalprice" -> purchaseRepository.findIdsTotalPriceContains(v).toSet()
+            "repaircompany" -> purchaseRepository.findIdsRepairCompanyContains(v).toSet()
+            "manufactureyear" -> purchaseRepository.findIdsManufactureYearContains(v).toSet()
+            "bookingid" -> purchaseRepository.findIdsBookingIdContains(v).toSet()
+            "workflowstatus" -> purchaseRepository.findIdsWorkflowStatusContains(v).toSet()
             else -> {
-                Logger.warn("Ignoring unsupported DB filter field: ${clause.field}")
+                Logger.warn("Ignoring unsupported DB filter field: $field")
                 emptySet()
             }
         }
     }
 
+    /** IDs matching a DB-column filter clause (OR across [clauseValues]). */
+    private fun matchingIdsForDbFilterClause(clause: PurchasePageFilterClause): Set<Long> {
+        val values = clauseValues(clause)
+        if (values.isEmpty()) return emptySet()
+        return values.flatMap { matchingIdsForDbFilterValue(clause.field, it) }.toSet()
+    }
+
     private fun applyDbColumnFilter(candidateIds: Set<Long>, clause: PurchasePageFilterClause): Set<Long> {
         if (candidateIds.isEmpty()) return candidateIds
-        val value = clause.value.trim()
-        if (value.isEmpty()) return candidateIds
+        if (clauseValues(clause).isEmpty()) return candidateIds
         if (!isDbColumnFilterField(clause.field)) {
             Logger.warn("Ignoring unsupported DB filter field: ${clause.field}")
             return candidateIds
@@ -1943,8 +1959,14 @@ class PurchaseService(
      * else text contains (case-insensitive).
      */
     private fun purchaseMatchesAdvancedFilter(p: Purchase, clause: PurchasePageFilterClause): Boolean {
-        val key = normalizeFilterFieldKey(clause.field)
-        val v = clause.value.trim()
+        val values = clauseValues(clause)
+        if (values.isEmpty()) return true
+        return values.any { v -> purchaseMatchesAdvancedFilterOne(p, clause.field, v) }
+    }
+
+    private fun purchaseMatchesAdvancedFilterOne(p: Purchase, field: String, rawValue: String): Boolean {
+        val key = normalizeFilterFieldKey(field)
+        val v = rawValue.trim()
         if (v.isEmpty()) return true
 
         if (key in dateFilterFields) {
@@ -1953,7 +1975,7 @@ class PurchaseService(
                 val filterYm = normalizeYearMonth(v) ?: return false
                 return rowYm == filterYm
             }
-            val rowDate = PurchaseDateParseUtils.parseToLocalDate(purchaseFieldRaw(p, clause.field))
+            val rowDate = PurchaseDateParseUtils.parseToLocalDate(purchaseFieldRaw(p, field))
                 ?: return false
             val filterDate = parseIsoLocalDateOrNull(v)
                 ?: PurchaseDateParseUtils.parseToLocalDate(v)
@@ -1962,10 +1984,10 @@ class PurchaseService(
         }
 
         if (key in moneyFilterFields || key in plainIntFilterFields || key in commaIntFilterFields) {
-            return purchaseNumericFilterMatch(p, clause.field, v)
+            return purchaseNumericFilterMatch(p, field, v)
         }
 
-        val text = purchaseFieldRaw(p, clause.field).lowercase()
+        val text = purchaseFieldRaw(p, field).lowercase()
         return text.contains(v.lowercase())
     }
 
@@ -3299,9 +3321,7 @@ class PurchaseService(
             val chassis = chassisRaw.trim()
             val frontendYen = resolveFrontendYenForShippingPdf(request.frontendTotalYenByChassis, chassis)
             val historyRow = shippingHistoryRepository.findFirstByChassisOrderByIdDesc(chassis)
-            val rawPurchases = purchaseRepository.findByChassisIgnoreCaseTrim(chassis)
-                .ifEmpty { purchaseRepository.findByChassis(chassis) }
-            val purchase = applyReadAdapterOrNull(rawPurchases.firstOrNull())
+            val purchase = getPurchaseByChassis(chassis)
 
             fun carDto(priceYen: String): com.automan.backend.dto.CarPdfDto {
                 val name = purchase?.carName ?: "Unknown"
@@ -3309,7 +3329,7 @@ class PurchaseService(
                     no = index + 1,
                     name = name,
                     chassisNumber = purchase?.chassis ?: chassis,
-                    year = purchase?.let { CarModelYearUtils.extractYearFromCarModelYear(it.carModelYear) }.orEmpty(),
+                    year = CarModelYearUtils.displayYear(purchase?.carModelYear, purchase?.manufactureYear),
                     cnfPrice = priceYen,
                     maker = purchase?.brand?.trim()?.takeIf { it.isNotEmpty() },
                     model = purchase?.carName?.trim()?.takeIf { it.isNotEmpty() },

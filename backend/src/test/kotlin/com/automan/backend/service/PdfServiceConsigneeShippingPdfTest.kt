@@ -26,6 +26,18 @@ class PdfServiceConsigneeShippingPdfTest {
     }
 
     @Test
+    fun consigneeShippingPdf_rendersEtaInHeader() {
+        val text = extract(
+            pdfService.generateShippingScheduleInvoicePdf(
+                sample(eta = "2026-05-19"),
+                includePrices = false,
+            ),
+        )
+        assertTrue(text.contains("ETA:"), text)
+        assertTrue(text.contains("MAY-19-2026"), text)
+    }
+
+    @Test
     fun staffShippingPdfKeepsPrices() {
         val text = extract(pdfService.generateShippingScheduleInvoicePdf(sample()))
         assertTrue(text.contains("AMOUNT JPY"), text)
@@ -33,7 +45,7 @@ class PdfServiceConsigneeShippingPdfTest {
         assertTrue(text.contains("1,815,000"), text)
     }
 
-    private fun sample() = ShippingSchedulePdfData(
+    private fun sample(eta: String? = null) = ShippingSchedulePdfData(
         companyName = "MEMON CO., LTD",
         bookingNo = "OSAG54151700",
         vesselName = "BROOKLYN BRIDGE",
@@ -50,6 +62,7 @@ class PdfServiceConsigneeShippingPdfTest {
             CarPdfDto(6, "KICKS", "P15-042379", "2022", "¥1,860,000", "NISSAN", "KICKS"),
         ),
         calculationMode = "C&F",
+        eta = eta,
     )
 
     private fun extract(bytes: ByteArray): String {

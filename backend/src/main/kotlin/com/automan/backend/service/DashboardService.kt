@@ -142,7 +142,14 @@ class DashboardService(
     ): DashboardResponse {
         val today = LocalDate.now()
         val period = resolvePeriod(periodKey, fromRaw, toRaw, today)
-        val rows = purchaseRepository.findDashboardRows().map { ParsedRow(it) }
+        val projections = purchaseRepository.findDashboardRows()
+        val carPriceByPurchaseId = purchaseCostLineService.priceAmountsByPurchaseId(projections.mapNotNull { it.getId() })
+        val rows = projections.map { projection ->
+            ParsedRow(
+                projection,
+                carPrice = carPriceByPurchaseId[projection.getId()]?.toDouble() ?: 0.0,
+            )
+        }
 
         val current = rows.filter { it.parsedDate != null && !it.parsedDate.isBefore(period.from) && !it.parsedDate.isAfter(period.to) }
         val previous = rows.filter {
@@ -289,9 +296,10 @@ class DashboardService(
         val country: String?,
         val totalPriceRaw: String?,
         val totalPrice: Double,
+        val carPrice: Double,
         val status: WorkflowStatus,
     ) {
-        constructor(p: DashboardPurchaseRowProjection) : this(
+        constructor(p: DashboardPurchaseRowProjection, carPrice: Double = 0.0) : this(
             id = p.getId(),
             dateRaw = p.getDate(),
             parsedDate = PurchaseDateParseUtils.parseToLocalDate(p.getDate()?.trim().orEmpty()),
@@ -303,6 +311,7 @@ class DashboardService(
             country = p.getCountry(),
             totalPriceRaw = p.getTotalPrice(),
             totalPrice = parseMoney(p.getTotalPrice()),
+            carPrice = carPrice,
             status = p.getWorkflowStatus() ?: WorkflowStatus.PURCHASED,
         )
 
@@ -400,6 +409,9 @@ class DashboardService(
         val carsBought = current.size.toDouble()
         val prevCarsBought = previous.size.toDouble()
 
+        val totalCarPrice = current.sumOf { it.carPrice }
+        val prevTotalCarPrice = previous.sumOf { it.carPrice }
+
         val totalClients = current.mapNotNull { it.clientName?.trim()?.takeIf { n -> n.isNotEmpty() } }.toSet().size.toDouble()
         val prevTotalClients = previous.mapNotNull { it.clientName?.trim()?.takeIf { n -> n.isNotEmpty() } }.toSet().size.toDouble()
 
@@ -437,6 +449,7 @@ class DashboardService(
 
         return listOf(
             kpi("cars_bought", "Cars Bought This Month", carsBought, prevCarsBought, "", "number"),
+            kpi("total_car_price", "Total Car Price", totalCarPrice, prevTotalCarPrice, "", "currency"),
             kpi("total_clients", "Total Clients", totalClients, prevTotalClients, "", "number"),
             kpi("cars_shipped", "Cars Shipped This Month", carsShipped, prevCarsShipped, "", "number"),
             kpi("cars_sold", "Cars Sold This Month", carsSold, prevCarsSold, "", "number"),

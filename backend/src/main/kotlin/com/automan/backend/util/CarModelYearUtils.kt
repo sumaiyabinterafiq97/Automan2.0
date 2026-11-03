@@ -28,4 +28,14 @@ object CarModelYearUtils {
         if (t.length == 4 && t.all { it.isDigit() }) return t
         return t
     }
+
+    /** PDF/list display year: production date first, then manufacture year on purchase. */
+    fun displayYear(carModelYear: String?, manufactureYear: String?): String {
+        val fromModel = extractYearFromCarModelYear(carModelYear)
+        if (fromModel.isNotEmpty()) return fromModel
+        val mfy = manufactureYear?.trim().orEmpty()
+        if (mfy.isEmpty()) return ""
+        val fromMfy = extractYearFromCarModelYear(mfy)
+        return fromMfy.ifEmpty { if (mfy.length == 4 && mfy.all { it.isDigit() }) mfy else mfy }
+    }
 }

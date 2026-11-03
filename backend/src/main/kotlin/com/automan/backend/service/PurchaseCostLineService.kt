@@ -106,6 +106,16 @@ class PurchaseCostLineService(
         }
     }
 
+    /** Car Price amounts from canonical purchase_cost_lines (cost_code PRICE). */
+    @Transactional(readOnly = true)
+    fun priceAmountsByPurchaseId(purchaseIds: Collection<Long>): Map<Long, java.math.BigDecimal> {
+        if (purchaseIds.isEmpty()) return emptyMap()
+        return purchaseCostLineRepository.findByPurchaseIdIn(purchaseIds)
+            .asSequence()
+            .filter { it.costCode == "PRICE" }
+            .associate { it.purchaseId to it.amount }
+    }
+
     @Transactional
     fun syncFromPurchase(purchase: Purchase) {
         val purchaseId = purchase.id ?: return

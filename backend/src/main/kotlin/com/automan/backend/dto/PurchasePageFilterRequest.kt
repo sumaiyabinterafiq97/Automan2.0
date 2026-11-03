@@ -24,4 +24,6 @@ data class PurchasePageFilterClause(
     val field: String,
     val operator: String = "contains",
     val value: String = "",
+    /** When non-empty, OR-match any entry; [value] is legacy single-value fallback. */
+    val values: List<String> = emptyList(),
 )

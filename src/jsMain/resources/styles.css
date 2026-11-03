@@ -766,6 +766,69 @@ select:focus {
     }
 }
 
+.purchase-adv-multi-field {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    box-sizing: border-box;
+}
+
+.purchase-adv-multi-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.purchase-adv-multi-chips:empty {
+    margin-bottom: 0;
+}
+
+.purchase-adv-multi-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 4px 8px 4px 10px;
+    border-radius: 9999px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #111827;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.35;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    box-sizing: border-box;
+}
+
+.purchase-adv-multi-chip-label {
+    min-width: 0;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.purchase-adv-multi-chip-remove {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.purchase-adv-multi-chip-remove:hover {
+    color: #111827;
+}
+
+.purchase-adv-multi-add {
+    width: 100%;
+    min-width: 0;
+}
+
 #purchaseTable tbody tr:hover td {
     background-color: #fafafa;
 }

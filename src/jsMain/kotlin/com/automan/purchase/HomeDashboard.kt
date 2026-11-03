@@ -300,6 +300,7 @@ private fun kpiIcon(id: String): String = when (id) {
     "cars_sold", "sold" -> "✓"
     "current_inventory", "unshipped" -> "◎"
     "avg_monthly_revenue", "purchase_value", "avg_price" -> "¥"
+    "total_car_price" -> "¥"
     "rixo_pending" -> "◇"
     "bookings_pending", "booking_pending" -> "▦"
     else -> "•"

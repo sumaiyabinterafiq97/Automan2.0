@@ -27,6 +27,9 @@ import com.automan.backend.repository.UserPartyLinkRepository
 import com.automan.backend.repository.UserRepository
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.itextpdf.kernel.pdf.PdfDocument
+import com.itextpdf.kernel.pdf.PdfReader
+import com.itextpdf.kernel.pdf.canvas.parser.PdfTextExtractor
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -50,7 +53,10 @@ import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
+import java.io.ByteArrayInputStream
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -696,6 +702,26 @@ class PortalApiIntegrationTest {
     }
 
     @Test
+    fun consigneeShippingHistoryPdf_includesEtaAndCarYear() {
+        val fixture = seed()
+        val eta = LocalDate.now(ZoneOffset.UTC).plusDays(2)
+        val expectedEta = eta.format(DateTimeFormatter.ofPattern("MMM-dd-yyyy", Locale.ENGLISH)).uppercase()
+        val pdf = mockMvc.perform(
+            get("/portal/consignee/shipping-history/pdf")
+                .param("bookingId", "SHIP-1")
+                .header("Authorization", "Bearer ${fixture.tokenAlpha}"),
+        ).andExpect(status().isOk).andReturn().response.contentAsByteArray
+        assertTrue(pdf.size > 4)
+        assertEquals('%'.code.toByte(), pdf[0])
+        val text = extractPdfText(pdf)
+        assertTrue(text.contains("ETA:"), text)
+        assertTrue(text.contains(expectedEta), text)
+        assertTrue(text.contains("2020"), text)
+        assertTrue(text.contains(fixture.chassisShip), text)
+        assertFalse(text.contains("AMOUNT JPY"), text)
+    }
+
+    @Test
     fun portalPathsAndTrailingSlashesStayRoleSpecific() {
         val fixture = seed()
         mockMvc.perform(get("/portal/client/me/").header("Authorization", "Bearer ${fixture.tokenA}"))
@@ -928,6 +954,15 @@ class PortalApiIntegrationTest {
             .andExpect(status().isOk)
             .andReturn()
         return result.response.contentAsString
+    }
+
+    private fun extractPdfText(bytes: ByteArray): String {
+        val pdf = PdfDocument(PdfReader(ByteArrayInputStream(bytes)))
+        return try {
+            (1..pdf.numberOfPages).joinToString("\n") { PdfTextExtractor.getTextFromPage(pdf.getPage(it)) }
+        } finally {
+            pdf.close()
+        }
     }
 
     private fun textValues(node: JsonNode, field: String?): List<String> {

@@ -379,6 +379,140 @@ class PurchaseListDateReadOptimizationTest {
         verify(purchaseRepository, never()).findIdAndDateByIdIn(anyCollection())
     }
 
+    @Test
+    fun multiValueClientName_orWithinField_returnsBothRows() {
+        saveClient(chassis = "CLI-A", clientName = "Alpha Motors")
+        saveClient(chassis = "CLI-B", clientName = "Beta Trading")
+        saveClient(chassis = "CLI-C", clientName = "Gamma LLC")
+
+        val ids = purchaseService.matchingPurchaseIdsForListFilter(
+            PurchasePageFilterRequest(
+                filters = listOf(
+                    PurchasePageFilterClause(
+                        field = "clientName",
+                        operator = "contains",
+                        value = "",
+                        values = listOf("Alpha", "Beta"),
+                    ),
+                ),
+            ),
+        ).map { chassisFor(it) }.toSet()
+
+        assertEquals(setOf("CLI-A", "CLI-B"), ids)
+    }
+
+    @Test
+    fun multiValueDate_orWithinField_returnsBothDays() {
+        save(chassis = "DAY-A", date = "2026-06-10")
+        save(chassis = "DAY-B", date = "2026-06-15")
+        save(chassis = "DAY-C", date = "2026-06-20")
+
+        val ids = purchaseService.matchingPurchaseIdsForListFilter(
+            PurchasePageFilterRequest(
+                filters = listOf(
+                    PurchasePageFilterClause(
+                        field = "date",
+                        operator = "equals",
+                        value = "",
+                        values = listOf("2026-06-10", "2026-06-15"),
+                    ),
+                ),
+            ),
+        ).map { chassisFor(it) }.toSet()
+
+        assertEquals(setOf("DAY-A", "DAY-B"), ids)
+    }
+
+    @Test
+    fun multiValueClient_orAndBrand_andAcrossFields() {
+        save(
+            chassis = "YES",
+            date = "2026-06-01",
+            brand = "TOYOTA",
+        ).let { purchaseRepository.save(it.copy(clientName = "Target Client")) }
+        save(
+            chassis = "WRONG-BRAND",
+            date = "2026-06-01",
+            brand = "HONDA",
+        ).let { purchaseRepository.save(it.copy(clientName = "Target Client")) }
+        save(
+            chassis = "WRONG-CLIENT",
+            date = "2026-06-01",
+            brand = "TOYOTA",
+        ).let { purchaseRepository.save(it.copy(clientName = "Other Client")) }
+
+        val ids = purchaseService.matchingPurchaseIdsForListFilter(
+            PurchasePageFilterRequest(
+                filters = listOf(
+                    PurchasePageFilterClause(
+                        field = "clientName",
+                        operator = "contains",
+                        values = listOf("Target", "Other"),
+                    ),
+                    PurchasePageFilterClause(field = "brand", operator = "contains", value = "TOYOTA"),
+                ),
+            ),
+        ).map { chassisFor(it) }.toSet()
+
+        assertEquals(setOf("YES", "WRONG-CLIENT"), ids)
+    }
+
+    @Test
+    fun openEndedDateTo_includesOnOrBeforeCap_excludesAfter() {
+        save(chassis = "OLD", date = "2026-06-01")
+        save(chassis = "CAP", date = "2026-06-15")
+        save(chassis = "AFTER", date = "2026-06-20")
+
+        val ids = purchaseService.matchingPurchaseIdsForListFilter(
+            PurchasePageFilterRequest(dateTo = "2026-06-15"),
+        ).map { chassisFor(it) }.toSet()
+
+        assertEquals(setOf("OLD", "CAP"), ids)
+    }
+
+    @Test
+    fun openEndedDateFrom_includesOnOrAfterFloor_excludesBefore() {
+        save(chassis = "BEFORE", date = "2026-06-01")
+        save(chassis = "FLOOR", date = "2026-06-15")
+        save(chassis = "LATER", date = "2026-06-20")
+
+        val ids = purchaseService.matchingPurchaseIdsForListFilter(
+            PurchasePageFilterRequest(dateFrom = "2026-06-15"),
+        ).map { chassisFor(it) }.toSet()
+
+        assertEquals(setOf("FLOOR", "LATER"), ids)
+    }
+
+    @Test
+    fun listPurchasesPage_dateToOnly_returnsRowsOnOrBefore() {
+        save(chassis = "IN", date = "2026-07-10")
+        save(chassis = "OUT", date = "2026-07-20")
+
+        val page = purchaseService.listPurchasesPage(
+            page = 0,
+            rawSize = 10,
+            sortField = "date",
+            dateTo = "2026-07-15",
+        )
+
+        assertEquals(1, page.totalElements)
+        assertEquals("IN", page.content.single().chassis)
+    }
+
+    private fun saveClient(
+        chassis: String,
+        clientName: String,
+        date: String = "2026-06-01",
+    ): Purchase = purchaseRepository.save(
+        Purchase(
+            chassis = chassis,
+            date = date,
+            brand = "TOYOTA",
+            carName = "Test",
+            clientName = clientName,
+        ),
+    )
+
     private fun save(
         chassis: String,
         date: String,
