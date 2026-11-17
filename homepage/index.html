@@ -1,67 +1,1669 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja" class="scroll-smooth">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Memon — Automotive Solutions</title>
-    <link rel="stylesheet" href="/home.css">
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%234CC9FF'/%3E%3C/svg%3E">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>有限会社メモン | MEMON CO., LTD. - Global Trade, IT/DX & Retail</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Montserrat (for geometric circular 'O' in MEMON), Plus Jakarta Sans & Noto Sans JP -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Montserrat:wght@700;800;900&family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Inter"', '"Noto Sans JP"', 'sans-serif'],
+            logo: ['"Montserrat"', '"Noto Sans JP"', 'sans-serif'],
+          },
+          colors: {
+            brand: {
+              navy: '#0B1536',
+              navyLight: '#0F1E46',
+              blue: '#2563EB',
+              purple: '#6B21A8',
+              magenta: '#C026D3',
+              pink: '#F43F5E',
+              red: '#E11D48',
+              dark: '#0B1536'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      font-family: 'Inter', 'Noto Sans JP', sans-serif;
+    }
+    .font-memon {
+      font-family: 'Montserrat', sans-serif;
+      letter-spacing: 0.04em;
+    }
+    .gradient-brand {
+      background: linear-gradient(135deg, #6B21A8 0%, #C026D3 35%, #E11D48 75%, #2563EB 100%);
+    }
+    .gradient-mcl-text {
+      background: linear-gradient(95deg, #6B21A8 0%, #C026D3 32%, #E11D48 68%, #2563EB 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .gradient-text {
+      background: linear-gradient(135deg, #0B1536 0%, #6B21A8 35%, #C026D3 68%, #E11D48 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .gradient-border-top {
+      border-top: 5px solid transparent;
+      border-image: linear-gradient(90deg, #0B1536, #6B21A8, #C026D3, #F43F5E, #E11D48, #2563EB) 1;
+    }
+    .pillar-slant {
+      transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .pillar-slant:hover {
+      transform: translateY(-6px);
+    }
+  </style>
 </head>
-<body>
-    <header class="site-header">
-        <div class="container header-inner">
-            <a class="logo" href="/">MEMON</a>
-            <nav class="nav-actions">
-                <a class="btn btn-primary" id="signInLink" href="/automan/login">Sign In</a>
-            </nav>
-        </div>
-    </header>
+<body class="bg-slate-50 text-slate-800 antialiased selection:bg-fuchsia-600 selection:text-white">
 
-    <main>
-        <section class="hero">
-            <div class="container hero-inner">
-                <p class="eyebrow">memon.co.jp</p>
-                <h1>Automotive trading &amp; purchase management</h1>
-                <p class="lead">
-                    Memon provides vehicle sourcing, auction support, and operational tools for international car trading teams.
-                </p>
+  <!-- Master SVG Definitions: Pixel-Accurate Vector Trace of image_ab5803.png -->
+  <svg width="0" height="0" class="absolute pointer-events-none" aria-hidden="true">
+    <defs>
+      <!-- === 1. GRADIENTS FOR LEFT 3D 'M' RIBBON EMBLEM === -->
+      <!-- Left Outer Leg: Deep Purple bottom-left sweeping up to Magenta at Peak 1 -->
+      <linearGradient id="mLeg1" x1="5%" y1="98%" x2="88%" y2="2%">
+        <stop offset="0%" stop-color="#4C1D95" />
+        <stop offset="40%" stop-color="#7E22CE" />
+        <stop offset="80%" stop-color="#A21CAF" />
+        <stop offset="100%" stop-color="#D946EF" />
+      </linearGradient>
+
+      <!-- Inner Cyan-to-Royal-Blue Crescent Layers under Arch 1 & Arch 2 -->
+      <linearGradient id="mBlueCrescent" x1="15%" y1="95%" x2="75%" y2="5%">
+        <stop offset="0%" stop-color="#1E3A8A" />
+        <stop offset="45%" stop-color="#2563EB" />
+        <stop offset="85%" stop-color="#0284C7" />
+        <stop offset="100%" stop-color="#38BDF8" />
+      </linearGradient>
+
+      <!-- Left-to-Center Diagonal Ribbon: Bright Pink/Magenta fold at Peak 1 descending to Deep Purple Valley -->
+      <linearGradient id="mDiagLeft" x1="12%" y1="0%" x2="88%" y2="100%">
+        <stop offset="0%" stop-color="#F43F5E" />
+        <stop offset="22%" stop-color="#D946EF" />
+        <stop offset="65%" stop-color="#7E22CE" />
+        <stop offset="100%" stop-color="#4C1D95" />
+      </linearGradient>
+
+      <!-- Center-to-Right Diagonal Ribbon: Magenta Valley rising to Vivid Coral-Crimson at Peak 2 -->
+      <linearGradient id="mDiagRight" x1="8%" y1="100%" x2="92%" y2="0%">
+        <stop offset="0%" stop-color="#6B21A8" />
+        <stop offset="28%" stop-color="#C026D3" />
+        <stop offset="65%" stop-color="#E11D48" />
+        <stop offset="90%" stop-color="#F43F5E" />
+        <stop offset="100%" stop-color="#FB7185" />
+      </linearGradient>
+
+      <!-- Right Outer Leg: Dark Crimson fold under Peak 2 sweeping down to flared Red-Magenta tip -->
+      <linearGradient id="mLeg4" x1="10%" y1="5%" x2="90%" y2="98%">
+        <stop offset="0%" stop-color="#881337" />
+        <stop offset="35%" stop-color="#BE123C" />
+        <stop offset="75%" stop-color="#E11D48" />
+        <stop offset="100%" stop-color="#9D174D" />
+      </linearGradient>
+
+      <!-- === 2. GRADIENTS FOR 3D RIBBON LETTERS 'M C L' === -->
+      <!-- MCL 'M' Left Vertical Stem -->
+      <linearGradient id="mclM_StemL" x1="0%" y1="100%" x2="0%" y2="0%">
+        <stop offset="0%" stop-color="#581C87" />
+        <stop offset="55%" stop-color="#7E22CE" />
+        <stop offset="100%" stop-color="#9333EA" />
+      </linearGradient>
+      <!-- MCL 'M' Left Diagonal Fold -->
+      <linearGradient id="mclM_DiagL" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#A21CAF" />
+        <stop offset="55%" stop-color="#C026D3" />
+        <stop offset="100%" stop-color="#7E22CE" />
+      </linearGradient>
+      <!-- MCL 'M' Center V Dark Fold Triangle -->
+      <linearGradient id="mclM_VShadow" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#4C1D95" />
+        <stop offset="100%" stop-color="#831843" />
+      </linearGradient>
+      <!-- MCL 'M' Right Diagonal Glossy Pink-Red Ribbon -->
+      <linearGradient id="mclM_DiagR" x1="0%" y1="100%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#BE185D" />
+        <stop offset="40%" stop-color="#EC4899" />
+        <stop offset="72%" stop-color="#FB7185" />
+        <stop offset="100%" stop-color="#E11D48" />
+      </linearGradient>
+      <!-- MCL 'M' Right Vertical Crimson Stem -->
+      <linearGradient id="mclM_StemR" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#E11D48" />
+        <stop offset="50%" stop-color="#F43F5E" />
+        <stop offset="100%" stop-color="#BE123C" />
+      </linearGradient>
+
+      <!-- MCL 'C' Outer Main Ribbon Curve -->
+      <linearGradient id="mclC_Main" x1="15%" y1="5%" x2="85%" y2="95%">
+        <stop offset="0%" stop-color="#7E22CE" />
+        <stop offset="32%" stop-color="#A21CAF" />
+        <stop offset="68%" stop-color="#E11D48" />
+        <stop offset="100%" stop-color="#EC4899" />
+      </linearGradient>
+      <!-- MCL 'C' Top Inner Cyan-Blue Fold Facet -->
+      <linearGradient id="mclC_TopBlue" x1="0%" y1="0%" x2="100%" y2="80%">
+        <stop offset="0%" stop-color="#2563EB" />
+        <stop offset="60%" stop-color="#0284C7" />
+        <stop offset="100%" stop-color="#38BDF8" />
+      </linearGradient>
+      <!-- MCL 'C' Bottom Inner Dark Purple Fold Facet -->
+      <linearGradient id="mclC_BotPurple" x1="0%" y1="100%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#831843" />
+        <stop offset="55%" stop-color="#6B21A8" />
+        <stop offset="100%" stop-color="#4C1D95" />
+      </linearGradient>
+
+      <!-- MCL 'L' Left Outer Cyan-Blue Vertical Strip -->
+      <linearGradient id="mclL_BlueLeft" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#7E22CE" />
+        <stop offset="30%" stop-color="#38BDF8" />
+        <stop offset="75%" stop-color="#0284C7" />
+        <stop offset="100%" stop-color="#1D4ED8" />
+      </linearGradient>
+      <!-- MCL 'L' Right Inner Pink-Magenta Vertical Strip -->
+      <linearGradient id="mclL_PinkRight" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#E11D48" />
+        <stop offset="50%" stop-color="#EC4899" />
+        <stop offset="100%" stop-color="#9333EA" />
+      </linearGradient>
+      <!-- MCL 'L' Bottom Horizontal Base Sweep -->
+      <linearGradient id="mclL_Base" x1="0%" y1="50%" x2="100%" y2="50%">
+        <stop offset="0%" stop-color="#4C1D95" />
+        <stop offset="40%" stop-color="#9333EA" />
+        <stop offset="80%" stop-color="#E11D48" />
+        <stop offset="100%" stop-color="#BE123C" />
+      </linearGradient>
+
+      <!-- === SYMBOL 1: EXACT 3D RIBBON 'M' EMBLEM (viewBox="0 0 240 140") === -->
+      <symbol id="memon-ribbon-m" viewBox="0 0 240 140">
+        <!-- 1. Left Inner Blue Crescent (under Arch 1, separated by crisp gap) -->
+        <path d="M 35 128 C 56 122, 70 92, 79 47 C 83 59, 86 71, 89 82 C 76 110, 61 128, 35 128 Z" fill="url(#mBlueCrescent)" />
+        <!-- 2. Right Inner Blue Crescent (under Arch 2, separated by crisp gap) -->
+        <path d="M 142 128 C 159 121, 169 93, 176 49 C 180 61, 183 73, 186 83 C 175 110, 162 128, 142 128 Z" fill="url(#mBlueCrescent)" />
+
+        <!-- 3. Left Outer Sweeping Leg (Flared bottom-left tip -> Rounded Peak 1) -->
+        <path d="M 6 128 C 29 123, 47 84, 62 24 C 66 9, 81 8, 88 18 C 78 21, 71 33, 66 51 C 52 95, 36 125, 6 128 Z" fill="url(#mLeg1)" />
+
+        <!-- 4. Center-to-Right Rising Diagonal Ribbon (Rounded Center Valley -> Rounded Peak 2) -->
+        <path d="M 101 118 C 113 118, 126 84, 145 24 C 150 9, 166 8, 173 19 C 164 22, 157 35, 149 58 C 134 100, 122 128, 105 128 C 98 128, 95 122, 101 118 Z" fill="url(#mDiagRight)" />
+
+        <!-- 5. Left-to-Center Descending Diagonal Ribbon (Overlaps Peak 1 -> Curves into Valley) -->
+        <path d="M 63 18 C 69 7, 85 7, 92 22 C 103 54, 113 89, 123 114 C 116 125, 102 129, 93 118 C 83 93, 74 56, 65 29 C 63 23, 62 20, 63 18 Z" fill="url(#mDiagLeft)" />
+
+        <!-- 6. Right Outer Descending Leg (Folds under Peak 2 -> Sweeps to Flared Right Tail) -->
+        <path d="M 148 18 C 154 7, 170 7, 177 23 C 192 68, 207 112, 232 128 L 204 128 C 188 116, 176 78, 164 36 C 160 22, 153 16, 148 18 Z" fill="url(#mLeg4)" />
+      </symbol>
+
+      <!-- === SYMBOL 2: EXACT 3D RIBBON LETTERS 'M C L' (viewBox="0 0 370 140") === -->
+      <symbol id="memon-ribbon-mcl" viewBox="0 0 370 140">
+        <!-- === LETTER 'M' (x: 6..136) === -->
+        <!-- Left Vertical Purple Bar -->
+        <path d="M 8 14 L 33 14 L 33 126 L 8 126 Z" fill="url(#mclM_StemL)" />
+        <!-- Left Diagonal Magenta Ribbon -->
+        <path d="M 8 14 L 34 14 L 74 86 L 59 108 L 24 44 Z" fill="url(#mclM_DiagL)" />
+        <!-- Bottom V Dark Fold Triangle -->
+        <path d="M 59 108 L 74 86 L 83 101 L 71 112 Z" fill="url(#mclM_VShadow)" />
+        <!-- Right Diagonal Glossy Coral-Pink Ribbon -->
+        <path d="M 59 108 L 108 14 L 134 14 L 74 112 Z" fill="url(#mclM_DiagR)" />
+        <!-- Glossy Diagonal Specular Highlight Band across Right Diagonal of M -->
+        <path d="M 79 70 L 96 38 L 118 38 L 96 78 Z" fill="#FFFFFF" fill-opacity="0.26" />
+        <!-- Right Vertical Crimson Bar -->
+        <path d="M 109 14 L 134 14 L 134 126 L 109 126 Z" fill="url(#mclM_StemR)" />
+
+        <!-- === LETTER 'C' (x: 150..258) === -->
+        <!-- Top Inner Cyan-Blue Fold Facet (curling inward under the top lip of C) -->
+        <path d="M 192 14 C 220 12, 243 24, 254 44 L 231 56 C 223 41, 207 34, 190 38 C 181 40, 174 46, 169 54 C 168 34, 177 16, 192 14 Z" fill="url(#mclC_TopBlue)" />
+        <!-- Bottom Inner Dark Purple Fold Facet (curling upward inside bottom lip of C) -->
+        <path d="M 190 126 C 218 128, 243 116, 254 96 L 231 84 C 223 99, 207 106, 190 102 C 181 100, 174 94, 169 86 C 168 106, 177 124, 190 126 Z" fill="url(#mclC_BotPurple)" />
+        <!-- Main Outer 3D Ribbon C Body -->
+        <path d="M 244 33 C 230 18, 208 12, 188 16 C 163 22, 148 44, 148 70 C 148 96, 163 118, 188 124 C 208 128, 230 122, 244 107 L 226 90 C 216 101, 201 105, 188 101 C 177 97, 171 85, 171 70 C 171 55, 177 43, 188 39 C 201 35, 216 39, 226 50 Z" fill="url(#mclC_Main)" />
+
+        <!-- === LETTER 'L' (x: 270..362) === -->
+        <!-- Left Outer Cyan-Blue Vertical Ribbon Strip curving into bottom-left corner -->
+        <path d="M 272 14 L 285 14 L 285 98 C 285 110, 292 118, 304 121 L 294 126 C 279 126, 272 117, 272 100 Z" fill="url(#mclL_BlueLeft)" />
+        <!-- Right Inner Pink-Magenta Vertical Ribbon Strip -->
+        <path d="M 286 14 L 299 14 L 299 101 C 299 107, 303 111, 310 113 L 298 121 C 289 117, 286 109, 286 98 Z" fill="url(#mclL_PinkRight)" />
+        <!-- Crisp Specular Highlight Line between Blue and Pink vertical strips of L -->
+        <rect x="284.5" y="14" width="1.5" height="86" fill="#FFFFFF" fill-opacity="0.55" />
+        <!-- Bottom Horizontal Ribbon Base of L with angled 3D right terminal -->
+        <path d="M 285 100 C 285 103, 290 103, 299 103 L 351 103 L 362 126 L 294 126 C 281 126, 276 116, 285 100 Z" fill="url(#mclL_Base)" />
+      </symbol>
+
+      <!-- === SYMBOL 3: COMBINED 'M + MCL' TOP GRAPHIC ROW (viewBox="0 0 625 140") === -->
+      <symbol id="memon-full-top-row" viewBox="0 0 625 140">
+        <use href="#memon-ribbon-m" x="0" y="0" width="240" height="140" />
+        <use href="#memon-ribbon-mcl" x="255" y="0" width="370" height="140" />
+      </symbol>
+
+      <!-- === SYMBOL 4: POLISHED HIGH-DEFINITION HIRA MART LOGO (viewBox="0 0 640 155") === -->
+      <symbol id="hiramart-logo" viewBox="0 0 640 155">
+        <!-- Transparent backing with generous inner padding ensuring zero edge clipping -->
+        
+        <!-- Halal Badge Tag (Angled Red Parallelogram + White Script + Dual Green Leaves) -->
+        <g transform="translate(10, 10)">
+          <path d="M 16 0 L 74 0 C 78 0, 80 3, 79 7 L 62 55 C 61 59, 57 62, 53 62 L 6 62 C 1 62, -1 58, 0 54 L 11 7 C 12 3, 15 0, 16 0 Z" fill="#E60012" />
+          <text x="39" y="32" fill="#FFFFFF" font-family="'Brush Script MT', 'Palatino', cursive, sans-serif" font-style="italic" font-weight="bold" font-size="25" text-anchor="middle">Halal</text>
+          <!-- Twin Green Leaves at Base of Halal Badge -->
+          <path d="M 16 46 C 22 37, 34 38, 41 47 C 31 52, 22 51, 16 46 Z" fill="#008837" stroke="#FFFFFF" stroke-width="1.2" />
+          <path d="M 35 48 C 42 39, 54 39, 61 48 C 50 53, 40 52, 35 48 Z" fill="#008837" stroke="#FFFFFF" stroke-width="1.2" />
+        </g>
+
+        <!-- Bold Italic Red Typography: HIRA MART (Matching logo.jpg) -->
+        <text x="96" y="60" fill="#E60012" font-family="'Impact', 'Arial Black', 'Helvetica Neue', sans-serif" font-style="italic" font-weight="900" font-size="58" letter-spacing="-0.02em">HIRA MART</text>
+
+        <!-- Dual Decorative Horizontal Base Stripes -->
+        <!-- Green Upper Stripe -->
+        <rect x="10" y="81" width="224" height="17" rx="2" fill="#009944" />
+        <!-- Red Lower Stripe -->
+        <rect x="10" y="104" width="262" height="28" rx="2.5" fill="#E60012" />
+
+        <!-- Crisp Japanese Subtitle: アジアンスパイスと輸入食品のお店 -->
+        <text x="242" y="95" fill="#00662B" font-family="'Noto Sans JP', 'Hiragino Kaku Gothic ProN', sans-serif" font-weight="900" font-size="20.5" letter-spacing="-0.01em">アジアンスパイスと輸入食品のお店</text>
+
+        <!-- Crisp English Subtitle: International Food & Products (Ample clearance, no truncation) -->
+        <text x="278" y="130" fill="#00662B" font-family="'Arial Narrow', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="25" letter-spacing="-0.01em">International Food & Products</text>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- Top Utility Bar -->
+  <div class="bg-[#0B1536] text-slate-300 text-xs py-2 px-4 border-b border-slate-800">
+    <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-2">
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center gap-1.5 text-pink-400 font-semibold">
+          <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+          Since 1995
+        </span>
+        <span class="text-slate-600">|</span>
+        <span data-i18n="top_bar_tagline" class="font-medium text-slate-200">1995年5月設立：中古車輸出・ITソリューション開発・輸入食品スーパー運営</span>
+      </div>
+      <div class="flex items-center gap-4 text-slate-300 font-medium text-[11px]">
+        <span class="hidden sm:inline-flex items-center gap-1.5 text-slate-400">
+          <i data-lucide="phone" class="w-3.5 h-3.5 text-blue-400"></i> TEL: 047-303-3098
+        </span>
+        <span class="hidden md:inline-flex items-center gap-1.5 text-slate-400">
+          <i data-lucide="map-pin" class="w-3.5 h-3.5 text-pink-400"></i> 千葉県市川市 / 船橋市
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sticky Navigation Header (HORIZONTAL LOGO Layout) -->
+  <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between gap-4">
+      
+      <!-- Exact HORIZONTAL LOGO Recreation from Brand Sheet -->
+      <!-- Exact HORIZONTAL LOGO Recreation from Brand Sheet (image_ab5803.png top-right) -->
+      <a href="/" class="flex items-center gap-2 sm:gap-3 group focus:outline-none shrink-0 min-w-0 max-w-[55%] sm:max-w-none">
+        <img id="headerLogo" src="/mcl-logo-transparent.png" alt="MEMON CO., LTD." width="320" height="80" class="h-10 sm:h-12 md:h-14 w-auto max-w-[min(100%,320px)] object-contain object-left drop-shadow-sm group-hover:scale-[1.02] transition-transform duration-300">
+      </a>
+
+      <!-- Desktop Navigation Links -->
+      <nav class="hidden lg:flex items-center gap-6 text-sm font-bold text-[#0B1536]">
+        <a href="#pillars" class="hover:text-fuchsia-700 transition py-2" data-i18n="nav_pillars">3つのコア事業</a>
+        <a href="#flow" class="hover:text-fuchsia-700 transition py-2" data-i18n="nav_flow">事業内容・流通スキーム</a>
+        <a href="#ceo-message" class="hover:text-fuchsia-700 transition py-2" data-i18n="nav_ceo">代表者挨拶</a>
+        <a href="#company" class="hover:text-fuchsia-700 transition py-2" data-i18n="nav_company">会社概要</a>
+        <a href="#contact" class="inline-flex shrink-0 items-center whitespace-nowrap px-4 py-2 rounded-full gradient-brand text-white shadow-md hover:opacity-95 transition" data-i18n="nav_contact">お問い合わせ</a>
+      </nav>
+
+      <!-- Language Switcher & Mobile Menu Button -->
+      <div class="flex items-center gap-3">
+        <a href="/automan/login" id="signInLink" class="hidden lg:inline-flex shrink-0 items-center justify-center whitespace-nowrap px-4 py-2 rounded-full text-sm font-bold text-white bg-[#0B1536] hover:bg-[#0F1E46] shadow-sm transition" data-i18n="nav_staff">Sign In</a>
+        <!-- Bilingual Switcher Pill -->
+        <button id="langToggleBtn" onclick="toggleLanguage()" class="flex items-center gap-2 px-3.5 py-2 rounded-full border-2 border-purple-700/30 bg-purple-50/60 hover:bg-purple-100/80 transition shadow-sm group" aria-label="Switch Language">
+          <i data-lucide="globe" class="w-4 h-4 text-purple-700 group-hover:rotate-12 transition-transform"></i>
+          <div class="text-xs font-black tracking-wider flex items-center gap-1">
+            <span id="langIndJa" class="px-1.5 py-0.5 rounded bg-[#0B1536] text-white transition">JA</span>
+            <span class="text-slate-400">|</span>
+            <span id="langIndEn" class="px-1.5 py-0.5 rounded text-slate-600 transition">EN</span>
+          </div>
+        </button>
+
+        <!-- Mobile Menu Trigger -->
+        <button onclick="toggleMobileMenu()" class="lg:hidden p-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100">
+          <i data-lucide="menu" class="w-5 h-5"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Mobile Menu Drawer -->
+    <div id="mobileMenu" class="hidden lg:hidden bg-white border-b border-slate-200 px-4 pt-2 pb-5 space-y-2 text-sm font-bold text-[#0B1536]">
+      <a href="#pillars" onclick="toggleMobileMenu()" class="block py-2.5 px-3 rounded-lg hover:bg-slate-100" data-i18n="nav_pillars">3つのコア事業</a>
+      <a href="#flow" onclick="toggleMobileMenu()" class="block py-2.5 px-3 rounded-lg hover:bg-slate-100" data-i18n="nav_flow">事業内容・流通スキーム</a>
+      <a href="#ceo-message" onclick="toggleMobileMenu()" class="block py-2.5 px-3 rounded-lg hover:bg-slate-100" data-i18n="nav_ceo">代表者挨拶</a>
+      <a href="#company" onclick="toggleMobileMenu()" class="block py-2.5 px-3 rounded-lg hover:bg-slate-100" data-i18n="nav_company">会社概要</a>
+      <a href="/automan/login" id="signInLinkMobile" class="block py-3 px-3 rounded-lg text-center bg-[#0B1536] text-white font-bold shadow-sm" data-i18n="nav_staff">Sign In</a>
+      <a href="#contact" onclick="toggleMobileMenu()" class="block py-2.5 px-3 rounded-lg gradient-brand text-white text-center mt-2 whitespace-nowrap" data-i18n="nav_contact">お問い合わせ</a>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="relative overflow-hidden bg-white pt-12 pb-16 sm:pt-20 sm:pb-24 border-b border-slate-200">
+    <!-- Subtle Decorative Background Gradient Blobs matching Brand Sheet -->
+    <div class="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-purple-700/10 blur-3xl pointer-events-none"></div>
+    <div class="absolute top-12 right-0 w-96 h-96 rounded-full bg-rose-600/10 blur-3xl pointer-events-none"></div>
+    <div class="absolute bottom-0 left-1/3 w-96 h-96 rounded-full bg-blue-600/10 blur-3xl pointer-events-none"></div>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+
+      <!-- Corporate Mission Header -->
+      <div class="text-center max-w-4xl mx-auto mb-10 sm:mb-14">
+        <h1 class="text-2xl sm:text-4xl lg:text-5xl font-black text-[#0B1536] tracking-tight leading-tight mb-4">
+          <span class="gradient-text" data-i18n="hero_title">30年の現場経験と物流、そしてITの力で、世界を滑らかにつなぐ。</span>
+        </h1>
+        <p class="text-sm sm:text-lg text-slate-600 leading-relaxed max-w-3xl mx-auto font-medium" data-i18n="hero_subtitle">
+          有限会社メモン（MEMON CO., LTD. / MCL）は、1995年の創業以来培った「中古車輸出の国際物流網」、26年以上の「輸入食品スーパー運営」、そして現場の知見から生まれた「貿易クラウドERP・店舗POSシステム開発」の3つの柱で世界と日本をつなぎます。
+        </p>
+      </div>
+
+      <!-- 3 Visual Showcase Panels (Hero Triptych) -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-5 lg:gap-6">
+        
+        <!-- Panel 1: Automotive Export (Blue Accent) -->
+        <a href="#flow" onclick="switchFlowTab('auto')" class="pillar-slant group relative h-72 sm:h-80 rounded-2xl overflow-hidden shadow-lg border-2 border-blue-700/80 bg-slate-900 flex flex-col justify-end p-6">
+          <img src="https://images.unsplash.com/photo-1578575437130-527eed3abbec?auto=format&fit=crop&w=900&q=80" alt="Automotive Export & Shipping" class="absolute inset-0 w-full h-full object-cover opacity-65 group-hover:scale-105 transition-transform duration-500" onerror="this.src='https://placehold.co/800x600/1e3a8a/ffffff?text=Automotive+Export'">
+          <div class="absolute inset-0 bg-gradient-to-t from-blue-950 via-blue-950/60 to-transparent"></div>
+          <div class="relative z-10">
+            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-600 text-white text-[11px] font-extrabold uppercase tracking-wider mb-2 shadow">
+              <i data-lucide="ship" class="w-3.5 h-3.5"></i> 30+ Years Heritage
             </div>
-        </section>
+            <h2 class="text-xl sm:text-2xl font-black text-white tracking-tight" data-i18n="panel1_title">AUTOMOTIVE EXPORT</h2>
+            <p class="text-sm font-bold text-blue-200 mt-0.5" data-i18n="panel1_sub">新車・中古車の世界輸出・国際物流</p>
+            <p class="text-xs text-slate-200 mt-2 line-clamp-2" data-i18n="panel1_desc">日本の確かな品質を世界数十カ国へ。オークション仕入れから整備・通関・船積みまで一貫対応。</p>
+          </div>
+        </a>
 
-        <section class="about">
-            <div class="container">
-                <h2>About Memon</h2>
-                <p>
-                    This is a placeholder homepage for Memon. Content and branding will be updated when the client provides final copy and design assets.
-                </p>
-                <p>
-                    Staff can access the Automan purchase management system using the Sign In button above.
-                </p>
+        <!-- Panel 2: IT & DX Solutions (Purple Accent) -->
+        <a href="#flow" onclick="switchFlowTab('it')" class="pillar-slant group relative h-72 sm:h-80 rounded-2xl overflow-hidden shadow-lg border-2 border-purple-600/80 bg-slate-900 flex flex-col justify-end p-6">
+          <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=900&q=80" alt="IT & DX Software Engineering" class="absolute inset-0 w-full h-full object-cover opacity-65 group-hover:scale-105 transition-transform duration-500" onerror="this.src='https://placehold.co/800x600/4c1d95/ffffff?text=IT+%26+DX+Solutions'">
+          <div class="absolute inset-0 bg-gradient-to-t from-purple-950 via-purple-950/65 to-transparent"></div>
+          <div class="relative z-10">
+            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-purple-600 text-white text-[11px] font-extrabold uppercase tracking-wider mb-2 shadow">
+              <i data-lucide="cpu" class="w-3.5 h-3.5"></i> Field-Driven Tech
             </div>
-        </section>
-    </main>
+            <h2 class="text-xl sm:text-2xl font-black text-white tracking-tight" data-i18n="panel2_title">IT & DX SOLUTIONS</h2>
+            <p class="text-sm font-bold text-purple-200 mt-0.5" data-i18n="panel2_sub">ソフトウェア開発・貿易クラウド & 店舗POS</p>
+            <p class="text-xs text-slate-200 mt-2 line-clamp-2" data-i18n="panel2_desc">30年の貿易と26年の店舗経営ノウハウを凝縮した、オーダーメイド業務クラウド＆レジシステム。</p>
+          </div>
+        </a>
 
-    <footer class="site-footer">
-        <div class="container">
-            <p>&copy; 2026 Memon &middot; memon.co.jp</p>
+        <!-- Panel 3: Imported Foods Supermarket (Red Accent) -->
+        <a href="#flow" onclick="switchFlowTab('food')" class="pillar-slant group relative h-72 sm:h-80 rounded-2xl overflow-hidden shadow-lg border-2 border-red-600/80 bg-slate-900 flex flex-col justify-end p-6">
+          <img src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=80" alt="Imported Foods Supermarket" class="absolute inset-0 w-full h-full object-cover opacity-65 group-hover:scale-105 transition-transform duration-500" onerror="this.src='https://placehold.co/800x600/991b1b/ffffff?text=Import+Supermarket'">
+          <div class="absolute inset-0 bg-gradient-to-t from-red-950 via-red-950/60 to-transparent"></div>
+          <div class="relative z-10">
+            <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-600 text-white text-[11px] font-extrabold uppercase tracking-wider mb-2 shadow">
+              <i data-lucide="shopping-Cart" class="w-3.5 h-3.5"></i> 26+ Years Retail
+            </div>
+            <h2 class="text-xl sm:text-2xl font-black text-white tracking-tight" data-i18n="panel3_title">IMPORT FOODS SUPERMARKET</h2>
+            <p class="text-sm font-bold text-red-200 mt-0.5" data-i18n="panel3_sub">輸入食品スーパー運営・食の国際交流</p>
+            <p class="text-xs text-slate-200 mt-2 line-clamp-2" data-i18n="panel3_desc">世界各国の本場の食材・スパイスを日本の食卓へ。26年以上にわたり地域の多文化共生を支えています。</p>
+          </div>
+        </a>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Section: OUR THREE CORE BUSINESSES (3つのコア事業) -->
+  <section id="pillars" class="py-16 sm:py-24 bg-slate-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center max-w-3xl mx-auto mb-14">
+        <span class="text-xs font-extrabold uppercase tracking-widest text-purple-700 block mb-1">OUR THREE CORE BUSINESSES</span>
+        <h2 class="text-2xl sm:text-4xl font-black text-slate-900 tracking-tight" data-i18n="core_heading">
+          3つのコア事業とシナジー
+        </h2>
+        <p class="text-sm sm:text-base text-slate-600 mt-3" data-i18n="core_subheading">
+          「モノを運ぶ」「仕組みを創る」「食文化を届ける」。実業の現場で磨かれた3つの事業が互いに強みを高め合っています。
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+        <!-- Card 1: Automotive Export -->
+        <div class="bg-white rounded-3xl border border-slate-200/90 shadow-md hover:shadow-xl transition flex flex-col justify-between overflow-hidden">
+          <div class="h-2 bg-blue-700"></div>
+          <div class="p-7 sm:p-8 flex-1 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-4 mb-5">
+                <div class="w-14 h-14 rounded-2xl bg-blue-50 border border-blue-200 text-blue-700 flex items-center justify-center">
+                  <i data-lucide="ship" class="w-7 h-7"></i>
+                </div>
+                <span class="text-xs font-black px-3 py-1 rounded-full bg-blue-100 text-blue-900" data-i18n="c1_badge">30年以上の輸出実績</span>
+              </div>
+              <h3 class="text-xl font-black text-slate-900" data-i18n="c1_title">中古車・新車の輸出事業</h3>
+              <p class="text-xs font-bold text-blue-700 uppercase tracking-wider mt-0.5">Global Automotive Export</p>
+              <p class="text-sm text-slate-600 leading-relaxed mt-4" data-i18n="c1_desc">
+                日本全国のオートオークションおよび買取網から高品質な車両を厳選。自社契約ヤードでの保管・点検・整備から通関・船積みまでワンストップで世界各国へお届けします。
+              </p>
+              <ul class="mt-5 space-y-2 text-xs font-semibold text-slate-700 bg-slate-50 p-4 rounded-2xl border border-slate-200/70">
+                <li class="flex items-center gap-2"><i data-lucide="check-circle-2" class="w-4 h-4 text-blue-700 flex-shrink-0"></i> <span data-i18n="c1_li1">全国の主要オークション（USS/TAA/CAA/JU等）直結</span></li>
+                <li class="flex items-center gap-2"><i data-lucide="check-circle-2" class="w-4 h-4 text-blue-700 flex-shrink-0"></i> <span data-i18n="c1_li2">輸出国規制に合わせた厳格な車両検査・整備</span></li>
+                <li class="flex items-center gap-2"><i data-lucide="check-circle-2" class="w-4 h-4 text-blue-700 flex-shrink-0"></i> <span data-i18n="c1_li3">迅速なB/L発行と多言語カスタマーサポート</span></li>
+              </ul>
+            </div>
+            <div class="mt-7 pt-4 border-t border-slate-100 space-y-2.5">
+              <!-- Global Export Portal Link Button -->
+              <a href="https://mcljapan.com" target="_blank" rel="noopener noreferrer" class="w-full py-2.5 px-4 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 font-extrabold text-xs flex items-center justify-between shadow-sm transition group">
+                <span class="flex items-center gap-2">
+                  <i data-lucide="globe-2" class="w-4 h-4 text-blue-700 group-hover:rotate-45 transition-transform"></i>
+                  <span data-i18n="btn_mcljapan">海外向け中古車販売サイト (mcljapan.com)</span>
+                </span>
+                <i data-lucide="external-link" class="w-3.5 h-3.5 text-blue-500"></i>
+              </a>
+              <a href="#flow" onclick="switchFlowTab('auto')" class="w-full py-3 px-4 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs flex items-center justify-center gap-2 shadow transition">
+                <span data-i18n="btn_view_flow">流通スキーム・詳細を見る</span>
+                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+              </a>
+            </div>
+          </div>
         </div>
-    </footer>
 
-    <script>
-        (function () {
-            var signIn = document.getElementById('signInLink');
-            if (!signIn) return;
-            signIn.addEventListener('click', function (e) {
-                try {
-                    if (localStorage.getItem('authToken')) {
-                        e.preventDefault();
-                        window.location.href = '/automan/purchase';
-                    }
-                } catch (err) {
-                    /* ignore storage errors */
-                }
-            });
-        })();
-    </script>
+        <!-- Card 2: IT & DX Solutions -->
+        <div class="bg-white rounded-3xl border-2 border-purple-600/80 shadow-lg hover:shadow-xl transition flex flex-col justify-between overflow-hidden relative">
+          <div class="h-2 bg-gradient-to-r from-blue-700 via-purple-600 to-red-600"></div>
+          <div class="p-7 sm:p-8 flex-1 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-4 mb-5">
+                <div class="w-14 h-14 rounded-2xl bg-purple-50 border border-purple-200 text-purple-700 flex items-center justify-center">
+                  <i data-lucide="code-2" class="w-7 h-7"></i>
+                </div>
+                <span class="text-xs font-black px-3 py-1 rounded-full bg-purple-100 text-purple-900" data-i18n="c2_badge">現場ノウハウ × 高度IT人材</span>
+              </div>
+              <h3 class="text-xl font-black text-slate-900" data-i18n="c2_title">IT・ソフトウェア開発 & DX</h3>
+              <p class="text-xs font-bold text-purple-700 uppercase tracking-wider mt-0.5">Custom Cloud ERP & Retail POS</p>
+              <p class="text-sm text-slate-600 leading-relaxed mt-4" data-i18n="c2_desc">
+                30年以上の貿易実務と26年以上のスーパー・飲食店経営のノウハウを生かし、どんな貿易業務にも使えるオーダーメイドのクラウド管理システムや、店舗用レジ・管理ツールを開発しています。
+              </p>
+              <ul class="mt-5 space-y-2 text-xs font-semibold text-slate-700 bg-purple-50/60 p-4 rounded-2xl border border-purple-200/70">
+                <li class="flex items-center gap-2"><i data-lucide="check-circle-2" class="w-4 h-4 text-purple-700 flex-shrink-0"></i> <span data-i18n="c2_li1">貿易業務データクラウド管理システム（車両・コンテナ・書類・外貨一元管理）</span></li>
+                <li class="flex items-center gap-2"><i data-lucide="check-circle-2" class="w-4 h-4 text-purple-700 flex-shrink-0"></i> <span data-i18n="c2_li2">レストラン・スーパーマーケット専用POSレジ＆多言語在庫管理システム</span></li>
+                <li class="flex items-center gap-2"><i data-lucide="check-circle-2" class="w-4 h-4 text-purple-700 flex-shrink-0"></i> <span data-i18n="c2_li3">日本企業がスムーズに運営できるオーダーメイドDX支援</span></li>
+              </ul>
+            </div>
+            <div class="mt-7 pt-4 border-t border-slate-100">
+              <a href="#flow" onclick="switchFlowTab('it')" class="w-full py-3 px-4 rounded-xl bg-purple-700 hover:bg-purple-800 text-white font-bold text-xs flex items-center justify-center gap-2 shadow transition">
+                <span data-i18n="btn_view_it">開発システム・詳細を見る</span>
+                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: Imported Foods Supermarket -->
+        <div class="bg-white rounded-3xl border border-slate-200/90 shadow-md hover:shadow-xl transition flex flex-col justify-between overflow-hidden">
+          <div class="h-2 bg-red-600"></div>
+          <div class="p-7 sm:p-8 flex-1 flex flex-col justify-between">
+            <div>
+              <div class="flex items-center justify-between gap-4 mb-3">
+                <!-- Hira Mart Badge / Brand Indicator -->
+                <div class="flex items-center gap-2">
+                  <div class="w-10 h-10 rounded-xl bg-red-50 border border-red-200 text-red-600 flex items-center justify-center">
+                    <i data-lucide="store" class="w-5 h-5"></i>
+                  </div>
+                  <div>
+                    <span class="text-[10px] font-extrabold tracking-widest text-red-600 uppercase">STORE BRAND</span>
+                    <div class="text-xs font-black text-slate-800">HIRA MART (ヒラマート)</div>
+                  </div>
+                </div>
+                <span class="text-xs font-black px-3 py-1 rounded-full bg-red-100 text-red-900" data-i18n="c3_badge">26年以上の店舗経営実績</span>
+              </div>
+
+              <!-- Refined Hira Mart Brand Logo Framing (Full-width, proper aspect ratio, no clipping) -->
+              <div class="my-4 p-3 sm:p-4 rounded-2xl bg-white border border-slate-200/90 shadow-sm flex items-center justify-center">
+                <div class="w-full max-w-[340px] aspect-[3.6/1] flex items-center justify-center">
+                  <img src="logo.jpg" alt="HIRA MART Official Brand Logo" class="w-full h-full object-contain" onerror="this.classList.add('hidden'); this.nextElementSibling.classList.remove('hidden');">
+                  <svg viewBox="0 0 640 155" class="hidden w-full h-full object-contain">
+                    <use href="#hiramart-logo" />
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Storefront Snapshot Preview -->
+              <div class="relative rounded-2xl overflow-hidden border border-slate-200 mb-4 group shadow-sm">
+                <img src="https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=800&q=80" alt="Hira Mart Physical Storefront" class="w-full h-36 object-cover group-hover:scale-105 transition-transform duration-500" onerror="this.src='https://placehold.co/600x300/991b1b/ffffff?text=Hira+Mart+Storefront'">
+                <div class="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-slate-950/20 to-transparent"></div>
+                <div class="absolute bottom-2.5 left-3 right-3 flex items-center justify-between text-white text-[11px] font-bold">
+                  <span class="inline-flex items-center gap-1.5"><i data-lucide="store" class="w-3.5 h-3.5 text-rose-400"></i> <span data-i18n="c3_store_badge">Hira Mart 実店舗</span></span>
+                  <span class="px-2 py-0.5 rounded bg-red-600/90 text-[10px] font-black uppercase">Retail Shop</span>
+                </div>
+              </div>
+
+              <h3 class="text-xl font-black text-slate-900" data-i18n="c3_title">輸入食品スーパーマーケット</h3>
+              <p class="text-xs font-bold text-red-600 uppercase tracking-wider mt-0.5">Imported Foods & Cultural Exchange</p>
+              <p class="text-sm text-slate-600 leading-relaxed mt-2" data-i18n="c3_desc">
+                日本で暮らす方々に海外の豊かな食文化を広めたいという思いから26年以上にわたり輸入食品小売店「HIRA MART（ヒラマート）」を運営。食を通じた草の根の国際交流を実現しています。
+              </p>
+              <ul class="mt-4 space-y-2 text-xs font-semibold text-slate-700 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/70">
+                <li class="flex items-center gap-2"><i data-lucide="check-circle-2" class="w-4 h-4 text-red-600 flex-shrink-0"></i> <span data-i18n="c3_li1">国内流通のスパイス・ハラール・世界各国の食材に特化した地域密着型小売</span></li>
+                <li class="flex items-center gap-2"><i data-lucide="check-circle-2" class="w-4 h-4 text-red-600 flex-shrink-0"></i> <span data-i18n="c3_li2">国内食品メーカーおよび専門卸業者との強固な信頼ネットワーク</span></li>
+                <li class="flex items-center gap-2"><i data-lucide="check-circle-2" class="w-4 h-4 text-red-600 flex-shrink-0"></i> <span data-i18n="c3_li3">自社開発POSシステムによるスマートな店舗オペレーション</span></li>
+              </ul>
+            </div>
+            <div class="mt-6 pt-4 border-t border-slate-100 space-y-2.5">
+              <!-- Official Online Shop Link Button -->
+              <a href="https://hiramart.net" target="_blank" rel="noopener noreferrer" class="w-full py-2.5 px-4 rounded-xl bg-red-50 hover:bg-red-100 text-red-950 border border-red-200 font-extrabold text-xs flex items-center justify-between shadow-sm transition group">
+                <span class="flex items-center gap-2">
+                  <i data-lucide="shopping-bag" class="w-4 h-4 text-red-600 group-hover:scale-110 transition-transform"></i>
+                  <span data-i18n="btn_hiramart">公式EC・オンライン通販 (hiramart.net)</span>
+                </span>
+                <i data-lucide="external-link" class="w-3.5 h-3.5 text-red-500"></i>
+              </a>
+              <a href="#flow" onclick="switchFlowTab('food')" class="w-full py-3 px-4 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow transition">
+                <span data-i18n="btn_view_food">店舗運営・詳細を見る</span>
+                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+              </a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Section: Interactive Business Flow & Supply Chain Architecture (事業内容・流通スキーム) -->
+  <section id="flow" class="py-16 sm:py-24 bg-white border-t border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      
+      <!-- Purple Geometric Banner inspired by Dean Corp -->
+      <div class="relative rounded-3xl overflow-hidden mb-10 shadow-lg bg-gradient-to-r from-blue-950 via-purple-900 to-red-900 p-8 sm:p-12 text-center text-white">
+        <div class="absolute inset-0 opacity-20 bg-[radial-gradient(#ffffff_1px,transparent_1px)] [background-size:20px_20px]"></div>
+        <div class="relative z-10">
+          <span class="text-xs font-extrabold uppercase tracking-widest text-purple-200 block mb-1">BUSINESS OPERATIONS & SUPPLY CHAIN</span>
+          <h2 class="text-2xl sm:text-4xl font-black tracking-tight" data-i18n="flow_banner_title">事業内容・業務フロー</h2>
+          <p class="text-xs sm:text-sm text-purple-100 mt-2 max-w-2xl mx-auto" data-i18n="flow_banner_sub">
+            各事業タブをクリックすると、具体的な流通スキームとステップ別の業務内容をご覧いただけます。
+          </p>
+        </div>
+      </div>
+
+      <!-- Interactive Tab Buttons -->
+      <div class="flex flex-wrap justify-center gap-3 mb-12">
+        <button id="tabBtn-auto" onclick="switchFlowTab('auto')" class="px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center gap-2.5 transition shadow-md bg-blue-700 text-white">
+          <i data-lucide="ship" class="w-4 h-4"></i>
+          <span data-i18n="tab_auto">1. 新車・中古車の輸出販売</span>
+        </button>
+        <button id="tabBtn-it" onclick="switchFlowTab('it')" class="px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center gap-2.5 transition bg-slate-100 text-slate-700 hover:bg-slate-200">
+          <i data-lucide="cpu" class="w-4 h-4"></i>
+          <span data-i18n="tab_it">2. IT・クラウド管理 & POS開発</span>
+        </button>
+        <button id="tabBtn-food" onclick="switchFlowTab('food')" class="px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center gap-2.5 transition bg-slate-100 text-slate-700 hover:bg-slate-200">
+          <i data-lucide="shopping-basket" class="w-4 h-4"></i>
+          <span data-i18n="tab_food">3. 輸入食品スーパー運営</span>
+        </button>
+      </div>
+
+      <!-- TAB 1 CONTENT: AUTOMOTIVE EXPORT (SBT 3-Block Diagram + Dean Corp 3-Step Flow) -->
+      <div id="flowPanel-auto" class="space-y-12">
+        
+        <!-- Intro Block (Dean Corp Style) -->
+        <div class="bg-slate-50 rounded-3xl border border-slate-200 p-6 sm:p-10">
+          <div class="flex items-center gap-3 mb-6">
+            <span class="w-2.5 h-8 bg-purple-700 rounded-full"></span>
+            <h3 class="text-xl sm:text-2xl font-black text-purple-950" data-i18n="auto_intro_h">新車・中古車の輸出販売</h3>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
+            <div class="md:col-span-5 rounded-2xl overflow-hidden shadow-md border border-slate-200">
+              <img src="https://images.unsplash.com/photo-1494412574643-ff11b0a5c1c3?auto=format&fit=crop&w=800&q=80" alt="Port Logistics" class="w-full h-56 object-cover" onerror="this.src='https://placehold.co/600x400/1e3a8a/ffffff?text=Global+Port+Logistics'">
+            </div>
+            <div class="md:col-span-7 space-y-4 text-sm sm:text-base text-slate-700 leading-relaxed">
+              <p data-i18n="auto_intro_p1">
+                有限会社メモン（MEMON CO., LTD.）は、30年以上の輸出実務経験と自社開発のIT技術を駆使し、全世界に日本の中古車・新車輸出を行っている会社です。
+              </p>
+              <p data-i18n="auto_intro_p2">
+                お客様へ、IT技術と確かな物流網を活用して人々の生活をより豊かに、より便利にするお手伝いを国境を越えたグローバルな視点で追求してまいります。
+              </p>
+              <!-- Global Car Export Portal Callout Box -->
+              <div class="pt-2">
+                <div class="p-4 rounded-2xl bg-white border border-blue-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <span class="text-[11px] font-black tracking-wider text-blue-700 uppercase" data-i18n="portal_tag">GLOBAL VEHICLE INVENTORY</span>
+                    <h5 class="text-sm font-extrabold text-slate-900" data-i18n="portal_title">海外向け中古車輸出販売サイト（MCL JAPAN）</h5>
+                    <p class="text-xs text-slate-500" data-i18n="portal_sub">世界中のバイヤー様向けに最新の輸出在庫車両・シッピング情報を掲載しています。</p>
+                  </div>
+                  <a href="https://mcljapan.com" target="_blank" rel="noopener noreferrer" class="flex-shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold shadow transition">
+                    <span>mcljapan.com</span>
+                    <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SBT-Style Horizontal 3-Block Supply Chain Architecture Diagram -->
+        <div class="bg-white rounded-3xl border-2 border-slate-200 p-6 sm:p-10 shadow-lg">
+          <div class="text-center mb-8">
+            <span class="text-xs font-extrabold uppercase tracking-widest text-blue-700">SUPPLY CHAIN ARCHITECTURE</span>
+            <h4 class="text-xl sm:text-2xl font-black text-slate-900 mt-1" data-i18n="sbt_title">中古車輸出の全体ビジネス相関図</h4>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-11 gap-4 items-stretch">
+            
+            <!-- Left Box: 仕入先 (Suppliers) - Blue Border -->
+            <div class="lg:col-span-3 rounded-2xl border-[3px] border-blue-800 bg-blue-50/20 p-5 flex flex-col justify-between relative">
+              <div class=" -mt-9 mx-auto bg-white px-4 py-1 text-lg font-black text-blue-900 tracking-wide" data-i18n="sbt_box1_title">
+                仕入先
+              </div>
+              <div class="grid grid-cols-2 gap-3 my-4">
+                <div class="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                  <i data-lucide="building-2" class="w-7 h-7 mx-auto text-blue-700 mb-1.5"></i>
+                  <div class="text-xs font-extrabold text-slate-800" data-i18n="sbt_b1_1">国内・海外<br>オートオークション</div>
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                  <i data-lucide="network" class="w-7 h-7 mx-auto text-blue-700 mb-1.5"></i>
+                  <div class="text-xs font-extrabold text-slate-800" data-i18n="sbt_b1_2">全国提携<br>ディーラー網</div>
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                  <i data-lucide="store" class="w-7 h-7 mx-auto text-blue-700 mb-1.5"></i>
+                  <div class="text-xs font-extrabold text-slate-800" data-i18n="sbt_b1_3">中古車買取業者</div>
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-slate-200 text-center shadow-sm">
+                  <i data-lucide="users" class="w-7 h-7 mx-auto text-blue-700 mb-1.5"></i>
+                  <div class="text-xs font-extrabold text-slate-800" data-i18n="sbt_b1_4">個人様</div>
+                </div>
+              </div>
+              <div class="text-[11px] text-center font-bold text-blue-900 bg-blue-100/80 py-1.5 rounded-lg" data-i18n="sbt_b1_foot">
+                TAA / CAA / USS / JU / ホンダ / 日産 他
+              </div>
+            </div>
+
+            <!-- Arrow 1 (Blue Curved/Directional Arrow) -->
+            <div class="lg:col-span-1 flex items-center justify-center py-2 lg:py-0">
+              <div class="w-12 h-12 rounded-full bg-blue-700 text-white flex items-center justify-center shadow-lg">
+                <i data-lucide="arrow-right" class="w-6 h-6 hidden lg:block"></i>
+                <i data-lucide="arrow-down" class="w-6 h-6 lg:hidden"></i>
+              </div>
+            </div>
+
+            <!-- Center Box: MCL / MEMON CO., LTD. - Crimson/Magenta Border with New Brand Logo -->
+            <div class="lg:col-span-3 rounded-2xl border-[3px] border-rose-600 bg-rose-50/20 p-5 flex flex-col justify-between relative shadow-md">
+              <div class="-mt-10 mx-auto bg-white px-3.5 py-1.5 rounded-xl border border-rose-200 shadow-sm flex items-center gap-2">
+                <!-- Mini Dark Navy Square App Icon from Brand Sheet -->
+                <div class="w-8 h-8 rounded-lg bg-[#0B1536] flex items-center justify-center p-1 shadow-inner overflow-hidden">
+                  <svg id="hubVectorIcon" viewBox="0 0 220 135" class="w-full h-full">
+                    <use href="#memon-ribbon-m" />
+                  </svg>
+                  <img id="hubUploadedIcon" class="hidden w-full h-full object-cover rounded" alt="M Icon">
+                </div>
+                <svg viewBox="0 0 355 135" class="h-5 w-auto">
+                  <use href="#memon-ribbon-mcl" />
+                </svg>
+                <span class="text-xs font-extrabold font-memon text-[#0B1536]">MEMON</span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2.5 my-4">
+                <div class="bg-rose-600 text-white px-2.5 py-2.5 rounded-lg text-center font-bold text-xs shadow-sm flex items-center justify-center" data-i18n="sbt_mcl_1">
+                  自社契約ヤードへの陸送
+                </div>
+                <div class="bg-rose-600 text-white px-2.5 py-2.5 rounded-lg text-center font-bold text-xs shadow-sm flex items-center justify-center" data-i18n="sbt_mcl_2">
+                  通関・輸出抹消
+                </div>
+                <div class="bg-rose-600 text-white px-2.5 py-2.5 rounded-lg text-center font-bold text-xs shadow-sm flex items-center justify-center" data-i18n="sbt_mcl_3">
+                  保管・検査・整備
+                </div>
+                <div class="bg-rose-600 text-white px-2.5 py-2.5 rounded-lg text-center font-bold text-xs shadow-sm flex items-center justify-center" data-i18n="sbt_mcl_4">
+                  各種輸出・船積手続
+                </div>
+                <div class="bg-rose-600 text-white px-2.5 py-2.5 rounded-lg text-center font-bold text-xs shadow-sm flex items-center justify-center" data-i18n="sbt_mcl_5">
+                  適切な価格設定
+                </div>
+                <div class="bg-rose-600 text-white px-2.5 py-2.5 rounded-lg text-center font-bold text-xs shadow-sm flex items-center justify-center" data-i18n="sbt_mcl_6">
+                  マーケティング・セールス
+                </div>
+              </div>
+
+              <div class="bg-white rounded-xl p-2.5 border border-rose-200 flex items-center justify-center gap-3 text-xs font-extrabold text-[#0B1536]">
+                <i data-lucide="car-front" class="w-5 h-5 text-rose-600"></i>
+                <span data-i18n="sbt_mcl_foot">自社開発クラウドERPで全車両を一元管理</span>
+              </div>
+            </div>
+
+            <!-- Arrow 2 (Red Directional Arrow) -->
+            <div class="lg:col-span-1 flex items-center justify-center py-2 lg:py-0">
+              <div class="w-12 h-12 rounded-full bg-red-600 text-white flex items-center justify-center shadow-lg">
+                <i data-lucide="arrow-right" class="w-6 h-6 hidden lg:block"></i>
+                <i data-lucide="arrow-down" class="w-6 h-6 lg:hidden"></i>
+              </div>
+            </div>
+
+            <!-- Right Box: 顧客 (Customers) - Orange/Amber Border -->
+            <div class="lg:col-span-3 rounded-2xl border-[3px] border-amber-500 bg-amber-50/20 p-5 flex flex-col justify-between relative">
+              <div class="-mt-9 mx-auto bg-white px-4 py-1 text-lg font-black text-amber-600 tracking-wide" data-i18n="sbt_box3_title">
+                顧客
+              </div>
+              <div class="grid grid-cols-1 gap-3 my-4">
+                <div class="bg-white p-3 rounded-xl border border-slate-200 flex items-center gap-3 shadow-sm">
+                  <i data-lucide="warehouse" class="w-7 h-7 text-amber-600 flex-shrink-0"></i>
+                  <div>
+                    <div class="text-xs font-extrabold text-slate-900" data-i18n="sbt_b3_1">現地ディーラー様</div>
+                    <div class="text-[11px] text-slate-500" data-i18n="sbt_b3_1d">世界各国の販売店・ショールーム</div>
+                  </div>
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-slate-200 flex items-center gap-3 shadow-sm">
+                  <i data-lucide="briefcase" class="w-7 h-7 text-amber-600 flex-shrink-0"></i>
+                  <div>
+                    <div class="text-xs font-extrabold text-slate-900" data-i18n="sbt_b3_2">海外バイヤー様</div>
+                    <div class="text-[11px] text-slate-500" data-i18n="sbt_b3_2d">法人インポーター・商用車フリート</div>
+                  </div>
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-slate-200 flex items-center gap-3 shadow-sm">
+                  <i data-lucide="user-check" class="w-7 h-7 text-amber-600 flex-shrink-0"></i>
+                  <div>
+                    <div class="text-xs font-extrabold text-slate-900" data-i18n="sbt_b3_3">個人顧客様</div>
+                    <div class="text-[11px] text-slate-500" data-i18n="sbt_b3_3d">ダイレクト輸出・個別オーダー</div>
+                  </div>
+                </div>
+              </div>
+              <div class="text-[11px] text-center font-bold text-amber-900 bg-amber-100/80 py-1.5 rounded-lg" data-i18n="sbt_b3_foot">
+                世界数十カ国への豊富な販売・納車実績
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- TAB 2 CONTENT: IT & DX SOLUTIONS -->
+      <div id="flowPanel-it" class="hidden space-y-8">
+        <div class="bg-purple-50/70 rounded-3xl border border-purple-200 p-6 sm:p-10">
+          <div class="max-w-3xl mb-8">
+            <span class="text-xs font-extrabold uppercase tracking-widest text-purple-700">FIELD-PROVEN SOFTWARE ENGINEERING</span>
+            <h3 class="text-2xl sm:text-3xl font-black text-slate-900 mt-1" data-i18n="it_panel_title">
+              30年の貿易実務 × 26年の店舗経営から生まれた実践的ITソリューション
+            </h3>
+            <p class="text-sm text-slate-600 mt-2 leading-relaxed" data-i18n="it_panel_sub">
+              一般的なIT会社では分からない「現場の細かな業務フローや悩み」を熟知した自社の高度ITエンジニアチームが、日本の企業がスムーズに運営できるオーダーメイドシステムを開発・提供します。
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- IT Solution 1: Trade Cloud ERP -->
+            <div class="bg-white rounded-2xl p-6 sm:p-8 border border-purple-200 shadow-sm">
+              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-blue-100 text-blue-900 text-xs font-extrabold mb-4">
+                <i data-lucide="cloud-cog" class="w-4 h-4"></i> Cloud Trade ERP
+              </div>
+              <h4 class="text-lg sm:text-xl font-black text-slate-900" data-i18n="it_prod1_title">
+                オーダーメイド貿易業務データクラウド管理システム
+              </h4>
+              <p class="text-xs sm:text-sm text-slate-600 mt-2 leading-relaxed" data-i18n="it_prod1_desc">
+                中古車輸出をはじめ、あらゆる国際貿易業務に対応。仕入れ・ヤード在庫・整備ステータス・船積みスケジュール・B/Lやインボイス等の書類自動生成・多通貨決済までをクラウド上で一元管理できます。
+              </p>
+            </div>
+
+            <!-- IT Solution 2: Supermarket & Restaurant POS -->
+            <div class="bg-white rounded-2xl p-6 sm:p-8 border border-purple-200 shadow-sm">
+              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-red-100 text-red-900 text-xs font-extrabold mb-4">
+                <i data-lucide="monitor-smartphone" class="w-4 h-4"></i> Smart Retail & Dining POS
+              </div>
+              <h4 class="text-lg sm:text-xl font-black text-slate-900" data-i18n="it_prod2_title">
+                レストラン・スーパーマーケット用レジ＆店舗管理ツール
+              </h4>
+              <p class="text-xs sm:text-sm text-slate-600 mt-2 leading-relaxed" data-i18n="it_prod2_desc">
+                26年以上の輸入食品スーパーとエスニックレストラン経営の現場ノウハウを凝縮。多言語対応レジ、賞味期限・ロット管理、ハンディオーダー、インボイス対応、日次売上分析を直感的な操作で実現します。
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 3 CONTENT: IMPORTED FOODS SUPERMARKET -->
+      <div id="flowPanel-food" class="hidden space-y-8">
+        <div class="bg-red-50/60 rounded-3xl border border-red-200 p-6 sm:p-10">
+          
+          <!-- Section Title with High-Definition Hira Mart Brand Logo Display -->
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-8 pb-6 border-b border-red-200/80">
+            <div class="max-w-2xl">
+              <span class="text-xs font-extrabold uppercase tracking-widest text-red-600">26+ YEARS OF GRASSROOTS CULTURAL EXCHANGE</span>
+              <h3 class="text-2xl sm:text-3xl font-black text-slate-900 mt-1" data-i18n="food_panel_title">
+                輸入食品スーパーマーケット運営（小売特化型）
+              </h3>
+              <p class="text-sm text-slate-600 mt-2 leading-relaxed" data-i18n="food_panel_sub">
+                日本で暮らす方々に世界の豊かな食文化を広めたいという思いから26年以上にわたり輸入食品スーパー「HIRA MART（ヒラマート）」を店舗経営。大量の自社輸入ではなく、国内で確かな品質を持つ食品メーカーや専門卸業者から仕入れ、小売りを通じて身近な食の国際交流を行っています。
+              </p>
+            </div>
+            <!-- Official Hira Mart Logo Box with Generous Breathing Room -->
+            <div class="bg-white p-3.5 sm:p-4 rounded-2xl border border-red-200/90 shadow-sm flex items-center justify-center flex-shrink-0">
+              <div class="w-56 sm:w-64 aspect-[3.6/1] flex items-center justify-center">
+                <img src="logo.jpg" alt="HIRA MART Official Logo" class="w-full h-full object-contain" onerror="this.classList.add('hidden'); this.nextElementSibling.classList.remove('hidden');">
+                <svg viewBox="0 0 640 155" class="hidden w-full h-full object-contain">
+                  <use href="#hiramart-logo" />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <!-- Storefront Architecture & Physical Presence Feature Card -->
+          <div class="bg-white rounded-3xl border border-red-200 p-6 sm:p-8 shadow-md mb-8">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              
+              <!-- Left: Polished Storefront Visual Presentation -->
+              <div class="lg:col-span-6 relative rounded-2xl overflow-hidden border-2 border-red-100 shadow-lg group">
+                <div class="relative bg-slate-900 aspect-[4/3] overflow-hidden">
+                  <!-- Physical Storefront Imagery Representation of image_9a8abf.png -->
+                  <img src="https://images.unsplash.com/photo-1578916171728-46686eac8d58?auto=format&fit=crop&w=1000&q=85" alt="Hira Mart Physical Storefront and Interior" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 brightness-[1.03] contrast-[1.05]" onerror="this.src='https://placehold.co/800x600/991b1b/ffffff?text=Hira+Mart+Storefront'">
+                  
+                  <!-- Gradient Vignette -->
+                  <div class="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/25 to-transparent"></div>
+                  
+                  <!-- Overlay Signboard Header Replica Badge -->
+                  <div class="absolute top-3 left-3 right-3 flex items-center justify-between">
+                    <div class="bg-white/95 backdrop-blur-md px-3 py-1.5 rounded-xl shadow border border-red-100 flex items-center gap-2">
+                      <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                      <span class="text-[11px] font-black text-slate-800" data-i18n="store_badge">Hira Mart 実店舗</span>
+                    </div>
+                    <span class="px-2.5 py-1 rounded-lg bg-red-600/90 text-white text-[10px] font-extrabold uppercase tracking-wider shadow">Halal & Asian Mart</span>
+                  </div>
+
+                  <!-- Bottom Caption -->
+                  <div class="absolute bottom-3 left-4 right-4 text-white">
+                    <p class="text-xs font-bold text-red-200 flex items-center gap-1.5 mb-0.5">
+                      <i data-lucide="store" class="w-4 h-4 text-emerald-400"></i>
+                      <span data-i18n="store_caption_h">地域に根ざした食のワンストップ拠点</span>
+                    </p>
+                    <p class="text-[11px] text-slate-200 font-medium line-clamp-1" data-i18n="store_caption_sub">
+                      赤と緑の看板が目印の角地店舗。店内の棚には本格スパイスや各国の食材がずらりと並びます。
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Right: Store Concept, Capabilities & Community Commitment -->
+              <div class="lg:col-span-6 space-y-4">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-100 text-red-900 text-xs font-extrabold">
+                  <i data-lucide="check-check" class="w-3.5 h-3.5 text-red-600"></i>
+                  <span data-i18n="store_tag">26年以上の信頼と実績</span>
+                </div>
+                <h4 class="text-xl sm:text-2xl font-black text-slate-900 leading-snug" data-i18n="store_h">
+                  地域に寄り添うアジアン＆ハラールフードの専門店「Hira Mart」
+                </h4>
+                <p class="text-xs sm:text-sm text-slate-600 leading-relaxed font-normal" data-i18n="store_desc">
+                  千葉県の地域密着型店舗として26年以上、在日外国人の方々のソウルフードから、本格的な料理を楽しむ日本のご家庭まで幅広く愛され続けています。国内の信頼できるメーカーや正規卸業者から厳選調達し、徹底した品質管理を行っています。
+                </p>
+
+                <!-- Store Highlights Grid -->
+                <div class="grid grid-cols-2 gap-3 pt-1">
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-extrabold text-red-700 flex items-center gap-1.5 mb-1">
+                      <i data-lucide="utensils" class="w-3.5 h-3.5"></i>
+                      <span data-i18n="st_feat1_t">豊富なスパイス＆米類</span>
+                    </div>
+                    <div class="text-[11px] text-slate-600" data-i18n="st_feat1_d">バスマティライス、各種ホール・パウダースパイス</div>
+                  </div>
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-extrabold text-emerald-700 flex items-center gap-1.5 mb-1">
+                      <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+                      <span data-i18n="st_feat2_t">100% ハラール認証食材</span>
+                    </div>
+                    <div class="text-[11px] text-slate-600" data-i18n="st_feat2_d">冷凍マトン・チキン・ハラール加工食品</div>
+                  </div>
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-extrabold text-blue-700 flex items-center gap-1.5 mb-1">
+                      <i data-lucide="globe" class="w-3.5 h-3.5"></i>
+                      <span data-i18n="st_feat3_t">アジア・中東の輸入調味料</span>
+                    </div>
+                    <div class="text-[11px] text-slate-600" data-i18n="st_feat3_d">豆類、ギー、ソース、スナック菓子、紅茶</div>
+                  </div>
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-extrabold text-purple-700 flex items-center gap-1.5 mb-1">
+                      <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+                      <span data-i18n="st_feat4_t">自社開発POSシステム</span>
+                    </div>
+                    <div class="text-[11px] text-slate-600" data-i18n="st_feat4_d">多言語レジ＆在庫管理でスムーズな接客</div>
+                  </div>
+                </div>
+
+                <!-- Live Store & Online Shop Connection -->
+                <div class="pt-2 flex flex-wrap items-center gap-3">
+                  <a href="https://hiramart.net" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow transition">
+                    <i data-lucide="shopping-bag" class="w-4 h-4"></i>
+                    <span data-i18n="btn_hiramart_ec">公式通販サイト (hiramart.net)</span>
+                    <i data-lucide="external-link" class="w-3.5 h-3.5 text-red-200"></i>
+                  </a>
+                  <span class="text-[11px] text-slate-500 font-medium" data-i18n="store_note">※全国発送にも対応しております</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Official EC Store Banner (hiramart.net) with Hira Mart Logo -->
+          <div class="mb-8 p-5 sm:p-6 rounded-2xl bg-white border-2 border-red-300 shadow-md flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div class="flex items-center gap-4">
+              <div class="hidden sm:flex bg-white p-3 rounded-2xl border border-red-200/90 items-center justify-center flex-shrink-0 shadow-sm">
+                <div class="w-48 sm:w-56 aspect-[3.6/1] flex items-center justify-center">
+                  <img src="logo.jpg" alt="HIRA MART Logo" class="w-full h-full object-contain" onerror="this.classList.add('hidden'); this.nextElementSibling.classList.remove('hidden');">
+                  <svg viewBox="0 0 640 155" class="hidden w-full h-full object-contain">
+                    <use href="#hiramart-logo" />
+                  </svg>
+                </div>
+              </div>
+              <div>
+                <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-red-100 text-red-800 text-[10px] font-black uppercase tracking-wider mb-1">
+                  OFFICIAL ONLINE STORE
+                </div>
+                <h4 class="text-base sm:text-lg font-black text-slate-900" data-i18n="ec_title">公式ECサイト「ヒラマート（Hira Mart）」オンライン通販</h4>
+                <p class="text-xs text-slate-600 mt-0.5" data-i18n="ec_desc">実店舗だけでなく、全国どこからでも本格スパイス・ハラールフード・輸入食品をご注文いただけます。</p>
+              </div>
+            </div>
+            <a href="https://hiramart.net" target="_blank" rel="noopener noreferrer" class="flex-shrink-0 inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs sm:text-sm font-bold shadow-md transition group">
+              <span data-i18n="btn_ec_visit">hiramart.net を見る</span>
+              <i data-lucide="external-link" class="w-4 h-4 group-hover:translate-x-0.5 transition-transform"></i>
+            </a>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="bg-white rounded-2xl p-6 border border-red-200 shadow-sm">
+              <div class="text-xs font-black text-red-600 mb-1">POINT 01</div>
+              <h4 class="text-base font-black text-slate-900" data-i18n="food_s1_t">国内優良メーカー・卸からの厳選調達</h4>
+              <p class="text-xs text-slate-600 mt-2 leading-relaxed" data-i18n="food_s1_d">国内の食品メーカーや専門卸業者と連携し、本場のスパイス、ハラール食材、調味料など安全で高品質な品揃えを維持。</p>
+            </div>
+            <div class="bg-white rounded-2xl p-6 border border-red-200 shadow-sm">
+              <div class="text-xs font-black text-red-600 mb-1">POINT 02</div>
+              <h4 class="text-base font-black text-slate-900" data-i18n="food_s2_t">地域に愛される小売り専門店</h4>
+              <p class="text-xs text-slate-600 mt-2 leading-relaxed" data-i18n="food_s2_d">長年の店舗運営ノウハウを活かし、在日外国人の方や本格的な料理を楽しむ日本のお客様が気軽に訪れることができる小売店舗を運営。</p>
+            </div>
+            <div class="bg-white rounded-2xl p-6 border border-red-200 shadow-sm">
+              <div class="text-xs font-black text-red-600 mb-1">POINT 03</div>
+              <h4 class="text-base font-black text-slate-900" data-i18n="food_s3_t">食を通じた国際交流と店舗DX</h4>
+              <p class="text-xs text-slate-600 mt-2 leading-relaxed" data-i18n="food_s3_d">自社開発のPOSレジ・在庫管理ツールを実地運用し、スムーズな店舗体験と多文化共生の場を提供。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Section: Message from the CEO (代表者挨拶 - Personal Story Since 1988) -->
+  <section id="ceo-message" class="py-16 sm:py-24 bg-gradient-to-b from-purple-50/70 via-white to-slate-50 border-t border-slate-200">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      
+      <!-- Decorative Wave Header inspired by uploaded image -->
+      <div class="text-center mb-12">
+        <div class="inline-flex flex-col items-center">
+          <svg class="w-12 h-8 text-purple-700 mb-2" viewBox="0 0 60 36" fill="none">
+            <path d="M2 6C10 2 18 10 26 6C34 2 42 10 50 6C54 4 56 5 58 6" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M2 14C10 10 18 18 26 14C34 10 42 18 50 14C54 12 56 13 58 14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M2 22C10 18 18 26 26 22C34 18 42 26 50 22C54 20 56 21 58 22" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M2 30C10 26 18 34 26 30C34 26 42 34 50 30C54 28 56 29 58 30" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          </svg>
+          <span class="text-xs font-extrabold uppercase tracking-widest text-purple-700">MESSAGE FROM THE CEO</span>
+          <h2 class="text-2xl sm:text-4xl font-black text-purple-950 mt-1" data-i18n="ceo_heading">代表者挨拶</h2>
+        </div>
+      </div>
+
+      <!-- Milestone Timeline Pills -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-10">
+        <div class="bg-white p-3.5 rounded-2xl border border-purple-200/80 text-center shadow-sm">
+          <div class="text-lg font-black text-blue-800">1988</div>
+          <div class="text-xs font-bold text-slate-600" data-i18n="mile_1988">日本へ来日</div>
+        </div>
+        <div class="bg-white p-3.5 rounded-2xl border border-purple-200/80 text-center shadow-sm">
+          <div class="text-lg font-black text-purple-800">1995</div>
+          <div class="text-xs font-bold text-slate-600" data-i18n="mile_1995">創業・貿易開始</div>
+        </div>
+        <div class="bg-white p-3.5 rounded-2xl border border-purple-200/80 text-center shadow-sm">
+          <div class="text-lg font-black text-red-600">26+ Years</div>
+          <div class="text-xs font-bold text-slate-600" data-i18n="mile_food">輸入食品スーパー経営</div>
+        </div>
+        <div class="bg-white p-3.5 rounded-2xl border border-purple-200/80 text-center shadow-sm">
+          <div class="text-lg font-black gradient-text">IT & DX</div>
+          <div class="text-xs font-bold text-slate-600" data-i18n="mile_it">現場発のシステム開発</div>
+        </div>
+      </div>
+
+      <!-- Main CEO Letter Card -->
+      <div class="bg-white rounded-3xl border border-purple-200/90 shadow-xl p-7 sm:p-12 relative overflow-hidden gradient-border-top">
+        <div class="space-y-5 text-sm sm:text-base text-slate-700 leading-relaxed font-normal">
+          <p class="font-bold text-slate-900 text-base sm:text-lg" data-i18n="ceo_p1">
+            有限会社メモン（MEMON CO., LTD.）のホームページをご覧いただき、誠にありがとうございます。
+          </p>
+          <p data-i18n="ceo_p2">
+            私は1988年に日本へ来日しました。当時の日本は経済の活気にあふれ、世界最高峰のものづくりの技術と、誠実に働く人々の姿に深い感銘を受けました。最初は海外の雑貨を日本に広めるために1995年に起業し、その数年後に日本の中古車を世界各国へ届ける輸出事業へとシフトいたしました。
+          </p>
+
+          <!-- Highlight Callout Quote -->
+          <blockquote class="my-6 p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-blue-50 via-purple-50 to-red-50 border-l-4 border-purple-700 text-slate-900 font-bold text-sm sm:text-base shadow-sm" data-i18n="ceo_quote">
+            「日本のものを海外に売るというのは、非常に大きな責任が伴います。なぜなら、海外のお客様にとって私たちが『日本の顔』になるからです。」
+          </blockquote>
+
+          <p data-i18n="ceo_p3">
+            私たちはその誇りと責任を胸に、30年以上にわたり一台一台に誠実に向き合い続けてきました。そして同時に、「日本にいる方々にも海外の豊かな食品や文化を広めたい」という思いから、26年前より輸入食品の小売店（スーパーマーケット）を経営し、一時期はエスニック系のレストランも手掛けてまいりました。食やモノを通じて人と人をつなぐこと——それが私たちの実践する「ビジネスを通じた国際交流」です。
+          </p>
+          <p data-i18n="ceo_p4">
+            さらに近年はITが急速に普及する中で、日本の企業がよりスムーズに業務を運営できるよう、30年以上の輸出業務やスーパー・レストラン経営で培った現場ノウハウと、弊社の高度なIT人材を生かして「ITソリューション事業（貿易クラウド管理システムや店舗用POSレジ・ツールの開発）」にも挑んでいます。
+          </p>
+          <p data-i18n="ceo_p5">
+            私たちが築いてきた経験、物流、そしてITの力によって、国境を越えて働く人々や暮らす人々がつながり、「みんながより生きやすい世界」になることを心から願っております。これからもチーム一丸となり、世界中のお客様やお取引先様と共に発展していけるよう全力で邁進してまいります。
+          </p>
+        </div>
+
+        <div class="mt-10 pt-6 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div class="text-xs font-bold text-slate-500" data-i18n="ceo_sign_comp">有限会社メモン（MEMON CO., LTD.）</div>
+            <div class="text-lg sm:text-xl font-black text-[#0B1536] mt-0.5" data-i18n="ceo_sign_role">取締役社長　メモン　モハメド　アセフ</div>
+          </div>
+          <div class="inline-flex items-center gap-2 text-xs font-bold text-purple-800 bg-purple-50 px-4 py-2 rounded-full border border-purple-200">
+            <i data-lucide="heart-handshake" class="w-4 h-4 text-red-600"></i>
+            <span data-i18n="ceo_sign_motto">Connecting the World with Experience, Logistics & IT</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Section: Company Profile (会社概要 - Updated with Full Official Registration Info) -->
+  <section id="company" class="py-16 sm:py-20 bg-white border-t border-slate-200">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-12">
+        <span class="text-xs font-extrabold uppercase tracking-widest text-blue-700">COMPANY PROFILE</span>
+        <h2 class="text-2xl sm:text-3xl font-black text-slate-900 mt-1" data-i18n="comp_heading">会社概要</h2>
+      </div>
+
+      <div class="bg-slate-50 rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+        <dl class="divide-y divide-slate-200 text-sm">
+          <!-- Company Name -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_name_label">会社名</dt>
+            <dd class="sm:col-span-2 text-slate-800 font-bold mt-1 sm:mt-0" data-i18n="cp_name_val">有限会社メモン（英語表記：MEMON CO., LTD.）</dd>
+          </div>
+          <!-- President & CEO -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_ceo_label">取締役社長</dt>
+            <dd class="sm:col-span-2 text-slate-800 font-bold mt-1 sm:mt-0" data-i18n="cp_ceo_val">メモン　モハメド　アセフ（Memon Mohammad Asif）</dd>
+          </div>
+          <!-- Established -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_found_label">会社設立</dt>
+            <dd class="sm:col-span-2 text-slate-700 font-semibold mt-1 sm:mt-0" data-i18n="cp_found_val">1995年5月（平成7年5月）</dd>
+          </div>
+          <!-- Capital (資本金) -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_cap_label">資本金</dt>
+            <dd class="sm:col-span-2 text-slate-800 font-bold mt-1 sm:mt-0" data-i18n="cp_cap_val">600万円</dd>
+          </div>
+          <!-- Annual Revenue (売上高) -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_rev_label">売上高</dt>
+            <dd class="sm:col-span-2 text-slate-800 font-bold mt-1 sm:mt-0" data-i18n="cp_rev_val">約30億円（2026年度見込み）</dd>
+          </div>
+          <!-- Head Office -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_hq_label">本社所在地</dt>
+            <dd class="sm:col-span-2 text-slate-700 font-semibold mt-1 sm:mt-0" data-i18n="cp_hq_val">〒272-0133 千葉県市川市行徳駅前3-6-1-112</dd>
+          </div>
+          <!-- Funabashi Office -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_funa_label">船橋オフィス</dt>
+            <dd class="sm:col-span-2 text-slate-700 font-semibold mt-1 sm:mt-0" data-i18n="cp_funa_val">〒273-0035 千葉県船橋市本中山6-9-10-301</dd>
+          </div>
+          <!-- TEL & FAX -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_tel_label">連絡先（TEL / FAX）</dt>
+            <dd class="sm:col-span-2 text-slate-800 font-bold mt-1 sm:mt-0 flex flex-wrap items-center gap-6">
+              <span class="inline-flex items-center gap-1.5"><i data-lucide="phone" class="w-4 h-4 text-blue-700"></i> TEL: 047-303-3098</span>
+              <span class="inline-flex items-center gap-1.5"><i data-lucide="printer" class="w-4 h-4 text-purple-700"></i> FAX: 04-711-0409</span>
+            </dd>
+          </div>
+          <!-- Core Businesses -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_biz_label">主な事業内容</dt>
+            <dd class="sm:col-span-2 text-slate-700 mt-1 sm:mt-0 space-y-1.5 font-medium">
+              <div data-i18n="cp_biz_1">1. 新車・中古車・商用車・パーツの輸出販売事業（30年以上の実績）</div>
+              <div data-i18n="cp_biz_2">2. ITソフトウェア・DX開発事業（オーダーメイド貿易クラウド管理システム、スーパー・飲食店向けPOSレジ＆管理ツールの開発）</div>
+              <div data-i18n="cp_biz_3">3. 輸入食品スーパーマーケットの店舗運営（小売特化・26年以上の実績）</div>
+            </dd>
+          </div>
+          <!-- Secondhand Dealer License -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_lic_label">古物商許可番号</dt>
+            <dd class="sm:col-span-2 text-slate-800 font-bold mt-1 sm:mt-0">
+              <span class="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-blue-50 border border-blue-200 text-blue-950 text-xs sm:text-sm" data-i18n="cp_lic_val">
+                千葉県公安委員会　第441430000079号
+              </span>
+            </dd>
+          </div>
+          <!-- Major Partners -->
+          <div class="grid grid-cols-1 sm:grid-cols-3 p-5 sm:px-8 hover:bg-white/60 transition">
+            <dt class="font-extrabold text-[#0B1536]" data-i18n="cp_auc_label">主要取引先</dt>
+            <dd class="sm:col-span-2 text-slate-700 mt-1 sm:mt-0" data-i18n="cp_auc_val">国内食品メーカーおよび卸業者、国内・海外主要オートオークション（USS、TAA、CAA、JU、ホンダAA、日産AA 等）、全国中古車買取ネットワーク各社</dd>
+          </div>
+        </dl>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Section: Interactive Contact Form (お問い合わせ) -->
+  <section id="contact" class="py-16 sm:py-24 bg-slate-900 text-white relative overflow-hidden">
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+      <div class="text-center mb-10">
+        <span class="text-xs font-extrabold uppercase tracking-widest text-purple-400">CONTACT US</span>
+        <h2 class="text-2xl sm:text-4xl font-black mt-1" data-i18n="contact_heading">お問い合わせ・ご相談</h2>
+        <p class="text-xs sm:text-sm text-slate-300 mt-2" data-i18n="contact_sub">
+          中古車輸出のお取引、貿易クラウドシステムや店舗POSレジの導入相談、輸入食品の卸売・仕入れに関するお問い合わせはこちらから承ります。
+        </p>
+      </div>
+
+      <form id="contactForm" onsubmit="handleFormSubmit(event)" class="bg-slate-800/90 border border-slate-700 rounded-3xl p-6 sm:p-10 space-y-5 shadow-2xl">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <div>
+            <label class="block text-xs font-bold text-slate-300 mb-2" data-i18n="form_name">お名前・御社名 *</label>
+            <input type="text" required class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm focus:outline-none focus:border-purple-500" placeholder="有限会社メモン / Taro Yamada">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-300 mb-2" data-i18n="form_email">メールアドレス *</label>
+            <input type="email" required class="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-700 text-white text-sm focus:outline-none focus:border-purple-500" placeholder="info@example.com">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-300 mb-2" data-i18n="form_cat">お問い合わせ対象の事業 *</label>
+  <!-- Footer with App Icon, Full Addresses, TEL/FAX & License -->
+  <footer class="bg-[#0B1536] text-slate-300 py-14 border-t border-slate-800 text-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-start">
+        <!-- Brand Column -->
+        <div class="md:col-span-5 flex flex-col items-start gap-3">
+          <div class="flex items-center">
+            <img src="/mcl-logo-transparent.png" alt="MEMON CO., LTD." width="280" height="70" class="h-10 sm:h-12 w-auto max-w-[280px] object-contain">
+          </div>
+          <div>
+            <div class="text-slate-300 font-bold text-xs" data-i18n="footer_comp_jp">有限会社メモン（取締役社長：メモン モハメド アセフ）</div>
+            <div class="text-slate-400 text-[11px] mt-1" data-i18n="footer_lic">古物商許可番号：千葉県公安委員会 第441430000079号</div>
+          </div>
+        </div>
+
+        <!-- Offices & Contact Column -->
+        <div class="md:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4 text-slate-300">
+          <div class="bg-white/5 rounded-2xl p-4 border border-white/10">
+            <div class="font-extrabold text-pink-400 mb-1" data-i18n="footer_hq_title">本社（Head Office）</div>
+            <div class="leading-relaxed" data-i18n="footer_hq_addr">〒272-0133 千葉県市川市行徳駅前3-6-1-112</div>
+            <div class="mt-2 font-bold text-white">TEL: 047-303-3098 / FAX: 04-711-0409</div>
+          </div>
+          <div class="bg-white/5 rounded-2xl p-4 border border-white/10">
+            <div class="font-extrabold text-sky-400 mb-1" data-i18n="footer_funa_title">船橋オフィス（Funabashi Office）</div>
+            <div class="leading-relaxed" data-i18n="footer_funa_addr">〒273-0035 千葉県船橋市本中山6-9-10-301</div>
+            <div class="mt-2 text-slate-400" data-i18n="footer_est">設立：1995年5月</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-6 border-t border-slate-800/90 flex flex-col sm:flex-row items-center justify-between gap-4 text-slate-400">
+        <p>© 1995-2026 MEMON CO., LTD. (有限会社メモン) All Rights Reserved.</p>
+        <p class="text-[11px]">Connecting the World with Experience, Logistics & IT</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Bilingual Dictionary & Interactive Scripts -->
+  <script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+
+    let currentLang = 'ja';
+
+    const i18nDict = {
+      ja: {
+        top_bar_tagline: "1995年5月設立：中古車輸出・ITソリューション開発・輸入食品スーパー運営",
+        logo_sub: "有限会社メモン",
+        nav_pillars: "3つのコア事業",
+        nav_flow: "事業内容・流通スキーム",
+        nav_ceo: "代表者挨拶",
+        nav_company: "会社概要",
+        nav_staff: "Sign In",
+        nav_contact: "お問い合わせ",
+        hero_badge: "MCL : INTEGRATED GLOBAL TRADING, RETAIL & IT SOLUTIONS",
+        hero_title: "30年の現場経験と物流、そしてITの力で、世界を滑らかにつなぐ。",
+        hero_subtitle: "有限会社メモン（MEMON CO., LTD. / MCL）は、1995年5月の設立以来培った「中古車輸出の国際物流網」、26年以上の「輸入食品スーパー運営」、そして現場の知見から生まれた「貿易クラウドERP・店舗POSシステム開発」の3つの柱で世界と日本をつなぎます。",
+        panel1_title: "AUTOMOTIVE EXPORT",
+        panel1_sub: "新車・中古車の世界輸出・国際物流",
+        panel1_desc: "日本の確かな品質を世界数十カ国へ。オークション仕入れから整備・通関・船積みまで一貫対応。",
+        panel2_title: "IT & DX SOLUTIONS",
+        panel2_sub: "ソフトウェア開発・貿易クラウド & 店舗POS",
+        panel2_desc: "30年の貿易と26年の店舗経営ノウハウを凝縮した、オーダーメイド業務クラウド＆レジシステム。",
+        panel3_title: "IMPORT FOODS SUPERMARKET",
+        panel3_sub: "輸入食品スーパー運営・食の国際交流",
+        panel3_desc: "世界各国の本場の食材・スパイスを日本の食卓へ。26年以上にわたり地域の多文化共生を支えています。",
+        core_heading: "3つのコア事業とシナジー",
+        core_subheading: "「モノを運ぶ」「仕組みを創る」「食文化を届ける」。実業の現場で磨かれた3つの事業が互いに強みを高め合っています。",
+        c1_badge: "30年以上の輸出実績",
+        c1_title: "中古車・新車の輸出事業",
+        c1_desc: "日本全国のオートオークションおよび買取網から高品質な車両を厳選。自社契約ヤードでの保管・点検・整備から通関・船積みまでワンストップで世界各国へお届けします。",
+        c1_li1: "全国の主要オークション（USS/TAA/CAA/JU等）直結",
+        c1_li2: "輸出国規制に合わせた厳格な車両検査・整備",
+        c1_li3: "迅速なB/L発行と多言語カスタマーサポート",
+        btn_mcljapan: "海外向け中古車販売サイト (mcljapan.com)",
+        btn_view_flow: "流通スキーム・詳細を見る",
+        c2_badge: "現場ノウハウ × 高度IT人材",
+        c2_title: "IT・ソフトウェア開発 & DX",
+        c2_desc: "30年以上の貿易実務と26年以上のスーパー・飲食店経営のノウハウを生かし、どんな貿易業務にも使えるオーダーメイドのクラウド管理システムや、店舗用レジ・管理ツールを開発しています。",
+        c2_li1: "貿易業務データクラウド管理システム（車両・コンテナ・書類・外貨一元管理）",
+        c2_li2: "レストラン・スーパーマーケット専用POSレジ＆多言語在庫管理システム",
+        c2_li3: "日本企業がスムーズに運営できるオーダーメイドDX支援",
+        btn_view_it: "開発システム・詳細を見る",
+        c3_badge: "26年以上の店舗経営実績",
+        c3_title: "輸入食品スーパーマーケット",
+        c3_desc: "日本で暮らす方々に海外の豊かな食文化を広めたいという思いから26年以上にわたり輸入食品小売店（スーパー）を運営。食を通じた草の根の国際交流を実現しています。",
+        c3_li1: "国内流通のスパイス・ハラール・世界各国の食材に特化した地域密着型小売",
+        c3_li2: "国内食品メーカーおよび専門卸業者との強固な信頼ネットワーク",
+        c3_li3: "自社開発POSシステムによるスマートな店舗オペレーション",
+        btn_hiramart: "公式EC・オンライン通販 (hiramart.net)",
+        btn_view_food: "店舗運営・詳細を見る",
+        flow_banner_title: "事業内容・業務フロー",
+        flow_banner_sub: "各事業タブをクリックすると、具体的な流通スキームとステップ別の業務内容をご覧いただけます。",
+        tab_auto: "1. 新車・中古車の輸出販売",
+        tab_it: "2. IT・クラウド管理 & POS開発",
+        tab_food: "3. 輸入食品スーパー運営（小売特化）",
+        auto_intro_h: "新車・中古車の輸出販売",
+        auto_intro_p1: "有限会社メモン（MEMON CO., LTD.）は、30年以上の輸出実務経験と自社開発のIT技術を駆使し、全世界に日本の中古車・新車輸出を行っている会社です。",
+        auto_intro_p2: "お客様へ、IT技術と確かな物流網を活用して人々の生活をより豊かに、より便利にするお手伝いを国境を越えたグローバルな視点で追求してまいります。",
+        portal_tag: "GLOBAL VEHICLE INVENTORY",
+        portal_title: "海外向け中古車輸出販売ポータルサイト（MCL JAPAN）",
+        portal_sub: "世界各国のバイヤー様向けに最新の輸出在庫車両・シッピング情報を掲載しています。",
+        sbt_title: "中古車輸出の全体ビジネス相関図",
+        sbt_box1_title: "仕入先",
+        sbt_b1_1: "国内・海外<br>オートオークション",
+        sbt_b1_2: "全国提携<br>ディーラー網",
+        sbt_b1_3: "中古車買取業者",
+        sbt_b1_4: "個人様",
+        sbt_b1_foot: "TAA / CAA / USS / JU / ホンダ / 日産 他",
+        sbt_mcl_1: "自社契約ヤードへの陸送",
+        sbt_mcl_2: "通関・輸出抹消",
+        sbt_mcl_3: "保管・検査・整備",
+        sbt_mcl_4: "各種輸出・船積手続",
+        sbt_mcl_5: "適切な価格設定",
+        sbt_mcl_6: "マーケティング・セールス",
+        sbt_mcl_foot: "自社開発クラウドERPで全車両を一元管理",
+        sbt_box3_title: "顧客",
+        sbt_b3_1: "現地ディーラー様",
+        sbt_b3_1d: "世界各国の販売店・ショールーム",
+        sbt_b3_2: "海外バイヤー様",
+        sbt_b3_2d: "法人インポーター・商用車フリート",
+        sbt_b3_3: "個人顧客様",
+        sbt_b3_3d: "ダイレクト輸出・個別オーダー",
+        sbt_b3_foot: "世界数十カ国への豊富な販売・納車実績",
+        step1_title: "1. 仕入れ先から車を仕入れる",
+        step1_li1: "〇 国内オートオークション（TAA、CAA、USS、JU、ホンダオートオークション、日産オートオークション など）",
+        step1_li2: "〇 海外オートオークション",
+        step1_li3: "〇 中古車買取業者",
+        step1_li4: "〇 個人様など",
+        step2_title: "2. 当社が手続きや整備など行う",
+        step2_desc: "有限会社メモンでの販売車両の仕入れ・船積み手配・適切な販売価格の設定・貿易書類の作成・輸出先国の輸入規制に合わせた車両の検査や整備・輸出先国でのマーケティング活動・多言語による顧客対応など、仕入れから輸出先でのその後の対応までを、30年以上の安心と信頼を基に行っています。",
+        step2_box1: "〇 自社契約ヤードへの運送（船・陸）",
+        step2_box2: "〇 保管・検査・整備・点検など",
+        step2_box3: "〇 各種輸出手続き・通関・B/L発行",
+        step3_title: "3. 顧客様へ車をお渡しする",
+        step3_li1: "〇 海外バイヤー様",
+        step3_li2: "〇 現地ディーラー様",
+        step3_li3: "〇 個人様など",
+        it_panel_title: "30年の貿易実務 × 26年の店舗経営から生まれた実践的ITソリューション",
+        it_panel_sub: "一般的なIT会社では分からない「現場の細かな業務フローや悩み」を熟知した自社の高度ITエンジニアチームが、日本の企業がスムーズに運営できるオーダーメイドシステムを開発・提供します。",
+        it_prod1_title: "オーダーメイド貿易業務データクラウド管理システム",
+        it_prod1_desc: "中古車輸出をはじめ、あらゆる国際貿易業務に対応。仕入れ・ヤード在庫・整備ステータス・船積みスケジュール・B/Lやインボイス等の書類自動生成・多通貨決済までをクラウド上で一元管理できます。",
+        it_prod2_title: "レストラン・スーパーマーケット用レジ＆店舗管理ツール",
+        it_prod2_desc: "26年以上の輸入食品スーパーとエスニックレストラン経営の現場ノウハウを凝縮。多言語対応レジ、賞味期限・ロット管理、ハンディオーダー、インボイス対応、日次売上分析を直感的な操作で実現します。",
+        food_panel_title: "輸入食品スーパーマーケット運営（小売特化型）",
+        food_panel_sub: "日本で暮らす方々に世界の豊かな食文化を広めたいという思いから26年以上にわたり輸入食品スーパーを店舗経営。大量の自社輸入ではなく、国内で確かな品質を持つ食品メーカーや専門卸業者から仕入れ、小売りを通じて身近な食の国際交流を行っています。",
+        ec_title: "公式ECサイト「ヒラマート（Hira Mart）」オンライン通販",
+        ec_desc: "実店舗だけでなく、全国どこからでも本格スパイス・ハラールフード・輸入食品をご注文いただけます。",
+        btn_ec_visit: "hiramart.net を見る",
+        food_s1_t: "国内優良メーカー・卸からの厳選調達",
+        food_s1_d: "国内の食品メーカーや専門卸業者と連携し、本場のスパイス、ハラール食材、調味料など安全で高品質な品揃えを維持。",
+        food_s2_t: "地域に愛される小売り専門店",
+        food_s2_d: "長年の店舗運営ノウハウを活かし、在日外国人の方や本格的な料理を楽しむ日本のお客様が気軽に訪れることができる小売店舗を運営。",
+        food_s3_t: "食を通じた国際交流と店舗DX",
+        food_s3_d: "自社開発のPOSレジ・在庫管理ツールを実地運用し、スムーズな店舗体験と多文化共生の場を提供。",
+        c3_store_badge: "Hira Mart 実店舗",
+        store_badge: "Hira Mart 実店舗",
+        store_caption_h: "地域に根ざした食のワンストップ拠点",
+        store_caption_sub: "赤と緑の看板が目印の角地店舗。店内の棚には本格スパイスや各国の食材がずらりと並びます。",
+        store_tag: "26年以上の信頼と実績",
+        store_h: "地域に寄り添うアジアン＆ハラールフードの専門店「Hira Mart」",
+        store_desc: "千葉県の地域密着型店舗として26年以上、在日外国人の方々のソウルフードから、本格的な料理を楽しむ日本のご家庭まで幅広く愛され続けています。国内の信頼できるメーカーや正規卸業者から厳選調達し、徹底した品質管理を行っています。",
+        st_feat1_t: "豊富なスパイス＆米類",
+        st_feat1_d: "バスマティライス、各種ホール・パウダースパイス",
+        st_feat2_t: "100% ハラール認証食材",
+        st_feat2_d: "冷凍マトン・チキン・ハラール加工食品",
+        st_feat3_t: "アジア・中東の輸入調味料",
+        st_feat3_d: "豆類、ギー、ソース、スナック菓子、紅茶",
+        st_feat4_t: "自社開発POSシステム",
+        st_feat4_d: "多言語レジ＆在庫管理でスムーズな接客",
+        btn_hiramart_ec: "公式通販サイト (hiramart.net)",
+        store_note: "※全国発送にも対応しております",
+        ceo_heading: "代表者挨拶",
+        mile_1988: "日本へ来日",
+        mile_1995: "1995年5月 会社設立",
+        mile_food: "輸入食品スーパー経営",
+        mile_it: "現場発のシステム開発",
+        ceo_p1: "有限会社メモン（MEMON CO., LTD.）のホームページをご覧いただき、誠にありがとうございます。",
+        ceo_p2: "私は1988年に日本へ来日しました。当時の日本は経済の活気にあふれ、世界最高峰のものづくりの技術と、誠実に働く人々の姿に深い感銘を受けました。最初は海外の雑貨を日本に広めるために1995年5月に会社を設立し、その数年後に日本の中古車を世界各国へ届ける輸出事業へとシフトいたしました。",
+        ceo_quote: "「日本のものを海外に売るというのは、非常に大きな責任が伴います。なぜなら、海外のお客様にとって私たちが『日本の顔』になるからです。」",
+        ceo_p3: "私たちはその誇りと責任を胸に、30年以上にわたり一台一台に誠実に向き合い続けてきました。そして同時に、「日本にいる方々にも海外の豊かな食品や文化を広めたい」という思いから、26年前より輸入食品の小売店（スーパーマーケット）を経営し、一時期はエスニック系のレストランも手掛けてまいりました。大量に輸入するのではなく小売りという現場に特化し、国内の信頼できる食品メーカー様や卸業者様と連携しながら、食やモノを通じて人と人をつなぐこと——それが私たちの実践する「ビジネスを通じた国際交流」です。",
+        ceo_p4: "さらに近年はITが急速に普及する中で、日本の企業がよりスムーズに業務を運営できるよう、30年以上の輸出業務やスーパー・レストラン経営で培った現場ノウハウと、弊社の高度なIT人材を生かして「ITソリューション事業（貿易クラウド管理システムや店舗用POSレジ・ツールの開発）」にも挑んでいます。",
+        ceo_p5: "私たちが築いてきた経験、物流、そしてITの力によって、国境を越えて働く人々や暮らす人々がつながり、「みんながより生きやすい世界」になることを心から願っております。これからもチーム一丸となり、世界中のお客様やお取引先様と共に発展していけるよう全力で邁進してまいります。",
+        ceo_sign_comp: "有限会社メモン（MEMON CO., LTD.）",
+        ceo_sign_role: "取締役社長　メモン　モハメド　アセフ",
+        ceo_sign_motto: "経験と物流、そしてITで世界をつなぐ",
+        comp_heading: "会社概要",
+        cp_name_label: "会社名",
+        cp_name_val: "有限会社メモン（英語表記：MEMON CO., LTD.）",
+        cp_ceo_label: "取締役社長",
+        cp_ceo_val: "メモン　モハメド　アセフ（Memon Mohammad Asif）",
+        cp_found_label: "会社設立",
+        cp_found_val: "1995年5月（平成7年5月）",
+        cp_hq_label: "本社所在地",
+        cp_hq_val: "〒272-0133 千葉県市川市行徳駅前3-6-1-112",
+        cp_funa_label: "船橋オフィス",
+        cp_funa_val: "〒273-0035 千葉県船橋市本中山6-9-10-301",
+        cp_tel_label: "TEL / FAX",
+        cp_biz_label: "主な事業内容",
+        cp_biz_1: "1. 新車・中古車・商用車・パーツの輸出販売事業（30年以上の実績）",
+        cp_biz_2: "2. ITソフトウェア・DX開発事業（オーダーメイド貿易クラウド管理システム、スーパー・飲食店向けPOSレジ＆管理ツールの開発）",
+        cp_biz_3: "3. 輸入食品スーパーマーケットの店舗運営（小売特化・26年以上の実績）",
+        cp_lic_label: "古物商許可番号",
+        cp_lic_val: "千葉県公安委員会　第441430000079号",
+        cp_auc_label: "主要取引先",
+        cp_auc_val: "国内食品メーカーおよび卸業者、国内・海外主要オートオークション（USS、TAA、CAA、JU、ホンダAA、日産AA 等）、全国中古車買取ネットワーク各社",
+        brand_sec_title: "公式ブランドロゴ＆カラーシステム",
+        brand_colors_label: "使用カラー",
+        contact_heading: "お問い合わせ・ご相談",
+        contact_sub: "中古車輸出のお取引、貿易クラウドシステムや店舗POSレジの導入相談、輸入食品の小売り・店舗に関するお問い合わせはこちらから承ります。",
+        form_name: "お名前・御社名 *",
+        form_email: "メールアドレス *",
+        form_cat: "お問い合わせ対象の事業 *",
+        form_opt1: "新車・中古車の輸出販売について (Automotive Export)",
+        form_opt2: "貿易クラウド管理システム・店舗POSレジ開発について (IT & DX Solutions)",
+        form_opt3: "輸入食品スーパー・店舗運営について (Imported Foods Supermarket)",
+        form_opt4: "その他のお問い合わせ (General Inquiry)",
+        form_msg: "お問い合わせ内容 *",
+        form_submit: "メッセージを送信する / Send Inquiry",
+        form_thanks: "お問い合わせありがとうございます。担当者より折り返しご連絡いたします。",
+        footer_comp_jp: "有限会社メモン（取締役社長：メモン モハメド アセフ）",
+        footer_lic: "古物商許可番号：千葉県公安委員会 第441430000079号",
+        footer_hq_title: "本社所在地（Head Office）",
+        footer_hq_addr: "〒272-0133 千葉県市川市行徳駅前3-6-1-112",
+        footer_funa_title: "船橋オフィス（Funabashi Office）",
+        footer_funa_addr: "〒273-0035 千葉県船橋市本中山6-9-10-301",
+        footer_est: "会社設立：1995年5月"
+      },
+      en: {
+        top_bar_tagline: "Established May 1995: Global Vehicle Export, IT/DX Solutions & Imported Foods Retail Supermarket",
+        logo_sub: "MEMON CO., LTD.",
+        nav_pillars: "Core Businesses",
+        nav_flow: "Operations & Supply Chain",
+        nav_ceo: "CEO Message",
+        nav_company: "Company Profile",
+        nav_staff: "Sign In",
+        nav_contact: "Contact Us",
+        hero_badge: "MCL : INTEGRATED GLOBAL TRADING, RETAIL & IT SOLUTIONS",
+        hero_title: "Bridging the World with Experience, Logistics, and Technology.",
+        hero_subtitle: "Established in May 1995, MEMON CO., LTD. (MCL) connects Japan and the world through three core pillars: over 30 years of global automotive export logistics, 26+ years of specialized imported foods supermarket retail, and custom cloud ERP & retail POS software built from real-world business mastery.",
+        panel1_title: "AUTOMOTIVE EXPORT",
+        panel1_sub: "Global Pre-Owned & New Vehicle Export",
+        panel1_desc: "Delivering trusted Japanese vehicles worldwide. One-stop service from auction sourcing to inspection, customs, and maritime shipping.",
+        panel2_title: "IT & DX SOLUTIONS",
+        panel2_sub: "Tailor-Made Cloud Trade ERP & Retail POS",
+        panel2_desc: "Custom cloud systems for international trade and smart POS tools for supermarkets & restaurants, engineered from 30+ years of field know-how.",
+        panel3_title: "IMPORT FOODS SUPERMARKET",
+        panel3_sub: "Specialized Retail & Everyday Cultural Exchange",
+        panel3_desc: "Specializing in the retail of authentic international spices and Halal groceries sourced from trusted domestic partners for over 26 years.",
+        core_heading: "Our Three Core Pillars & Synergy",
+        core_subheading: "Moving goods, engineering digital systems, and sharing global food cultures—each pillar reinforces the others through real operational insight.",
+        c1_badge: "30+ Years Export Track Record",
+        c1_title: "Global Automotive Export",
+        c1_desc: "Sourcing top-grade vehicles from major auto auctions and dealer networks across Japan. We handle yard logistics, inspection, maintenance, customs clearance, and global shipping under one roof.",
+        c1_li1: "Direct access to major Japanese auto auctions (USS, TAA, CAA, JU, etc.)",
+        c1_li2: "Strict pre-shipment inspection & maintenance tailored to destination rules",
+        c1_li3: "Fast documentation, B/L issuance & multilingual customer care",
+        btn_mcljapan: "Global Vehicle Sales Portal (mcljapan.com)",
+        btn_view_flow: "View Supply Chain & Flow",
+        c2_badge: "30+ Yrs Know-How × Elite Tech Talent",
+        c2_title: "IT Software Development & DX",
+        c2_desc: "Built on 30+ years of export operations and 26+ years of supermarket and restaurant management, we develop tailor-made cloud trade management systems and POS tools that empower businesses to run smoothly.",
+        c2_li1: "Tailor-made Cloud Trade Management ERP (inventory, shipping, docs & multi-currency)",
+        c2_li2: "Smart POS & inventory systems designed for supermarkets and restaurants",
+        c2_li3: "Practical DX consulting helping Japanese enterprises streamline operations",
+        btn_view_it: "Explore IT & DX Solutions",
+        c3_badge: "26+ Years Retail Heritage",
+        c3_title: "Imported Foods Supermarket (Retail Focus)",
+        c3_desc: "Operating community-rooted supermarkets dedicated to retail excellence, sharing world culinary traditions with local residents in Japan.",
+        c3_li1: "Community-focused retail specializing in global spices, Halal foods, and specialties",
+        c3_li2: "Strong partnerships with reputable domestic food manufacturers and wholesalers",
+        c3_li3: "Seamless store operations powered by our proprietary retail POS platform",
+        btn_hiramart: "Official Online Store (hiramart.net)",
+        btn_view_food: "View Retail Operations",
+        flow_banner_title: "Business Operations & Supply Chain",
+        flow_banner_sub: "Select a business tab below to explore our supply chain architecture and step-by-step operational workflow.",
+        tab_auto: "1. Automotive Export Flow",
+        tab_it: "2. IT Cloud ERP & POS Systems",
+        tab_food: "3. Imported Foods Supermarket (Retail)",
+        auto_intro_h: "Global Export of New & Pre-Owned Vehicles",
+        auto_intro_p1: "MEMON CO., LTD. (MCL) leverages over three decades of international trading expertise and proprietary IT systems to export quality vehicles from Japan to clients around the globe.",
+        auto_intro_p2: "We strive to enrich lives and empower businesses across borders through reliable logistics and digital innovation.",
+        portal_tag: "GLOBAL VEHICLE INVENTORY",
+        portal_title: "MCL JAPAN Global Vehicle Export Portal",
+        portal_sub: "Real-time export inventory and maritime shipping schedules for international buyers.",
+        sbt_title: "End-to-End Automotive Export Supply Chain",
+        sbt_box1_title: "Suppliers",
+        sbt_b1_1: "Japanese & Overseas<br>Auto Auctions",
+        sbt_b1_2: "Nationwide<br>Dealer Networks",
+        sbt_b1_3: "Vehicle Buyback Specialists",
+        sbt_b1_4: "Individual Owners",
+        sbt_b1_foot: "TAA / CAA / USS / JU / Honda / Nissan, etc.",
+        sbt_mcl_1: "In-House Yard Transport",
+        sbt_mcl_2: "Customs & De-registration",
+        sbt_mcl_3: "Storage, Inspection & Repair",
+        sbt_mcl_4: "Export & Maritime Shipping",
+        sbt_mcl_5: "Fair Pricing & Forex",
+        sbt_mcl_6: "Global Marketing & Sales",
+        sbt_mcl_foot: "Unified tracking via our proprietary Cloud ERP",
+        sbt_box3_title: "Global Clients",
+        sbt_b3_1: "Overseas Dealerships",
+        sbt_b3_1d: "Showrooms & local distributors worldwide",
+        sbt_b3_2: "International Buyers",
+        sbt_b3_2d: "Corporate importers & commercial fleets",
+        sbt_b3_3: "Individual Customers",
+        sbt_b3_3d: "Direct personal import & custom orders",
+        sbt_b3_foot: "Proven delivery track record across dozens of countries",
+        step1_title: "1. Sourcing Quality Vehicles from Trusted Suppliers",
+        step1_li1: "〇 Japanese Auto Auctions (TAA, CAA, USS, JU, Honda Auto Auction, Nissan Auto Auction, etc.)",
+        step1_li2: "〇 International Auto Auctions",
+        step1_li3: "〇 Specialized Vehicle Buyback Dealers",
+        step1_li4: "〇 Direct Individual Sellers",
+        step2_title: "2. Comprehensive Processing, Inspection & Shipping by MCL",
+        step2_desc: "From vehicle procurement, inland transport to our contracted yards, and fair pricing to export documentation, country-specific compliance inspections, maintenance, and multilingual support—MEMON CO., LTD. handles every step with 30+ years of proven reliability.",
+        step2_box1: "〇 Inland & marine transport to our contracted yards",
+        step2_box2: "〇 Secure storage, quarantine inspection, maintenance & conditioning",
+        step2_box3: "〇 Full customs clearance, export certificates & B/L issuance",
+        step3_title: "3. Safe Delivery to Global Customers",
+        step3_li1: "〇 International Trade Buyers",
+        step3_li2: "〇 Local Overseas Dealerships",
+        step3_li3: "〇 Individual Retail Customers Worldwide",
+        it_panel_title: "Practical IT Solutions Born from 30 Years of Trade & 26 Years of Retail",
+        it_panel_sub: "Unlike purely theoretical software vendors, our skilled engineering team builds systems grounded in decades of real operational experience—helping businesses operate smoothly without friction.",
+        it_prod1_title: "Tailor-Made Cloud Trade Management System (Trade ERP)",
+        it_prod1_desc: "Designed for any international trading operation. Centralize sourcing, yard inventory, inspection status, vessel schedules, automated B/L & invoice generation, and multi-currency accounting in the cloud.",
+        it_prod2_title: "Restaurant & Supermarket POS Register & Management Suite",
+        it_prod2_desc: "Distilling 26+ years of supermarket and ethnic restaurant operations into an intuitive platform: multilingual POS checkout, expiration & lot tracking, mobile ordering, tax compliance, and real-time analytics.",
+        food_panel_title: "Imported Foods Supermarket (Specialized Retail)",
+        food_panel_sub: "Rather than large-scale direct importing, we focus on retail excellence—sourcing authentic, safe, and diverse world groceries from reputable domestic food manufacturers and wholesalers to enrich local dinner tables in Japan.",
+        ec_title: "Hira Mart Official Online Store (hiramart.net)",
+        ec_desc: "In addition to our physical stores, we deliver authentic spices, Halal foods, and specialty groceries across Japan.",
+        btn_ec_visit: "Visit hiramart.net",
+        food_s1_t: "Reliable Domestic Sourcing",
+        food_s1_d: "Partnering with trusted domestic food manufacturers and specialized importers to ensure high standards of quality, freshness, and food safety.",
+        food_s2_t: "Community-Centered Retail Experience",
+        food_s2_d: "Welcoming both local international residents and Japanese customers seeking genuine international flavors in our neighborhood store.",
+        food_s3_t: "Cultural Exchange & Smart Retail DX",
+        food_s3_d: "Harnessing our own POS register tools to optimize inventory, creating a modern, frictionless shopping space for diverse communities.",
+        c3_store_badge: "Hira Mart Physical Store",
+        store_badge: "Hira Mart Physical Store",
+        store_caption_h: "A Community Hub for International Foods",
+        store_caption_sub: "Recognizable by its vibrant red and green signboard, fully stocked with authentic spices and world groceries.",
+        store_tag: "Over 26 Years of Local Heritage",
+        store_h: "Neighborhood Asian & Halal Specialty Mart: Hira Mart",
+        store_desc: "For more than 26 years, Hira Mart has stood as a beloved local destination in Chiba, serving both international residents looking for their comfort foods and Japanese cooking enthusiasts discovering world culinary traditions.",
+        st_feat1_t: "Rich Selection of Spices & Rice",
+        st_feat1_d: "Basmati rice, whole & ground spices, herbs",
+        st_feat2_t: "100% Halal Certified Foods",
+        st_feat2_d: "Frozen mutton, chicken, and halal specialty goods",
+        st_feat3_t: "Asian & Middle Eastern Groceries",
+        st_feat3_d: "Lentils, ghee, sauces, snacks, tea blends",
+        st_feat4_t: "Proprietary Smart POS DX",
+        st_feat4_d: "Multilingual checkout & precise inventory control",
+        btn_hiramart_ec: "Official Online Store (hiramart.net)",
+        store_note: "※Nationwide delivery across Japan available",
+        ceo_heading: "Message from the CEO",
+        mile_1988: "Arrived in Japan",
+        mile_1995: "Est. May 1995",
+        mile_food: "Retail Supermarket",
+        mile_it: "Field-Driven IT & DX",
+        ceo_p1: "Thank you very much for visiting the official website of MEMON CO., LTD. (MCL).",
+        ceo_p2: "I first arrived in Japan in 1988. At the time, I was deeply inspired by the extraordinary vitality of Japan's economy, its world-leading craftsmanship, and the sincerity of its people. In May 1995, I established our company to introduce international general merchandise to Japan, and a few years later shifted our core focus to exporting pre-owned Japanese vehicles worldwide.",
+        ceo_quote: "“Selling Japanese products overseas carries immense responsibility—because to our international customers, we become the very face of Japan.”",
+        ceo_p3: "With that pride and responsibility at heart, we have dedicated ourselves to serving global partners with integrity for over 30 years. At the same time, driven by a desire to share rich international food cultures with people living in Japan, we have operated imported food supermarkets for over 26 years and also managed ethnic restaurants. Rather than engaging in mass importation, we have focused closely on the retail floor, working alongside trustworthy domestic manufacturers and wholesalers to connect people through food and daily living.",
+        ceo_p4: "In recent years, as digital technology transforms every industry, we have combined our 30+ years of export and retail management know-how with our highly skilled IT talent to launch our IT Solutions division—developing custom cloud trade management systems and POS tools that help companies operate smoothly.",
+        ceo_p5: "It is my sincere wish that by uniting our real-world experience, logistics networks, and technology, we can help build a more comfortable, inclusive world where everyone can thrive. Together with our team, clients, and partners worldwide, we will continue moving forward with all our strength.",
+        ceo_sign_comp: "MEMON CO., LTD. (MCL)",
+        ceo_sign_role: "President & CEO   Memon Mohammad Asif",
+        ceo_sign_motto: "Connecting the World with Experience, Logistics & IT",
+        comp_heading: "Company Profile",
+        cp_name_label: "Company Name",
+        cp_name_val: "MEMON CO., LTD. (有限会社メモン)",
+        cp_ceo_label: "President & CEO",
+        cp_ceo_val: "Memon Mohammad Asif (メモン モハメド アセフ)",
+        cp_found_label: "Established",
+        cp_found_val: "May 1995",
+        cp_hq_label: "Head Office",
+        cp_hq_val: "3-6-1-112 Gyotoku-Ekimae, Ichikawa-shi, Chiba 272-0133, Japan",
+        cp_funa_label: "Funabashi Office",
+        cp_funa_val: "6-9-10-301 Motonakayama, Funabashi-shi, Chiba 273-0035, Japan",
+        cp_tel_label: "TEL / FAX",
+        cp_biz_label: "Core Businesses",
+        cp_biz_1: "1. Global export and sales of new & pre-owned vehicles, commercial trucks, and auto parts (30+ years track record)",
+        cp_biz_2: "2. IT Software & DX Development (Tailor-made Cloud Trade Management ERP, Restaurant & Supermarket POS systems)",
+        cp_biz_3: "3. Operation of Imported Foods Supermarkets (Specialized in Retail / 26+ years track record)",
+        cp_lic_label: "Secondhand Dealer License",
+        cp_lic_val: "Chiba Prefectural Public Safety Commission No. 441430000079",
+        cp_auc_label: "Major Partners",
+        cp_auc_val: "Domestic Food Manufacturers and Wholesalers, Major Domestic & International Auto Auctions (USS, TAA, CAA, JU, Honda AA, Nissan AA, etc.), Nationwide Vehicle Buyback Networks",
+        brand_sec_title: "Official Brand Logo & Color System",
+        brand_colors_label: "Official Color Palette",
+        contact_heading: "Contact & Business Inquiries",
+        contact_sub: "Reach out to us regarding vehicle exports, custom trade cloud ERP & retail POS systems, or store inquiries.",
+        form_name: "Your Name / Company Name *",
+        form_email: "Email Address *",
+        form_cat: "Inquiry Category *",
+        form_opt1: "Automotive Export (Pre-Owned & New Vehicles)",
+        form_opt2: "IT & DX Solutions (Trade Cloud ERP / Retail & Restaurant POS)",
+        form_opt3: "Imported Foods Supermarket (Retail Store)",
+        form_opt4: "General Corporate Inquiry",
+        form_msg: "Message *",
+        form_submit: "Send Inquiry",
+        form_thanks: "Thank you for your inquiry. Our team will get back to you shortly.",
+        footer_comp_jp: "MEMON CO., LTD. (President & CEO: Memon Mohammad Asif)",
+        footer_lic: "Secondhand Dealer License: Chiba Prefectural Public Safety Commission No. 441430000079",
+        footer_hq_title: "Head Office (Ichikawa, Chiba)",
+        footer_hq_addr: "3-6-1-112 Gyotoku-Ekimae, Ichikawa-shi, Chiba 272-0133, Japan",
+        footer_funa_title: "Funabashi Office (Chiba)",
+        footer_funa_addr: "6-9-10-301 Motonakayama, Funabashi-shi, Chiba 273-0035, Japan",
+        footer_est: "Established: May 1995"
+      }
+    };
+
+    function toggleLanguage() {
+      currentLang = currentLang === 'ja' ? 'en' : 'ja';
+      applyLanguage(currentLang);
+    }
+
+    function applyLanguage(lang) {
+      const dict = i18nDict[lang];
+      document.documentElement.lang = lang;
+
+      // Update all data-i18n elements
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key]) {
+          el.innerHTML = dict[key];
+        }
+      });
+
+      // Update toggle pill highlight
+      const jaBadge = document.getElementById('langIndJa');
+      const enBadge = document.getElementById('langIndEn');
+      if (lang === 'ja') {
+        jaBadge.className = 'px-1.5 py-0.5 rounded bg-[#0B1536] text-white transition';
+        enBadge.className = 'px-1.5 py-0.5 rounded text-slate-600 transition';
+      } else {
+        enBadge.className = 'px-1.5 py-0.5 rounded bg-[#0B1536] text-white transition';
+        jaBadge.className = 'px-1.5 py-0.5 rounded text-slate-600 transition';
+      }
+    }
+
+    function switchFlowTab(tabName) {
+      const tabs = ['auto', 'it', 'food'];
+      tabs.forEach(t => {
+        const panel = document.getElementById('flowPanel-' + t);
+        const btn = document.getElementById('tabBtn-' + t);
+        if (t === tabName) {
+          panel.classList.remove('hidden');
+          if (t === 'auto') btn.className = 'px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center gap-2.5 transition shadow-md bg-blue-700 text-white';
+          if (t === 'it') btn.className = 'px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center gap-2.5 transition shadow-md bg-purple-700 text-white';
+          if (t === 'food') btn.className = 'px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center gap-2.5 transition shadow-md bg-red-600 text-white';
+        } else {
+          panel.classList.add('hidden');
+          btn.className = 'px-6 py-3.5 rounded-2xl font-black text-xs sm:text-sm flex items-center gap-2.5 transition bg-slate-100 text-slate-700 hover:bg-slate-200';
+        }
+      });
+    }
+
+    function toggleMobileMenu() {
+      const menu = document.getElementById('mobileMenu');
+      menu.classList.toggle('hidden');
+    }
+
+    function handleFormSubmit(e) {
+      e.preventDefault();
+      const msg = document.getElementById('formSuccessMsg');
+      msg.classList.remove('hidden');
+      e.target.reset();
+    }
+
+    (function () {
+      function onStaffSignInClick(e) {
+        try {
+          if (localStorage.getItem('authToken')) {
+            e.preventDefault();
+            window.location.href = '/automan/purchase';
+          }
+        } catch (err) {
+          /* ignore storage errors */
+        }
+      }
+      var signIn = document.getElementById('signInLink');
+      if (signIn) signIn.addEventListener('click', onStaffSignInClick);
+      var signInMobile = document.getElementById('signInLinkMobile');
+      if (signInMobile) signInMobile.addEventListener('click', onStaffSignInClick);
+    })();
+  </script>
 </body>
 </html>

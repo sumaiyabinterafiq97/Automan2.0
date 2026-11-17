@@ -30,10 +30,11 @@ body {
     color: #333;
 }
 
-/* Rixo table polish — equal-width data columns; select/edit widths come from <colgroup> in markup */
+/* Rixo table — action cols from <colgroup>; data cols keep min-width and scroll */
 .rixo-table {
-    width: 100%;
-    table-layout: fixed;
+    width: max-content;
+    min-width: 100%;
+    table-layout: auto;
     border-collapse: collapse;
 }
 
@@ -47,9 +48,9 @@ body {
     padding: 8px 10px;
 }
 
-.rixo-table thead th:not(.rixo-col-select):not(.rixo-col-edit),
-.rixo-table tbody td:not(.rixo-col-select):not(.rixo-col-edit) {
-    min-width: 0;
+.rixo-table thead th:not(.rixo-col-select):not(.rixo-col-view):not(.rixo-col-edit),
+.rixo-table tbody td:not(.rixo-col-select):not(.rixo-col-view):not(.rixo-col-edit) {
+    min-width: 112px;
 }
 
 .rixo-row { transition: background-color 140ms ease-in, box-shadow 140ms ease-in; }
@@ -514,11 +515,14 @@ select:focus {
     overflow-x: auto;
 }
 
-/* Purchase List Table - Base Styles (grid + chips; details in master map block) */
+/* Purchase List only. Other pages keep the shared .purchase-list-table grid. */
 #purchaseTable table.purchase-list-table {
     width: 100%;
+    table-layout: auto;
+    border: none;
     border-collapse: collapse;
-    font-size: 16px;
+    background: #fff;
+    font-size: 14px;
 }
 
 #purchaseTable table.purchase-list-table thead th {
@@ -529,9 +533,49 @@ select:focus {
 
 #purchaseTable table.purchase-list-table th,
 #purchaseTable table.purchase-list-table td {
+    padding: 8px 6px;
+    text-align: left;
+    vertical-align: middle;
+    border: none;
+    border-bottom: 1px solid #e8eaed;
+    background-color: #fff;
+    color: #1f2937;
+    font-size: 14px;
     white-space: normal;
     overflow: visible;
     text-overflow: clip;
+}
+
+#purchaseTable table.purchase-list-table thead th {
+    background-color: #f7f8fa;
+    color: #374151;
+    font-weight: 700;
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#purchaseTable table.purchase-list-table td:not(:first-child):not(.purchase-list-date-td):not(.purchase-list-chassis-td) {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 0;
+}
+
+#purchaseTable table.purchase-list-table col.purchase-list-chassis-col,
+#purchaseTable table.purchase-list-table th.purchase-list-chassis-th,
+#purchaseTable table.purchase-list-table td.purchase-list-chassis-td {
+    width: max-content;
+    min-width: max-content;
+    max-width: none;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+#purchaseTable table.purchase-list-table tbody tr:hover td {
+    background-color: #fafafa;
 }
 
 /* Purchase Date: keep text inside the cell; weekday wraps under the year when narrow */
@@ -568,8 +612,8 @@ select:focus {
     display: none;
     flex-direction: column;
     gap: 8px;
-    width: 280px;
-    min-width: 280px;
+    width: 360px;
+    min-width: 320px;
     padding: 10px;
     box-sizing: border-box;
     background: #fff;
@@ -577,6 +621,50 @@ select:focus {
     border-radius: 4px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
     z-index: 25000;
+}
+
+.purchase-date-quick-filter-menu__stepper {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+}
+
+.purchase-date-quick-filter-menu__stepper-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.purchase-date-quick-filter-menu__stepper-actions #purchaseDateQuickTodayBtn {
+    flex: 1;
+}
+
+.purchase-date-quick-filter-menu__stepper button {
+    min-width: 36px;
+    min-height: 32px;
+    padding: 4px 8px;
+    background: #f8f9fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 650;
+    color: #111827;
+}
+
+.purchase-date-quick-filter-menu__stepper button:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.purchase-date-quick-filter-menu__stepper-date {
+    text-align: center;
+    font-size: 13px;
+    font-weight: 650;
+    color: #0f172a;
+    white-space: nowrap;
+    line-height: 1.2;
 }
 
 .purchase-date-quick-filter-menu__quick-row {
@@ -676,6 +764,69 @@ select:focus {
     .purchase-adv-value-filters {
         grid-template-columns: 1fr;
     }
+}
+
+.purchase-adv-multi-field {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    box-sizing: border-box;
+}
+
+.purchase-adv-multi-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.purchase-adv-multi-chips:empty {
+    margin-bottom: 0;
+}
+
+.purchase-adv-multi-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 4px 8px 4px 10px;
+    border-radius: 9999px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    color: #111827;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.35;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    box-sizing: border-box;
+}
+
+.purchase-adv-multi-chip-label {
+    min-width: 0;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
+
+.purchase-adv-multi-chip-remove {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: #6b7280;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.purchase-adv-multi-chip-remove:hover {
+    color: #111827;
+}
+
+.purchase-adv-multi-add {
+    width: 100%;
+    min-width: 0;
 }
 
 #purchaseTable tbody tr:hover td {
@@ -2226,6 +2377,30 @@ div[id$="_dropdown"] {
     transform: translateY(0);
 }
 
+.rixo-email-btn {
+    flex: 1;
+    min-width: 120px;
+    width: auto;
+    padding: 14px;
+    background: #fff;
+    color: #0f766e;
+    border: 2px solid #0f766e;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.rixo-email-btn:hover {
+    background: #f0fdfa;
+    border-color: #0d9488;
+}
+
 .rixo-print-icon {
     font-size: 18px;
 }
@@ -2240,25 +2415,31 @@ div[id$="_dropdown"] {
 }
 
 .rixo-generator-col-filter-btn {
-    padding: 8px 14px;
-    background-color: #6c757d;
-    color: white;
-    border: none;
-    border-radius: 8px;
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    padding: 0;
+    background: #f3f4f6;
+    color: #4b5563;
+    border: 1px solid #e5e7eb;
+    border-radius: 50%;
     cursor: pointer;
-    font-size: 13px;
-    font-weight: 600;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-height: 40px;
-    white-space: nowrap;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
     flex-shrink: 0;
 }
 
 .rixo-generator-col-filter-btn:hover {
-    background-color: #5a6268;
+    background: #e8eaed;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.rixo-generator-col-filter-btn:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
 }
 
 /* Number cut inline edit (Cars to Rixo) */
@@ -2382,6 +2563,7 @@ div[id$="_dropdown"] {
     }
 
     #rixoGeneratorPage .rixo-table td.rixo-col-select,
+    #rixoGeneratorPage .rixo-table td.rixo-col-view,
     #rixoGeneratorPage .rixo-table td.rixo-col-edit {
         flex: 0 0 auto;
         width: auto;
@@ -2391,17 +2573,21 @@ div[id$="_dropdown"] {
         padding: 0 12px 10px 0;
     }
 
-    #rixoGeneratorPage .rixo-table td.rixo-col-select {
+    #rixoGeneratorPage .rixo-table td.rixo-col-view {
         order: 1;
     }
 
-    #rixoGeneratorPage .rixo-table td.rixo-col-edit {
+    #rixoGeneratorPage .rixo-table td.rixo-col-select {
         order: 2;
+    }
+
+    #rixoGeneratorPage .rixo-table td.rixo-col-edit {
+        order: 3;
         margin-left: auto;
         padding-right: 0;
     }
 
-    #rixoGeneratorPage .rixo-table td:not(.rixo-col-select):not(.rixo-col-edit) {
+    #rixoGeneratorPage .rixo-table td:not(.rixo-col-select):not(.rixo-col-view):not(.rixo-col-edit) {
         flex: 1 1 100%;
         order: 10;
     }
@@ -2591,7 +2777,8 @@ div[id$="_dropdown"] {
     
     .rixo-print-actions .rixo-preview-btn,
     .rixo-print-actions .rixo-save-history-btn,
-    .rixo-print-actions .rixo-print-btn {
+    .rixo-print-actions .rixo-print-btn,
+    .rixo-print-actions .rixo-email-btn {
         flex: 1;
         min-width: 0;
         border-radius: 0;
@@ -2648,7 +2835,8 @@ div[id$="_dropdown"] {
     }
 
     #rixoGeneratorPage .rixo-generator-col-filter-btn {
-        width: 100%;
+        width: 48px;
+        align-self: end;
     }
 }
 
@@ -2705,7 +2893,8 @@ div[id$="_dropdown"] {
     
     .rixo-print-actions .rixo-preview-btn,
     .rixo-print-actions .rixo-save-history-btn,
-    .rixo-print-actions .rixo-print-btn {
+    .rixo-print-actions .rixo-print-btn,
+    .rixo-print-actions .rixo-email-btn {
         min-height: 44px;
     }
     
@@ -2739,7 +2928,8 @@ div[id$="_dropdown"] {
     }
 
     #rixoGeneratorPage .rixo-generator-col-filter-btn {
-        width: 100%;
+        width: 48px;
+        align-self: end;
     }
     
     /* Table responsive on tablet */
@@ -2823,7 +3013,8 @@ div[id$="_dropdown"] {
     
     .rixo-print-actions .rixo-preview-btn,
     .rixo-print-actions .rixo-save-history-btn,
-    .rixo-print-actions .rixo-print-btn {
+    .rixo-print-actions .rixo-print-btn,
+    .rixo-print-actions .rixo-email-btn {
         min-height: 40px;
         padding: 12px 20px;
         font-size: 15px;
@@ -3610,11 +3801,6 @@ button.invoice-history-pdf-btn:active {
 button.invoice-history-pdf-btn:disabled {
     cursor: wait;
     opacity: 0.6;
-}
-
-#purchaseTable table.purchase-list-table th,
-#purchaseTable table.purchase-list-table td {
-    font-size: 16px;
 }
 
 /* Mobile Styles for Car Brands Page */
@@ -4544,7 +4730,31 @@ button.invoice-history-pdf-btn:disabled {
 }
 
 .booking-col-filter-btn {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 50%;
+    border: 1px solid #e5e7eb;
+    background: #f3f4f6;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    padding: 0;
+    color: #4b5563;
     flex-shrink: 0;
+}
+
+.booking-col-filter-btn:hover {
+    background: #e8eaed;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.booking-col-filter-btn:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
 }
 
 .booking-cars-selected-count {
@@ -4584,6 +4794,18 @@ button.invoice-history-pdf-btn:disabled {
     font-size: 14px;
 }
 
+.booking-req {
+    color: #dc2626;
+    font-weight: 700;
+}
+
+.booking-field-hint {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.4;
+}
+
 .booking-form-group input,
 .booking-form-group select,
 .booking-form-group textarea {
@@ -4609,19 +4831,76 @@ button.invoice-history-pdf-btn:disabled {
     position: relative;
 }
 
+.booking-chassis-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    border: 1px solid #e5e7eb;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.booking-chassis-search-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: #9ca3af;
+    display: flex;
+}
+
 .booking-chassis-search-input {
     width: 100%;
-    padding: 11px 14px !important;
-    border-radius: 10px !important;
-    border: 1px solid #cbd5e1 !important;
+    box-sizing: border-box;
+    padding: 11px 36px 11px 40px !important;
+    border: none !important;
+    border-radius: 999px !important;
     font-size: 14px !important;
-    transition: border-color 0.2s, box-shadow 0.2s !important;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 .booking-chassis-search-input:focus {
     outline: none !important;
-    border-color: #3b82f6 !important;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15) !important;
+    box-shadow: none !important;
+}
+
+.booking-chassis-search:focus-within {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.booking-chassis-search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: transparent;
+    color: #9ca3af;
+    cursor: pointer;
+    font-size: 20px;
+    padding: 6px 8px;
+    min-height: 36px;
+    min-width: 36px;
+    border-radius: 8px;
+}
+
+.booking-chassis-search-clear:hover {
+    background: #f3f4f6;
+    color: #111827;
+}
+
+.booking-chassis-search-clear.is-hidden {
+    display: none;
+}
+
+.booking-chassis-search-clear:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
 }
 
 .booking-chassis-suggestions {
@@ -4952,6 +5231,11 @@ button.invoice-history-pdf-btn:disabled {
     box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
 }
 
+.booking-calculate-btn:focus-visible {
+    outline: 2px solid #1d4ed8;
+    outline-offset: 2px;
+}
+
 /* Action Buttons Row */
 .booking-action-buttons {
     display: flex;
@@ -5116,6 +5400,149 @@ button.invoice-history-pdf-btn:disabled {
     background: #1d4ed8;
 }
 
+.booking-add-cars-row {
+    display: flex;
+    justify-content: flex-start;
+    margin: 0 0 12px;
+}
+
+.booking-add-cars-btn {
+    padding: 8px 14px;
+    border: 1px solid #2563eb;
+    border-radius: 8px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    min-height: 38px;
+}
+
+.booking-add-cars-btn:hover {
+    background: #dbeafe;
+}
+
+.booking-chassis-table:has(.booking-row-new) .booking-th-select,
+.booking-chassis-table:has(.booking-row-new) .booking-td-select {
+    width: auto;
+    min-width: 40px;
+    max-width: none;
+    white-space: nowrap;
+}
+
+.booking-td-select .booking-row-new {
+    margin-left: 6px;
+    margin-right: 0;
+}
+
+.booking-row-new {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 6px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: #ecfdf5;
+    color: #047857;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    vertical-align: middle;
+}
+
+.booking-add-cars-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 10060;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.booking-add-cars-dialog {
+    background: #fff;
+    border-radius: 12px;
+    width: min(920px, 100%);
+    max-height: min(80vh, 720px);
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.28);
+}
+
+.booking-add-cars-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 8px;
+}
+
+.booking-add-cars-head h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.booking-add-cars-close {
+    border: none;
+    background: transparent;
+    color: #475569;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+
+.booking-add-cars-note {
+    margin: 0 18px 10px;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.booking-add-cars-scroll {
+    overflow: auto;
+    padding: 0 18px 18px;
+}
+
+.booking-add-cars-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.booking-add-cars-table th,
+.booking-add-cars-table td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    white-space: nowrap;
+}
+
+.booking-add-cars-table th {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.booking-add-cars-plus {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    background: #dcfce7;
+    color: #15803d;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.booking-add-cars-plus:hover {
+    background: #bbf7d0;
+}
+
 .booking-field-icon {
     color: #6b7280;
     flex-shrink: 0;
@@ -5250,27 +5677,30 @@ button.invoice-history-pdf-btn:disabled {
 
 /* Chassis Search Table */
 .booking-chassis-table {
-    width: 100%;
+    width: max-content;
+    min-width: 100%;
     border-collapse: collapse;
     table-layout: auto;
 }
 
 .booking-chassis-table .purchase-list-cell-chip {
-    white-space: nowrap;
-    word-break: normal;
+    white-space: nowrap !important;
+    word-break: normal !important;
     max-width: none;
 }
 
 .booking-chassis-table th:nth-child(3),
 .booking-chassis-table td:nth-child(3) {
-    min-width: 108px;
+    min-width: 120px;
 }
 
 .booking-chassis-table th,
 .booking-chassis-table td {
-    padding: 12px 14px;
+    padding: 10px 12px;
     text-align: left;
     border-bottom: 1px solid #eef2f7;
+    white-space: nowrap;
+    vertical-align: middle;
 }
 
 .booking-th,
@@ -5281,16 +5711,65 @@ button.invoice-history-pdf-btn:disabled {
     letter-spacing: 0.04em;
     color: #475569;
     background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    white-space: nowrap;
+}
+
+.booking-th-data {
+    min-width: 88px;
+}
+
+.booking-col-chassis {
+    min-width: 120px;
+}
+
+.booking-col-name {
+    min-width: 140px;
 }
 
 .booking-th-select {
     white-space: nowrap;
+    width: 40px;
+    min-width: 40px;
+    max-width: 44px;
+    padding: 8px 4px !important;
+    text-align: center;
 }
 
 .booking-select-all-cb {
-    margin-right: 8px;
+    margin: 0;
     vertical-align: middle;
     accent-color: #2563eb;
+}
+
+.booking-list-sort-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #475569;
+    min-height: 32px;
+    white-space: nowrap;
+}
+
+.booking-list-sort-btn:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.booking-list-sort-btn.is-active .booking-list-sort-icon {
+    color: #0f766e;
+    font-weight: 800;
+}
+
+.booking-list-sort-icon {
+    font-size: 12px;
+    color: #64748b;
 }
 
 .booking-td {
@@ -5301,8 +5780,24 @@ button.invoice-history-pdf-btn:disabled {
 }
 
 .booking-td-select {
-    width: 52px;
+    width: 40px;
+    min-width: 40px;
+    max-width: 44px;
     text-align: center;
+    padding: 8px 4px !important;
+}
+
+.booking-th-view,
+.booking-td-view {
+    width: 40px;
+    min-width: 40px;
+    max-width: 44px;
+    text-align: center;
+    padding: 8px 2px 8px 8px !important;
+}
+
+.booking-td-view .purchase-view-btn {
+    vertical-align: middle;
 }
 
 .booking-td-select .car-checkbox {
@@ -5453,6 +5948,10 @@ button.invoice-history-pdf-btn:disabled {
         padding: 6px 0;
         border: none;
         font-size: 14px;
+        white-space: normal;
+        min-width: 0;
+        max-width: none;
+        width: auto;
     }
     .booking-list-section .booking-chassis-table td::before {
         content: attr(data-label);
@@ -5460,12 +5959,19 @@ button.invoice-history-pdf-btn:disabled {
         color: #374151;
         margin-right: 8px;
     }
+    .booking-list-section .booking-chassis-table td[data-label=""]::before {
+        content: none;
+    }
     .booking-list-section .booking-chassis-table tbody td.booking-col-year {
         display: none !important;
     }
-    .booking-list-section .booking-chassis-table td:first-child {
+    .booking-list-section .booking-chassis-table td:first-child,
+    .booking-list-section .booking-chassis-table td.booking-td-view {
         flex-wrap: wrap;
         gap: 8px;
+        width: auto;
+        max-width: none;
+        justify-content: flex-start;
     }
     /* Form group spacing on mobile */
     .booking-form-group {
@@ -7599,6 +8105,22 @@ input.client-form-readonly:read-only {
     min-width: 0;
 }
 
+.qp-radio-row {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    min-height: 40px;
+}
+
+.qp-radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+    color: #374151;
+    cursor: pointer;
+}
+
 .qp-field-span {
     grid-column: 1 / -1;
 }
@@ -9397,6 +9919,110 @@ input.client-form-readonly:read-only {
     }
 }
 
+/* Purchase bulk edit summary + chassis history sync modals (all routes) */
+.purchase-bulk-summary-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 12000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.purchase-bulk-summary {
+    background: #fff;
+    border-radius: 12px;
+    max-width: 880px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.18);
+}
+.purchase-bulk-summary h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
+    color: #0f172a;
+}
+.purchase-bulk-summary-error {
+    margin: 0 0 12px;
+    color: #b91c1c;
+    background: #fef2f2;
+    border-radius: 8px;
+    padding: 8px 10px;
+}
+.purchase-bulk-note {
+    margin: 0 0 8px;
+    color: #92400e;
+    font-size: 13px;
+}
+.purchase-bulk-summary-table-wrap {
+    overflow: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+}
+.purchase-bulk-summary table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.purchase-bulk-summary th,
+.purchase-bulk-summary td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid #eef2f7;
+    vertical-align: top;
+}
+.purchase-bulk-summary th {
+    background: #f8fafc;
+    position: sticky;
+    top: 0;
+}
+.purchase-bulk-summary-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 16px;
+}
+.purchase-bulk-summary-actions button {
+    min-height: 40px;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+}
+#purchaseBulkSummaryCancel,
+#purchaseChassisSyncCancel {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    color: #0f172a;
+}
+#purchaseBulkSummaryConfirm {
+    background: #b45309;
+    border: 1px solid #b45309;
+    color: #fff;
+}
+#purchaseBulkSummaryConfirm:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+#purchaseChassisSyncNo {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    color: #0f172a;
+}
+#purchaseChassisSyncYes {
+    background: #2563eb;
+    border: 1px solid #2563eb;
+    color: #fff;
+}
+#purchaseChassisSyncYes:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
 /* ============================================
    C&F / FOB Calculation - Table-Based UI
    ============================================ */
@@ -9451,6 +10077,41 @@ input.client-form-readonly:read-only {
 
 .cnf-table-row td:last-child {
     border-right: none;
+}
+
+.cnf-td-grip {
+    text-align: center;
+    width: 32px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.cnf-row-grip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    user-select: none;
+    color: #9ca3af;
+    font-size: 14px;
+    letter-spacing: -2px;
+    line-height: 1;
+    padding: 4px 2px;
+    border-radius: 4px;
+}
+
+.cnf-row-grip:hover {
+    color: #4b5563;
+    background: #f3f4f6;
+}
+
+.cnf-row-grip:active {
+    cursor: grabbing;
+}
+
+.cnf-table-row--dragging {
+    opacity: 0.85;
+    background-color: #eff6ff !important;
 }
 
 /* C&F table: per-row “saved” indicator (light green when costs persisted) */
@@ -9640,6 +10301,12 @@ input.client-form-readonly:read-only {
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+.cnf-total-box .cnf-usd-rate-input,
+.cnf-total-box .cnf-usd-total-input {
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .cnf-total-box label,
@@ -10698,6 +11365,10 @@ input.client-form-readonly:read-only {
         padding: 6px 0;
         border: none;
         font-size: 14px;
+        white-space: normal;
+        min-width: 0;
+        max-width: none;
+        width: auto;
     }
 
     .booking-list-section .booking-chassis-table td::before {
@@ -10708,12 +11379,23 @@ input.client-form-readonly:read-only {
         flex-shrink: 0;
     }
 
+    .booking-list-section .booking-chassis-table td[data-label=""]::before {
+        content: none;
+    }
+
+    .booking-list-section .booking-chassis-table td.booking-td-view,
+    .booking-list-section .booking-chassis-table td.booking-td-select {
+        width: auto;
+        max-width: none;
+        justify-content: flex-start;
+    }
+
     .booking-list-section .booking-chassis-table tbody td.booking-col-year {
         display: none !important;
     }
 
     .booking-list-section .booking-chassis-table .purchase-list-cell-chip {
-        white-space: normal;
+        white-space: normal !important;
         word-break: break-word;
     }
 
@@ -10766,13 +11448,14 @@ input.client-form-readonly:read-only {
         flex-shrink: 0;
     }
 
-    .cnf-cars-table tr.cnf-table-row td:nth-child(1)::before { content: "Expand"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(2)::before { content: "Saved"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(3)::before { content: "Chassis"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(4)::before { content: "Car Name"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(5)::before { content: "Car Price"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(6)::before { content: "Total"; }
-    .cnf-cars-table tr.cnf-table-row td:nth-child(7)::before { content: "Save"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(1)::before { content: "Order"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(2)::before { content: "Expand"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(3)::before { content: "Saved"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(4)::before { content: "Chassis"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(5)::before { content: "Car Name"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(6)::before { content: "Car Price"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(7)::before { content: "Total"; }
+    .cnf-cars-table tr.cnf-table-row td:nth-child(8)::before { content: "Save"; }
 
     .cnf-cars-table tr.cnf-detail-row {
         display: none;
@@ -12416,65 +13099,6 @@ input.client-form-readonly:read-only {
     gap: 12px;
 }
 
-.home-dash-recent-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.home-dash-recent-head select {
-    min-height: 36px;
-    border: 1px solid var(--home-dash-border);
-    border-radius: 8px;
-    background: #fff;
-    padding: 0 10px;
-    font-size: 14px;
-    color: #0f172a;
-}
-
-.home-dash-recent-scroll {
-    overflow-x: auto;
-}
-
-.home-dash-recent-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-}
-
-.home-dash-recent-table th,
-.home-dash-recent-table td {
-    padding: 10px 8px;
-    border-bottom: 1px solid var(--home-dash-border);
-    text-align: left;
-    white-space: nowrap;
-}
-
-.home-dash-recent-table th {
-    font-size: 11px;
-    letter-spacing: 0.04em;
-    color: var(--home-dash-muted);
-    font-weight: 700;
-}
-
-.home-dash-recent-check {
-    text-align: center;
-}
-
-.home-dash-recent-more {
-    display: block;
-    width: 100%;
-    margin-top: 12px;
-    min-height: 40px;
-    border: 1px dashed var(--home-dash-border);
-    border-radius: 10px;
-    background: transparent;
-    color: #334155;
-    font-weight: 600;
-    cursor: pointer;
-}
-
 .home-dash-kpi {
     display: flex;
     flex-direction: column;
@@ -12923,4 +13547,81 @@ input.client-form-readonly:read-only {
     .home-dash-workflow-arrow {
         display: none;
     }
+}
+
+#columnFilterModal #purchaseColumnSortBar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 14px;
+    color: #0f172a;
+}
+
+#columnFilterModal #purchaseColumnSortToggle {
+    border: 1px solid #cbd5e1;
+    background: #f8fafc;
+    color: #0f172a;
+    border-radius: 6px;
+    height: 36px;
+    padding: 0 12px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+#columnFilterModal #columnCheckboxes {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 16px;
+}
+
+#columnFilterModal .purchase-col-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+#columnFilterModal .purchase-col-row.is-selected {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+#columnFilterModal .purchase-col-row.is-dragging {
+    opacity: 0.55;
+}
+
+#columnFilterModal .purchase-col-name {
+    flex: 1;
+    font-size: 14px;
+    color: #0f172a;
+}
+
+#columnFilterModal .purchase-col-grip {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid #64748b;
+    border-radius: 6px;
+    background: #fff;
+    color: #1e293b;
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -1px;
+    cursor: grab;
+    user-select: none;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+#columnFilterModal .purchase-col-grip:hover {
+    background: #e2e8f0;
+    border-color: #334155;
 }
