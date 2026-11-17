@@ -332,12 +332,12 @@
         <a href="#flow" class="hover:text-fuchsia-700 transition py-2" data-i18n="nav_flow">事業内容・流通スキーム</a>
         <a href="#ceo-message" class="hover:text-fuchsia-700 transition py-2" data-i18n="nav_ceo">代表者挨拶</a>
         <a href="#company" class="hover:text-fuchsia-700 transition py-2" data-i18n="nav_company">会社概要</a>
-        <a href="/automan/login" id="signInLink" class="text-xs font-bold text-slate-500 hover:text-fuchsia-700 transition py-2 border border-slate-200 rounded-full px-3" data-i18n="nav_staff">社内システム</a>
         <a href="#contact" class="px-4 py-2 rounded-full gradient-brand text-white shadow-md hover:opacity-95 transition" data-i18n="nav_contact">お問い合わせ</a>
       </nav>
 
       <!-- Language Switcher & Mobile Menu Button -->
       <div class="flex items-center gap-3">
+        <a href="/automan/login" id="signInLink" class="hidden lg:inline-flex items-center justify-center px-4 py-2 rounded-full text-sm font-bold text-white bg-[#0B1536] hover:bg-[#0F1E46] shadow-sm transition" data-i18n="nav_staff">社内システム</a>
         <!-- Bilingual Switcher Pill -->
         <button id="langToggleBtn" onclick="toggleLanguage()" class="flex items-center gap-2 px-3.5 py-2 rounded-full border-2 border-purple-700/30 bg-purple-50/60 hover:bg-purple-100/80 transition shadow-sm group" aria-label="Switch Language">
           <i data-lucide="globe" class="w-4 h-4 text-purple-700 group-hover:rotate-12 transition-transform"></i>
@@ -361,7 +361,7 @@
       <a href="#flow" onclick="toggleMobileMenu()" class="block py-2.5 px-3 rounded-lg hover:bg-slate-100" data-i18n="nav_flow">事業内容・流通スキーム</a>
       <a href="#ceo-message" onclick="toggleMobileMenu()" class="block py-2.5 px-3 rounded-lg hover:bg-slate-100" data-i18n="nav_ceo">代表者挨拶</a>
       <a href="#company" onclick="toggleMobileMenu()" class="block py-2.5 px-3 rounded-lg hover:bg-slate-100" data-i18n="nav_company">会社概要</a>
-      <a href="/automan/login" id="signInLinkMobile" class="block py-2.5 px-3 rounded-lg text-center border border-slate-200 text-slate-600" data-i18n="nav_staff">社内システム</a>
+      <a href="/automan/login" id="signInLinkMobile" class="block py-3 px-3 rounded-lg text-center bg-[#0B1536] text-white font-bold shadow-sm" data-i18n="nav_staff">社内システム</a>
       <a href="#contact" onclick="toggleMobileMenu()" class="block py-2.5 px-3 rounded-lg gradient-brand text-white text-center mt-2" data-i18n="nav_contact">お問い合わせ</a>
     </div>
   </header>

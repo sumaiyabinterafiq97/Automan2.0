@@ -7412,6 +7412,9 @@ fun showAuthPage() {
                 </div>
 
                 <div id="signinPanel" class="auth-panel" style="display:block;">
+                    <a href="/" class="auth-home-link" id="authHomeLink">
+                        <span aria-hidden="true">🏠</span> Home
+                    </a>
                     <form id="signinForm" class="panel-content" novalidate>
                         <div class="form-group">
                             <label class="form-label" for="si_email">Email</label>
@@ -7525,6 +7528,31 @@ fun showAuthPage() {
 
             .auth-panel {
                 padding: 0 24px 24px 24px;
+            }
+
+            .auth-home-link {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                margin: 0 0 16px 0;
+                padding: 8px 12px;
+                font-size: 14px;
+                font-weight: 600;
+                color: rgba(255, 255, 255, 0.9);
+                text-decoration: none;
+                border-radius: 8px;
+                transition: color 0.15s ease, background-color 0.15s ease;
+            }
+
+            .auth-home-link:hover {
+                color: #fff;
+                background-color: rgba(255, 255, 255, 0.1);
+                text-decoration: underline;
+            }
+
+            .auth-home-link:focus-visible {
+                outline: 2px solid rgba(255, 255, 255, 0.85);
+                outline-offset: 2px;
             }
 
             .form-group {
