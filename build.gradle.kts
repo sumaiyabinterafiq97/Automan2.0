@@ -144,7 +144,18 @@ tasks.register("prepareVercelPublic") {
         }
         val homepageDir = file("homepage")
         homepageDir.resolve("index.html").copyTo(publicDir.resolve("index.html"), overwrite = true)
-        homepageDir.resolve("home.css").copyTo(publicDir.resolve("home.css"), overwrite = true)
+        val homepageAssets = homepageDir.resolve("assets")
+        if (homepageAssets.isDirectory) {
+            homepageAssets.listFiles()?.forEach { asset ->
+                if (asset.isFile && asset.name != ".gitkeep") {
+                    asset.copyTo(publicDir.resolve(asset.name), overwrite = true)
+                }
+            }
+        }
+        val legacyHomeCss = homepageDir.resolve("home.css")
+        if (legacyHomeCss.isFile) {
+            legacyHomeCss.copyTo(publicDir.resolve("home.css"), overwrite = true)
+        }
         println("✅ Copied homepage to public/")
     }
 }
